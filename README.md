@@ -1,31 +1,31 @@
-# Beeline
+# Hive
 
-Beeline Instrumentation for your AI agents
+Hive Instrumentation for your AI agents
 
 <p align="center">
-  <img width="100%" alt="Beeline Banner" src="https://storage.googleapis.com/aden-prod-assets/website/title-card.png" />
+  <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/title-card.png" />
 </p>
 
-[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/beeline/blob/main/LICENSE)
+[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
 [![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
-[![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/beeline?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
+[![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
 [![Discord](https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb)](https://discord.com/invite/MXE49hrKDk)
 [![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
 [![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
 
 ## Overview
 
-Beeline provides advanced runtime control for your AI agents, enabling you to observe, intervene, and dynamically adjust agent behavior as it executes. By giving you real-time visibility and control, Beeline helps you build more reliable AI systems—catching and correcting issues during execution rather than reacting after failures occur.
+Hive provides advanced runtime control for your AI agents, enabling you to observe, intervene, and dynamically adjust agent behavior as it executes. By giving you real-time visibility and control, Hive helps you build more reliable AI systems—catching and correcting issues during execution rather than reacting after failures occur.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
-- **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Beeline on your infrastructure
-- **[Changelog](https://github.com/adenhq/beeline/releases)** - Latest updates and releases
+- **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
+- **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
 <!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
-- **[Report Issues](https://github.com/adenhq/beeline/issues)** - Bug reports and feature requests
+- **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
 ## Quick Start
 
@@ -38,8 +38,8 @@ Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and
 
 ```bash
 # Clone the repository
-git clone https://github.com/adenhq/beeline.git
-cd beeline
+git clone https://github.com/adenhq/hive.git
+cd hive
 
 # Copy and configure
 cp config.yaml.example config.yaml
@@ -67,7 +67,7 @@ docker compose up
 ## Project Structure
 
 ```
-beeline/
+hive/
 ├── honeycomb/          # Frontend (React + TypeScript + Vite)
 ├── hive/               # Backend (Node.js + TypeScript + Express)
 ├── docs/               # Documentation
