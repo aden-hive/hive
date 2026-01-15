@@ -1,6 +1,6 @@
 # Hive
 
-Hive Instrumentation for your AI agents
+Hive is an easy way to craete reliable agenst with expanding toolkits. 
 
 <p align="center">
   <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/title-card.png" />
