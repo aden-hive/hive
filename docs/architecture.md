@@ -1,6 +1,6 @@
 # Architecture Overview
 
-This document describes the high-level architecture of Beeline.
+This document describes the high-level architecture of Hive.
 
 ## System Overview
 

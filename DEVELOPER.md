@@ -1,6 +1,6 @@
 # Developer Guide
 
-This comprehensive guide covers everything you need to know to work on the Beeline monorepo effectively.
+This comprehensive guide covers everything you need to know to work on the Hive monorepo effectively.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ This comprehensive guide covers everything you need to know to work on the Beeli
 
 ## Repository Overview
 
-Beeline is a monorepo containing two main packages:
+Hive is a monorepo containing two main packages:
 
 | Package | Directory | Description | Tech Stack |
 |---------|-----------|-------------|------------|
@@ -65,8 +65,8 @@ docker compose version  # Should be v2.x.x
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/adenhq/beeline.git
-cd beeline
+git clone https://github.com/adenhq/hive.git
+cd hive
 
 # 2. Create your configuration file
 cp config.yaml.example config.yaml
@@ -99,7 +99,7 @@ npm run dev -w hive       # Terminal 2: Backend at http://localhost:4000
 ## Project Structure
 
 ```
-beeline/                            # Repository root
+hive/                            # Repository root
 │
 ├── .github/                        # GitHub configuration
 │   ├── workflows/
@@ -233,7 +233,7 @@ The `config.yaml` file structure:
 
 # Application metadata
 app:
-  name: beeline                      # Used in logs and API responses
+  name: hive                      # Used in logs and API responses
   environment: development           # development | staging | production
 
 # Server configuration
@@ -268,7 +268,7 @@ security:
 database:
   host: localhost
   port: 5432
-  name: beeline
+  name: hive
   user: postgres
   password: postgres
 
@@ -1189,7 +1189,7 @@ npm run test -w honeycomb -- --clearCache
 ## Getting Help
 
 - **Documentation**: Check the `/docs` folder
-- **Issues**: Search [existing issues](https://github.com/adenhq/beeline/issues)
+- **Issues**: Search [existing issues](https://github.com/adenhq/hive/issues)
 - **Discord**: Join our [community](https://discord.com/invite/MXE49hrKDk)
 - **Code Review**: Tag a maintainer on your PR
 

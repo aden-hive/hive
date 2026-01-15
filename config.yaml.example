@@ -1,4 +1,4 @@
-# Beeline Configuration
+# Hive Configuration
 # ======================
 # Copy this file to config.yaml and customize for your environment.
 # Run `npm run setup` to generate .env files from this configuration.
@@ -10,7 +10,7 @@
 # -----------------------------------------------------------------------------
 app:
   # Application name (displayed in UI and logs)
-  name: Beeline
+  name: Hive
 
   # Environment: development, production, or test
   environment: development
