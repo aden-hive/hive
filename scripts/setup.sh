@@ -1,5 +1,5 @@
 #!/bin/bash
-# Beeline Setup Script
+# Hive Setup Script
 # This script sets up the project for first-time use
 
 set -e
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 echo "==================================="
-echo "  Beeline Setup"
+echo "  Hive Setup"
 echo "==================================="
 echo ""
 

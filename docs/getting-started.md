@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide will help you get Beeline running on your local machine.
+This guide will help you get Hive running on your local machine.
 
 ## Prerequisites
 
@@ -13,8 +13,8 @@ The fastest way to get started is using Docker Compose:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/adenhq/beeline.git
-cd beeline
+git clone https://github.com/adenhq/hive.git
+cd hive
 
 # 2. Copy and configure
 cp config.yaml.example config.yaml
@@ -37,8 +37,8 @@ For local development with hot reload:
 
 ```bash
 # 1. Clone and configure (same as above)
-git clone https://github.com/adenhq/beeline.git
-cd beeline
+git clone https://github.com/adenhq/hive.git
+cd hive
 cp config.yaml.example config.yaml
 
 # 2. Install dependencies
@@ -71,7 +71,7 @@ docker compose up
 ## Project Structure
 
 ```
-beeline/
+hive/
 ├── honeycomb/          # Frontend (React + TypeScript + Vite)
 │   ├── src/
 │   │   ├── components/ # Reusable UI components

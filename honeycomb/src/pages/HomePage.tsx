@@ -20,7 +20,7 @@ export function HomePage() {
   return (
     <div className="container">
       <header className="header">
-        <h1>Welcome to Beeline</h1>
+        <h1>Welcome to Hive</h1>
         <p>AI agent observability and control</p>
       </header>
 
@@ -41,7 +41,7 @@ export function HomePage() {
       </main>
 
       <footer className="footer">
-        <p>Beeline &copy; {new Date().getFullYear()}</p>
+        <p>Hive &copy; {new Date().getFullYear()}</p>
       </footer>
     </div>
   );

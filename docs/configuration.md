@@ -1,6 +1,6 @@
 # Configuration Guide
 
-Beeline uses a centralized configuration system based on a single `config.yaml` file. This makes it easy to configure the entire application from one place.
+Hive uses a centralized configuration system based on a single `config.yaml` file. This makes it easy to configure the entire application from one place.
 
 ## Configuration Flow
 
@@ -32,7 +32,7 @@ config.yaml  -->  generate-env.ts  -->  .env files
 ```yaml
 app:
   # Application name - displayed in UI and logs
-  name: Beeline
+  name: Hive
 
   # Environment mode
   # - development: enables debug features, verbose logging
@@ -65,10 +65,10 @@ server:
 ```yaml
 database:
   # PostgreSQL connection URL
-  url: postgresql://user:password@localhost:5432/beeline
+  url: postgresql://user:password@localhost:5432/hive
 
   # For SQLite (local development)
-  # url: sqlite:./data/beeline.db
+  # url: sqlite:./data/hive.db
 ```
 
 **Connection URL Format:**

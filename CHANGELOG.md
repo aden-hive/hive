@@ -36,5 +36,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/adenhq/beeline/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/adenhq/beeline/releases/tag/v0.1.0
+[Unreleased]: https://github.com/adenhq/hive/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/adenhq/hive/releases/tag/v0.1.0
