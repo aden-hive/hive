@@ -3,12 +3,13 @@ import type { User, Organization } from '@/types/user'
 import * as userApi from '@/services/userApi'
 import * as orgApi from '@/services/orgApi'
 
-interface UserState {
+export interface UserState {
   user: User | null
   roleId: number | null
   org: Organization | null
   orgLogo: string | null
   isLoading: boolean
+  isLoggingOut: boolean
 
   // Actions
   setUser: (user: User) => void
@@ -28,6 +29,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   org: null,
   orgLogo: null,
   isLoading: false,
+  isLoggingOut: false,
 
   setUser: (user) => set({ user }),
 
@@ -85,6 +87,9 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   signOut: (redirectUrl) => {
+    // Set logging out flag FIRST - prevents flash of error states
+    set({ isLoggingOut: true })
+
     // Clear storage
     localStorage.removeItem('token')
     localStorage.removeItem('context_session_id')

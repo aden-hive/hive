@@ -106,7 +106,14 @@ router.post(
       console.error("[UserController] login-v2 error:", err.message);
 
       // Handle specific error codes
-      if (err.code === "USER_NOT_FOUND" || err.code === "INVALID_CREDENTIALS") {
+      if (err.code === "USER_NOT_FOUND") {
+        return res.status(401).json({
+          success: false,
+          msg: "User not found. Please sign up for an account.",
+        });
+      }
+
+      if (err.code === "INVALID_CREDENTIALS") {
         return res.status(401).json({
           success: false,
           msg: "Invalid email or password",

@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useControlSocket } from '@/hooks/useControlSocket'
 import { useAgentControlStore } from '@/stores/agentControlStore'
-import { useUserStore } from '@/stores/userStore'
+import { useUserStore, type UserState } from '@/stores/userStore'
 import { useSidebarCollapsed } from '@/hooks/usePersistedSettings'
 import { NotificationBell } from './shared/NotificationBell'
 import {
@@ -32,6 +32,7 @@ import {
   PanelLeft,
   Settings,
   Sparkles,
+  LogOut,
   HelpCircle,
   ExternalLink,
   FileText,
@@ -53,8 +54,10 @@ const navItems = [
 export function AgentControlLayout() {
   const { connect, disconnect, isConnected } = useControlSocket()
   const hasActiveAgents = useAgentControlStore((state) => state.eventsBuffer.length > 0)
-  const user = useUserStore((state) => state.user)
-  const fullName = useUserStore((state) => state.fullName())
+  const user = useUserStore((state: UserState) => state.user)
+  const fullName = useUserStore((state: UserState) => state.fullName())
+  const signOut = useUserStore((state: UserState) => state.signOut)
+  const isLoggingOut = useUserStore((state: UserState) => state.isLoggingOut)
   const navigate = useNavigate()
   const location = useLocation()
   const { sidebarCollapsed, toggleSidebar } = useSidebarCollapsed()
@@ -178,51 +181,60 @@ export function AgentControlLayout() {
           </nav>
         </TooltipProvider>
 
-        {/* User Profile Section */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <div
-              className={cn(
-                "mt-auto p-3 cursor-pointer hover:bg-muted/50 transition-colors",
-                !sidebarCollapsed && "border-t"
-              )}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className={cn(
-                'flex items-center gap-3',
-                sidebarCollapsed && 'justify-center'
-              )}>
-                <UserAvatar
-                  src={user?.profile_img_url}
-                  name={fullName}
-                  size="sm"
-                />
-                {!sidebarCollapsed && (
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{fullName}</p>
-                    <p className="text-xs text-muted-foreground">Pro</p>
-                  </div>
+        {/* User Profile Section - hidden during logout to prevent red avatar flash */}
+        {!isLoggingOut && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <div
+                className={cn(
+                  "mt-auto p-3 cursor-pointer hover:bg-muted/50 transition-colors",
+                  !sidebarCollapsed && "border-t"
                 )}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className={cn(
+                  'flex items-center gap-3',
+                  sidebarCollapsed && 'justify-center'
+                )}>
+                  <UserAvatar
+                    src={user?.profile_img_url}
+                    name={fullName}
+                    size="sm"
+                  />
+                  {!sidebarCollapsed && (
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{fullName}</p>
+                      <p className="text-xs text-muted-foreground">Pro</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" alignOffset={12} className="w-48">
-            <DropdownMenuItem
-              onClick={() => navigate(`${location.pathname}#settings`)}
-              className="cursor-pointer"
-            >
-              <Settings className="mr-2 h-4 w-4" />
-              Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => console.log('Upgrade clicked')}
-              className="cursor-pointer"
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              Upgrade
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" alignOffset={12} className="w-40">
+              <DropdownMenuItem
+                onClick={() => navigate(`${location.pathname}#settings`)}
+                className="cursor-pointer"
+              >
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => console.log('Upgrade clicked')}
+                className="cursor-pointer"
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                Upgrade
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => signOut()}
+                className="cursor-pointer"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </aside>
 
       {/* Right side - header bar + content */}
@@ -231,23 +243,25 @@ export function AgentControlLayout() {
         <header className="h-14 flex items-center justify-end gap-2 px-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <LiveIndicator isLive={hasActiveAgents} />
 
-          {/* Connection status */}
-          <div
-            className={cn(
-              'flex items-center gap-1.5 text-xs px-2 py-1 rounded-full',
-              isConnected
-                ? 'bg-green-100 text-green-700'
-                : 'bg-red-100 text-red-700'
-            )}
-          >
-            <span
+          {/* Connection status - hidden during logout to prevent red flash */}
+          {!isLoggingOut && (
+            <div
               className={cn(
-                'h-1.5 w-1.5 rounded-full',
-                isConnected ? 'bg-green-500' : 'bg-red-500'
+                'flex items-center gap-1.5 text-xs px-2 py-1 rounded-full',
+                isConnected
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-red-100 text-red-700'
               )}
-            />
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </div>
+            >
+              <span
+                className={cn(
+                  'h-1.5 w-1.5 rounded-full',
+                  isConnected ? 'bg-green-500' : 'bg-red-500'
+                )}
+              />
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </div>
+          )}
 
           <NotificationBell />
 

@@ -18,6 +18,16 @@ class ApiClient {
     this.baseUrl = baseUrl
   }
 
+  private async parseErrorMessage(response: Response): Promise<string> {
+    const text = await response.text()
+    try {
+      const json = JSON.parse(text)
+      return json.msg || json.message || text
+    } catch {
+      return text
+    }
+  }
+
   private getHeaders(): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -34,7 +44,7 @@ class ApiClient {
     })
 
     if (!response.ok) {
-      throw new ApiError(response.status, await response.text())
+      throw new ApiError(response.status, await this.parseErrorMessage(response))
     }
 
     return response.json()
@@ -48,7 +58,7 @@ class ApiClient {
     })
 
     if (!response.ok) {
-      throw new ApiError(response.status, await response.text())
+      throw new ApiError(response.status, await this.parseErrorMessage(response))
     }
 
     return response.json()
@@ -62,7 +72,7 @@ class ApiClient {
     })
 
     if (!response.ok) {
-      throw new ApiError(response.status, await response.text())
+      throw new ApiError(response.status, await this.parseErrorMessage(response))
     }
 
     return response.json()
@@ -75,7 +85,7 @@ class ApiClient {
     })
 
     if (!response.ok) {
-      throw new ApiError(response.status, await response.text())
+      throw new ApiError(response.status, await this.parseErrorMessage(response))
     }
 
     return response.json()
