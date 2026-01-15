@@ -24,6 +24,21 @@ import {
 } from './charts/specs'
 import type { RawJsonData, KPIValues } from '@/types/agentControl'
 
+// Shape of analytics API response for type safety
+interface AnalyticsResponse extends RawJsonData {
+  analytics?: {
+    summary?: {
+      total_cost?: number
+      total_requests?: number
+      total_tokens?: number
+      avg_latency_ms?: number
+      cache_savings?: number
+    }
+  }
+  kpis?: Record<string, unknown>
+  summary?: Record<string, unknown>
+}
+
 const timeRangeOptions: { value: TimeRange; label: string }[] = [
   { value: 'all', label: 'All Time' },
   { value: 'month', label: 'Last Month' },
@@ -47,7 +62,7 @@ function extractKpis(data: RawJsonData | undefined): KPIValues {
   if (!data) return defaults
 
   // Handle new analytics response shape
-  const analyticsData = data as any
+  const analyticsData = data as AnalyticsResponse
   if (analyticsData?.analytics?.summary) {
     const summary = analyticsData.analytics.summary
     return {

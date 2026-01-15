@@ -118,7 +118,7 @@ function validateConfig(): void {
     required.push(['USER_DB_PG_URL or TSDB_PG_URL', config.userDb.url]);
   }
 
-  const missing = required.filter(([name, value]) => !value);
+  const missing = required.filter(([, value]) => !value);
 
   if (missing.length > 0) {
     const names = missing.map(([name]) => name).join(', ');

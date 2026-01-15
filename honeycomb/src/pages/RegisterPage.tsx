@@ -1,4 +1,4 @@
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { RegisterForm } from '@/components/auth/RegisterForm'
 import AdenLogo from '@/assets/aden-logo.svg'
@@ -6,7 +6,6 @@ import { getOrgInfoByPath } from '@/services/authApi'
 
 export function RegisterPage() {
   const { org } = useParams<{ org?: string }>()
-  const [searchParams] = useSearchParams()
   const [orgName, setOrgName] = useState<string | undefined>()
   const [isLoadingOrg, setIsLoadingOrg] = useState(!!org)
 

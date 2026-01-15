@@ -82,8 +82,8 @@ router.get('/get-current-team', async (req: Request, res: Response) => {
       teamId: team.id,
       teamName: team.name,
     });
-  } catch (err: any) {
-    console.error('[IAMController] /get-current-team error:', err.message);
+  } catch (err) {
+    console.error('[IAMController] /get-current-team error:', err instanceof Error ? err.message : err);
     res.status(500).json({
       success: false,
       msg: 'Failed to get current team',
@@ -142,8 +142,8 @@ router.get('/team/get-team-role-by-id/:teamId', async (req: Request, res: Respon
     const roleId = membership ? (roleMap[membership.role] || 2) : 2;
 
     res.json({ roleId });
-  } catch (err: any) {
-    console.error('[IAMController] /team/get-team-role-by-id error:', err.message);
+  } catch (err) {
+    console.error('[IAMController] /team/get-team-role-by-id error:', err instanceof Error ? err.message : err);
     res.status(500).json({
       success: false,
       msg: 'Failed to get team role',

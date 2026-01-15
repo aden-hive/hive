@@ -35,7 +35,6 @@ export function TopAgentsChart({
 
   // Sort by spend descending and take top 10
   const sortedData = [...data].sort((a, b) => b.spend - a.spend).slice(0, 10)
-  const maxSpend = Math.max(...sortedData.map((d) => d.spend))
 
   return (
     <Card className={className}>

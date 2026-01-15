@@ -18,7 +18,8 @@ interface HttpError extends Error {
  * @param {Object} res - Express response
  * @param {Function} next - Next middleware
  */
-function errorHandler(err: HttpError, req: Request, res: Response, next: NextFunction): void {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function errorHandler(err: HttpError, req: Request, res: Response, _next: NextFunction): void {
   // Log error
   console.error('[Error]', {
     message: err.message,

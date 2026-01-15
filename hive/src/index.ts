@@ -15,9 +15,13 @@ import { initializeSockets, setUserDbService } from "./sockets/control.socket";
 const PORT = process.env.PORT || 4000;
 
 // Declare globals for MongoDB (used by services)
+// eslint-disable-next-line no-var
 declare global {
+  // eslint-disable-next-line no-var
   var _ACHO_MG_DB: MongoClient;
+  // eslint-disable-next-line no-var
   var _ACHO_MDB_CONFIG: { ERP_DBNAME: string; DBNAME: string };
+  // eslint-disable-next-line no-var
   var _ACHO_MDB_COLLECTIONS: {
     ADEN_CONTROL_POLICIES: string;
     ADEN_CONTROL_CONTENT: string;

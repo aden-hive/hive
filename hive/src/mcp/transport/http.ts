@@ -5,7 +5,7 @@
  * - GET /mcp - SSE stream for server-to-client messages
  * - POST /mcp/message - Client-to-server messages
  */
-import express, { Request, Response, NextFunction, Router } from "express";
+import express, { Request, Response, Router } from "express";
 import passport from "passport";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createHiveMcpServer, type HiveMcpServerOptions } from "../server";
@@ -155,7 +155,7 @@ export function createMcpRouter(
 
       // Only show sessions for the requesting team
       const teamSessions = Array.from(sessions.entries())
-        .filter(([_, session]) => session.teamId === teamId)
+        .filter(([, session]) => session.teamId === teamId)
         .map(([id, session]) => ({
           session_id: id,
           team_id: session.teamId,

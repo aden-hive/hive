@@ -5,7 +5,6 @@ import {
   getMetricsSummary,
 } from '@/services/agentControlApi'
 import { useSettingsStore } from '@/stores/settingsStore'
-import type { RawJsonData } from '@/types/agentControl'
 
 // =============================================================================
 // Analytics Hook

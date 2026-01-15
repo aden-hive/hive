@@ -7,6 +7,82 @@
 export const MODEL_COLORS = ['#263A99', '#22c55e', '#6b21a8', '#f59e0b', '#c1392b', '#06b6d4']
 
 // =============================================================================
+// API Response Types (for type safety with unknown API data)
+// =============================================================================
+
+interface TimelineCostItem {
+  bucket: string
+  cost_total?: number
+}
+
+interface TimelineRequestItem {
+  bucket: string
+  requests?: number
+}
+
+interface TimelineTokenItem {
+  bucket: string
+  input_tokens?: number
+  output_tokens?: number
+}
+
+interface TimelineLatencyItem {
+  bucket: string
+  p50_ms?: number
+  p95_ms?: number
+  p99_ms?: number
+}
+
+interface TimelineData {
+  cost?: TimelineCostItem[]
+  requests?: TimelineRequestItem[]
+  tokens?: TimelineTokenItem[]
+  latency_percentiles?: TimelineLatencyItem[]
+}
+
+interface CostByModelItem {
+  model?: string
+  cost_total?: number
+  share?: number
+}
+
+interface CostByModelResponse {
+  models?: CostByModelItem[]
+}
+
+interface LatencyBucketItem {
+  bucket: string
+  count?: number
+}
+
+interface LatencyDistributionResponse {
+  buckets?: LatencyBucketItem[]
+}
+
+interface CostByAgentItem {
+  agent?: string
+  cost_total?: number
+  requests?: number
+}
+
+interface CostByAgentResponse {
+  agents?: CostByAgentItem[]
+}
+
+interface AnalyticsData {
+  analytics?: {
+    timeline?: {
+      resolution?: string
+      hourly?: TimelineData
+      daily?: TimelineData
+    }
+    cost_by_model?: CostByModelResponse
+    latency_distribution?: LatencyDistributionResponse
+    cost_by_agent?: CostByAgentResponse
+  }
+}
+
+// =============================================================================
 // Types for transformed chart data
 // =============================================================================
 
@@ -72,7 +148,7 @@ export function formatBucketLabel(bucket: string, resolution: 'day' | 'hour'): s
 /**
  * Transform analytics API response to chart-ready data
  */
-export function transformAnalyticsData(data: any) {
+export function transformAnalyticsData(data: AnalyticsData | undefined) {
   if (!data?.analytics) {
     return {
       costTrends: [],
@@ -85,7 +161,7 @@ export function transformAnalyticsData(data: any) {
   }
 
   const analytics = data.analytics
-  const resolution = analytics.timeline?.resolution || 'day'
+  const resolution: 'day' | 'hour' = analytics.timeline?.resolution === 'hour' ? 'hour' : 'day'
   const timeline = resolution === 'hour' ? analytics.timeline?.hourly : analytics.timeline?.daily
 
   return {
@@ -102,7 +178,7 @@ export function transformAnalyticsData(data: any) {
  * Transform cost timeline to cost trend data
  */
 function transformCostTrends(
-  timeline: any,
+  timeline: TimelineData | undefined,
   resolution: 'day' | 'hour'
 ): CostTrendData[] {
   if (!timeline?.cost || !Array.isArray(timeline.cost)) {
@@ -111,10 +187,10 @@ function transformCostTrends(
 
   // Create requests lookup map
   const requestsMap = new Map<string, number>(
-    (timeline.requests || []).map((r: any) => [r.bucket, r.requests])
+    (timeline.requests || []).map((r: TimelineRequestItem) => [r.bucket, r.requests ?? 0])
   )
 
-  return timeline.cost.map((d: any) => ({
+  return timeline.cost.map((d: TimelineCostItem) => ({
     date: formatBucketLabel(d.bucket, resolution),
     cost: d.cost_total || 0,
     requests: requestsMap.get(d.bucket) || 0,
@@ -126,14 +202,14 @@ function transformCostTrends(
  * Transform token timeline to stacked bar chart data (flattened)
  */
 function transformTokenUsage(
-  timeline: any,
+  timeline: TimelineData | undefined,
   resolution: 'day' | 'hour'
 ): TokenUsageData[] {
   if (!timeline?.tokens || !Array.isArray(timeline.tokens)) {
     return []
   }
 
-  return timeline.tokens.flatMap((d: any) => [
+  return timeline.tokens.flatMap((d: TimelineTokenItem) => [
     {
       date: formatBucketLabel(d.bucket, resolution),
       type: 'Input' as const,
@@ -150,12 +226,12 @@ function transformTokenUsage(
 /**
  * Transform cost by model to pie/donut chart data
  */
-function transformCostByModel(costByModel: any): CostByModelData[] {
+function transformCostByModel(costByModel: CostByModelResponse | undefined): CostByModelData[] {
   if (!costByModel?.models || !Array.isArray(costByModel.models)) {
     return []
   }
 
-  return costByModel.models.map((m: any, i: number) => ({
+  return costByModel.models.map((m: CostByModelItem, i: number) => ({
     name: m.model?.split('/').pop() || m.model || 'Unknown',
     cost: m.cost_total || 0,
     value: Math.round((m.share || 0) * 100),
@@ -169,7 +245,7 @@ function transformCostByModel(costByModel: any): CostByModelData[] {
  * UI:  0-2s, 2-5s, 5-10s, 10-20s, 20s+
  */
 function transformLatencyDistribution(
-  latencyDistribution: any
+  latencyDistribution: LatencyDistributionResponse | undefined
 ): LatencyDistributionData[] {
   if (!latencyDistribution?.buckets || !Array.isArray(latencyDistribution.buckets)) {
     return []
@@ -183,7 +259,7 @@ function transformLatencyDistribution(
     '20s+': 0,
   }
 
-  latencyDistribution.buckets.forEach((b: any) => {
+  latencyDistribution.buckets.forEach((b: LatencyBucketItem) => {
     switch (b.bucket) {
       case '0-1s':
       case '1-2s':
@@ -217,14 +293,14 @@ function transformLatencyDistribution(
  * Transform latency percentiles to multi-line chart data (flattened)
  */
 function transformLatencyPercentiles(
-  timeline: any,
+  timeline: TimelineData | undefined,
   resolution: 'day' | 'hour'
 ): LatencyPercentilesData[] {
   if (!timeline?.latency_percentiles || !Array.isArray(timeline.latency_percentiles)) {
     return []
   }
 
-  return timeline.latency_percentiles.flatMap((d: any) => [
+  return timeline.latency_percentiles.flatMap((d: TimelineLatencyItem) => [
     {
       date: formatBucketLabel(d.bucket, resolution),
       percentile: 'P50' as const,
@@ -246,15 +322,18 @@ function transformLatencyPercentiles(
 /**
  * Transform cost by agent to top agents list
  */
-function transformTopAgents(costByAgent: any): TopAgentData[] {
+function transformTopAgents(costByAgent: CostByAgentResponse | undefined): TopAgentData[] {
   if (!costByAgent?.agents || !Array.isArray(costByAgent.agents)) {
     return []
   }
 
-  return costByAgent.agents.map((a: any) => ({
-    name: a.agent || 'Unknown',
-    spend: a.cost_total || 0,
-    requests: a.requests || 0,
-    avgCost: a.requests > 0 ? (a.cost_total || 0) / a.requests : 0,
-  }))
+  return costByAgent.agents.map((a: CostByAgentItem) => {
+    const requests = a.requests || 0
+    return {
+      name: a.agent || 'Unknown',
+      spend: a.cost_total || 0,
+      requests,
+      avgCost: requests > 0 ? (a.cost_total || 0) / requests : 0,
+    }
+  })
 }

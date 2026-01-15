@@ -63,8 +63,8 @@ export function WorkersPanel() {
   const realtimeAgents = useMemo(() => deriveWorkersFromEvents(eventsBuffer), [eventsBuffer])
 
   // Merge API agents with real-time updates (real-time overrides API data)
-  const apiAgents = agentsData?.agents || []
   const workers = useMemo(() => {
+    const apiAgents = agentsData?.agents || []
     const agentMap = new Map<string, AgentInfo>()
     // Add API agents first
     for (const agent of apiAgents) {
@@ -75,7 +75,7 @@ export function WorkersPanel() {
       agentMap.set(agent.agent, agent)
     }
     return Array.from(agentMap.values())
-  }, [apiAgents, realtimeAgents])
+  }, [agentsData?.agents, realtimeAgents])
 
   // Compute summary stats
   const onlineCount = workers.filter((w: AgentInfo) => w.status === 'connected').length

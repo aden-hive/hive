@@ -10,7 +10,6 @@ import type {
   BudgetConfig,
   BudgetAlert,
   BudgetNotifications,
-  RawJsonData,
 } from '@/types/agentControl'
 
 // =============================================================================

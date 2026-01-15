@@ -552,7 +552,7 @@ function initAdenControlSockets(io: Server, rootEmitter: RedisEmitter): ControlE
         }
         break;
 
-      case "get_policy":
+      case "get_policy": {
         // Request for current policy
         const policy = await controlService.getPolicy(teamId!, policyId || null);
         socket.emit("message", {
@@ -560,6 +560,7 @@ function initAdenControlSockets(io: Server, rootEmitter: RedisEmitter): ControlE
           policy,
         });
         break;
+      }
 
       default:
         console.warn(

@@ -17,15 +17,6 @@ const router = express.Router();
 
 const AUTH_MIDDLEWARE = passport.authenticate("jwt", { session: false });
 
-const isRecord = (v: unknown): v is Record<string, unknown> => {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-};
-
-const utcDateKey = (d: Date): string => {
-  const x = new Date(d);
-  x.setUTCHours(0, 0, 0, 0);
-  return x.toISOString().slice(0, 10);
-};
 
 interface TokenContext {
   team_id: string;
@@ -318,7 +309,7 @@ router.get("/logs", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
 
         // Convert to array and sort by cost desc
         return Array.from(merged.values())
-          .map(({ latency_sum, ...rest }) => ({ ...rest, latency_sum: 0 }))
+          .map(({ latency_sum: _latency_sum, ...rest }) => ({ ...rest, latency_sum: 0 }))
           .sort((a, b) => b.total_cost - a.total_cost);
       };
 

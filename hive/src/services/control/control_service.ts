@@ -253,7 +253,7 @@ async function calculateBudgetAnalyticsFromTsdb(teamId: string | number, budget:
 
       const conditions = [`team_id = $1`, `"timestamp" >= $2`, `"timestamp" <= $3`];
       const values: unknown[] = [String(teamId), baseTableStart, now];
-      let paramIndex = 4;
+      const paramIndex = 4;
 
       // Apply budget-specific filter based on budget type
       const budgetFilter = getBudgetFilter(budget, paramIndex);
@@ -663,11 +663,12 @@ function matchesBudgetType(budget: Budget, metricData: MetricData): boolean {
       // Feature budgets apply when feature name matches
       return !!metadata.feature && budget.name === metadata.feature;
 
-    case "tag":
+    case "tag": {
       // Tag budgets apply when the tagCategory value matches budget name
       if (!budget.tagCategory || !metadata.tags) return false;
       const tagValue = (metadata.tags as Record<string, string>)[budget.tagCategory];
       return !!tagValue && budget.name === tagValue;
+    }
 
     default:
       return false;
@@ -726,18 +727,21 @@ async function sendBudgetNotifications(budget: Budget, alertData: Record<string,
     : "#eff6ff";
 
   // Build notification content
-  let subject: string, title: string, description: string;
+  let title: string, description: string;
   if (isLimitAction) {
-    subject = `[Aden] Budget "${budget.name}" - ${(action || "").toUpperCase()}`;
     title = "Budget Limit Triggered";
     description = `The budget <strong>${budget.name}</strong> has exceeded its limit and triggered a control action.`;
   } else {
-    subject = `[Aden] Budget "${budget.name}" at ${spentPercentage}%`;
     title = "Budget Threshold Alert";
     description = `The budget <strong>${budget.name}</strong> has reached ${threshold}% of its limit.`;
   }
 
-  const htmlContent = `
+  // Email subject and content prepared for future email notification implementation
+  const _subject = isLimitAction
+    ? `[Aden] Budget "${budget.name}" - ${(action || "").toUpperCase()}`
+    : `[Aden] Budget "${budget.name}" at ${spentPercentage}%`;
+
+  const _htmlContent = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -1743,8 +1747,6 @@ async function getBudgetDetails(teamId: string | number, policyId: string | null
   // Get real-time tracker status
   const tracker = budgetTracker.get(budgetId);
   const spent = tracker?.spent ?? budget.spent ?? 0;
-  const remaining = Math.max(0, budget.limit - spent);
-  const usagePercent = budget.limit > 0 ? (spent / budget.limit) * 100 : 0;
 
   return {
     ...budget,

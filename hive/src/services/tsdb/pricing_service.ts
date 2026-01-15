@@ -13,8 +13,8 @@
  */
 
 // In-memory cache for pricing data
-let pricingCache = new Map<string, PricingEntry>();
-let aliasCacheMap = new Map<string, string>(); // model alias -> canonical model
+const pricingCache = new Map<string, PricingEntry>();
+const aliasCacheMap = new Map<string, string>(); // model alias -> canonical model
 let cacheLoadedAt: number | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -389,7 +389,7 @@ interface CostResult {
  * @param {Object} params - Request parameters
  * @returns {Object} Cost breakdown { total, input_cost, output_cost, cached_cost, pricing }
  */
-function calculateCostSync({ model, provider, input_tokens = 0, output_tokens = 0, cached_tokens = 0 }: CostCalculationParams): CostResult {
+function calculateCostSync({ model, provider: _provider, input_tokens = 0, output_tokens = 0, cached_tokens = 0 }: CostCalculationParams): CostResult {
   const resolved = resolveAlias(model);
   let pricing: { input: number; output: number; cached_input: number; model: string; source: string };
 
@@ -577,7 +577,7 @@ async function getAllPricing(): Promise<AllPricingResult> {
   await loadPricingFromDb();
 
   const result: AllPricingResult = {};
-  for (const [key, pricing] of pricingCache.entries()) {
+  for (const [, pricing] of pricingCache.entries()) {
     result[pricing.model] = {
       provider: pricing.provider,
       input: pricing.input,

@@ -15,7 +15,6 @@ import {
   createSuccessResponse,
   handleToolError,
 } from "../utils/response-helpers";
-import { idSchema, paginationSchema } from "../utils/schema-helpers";
 
 export function registerPolicyTools(server: McpServer, api: ApiClient) {
   // ==================== hive_policies_list ====================

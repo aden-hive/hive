@@ -66,10 +66,10 @@ export function CostByModelChart({
                 dataKey="cost"
                 nameKey="name"
               >
-                {data.map((entry, index) => (
+                {data.map((item, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={entry.color || COLORS[index % COLORS.length]}
+                    fill={item.color || COLORS[index % COLORS.length]}
                   />
                 ))}
               </Pie>
@@ -89,7 +89,7 @@ export function CostByModelChart({
                   maxWidth: '45%',
                   overflow: 'hidden',
                 }}
-                formatter={(value, entry) => {
+                formatter={(value) => {
                   const item = data.find((d) => d.name === value)
                   return (
                     <span className="text-sm block truncate max-w-[120px]" title={String(value)}>

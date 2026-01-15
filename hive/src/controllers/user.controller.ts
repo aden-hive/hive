@@ -35,9 +35,10 @@ const EMAIL_REGEX =
  */
 router.post(
   "/login-v2",
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, _next: NextFunction) => {
     try {
-      let { email, password } = req.body;
+      let { email } = req.body;
+      const { password } = req.body;
 
       // Validate required fields
       if (
@@ -102,25 +103,26 @@ router.post(
         current_team_id: result.current_team_id,
         create_time: result.created_at,
       });
-    } catch (err: any) {
-      console.error("[UserController] login-v2 error:", err.message);
+    } catch (err) {
+      const error = err as { message?: string; code?: string };
+      console.error("[UserController] login-v2 error:", error.message);
 
       // Handle specific error codes
-      if (err.code === "USER_NOT_FOUND" || err.code === "INVALID_CREDENTIALS") {
+      if (error.code === "USER_NOT_FOUND" || error.code === "INVALID_CREDENTIALS") {
         return res.status(401).json({
           success: false,
           msg: "Invalid email or password",
         });
       }
 
-      if (err.code === "OAUTH_REQUIRED") {
+      if (error.code === "OAUTH_REQUIRED") {
         return res.status(400).json({
           success: false,
-          msg: err.message,
+          msg: error.message,
         });
       }
 
-      if (err.code === "ACCOUNT_DISABLED") {
+      if (error.code === "ACCOUNT_DISABLED") {
         return res.status(403).json({
           success: false,
           msg: "Your account has been disabled",
@@ -144,7 +146,8 @@ router.post(
  */
 router.post("/register", async (req: Request, res: Response) => {
   try {
-    let { email, password, name, firstname, lastname } = req.body;
+    let { email } = req.body;
+    const { password, name, firstname, lastname } = req.body;
 
     // Validate required fields
     if (

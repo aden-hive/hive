@@ -1,6 +1,5 @@
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import { getLogs, getLogsAggregated } from '@/services/agentControlApi'
-import type { RawJsonData } from '@/types/agentControl'
 
 // =============================================================================
 // Types

@@ -93,9 +93,13 @@ export function useAgentStatus(
       let buffer = ''
 
       // Read SSE stream
-      while (true) {
+      let streamActive = true
+      while (streamActive) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          streamActive = false
+          continue
+        }
 
         buffer += decoder.decode(value, { stream: true })
 
