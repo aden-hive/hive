@@ -3,7 +3,7 @@
 Hive is an easy way to craete reliable agenst with expanding toolkits. 
 
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/title-card.png" />
+  <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
