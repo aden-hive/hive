@@ -6,7 +6,7 @@ Aden Agent Framework aims to help developers build outcome orienated, self-adapt
 timeline
     title Aden Agent Framework Roadmap
     section MVP Phase
-        Architecture : Node-Based : SDK : Flexible Edges : Hooks : Tool Use
+        Architecture : Node-Based : Python SDK : Flexible Edges : Hooks : Tool Use
         Capabilities : Goal Creation : Worker Agents Generation: File/Memory Tools : Multi-Agent : Human-in-the-Loop
         Foundations : Basic Eval : Docker Deployment : Documentation
     section Post-MVP
@@ -29,9 +29,9 @@ timeline
     - [ ] LLM integration layer (Natively supports all mainstream LLMs through LiteLLM)
 - [ ] **Communication protocol between nodes**
 - [ ] **[Coding Agent] Goal Creation Session**
-    - [ ] Instruction back and forth
+    - [ ] Instruction for coding agents supporting generation of goal with multiple rounds of conversation
     - [ ] Goal Object schema definition
-    - [ ] Being able to generate the test cases
+    - [ ] Support generating test cases for goal
 - [ ] **[Coding Agent] Worker Agent Creation**
     - [ ] Coding Agent tools
     - [ ] Use Template Agent as a start
