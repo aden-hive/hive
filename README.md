@@ -82,130 +82,69 @@ Traditional agent frameworks require you to manually design workflows, define ag
 
 ```mermaid
 flowchart TB
-    subgraph USER["👤 User / Developer"]
-        GOAL[("🎯 Define Goal<br/>& Success Criteria")]
-        INPUT[("💬 Runtime Input")]
-    end
-
-    subgraph BUILDER["🏗️ Builder Layer (via Claude/LLM)"]
-        direction TB
-        PHASE1["Phase 1: Goal Draft<br/>(constraints, criteria)"]
-        PHASE2["Phase 2: Add Nodes<br/>(llm_tool_use, router, etc)"]
-        PHASE3["Phase 3: Add Edges<br/>(routing logic)"]
-        PHASE4["Phase 4: Test & Validate"]
-        PHASE5["Phase 5: Export Agent"]
-        QUERY["Query & Analysis<br/>(find patterns, suggest improvements)"]
-    end
-
-    subgraph EXPORT["📦 Exported Agent"]
+    subgraph BUILD["🏗️ AGENT BUILD PROCESS"]
         direction LR
-        AGENT_JSON["agent.json<br/>(graph spec + goal)"]
-        TOOLS_PY["tools.py<br/>(custom tools)"]
-        MCP_JSON["mcp_servers.json<br/>(MCP configs)"]
+        GOAL["🎯 Define Goal<br/>+ Success Criteria"]
+        BUILDER["🤖 Builder Agent<br/>(Claude/LLM)"]
+        GRAPH["Create Agent Graph<br/>• Add Nodes<br/>• Define Edges<br/>• Test & Validate"]
+        EXPORT["📦 Export<br/>agent.json<br/>tools.py<br/>mcp_servers.json"]
+
+        GOAL --> BUILDER
+        BUILDER --> GRAPH
+        GRAPH --> EXPORT
     end
 
-    subgraph RUNNER["🚀 Runner Layer"]
-        direction TB
-        AGENT_RUNNER["AgentRunner<br/>(loads agent)"]
-        TOOL_REG["ToolRegistry<br/>(discovers tools)"]
-        MCP_CLIENT["MCPClient<br/>(connects to servers)"]
-        ORCHESTRATOR["Orchestrator<br/>(multi-agent routing)"]
-    end
+    subgraph RUNTIME["🚀 AGENT EXECUTION"]
+        direction LR
+        INPUT["💬 User Input"]
+        RUNNER["AgentRunner<br/>• Load agent.json<br/>• ToolRegistry<br/>• MCP Integration"]
+        EXECUTOR["Graph Executor<br/>• Step-by-step<br/>• State management"]
 
-    subgraph GRAPH["⚙️ Graph Executor"]
-        direction TB
-        EXECUTOR["GraphExecutor<br/>(step-by-step execution)"]
-        subgraph NODES["Node Types"]
-            LLM_NODE["LLM Generate/Tool Use"]
-            ROUTER["Router (conditional/LLM)"]
-            FUNCTION["Function Node"]
-            HITL_NODE["Human-in-the-Loop"]
-            JUDGE["Judge (evaluation)"]
+        subgraph NODES["Node Execution"]
+            direction TB
+            LLM_NODE["LLM Nodes<br/>(generate/tool use)"]
+            ROUTER["Router Nodes<br/>(conditional/LLM)"]
+            FUNC["Function Nodes"]
+            HITL["Human-in-the-Loop"]
         end
+
+        INPUT --> RUNNER
+        RUNNER --> EXECUTOR
+        EXECUTOR --> NODES
     end
 
-    subgraph NODE_CTX["📋 Node Context (per execution)"]
+    subgraph INFRA["⚙️ CORE INFRASTRUCTURE"]
         direction LR
-        CTX_RUNTIME["Runtime<br/>(decision recorder)"]
-        CTX_MEMORY["SharedMemory<br/>(cross-node state)"]
-        CTX_TOOLS["Available Tools"]
-        CTX_LLM["LLM Provider"]
+
+        subgraph CTX["Node Context (Runtime)"]
+            direction TB
+            RUNTIME_DEC["Decision Recorder<br/>intent → options → choice"]
+            MEMORY["Shared Memory"]
+            TOOLS["Tool Access"]
+        end
+
+        LLM["🧠 LLM Providers<br/>Claude • GPT-4 • Gemini"]
+
+        STORAGE[("💾 Storage<br/>Decision History<br/>Metrics & Analytics")]
+
+        DASHBOARD["📊 Dashboard<br/>Monitoring • Costs • KPIs"]
     end
 
-    subgraph RUNTIME["📝 Runtime Layer"]
-        direction TB
-        DECISION_REC["Decision Recording<br/>(intent, options, choice, reasoning)"]
-        OUTCOME_REC["Outcome Recording<br/>(success/failure, metrics)"]
-    end
+    EXPORT --> RUNNER
+    NODES --> CTX
+    CTX --> LLM
+    CTX --> STORAGE
+    STORAGE --> DASHBOARD
+    STORAGE -.->|Self-Improve| BUILDER
 
-    subgraph LLM["🧠 LLM Layer"]
-        direction LR
-        ANTHROPIC["Anthropic<br/>(Claude)"]
-        OPENAI["OpenAI<br/>(GPT-4)"]
-        GOOGLE["Google<br/>(Gemini)"]
-    end
-
-    subgraph STORAGE["💾 Storage Layer"]
-        direction TB
-        RUN_STORE[("Run Storage<br/>(all decisions & outcomes)")]
-        CONTROL_DB[("Control Plane DB<br/>(metrics, policies, users)")]
-    end
-
-    subgraph DASHBOARD["📊 Dashboard (Honeycomb)"]
-        ANALYTICS["Agent Analytics"]
-        MONITOR["Execution Monitoring"]
-        COSTS["Cost Tracking"]
-    end
-
-    %% Build Flow
-    GOAL --> PHASE1
-    PHASE1 --> PHASE2
-    PHASE2 --> PHASE3
-    PHASE3 --> PHASE4
-    PHASE4 --> PHASE5
-    PHASE5 --> EXPORT
-
-    %% Runtime Flow
-    INPUT --> AGENT_RUNNER
-    EXPORT --> AGENT_RUNNER
-    AGENT_RUNNER --> TOOL_REG & MCP_CLIENT
-    TOOL_REG --> EXECUTOR
-    MCP_CLIENT --> TOOL_REG
-    AGENT_RUNNER --> EXECUTOR
-
-    EXECUTOR --> NODES
-    NODES --> NODE_CTX
-    NODE_CTX --> CTX_RUNTIME
-    CTX_RUNTIME --> DECISION_REC
-    DECISION_REC --> OUTCOME_REC
-    OUTCOME_REC --> RUN_STORE
-
-    NODE_CTX --> CTX_LLM
-    CTX_LLM --> LLM
-
-    %% Feedback Loop
-    RUN_STORE -->|"Analyze runs"| QUERY
-    QUERY -->|"Suggest improvements"| PHASE2
-
-    %% Multi-agent
-    ORCHESTRATOR -.->|"Route to agents"| AGENT_RUNNER
-
-    %% Dashboard Integration
-    RUN_STORE --> DASHBOARD
-    CONTROL_DB --> DASHBOARD
-
-    %% HITL Pause
-    HITL_NODE -.->|"Pause for approval"| USER
-
-    style USER fill:#e8f5e9,stroke:#2e7d32
-    style BUILDER fill:#e3f2fd,stroke:#1565c0
+    style BUILD fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    style RUNTIME fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    style INFRA fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style NODES fill:#ffe0b2,stroke:#e65100
+    style CTX fill:#fce4ec,stroke:#c2185b
+    style GOAL fill:#e8f5e9,stroke:#2e7d32
     style EXPORT fill:#fff9c4,stroke:#f57f17
-    style RUNNER fill:#ede7f6,stroke:#5e35b1
-    style GRAPH fill:#fff3e0,stroke:#ef6c00
-    style NODE_CTX fill:#fce4ec,stroke:#c2185b
-    style RUNTIME fill:#e0f2f1,stroke:#00695c
-    style LLM fill:#f3e5f5,stroke:#7b1fa2
-    style STORAGE fill:#eceff1,stroke:#37474f
+    style STORAGE fill:#eceff1,stroke:#455a64
     style DASHBOARD fill:#e0f7fa,stroke:#00838f
 ```
 
