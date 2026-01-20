@@ -433,6 +433,161 @@ Goal(
 **Good goals**: Specific, measurable, constrained
 **Bad goals**: Vague, unmeasurable, no boundaries
 
+## Integrating External Tools (MCP Servers)
+
+Before adding nodes, you can register MCP servers to make their tools available to your agent.
+
+### Using aden-tools in the Hive Monorepo
+
+The hive monorepo includes `aden-tools` which provides web search, web scraping, and file operations.
+
+**Step 1: Register the MCP Server**
+
+After creating your session, register aden-tools:
+
+```python
+# Using MCP tools
+add_mcp_server(
+    name="aden-tools",
+    transport="stdio",
+    command="python",
+    args='["mcp_server.py", "--stdio"]',
+    cwd="../aden-tools"  # Relative to core/ directory
+)
+```
+
+**Expected response:**
+```json
+{
+  "success": true,
+  "server": {
+    "name": "aden-tools",
+    "transport": "stdio",
+    "command": "python",
+    "args": ["-m", "aden_tools.server"],
+    "cwd": "../aden-tools"
+  },
+  "tools_discovered": 6,
+  "tools": [
+    "web_search",
+    "web_scrape",
+    "file_read",
+    "file_write",
+    "pdf_read",
+    "example_tool"
+  ],
+  "note": "MCP server 'aden-tools' registered with 6 tools..."
+}
+```
+
+**Step 2: List Available Tools** (optional verification)
+
+```python
+list_mcp_tools(server_name="aden-tools")
+```
+
+This shows detailed information about each tool including parameters.
+
+**Step 3: Use Tools in Your Nodes**
+
+Now you can reference these tools in `llm_tool_use` nodes:
+
+```python
+add_node(
+    node_id="web_searcher",
+    name="Web Searcher",
+    description="Search the web for information",
+    node_type="llm_tool_use",
+    input_keys='["query"]',
+    output_keys='["search_results"]',
+    tools='["web_search"]',  # ← Tool from aden-tools
+    system_prompt="Search for {query} using web_search tool"
+)
+```
+
+**Step 4: Export Creates mcp_servers.json**
+
+When you export your agent with `export_graph()`, the MCP server configuration is automatically saved:
+
+```
+exports/my-agent/
+├── agent.json           # Agent specification
+├── README.md            # Documentation
+└── mcp_servers.json     # ← MCP configuration (auto-generated)
+```
+
+The `mcp_servers.json` file ensures the agent can access aden-tools when run later.
+
+### Available aden-tools
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| `web_search` | Search the web using Brave Search API | `query`, `num_results`, `country` |
+| `web_scrape` | Extract text content from a webpage | `url`, `selector`, `include_links` |
+| `file_read` | Read file contents | `path` |
+| `file_write` | Write content to files | `path`, `content` |
+| `pdf_read` | Extract text from PDF files | `path` |
+
+### MCP Server Management
+
+List registered servers:
+```python
+list_mcp_servers()
+```
+
+Remove a server:
+```python
+remove_mcp_server(name="aden-tools")
+```
+
+### Best Practices
+
+1. **Register early**: Call `add_mcp_server` right after `create_session` and before defining nodes
+2. **Verify tools**: Use `list_mcp_tools` to see available tools and their parameters
+3. **Minimal tools**: Only include tools a node actually needs in its `tools` list
+4. **Test nodes**: Use `test_node` to verify tool access works before building the full graph
+
+### Example: Research Agent with aden-tools
+
+```python
+# 1. Create session
+create_session(name="research-agent")
+
+# 2. Register aden-tools
+add_mcp_server(
+    name="aden-tools",
+    transport="stdio",
+    command="python",
+    args='["mcp_server.py", "--stdio"]',
+    cwd="../aden-tools"
+)
+
+# 3. Verify tools
+list_mcp_tools(server_name="aden-tools")
+
+# 4. Define goal
+set_goal(
+    goal_id="research",
+    name="Research Agent",
+    description="Gather and synthesize information",
+    success_criteria='[...]',
+    constraints='[...]'
+)
+
+# 5. Add node that uses web_search
+add_node(
+    node_id="searcher",
+    name="Information Searcher",
+    node_type="llm_tool_use",
+    input_keys='["topic"]',
+    output_keys='["search_results"]',
+    tools='["web_search"]',  # From aden-tools
+    system_prompt="Search for information about {topic}"
+)
+
+# 6. Continue building...
+```
+
 ## Adding Nodes
 
 Each node does one thing:

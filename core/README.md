@@ -75,10 +75,70 @@ The MCP server provides tools for:
 - Defining goals with success criteria
 - Adding nodes (llm_generate, llm_tool_use, router, function)
 - Connecting nodes with edges
+- **Registering MCP servers as tool sources** ✨
+- **Discovering tools from MCP servers** ✨
 - Validating and exporting agent graphs
 - Testing nodes and full agent graphs
 
-See [MCP_SERVER_GUIDE.md](MCP_SERVER_GUIDE.md) for detailed instructions.
+When you register an MCP server during agent building, the tools from that server become available to your agent, and an `mcp_servers.json` configuration file is automatically created on export.
+
+See [MCP_SERVER_GUIDE.md](MCP_SERVER_GUIDE.md) for agent builder instructions and [MCP_BUILDER_TOOLS_GUIDE.md](MCP_BUILDER_TOOLS_GUIDE.md) for MCP integration tools.
+
+## MCP Tool Integration
+
+The framework also supports **connecting to MCP servers as tool providers**, allowing your agents to use tools from external MCP servers (like aden-tools). This enables you to extend your agents with powerful external capabilities.
+
+### Quick Example
+
+```python
+from framework.runner.runner import AgentRunner
+
+# Load an agent
+runner = AgentRunner.load("exports/task-planner")
+
+# Register an MCP server with tools
+runner.register_mcp_server(
+    name="aden-tools",
+    transport="stdio",
+    command="python",
+    args=["mcp_server.py", "--stdio"],
+    cwd="../aden-tools"
+)
+
+# Tools from the MCP server are now available to your agent
+result = await runner.run({"query": "Search for AI news"})
+```
+
+### Auto-loading MCP Servers
+
+Create `mcp_servers.json` in your agent folder:
+
+```json
+{
+  "servers": [
+    {
+      "name": "aden-tools",
+      "transport": "stdio",
+      "command": "python",
+      "args": ["mcp_server.py", "--stdio"],
+      "cwd": "../aden-tools"
+    }
+  ]
+}
+```
+
+MCP servers will be automatically loaded when you load the agent.
+
+### Available Tools from aden-tools
+
+When you register the aden-tools MCP server, these tools become available:
+- `web_search` - Search the web using Brave Search API
+- `web_scrape` - Extract content from web pages
+- `file_read` - Read file contents
+- `file_write` - Write content to files
+- `pdf_read` - Extract text from PDF files
+
+See [MCP_INTEGRATION_GUIDE.md](MCP_INTEGRATION_GUIDE.md) for detailed instructions on MCP tool integration.
 
 ## Quick Start
 

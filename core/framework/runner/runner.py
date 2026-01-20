@@ -210,6 +210,11 @@ class AgentRunner:
         if tools_path.exists():
             self._tool_registry.discover_from_module(tools_path)
 
+        # Auto-discover MCP servers from mcp_servers.json
+        mcp_config_path = agent_path / "mcp_servers.json"
+        if mcp_config_path.exists():
+            self._load_mcp_servers_from_config(mcp_config_path)
+
     @classmethod
     def load(
         cls,
@@ -282,6 +287,67 @@ class AgentRunner:
             Number of tools discovered
         """
         return self._tool_registry.discover_from_module(module_path)
+
+    def register_mcp_server(
+        self,
+        name: str,
+        transport: str,
+        **config_kwargs,
+    ) -> int:
+        """
+        Register an MCP server and discover its tools.
+
+        Args:
+            name: Server name
+            transport: "stdio" or "http"
+            **config_kwargs: Additional configuration (command, args, url, etc.)
+
+        Returns:
+            Number of tools registered from this server
+
+        Example:
+            # Register STDIO MCP server
+            runner.register_mcp_server(
+                name="aden-tools",
+                transport="stdio",
+                command="python",
+                args=["-m", "aden_tools.mcp_server", "--stdio"],
+                cwd="/path/to/aden-tools"
+            )
+
+            # Register HTTP MCP server
+            runner.register_mcp_server(
+                name="aden-tools",
+                transport="http",
+                url="http://localhost:4001"
+            )
+        """
+        server_config = {
+            "name": name,
+            "transport": transport,
+            **config_kwargs,
+        }
+        return self._tool_registry.register_mcp_server(server_config)
+
+    def _load_mcp_servers_from_config(self, config_path: Path) -> None:
+        """
+        Load and register MCP servers from a configuration file.
+
+        Args:
+            config_path: Path to mcp_servers.json file
+        """
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+
+            servers = config.get("servers", [])
+            for server_config in servers:
+                try:
+                    self._tool_registry.register_mcp_server(server_config)
+                except Exception as e:
+                    print(f"Warning: Failed to register MCP server '{server_config.get('name', 'unknown')}': {e}")
+        except Exception as e:
+            print(f"Warning: Failed to load MCP servers config from {config_path}: {e}")
 
     def set_approval_callback(self, callback: Callable) -> None:
         """
@@ -631,6 +697,9 @@ Respond with JSON only:
 
     def cleanup(self) -> None:
         """Clean up resources."""
+        # Clean up MCP client connections
+        self._tool_registry.cleanup()
+
         if self._temp_dir:
             self._temp_dir.cleanup()
             self._temp_dir = None

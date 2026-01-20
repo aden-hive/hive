@@ -392,10 +392,10 @@ class LLMNode(NodeProtocol):
 
                 def executor(tool_use: ToolUse) -> ToolResult:
                     logger.info(f"         🔧 Tool call: {tool_use.name}({', '.join(f'{k}={v}' for k, v in tool_use.input.items())})")
-                    result = self.tool_executor(ctx, tool_use)
+                    result = self.tool_executor(tool_use)
                     # Truncate long results
-                    result_str = str(result.output)[:150]
-                    if len(str(result.output)) > 150:
+                    result_str = str(result.content)[:150]
+                    if len(str(result.content)) > 150:
                         result_str += "..."
                     logger.info(f"         ✓ Tool result: {result_str}")
                     return result

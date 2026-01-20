@@ -3,7 +3,7 @@
     "agent-builder": {
       "command": "python",
       "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "/home/timothy/aden/worker-bee"
+      "cwd": "/home/timothy/oss/hive/core"
     }
   }
 }

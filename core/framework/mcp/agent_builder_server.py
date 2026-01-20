@@ -31,6 +31,7 @@ class BuildSession:
         self.goal: Goal | None = None
         self.nodes: list[NodeSpec] = []
         self.edges: list[EdgeSpec] = []
+        self.mcp_servers: list[dict] = []  # MCP server configurations
 
 
 # Global session
@@ -310,6 +311,155 @@ def add_edge(
 
 
 @mcp.tool()
+def update_node(
+    node_id: Annotated[str, "ID of the node to update"],
+    name: Annotated[str, "Updated human-readable name"] = "",
+    description: Annotated[str, "Updated description"] = "",
+    node_type: Annotated[str, "Updated type: llm_generate, llm_tool_use, router, or function"] = "",
+    input_keys: Annotated[str, "Updated JSON array of input keys"] = "",
+    output_keys: Annotated[str, "Updated JSON array of output keys"] = "",
+    system_prompt: Annotated[str, "Updated instructions for LLM nodes"] = "",
+    tools: Annotated[str, "Updated JSON array of tool names"] = "",
+    routes: Annotated[str, "Updated JSON object mapping conditions to target node IDs"] = "",
+) -> str:
+    """Update an existing node in the agent graph. Only provided fields will be updated."""
+    session = get_session()
+
+    # Find the node
+    node = None
+    for n in session.nodes:
+        if n.id == node_id:
+            node = n
+            break
+
+    if not node:
+        return json.dumps({"valid": False, "errors": [f"Node '{node_id}' not found"]})
+
+    # Update fields if provided
+    if name:
+        node.name = name
+    if description:
+        node.description = description
+    if node_type:
+        node.node_type = node_type
+    if input_keys:
+        node.input_keys = json.loads(input_keys)
+    if output_keys:
+        node.output_keys = json.loads(output_keys)
+    if system_prompt:
+        node.system_prompt = system_prompt
+    if tools:
+        node.tools = json.loads(tools)
+    if routes:
+        node.routes = json.loads(routes)
+
+    # Validate
+    errors = []
+    warnings = []
+
+    if node.node_type == "llm_tool_use" and not node.tools:
+        errors.append(f"Node '{node_id}' of type llm_tool_use must specify tools")
+    if node.node_type == "router" and not node.routes:
+        errors.append(f"Router node '{node_id}' must specify routes")
+    if node.node_type in ("llm_generate", "llm_tool_use") and not node.system_prompt:
+        warnings.append(f"LLM node '{node_id}' should have a system_prompt")
+
+    return json.dumps({
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "node": node.model_dump(),
+        "total_nodes": len(session.nodes),
+        "approval_required": True,
+        "approval_question": {
+            "component_type": "node",
+            "component_name": node.name,
+            "question": f"Do you approve this updated {node.node_type} node: {node.name}?",
+            "header": "Approve Node Update",
+            "options": [
+                {
+                    "label": "✓ Approve (Recommended)",
+                    "description": f"Updated node '{node.name}' looks good"
+                },
+                {
+                    "label": "✗ Reject & Modify",
+                    "description": "Need to change node configuration"
+                },
+                {
+                    "label": "⏸ Pause & Review",
+                    "description": "I need more time to review this update"
+                }
+            ]
+        }
+    }, default=str)
+
+
+@mcp.tool()
+def delete_node(
+    node_id: Annotated[str, "ID of the node to delete"],
+) -> str:
+    """Delete a node from the agent graph. Also removes all edges connected to this node."""
+    session = get_session()
+
+    # Find the node
+    node_idx = None
+    for i, n in enumerate(session.nodes):
+        if n.id == node_id:
+            node_idx = i
+            break
+
+    if node_idx is None:
+        return json.dumps({"valid": False, "errors": [f"Node '{node_id}' not found"]})
+
+    # Remove the node
+    removed_node = session.nodes.pop(node_idx)
+
+    # Remove all edges connected to this node
+    removed_edges = [e.id for e in session.edges if e.source == node_id or e.target == node_id]
+    session.edges = [
+        e for e in session.edges
+        if not (e.source == node_id or e.target == node_id)
+    ]
+
+    return json.dumps({
+        "valid": True,
+        "deleted_node": removed_node.model_dump(),
+        "removed_edges": removed_edges,
+        "total_nodes": len(session.nodes),
+        "total_edges": len(session.edges),
+        "message": f"Node '{node_id}' and {len(removed_edges)} connected edge(s) removed"
+    }, default=str)
+
+
+@mcp.tool()
+def delete_edge(
+    edge_id: Annotated[str, "ID of the edge to delete"],
+) -> str:
+    """Delete an edge from the agent graph."""
+    session = get_session()
+
+    # Find the edge
+    edge_idx = None
+    for i, e in enumerate(session.edges):
+        if e.id == edge_id:
+            edge_idx = i
+            break
+
+    if edge_idx is None:
+        return json.dumps({"valid": False, "errors": [f"Edge '{edge_id}' not found"]})
+
+    # Remove the edge
+    removed_edge = session.edges.pop(edge_idx)
+
+    return json.dumps({
+        "valid": True,
+        "deleted_edge": removed_edge.model_dump(),
+        "total_edges": len(session.edges),
+        "message": f"Edge '{edge_id}' removed: {removed_edge.source} → {removed_edge.target}"
+    }, default=str)
+
+
+@mcp.tool()
 def validate_graph() -> str:
     """Validate the complete graph. Checks for unreachable nodes, missing connections, and context flow."""
     session = get_session()
@@ -584,6 +734,18 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
 
 {chr(10).join(f"- `{tool}`" for tool in sorted(all_tools)) if all_tools else "No tools required"}
 
+{"## MCP Tool Sources" if session.mcp_servers else ""}
+
+{chr(10).join(f'''### {s["name"]} ({s["transport"]})
+{s.get("description", "")}
+
+**Configuration:**
+''' + (f'''- Command: `{s.get("command")}`
+- Args: `{s.get("args")}`
+- Working Directory: `{s.get("cwd")}`''' if s["transport"] == "stdio" else f'''- URL: `{s.get("url")}`''') for s in session.mcp_servers) if session.mcp_servers else ""}
+
+{"Tools from these MCP servers are automatically loaded when the agent runs." if session.mcp_servers else ""}
+
 ## Usage
 
 ### Basic Usage
@@ -754,30 +916,51 @@ def export_graph() -> str:
     with open(readme_path, "w") as f:
         f.write(readme_content)
 
+    # Write mcp_servers.json if MCP servers are configured
+    mcp_servers_path = None
+    mcp_servers_size = 0
+    if session.mcp_servers:
+        mcp_config = {
+            "servers": session.mcp_servers
+        }
+        mcp_servers_path = exports_dir / "mcp_servers.json"
+        with open(mcp_servers_path, "w") as f:
+            json.dump(mcp_config, f, indent=2)
+        mcp_servers_size = mcp_servers_path.stat().st_size
+
     # Get file sizes
     agent_json_size = agent_json_path.stat().st_size
     readme_size = readme_path.stat().st_size
 
+    files_written = {
+        "agent_json": {
+            "path": str(agent_json_path),
+            "size_bytes": agent_json_size,
+        },
+        "readme": {
+            "path": str(readme_path),
+            "size_bytes": readme_size,
+        },
+    }
+
+    if mcp_servers_path:
+        files_written["mcp_servers"] = {
+            "path": str(mcp_servers_path),
+            "size_bytes": mcp_servers_size,
+        }
+
     return json.dumps({
         "success": True,
         "agent": export_data["agent"],
-        "files_written": {
-            "agent_json": {
-                "path": str(agent_json_path),
-                "size_bytes": agent_json_size,
-            },
-            "readme": {
-                "path": str(readme_path),
-                "size_bytes": readme_size,
-            },
-        },
+        "files_written": files_written,
         "graph": graph_spec,
         "goal": session.goal.model_dump(),
         "evaluation_rules": _evaluation_rules,
         "required_tools": list(all_tools),
         "node_count": len(session.nodes),
         "edge_count": len(edges_list),
-        "note": f"Agent exported to {exports_dir}. Files: agent.json, README.md",
+        "mcp_servers_count": len(session.mcp_servers),
+        "note": f"Agent exported to {exports_dir}. Files: agent.json, README.md" + (", mcp_servers.json" if session.mcp_servers else ""),
     }, default=str, indent=2)
 
 
@@ -792,8 +975,253 @@ def get_session_status() -> str:
         "goal_name": session.goal.name if session.goal else None,
         "node_count": len(session.nodes),
         "edge_count": len(session.edges),
+        "mcp_servers_count": len(session.mcp_servers),
         "nodes": [n.id for n in session.nodes],
         "edges": [(e.source, e.target) for e in session.edges],
+        "mcp_servers": [s["name"] for s in session.mcp_servers],
+    })
+
+
+@mcp.tool()
+def add_mcp_server(
+    name: Annotated[str, "Unique name for the MCP server"],
+    transport: Annotated[str, "Transport type: 'stdio' or 'http'"],
+    command: Annotated[str, "Command to run (for stdio transport)"] = "",
+    args: Annotated[str, "JSON array of command arguments (for stdio)"] = "[]",
+    cwd: Annotated[str, "Working directory (for stdio)"] = "",
+    env: Annotated[str, "JSON object of environment variables (for stdio)"] = "{}",
+    url: Annotated[str, "Server URL (for http transport)"] = "",
+    headers: Annotated[str, "JSON object of HTTP headers (for http)"] = "{}",
+    description: Annotated[str, "Description of the MCP server"] = "",
+) -> str:
+    """
+    Register an MCP server as a tool source for this agent.
+
+    The MCP server will be saved in mcp_servers.json when the agent is exported,
+    and tools from this server will be available to the agent at runtime.
+
+    Example for stdio:
+        add_mcp_server(
+            name="aden-tools",
+            transport="stdio",
+            command="python",
+            args='["mcp_server.py", "--stdio"]',
+            cwd="../aden-tools"
+        )
+
+    Example for http:
+        add_mcp_server(
+            name="remote-tools",
+            transport="http",
+            url="http://localhost:4001"
+        )
+    """
+    session = get_session()
+
+    # Validate transport
+    if transport not in ["stdio", "http"]:
+        return json.dumps({
+            "success": False,
+            "error": f"Invalid transport '{transport}'. Must be 'stdio' or 'http'"
+        })
+
+    # Check for duplicate
+    if any(s["name"] == name for s in session.mcp_servers):
+        return json.dumps({
+            "success": False,
+            "error": f"MCP server '{name}' already registered"
+        })
+
+    # Parse JSON inputs
+    try:
+        args_list = json.loads(args)
+        env_dict = json.loads(env)
+        headers_dict = json.loads(headers)
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "success": False,
+            "error": f"Invalid JSON: {e}"
+        })
+
+    # Validate required fields
+    errors = []
+    if transport == "stdio" and not command:
+        errors.append("command is required for stdio transport")
+    if transport == "http" and not url:
+        errors.append("url is required for http transport")
+
+    if errors:
+        return json.dumps({"success": False, "errors": errors})
+
+    # Build server config
+    server_config = {
+        "name": name,
+        "transport": transport,
+        "description": description,
+    }
+
+    if transport == "stdio":
+        server_config["command"] = command
+        server_config["args"] = args_list
+        if cwd:
+            server_config["cwd"] = cwd
+        if env_dict:
+            server_config["env"] = env_dict
+    else:  # http
+        server_config["url"] = url
+        if headers_dict:
+            server_config["headers"] = headers_dict
+
+    # Try to connect and discover tools
+    try:
+        from framework.runner.mcp_client import MCPClient, MCPServerConfig
+
+        mcp_config = MCPServerConfig(
+            name=name,
+            transport=transport,
+            command=command if transport == "stdio" else None,
+            args=args_list if transport == "stdio" else [],
+            env=env_dict,
+            cwd=cwd if cwd else None,
+            url=url if transport == "http" else None,
+            headers=headers_dict,
+            description=description,
+        )
+
+        with MCPClient(mcp_config) as client:
+            tools = client.list_tools()
+            tool_names = [t.name for t in tools]
+
+            # Add to session
+            session.mcp_servers.append(server_config)
+
+            return json.dumps({
+                "success": True,
+                "server": server_config,
+                "tools_discovered": len(tool_names),
+                "tools": tool_names,
+                "total_mcp_servers": len(session.mcp_servers),
+                "note": f"MCP server '{name}' registered with {len(tool_names)} tools. These tools can now be used in llm_tool_use nodes.",
+            }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": f"Failed to connect to MCP server: {str(e)}",
+            "suggestion": "Check that the command/url is correct and the server is accessible"
+        })
+
+
+@mcp.tool()
+def list_mcp_servers() -> str:
+    """List all registered MCP servers for this agent."""
+    session = get_session()
+
+    if not session.mcp_servers:
+        return json.dumps({
+            "mcp_servers": [],
+            "total": 0,
+            "note": "No MCP servers registered. Use add_mcp_server to add tool sources."
+        })
+
+    return json.dumps({
+        "mcp_servers": session.mcp_servers,
+        "total": len(session.mcp_servers),
+    }, indent=2)
+
+
+@mcp.tool()
+def list_mcp_tools(
+    server_name: Annotated[str, "Name of the MCP server to list tools from"] = "",
+) -> str:
+    """
+    List tools available from registered MCP servers.
+
+    If server_name is provided, lists tools from that specific server.
+    Otherwise, lists all tools from all registered servers.
+    """
+    session = get_session()
+
+    if not session.mcp_servers:
+        return json.dumps({
+            "success": False,
+            "error": "No MCP servers registered"
+        })
+
+    # Filter servers if name provided
+    servers_to_query = session.mcp_servers
+    if server_name:
+        servers_to_query = [s for s in session.mcp_servers if s["name"] == server_name]
+        if not servers_to_query:
+            return json.dumps({
+                "success": False,
+                "error": f"MCP server '{server_name}' not found"
+            })
+
+    all_tools = {}
+
+    for server_config in servers_to_query:
+        try:
+            from framework.runner.mcp_client import MCPClient, MCPServerConfig
+
+            mcp_config = MCPServerConfig(
+                name=server_config["name"],
+                transport=server_config["transport"],
+                command=server_config.get("command"),
+                args=server_config.get("args", []),
+                env=server_config.get("env", {}),
+                cwd=server_config.get("cwd"),
+                url=server_config.get("url"),
+                headers=server_config.get("headers", {}),
+                description=server_config.get("description", ""),
+            )
+
+            with MCPClient(mcp_config) as client:
+                tools = client.list_tools()
+
+                all_tools[server_config["name"]] = [
+                    {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": list(t.input_schema.get("properties", {}).keys()),
+                    }
+                    for t in tools
+                ]
+
+        except Exception as e:
+            all_tools[server_config["name"]] = {
+                "error": f"Failed to connect: {str(e)}"
+            }
+
+    total_tools = sum(len(tools) if isinstance(tools, list) else 0 for tools in all_tools.values())
+
+    return json.dumps({
+        "success": True,
+        "tools_by_server": all_tools,
+        "total_tools": total_tools,
+        "note": "Use these tool names in the 'tools' parameter when adding llm_tool_use nodes",
+    }, indent=2)
+
+
+@mcp.tool()
+def remove_mcp_server(
+    name: Annotated[str, "Name of the MCP server to remove"],
+) -> str:
+    """Remove a registered MCP server."""
+    session = get_session()
+
+    for i, server in enumerate(session.mcp_servers):
+        if server["name"] == name:
+            session.mcp_servers.pop(i)
+            return json.dumps({
+                "success": True,
+                "removed": name,
+                "remaining_servers": len(session.mcp_servers)
+            })
+
+    return json.dumps({
+        "success": False,
+        "error": f"MCP server '{name}' not found"
     })
 
 

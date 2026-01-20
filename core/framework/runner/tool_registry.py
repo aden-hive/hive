@@ -3,11 +3,14 @@
 import importlib.util
 import inspect
 import json
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from framework.llm.provider import Tool, ToolUse, ToolResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -25,11 +28,13 @@ class ToolRegistry:
     Tool Discovery Order:
     1. Built-in tools (if any)
     2. tools.py in agent folder
-    3. Manually registered tools
+    3. MCP servers
+    4. Manually registered tools
     """
 
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
+        self._mcp_clients: list[Any] = []  # List of MCPClient instances
 
     def register(
         self,
@@ -221,6 +226,129 @@ class ToolRegistry:
     def has_tool(self, name: str) -> bool:
         """Check if a tool is registered."""
         return name in self._tools
+
+    def register_mcp_server(
+        self,
+        server_config: dict[str, Any],
+    ) -> int:
+        """
+        Register an MCP server and discover its tools.
+
+        Args:
+            server_config: MCP server configuration dict with keys:
+                - name: Server name (required)
+                - transport: "stdio" or "http" (required)
+                - command: Command to run (for stdio)
+                - args: Command arguments (for stdio)
+                - env: Environment variables (for stdio)
+                - cwd: Working directory (for stdio)
+                - url: Server URL (for http)
+                - headers: HTTP headers (for http)
+                - description: Server description (optional)
+
+        Returns:
+            Number of tools registered from this server
+        """
+        try:
+            from framework.runner.mcp_client import MCPClient, MCPServerConfig
+
+            # Build config object
+            config = MCPServerConfig(
+                name=server_config["name"],
+                transport=server_config["transport"],
+                command=server_config.get("command"),
+                args=server_config.get("args", []),
+                env=server_config.get("env", {}),
+                cwd=server_config.get("cwd"),
+                url=server_config.get("url"),
+                headers=server_config.get("headers", {}),
+                description=server_config.get("description", ""),
+            )
+
+            # Create and connect client
+            client = MCPClient(config)
+            client.connect()
+
+            # Store client for cleanup
+            self._mcp_clients.append(client)
+
+            # Register each tool
+            count = 0
+            for mcp_tool in client.list_tools():
+                # Convert MCP tool to framework Tool
+                tool = self._convert_mcp_tool_to_framework_tool(mcp_tool)
+
+                # Create executor that calls the MCP server
+                def make_mcp_executor(client_ref: MCPClient, tool_name: str):
+                    def executor(inputs: dict) -> Any:
+                        try:
+                            result = client_ref.call_tool(tool_name, inputs)
+                            # MCP tools return content array, extract the result
+                            if isinstance(result, list) and len(result) > 0:
+                                if isinstance(result[0], dict) and "text" in result[0]:
+                                    return result[0]["text"]
+                                return result[0]
+                            return result
+                        except Exception as e:
+                            logger.error(f"MCP tool '{tool_name}' execution failed: {e}")
+                            return {"error": str(e)}
+
+                    return executor
+
+                self.register(
+                    mcp_tool.name,
+                    tool,
+                    make_mcp_executor(client, mcp_tool.name),
+                )
+                count += 1
+
+            logger.info(f"Registered {count} tools from MCP server '{config.name}'")
+            return count
+
+        except Exception as e:
+            logger.error(f"Failed to register MCP server: {e}")
+            return 0
+
+    def _convert_mcp_tool_to_framework_tool(self, mcp_tool: Any) -> Tool:
+        """
+        Convert an MCP tool to a framework Tool.
+
+        Args:
+            mcp_tool: MCPTool object
+
+        Returns:
+            Framework Tool object
+        """
+        # Extract parameters from MCP input schema
+        input_schema = mcp_tool.input_schema
+        properties = input_schema.get("properties", {})
+        required = input_schema.get("required", [])
+
+        # Convert to framework Tool format
+        tool = Tool(
+            name=mcp_tool.name,
+            description=mcp_tool.description,
+            parameters={
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            },
+        )
+
+        return tool
+
+    def cleanup(self) -> None:
+        """Clean up all MCP client connections."""
+        for client in self._mcp_clients:
+            try:
+                client.disconnect()
+            except Exception as e:
+                logger.warning(f"Error disconnecting MCP client: {e}")
+        self._mcp_clients.clear()
+
+    def __del__(self):
+        """Destructor to ensure cleanup."""
+        self.cleanup()
 
 
 def tool(
