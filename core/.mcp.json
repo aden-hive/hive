@@ -4,6 +4,11 @@
       "command": "python",
       "args": ["-m", "framework.mcp.agent_builder_server"],
       "cwd": "/home/timothy/aden/worker-bee"
+    },
+    "aden-tools": {
+      "command": "python",
+      "args": ["-m", "aden_tools.mcp_server", "--stdio"],
+      "cwd": "/Users/guangjitang/acho/hive/aden-tools"
     }
   }
 }

@@ -1,7 +1,7 @@
 import os
 import diff_match_patch as dmp_module
 from mcp.server.fastmcp import FastMCP
-from file_server.security import get_secure_path
+from ..security import get_secure_path
 
 def register_tools(mcp: FastMCP) -> None:
     """Register patch application tools with the MCP server."""

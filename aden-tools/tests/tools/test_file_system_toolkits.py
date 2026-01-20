@@ -70,6 +70,30 @@ class TestViewFileTool:
         assert "error" in result
         assert "not found" in result["error"].lower()
 
+    def test_view_multiline_file(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Viewing a multiline file returns correct line count."""
+        test_file = tmp_path / "multiline.txt"
+        content = "Line 1\nLine 2\nLine 3\nLine 4\n"
+        test_file.write_text(content)
+
+        result = view_file_fn(path="multiline.txt", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["content"] == content
+        assert result["lines"] == 4
+
+    def test_view_empty_file(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Viewing an empty file returns empty content."""
+        test_file = tmp_path / "empty.txt"
+        test_file.write_text("")
+
+        result = view_file_fn(path="empty.txt", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["content"] == ""
+        assert result["size_bytes"] == 0
+        assert result["lines"] == 0
+
 
 class TestWriteToFileTool:
     """Tests for write_to_file tool."""
@@ -112,6 +136,48 @@ class TestWriteToFileTool:
         assert result["success"] is True
         assert result["mode"] == "appended"
         assert test_file.read_text() == "Line 1\nLine 2\n"
+
+    def test_write_overwrite_existing(self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Writing to existing file overwrites it by default."""
+        test_file = tmp_path / "overwrite.txt"
+        test_file.write_text("Original content")
+
+        result = write_to_file_fn(
+            path="overwrite.txt",
+            content="New content",
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["mode"] == "written"
+        assert test_file.read_text() == "New content"
+
+    def test_write_creates_parent_directories(self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Writing creates parent directories if they don't exist."""
+        result = write_to_file_fn(
+            path="nested/dir/file.txt",
+            content="Test",
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        created_file = tmp_path / "nested" / "dir" / "file.txt"
+        assert created_file.exists()
+        assert created_file.read_text() == "Test"
+
+    def test_write_empty_content(self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Writing empty content creates empty file."""
+        result = write_to_file_fn(
+            path="empty.txt",
+            content="",
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["bytes_written"] == 0
+        created_file = tmp_path / "empty.txt"
+        assert created_file.exists()
+        assert created_file.read_text() == ""
 
 
 class TestListDirTool:
@@ -287,3 +353,172 @@ class TestApplyDiffTool:
 
         assert "error" in result
         assert "not found" in result["error"].lower()
+
+    def test_apply_diff_successful(self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Applying a valid diff successfully modifies the file."""
+        test_file = tmp_path / "diff_test.txt"
+        test_file.write_text("Hello World")
+
+        # Create a simple diff using diff_match_patch format
+        import diff_match_patch as dmp_module
+        dmp = dmp_module.diff_match_patch()
+        patches = dmp.patch_make("Hello World", "Hello Universe")
+        diff_text = dmp.patch_toText(patches)
+
+        result = apply_diff_fn(
+            path="diff_test.txt",
+            diff_text=diff_text,
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["all_successful"] is True
+        assert result["patches_applied"] > 0
+        assert test_file.read_text() == "Hello Universe"
+
+    def test_apply_diff_multiline(self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Applying diff to multiline content works correctly."""
+        test_file = tmp_path / "multiline.txt"
+        original = "Line 1\nLine 2\nLine 3\n"
+        test_file.write_text(original)
+
+        import diff_match_patch as dmp_module
+        dmp = dmp_module.diff_match_patch()
+        modified = "Line 1\nModified Line 2\nLine 3\n"
+        patches = dmp.patch_make(original, modified)
+        diff_text = dmp.patch_toText(patches)
+
+        result = apply_diff_fn(
+            path="multiline.txt",
+            diff_text=diff_text,
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["all_successful"] is True
+        assert test_file.read_text() == modified
+
+    def test_apply_diff_invalid_patch(self, apply_diff_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Applying an invalid diff handles gracefully."""
+        test_file = tmp_path / "test.txt"
+        original_content = "Original content"
+        test_file.write_text(original_content)
+
+        # Invalid diff text
+        result = apply_diff_fn(
+            path="test.txt",
+            diff_text="invalid diff format",
+            **mock_workspace
+        )
+
+        # Should either error or show no patches applied
+        if "error" not in result:
+            assert result.get("patches_applied", 0) == 0
+        # File should remain unchanged
+        assert test_file.read_text() == original_content
+
+
+class TestApplyPatchTool:
+    """Tests for apply_patch tool."""
+
+    @pytest.fixture
+    def apply_patch_fn(self, mcp):
+        from aden_tools.tools.file_system_toolkits.apply_patch import register_tools
+        register_tools(mcp)
+        return mcp._tool_manager._tools["apply_patch"].fn
+
+    def test_apply_patch_file_not_found(self, apply_patch_fn, mock_workspace, mock_secure_path):
+        """Applying patch to non-existent file returns error."""
+        result = apply_patch_fn(
+            path="nonexistent.txt",
+            patch_text="some patch",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    def test_apply_patch_successful(self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Applying a valid patch successfully modifies the file."""
+        test_file = tmp_path / "patch_test.txt"
+        test_file.write_text("Hello World")
+
+        # Create a simple patch using diff_match_patch format
+        import diff_match_patch as dmp_module
+        dmp = dmp_module.diff_match_patch()
+        patches = dmp.patch_make("Hello World", "Hello Python")
+        patch_text = dmp.patch_toText(patches)
+
+        result = apply_patch_fn(
+            path="patch_test.txt",
+            patch_text=patch_text,
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["all_successful"] is True
+        assert result["patches_applied"] > 0
+        assert test_file.read_text() == "Hello Python"
+
+    def test_apply_patch_multiline(self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Applying patch to multiline content works correctly."""
+        test_file = tmp_path / "multiline.txt"
+        original = "Line 1\nLine 2\nLine 3\n"
+        test_file.write_text(original)
+
+        import diff_match_patch as dmp_module
+        dmp = dmp_module.diff_match_patch()
+        modified = "Line 1\nModified Line 2\nLine 3\n"
+        patches = dmp.patch_make(original, modified)
+        patch_text = dmp.patch_toText(patches)
+
+        result = apply_patch_fn(
+            path="multiline.txt",
+            patch_text=patch_text,
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["all_successful"] is True
+        assert test_file.read_text() == modified
+
+    def test_apply_patch_invalid_patch(self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Applying an invalid patch handles gracefully."""
+        test_file = tmp_path / "test.txt"
+        original_content = "Original content"
+        test_file.write_text(original_content)
+
+        # Invalid patch text
+        result = apply_patch_fn(
+            path="test.txt",
+            patch_text="invalid patch format",
+            **mock_workspace
+        )
+
+        # Should either error or show no patches applied
+        if "error" not in result:
+            assert result.get("patches_applied", 0) == 0
+        # File should remain unchanged
+        assert test_file.read_text() == original_content
+
+    def test_apply_patch_multiple_changes(self, apply_patch_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Applying patch with multiple changes works correctly."""
+        test_file = tmp_path / "complex.txt"
+        original = "Function foo() {\n  return 42;\n}\n"
+        test_file.write_text(original)
+
+        import diff_match_patch as dmp_module
+        dmp = dmp_module.diff_match_patch()
+        modified = "Function bar() {\n  return 100;\n}\n"
+        patches = dmp.patch_make(original, modified)
+        patch_text = dmp.patch_toText(patches)
+
+        result = apply_patch_fn(
+            path="complex.txt",
+            patch_text=patch_text,
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["all_successful"] is True
+        assert test_file.read_text() == modified

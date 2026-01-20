@@ -1,7 +1,7 @@
 import os
 import re
 from mcp.server.fastmcp import FastMCP
-from file_server.security import get_secure_path, WORKSPACES_DIR
+from ..security import get_secure_path, WORKSPACES_DIR
 
 def register_tools(mcp: FastMCP) -> None:
     """Register grep search tools with the MCP server."""
