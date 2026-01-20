@@ -137,15 +137,15 @@ flowchart TB
     STORAGE --> DASHBOARD
     STORAGE -.->|Self-Improve| BUILDER
 
-    style BUILD fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
-    style RUNTIME fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
-    style INFRA fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style NODES fill:#ffe0b2,stroke:#e65100
-    style CTX fill:#fce4ec,stroke:#c2185b
-    style GOAL fill:#e8f5e9,stroke:#2e7d32
-    style EXPORT fill:#fff9c4,stroke:#f57f17
-    style STORAGE fill:#eceff1,stroke:#455a64
-    style DASHBOARD fill:#e0f7fa,stroke:#00838f
+    style BUILD fill:#bbdefb,stroke:#1565c0,stroke-width:2px,color:#000
+    style RUNTIME fill:#ffe082,stroke:#ef6c00,stroke-width:2px,color:#000
+    style INFRA fill:#e1bee7,stroke:#7b1fa2,stroke-width:2px,color:#000
+    style NODES fill:#ffcc80,stroke:#e65100,stroke-width:2px,color:#000
+    style CTX fill:#f8bbd0,stroke:#c2185b,stroke-width:2px,color:#000
+    style GOAL fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px,color:#000
+    style EXPORT fill:#fff59d,stroke:#f57f17,stroke-width:2px,color:#000
+    style STORAGE fill:#b0bec5,stroke:#455a64,stroke-width:2px,color:#000
+    style DASHBOARD fill:#b2ebf2,stroke:#00838f,stroke-width:2px,color:#000
 ```
 
 ### The Aden Advantage
