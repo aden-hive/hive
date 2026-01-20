@@ -43,9 +43,18 @@ pnpm-debug.log*
 # Testing
 coverage/
 .nyc_output/
+.pytest_cache/
 
 # TypeScript
 *.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+*.egg
 
 # Misc
 *.local

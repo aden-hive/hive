@@ -9,6 +9,20 @@
 [![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
 [![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
 
+<p align="center">
+  <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
+  <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
+  <img src="https://img.shields.io/badge/Goal--Driven-Development-purple?style=flat-square" alt="Goal-Driven" />
+  <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
+  <img src="https://img.shields.io/badge/Production--Ready-red?style=flat-square" alt="Production" />
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
+  <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
+  <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
+  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+</p>
+
 ## Overview
 
 Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
@@ -62,6 +76,139 @@ docker compose up
 - **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
 - **Production-Ready** - Self-hostable, built for scale and reliability
 
+## Why Aden
+
+Traditional agent frameworks require you to manually design workflows, define agent interactions, and handle failures reactively. Aden flips this paradigm—**you describe outcomes, and the system builds itself**.
+
+```mermaid
+flowchart TB
+    subgraph USER["👤 User"]
+        GOAL[("🎯 Define Goal<br/>(Natural Language)")]
+    end
+
+    subgraph CODING["🤖 Coding Agent"]
+        direction TB
+        GENERATE["Generate Agent Graph"]
+        CONNECTION["Create Connection Code"]
+        TESTGEN["Generate Test Cases"]
+        EVOLVE["Evolve on Failure"]
+    end
+
+    subgraph WORKERS["⚙️ Worker Agents"]
+        direction TB
+        subgraph NODE1["SDK-Wrapped Node"]
+            N1_MEM["Memory (STM/LTM)"]
+            N1_TOOLS["Tools Access"]
+            N1_LLM["LLM Integration"]
+            N1_MON["Monitoring"]
+        end
+        subgraph NODE2["SDK-Wrapped Node"]
+            N2_MEM["Memory (STM/LTM)"]
+            N2_TOOLS["Tools Access"]
+            N2_LLM["LLM Integration"]
+            N2_MON["Monitoring"]
+        end
+        HITL["🙋 Human-in-the-Loop<br/>Intervention Points"]
+    end
+
+    subgraph CONTROL["🎛️ Hive Control Plane"]
+        direction TB
+        BUDGET["Budget & Cost Control"]
+        POLICY["Policy Management"]
+        METRICS["Real-time Metrics"]
+        MCP["19 MCP Tools"]
+    end
+
+    subgraph STORAGE["💾 Storage Layer"]
+        TSDB[("TimescaleDB<br/>Metrics & Events")]
+        MONGO[("MongoDB<br/>Policies")]
+        POSTGRES[("PostgreSQL<br/>Users & Config")]
+    end
+
+    subgraph DASHBOARD["📊 Dashboard (Honeycomb)"]
+        ANALYTICS["Analytics & KPIs"]
+        AGENTS["Agent Monitoring"]
+        COSTS["Cost Tracking"]
+    end
+
+    GOAL --> GENERATE
+    GENERATE --> CONNECTION
+    CONNECTION --> TESTGEN
+    TESTGEN --> NODE1
+    TESTGEN --> NODE2
+
+    NODE1 <--> NODE2
+    NODE1 & NODE2 --> HITL
+
+    NODE1 & NODE2 -->|Events| CONTROL
+    CONTROL -->|Policies| NODE1 & NODE2
+    CONTROL <-->|WebSocket| DASHBOARD
+
+    CONTROL --> STORAGE
+
+    NODE1 & NODE2 -->|Failure Data| EVOLVE
+    EVOLVE -->|Updated Graph| GENERATE
+
+    style USER fill:#e8f5e9,stroke:#2e7d32
+    style CODING fill:#e3f2fd,stroke:#1565c0
+    style WORKERS fill:#fff3e0,stroke:#ef6c00
+    style CONTROL fill:#fce4ec,stroke:#c2185b
+    style STORAGE fill:#f3e5f5,stroke:#7b1fa2
+    style DASHBOARD fill:#e0f7fa,stroke:#00838f
+```
+
+### The Aden Advantage
+
+| Traditional Frameworks | Aden |
+|------------------------|------|
+| Hardcode agent workflows | Describe goals in natural language |
+| Manual graph definition | Auto-generated agent graphs |
+| Reactive error handling | Proactive self-evolution |
+| Static tool configurations | Dynamic SDK-wrapped nodes |
+| Separate monitoring setup | Built-in real-time observability |
+| DIY budget management | Integrated cost controls & degradation |
+
+### How It Works
+
+1. **Define Your Goal** → Describe what you want to achieve in plain English
+2. **Coding Agent Generates** → Creates the agent graph, connection code, and test cases
+3. **Workers Execute** → SDK-wrapped nodes run with full observability and tool access
+4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
+5. **Self-Improve** → On failure, the system evolves the graph and redeploys automatically
+
+## How Aden Compares
+
+Aden takes a fundamentally different approach to agent development. While most frameworks require you to hardcode workflows or manually define agent graphs, Aden uses a **coding agent to generate your entire agent system** from natural language goals. When agents fail, the framework doesn't just log errors—it **automatically evolves the agent graph** and redeploys.
+
+### Comparison Table
+
+| Framework | Category | Approach | Aden Difference |
+|-----------|----------|----------|-----------------|
+| **LangChain, LlamaIndex, Haystack** | Component Libraries | Predefined components for RAG/LLM apps; manual connection logic | Generates entire graph and connection code upfront |
+| **CrewAI, AutoGen, Swarm** | Multi-Agent Orchestration | Role-based agents with predefined collaboration patterns | Dynamically creates agents/connections; adapts on failure |
+| **PydanticAI, Mastra, Agno** | Type-Safe Frameworks | Structured outputs and validation for known workflows | Evolving workflows; structure emerges through iteration |
+| **Agent Zero, Letta** | Personal AI Assistants | Memory and learning; OS-as-tool or stateful memory focus | Production multi-agent systems with self-healing |
+| **CAMEL** | Research Framework | Emergent behavior in large-scale simulations (up to 1M agents) | Production-oriented with reliable execution and recovery |
+| **TEN Framework, Genkit** | Infrastructure Frameworks | Real-time multimodal (TEN) or full-stack AI (Genkit) | Higher abstraction—generates and evolves agent logic |
+| **GPT Engineer, Motia** | Code Generation | Code from specs (GPT Engineer) or "Step" primitive (Motia) | Self-adapting graphs with automatic failure recovery |
+| **Trading Agents** | Domain-Specific | Hardcoded trading firm roles on LangGraph | Domain-agnostic; generates structures for any use case |
+
+### When to Choose Aden
+
+Choose Aden when you need:
+- Agents that **self-improve from failures** without manual intervention
+- **Goal-driven development** where you describe outcomes, not workflows
+- **Production reliability** with automatic recovery and redeployment
+- **Rapid iteration** on agent architectures without rewriting code
+- **Full observability** with real-time monitoring and human oversight
+
+Choose other frameworks when you need:
+- **Type-safe, predictable workflows** (PydanticAI, Mastra)
+- **RAG and document processing** (LlamaIndex, Haystack)
+- **Research on agent emergence** (CAMEL)
+- **Real-time voice/multimodal** (TEN Framework)
+- **Simple component chaining** (LangChain, Swarm)
+
 ## Project Structure
 
 ```
@@ -111,9 +258,25 @@ cd hive && npm run dev
 
 ## Roadmap
 
-Aden Agent Framework aims to help developers build outcome orienated, self-adaptive agents. Please find our roadmap here
-  
+Aden Agent Framework aims to help developers build outcome oriented, self-adaptive agents. Please find our roadmap here
+
 [ROADMAP.md](ROADMAP.md)
+
+```mermaid
+timeline
+    title Aden Agent Framework Roadmap
+    section Foundation
+        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
+        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
+        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
+        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
+        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
+    section Expansion
+        Intelligence : Guardrails : Streaming Mode : Semantic Search
+        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
+        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
+        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
+```
 
 ## Community & Support
 
@@ -147,8 +310,74 @@ For security concerns, please see [SECURITY.md](SECURITY.md).
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
+## Frequently Asked Questions (FAQ)
+
+**Q: Does Aden depend on LangChain or other agent frameworks?**
+
+No. Aden is built from the ground up with no dependencies on LangChain, CrewAI, or other agent frameworks. The framework is designed to be lean and flexible, generating agent graphs dynamically rather than relying on predefined components.
+
+**Q: What LLM providers does Aden support?**
+
+Aden supports OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), and Google Gemini out of the box. The architecture is provider-agnostic through SDK abstraction, with LiteLLM integration on the roadmap for expanded model support.
+
+**Q: Can I use Aden with local AI models like Ollama?**
+
+Local model support through LiteLLM integration is on our roadmap. The SDK's provider-agnostic design means adding local model support will be straightforward once implemented.
+
+**Q: What makes Aden different from other agent frameworks?**
+
+Aden generates your entire agent system from natural language goals using a coding agent—you don't hardcode workflows or manually define graphs. When agents fail, the framework automatically captures failure data, evolves the agent graph, and redeploys. This self-improving loop is unique to Aden.
+
+**Q: Is Aden open-source?**
+
+Yes, Aden is fully open-source under the Apache License 2.0. We actively encourage community contributions and collaboration.
+
+**Q: Does Aden collect data from users?**
+
+Aden collects telemetry data for monitoring and observability purposes, including token usage, latency metrics, and cost tracking. Content capture (prompts and responses) is configurable and stored with team-scoped data isolation. All data stays within your infrastructure when self-hosted.
+
+**Q: What deployment options does Aden support?**
+
+Aden supports Docker Compose deployment out of the box, with both production and development configurations. Self-hosted deployments work on any infrastructure supporting Docker. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
+
+**Q: Can Aden handle complex, production-scale use cases?**
+
+Yes. Aden is explicitly designed for production environments with features like automatic failure recovery, real-time observability, cost controls, and horizontal scaling support. The framework handles both simple automations and complex multi-agent workflows.
+
+**Q: Does Aden support human-in-the-loop workflows?**
+
+Yes, Aden fully supports human-in-the-loop workflows through intervention nodes that pause execution for human input. These include configurable timeouts and escalation policies, allowing seamless collaboration between human experts and AI agents.
+
+**Q: What monitoring and debugging tools does Aden provide?**
+
+Aden includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and 19 MCP tools for budget management, agent status, and policy control.
+
+**Q: What programming languages does Aden support?**
+
+Aden provides SDKs for both Python and JavaScript/TypeScript. The Python SDK includes integration templates for LangGraph, LangFlow, and LiveKit. The backend is Node.js/TypeScript, and the frontend is React/TypeScript.
+
+**Q: Can Aden agents interact with external tools and APIs?**
+
+Yes. Aden's SDK-wrapped nodes provide built-in tool access, and the framework supports flexible tool ecosystems. Agents can integrate with external APIs, databases, and services through the node architecture.
+
+**Q: How does cost control work in Aden?**
+
+Aden provides granular budget controls including spending limits, throttles, and automatic model degradation policies. You can set budgets at the team, agent, or workflow level, with real-time cost tracking and alerts.
+
+**Q: Where can I find examples and documentation?**
+
+Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API reference, and getting started tutorials. The repository also includes documentation in the `docs/` folder and a comprehensive [DEVELOPER.md](DEVELOPER.md) guide.
+
+**Q: How can I contribute to Aden?**
+
+Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+**Q: Does Aden offer enterprise support?**
+
+For enterprise inquiries, contact the Aden team through [adenhq.com](https://adenhq.com) or join our [Discord community](https://discord.com/invite/MXE49hrKDk) for support and discussions.
+
 ---
 
 <p align="center">
-  Made with care by the <a href="https://adenhq.com">Aden</a> team
+  Made with 🔥 Passion in San Francisco
 </p>

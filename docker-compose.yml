@@ -131,6 +131,31 @@ services:
     networks:
       - honeycomb-network
 
+  # Aden Tools MCP Server - Python tools via Model Context Protocol
+  aden-tools-mcp:
+    build:
+      context: ./aden-tools
+    container_name: honeycomb-aden-tools-mcp
+    ports:
+      - "${ADEN_TOOLS_MCP_PORT:-4001}:4001"
+    environment:
+      - MCP_PORT=4001
+      # Pass through tool-specific env vars
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
+    volumes:
+      - .:/workspace:rw  # Mount project root for file access
+    working_dir: /workspace  # Set working directory so relative paths work
+    command: ["python", "/app/mcp_server.py"]  # Use absolute path since working_dir changed
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:4001/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - honeycomb-network
+
 networks:
   honeycomb-network:
     driver: bridge
