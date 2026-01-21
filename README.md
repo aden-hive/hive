@@ -290,11 +290,11 @@ No. Aden is built from the ground up with no dependencies on LangChain, CrewAI, 
 
 **Q: What LLM providers does Aden support?**
 
-Aden supports OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), and Google Gemini out of the box. The architecture is provider-agnostic through SDK abstraction, with LiteLLM integration on the roadmap for expanded model support.
+Aden supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
 
 **Q: Can I use Aden with local AI models like Ollama?**
 
-Local model support through LiteLLM integration is on our roadmap. The SDK's provider-agnostic design means adding local model support will be straightforward once implemented.
+Yes! Aden supports local models through LiteLLM. Simply use the model name format `ollama/model-name` (e.g., `ollama/llama3`, `ollama/mistral`) and ensure Ollama is running locally.
 
 **Q: What makes Aden different from other agent frameworks?**
 
