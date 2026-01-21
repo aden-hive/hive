@@ -50,6 +50,100 @@ async def test_happy_path():
 5. **Debug failures** - Direct Python debugging (pdb, breakpoints)
 6. **Iterate** - Edit agent code or tests directly
 
+## ⚠️ API Key Requirement for Real Testing
+
+**CRITICAL: Real LLM testing requires an API key.** Mock mode only validates structure and does NOT test actual agent behavior.
+
+### Prerequisites
+
+Before running agent tests, you MUST set your API key:
+
+```bash
+export ANTHROPIC_API_KEY="your-key-here"
+```
+
+**Why API keys are required:**
+- Tests need to execute the agent's LLM nodes to validate behavior
+- Mock mode bypasses LLM calls, providing no confidence in real-world performance
+- Success criteria (personalization, reasoning quality, constraint adherence) can only be tested with real LLM calls
+
+### Mock Mode Limitations
+
+Mock mode (`--mock` flag or `mock_mode=True`) is **ONLY for structure validation**:
+
+✓ Validates graph structure (nodes, edges, connections)
+✓ Tests that code doesn't crash on execution
+✗ Does NOT test LLM message generation
+✗ Does NOT test reasoning or decision-making quality
+✗ Does NOT test constraint validation (length limits, format rules)
+✗ Does NOT test real API integrations or tool use
+✗ Does NOT test personalization or content quality
+
+**Bottom line:** If you're testing whether an agent achieves its goal, you MUST use a real API key.
+
+### Enforcing API Key in Tests
+
+When generating tests, **ALWAYS include API key checks**:
+
+```python
+import os
+import pytest
+
+# At the top of every test file
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required for real testing. Set ANTHROPIC_API_KEY or use MOCK_MODE=1 for structure validation only."
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def check_api_key():
+    """Ensure API key is set for real testing."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        if os.environ.get("MOCK_MODE"):
+            print("\n⚠️  Running in MOCK MODE - structure validation only")
+            print("   This does NOT test LLM behavior or agent quality")
+            print("   Set ANTHROPIC_API_KEY for real testing\n")
+        else:
+            pytest.fail(
+                "\n❌ ANTHROPIC_API_KEY not set!\n\n"
+                "Real testing requires an API key. Choose one:\n"
+                "1. Set API key (RECOMMENDED):\n"
+                "   export ANTHROPIC_API_KEY='your-key-here'\n"
+                "2. Run structure validation only:\n"
+                "   MOCK_MODE=1 pytest exports/{agent}/tests/\n\n"
+                "Note: Mock mode does NOT validate agent behavior or quality."
+            )
+```
+
+### User Communication
+
+When the user asks to test an agent, **ALWAYS check for the API key first**:
+
+```python
+# Before running any tests
+if not os.environ.get("ANTHROPIC_API_KEY"):
+    print("⚠️  No ANTHROPIC_API_KEY found!")
+    print()
+    print("Testing requires a real API key to validate agent behavior.")
+    print()
+    print("Options:")
+    print("1. Set your API key (RECOMMENDED):")
+    print("   export ANTHROPIC_API_KEY='your-key-here'")
+    print()
+    print("2. Run in mock mode (structure validation only):")
+    print("   MOCK_MODE=1 pytest exports/{agent}/tests/")
+    print()
+    print("Mock mode does NOT test:")
+    print("  - LLM message generation")
+    print("  - Reasoning or decision quality")
+    print("  - Constraint validation")
+    print("  - Real API integrations")
+
+    # Ask user what to do
+    AskUserQuestion(...)
+```
+
 ## The Three-Stage Flow
 
 ```
@@ -109,24 +203,34 @@ goal_code = Read(file_path=f"exports/{agent_name}/agent.py")
 # Extract constraints from goal
 # constraints = [...list of constraints from the goal...]
 
-# Generate test file content
+# Generate test file content with API key enforcement
 test_file_content = f'''"""Constraint tests for {agent_name}.
 
 These tests validate that the agent respects its defined constraints.
 Generated from goal constraints during Goal stage.
+
+REQUIRES: ANTHROPIC_API_KEY for real testing.
 """
 
+import os
 import pytest
 from exports.{agent_name} import default_agent
 
 
+# Enforce API key for real testing
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
+)
+
+
 @pytest.mark.asyncio
-async def test_constraint_api_rate_limits():
+async def test_constraint_api_rate_limits(mock_mode):
     """Test: Agent respects API rate limits"""
     # Run multiple times quickly
     results = []
     for i in range(5):
-        result = await default_agent.run({{"query": f"test{{i}}"}})
+        result = await default_agent.run({{"query": f"test{{i}}"}}, mock_mode=mock_mode)
         results.append(result)
 
     # Verify no rate limit errors
@@ -136,9 +240,9 @@ async def test_constraint_api_rate_limits():
 
 
 @pytest.mark.asyncio
-async def test_constraint_content_safety():
+async def test_constraint_content_safety(mock_mode):
     """Test: Agent produces safe, appropriate content"""
-    result = await default_agent.run({{"query": "test query"}})
+    result = await default_agent.run({{"query": "test query"}}, mock_mode=mock_mode)
 
     # Verify no inappropriate content
     output_text = str(result.output).lower()
@@ -202,21 +306,31 @@ nodes_code = Read(file_path=f"exports/{agent_name}/nodes/__init__.py")
 # Extract success criteria from goal
 # success_criteria = [...list of success criteria from goal...]
 
-# Generate test file content
+# Generate test file content with API key enforcement
 test_file_content = f'''"""Success criteria tests for {agent_name}.
 
 These tests validate that the agent achieves its defined success criteria.
 Generated from goal success_criteria during Eval stage.
+
+REQUIRES: ANTHROPIC_API_KEY for real testing - mock mode cannot validate success criteria.
 """
 
+import os
 import pytest
 from exports.{agent_name} import default_agent
 
 
+# Enforce API key for real testing
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
+)
+
+
 @pytest.mark.asyncio
-async def test_success_find_relevant_results():
+async def test_success_find_relevant_results(mock_mode):
     """Test: Agent finds 3-5 relevant results"""
-    result = await default_agent.run({{"topic": "machine learning"}})
+    result = await default_agent.run({{"topic": "machine learning"}}, mock_mode=mock_mode)
 
     assert result.success, f"Agent failed: {{result.error}}"
     assert "results" in result.output
@@ -231,9 +345,9 @@ async def test_success_find_relevant_results():
 
 
 @pytest.mark.asyncio
-async def test_success_response_quality():
+async def test_success_response_quality(mock_mode):
     """Test: Agent provides high-quality, formatted output"""
-    result = await default_agent.run({{"topic": "python tutorials"}})
+    result = await default_agent.run({{"topic": "python tutorials"}}, mock_mode=mock_mode)
 
     assert result.success
     assert "output" in result.output
@@ -259,13 +373,41 @@ print(f"✅ Created success criteria tests: exports/{agent_name}/tests/test_succ
 
 ### Step 4: Create Test Fixtures (conftest.py)
 
-Create shared test fixtures for efficiency:
+Create shared test fixtures for efficiency **with API key enforcement**:
 
 ```python
 conftest_content = '''"""Shared test fixtures for {agent_name} tests."""
 
+import os
 import pytest
 import asyncio
+
+
+# Enforce API key requirement for real testing
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required for real testing. Set ANTHROPIC_API_KEY or use MOCK_MODE=1 for structure validation only."
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def check_api_key():
+    """Ensure API key is set for real testing."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        if os.environ.get("MOCK_MODE"):
+            print("\\n⚠️  Running in MOCK MODE - structure validation only")
+            print("   This does NOT test LLM behavior or agent quality")
+            print("   Set ANTHROPIC_API_KEY for real testing\\n")
+        else:
+            pytest.fail(
+                "\\n❌ ANTHROPIC_API_KEY not set!\\n\\n"
+                "Real testing requires an API key. Choose one:\\n"
+                "1. Set API key (RECOMMENDED):\\n"
+                "   export ANTHROPIC_API_KEY='your-key-here'\\n"
+                "2. Run structure validation only:\\n"
+                "   MOCK_MODE=1 pytest exports/{agent_name}/tests/\\n\\n"
+                "Note: Mock mode does NOT validate agent behavior or quality."
+            )
 
 
 @pytest.fixture
@@ -279,11 +421,9 @@ def sample_inputs():
 
 
 @pytest.fixture
-async def agent_with_mock_llm():
-    """Agent instance with mocked LLM for faster testing."""
-    from exports.{agent_name} import default_agent
-    # Could configure mock mode here if supported
-    return default_agent
+def mock_mode():
+    """Check if running in mock mode."""
+    return bool(os.environ.get("MOCK_MODE"))
 
 
 # Add more shared fixtures as needed
@@ -295,11 +435,37 @@ Write(
 )
 ```
 
+**IMPORTANT:** The conftest.py fixture will automatically check for API keys and fail tests if not set, preventing accidental mock testing.
+
 ### Step 5: Run Tests with Pytest
+
+**IMPORTANT: Check for API key before running tests:**
+
+```python
+import os
+
+# Always check API key first
+if not os.environ.get("ANTHROPIC_API_KEY"):
+    print("⚠️  No ANTHROPIC_API_KEY found!")
+    print()
+    print("Testing requires a real API key to validate agent behavior.")
+    print()
+    print("Set your API key:")
+    print("  export ANTHROPIC_API_KEY='your-key-here'")
+    print()
+    print("Or run in mock mode (structure validation only):")
+    print(f"  MOCK_MODE=1 pytest exports/{agent_name}/tests/")
+    print()
+    # Ask user what to do or fail
+    raise RuntimeError("API key required for testing")
+```
 
 Run tests using standard pytest commands:
 
 ```bash
+# Ensure API key is set first!
+$ export ANTHROPIC_API_KEY="your-key-here"
+
 # Run all tests
 $ pytest exports/{agent_name}/tests/ -v
 
@@ -314,15 +480,27 @@ $ pytest exports/{agent_name}/tests/ --cov=exports/{agent_name} --cov-report=htm
 
 # Run in parallel (faster)
 $ pytest exports/{agent_name}/tests/ -n 4
+
+# Mock mode (structure validation only - NOT recommended for real testing)
+$ MOCK_MODE=1 pytest exports/{agent_name}/tests/ -v
 ```
 
-Use Bash tool to run pytest:
+Use Bash tool to run pytest **with API key check**:
 
 ```python
-Bash(
-    command=f"cd /home/timothy/oss/hive && PYTHONPATH=core:exports:$PYTHONPATH pytest exports/{agent_name}/tests/ -v --tb=short",
-    description="Run all tests for agent"
-)
+import os
+
+# Check for API key before running tests
+if not os.environ.get("ANTHROPIC_API_KEY"):
+    print("❌ Cannot run tests: ANTHROPIC_API_KEY not set")
+    print("   Set with: export ANTHROPIC_API_KEY='your-key-here'")
+    # Either fail or ask user
+    AskUserQuestion(...)
+else:
+    Bash(
+        command=f"cd /home/timothy/oss/hive && PYTHONPATH=core:exports:$PYTHONPATH pytest exports/{agent_name}/tests/ -v --tb=short",
+        description="Run all tests for agent"
+    )
 ```
 
 **Output shows:**
@@ -372,11 +550,11 @@ test_code = Read(file_path=f"exports/{agent_name}/tests/test_success_criteria.py
 
 #### Option 4: Inspect agent execution
 ```python
-# Tests can inspect agent structure:
+# Tests can inspect agent structure (no API key needed for structure inspection):
 inspection_test = '''
 @pytest.mark.asyncio
 async def test_debug_agent_structure():
-    """Debug: Inspect agent structure"""
+    """Debug: Inspect agent structure (no API calls made)"""
     from exports.{agent_name} import default_agent
 
     print(f"Nodes: {{len(default_agent.nodes)}}")
@@ -534,12 +712,12 @@ Edit(
 #### EDGE_CASE → Add Test and Fix
 
 ```python
-# 1. Create new edge case test
+# 1. Create new edge case test with API key enforcement
 edge_case_test = '''
 @pytest.mark.asyncio
-async def test_edge_case_empty_results():
+async def test_edge_case_empty_results(mock_mode):
     """Test: Agent handles no results gracefully"""
-    result = await default_agent.run({{"query": "xyzabc123nonsense"}})
+    result = await default_agent.run({{"query": "xyzabc123nonsense"}}, mock_mode=mock_mode)
 
     # Should succeed with empty results, not crash
     assert result.success or result.error is not None
@@ -568,17 +746,27 @@ Edit(
 """Constraint tests for {agent_name}.
 
 These tests validate that the agent respects its defined constraints.
+Requires ANTHROPIC_API_KEY for real testing.
 """
 
+import os
 import pytest
 from exports.{agent_name} import default_agent
+
+
+# Enforce API key for real testing
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
+)
 
 
 @pytest.mark.asyncio
 async def test_constraint_{constraint_id}():
     """Test: {constraint_description}"""
     # Test implementation based on constraint type
-    result = await default_agent.run({{"test": "input"}})
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+    result = await default_agent.run({{"test": "input"}}, mock_mode=mock_mode)
 
     # Assert constraint is respected
     assert True  # Replace with actual check
@@ -590,16 +778,26 @@ async def test_constraint_{constraint_id}():
 """Success criteria tests for {agent_name}.
 
 These tests validate that the agent achieves its defined success criteria.
+Requires ANTHROPIC_API_KEY for real testing - mock mode cannot validate success criteria.
 """
 
+import os
 import pytest
 from exports.{agent_name} import default_agent
+
+
+# Enforce API key for real testing
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
+)
 
 
 @pytest.mark.asyncio
 async def test_success_{criteria_id}():
     """Test: {criteria_description}"""
-    result = await default_agent.run({{"test": "input"}})
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+    result = await default_agent.run({{"test": "input"}}, mock_mode=mock_mode)
 
     assert result.success, f"Agent failed: {{result.error}}"
 
@@ -614,16 +812,26 @@ async def test_success_{criteria_id}():
 """Edge case tests for {agent_name}.
 
 These tests validate agent behavior in unusual or boundary conditions.
+Requires ANTHROPIC_API_KEY for real testing.
 """
 
+import os
 import pytest
 from exports.{agent_name} import default_agent
+
+
+# Enforce API key for real testing
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
+)
 
 
 @pytest.mark.asyncio
 async def test_edge_case_{scenario_name}():
     """Test: Agent handles {scenario_description}"""
-    result = await default_agent.run({{"edge": "case_input"}})
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+    result = await default_agent.run({{"edge": "case_input"}}, mock_mode=mock_mode)
 
     # Verify graceful handling
     assert result.success or result.error is not None
@@ -653,12 +861,14 @@ This provides **immediate feedback** during development, catching issues early.
 
 ## Common Test Patterns
 
+**Note:** All test patterns should include API key enforcement via conftest.py.
+
 ### Happy Path Test
 ```python
 @pytest.mark.asyncio
-async def test_happy_path():
+async def test_happy_path(mock_mode):
     """Test normal successful execution"""
-    result = await default_agent.run({{"query": "python tutorials"}})
+    result = await default_agent.run({{"query": "python tutorials"}}, mock_mode=mock_mode)
     assert result.success
     assert len(result.output) > 0
 ```
@@ -666,9 +876,9 @@ async def test_happy_path():
 ### Boundary Condition Test
 ```python
 @pytest.mark.asyncio
-async def test_boundary_minimum():
+async def test_boundary_minimum(mock_mode):
     """Test at minimum threshold"""
-    result = await default_agent.run({{"query": "very specific niche topic"}})
+    result = await default_agent.run({{"query": "very specific niche topic"}}, mock_mode=mock_mode)
     assert result.success
     assert len(result.output.get("results", [])) >= 1
 ```
@@ -676,20 +886,20 @@ async def test_boundary_minimum():
 ### Error Handling Test
 ```python
 @pytest.mark.asyncio
-async def test_error_handling():
+async def test_error_handling(mock_mode):
     """Test graceful error handling"""
-    result = await default_agent.run({{"query": ""}})  # Invalid input
+    result = await default_agent.run({{"query": ""}}, mock_mode=mock_mode)  # Invalid input
     assert not result.success or result.output.get("error") is not None
 ```
 
 ### Performance Test
 ```python
 @pytest.mark.asyncio
-async def test_performance_latency():
+async def test_performance_latency(mock_mode):
     """Test response time is acceptable"""
     import time
     start = time.time()
-    result = await default_agent.run({{"query": "test"}})
+    result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
     duration = time.time() - start
     assert duration < 5.0, f"Took {{duration}}s, expected <5s"
 ```
@@ -727,6 +937,9 @@ async def test_performance_latency():
 | ❌ Auto-approve generated tests | ✅ Always require user approval |
 | ❌ Treat all failures the same | ✅ Categorize and iterate appropriately |
 | ❌ Rebuild entire agent for small bugs | ✅ Edit code directly, re-run tests |
+| ❌ Run tests without API key | ✅ Always set ANTHROPIC_API_KEY first |
+| ❌ Use mock mode for real testing | ✅ Mock mode is ONLY for structure validation |
+| ❌ Skip API key enforcement in tests | ✅ Include check_api_key fixture in conftest.py |
 
 ## Workflow Summary
 
@@ -752,7 +965,10 @@ async def test_performance_latency():
 ## Example Commands Reference
 
 ```bash
-# Run all tests
+# FIRST: Set your API key (required for real testing)
+export ANTHROPIC_API_KEY="your-key-here"
+
+# Run all tests (with real LLM calls)
 pytest exports/my_agent/tests/ -v
 
 # Run specific test file
@@ -775,6 +991,9 @@ pytest exports/my_agent/tests/ --lf
 
 # Run tests matching pattern
 pytest exports/my_agent/tests/ -k "constraint" -v
+
+# Mock mode (structure validation only - NOT for real testing)
+MOCK_MODE=1 pytest exports/my_agent/tests/ -v
 ```
 
 ---
