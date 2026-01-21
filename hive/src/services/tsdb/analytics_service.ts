@@ -5,6 +5,7 @@
 
 import { PoolClient } from 'pg';
 import pricingService from './pricing_service';
+import { DailyCostRow, LatencyStatsRow, LatencyBucketRow, ModelCostRow, AgentCostRow, LLMEventRow } from './analytics_types';
 
 const BUCKETS = [
   { label: '0-1s', min: 0, max: 1000 },
@@ -174,7 +175,7 @@ const fetchDailyCA = async ({
     ORDER BY bucket ASC
   `;
   const { rows } = await client.query(sql, params);
-  return rows.map((r: any) => ({
+  177 => ({
     bucket: r.bucket instanceof Date ? r.bucket.toISOString().slice(0, 10) : r.bucket,
     requests: Number(r.requests) || 0,
     cost_total: toNumber(r.cost_total, 0),
