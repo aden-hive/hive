@@ -16,21 +16,41 @@ Usage:
 
 Environment Variables:
     MCP_PORT              - Server port (default: 4001)
-    BRAVE_SEARCH_API_KEY  - Required for web_search tool
+    ANTHROPIC_API_KEY     - Required at startup for testing/LLM nodes
+    BRAVE_SEARCH_API_KEY  - Required for web_search tool (validated at agent load time)
+
+Note:
+    Two-tier credential validation:
+    - Tier 1 (startup): ANTHROPIC_API_KEY must be set before server starts
+    - Tier 2 (agent load): Tool credentials validated when agent is loaded
+    See aden_tools.credentials for details.
 """
 import argparse
 import os
+import sys
 
 from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
-mcp = FastMCP("aden-tools")
-
-# Register all tools with the MCP server
+from aden_tools.credentials import CredentialManager, CredentialError
 from aden_tools.tools import register_all_tools
 
-tools = register_all_tools(mcp)
+# Create credential manager
+credentials = CredentialManager()
+
+# Tier 1: Validate startup-required credentials (ANTHROPIC_API_KEY)
+try:
+    credentials.validate_startup()
+    print("[MCP] Startup credentials validated")
+except CredentialError as e:
+    print(f"[MCP] FATAL: {e}", file=sys.stderr)
+    sys.exit(1)
+
+mcp = FastMCP("aden-tools")
+
+# Register all tools with the MCP server, passing credential manager
+tools = register_all_tools(mcp, credentials=credentials)
 print(f"[MCP] Registered {len(tools)} tools: {tools}")
 
 

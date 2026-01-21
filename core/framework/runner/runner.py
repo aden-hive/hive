@@ -44,6 +44,7 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     missing_tools: list[str] = field(default_factory=list)
+    missing_credentials: list[str] = field(default_factory=list)
 
 
 def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
@@ -485,19 +486,51 @@ class AgentRunner:
         if missing_tools:
             warnings.append(f"Missing tool implementations: {', '.join(missing_tools)}")
 
-        # Check for LLM nodes without LLM
-        has_llm_nodes = any(
-            node.node_type in ("llm_generate", "llm_tool_use")
-            for node in self.graph.nodes
-        )
-        if has_llm_nodes and not os.environ.get("ANTHROPIC_API_KEY"):
-            warnings.append("Agent has LLM nodes but ANTHROPIC_API_KEY not set")
+        # Check credentials for required tools and node types
+        missing_credentials = []
+        try:
+            from aden_tools.credentials import CredentialManager
+
+            cred_manager = CredentialManager()
+
+            # Check tool credentials (Tier 2)
+            missing_creds = cred_manager.get_missing_for_tools(info.required_tools)
+            for cred_name, spec in missing_creds:
+                missing_credentials.append(spec.env_var)
+                affected_tools = [t for t in info.required_tools if t in spec.tools]
+                tools_str = ", ".join(affected_tools)
+                warning_msg = f"Missing {spec.env_var} for {tools_str}"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
+
+            # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
+            node_types = list(set(node.node_type for node in self.graph.nodes))
+            missing_node_creds = cred_manager.get_missing_for_node_types(node_types)
+            for cred_name, spec in missing_node_creds:
+                if spec.env_var not in missing_credentials:  # Avoid duplicates
+                    missing_credentials.append(spec.env_var)
+                    affected_types = [t for t in node_types if t in spec.node_types]
+                    types_str = ", ".join(affected_types)
+                    warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
+                    if spec.help_url:
+                        warning_msg += f"\n  Get it at: {spec.help_url}"
+                    warnings.append(warning_msg)
+        except ImportError:
+            # aden_tools not installed - fall back to direct check
+            has_llm_nodes = any(
+                node.node_type in ("llm_generate", "llm_tool_use")
+                for node in self.graph.nodes
+            )
+            if has_llm_nodes and not os.environ.get("ANTHROPIC_API_KEY"):
+                warnings.append("Agent has LLM nodes but ANTHROPIC_API_KEY not set")
 
         return ValidationResult(
             valid=len(errors) == 0,
             errors=errors,
             warnings=warnings,
             missing_tools=missing_tools,
+            missing_credentials=missing_credentials,
         )
 
     async def can_handle(self, request: dict, llm: LLMProvider | None = None) -> "CapabilityResponse":

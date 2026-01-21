@@ -4,13 +4,18 @@ Aden Tools - Tool implementations for FastMCP.
 Usage:
     from fastmcp import FastMCP
     from aden_tools.tools import register_all_tools
+    from aden_tools.credentials import CredentialManager
 
     mcp = FastMCP("my-server")
-    register_all_tools(mcp)
+    credentials = CredentialManager()
+    register_all_tools(mcp, credentials=credentials)
 """
-from typing import List
+from typing import List, Optional, TYPE_CHECKING
 
 from fastmcp import FastMCP
+
+if TYPE_CHECKING:
+    from aden_tools.credentials import CredentialManager
 
 # Import register_tools from each tool module
 from .example_tool import register_tools as register_example
@@ -31,22 +36,30 @@ from .file_system_toolkits.grep_search import register_tools as register_grep_se
 from .file_system_toolkits.execute_command_tool import register_tools as register_execute_command
 
 
-def register_all_tools(mcp: FastMCP) -> List[str]:
+def register_all_tools(
+    mcp: FastMCP,
+    credentials: Optional["CredentialManager"] = None,
+) -> List[str]:
     """
     Register all aden-tools with a FastMCP server.
 
     Args:
         mcp: FastMCP server instance
+        credentials: Optional CredentialManager for centralized credential access.
+                     If not provided, tools fall back to direct os.getenv() calls.
 
     Returns:
         List of registered tool names
     """
+    # Tools that don't need credentials
     register_example(mcp)
     register_file_read(mcp)
     register_file_write(mcp)
-    register_web_search(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
+
+    # Tools that need credentials (pass credentials if provided)
+    register_web_search(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)

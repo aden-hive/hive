@@ -84,9 +84,119 @@ _TOOL_MODULES = [
 ]
 ```
 
-## Environment Variables
+## Credential Management
 
-For tools requiring API keys or configuration, check environment variables at runtime:
+For tools requiring API keys, use the centralized `CredentialManager`. This enables:
+- **Agent-aware validation**: Credentials are checked when an agent loads, not at server startup
+- **Better error messages**: Users see exactly which credentials are missing and how to get them
+- **Easy testing**: Use `CredentialManager.for_testing()` to mock credentials
+
+### Adding a New Credential
+
+1. Find the appropriate category file in `src/aden_tools/credentials/`:
+   - `llm.py` - LLM providers (anthropic, openai, etc.)
+   - `search.py` - Search tools (brave_search, google_search, etc.)
+   - Or create a new category file for integrations
+
+2. Add the credential spec to the category's dict:
+
+```python
+# In credentials/search.py
+SEARCH_CREDENTIALS = {
+    # ... existing credentials
+    "my_api": CredentialSpec(
+        env_var="MY_API_KEY",
+        tools=["my_api_tool"],  # Which tools need this credential
+        required=True,          # or False for optional
+        help_url="https://example.com/api-keys",
+        description="API key for My Service",
+    ),
+}
+```
+
+3. If you created a new category file, import and merge it in `credentials/__init__.py`:
+
+```python
+from .my_category import MY_CATEGORY_CREDENTIALS
+
+CREDENTIAL_SPECS = {
+    **LLM_CREDENTIALS,
+    **SEARCH_CREDENTIALS,
+    **MY_CATEGORY_CREDENTIALS,  # Add new category
+}
+```
+
+4. Update your tool to accept the optional `credentials` parameter:
+
+```python
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from aden_tools.credentials import CredentialManager
+
+
+def register_tools(
+    mcp: FastMCP,
+    credentials: Optional["CredentialManager"] = None,
+) -> None:
+    @mcp.tool()
+    def my_api_tool(query: str) -> dict:
+        """Tool that requires an API key."""
+        # Use CredentialManager if provided, fallback to direct env access
+        if credentials is not None:
+            api_key = credentials.get("my_api")
+        else:
+            api_key = os.getenv("MY_API_KEY")
+
+        if not api_key:
+            return {
+                "error": "MY_API_KEY environment variable not set",
+                "help": "Get an API key at https://example.com/api-keys",
+            }
+
+        # Use the API key...
+```
+
+5. Update `register_all_tools()` in `tools/__init__.py` to pass credentials to your tool.
+
+### Testing with Mock Credentials
+
+```python
+from aden_tools.credentials import CredentialManager
+
+def test_my_tool_with_valid_key(mcp):
+    creds = CredentialManager.for_testing({"my_api": "test-key"})
+    register_tools(mcp, credentials=creds)
+    tool_fn = mcp._tool_manager._tools["my_api_tool"].fn
+
+    result = tool_fn(query="test")
+    # Assertions...
+```
+
+### When Validation Happens
+
+Credentials are validated when an agent is loaded (via `AgentRunner.validate()`), not at MCP server startup. This means:
+
+1. The MCP server always starts (even if credentials are missing)
+2. When you load an agent, validation checks which tools it needs
+3. If credentials are missing, you get a clear error:
+
+```
+Cannot run agent: Missing credentials
+
+The following tools require credentials that are not set:
+
+  web_search requires BRAVE_SEARCH_API_KEY
+    API key for Brave Search
+    Get an API key at: https://brave.com/search/api/
+    Set via: export BRAVE_SEARCH_API_KEY=your_key
+
+Set these environment variables and re-run the agent.
+```
+
+## Environment Variables (Legacy)
+
+For simple cases or backward compatibility, you can still check environment variables directly:
 
 ```python
 import os
@@ -104,6 +214,8 @@ def register_tools(mcp: FastMCP) -> None:
 
         # Use the API key...
 ```
+
+However, using `CredentialManager` is recommended for new tools as it provides better validation and testing support.
 
 ## Best Practices
 

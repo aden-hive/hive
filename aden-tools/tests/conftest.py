@@ -4,11 +4,23 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
+from aden_tools.credentials import CredentialManager
+
 
 @pytest.fixture
 def mcp() -> FastMCP:
     """Create a fresh FastMCP instance for testing."""
     return FastMCP("test-server")
+
+
+@pytest.fixture
+def mock_credentials() -> CredentialManager:
+    """Create a CredentialManager with mock test credentials."""
+    return CredentialManager.for_testing({
+        "anthropic": "test-anthropic-api-key",
+        "brave_search": "test-brave-api-key",
+        # Add other mock credentials as needed
+    })
 
 
 @pytest.fixture

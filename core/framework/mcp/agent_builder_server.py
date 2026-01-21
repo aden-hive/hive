@@ -151,6 +151,55 @@ def set_goal(
     }, default=str)
 
 
+def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
+    """
+    Validate that credentials are available for the specified tools.
+
+    Returns None if all credentials are available, or an error dict if any are missing.
+    """
+    if not tools_list:
+        return None
+
+    try:
+        from aden_tools.credentials import CredentialManager
+
+        cred_manager = CredentialManager()
+        missing_creds = cred_manager.get_missing_for_tools(tools_list)
+
+        if missing_creds:
+            cred_errors = []
+            for cred_name, spec in missing_creds:
+                affected_tools = [t for t in tools_list if t in spec.tools]
+                cred_errors.append({
+                    "credential": cred_name,
+                    "env_var": spec.env_var,
+                    "tools_affected": affected_tools,
+                    "help_url": spec.help_url,
+                    "description": spec.description,
+                })
+
+            return {
+                "valid": False,
+                "errors": [f"Missing credentials for tools: {[e['env_var'] for e in cred_errors]}"],
+                "missing_credentials": cred_errors,
+                "action_required": "Add the credentials to your .env file and retry",
+                "example": f"Add to .env:\n{cred_errors[0]['env_var']}=your_key_here",
+                "message": "Cannot add node: missing API credentials. Add them to .env and retry this command.",
+            }
+    except ImportError as e:
+        # Return a warning that credential validation was skipped
+        return {
+            "valid": True,
+            "warnings": [
+                f"⚠️ Credential validation SKIPPED: aden_tools not available ({e}). "
+                "Tools may fail at runtime if credentials are missing. "
+                "Add aden-tools/src to PYTHONPATH to enable validation."
+            ],
+        }
+
+    return None
+
+
 @mcp.tool()
 def add_node(
     node_id: Annotated[str, "Unique identifier for the node"],
@@ -171,6 +220,11 @@ def add_node(
     output_keys_list = json.loads(output_keys)
     tools_list = json.loads(tools)
     routes_dict = json.loads(routes)
+
+    # Validate credentials for tools BEFORE adding the node
+    cred_error = _validate_tool_credentials(tools_list)
+    if cred_error:
+        return json.dumps(cred_error)
 
     # Check for duplicate
     if any(n.id == node_id for n in session.nodes):
@@ -334,6 +388,13 @@ def update_node(
 
     if not node:
         return json.dumps({"valid": False, "errors": [f"Node '{node_id}' not found"]})
+
+    # Validate credentials for new tools BEFORE updating
+    if tools:
+        tools_list = json.loads(tools)
+        cred_error = _validate_tool_credentials(tools_list)
+        if cred_error:
+            return json.dumps(cred_error)
 
     # Update fields if provided
     if name:

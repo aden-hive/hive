@@ -7,12 +7,19 @@ Returns search results with titles, URLs, and snippets.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING, Optional
 
 import httpx
 from fastmcp import FastMCP
 
+if TYPE_CHECKING:
+    from aden_tools.credentials import CredentialManager
 
-def register_tools(mcp: FastMCP) -> None:
+
+def register_tools(
+    mcp: FastMCP,
+    credentials: Optional["CredentialManager"] = None,
+) -> None:
     """Register web search tools with the MCP server."""
 
     @mcp.tool()
@@ -37,7 +44,13 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with search results or error dict
         """
-        api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+        # Get API key - use CredentialManager if provided, fallback to direct env
+        if credentials is not None:
+            api_key = credentials.get("brave_search")
+        else:
+            # Backward compatibility: direct env access
+            api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+
         if not api_key:
             return {
                 "error": "BRAVE_SEARCH_API_KEY environment variable not set",
