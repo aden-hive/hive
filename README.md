@@ -29,6 +29,21 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## What is Aden
+
+<p align="center">
+  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+</p>
+
+Aden is a platform for building, deploying, operating, and adapting AI agents:
+
+- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
+- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
+- **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
+- **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
+- **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
+
+
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
