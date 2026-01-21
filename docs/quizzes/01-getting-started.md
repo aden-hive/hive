@@ -2,6 +2,9 @@
 
 Welcome to Aden! This challenge will help you get familiar with our project and community. Complete all tasks to earn your first badge!
 
+Aden is an open-source platform for building, running, and observing autonomous agents. It provides a control plane, SDKs, and tools that help developers experiment with agent workflows in a structured and reproducible way.
+
+
 **Difficulty:** Beginner
 **Time:** ~30 minutes
 **Prerequisites:** GitHub account
