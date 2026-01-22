@@ -2,25 +2,14 @@
   "name": "hive",
   "version": "0.1.0",
   "private": true,
-  "description": "Hive - AI agent observability and control platform",
+  "description": "Hive - Aden Agent Framework - Build goal-driven, self-improving AI agents",
   "repository": {
     "type": "git",
     "url": "https://github.com/adenhq/hive.git"
   },
   "license": "Apache-2.0",
-  "workspaces": [
-    "honeycomb",
-    "hive"
-  ],
   "scripts": {
-    "dev": "docker compose up",
-    "dev:build": "docker compose up --build",
-    "build": "npm run build --workspaces",
-    "lint": "npm run lint --workspaces",
-    "test": "npm run test --workspaces",
-    "setup": "bash scripts/setup.sh",
-    "generate:env": "npx tsx scripts/generate-env.ts",
-    "clean": "npm run clean --workspaces && rm -rf node_modules"
+    "setup": "echo '⚠️  This npm setup is for the archived web application. For agent development, use: ./scripts/setup-python.sh' && bash scripts/setup.sh"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

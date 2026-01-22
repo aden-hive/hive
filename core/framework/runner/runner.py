@@ -2,19 +2,20 @@
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 from framework.graph import Goal
 from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition
 from framework.graph.node import NodeSpec
 from framework.graph.executor import GraphExecutor, ExecutionResult
-from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
-from framework.llm.litellm import LiteLLMProvider
+from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.core import Runtime
+
+if TYPE_CHECKING:
+    from framework.runner.protocol import CapabilityResponse, AgentMessage
 
 
 @dataclass
@@ -637,7 +638,7 @@ Respond with JSON only:
                     reasoning=data.get("reasoning", ""),
                     estimated_steps=data.get("estimated_steps"),
                 )
-        except Exception as e:
+        except Exception:
             # Fall back to keyword matching on error
             pass
 
@@ -690,7 +691,7 @@ Respond with JSON only:
         Returns:
             Response message
         """
-        from framework.runner.protocol import AgentMessage, MessageType
+        from framework.runner.protocol import MessageType
 
         info = self.info()
 
