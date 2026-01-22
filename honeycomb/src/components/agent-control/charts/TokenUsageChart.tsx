@@ -31,8 +31,9 @@ export function TokenUsageChart({
     return value.toString()
   }
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr)
+  const formatDate = (label: any) => {
+    if (typeof label !== 'string') return String(label || '')
+    const date = new Date(label)
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   }
 
