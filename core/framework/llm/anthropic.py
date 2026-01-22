@@ -1,11 +1,27 @@
-"""Anthropic Claude LLM provider."""
+"""Anthropic Claude LLM provider - backward compatible wrapper around LiteLLM."""
 
-import os
 from typing import Any
 
-import anthropic
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.litellm import LiteLLMProvider
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse, ToolResult
+
+def _get_api_key_from_credential_manager() -> str | None:
+    """Get API key from CredentialManager or environment.
+
+    Priority:
+    1. CredentialManager (supports .env hot-reload)
+    2. os.environ fallback
+    """
+    try:
+        from aden_tools.credentials import CredentialManager
+
+        creds = CredentialManager()
+        if creds.is_available("anthropic"):
+            return creds.get("anthropic")
+    except ImportError:
+        pass
+    return os.environ.get("ANTHROPIC_API_KEY")
 
 
 def _get_api_key_from_credential_manager() -> str | None:
@@ -30,7 +46,9 @@ class AnthropicProvider(LLMProvider):
     """
     Anthropic Claude LLM provider.
 
-    Uses the Anthropic API to interact with Claude models.
+    This is a backward-compatible wrapper that internally uses LiteLLMProvider.
+    Existing code using AnthropicProvider will continue to work unchanged,
+    while benefiting from LiteLLM's unified interface and features.
     """
 
     def __init__(
@@ -46,6 +64,7 @@ class AnthropicProvider(LLMProvider):
                      or ANTHROPIC_API_KEY env var.
             model: Model to use (default: claude-haiku-4-5-20251001)
         """
+                # Delegate to LiteLLMProvider internally.
         self.api_key = api_key or _get_api_key_from_credential_manager()
         if not self.api_key:
             raise ValueError(
@@ -53,7 +72,17 @@ class AnthropicProvider(LLMProvider):
             )
 
         self.model = model
-        self.client = anthropic.Anthropic(api_key=self.api_key)
+        
+        self._provider = LiteLLMProvider(
+            model=model,
+            api_key=self.api_key,
+        )
+
+        
+        
+
+        self.model = model
+        self.api_key = api_key
 
     def complete(
         self,
@@ -62,34 +91,12 @@ class AnthropicProvider(LLMProvider):
         tools: list[Tool] | None = None,
         max_tokens: int = 1024,
     ) -> LLMResponse:
-        """Generate a completion from Claude."""
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": max_tokens,
-            "messages": messages,
-        }
-
-        if system:
-            kwargs["system"] = system
-
-        if tools:
-            kwargs["tools"] = [self._tool_to_dict(t) for t in tools]
-
-        response = self.client.messages.create(**kwargs)
-
-        # Extract text content
-        content = ""
-        for block in response.content:
-            if block.type == "text":
-                content += block.text
-
-        return LLMResponse(
-            content=content,
-            model=response.model,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            stop_reason=response.stop_reason,
-            raw_response=response,
+        """Generate a completion from Claude (via LiteLLM)."""
+        return self._provider.complete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
         )
 
     def complete_with_tools(
@@ -186,15 +193,3 @@ class AnthropicProvider(LLMProvider):
             stop_reason="max_iterations",
             raw_response=None,
         )
-
-    def _tool_to_dict(self, tool: Tool) -> dict[str, Any]:
-        """Convert Tool to Anthropic API format."""
-        return {
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": {
-                "type": "object",
-                "properties": tool.parameters.get("properties", {}),
-                "required": tool.parameters.get("required", []),
-            },
-        }
