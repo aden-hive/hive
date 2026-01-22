@@ -57,14 +57,15 @@ Aden es una plataforma para construir, desplegar, operar y adaptar agentes de IA
 - **[Documentación](https://docs.adenhq.com/)** - Guías completas y referencia de API
 - **[Guía de Auto-Hospedaje](https://docs.adenhq.com/getting-started/quickstart)** - Despliega Hive en tu infraestructura
 - **[Registro de Cambios](https://github.com/adenhq/hive/releases)** - Últimas actualizaciones y versiones
+<!-- - **[Hoja de Ruta](https://adenhq.com/roadmap)** - Funciones y planes próximos -->
 - **[Reportar Problemas](https://github.com/adenhq/hive/issues)** - Reportes de bugs y solicitudes de funciones
 
 ## Inicio Rápido
 
 ### Prerrequisitos
 
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+)
-- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0+)
+- [Python 3.11+](https://www.python.org/downloads/) - Para desarrollo de agentes
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Opcional, para herramientas en contenedores
 
 ### Instalación
 
@@ -73,19 +74,32 @@ Aden es una plataforma para construir, desplegar, operar y adaptar agentes de IA
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# Copiar y configurar
-cp config.yaml.example config.yaml
-
-# Ejecutar configuración e iniciar servicios
-npm run setup
-docker compose up
+# Ejecutar configuración del entorno Python
+./scripts/setup-python.sh
 ```
 
-**Acceder a la aplicación:**
+Esto instala:
+- **framework** - Runtime del agente principal y ejecutor de grafos
+- **aden_tools** - 19 herramientas MCP para capacidades de agentes
+- Todas las dependencias requeridas
 
-- Panel de Control: http://localhost:3000
-- API: http://localhost:4000
-- Salud: http://localhost:4000/health
+### Construye Tu Primer Agente
+
+```bash
+# Instalar habilidades de Claude Code (una vez)
+./quickstart.sh
+
+# Construir un agente usando Claude Code
+claude> /building-agents
+
+# Probar tu agente
+claude> /testing-agent
+
+# Ejecutar tu agente
+PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+```
+
+**[📖 Guía de Configuración Completa](ENVIRONMENT_SETUP.md)** - Instrucciones detalladas para desarrollo de agentes
 
 ## Características
 
@@ -102,6 +116,51 @@ docker compose up
 
 Los frameworks de agentes tradicionales requieren que diseñes manualmente flujos de trabajo, definas interacciones de agentes y manejes fallos de forma reactiva. Aden invierte este paradigma—**describes resultados, y el sistema se construye solo**.
 
+```mermaid
+flowchart LR
+    subgraph BUILD["🏗️ BUILD"]
+        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>LLM/Router/Function"]
+        NODES --> EDGES["Connect Edges<br/>on_success/failure/conditional"]
+        EDGES --> TEST["Test & Validate"] --> APPROVE["Approve & Export"]
+    end
+
+    subgraph EXPORT["📦 EXPORT"]
+        direction TB
+        JSON["agent.json<br/>(GraphSpec)"]
+        TOOLS["tools.py<br/>(Functions)"]
+        MCP["mcp_servers.json<br/>(Integrations)"]
+    end
+
+    subgraph RUN["🚀 RUNTIME"]
+        LOAD["AgentRunner<br/>Load + Parse"] --> SETUP["Setup Runtime<br/>+ ToolRegistry"]
+        SETUP --> EXEC["GraphExecutor<br/>Execute Nodes"]
+
+        subgraph DECISION["Decision Recording"]
+            DEC1["runtime.decide()<br/>intent → options → choice"]
+            DEC2["runtime.record_outcome()<br/>success, result, metrics"]
+        end
+    end
+
+    subgraph INFRA["⚙️ INFRASTRUCTURE"]
+        CTX["NodeContext<br/>memory • llm • tools"]
+        STORE[("FileStorage<br/>Runs & Decisions")]
+    end
+
+    APPROVE --> EXPORT
+    EXPORT --> LOAD
+    EXEC --> DECISION
+    EXEC --> CTX
+    DECISION --> STORE
+    STORE -.->|"Analyze & Improve"| NODES
+
+    style BUILD fill:#ffbe42,stroke:#cc5d00,stroke-width:3px,color:#333
+    style EXPORT fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
+    style RUN fill:#ffb100,stroke:#cc5d00,stroke-width:3px,color:#333
+    style DECISION fill:#ffcc80,stroke:#ed8c00,stroke-width:2px,color:#333
+    style INFRA fill:#e8763d,stroke:#cc5d00,stroke-width:3px,color:#fff
+    style STORE fill:#ed8c00,stroke:#cc5d00,stroke-width:2px,color:#fff
+```
+
 ### La Ventaja de Aden
 
 | Frameworks Tradicionales | Aden |
@@ -115,51 +174,78 @@ Los frameworks de agentes tradicionales requieren que diseñes manualmente flujo
 
 ### Cómo Funciona
 
-1. **Define Tu Objetivo** → Describe lo que quieres lograr en español simple
+1. **Define Tu Objetivo** → Describe lo que quieres lograr en lenguaje simple
 2. **El Agente de Codificación Genera** → Crea el grafo de agentes, código de conexión y casos de prueba
 3. **Los Trabajadores Ejecutan** → Los nodos envueltos en SDK se ejecutan con observabilidad completa y acceso a herramientas
 4. **El Plano de Control Monitorea** → Métricas en tiempo real, aplicación de presupuesto, gestión de políticas
 5. **Auto-Mejora** → En caso de fallo, el sistema evoluciona el grafo y lo vuelve a desplegar automáticamente
 
+## Cómo se Compara Aden
+
+Aden adopta un enfoque fundamentalmente diferente al desarrollo de agentes. Mientras que la mayoría de los frameworks requieren que codifiques flujos de trabajo o definas manualmente grafos de agentes, Aden usa un **agente de codificación para generar todo tu sistema de agentes** a partir de objetivos en lenguaje natural. Cuando los agentes fallan, el framework no solo registra errores—**evoluciona automáticamente el grafo de agentes** y lo vuelve a desplegar.
+
+> **Nota:** Para la tabla de comparación detallada de frameworks y preguntas frecuentes, consulta el [README.md](README.md) en inglés.
+
+### Cuándo Elegir Aden
+
+Elige Aden cuando necesites:
+
+- Agentes que **se auto-mejoren a partir de fallos** sin intervención manual
+- **Desarrollo orientado a objetivos** donde describes resultados, no flujos de trabajo
+- **Confiabilidad en producción** con recuperación y redespliegue automáticos
+- **Iteración rápida** en arquitecturas de agentes sin reescribir código
+- **Observabilidad completa** con monitoreo en tiempo real y supervisión humana
+
+Elige otros frameworks cuando necesites:
+
+- **Flujos de trabajo predecibles y con tipos seguros** (PydanticAI, Mastra)
+- **RAG y procesamiento de documentos** (LlamaIndex, Haystack)
+- **Investigación sobre emergencia de agentes** (CAMEL)
+- **Voz/multimodal en tiempo real** (TEN Framework)
+- **Encadenamiento simple de componentes** (LangChain, Swarm)
+
 ## Estructura del Proyecto
 
 ```
 hive/
-├── honeycomb/          # Frontend (React + TypeScript + Vite)
-├── hive/               # Backend (Node.js + TypeScript + Express)
-├── docs/               # Documentación
-├── scripts/            # Scripts de construcción y utilidades
-├── config.yaml.example # Plantilla de configuración
-└── docker-compose.yml  # Orquestación de contenedores
+├── core/                   # Framework principal - Runtime de agentes, ejecutor de grafos, protocolos
+├── tools/                  # Paquete de Herramientas MCP - 19 herramientas para capacidades de agentes
+├── exports/                # Paquetes de Agentes - Agentes pre-construidos y ejemplos
+├── docs/                   # Documentación y guías
+├── scripts/                # Scripts de construcción y utilidades
+├── .claude/                # Habilidades de Claude Code para construir agentes
+├── ENVIRONMENT_SETUP.md    # Guía de configuración de Python para desarrollo de agentes
+├── DEVELOPER.md            # Guía del desarrollador
+├── CONTRIBUTING.md         # Directrices de contribución
+└── ROADMAP.md              # Hoja de ruta del producto
 ```
 
 ## Desarrollo
 
-### Desarrollo Local con Recarga en Caliente
+### Desarrollo de Agentes en Python
+
+Para construir y ejecutar agentes orientados a objetivos con el framework:
 
 ```bash
-# Copiar sobrescrituras de desarrollo
-cp docker-compose.override.yml.example docker-compose.override.yml
+# Configuración única
+./scripts/setup-python.sh
 
-# Iniciar con recarga en caliente habilitada
-docker compose up
+# Esto instala:
+# - paquete framework (runtime principal)
+# - paquete aden_tools (19 herramientas MCP)
+# - Todas las dependencias
+
+# Construir nuevos agentes usando habilidades de Claude Code
+claude> /building-agents
+
+# Probar agentes
+claude> /testing-agent
+
+# Ejecutar agentes
+PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 ```
 
-### Ejecutar Sin Docker
-
-```bash
-# Instalar dependencias
-npm install
-
-# Generar archivos de entorno
-npm run generate:env
-
-# Iniciar frontend (en honeycomb/)
-cd honeycomb && npm run dev
-
-# Iniciar backend (en hive/)
-cd hive && npm run dev
-```
+Consulta [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instrucciones de configuración completas.
 
 ## Documentación
 
@@ -170,9 +256,25 @@ cd hive && npm run dev
 
 ## Hoja de Ruta
 
-El Framework de Agentes Aden tiene como objetivo ayudar a los desarrolladores a construir agentes auto-adaptativos orientados a resultados. Encuentra nuestra hoja de ruta aquí:
+El Framework de Agentes Aden tiene como objetivo ayudar a los desarrolladores a construir agentes auto-adaptativos orientados a resultados. Encuentra nuestra hoja de ruta aquí
 
 [ROADMAP.md](ROADMAP.md)
+
+```mermaid
+timeline
+    title Aden Agent Framework Roadmap
+    section Foundation
+        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
+        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
+        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
+        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
+        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
+    section Expansion
+        Intelligence : Guardrails : Streaming Mode : Semantic Search
+        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
+        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
+        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
+```
 
 ## Comunidad y Soporte
 
@@ -208,33 +310,27 @@ Este proyecto está licenciado bajo la Licencia Apache 2.0 - consulta el archivo
 
 ## Preguntas Frecuentes (FAQ)
 
+> **Nota:** Para las preguntas frecuentes completas, consulta el [README.md](README.md) en inglés.
+
 **P: ¿Aden depende de LangChain u otros frameworks de agentes?**
 
 No. Aden está construido desde cero sin dependencias de LangChain, CrewAI u otros frameworks de agentes. El framework está diseñado para ser ligero y flexible, generando grafos de agentes dinámicamente en lugar de depender de componentes predefinidos.
 
 **P: ¿Qué proveedores de LLM soporta Aden?**
 
-Aden soporta OpenAI (GPT-4, GPT-4o), Anthropic (modelos Claude) y Google Gemini de serie. La arquitectura es agnóstica al proveedor a través de la abstracción del SDK, con integración de LiteLLM en la hoja de ruta para soporte expandido de modelos.
+Aden soporta más de 100 proveedores de LLM a través de la integración de LiteLLM, incluyendo OpenAI (GPT-4, GPT-4o), Anthropic (modelos Claude), Google Gemini, Mistral, Groq y muchos más. Simplemente configura la variable de entorno de la clave API apropiada y especifica el nombre del modelo.
 
 **P: ¿Aden es de código abierto?**
 
 Sí, Aden es completamente de código abierto bajo la Licencia Apache 2.0. Fomentamos activamente las contribuciones y colaboración de la comunidad.
 
-**P: ¿Qué opciones de despliegue soporta Aden?**
+**P: ¿Qué hace que Aden sea diferente de otros frameworks de agentes?**
 
-Aden soporta despliegue con Docker Compose de serie, con configuraciones tanto de producción como de desarrollo. Los despliegues auto-hospedados funcionan en cualquier infraestructura que soporte Docker. Las opciones de despliegue en la nube y configuraciones listas para Kubernetes están en la hoja de ruta.
-
-**P: ¿Puede Aden manejar casos de uso complejos a escala de producción?**
-
-Sí. Aden está explícitamente diseñado para entornos de producción con características como recuperación automática de fallos, observabilidad en tiempo real, controles de costos y soporte de escalado horizontal. El framework maneja tanto automatizaciones simples como flujos de trabajo complejos multi-agente.
+Aden genera todo tu sistema de agentes a partir de objetivos en lenguaje natural usando un agente de codificación—no codificas flujos de trabajo ni defines grafos manualmente. Cuando los agentes fallan, el framework captura automáticamente los datos del fallo, evoluciona el grafo de agentes y lo vuelve a desplegar. Este ciclo de auto-mejora es único de Aden.
 
 **P: ¿Aden soporta flujos de trabajo con humano en el bucle?**
 
 Sí, Aden soporta completamente flujos de trabajo con humano en el bucle a través de nodos de intervención que pausan la ejecución para entrada humana. Estos incluyen tiempos de espera configurables y políticas de escalación, permitiendo colaboración fluida entre expertos humanos y agentes de IA.
-
-**P: ¿Cómo puedo contribuir a Aden?**
-
-¡Las contribuciones son bienvenidas! Haz fork del repositorio, crea tu rama de funcionalidad, implementa tus cambios y envía un pull request. Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para directrices detalladas.
 
 ---
 

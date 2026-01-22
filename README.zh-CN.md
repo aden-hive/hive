@@ -57,14 +57,15 @@ Aden 是一个用于构建、部署、运营和适应 AI 智能体的平台：
 - **[文档](https://docs.adenhq.com/)** - 完整指南和 API 参考
 - **[自托管指南](https://docs.adenhq.com/getting-started/quickstart)** - 在您的基础设施上部署 Hive
 - **[更新日志](https://github.com/adenhq/hive/releases)** - 最新更新和版本
+<!-- - **[路线图](https://adenhq.com/roadmap)** - 即将推出的功能和计划 -->
 - **[报告问题](https://github.com/adenhq/hive/issues)** - Bug 报告和功能请求
 
 ## 快速开始
 
 ### 前置要求
 
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+)
-- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0+)
+- [Python 3.11+](https://www.python.org/downloads/) - 用于智能体开发
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - 可选，用于容器化工具
 
 ### 安装
 
@@ -73,19 +74,32 @@ Aden 是一个用于构建、部署、运营和适应 AI 智能体的平台：
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# 复制并配置
-cp config.yaml.example config.yaml
-
-# 运行设置并启动服务
-npm run setup
-docker compose up
+# 运行 Python 环境设置
+./scripts/setup-python.sh
 ```
 
-**访问应用：**
+这将安装：
+- **framework** - 核心智能体运行时和图执行器
+- **aden_tools** - 19 个 MCP 工具提供智能体能力
+- 所有必需的依赖项
 
-- 仪表板：http://localhost:3000
-- API：http://localhost:4000
-- 健康检查：http://localhost:4000/health
+### 构建您的第一个智能体
+
+```bash
+# 安装 Claude Code 技能（一次性）
+./quickstart.sh
+
+# 使用 Claude Code 构建智能体
+claude> /building-agents
+
+# 测试您的智能体
+claude> /testing-agent
+
+# 运行您的智能体
+PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+```
+
+**[📖 完整设置指南](ENVIRONMENT_SETUP.md)** - 智能体开发的详细说明
 
 ## 功能特性
 
@@ -102,12 +116,57 @@ docker compose up
 
 传统智能体框架要求您手动设计工作流、定义智能体交互并被动处理故障。Aden 颠覆了这一范式——**您描述结果，系统自动构建自己**。
 
+```mermaid
+flowchart LR
+    subgraph BUILD["🏗️ BUILD"]
+        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>LLM/Router/Function"]
+        NODES --> EDGES["Connect Edges<br/>on_success/failure/conditional"]
+        EDGES --> TEST["Test & Validate"] --> APPROVE["Approve & Export"]
+    end
+
+    subgraph EXPORT["📦 EXPORT"]
+        direction TB
+        JSON["agent.json<br/>(GraphSpec)"]
+        TOOLS["tools.py<br/>(Functions)"]
+        MCP["mcp_servers.json<br/>(Integrations)"]
+    end
+
+    subgraph RUN["🚀 RUNTIME"]
+        LOAD["AgentRunner<br/>Load + Parse"] --> SETUP["Setup Runtime<br/>+ ToolRegistry"]
+        SETUP --> EXEC["GraphExecutor<br/>Execute Nodes"]
+
+        subgraph DECISION["Decision Recording"]
+            DEC1["runtime.decide()<br/>intent → options → choice"]
+            DEC2["runtime.record_outcome()<br/>success, result, metrics"]
+        end
+    end
+
+    subgraph INFRA["⚙️ INFRASTRUCTURE"]
+        CTX["NodeContext<br/>memory • llm • tools"]
+        STORE[("FileStorage<br/>Runs & Decisions")]
+    end
+
+    APPROVE --> EXPORT
+    EXPORT --> LOAD
+    EXEC --> DECISION
+    EXEC --> CTX
+    DECISION --> STORE
+    STORE -.->|"Analyze & Improve"| NODES
+
+    style BUILD fill:#ffbe42,stroke:#cc5d00,stroke-width:3px,color:#333
+    style EXPORT fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
+    style RUN fill:#ffb100,stroke:#cc5d00,stroke-width:3px,color:#333
+    style DECISION fill:#ffcc80,stroke:#ed8c00,stroke-width:2px,color:#333
+    style INFRA fill:#e8763d,stroke:#cc5d00,stroke-width:3px,color:#fff
+    style STORE fill:#ed8c00,stroke:#cc5d00,stroke-width:2px,color:#fff
+```
+
 ### Aden 的优势
 
 | 传统框架 | Aden |
 |----------|------|
 | 硬编码智能体工作流 | 用自然语言描述目标 |
-| 手动定义图 | 自动生成智能体图 |
+| 手动图定义 | 自动生成智能体图 |
 | 被动错误处理 | 主动自我进化 |
 | 静态工具配置 | 动态 SDK 封装节点 |
 | 单独设置监控 | 内置实时可观测性 |
@@ -121,45 +180,72 @@ docker compose up
 4. **控制平面监控** → 实时指标、预算执行、策略管理
 5. **自我改进** → 失败时，系统进化图并自动重新部署
 
+## Aden 与其他框架的比较
+
+Aden 在智能体开发方面采取了根本不同的方法。虽然大多数框架要求您硬编码工作流或手动定义智能体图，但 Aden 使用**编码智能体从自然语言目标生成整个智能体系统**。当智能体失败时，框架不仅记录错误——它会**自动进化智能体图**并重新部署。
+
+> **注意：** 详细的框架比较表和常见问题解答，请参阅英文版 [README.md](README.md)。
+
+### 何时选择 Aden
+
+选择 Aden 当您需要：
+
+- 智能体从失败中**自我改进**而无需人工干预
+- **目标驱动的开发**，您描述结果而非工作流
+- 具有自动恢复和重新部署的**生产可靠性**
+- 无需重写代码即可**快速迭代**智能体架构
+- 具有实时监控和人工监督的**完整可观测性**
+
+选择其他框架当您需要：
+
+- **类型安全、可预测的工作流**（PydanticAI、Mastra）
+- **RAG 和文档处理**（LlamaIndex、Haystack）
+- **智能体涌现的研究**（CAMEL）
+- **实时语音/多模态**（TEN Framework）
+- **简单的组件链接**（LangChain、Swarm）
+
 ## 项目结构
 
 ```
 hive/
-├── honeycomb/          # 前端 (React + TypeScript + Vite)
-├── hive/               # 后端 (Node.js + TypeScript + Express)
-├── docs/               # 文档
-├── scripts/            # 构建和实用脚本
-├── config.yaml.example # 配置模板
-└── docker-compose.yml  # 容器编排
+├── core/                   # 核心框架 - 智能体运行时、图执行器、协议
+├── tools/                  # MCP 工具包 - 19 个工具提供智能体能力
+├── exports/                # 智能体包 - 预构建的智能体和示例
+├── docs/                   # 文档和指南
+├── scripts/                # 构建和实用脚本
+├── .claude/                # Claude Code 技能用于构建智能体
+├── ENVIRONMENT_SETUP.md    # 智能体开发的 Python 设置指南
+├── DEVELOPER.md            # 开发者指南
+├── CONTRIBUTING.md         # 贡献指南
+└── ROADMAP.md              # 产品路线图
 ```
 
 ## 开发
 
-### 带热重载的本地开发
+### Python 智能体开发
+
+使用框架构建和运行目标驱动的智能体：
 
 ```bash
-# 复制开发覆盖配置
-cp docker-compose.override.yml.example docker-compose.override.yml
+# 一次性设置
+./scripts/setup-python.sh
 
-# 启用热重载启动
-docker compose up
+# 这将安装：
+# - framework 包（核心运行时）
+# - aden_tools 包（19 个 MCP 工具）
+# - 所有依赖项
+
+# 使用 Claude Code 技能构建新智能体
+claude> /building-agents
+
+# 测试智能体
+claude> /testing-agent
+
+# 运行智能体
+PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 ```
 
-### 不使用 Docker 运行
-
-```bash
-# 安装依赖
-npm install
-
-# 生成环境文件
-npm run generate:env
-
-# 启动前端（在 honeycomb/ 目录）
-cd honeycomb && npm run dev
-
-# 启动后端（在 hive/ 目录）
-cd hive && npm run dev
-```
+完整设置说明请参阅 [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)。
 
 ## 文档
 
@@ -170,9 +256,25 @@ cd hive && npm run dev
 
 ## 路线图
 
-Aden 智能体框架旨在帮助开发者构建面向结果的、自适应的智能体。请在此查看我们的路线图：
+Aden 智能体框架旨在帮助开发者构建面向结果的、自适应的智能体。请在此查看我们的路线图
 
 [ROADMAP.md](ROADMAP.md)
+
+```mermaid
+timeline
+    title Aden Agent Framework Roadmap
+    section Foundation
+        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
+        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
+        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
+        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
+        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
+    section Expansion
+        Intelligence : Guardrails : Streaming Mode : Semantic Search
+        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
+        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
+        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
+```
 
 ## 社区与支持
 
@@ -208,33 +310,27 @@ Aden 智能体框架旨在帮助开发者构建面向结果的、自适应的智
 
 ## 常见问题 (FAQ)
 
+> **注意：** 完整的常见问题解答，请参阅英文版 [README.md](README.md)。
+
 **问：Aden 是否依赖 LangChain 或其他智能体框架？**
 
 不。Aden 从头开始构建，不依赖 LangChain、CrewAI 或其他智能体框架。该框架设计精简灵活，动态生成智能体图而非依赖预定义组件。
 
 **问：Aden 支持哪些 LLM 提供商？**
 
-Aden 开箱即用支持 OpenAI（GPT-4、GPT-4o）、Anthropic（Claude 模型）和 Google Gemini。架构通过 SDK 抽象实现提供商无关，LiteLLM 集成在路线图中以扩展模型支持。
+Aden 通过 LiteLLM 集成支持 100 多个 LLM 提供商，包括 OpenAI（GPT-4、GPT-4o）、Anthropic（Claude 模型）、Google Gemini、Mistral、Groq 等。只需设置适当的 API 密钥环境变量并指定模型名称即可。
 
 **问：Aden 是开源的吗？**
 
 是的，Aden 在 Apache License 2.0 下完全开源。我们积极鼓励社区贡献和协作。
 
-**问：Aden 支持哪些部署选项？**
+**问：Aden 与其他智能体框架有何不同？**
 
-Aden 开箱即用支持 Docker Compose 部署，包括生产和开发配置。自托管部署可在任何支持 Docker 的基础设施上运行。云部署选项和 Kubernetes 就绪配置在路线图中。
-
-**问：Aden 能处理复杂的生产级用例吗？**
-
-可以。Aden 明确为生产环境设计，具有自动故障恢复、实时可观测性、成本控制和水平扩展支持等功能。该框架可处理简单自动化和复杂的多智能体工作流。
+Aden 使用编码智能体从自然语言目标生成整个智能体系统——您无需硬编码工作流或手动定义图。当智能体失败时，框架会自动捕获故障数据、进化智能体图并重新部署。这种自我改进循环是 Aden 独有的。
 
 **问：Aden 支持人机协作工作流吗？**
 
 是的，Aden 通过干预节点完全支持人机协作工作流，这些节点会暂停执行以等待人工输入。包括可配置的超时和升级策略，实现人类专家与 AI 智能体的无缝协作。
-
-**问：如何为 Aden 做贡献？**
-
-欢迎贡献！Fork 仓库，创建功能分支，实现更改，然后提交 pull request。详细指南请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ---
 

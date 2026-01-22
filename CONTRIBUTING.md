@@ -1,6 +1,6 @@
-# Contributing to Hive
+# Contributing to Aden Agent Framework
 
-Thank you for your interest in contributing to Hive! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors.
 
 ## Code of Conduct
 
@@ -12,24 +12,21 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/hive.git`
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
 4. Make your changes
-5. Run tests: `npm run test`
+5. Run tests: `PYTHONPATH=core:exports python -m pytest`
 6. Commit your changes following our commit conventions
 7. Push to your fork and submit a Pull Request
 
 ## Development Setup
 
 ```bash
-# Install dependencies
-npm install
+# Install Python packages
+./scripts/setup-python.sh
 
-# Copy configuration
-cp config.yaml.example config.yaml
+# Verify installation
+python -c "import framework; import aden_tools; print('✓ Setup complete')"
 
-# Generate environment files
-npm run setup
-
-# Start development environment
-docker compose up
+# Install Claude Code skills (optional)
+./quickstart.sh
 ```
 
 ## Commit Convention
@@ -77,28 +74,33 @@ feat(component): add new feature description
 
 ## Project Structure
 
-- `honeycomb/` - React frontend application
-- `hive/` - Node.js backend API
+- `core/` - Core framework (agent runtime, graph executor, protocols)
+- `tools/` - MCP Tools Package (19 tools for agent capabilities)
+- `exports/` - Agent packages and examples
 - `docs/` - Documentation
 - `scripts/` - Build and utility scripts
+- `.claude/` - Claude Code skills for building/testing agents
 
 ## Code Style
 
-- Use TypeScript for all new code
-- Follow existing code patterns
+- Use Python 3.11+ for all new code
+- Follow PEP 8 style guide
+- Add type hints to function signatures
+- Write docstrings for classes and public functions
 - Use meaningful variable and function names
-- Add comments for complex logic
 - Keep functions focused and small
 
 ## Testing
 
 ```bash
-# Run all tests
-npm run test
+# Run all tests for the framework
+cd core && python -m pytest
 
-# Run tests for a specific package
-npm run test --workspace=honeycomb
-npm run test --workspace=hive
+# Run all tests for tools
+cd tools && python -m pytest
+
+# Run tests for a specific agent
+PYTHONPATH=core:exports python -m agent_name test
 ```
 
 ## Questions?
