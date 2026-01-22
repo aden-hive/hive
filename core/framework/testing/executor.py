@@ -6,7 +6,6 @@ Executes a single test against an agent and returns a TestResult.
 
 import asyncio
 import inspect
-import os
 import time
 import traceback
 from typing import Any, Protocol, runtime_checkable
