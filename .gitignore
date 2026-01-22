@@ -9,12 +9,10 @@ workdir/
 .next/
 out/
 
-# Environment files (generated from config.yaml)
+# Environment files
 .env
 .env.local
 .env.*.local
-honeycomb/.env
-hive/.env
 
 # User configuration (copied from .example)
 config.yaml

@@ -16,15 +16,151 @@ Step-by-step guide for building goal-driven agent packages.
 
 **Prerequisites:** Read `building-agents-core` for fundamental concepts.
 
-## Step-by-Step Guide
+## CRITICAL: entry_points Format Reference
 
-### Step 1: Create Package Structure
+**⚠️ Common Mistake Prevention:**
 
-When user requests an agent, **immediately create the package**:
+The `entry_points` parameter in GraphSpec has a specific format that is easy to get wrong. This section exists because this mistake has caused production bugs.
+
+### Correct Format
 
 ```python
-# 1. Create directory
+entry_points = {"start": "first-node-id"}
+```
+
+**Examples from working agents:**
+
+```python
+# From exports/outbound_sales_agent/agent.py
+entry_node = "lead-qualification"
+entry_points = {"start": "lead-qualification"}
+
+# From exports/support_ticket_agent/agent.py (FIXED)
+entry_node = "parse-ticket"
+entry_points = {"start": "parse-ticket"}
+```
+
+### WRONG Formats (DO NOT USE)
+
+```python
+# ❌ WRONG: Using node ID as key with input keys as value
+entry_points = {
+    "parse-ticket": ["ticket_content", "customer_id", "ticket_id"]
+}
+# Error: ValidationError: Input should be a valid string, got list
+
+# ❌ WRONG: Using set instead of dict
+entry_points = {"parse-ticket"}
+# Error: ValidationError: Input should be a valid dictionary, got set
+
+# ❌ WRONG: Missing "start" key
+entry_points = {"entry": "parse-ticket"}
+# Error: Graph execution fails, cannot find entry point
+```
+
+### Validation Check
+
+After writing graph configuration, ALWAYS validate:
+
+```python
+# Check 1: Must be a dict
+assert isinstance(entry_points, dict), f"entry_points must be dict, got {type(entry_points)}"
+
+# Check 2: Must have "start" key
+assert "start" in entry_points, f"entry_points must have 'start' key, got keys: {entry_points.keys()}"
+
+# Check 3: "start" value must match entry_node
+assert entry_points["start"] == entry_node, f"entry_points['start']={entry_points['start']} must match entry_node={entry_node}"
+
+# Check 4: Value must be a string (node ID)
+assert isinstance(entry_points["start"], str), f"entry_points['start'] must be string, got {type(entry_points['start'])}"
+```
+
+**Why this matters:** GraphSpec uses Pydantic validation. The wrong format causes ValidationError at runtime, which blocks all agent execution and tests. This bug is not caught until you try to run the agent.
+
+## Building Session Management with MCP
+
+**MANDATORY**: Use the agent-builder MCP server's BuildSession system for automatic bookkeeping and persistence.
+
+### Available MCP Session Tools
+
+```python
+# Create new session (call FIRST before building)
+mcp__agent-builder__create_session(name="Support Ticket Agent")
+# Returns: session_id, automatically sets as active session
+
+# Get current session status (use for progress tracking)
+status = mcp__agent-builder__get_session_status()
+# Returns: {
+#   "session_id": "build_20250122_...",
+#   "name": "Support Ticket Agent",
+#   "has_goal": true,
+#   "node_count": 5,
+#   "edge_count": 7,
+#   "nodes": ["parse-ticket", "categorize", ...],
+#   "edges": [("parse-ticket", "categorize"), ...]
+# }
+
+# List all saved sessions
+mcp__agent-builder__list_sessions()
+
+# Load previous session
+mcp__agent-builder__load_session_by_id(session_id="build_...")
+
+# Delete session
+mcp__agent-builder__delete_session(session_id="build_...")
+```
+
+### How MCP Session Works
+
+The BuildSession class (in `core/framework/mcp/agent_builder_server.py`) automatically:
+- **Persists to disk** after every operation (`_save_session()` called automatically)
+- **Tracks all components**: goal, nodes, edges, mcp_servers
+- **Maintains timestamps**: created_at, last_modified
+- **Stores to**: `~/.claude-code-agent-builder/sessions/`
+
+When you call MCP tools like:
+- `mcp__agent-builder__set_goal(...)` - Automatically added to session.goal and saved
+- `mcp__agent-builder__add_node(...)` - Automatically added to session.nodes and saved
+- `mcp__agent-builder__add_edge(...)` - Automatically added to session.edges and saved
+
+**No manual bookkeeping needed** - the MCP server handles it all!
+
+### Show Progress to User
+
+```python
+# Get session status to show progress
+status = json.loads(mcp__agent-builder__get_session_status())
+
+print(f"\n📊 Building Progress:")
+print(f"   Session: {status['name']}")
+print(f"   Goal defined: {status['has_goal']}")
+print(f"   Nodes: {status['node_count']}")
+print(f"   Edges: {status['edge_count']}")
+print(f"   Nodes added: {', '.join(status['nodes'])}")
+```
+
+**Benefits:**
+- Automatic persistence - survive crashes/restarts
+- Clear audit trail - all operations logged
+- Session resume - continue from where you left off
+- Progress tracking built-in
+- No manual state management needed
+
+## Step-by-Step Guide
+
+### Step 1: Create Building Session & Package Structure
+
+When user requests an agent, **immediately create MCP session and package**:
+
+```python
+# 0. FIRST: Create MCP building session
 agent_name = "technical_research_agent"  # snake_case
+session_result = mcp__agent-builder__create_session(name=agent_name.replace('_', ' ').title())
+session_id = json.loads(session_result)["session_id"]
+print(f"✅ Created building session: {session_id}")
+
+# 1. Create directory
 package_path = f"exports/{agent_name}"
 
 Bash(f"mkdir -p {package_path}/nodes")
@@ -174,13 +310,21 @@ Edit(
 Open exports/technical_research_agent/agent.py to see the goal!
 ```
 
+**Note:** Goal is automatically tracked in MCP session. Use `mcp__agent-builder__get_session_status()` to check progress.
+
 ### Step 3: Add Nodes (Incremental)
 
-**⚠️ IMPORTANT:** Before adding any node with tools, you MUST:
+**⚠️ CRITICAL VALIDATION REQUIREMENTS:**
 
+Before adding any node with tools:
 1. Call `mcp__agent-builder__list_mcp_tools()` to discover available tools
 2. Verify each tool exists in the response
 3. If a tool doesn't exist, inform the user and ask how to proceed
+
+After writing each node:
+4. **MANDATORY**: Validate with `mcp__agent-builder__test_node()` before proceeding
+5. **MANDATORY**: Check MCP session status to track progress
+6. Only proceed to next node after validation passes
 
 For each node, **write immediately after approval**:
 
@@ -234,24 +378,36 @@ Open exports/technical_research_agent/nodes/__init__.py to see it!
 
 **Repeat for each node.** User watches the file grow.
 
-#### Optional: Validate Node with MCP Tools
+#### MANDATORY: Validate Each Node with MCP Tools
 
-After writing a node, you can optionally use MCP tools for validation:
+After writing EVERY node, you MUST validate before proceeding:
 
 ```python
-# Node is already written to file. Now validate it:
-mcp__agent-builder__test_node(
+# Node is already written to file. Now VALIDATE IT (REQUIRED):
+validation_result = json.loads(mcp__agent-builder__test_node(
     node_id="analyze-request",
     test_input='{"query": "test query"}',
     mock_llm_response='{"analysis": "mock output"}'
-)
+))
 
-# Returns validation result showing node behavior
-# This is OPTIONAL - for bookkeeping/validation only
-# The node already exists in the file!
+# Check validation result
+if validation_result["valid"]:
+    # Show user validation passed
+    print(f"✅ Node validation passed: analyze-request")
+
+    # Show session progress
+    status = json.loads(mcp__agent-builder__get_session_status())
+    print(f"📊 Session progress: {status['node_count']} nodes added")
+else:
+    # STOP - Do not proceed until fixed
+    print(f"❌ Node validation FAILED:")
+    for error in validation_result["errors"]:
+        print(f"   - {error}")
+    print("⚠️ Must fix node before proceeding to next component")
+    # Ask user how to proceed
 ```
 
-**Key Point:** The node was written to `nodes/__init__.py` FIRST. The MCP tool is just for validation.
+**CRITICAL:** Do NOT proceed to the next node until validation passes. Bugs caught here prevent wasted work later.
 
 ### Step 4: Connect Edges
 
@@ -282,10 +438,15 @@ Edit(
 )
 
 # Write entry points and terminal nodes
+# ⚠️ CRITICAL: entry_points format must be {"start": "node_id"}
+# Common mistake: {"node_id": ["input_keys"]} is WRONG
+# Correct format: {"start": "first-node-id"}
+# Reference: See exports/outbound_sales_agent/agent.py for example
+
 graph_config = f'''
 # Graph configuration
 entry_node = "{entry_node_id}"
-entry_points = {entry_points}
+entry_points = {{"start": "{entry_node_id}"}}  # CRITICAL: Must be {{"start": "node-id"}}
 pause_nodes = {pause_nodes}
 terminal_nodes = {terminal_nodes}
 
@@ -311,23 +472,101 @@ Edit(
 5 edges connecting 6 nodes
 ```
 
-#### Optional: Validate Graph Structure
+#### MANDATORY: Validate Graph Structure
 
-After writing edges, optionally validate with MCP tools:
+After writing edges, you MUST validate before proceeding to finalization:
 
 ```python
-# Edges already written to agent.py. Now validate structure:
-mcp__agent-builder__validate_graph()
+# Edges already written to agent.py. Now VALIDATE STRUCTURE (REQUIRED):
+graph_validation = json.loads(mcp__agent-builder__validate_graph())
 
-# Returns: unreachable nodes, missing connections, etc.
-# This is OPTIONAL - for validation only
+# Check for structural issues
+if graph_validation["valid"]:
+    print("✅ Graph structure validated successfully")
+
+    # Show session summary
+    status = json.loads(mcp__agent-builder__get_session_status())
+    print(f"   - Nodes: {status['node_count']}")
+    print(f"   - Edges: {status['edge_count']}")
+    print(f"   - Entry point: {entry_node_id}")
+else:
+    print("❌ Graph validation FAILED:")
+    for error in graph_validation["errors"]:
+        print(f"   ERROR: {error}")
+    print("\n⚠️ Must fix graph structure before finalizing agent")
+    # Ask user how to proceed
+
+# Additional validation: Check entry_points format
+if not isinstance(entry_points, dict):
+    print("❌ CRITICAL ERROR: entry_points must be a dict")
+    print(f"   Current value: {entry_points} (type: {type(entry_points)})")
+    print("   Correct format: {'start': 'node-id'}")
+    # STOP - This is the mistake that caused the support_ticket_agent bug
+
+if entry_points.get("start") != entry_node_id:
+    print("❌ CRITICAL ERROR: entry_points['start'] must match entry_node")
+    print(f"   entry_points: {entry_points}")
+    print(f"   entry_node: {entry_node_id}")
+    print("   They must be consistent!")
 ```
+
+**CRITICAL:** Do NOT proceed to Step 5 (finalization) until graph validation passes. This checkpoint prevents structural bugs from reaching production.
 
 ### Step 5: Finalize Agent Class
 
-Write the agent class:
+**Pre-flight checks before finalization:**
 
 ```python
+# MANDATORY: Verify all validations passed before finalizing
+print("\n🔍 Pre-finalization Checklist:")
+
+# Get current session status
+status = json.loads(mcp__agent-builder__get_session_status())
+
+checks_passed = True
+
+# Check 1: Goal defined
+if not status["has_goal"]:
+    print("❌ No goal defined")
+    checks_passed = False
+else:
+    print(f"✅ Goal defined: {status['goal_name']}")
+
+# Check 2: Nodes added
+if status["node_count"] == 0:
+    print("❌ No nodes added")
+    checks_passed = False
+else:
+    print(f"✅ {status['node_count']} nodes added: {', '.join(status['nodes'])}")
+
+# Check 3: Edges added
+if status["edge_count"] == 0:
+    print("❌ No edges added")
+    checks_passed = False
+else:
+    print(f"✅ {status['edge_count']} edges added")
+
+# Check 4: Entry points format correct
+if not isinstance(entry_points, dict) or "start" not in entry_points:
+    print("❌ CRITICAL: entry_points format incorrect")
+    print(f"   Current: {entry_points}")
+    print("   Required: {'start': 'node-id'}")
+    checks_passed = False
+else:
+    print(f"✅ Entry points valid: {entry_points}")
+
+if not checks_passed:
+    print("\n⚠️ CANNOT PROCEED to finalization until all checks pass")
+    print("   Fix the issues above first")
+    # Ask user how to proceed or stop here
+    return
+
+print("\n✅ All pre-flight checks passed - proceeding to finalization\n")
+```
+
+Write the agent class:
+
+````python
 agent_class_code = f'''
 
 class {agent_class_name}:
@@ -500,7 +739,7 @@ python -m {agent_name} run --input '{{"key": "value"}}'
 
 # Interactive shell
 python -m {agent_name} shell
-```
+````
 
 ## As Python Module
 
@@ -516,17 +755,19 @@ result = await default_agent.run({{"key": "value"}})
 - `nodes/__init__.py` - Node definitions
 - `config.py` - Runtime configuration
 - `__main__.py` - CLI interface
-'''
+  '''
 
 Write(
-    file_path=f"{package_path}/README.md",
-    content=readme_content
+file_path=f"{package_path}/README.md",
+content=readme_content
 )
+
 ```
 
 **Show user:**
 
 ```
+
 ✅ Agent class written to agent.py
 ✅ Package exports finalized in __init__.py
 ✅ README.md generated
@@ -534,10 +775,27 @@ Write(
 🎉 Agent complete: exports/technical_research_agent/
 
 Commands:
-  python -m technical_research_agent info
-  python -m technical_research_agent validate
-  python -m technical_research_agent run --input '{"topic": "..."}'
+python -m technical_research_agent info
+python -m technical_research_agent validate
+python -m technical_research_agent run --input '{"topic": "..."}'
 ```
+
+**Final session summary:**
+
+```python
+# Show final MCP session status
+status = json.loads(mcp__agent-builder__get_session_status())
+
+print("\n📊 Build Session Summary:")
+print(f"   Session ID: {status['session_id']}")
+print(f"   Agent: {status['name']}")
+print(f"   Goal: {status['goal_name']}")
+print(f"   Nodes: {status['node_count']}")
+print(f"   Edges: {status['edge_count']}")
+print(f"   MCP Servers: {status['mcp_servers_count']}")
+print("\n✅ Agent construction complete with full validation")
+print(f"\nSession saved to: ~/.claude-code-agent-builder/sessions/{status['session_id']}.json")
+````
 
 ## CLI Template
 
@@ -623,7 +881,7 @@ def shell():
 if __name__ == "__main__":
     cli()
 '''
-```
+````
 
 ## Testing During Build
 
@@ -677,11 +935,13 @@ response = AskUserQuestion(
 After completing construction:
 
 **If agent structure complete:**
+
 - Validate: `python -m agent_name validate`
 - Test basic execution: `python -m agent_name info`
 - Proceed to testing-agent skill for comprehensive tests
 
 **If implementation needed:**
+
 - Check for STATUS.md or IMPLEMENTATION_GUIDE.md in agent directory
 - May need Python functions or MCP tool integration
 
