@@ -1,5 +1,6 @@
 # Development Dockerfile with hot reload
-FROM node:20-alpine
+# The 'production' alias allows this to work with docker-compose.yml target
+FROM node:20-alpine AS production
 
 ARG NPM_TOKEN
 
