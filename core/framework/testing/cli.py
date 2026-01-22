@@ -420,7 +420,7 @@ def cmd_test_stats(args: argparse.Namespace) -> int:
 
     print(f"Statistics for goal {args.goal_id}:\n")
     print(f"  Total tests: {stats['total_tests']}")
-    print(f"\n  By approval status:")
+    print("\n  By approval status:")
     for status, count in stats["by_approval"].items():
         print(f"    {status}: {count}")
 
@@ -430,7 +430,7 @@ def cmd_test_stats(args: argparse.Namespace) -> int:
     failed = sum(1 for t in tests if t.last_result == "failed")
     not_run = sum(1 for t in tests if t.last_result is None)
 
-    print(f"\n  Execution results:")
+    print("\n  Execution results:")
     print(f"    Passed: {passed}")
     print(f"    Failed: {failed}")
     print(f"    Not run: {not_run}")

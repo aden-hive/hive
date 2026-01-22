@@ -1,10 +1,9 @@
 """Tests for the Runtime class - the agent's interface to record decisions."""
 
 import pytest
-import tempfile
 from pathlib import Path
 
-from framework import Runtime, Decision, Run
+from framework import Runtime
 from framework.schemas.decision import DecisionType
 
 
@@ -33,9 +32,8 @@ class TestRuntimeBasics:
         """Ending a run that wasn't started logs warning but doesn't raise."""
         runtime = Runtime(tmp_path)
 
-        # Should not raise - gracefully handles the case
+        # Should not raise, but log a warning instead
         runtime.end_run(success=True)
-        # Run is still None
         assert runtime.current_run is None
 
     def test_run_saved_on_end(self, tmp_path: Path):
@@ -82,15 +80,14 @@ class TestDecisionRecording:
         """Recording decisions without a run logs warning and returns empty string."""
         runtime = Runtime(tmp_path)
 
-        # Should not raise - gracefully handles the case
-        result = runtime.decide(
+        # Should not raise, but log a warning and return empty string
+        decision_id = runtime.decide(
             intent="Test",
             options=[{"id": "a", "description": "A"}],
             chosen="a",
             reasoning="Test",
         )
-        # Returns empty string when no run in progress
-        assert result == ""
+        assert decision_id == ""
 
     def test_decision_with_node_context(self, tmp_path: Path):
         """Test decision with node ID context."""
@@ -100,7 +97,7 @@ class TestDecisionRecording:
         # Set node context
         runtime.set_node("search-node")
 
-        decision_id = runtime.decide(
+        runtime.decide(
             intent="Search query",
             options=[{"id": "web", "description": "Web search"}],
             chosen="web",
@@ -280,7 +277,7 @@ class TestConvenienceMethods:
         runtime = Runtime(tmp_path)
         runtime.start_run("test_goal", "Test")
 
-        decision_id = runtime.quick_decision(
+        runtime.quick_decision(
             intent="Log message",
             action="Write to stdout",
             reasoning="Standard logging",

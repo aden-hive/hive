@@ -84,7 +84,7 @@ class AnthropicProvider(LLMProvider):
         tool_executor: callable,
         max_iterations: int = 10,
     ) -> LLMResponse:
-        """Run a tool-use loop until Claude produces a final response."""
+        """Run a tool-use loop until Claude produces a final response (via LiteLLM)."""
         return self._provider.complete_with_tools(
             messages=messages,
             system=system,

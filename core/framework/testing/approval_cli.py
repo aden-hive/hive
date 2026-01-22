@@ -11,7 +11,7 @@ import subprocess
 import os
 from typing import Callable
 
-from framework.testing.test_case import Test, ApprovalStatus
+from framework.testing.test_case import Test
 from framework.testing.test_storage import TestStorage
 from framework.testing.approval_types import (
     ApprovalAction,
@@ -165,14 +165,14 @@ def _display_test(test: Test, index: int, total: int) -> None:
     print(f"\nDescription: {test.description}")
 
     if test.input:
-        print(f"\nInput:")
+        print("\nInput:")
         print(json.dumps(test.input, indent=2))
 
     if test.expected_output:
-        print(f"\nExpected Output:")
+        print("\nExpected Output:")
         print(json.dumps(test.expected_output, indent=2))
 
-    print(f"\nTest Code:")
+    print("\nTest Code:")
     print("-" * 40)
     print(test.test_code)
     print("-" * 40)

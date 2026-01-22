@@ -26,7 +26,7 @@ if not os.environ.get("ANTHROPIC_API_KEY"):
         pass  # aden_tools not available
 
 from framework.graph import Goal, SuccessCriterion, Constraint, NodeSpec, EdgeSpec, EdgeCondition
-from framework.graph.edge import GraphSpec
+from framework.graph.plan import Plan
 
 # Testing framework imports
 from framework.testing.test_case import Test, ApprovalStatus, TestType
@@ -606,7 +606,7 @@ def add_edge(
             "options": [
                 {
                     "label": "✓ Approve (Recommended)",
-                    "description": f"Edge connection looks good"
+                    "description": "Edge connection looks good"
                 },
                 {
                     "label": "✗ Reject & Modify",
@@ -1194,7 +1194,6 @@ def export_graph() -> str:
     - exports/{agent-name}/agent.json - Full agent specification
     - exports/{agent-name}/README.md - Documentation
     """
-    import os
     from pathlib import Path
 
     session = get_session()
@@ -1712,7 +1711,7 @@ def test_node(
 
         if mock_llm_response:
             result["mock_response"] = mock_llm_response
-            result["simulation"] = f"LLM would receive prompt and produce response"
+            result["simulation"] = "LLM would receive prompt and produce response"
         else:
             result["simulation"] = "LLM would be called with the system prompt and input data"
 
@@ -3038,7 +3037,7 @@ def get_pending_tests(
 # PLAN LOADING AND EXECUTION
 # =============================================================================
 
-def load_plan_from_json(plan_json: str | dict) -> "Plan":
+def load_plan_from_json(plan_json: str | dict) -> Plan:
     """
     Load a Plan object from exported JSON.
 
