@@ -1,6 +1,5 @@
 """Tests for the BuilderQuery interface - how Builder analyzes agent runs."""
 
-import pytest
 from pathlib import Path
 
 from framework import Runtime, BuilderQuery
