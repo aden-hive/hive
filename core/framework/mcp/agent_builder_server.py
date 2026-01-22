@@ -15,6 +15,7 @@ from typing import Annotated
 from mcp.server import FastMCP
 
 from framework.graph import Goal, SuccessCriterion, Constraint, NodeSpec, EdgeSpec, EdgeCondition
+from framework.graph.plan import Plan
 
 # Testing framework imports
 from framework.testing.test_case import Test, ApprovalStatus, TestType
@@ -2644,7 +2645,7 @@ def get_pending_tests(
 # PLAN LOADING AND EXECUTION
 # =============================================================================
 
-def load_plan_from_json(plan_json: str | dict) -> "Plan":
+def load_plan_from_json(plan_json: str | dict) -> Plan:
     """
     Load a Plan object from exported JSON.
 
