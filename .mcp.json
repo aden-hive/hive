@@ -7,6 +7,14 @@
       "env": {
         "PYTHONPATH": "../aden-tools/src"
       }
+    },
+    "aden-tools": {
+      "command": "python",
+      "args": ["mcp_server.py", "--stdio"],
+      "cwd": "aden-tools",
+      "env": {
+        "PYTHONPATH": "src"
+      }
     }
   }
 }

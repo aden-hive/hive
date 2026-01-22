@@ -1,166 +1,20 @@
 ---
-name: building-agents
-description: Build goal-driven agents as Python packages. Creates runnable services with full framework access. Use when asked to create an agent, design a workflow, or build automation.
+name: building-agents-construction
+description: Step-by-step guide for building goal-driven agents. Creates package structure, defines goals, adds nodes, connects edges, and finalizes agent class. Use when actively building an agent.
+license: Apache-2.0
+metadata:
+  author: hive
+  version: "1.0"
+  type: procedural
+  part_of: building-agents
+  requires: building-agents-core
 ---
 
-# Building Agents
+# Building Agents - Construction Process
 
-Build goal-driven agents as **Python service packages** with direct file manipulation.
+Step-by-step guide for building goal-driven agent packages.
 
-## Architecture: Python Services (Not JSON Configs)
-
-Agents are built as Python packages:
-```
-exports/my_agent/
-├── __init__.py          # Package exports
-├── __main__.py          # CLI (run, info, validate, shell)
-├── agent.py             # Graph construction (goal, edges, agent class)
-├── nodes/__init__.py    # Node definitions (NodeSpec)
-├── config.py            # Runtime config
-└── README.md            # Documentation
-```
-
-**Key Principle: Agent is visible and editable during build**
-- ✅ Files created immediately as components are approved
-- ✅ User can watch files grow in their editor
-- ✅ No session state - just direct file writes
-- ✅ No "export" step - agent is ready when build completes
-
-## Core Concepts
-
-**Goal**: Success criteria and constraints (written to agent.py)
-
-**Node**: Unit of work (written to nodes/__init__.py)
-- `llm_generate` - Text generation, parsing
-- `llm_tool_use` - Actions requiring tools
-- `router` - Conditional branching
-- `function` - Deterministic operations
-
-**Edge**: Connection between nodes (written to agent.py)
-- `on_success` - Proceed if node succeeds
-- `on_failure` - Handle errors
-- `always` - Always proceed
-- `conditional` - Based on expression
-
-**Pause/Resume**: Multi-turn conversations
-- Pause nodes stop execution, wait for user input
-- Resume entry points continue from pause with user's response
-
-## Tool Discovery & Validation
-
-**CRITICAL:** Before adding a node with tools, you MUST verify the tools exist.
-
-Tools are provided by MCP servers. Never assume a tool exists - always discover dynamically.
-
-### Step 1: Register MCP Server (if not already done)
-
-```python
-mcp__agent-builder__add_mcp_server(
-    name="aden-tools",
-    transport="stdio",
-    command="python",
-    args='["mcp_server.py", "--stdio"]',
-    cwd="../aden-tools"
-)
-```
-
-### Step 2: Discover Available Tools
-
-```python
-# List all tools from all registered servers
-mcp__agent-builder__list_mcp_tools()
-
-# Or list tools from a specific server
-mcp__agent-builder__list_mcp_tools(server_name="aden-tools")
-```
-
-This returns available tools with their descriptions and parameters:
-```json
-{
-  "success": true,
-  "tools_by_server": {
-    "aden-tools": [
-      {"name": "web_search", "description": "Search the web...", "parameters": ["query"]},
-      {"name": "web_scrape", "description": "Scrape a URL...", "parameters": ["url"]}
-    ]
-  },
-  "total_tools": 14
-}
-```
-
-### Step 3: Validate Before Adding Nodes
-
-Before writing a node with `tools=[...]`:
-1. Call `list_mcp_tools()` to get available tools
-2. Check each tool in your node exists in the response
-3. If a tool doesn't exist:
-   - **DO NOT proceed** with the node
-   - Inform the user: "The tool 'X' is not available. Available tools are: ..."
-   - Ask if they want to use an alternative or proceed without the tool
-
-### Tool Validation Anti-Patterns
-
-❌ **Never assume a tool exists** - always call `list_mcp_tools()` first
-❌ **Never write a node with unverified tools** - validate before writing
-❌ **Never silently drop tools** - if a tool doesn't exist, inform the user
-❌ **Never guess tool names** - use exact names from discovery response
-
-### Example Validation Flow
-
-```python
-# 1. User requests: "Add a node that searches the web"
-# 2. Discover available tools
-tools_response = mcp__agent-builder__list_mcp_tools()
-
-# 3. Check if web_search exists
-available = [t["name"] for tools in tools_response["tools_by_server"].values() for t in tools]
-if "web_search" not in available:
-    # Inform user and ask how to proceed
-    print("❌ 'web_search' not available. Available tools:", available)
-else:
-    # Proceed with node creation
-    # ...
-```
-
-## Workflow: Incremental File Construction
-
-```
-1. CREATE PACKAGE → mkdir + write skeletons
-2. DEFINE GOAL → Write to agent.py + config.py
-3. FOR EACH NODE:
-   - Propose design
-   - User approves
-   - Write to nodes/__init__.py IMMEDIATELY ← FILE WRITTEN
-   - (Optional) Validate with test_node ← MCP VALIDATION
-   - User can open file and see it
-4. CONNECT EDGES → Update agent.py ← FILE WRITTEN
-   - (Optional) Validate with validate_graph ← MCP VALIDATION
-5. FINALIZE → Write agent class to agent.py ← FILE WRITTEN
-6. DONE - Agent ready at exports/my_agent/
-```
-
-**Files written immediately. MCP tools optional for validation/testing bookkeeping.**
-
-### The Key Difference
-
-**OLD (Bad):**
-```
-MCP add_node → Session State → MCP add_node → Session State → ...
-                                                                ↓
-                                                     MCP export_graph
-                                                                ↓
-                                                       Files appear
-```
-
-**NEW (Good):**
-```
-Write node to file → (Optional: MCP test_node) → Write node to file → ...
-       ↓                                               ↓
-  File visible                                    File visible
-  immediately                                     immediately
-```
-
-**Bottom line:** Use Write/Edit for construction, MCP for validation if needed.
+**Prerequisites:** Read `building-agents-core` for fundamental concepts.
 
 ## Step-by-Step Guide
 
@@ -237,6 +91,7 @@ Write(
 ```
 
 **Show user:**
+
 ```
 ✅ Package created: exports/technical_research_agent/
 📁 Files created:
@@ -311,6 +166,7 @@ Edit(
 ```
 
 **Show user:**
+
 ```
 ✅ Goal written to agent.py
 ✅ Metadata written to config.py
@@ -321,6 +177,7 @@ Open exports/technical_research_agent/agent.py to see the goal!
 ### Step 3: Add Nodes (Incremental)
 
 **⚠️ IMPORTANT:** Before adding any node with tools, you MUST:
+
 1. Call `mcp__agent-builder__list_mcp_tools()` to discover available tools
 2. Verify each tool exists in the response
 3. If a tool doesn't exist, inform the user and ask how to proceed
@@ -367,6 +224,7 @@ Edit(
 ```
 
 **Show user after each node:**
+
 ```
 ✅ Added analyze_request_node to nodes/__init__.py
 📊 Progress: 1/6 nodes added
@@ -445,6 +303,7 @@ Edit(
 ```
 
 **Show user:**
+
 ```
 ✅ Edges written to agent.py
 ✅ Graph configuration added
@@ -629,7 +488,7 @@ readme_content = f'''# {agent_name.replace('_', ' ').title()}
 
 ## Usage
 
-\`\`\`bash
+```bash
 # Show agent info
 python -m {agent_name} info
 
@@ -641,15 +500,15 @@ python -m {agent_name} run --input '{{"key": "value"}}'
 
 # Interactive shell
 python -m {agent_name} shell
-\`\`\`
+```
 
 ## As Python Module
 
-\`\`\`python
+```python
 from {agent_name} import default_agent
 
 result = await default_agent.run({{"key": "value"}})
-\`\`\`
+```
 
 ## Structure
 
@@ -666,6 +525,7 @@ Write(
 ```
 
 **Show user:**
+
 ```
 ✅ Agent class written to agent.py
 ✅ Package exports finalized in __init__.py
@@ -812,104 +672,22 @@ response = AskUserQuestion(
 )
 ```
 
-## Pause/Resume Architecture
+## Next Steps
 
-For agents needing multi-turn conversations:
+After completing construction:
 
-1. **Pause node**: Execution stops, waits for user input
-2. **Resume entry point**: Continues from pause with user's response
+**If agent structure complete:**
+- Validate: `python -m agent_name validate`
+- Test basic execution: `python -m agent_name info`
+- Proceed to testing-agent skill for comprehensive tests
 
-```python
-# Example pause/resume flow
-pause_nodes = ["request-clarification"]
-entry_points = {
-    "start": "analyze-request",
-    "request-clarification_resume": "process-clarification"
-}
-```
+**If implementation needed:**
+- Check for STATUS.md or IMPLEMENTATION_GUIDE.md in agent directory
+- May need Python functions or MCP tool integration
 
-## Practical Example: Hybrid Workflow
+## Related Skills
 
-Here's how to build a node using both approaches:
-
-```python
-# 1. WRITE TO FILE FIRST (Primary - makes it visible)
-node_code = '''
-search_node = NodeSpec(
-    id="search-web",
-    node_type="llm_tool_use",
-    input_keys=["query"],
-    output_keys=["search_results"],
-    system_prompt="Search the web for: {query}",
-    tools=["web_search"],
-)
-'''
-
-Edit(
-    file_path="exports/research_agent/nodes/__init__.py",
-    old_string="# Nodes will be added here",
-    new_string=node_code
-)
-
-print("✅ Added search_node to nodes/__init__.py")
-print("📁 Open exports/research_agent/nodes/__init__.py to see it!")
-
-# 2. OPTIONALLY VALIDATE WITH MCP (Secondary - bookkeeping)
-validation = mcp__agent-builder__test_node(
-    node_id="search-web",
-    test_input='{"query": "python tutorials"}',
-    mock_llm_response='{"search_results": [...mock results...]}'
-)
-
-print(f"✓ Validation: {validation['success']}")
-```
-
-**User experience:**
-- Immediately sees node in their editor (from step 1)
-- Gets validation feedback (from step 2)
-- Can edit the file directly if needed
-
-This combines visibility (files) with validation (MCP tools).
-
-## Anti-Patterns
-
-❌ **Don't rely on `export_graph`** - Write files immediately, not at end
-❌ **Don't hide code in session** - Write to files as components approved
-❌ **Don't wait to write files** - Agent visible from first step
-❌ **Don't batch everything** - Write incrementally
-
-**MCP tools OK for:**
-✅ `test_node` - Validate node configuration with mock inputs
-✅ `validate_graph` - Check graph structure
-✅ `create_session` - Track session state for bookkeeping
-✅ Other validation tools
-
-**Just don't:** Use MCP as the primary construction method or rely on export_graph
-
-## Best Practices
-
-✅ **Show progress** after each file write
-✅ **Let user open files** during build
-✅ **Write incrementally** - one component at a time
-✅ **Test as you build** - validate after each addition
-✅ **Keep user informed** - show file paths and diffs
-
-## Handoff to testing-agent
-
-When agent is complete:
-
-```
-✅ Agent complete: exports/my_agent/
-
-Next steps:
-1. Switch to testing-agent skill
-2. Generate and approve tests
-3. Run evaluation
-4. Debug any failures
-
-Command: "Test the agent at exports/my_agent/"
-```
-
----
-
-**Remember: Agent is actively constructed, visible the whole time. No hidden state. No surprise exports. Just transparent, incremental file building.**
+- **building-agents-core** - Fundamental concepts
+- **building-agents-patterns** - Best practices and examples
+- **testing-agent** - Test and validate completed agents
+- **agent-workflow** - Complete workflow orchestrator
