@@ -167,6 +167,22 @@ docker compose up --build
 
 ## Troubleshooting
 
+### Validate Environment Variables (Recommended)
+
+Hive validates required environment variables at startup and will fail fast with actionable error messages if configuration is missing or invalid.
+
+You can run the validator directly:
+
+```bash
+npm run config:validate
+```
+
+To write a JSON artifact for CI/monitoring tools:
+
+```bash
+npm run config:validate -- --json
+```
+
 ### Changes Not Taking Effect
 
 1. Ensure you ran `npm run generate:env`

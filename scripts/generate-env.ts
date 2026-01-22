@@ -13,6 +13,8 @@ import { parse } from 'yaml';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
+import { formatEnvReportHuman, validateEnv } from '../hive/src/config/env-schema';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
 
@@ -77,6 +79,15 @@ function loadConfig(): Config {
   return parse(configContent) as Config;
 }
 
+function renderEnvFile(vars: Record<string, string | number | boolean | undefined>): string {
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(vars)) {
+    if (value === undefined) continue;
+    lines.push(`${key}=${value}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 function generateRootEnv(config: Config): string {
   return `# Generated from config.yaml - do not edit directly
 # Regenerate with: npm run generate:env
@@ -123,34 +134,63 @@ VITE_APP_ENV=${config.app.environment}
 }
 
 function generateBackendEnv(config: Config): string {
+  const backendVars: Record<string, string | number | boolean | undefined> = {
+    // Server
+    NODE_ENV: config.app.environment,
+    PORT: config.server.backend.port,
+
+    // Application
+    LOG_LEVEL: config.app.log_level,
+
+    // TimescaleDB (PostgreSQL)
+    TSDB_PG_URL: config.timescaledb.url,
+
+    // MongoDB
+    MONGODB_URL: config.mongodb.url,
+    // Alias for compatibility / tooling
+    MONGODB_URI: config.mongodb.url,
+    MONGODB_DBNAME: config.mongodb.database,
+    MONGODB_ERP_DBNAME: config.mongodb.erp_database,
+
+    // Redis
+    REDIS_URL: config.redis.url,
+    // Useful for tooling that expects host/port
+    REDIS_HOST: (() => {
+      try {
+        return new URL(config.redis.url).hostname;
+      } catch {
+        return undefined;
+      }
+    })(),
+    REDIS_PORT: (() => {
+      try {
+        return new URL(config.redis.url).port || String(config.redis.port);
+      } catch {
+        return String(config.redis.port);
+      }
+    })(),
+
+    // Authentication
+    JWT_SECRET: config.auth.jwt_secret,
+    PASSPHRASE: config.auth.passphrase,
+
+    // Features
+    FEATURE_MCP_SERVER: config.features.mcp_server,
+  };
+
+  // Validate backend env output before writing files.
+  const report = validateEnv(backendVars as NodeJS.ProcessEnv, { nodeEnv: String(backendVars.NODE_ENV ?? 'development') });
+  if (!report.ok) {
+    console.error(formatEnvReportHuman(report));
+    console.error('\n[Env] Refusing to generate env files because required variables are missing/invalid.');
+    console.error('[Env] Fix config.yaml then re-run: npm run generate:env');
+    process.exit(1);
+  }
+
   return `# Generated from config.yaml - do not edit directly
 # Regenerate with: npm run generate:env
 
-# Server
-NODE_ENV=${config.app.environment}
-PORT=${config.server.backend.port}
-
-# Application
-LOG_LEVEL=${config.app.log_level}
-
-# TimescaleDB (PostgreSQL)
-TSDB_PG_URL=${config.timescaledb.url}
-
-# MongoDB
-MONGODB_URL=${config.mongodb.url}
-MONGODB_DBNAME=${config.mongodb.database}
-MONGODB_ERP_DBNAME=${config.mongodb.erp_database}
-
-# Redis
-REDIS_URL=${config.redis.url}
-
-# Authentication
-JWT_SECRET=${config.auth.jwt_secret}
-PASSPHRASE=${config.auth.passphrase}
-
-# Features
-FEATURE_MCP_SERVER=${config.features.mcp_server}
-`;
+${renderEnvFile(backendVars)}`;
 }
 
 function main() {
