@@ -21,7 +21,7 @@ CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 
 echo ""
 echo "================================================"
-echo "  Hive Agent Framework - Skill Installation"
+echo "  Aden Agent Framework - Skill Installation"
 echo "================================================"
 echo ""
 
