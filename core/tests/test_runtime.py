@@ -33,8 +33,9 @@ class TestRuntimeBasics:
         """Cannot end a run that wasn't started."""
         runtime = Runtime(tmp_path)
 
-        with pytest.raises(RuntimeError, match="No run in progress"):
-            runtime.end_run(success=True)
+        # Should not raise, but log a warning instead
+        runtime.end_run(success=True)
+        assert runtime.current_run is None
 
     def test_run_saved_on_end(self, tmp_path: Path):
         """Run is saved to storage when ended."""
@@ -80,13 +81,14 @@ class TestDecisionRecording:
         """Cannot record decisions without a run."""
         runtime = Runtime(tmp_path)
 
-        with pytest.raises(RuntimeError, match="No run in progress"):
-            runtime.decide(
-                intent="Test",
-                options=[{"id": "a", "description": "A"}],
-                chosen="a",
-                reasoning="Test",
-            )
+        # Should not raise, but log a warning and return empty string
+        decision_id = runtime.decide(
+            intent="Test",
+            options=[{"id": "a", "description": "A"}],
+            chosen="a",
+            reasoning="Test",
+        )
+        assert decision_id == ""
 
     def test_decision_with_node_context(self, tmp_path: Path):
         """Test decision with node ID context."""
