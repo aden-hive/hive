@@ -57,14 +57,15 @@ Adenは、AIエージェントの構築、デプロイ、運用、適応のた�
 - **[ドキュメント](https://docs.adenhq.com/)** - 完全なガイドとAPIリファレンス
 - **[セルフホスティングガイド](https://docs.adenhq.com/getting-started/quickstart)** - インフラストラクチャへのHiveデプロイ
 - **[変更履歴](https://github.com/adenhq/hive/releases)** - 最新の更新とリリース
+<!-- - **[ロードマップ](https://adenhq.com/roadmap)** - 今後の機能と計画 -->
 - **[問題を報告](https://github.com/adenhq/hive/issues)** - バグレポートと機能リクエスト
 
 ## クイックスタート
 
 ### 前提条件
 
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+)
-- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0+)
+- [Python 3.11+](https://www.python.org/downloads/) - エージェント開発用
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - オプション、コンテナ化されたツール用
 
 ### インストール
 
@@ -73,19 +74,32 @@ Adenは、AIエージェントの構築、デプロイ、運用、適応のた�
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# コピーして設定
-cp config.yaml.example config.yaml
-
-# セットアップを実行してサービスを開始
-npm run setup
-docker compose up
+# Python環境セットアップを実行
+./scripts/setup-python.sh
 ```
 
-**アプリケーションにアクセス：**
+これにより以下がインストールされます：
+- **framework** - コアエージェントランタイムとグラフエグゼキュータ
+- **aden_tools** - エージェント機能のための19個のMCPツール
+- すべての必要な依存関係
 
-- ダッシュボード：http://localhost:3000
-- API：http://localhost:4000
-- ヘルスチェック：http://localhost:4000/health
+### 最初のエージェントを構築
+
+```bash
+# Claude Codeスキルをインストール（1回のみ）
+./quickstart.sh
+
+# Claude Codeを使用してエージェントを構築
+claude> /building-agents
+
+# エージェントをテスト
+claude> /testing-agent
+
+# エージェントを実行
+PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+```
+
+**[📖 完全セットアップガイド](ENVIRONMENT_SETUP.md)** - エージェント開発の詳細な手順
 
 ## 機能
 
@@ -101,6 +115,51 @@ docker compose up
 ## なぜAdenか
 
 従来のエージェントフレームワークでは、ワークフローを手動で設計し、エージェントの相互作用を定義し、障害を事後的に処理する必要があります。Adenはこのパラダイムを逆転させます—**結果を記述すれば、システムが自ら構築します**。
+
+```mermaid
+flowchart LR
+    subgraph BUILD["🏗️ BUILD"]
+        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>LLM/Router/Function"]
+        NODES --> EDGES["Connect Edges<br/>on_success/failure/conditional"]
+        EDGES --> TEST["Test & Validate"] --> APPROVE["Approve & Export"]
+    end
+
+    subgraph EXPORT["📦 EXPORT"]
+        direction TB
+        JSON["agent.json<br/>(GraphSpec)"]
+        TOOLS["tools.py<br/>(Functions)"]
+        MCP["mcp_servers.json<br/>(Integrations)"]
+    end
+
+    subgraph RUN["🚀 RUNTIME"]
+        LOAD["AgentRunner<br/>Load + Parse"] --> SETUP["Setup Runtime<br/>+ ToolRegistry"]
+        SETUP --> EXEC["GraphExecutor<br/>Execute Nodes"]
+
+        subgraph DECISION["Decision Recording"]
+            DEC1["runtime.decide()<br/>intent → options → choice"]
+            DEC2["runtime.record_outcome()<br/>success, result, metrics"]
+        end
+    end
+
+    subgraph INFRA["⚙️ INFRASTRUCTURE"]
+        CTX["NodeContext<br/>memory • llm • tools"]
+        STORE[("FileStorage<br/>Runs & Decisions")]
+    end
+
+    APPROVE --> EXPORT
+    EXPORT --> LOAD
+    EXEC --> DECISION
+    EXEC --> CTX
+    DECISION --> STORE
+    STORE -.->|"Analyze & Improve"| NODES
+
+    style BUILD fill:#ffbe42,stroke:#cc5d00,stroke-width:3px,color:#333
+    style EXPORT fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
+    style RUN fill:#ffb100,stroke:#cc5d00,stroke-width:3px,color:#333
+    style DECISION fill:#ffcc80,stroke:#ed8c00,stroke-width:2px,color:#333
+    style INFRA fill:#e8763d,stroke:#cc5d00,stroke-width:3px,color:#fff
+    style STORE fill:#ed8c00,stroke:#cc5d00,stroke-width:2px,color:#fff
+```
 
 ### Adenの優位性
 
@@ -121,45 +180,72 @@ docker compose up
 4. **コントロールプレーンが監視** → リアルタイムメトリクス、予算執行、ポリシー管理
 5. **自己改善** → 障害時、システムがグラフを進化させ自動的に再デプロイ
 
+## Adenの比較
+
+Adenはエージェント開発に根本的に異なるアプローチを採用しています。ほとんどのフレームワークがワークフローをハードコードするか、エージェントグラフを手動で定義することを要求するのに対し、Adenは**コーディングエージェントを使用して自然言語の目標からエージェントシステム全体を生成**します。エージェントが失敗した場合、フレームワークは単にエラーをログに記録するだけでなく—**自動的にエージェントグラフを進化させ**、再デプロイします。
+
+> **注意：** 詳細なフレームワーク比較表とよくある質問については、英語の[README.md](README.md)を参照してください。
+
+### Adenを選ぶべきとき
+
+Adenを選択する場合：
+
+- 手動介入なしに**失敗から自己改善する**エージェントが必要
+- ワークフローではなく結果を記述する**目標駆動開発**が必要
+- 自動回復と再デプロイを備えた**本番環境の信頼性**が必要
+- コードを書き直すことなくエージェントアーキテクチャを**迅速に反復**する必要がある
+- リアルタイムモニタリングと人間の監督を備えた**完全な可観測性**が必要
+
+他のフレームワークを選択する場合：
+
+- **型安全で予測可能なワークフロー**（PydanticAI、Mastra）
+- **RAGとドキュメント処理**（LlamaIndex、Haystack）
+- **エージェント創発の研究**（CAMEL）
+- **リアルタイム音声/マルチモーダル**（TEN Framework）
+- **シンプルなコンポーネント連鎖**（LangChain、Swarm）
+
 ## プロジェクト構造
 
 ```
 hive/
-├── honeycomb/          # フロントエンド (React + TypeScript + Vite)
-├── hive/               # バックエンド (Node.js + TypeScript + Express)
-├── docs/               # ドキュメント
-├── scripts/            # ビルドとユーティリティスクリプト
-├── config.yaml.example # 設定テンプレート
-└── docker-compose.yml  # コンテナオーケストレーション
+├── core/                   # コアフレームワーク - エージェントランタイム、グラフエグゼキュータ、プロトコル
+├── tools/                  # MCPツールパッケージ - エージェント機能のための19個のツール
+├── exports/                # エージェントパッケージ - 事前構築されたエージェントと例
+├── docs/                   # ドキュメントとガイド
+├── scripts/                # ビルドとユーティリティスクリプト
+├── .claude/                # エージェント構築用のClaude Codeスキル
+├── ENVIRONMENT_SETUP.md    # エージェント開発用のPythonセットアップガイド
+├── DEVELOPER.md            # 開発者ガイド
+├── CONTRIBUTING.md         # 貢献ガイドライン
+└── ROADMAP.md              # プロダクトロードマップ
 ```
 
 ## 開発
 
-### ホットリロードでのローカル開発
+### Pythonエージェント開発
+
+フレームワークで目標駆動エージェントを構築および実行するには：
 
 ```bash
-# 開発用オーバーライドをコピー
-cp docker-compose.override.yml.example docker-compose.override.yml
+# 1回限りのセットアップ
+./scripts/setup-python.sh
 
-# ホットリロードを有効にして開始
-docker compose up
+# これにより以下がインストールされます：
+# - frameworkパッケージ（コアランタイム）
+# - aden_toolsパッケージ（19個のMCPツール）
+# - すべての依存関係
+
+# Claude Codeスキルを使用して新しいエージェントを構築
+claude> /building-agents
+
+# エージェントをテスト
+claude> /testing-agent
+
+# エージェントを実行
+PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 ```
 
-### Dockerなしで実行
-
-```bash
-# 依存関係をインストール
-npm install
-
-# 環境ファイルを生成
-npm run generate:env
-
-# フロントエンドを開始（honeycomb/内）
-cd honeycomb && npm run dev
-
-# バックエンドを開始（hive/内）
-cd hive && npm run dev
-```
+完全なセットアップ手順については、[ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)を参照してください。
 
 ## ドキュメント
 
@@ -170,9 +256,25 @@ cd hive && npm run dev
 
 ## ロードマップ
 
-Adenエージェントフレームワークは、開発者が結果志向で自己適応するエージェントを構築できるよう支援することを目指しています。ロードマップはこちらをご覧ください：
+Adenエージェントフレームワークは、開発者が結果志向で自己適応するエージェントを構築できるよう支援することを目指しています。ロードマップはこちらをご覧ください
 
 [ROADMAP.md](ROADMAP.md)
+
+```mermaid
+timeline
+    title Aden Agent Framework Roadmap
+    section Foundation
+        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
+        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
+        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
+        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
+        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
+    section Expansion
+        Intelligence : Guardrails : Streaming Mode : Semantic Search
+        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
+        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
+        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
+```
 
 ## コミュニティとサポート
 
@@ -208,33 +310,27 @@ Adenエージェントフレームワークは、開発者が結果志向で自�
 
 ## よくある質問 (FAQ)
 
+> **注意：** よくある質問の完全版については、英語の[README.md](README.md)を参照してください。
+
 **Q: AdenはLangChainや他のエージェントフレームワークに依存していますか？**
 
 いいえ。AdenはLangChain、CrewAI、その他のエージェントフレームワークに依存せずにゼロから構築されています。フレームワークは軽量で柔軟に設計されており、事前定義されたコンポーネントに依存するのではなく、エージェントグラフを動的に生成します。
 
 **Q: AdenはどのLLMプロバイダーをサポートしていますか？**
 
-AdenはOpenAI（GPT-4、GPT-4o）、Anthropic（Claudeモデル）、Google Geminiを標準でサポートしています。アーキテクチャはSDK抽象化によりプロバイダー非依存であり、拡張モデルサポートのためのLiteLLM統合がロードマップにあります。
+AdenはLiteLLM統合を通じて100以上のLLMプロバイダーをサポートしており、OpenAI（GPT-4、GPT-4o）、Anthropic（Claudeモデル）、Google Gemini、Mistral、Groqなどが含まれます。適切なAPIキー環境変数を設定し、モデル名を指定するだけです。
 
 **Q: Adenはオープンソースですか？**
 
 はい、AdenはApache License 2.0の下で完全にオープンソースです。コミュニティの貢献とコラボレーションを積極的に奨励しています。
 
-**Q: Adenはどのデプロイオプションをサポートしていますか？**
+**Q: Adenは他のエージェントフレームワークと何が違いますか？**
 
-Adenは本番環境と開発環境の両方の設定でDocker Composeデプロイを標準でサポートしています。セルフホストデプロイはDockerをサポートする任意のインフラストラクチャで動作します。クラウドデプロイオプションとKubernetes対応設定はロードマップにあります。
-
-**Q: Adenは複雑な本番規模のユースケースを処理できますか？**
-
-はい。Adenは自動障害回復、リアルタイム可観測性、コスト制御、水平スケーリングサポートなどの機能を備え、本番環境向けに明示的に設計されています。フレームワークは単純な自動化から複雑なマルチエージェントワークフローまで処理できます。
+Adenはコーディングエージェントを使用して自然言語の目標からエージェントシステム全体を生成します—ワークフローをハードコードしたり、グラフを手動で定義したりする必要はありません。エージェントが失敗すると、フレームワークは自動的に障害データをキャプチャし、エージェントグラフを進化させ、再デプロイします。この自己改善ループはAden独自のものです。
 
 **Q: Adenはヒューマンインザループワークフローをサポートしていますか？**
 
 はい、Adenは人間の入力のために実行を一時停止する介入ノードを通じて、ヒューマンインザループワークフローを完全にサポートしています。設定可能なタイムアウトとエスカレーションポリシーが含まれており、人間の専門家とAIエージェントのシームレスなコラボレーションを可能にします。
-
-**Q: Adenに貢献するにはどうすればよいですか？**
-
-貢献を歓迎します！リポジトリをフォークし、機能ブランチを作成し、変更を実装して、プルリクエストを送信してください。詳細なガイドラインについては[CONTRIBUTING.md](CONTRIBUTING.md)をご覧ください。
 
 ---
 
