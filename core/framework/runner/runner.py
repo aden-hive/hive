@@ -12,6 +12,7 @@ from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition
 from framework.graph.node import NodeSpec
 from framework.graph.executor import GraphExecutor, ExecutionResult
 from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
+from framework.llm.litellm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.core import Runtime
 
@@ -183,7 +184,8 @@ class AgentRunner:
             goal: Loaded Goal object
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to temp)
-            model: Anthropic model to use
+            model: Model to use - any LiteLLM-compatible model name
+                   (e.g., "claude-sonnet-4-20250514", "gpt-4o-mini", "gemini/gemini-pro")
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -313,16 +315,16 @@ class AgentRunner:
         Example:
             # Register STDIO MCP server
             runner.register_mcp_server(
-                name="aden-tools",
+                name="tools",
                 transport="stdio",
                 command="python",
                 args=["-m", "aden_tools.mcp_server", "--stdio"],
-                cwd="/path/to/aden-tools"
+                cwd="/path/to/tools"
             )
 
             # Register HTTP MCP server
             runner.register_mcp_server(
-                name="aden-tools",
+                name="tools",
                 transport="http",
                 url="http://localhost:4001"
             )

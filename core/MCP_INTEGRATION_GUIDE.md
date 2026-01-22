@@ -21,13 +21,13 @@ from framework.runner.runner import AgentRunner
 # Load your agent
 runner = AgentRunner.load("exports/my-agent")
 
-# Register aden-tools MCP server
+# Register tools MCP server
 runner.register_mcp_server(
-    name="aden-tools",
+    name="tools",
     transport="stdio",
     command="python",
     args=["-m", "aden_tools.mcp_server", "--stdio"],
-    cwd="/path/to/aden-tools"
+    cwd="/path/to/tools"
 )
 
 # Tools are now available to your agent
@@ -42,11 +42,11 @@ Create `mcp_servers.json` in your agent folder:
 {
   "servers": [
     {
-      "name": "aden-tools",
+      "name": "tools",
       "transport": "stdio",
       "command": "python",
       "args": ["-m", "aden_tools.mcp_server", "--stdio"],
-      "cwd": "../aden-tools"
+      "cwd": "../tools"
     }
   ]
 }
@@ -78,6 +78,7 @@ runner.register_mcp_server(
 ```
 
 **Configuration:**
+
 - `command`: Executable to run (e.g., "python", "node")
 - `args`: List of command-line arguments
 - `cwd`: Working directory for the process
@@ -99,6 +100,7 @@ runner.register_mcp_server(
 ```
 
 **Configuration:**
+
 - `url`: Base URL of the MCP server
 - `headers`: HTTP headers to include (optional)
 
@@ -119,7 +121,7 @@ builder.add_node(
     name="Web Researcher",
     node_type="llm_tool_use",
     system_prompt="Research the topic using web_search",
-    tools=["web_search"],  # Tool from aden-tools MCP server
+    tools=["web_search"],  # Tool from tools MCP server
     input_keys=["topic"],
     output_keys=["findings"]
 )
@@ -145,9 +147,9 @@ Tools from MCP servers can be referenced in your agent.json just like built-in t
 }
 ```
 
-## Available Tools from aden-tools
+## Available Tools from tools
 
-When you register the `aden-tools` MCP server, the following tools become available:
+When you register the `tools` MCP server, the following tools become available:
 
 - **web_search**: Search the web using Brave Search API
 - **web_scrape**: Scrape content from a URL
@@ -163,11 +165,11 @@ Some MCP tools require environment variables. You can pass them in the configura
 
 ```python
 runner.register_mcp_server(
-    name="aden-tools",
+    name="tools",
     transport="stdio",
     command="python",
     args=["-m", "aden_tools.mcp_server", "--stdio"],
-    cwd="../aden-tools",
+    cwd="../tools",
     env={
         "BRAVE_SEARCH_API_KEY": os.environ["BRAVE_SEARCH_API_KEY"]
     }
@@ -180,11 +182,11 @@ runner.register_mcp_server(
 {
   "servers": [
     {
-      "name": "aden-tools",
+      "name": "tools",
       "transport": "stdio",
       "command": "python",
       "args": ["-m", "aden_tools.mcp_server", "--stdio"],
-      "cwd": "../aden-tools",
+      "cwd": "../tools",
       "env": {
         "BRAVE_SEARCH_API_KEY": "${BRAVE_SEARCH_API_KEY}"
       }
@@ -203,11 +205,11 @@ You can register multiple MCP servers to access different sets of tools:
 {
   "servers": [
     {
-      "name": "aden-tools",
+      "name": "tools",
       "transport": "stdio",
       "command": "python",
       "args": ["-m", "aden_tools.mcp_server", "--stdio"],
-      "cwd": "../aden-tools"
+      "cwd": "../tools"
     },
     {
       "name": "database-tools",
@@ -243,6 +245,7 @@ runner.register_mcp_server(
 ### 2. Use HTTP for Production
 
 HTTP transport is better for:
+
 - Containerized deployments
 - Shared tools across multiple agents
 - Remote tool execution
@@ -330,11 +333,11 @@ async def main():
 
     # Register MCP server
     runner.register_mcp_server(
-        name="aden-tools",
+        name="tools",
         transport="stdio",
         command="python",
         args=["-m", "aden_tools.mcp_server", "--stdio"],
-        cwd="../aden-tools",
+        cwd="../tools",
         env={
             "BRAVE_SEARCH_API_KEY": "your-api-key"
         }

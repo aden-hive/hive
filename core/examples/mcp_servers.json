@@ -1,18 +1,18 @@
 {
   "servers": [
     {
-      "name": "aden-tools",
+      "name": "tools",
       "description": "Aden tools including web search, file operations, and PDF reading",
       "transport": "stdio",
       "command": "python",
       "args": ["mcp_server.py", "--stdio"],
-      "cwd": "../aden-tools",
+      "cwd": "../tools",
       "env": {
         "BRAVE_SEARCH_API_KEY": "${BRAVE_SEARCH_API_KEY}"
       }
     },
     {
-      "name": "aden-tools-http",
+      "name": "tools-http",
       "description": "Aden tools via HTTP (for Docker deployments)",
       "transport": "http",
       "url": "http://localhost:4001",

@@ -25,10 +25,10 @@ This comprehensive guide covers everything you need to know to work on the Hive 
 
 Hive is a monorepo containing two main packages:
 
-| Package | Directory | Description | Tech Stack |
-|---------|-----------|-------------|------------|
-| **honeycomb** | `/honeycomb` | Frontend web application | React 18, TypeScript, Vite |
-| **hive** | `/hive` | Backend API server | Node.js, Express, TypeScript |
+| Package       | Directory    | Description              | Tech Stack                   |
+| ------------- | ------------ | ------------------------ | ---------------------------- |
+| **honeycomb** | `/honeycomb` | Frontend web application | React 18, TypeScript, Vite   |
+| **hive**      | `/hive`      | Backend API server       | Node.js, Express, TypeScript |
 
 The repository uses **npm workspaces** to manage dependencies across packages from a single root `package.json`.
 
@@ -79,6 +79,7 @@ npm run setup
 ```
 
 The `setup` script performs these actions:
+
 1. Installs all dependencies for root, honeycomb, and hive
 2. Generates `.env` files from your `config.yaml`
 3. Reports any issues
@@ -88,8 +89,8 @@ The `setup` script performs these actions:
 If working with the agent framework:
 
 ```bash
-# Set up aden-tools credentials
-cd aden-tools
+# Set up tools credentials
+cd tools
 cp .env.example .env
 # Edit .env with your ANTHROPIC_API_KEY and BRAVE_SEARCH_API_KEY
 ```
@@ -244,36 +245,36 @@ The `config.yaml` file structure:
 
 # Application metadata
 app:
-  name: hive                      # Used in logs and API responses
-  environment: development           # development | staging | production
+  name: hive # Used in logs and API responses
+  environment: development # development | staging | production
 
 # Server configuration
 server:
   frontend:
-    port: 3000                       # Frontend port
-    host: "0.0.0.0"                  # Bind address
+    port: 3000 # Frontend port
+    host: "0.0.0.0" # Bind address
   backend:
-    port: 4000                       # Backend API port
-    host: "0.0.0.0"                  # Bind address
+    port: 4000 # Backend API port
+    host: "0.0.0.0" # Bind address
 
 # API configuration
 api:
-  prefix: /api                       # API route prefix
+  prefix: /api # API route prefix
   cors:
-    origins:                         # Allowed CORS origins
+    origins: # Allowed CORS origins
       - "http://localhost:3000"
       - "http://localhost:4000"
 
 # Logging configuration
 logging:
-  level: debug                       # debug | info | warn | error
-  format: pretty                     # pretty | json
+  level: debug # debug | info | warn | error
+  format: pretty # pretty | json
 
 # Security settings
 security:
   jwt:
     secret: "change-me-in-production-use-min-32-chars"
-    expiresIn: "7d"                  # Token expiration
+    expiresIn: "7d" # Token expiration
 
 # Database configuration (when needed)
 database:
@@ -298,6 +299,7 @@ npm run generate:env
 ```
 
 This is required because:
+
 - Docker Compose reads from `.env` files
 - Vite reads frontend env vars from `/honeycomb/.env`
 - Node.js reads backend env vars from `/hive/.env`
@@ -318,11 +320,11 @@ npm run dev -w honeycomb
 npm run dev -w hive
 ```
 
-| Service | URL | Hot Reload |
-|---------|-----|------------|
-| Frontend | http://localhost:3000 | Yes (Vite HMR) |
-| Backend | http://localhost:4000 | Yes (tsx watch) |
-| API Health | http://localhost:4000/health | - |
+| Service    | URL                          | Hot Reload      |
+| ---------- | ---------------------------- | --------------- |
+| Frontend   | http://localhost:3000        | Yes (Vite HMR)  |
+| Backend    | http://localhost:4000        | Yes (tsx watch) |
+| API Health | http://localhost:4000/health | -               |
 
 ### Option 2: Docker Development
 
@@ -361,38 +363,38 @@ npm run dev -w honeycomb
 
 **Root level** (run from repository root):
 
-| Command | Description |
-|---------|-------------|
-| `npm run setup` | First-time setup (install + generate env) |
-| `npm run generate:env` | Regenerate .env files from config.yaml |
-| `npm run build` | Build all packages |
-| `npm run build -w honeycomb` | Build frontend only |
-| `npm run build -w hive` | Build backend only |
-| `npm run lint` | Lint all packages |
-| `npm run test` | Run all tests |
-| `npm run clean` | Remove node_modules and build artifacts |
+| Command                      | Description                               |
+| ---------------------------- | ----------------------------------------- |
+| `npm run setup`              | First-time setup (install + generate env) |
+| `npm run generate:env`       | Regenerate .env files from config.yaml    |
+| `npm run build`              | Build all packages                        |
+| `npm run build -w honeycomb` | Build frontend only                       |
+| `npm run build -w hive`      | Build backend only                        |
+| `npm run lint`               | Lint all packages                         |
+| `npm run test`               | Run all tests                             |
+| `npm run clean`              | Remove node_modules and build artifacts   |
 
 **Frontend** (`/honeycomb`):
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Vite dev server with HMR |
-| `npm run build` | Type-check and build for production |
-| `npm run preview` | Preview production build locally |
-| `npm run lint` | Lint with ESLint |
-| `npm run test` | Run tests with Vitest |
-| `npm run test:coverage` | Run tests with coverage report |
+| Command                 | Description                         |
+| ----------------------- | ----------------------------------- |
+| `npm run dev`           | Start Vite dev server with HMR      |
+| `npm run build`         | Type-check and build for production |
+| `npm run preview`       | Preview production build locally    |
+| `npm run lint`          | Lint with ESLint                    |
+| `npm run test`          | Run tests with Vitest               |
+| `npm run test:coverage` | Run tests with coverage report      |
 
 **Backend** (`/hive`):
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start with hot reload (tsx watch) |
-| `npm run build` | Compile TypeScript to JavaScript |
-| `npm run start` | Run compiled JavaScript |
-| `npm run lint` | Lint with ESLint |
-| `npm run test` | Run tests with Vitest |
-| `npm run test:coverage` | Run tests with coverage report |
+| Command                 | Description                       |
+| ----------------------- | --------------------------------- |
+| `npm run dev`           | Start with hot reload (tsx watch) |
+| `npm run build`         | Compile TypeScript to JavaScript  |
+| `npm run start`         | Run compiled JavaScript           |
+| `npm run lint`          | Lint with ESLint                  |
+| `npm run test`          | Run tests with Vitest             |
+| `npm run test:coverage` | Run tests with coverage report    |
 
 ---
 
@@ -412,11 +414,11 @@ npm run dev -w honeycomb
 
 ```tsx
 // honeycomb/src/pages/UsersPage.tsx
-import { useEffect, useState } from 'react';
-import { useApi } from '../hooks/useApi';
+import { useEffect, useState } from "react";
+import { useApi } from "../hooks/useApi";
 
 export function UsersPage() {
-  const { data, loading, error } = useApi<User[]>('/api/users');
+  const { data, loading, error } = useApi<User[]>("/api/users");
 
   if (loading) return <div>Loading...</div>;
   if (error) return <div>Error: {error.message}</div>;
@@ -425,7 +427,7 @@ export function UsersPage() {
     <div>
       <h1>Users</h1>
       <ul>
-        {data?.map(user => (
+        {data?.map((user) => (
           <li key={user.id}>{user.name}</li>
         ))}
       </ul>
@@ -438,10 +440,10 @@ export function UsersPage() {
 
 ```tsx
 // honeycomb/src/App.tsx
-import { UsersPage } from './pages/UsersPage';
+import { UsersPage } from "./pages/UsersPage";
 
 // Inside Routes:
-<Route path="/users" element={<UsersPage />} />
+<Route path="/users" element={<UsersPage />} />;
 ```
 
 ### Adding a New Component
@@ -451,15 +453,16 @@ import { UsersPage } from './pages/UsersPage';
 interface ButtonProps {
   children: React.ReactNode;
   onClick?: () => void;
-  variant?: 'primary' | 'secondary';
+  variant?: "primary" | "secondary";
 }
 
-export function Button({ children, onClick, variant = 'primary' }: ButtonProps) {
+export function Button({
+  children,
+  onClick,
+  variant = "primary",
+}: ButtonProps) {
   return (
-    <button
-      className={`btn btn-${variant}`}
-      onClick={onClick}
-    >
+    <button className={`btn btn-${variant}`} onClick={onClick}>
       {children}
     </button>
   );
@@ -472,18 +475,18 @@ Use the provided `useApi` hook or the `api` service:
 
 ```tsx
 // Using the hook (recommended for components)
-import { useApi } from '../hooks/useApi';
+import { useApi } from "../hooks/useApi";
 
 function MyComponent() {
-  const { data, loading, error, refetch } = useApi<MyData>('/api/endpoint');
+  const { data, loading, error, refetch } = useApi<MyData>("/api/endpoint");
   // ...
 }
 
 // Using the service directly (for non-component code)
-import { api } from '../services/api';
+import { api } from "../services/api";
 
 async function fetchData() {
-  const response = await api.get('/api/endpoint');
+  const response = await api.get("/api/endpoint");
   return response.data;
 }
 ```
@@ -506,10 +509,10 @@ Use `@/` to import from the `src` directory:
 
 ```tsx
 // Instead of:
-import { Button } from '../../../components/Button';
+import { Button } from "../../../components/Button";
 
 // Use:
-import { Button } from '@/components/Button';
+import { Button } from "@/components/Button";
 ```
 
 ---
@@ -531,43 +534,43 @@ import { Button } from '@/components/Button';
 
 ```typescript
 // hive/src/routes/users.ts
-import { Router } from 'express';
-import type { Request, Response } from 'express';
+import { Router } from "express";
+import type { Request, Response } from "express";
 
 const router = Router();
 
 // GET /api/users
-router.get('/', async (req: Request, res: Response) => {
+router.get("/", async (req: Request, res: Response) => {
   try {
     const users = await getUsersFromDatabase();
     res.json(users);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch users' });
+    res.status(500).json({ error: "Failed to fetch users" });
   }
 });
 
 // GET /api/users/:id
-router.get('/:id', async (req: Request, res: Response) => {
+router.get("/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const user = await getUserById(id);
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ error: "User not found" });
     }
     res.json(user);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch user' });
+    res.status(500).json({ error: "Failed to fetch user" });
   }
 });
 
 // POST /api/users
-router.post('/', async (req: Request, res: Response) => {
+router.post("/", async (req: Request, res: Response) => {
   const { name, email } = req.body;
   try {
     const user = await createUser({ name, email });
     res.status(201).json(user);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create user' });
+    res.status(500).json({ error: "Failed to create user" });
   }
 });
 
@@ -578,17 +581,17 @@ export default router;
 
 ```typescript
 // hive/src/routes/api.ts
-import usersRouter from './users';
+import usersRouter from "./users";
 
 // Add to the router:
-router.use('/users', usersRouter);
+router.use("/users", usersRouter);
 ```
 
 ### Request Validation with Zod
 
 ```typescript
 // hive/src/routes/users.ts
-import { z } from 'zod';
+import { z } from "zod";
 
 const createUserSchema = z.object({
   name: z.string().min(1).max(100),
@@ -596,13 +599,13 @@ const createUserSchema = z.object({
   age: z.number().int().positive().optional(),
 });
 
-router.post('/', async (req: Request, res: Response) => {
+router.post("/", async (req: Request, res: Response) => {
   const result = createUserSchema.safeParse(req.body);
 
   if (!result.success) {
     return res.status(400).json({
-      error: 'Validation failed',
-      details: result.error.issues
+      error: "Validation failed",
+      details: result.error.issues,
     });
   }
 
@@ -615,13 +618,13 @@ router.post('/', async (req: Request, res: Response) => {
 
 ```typescript
 // hive/src/middleware/auth.ts
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from "express";
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
+  const token = req.headers.authorization?.replace("Bearer ", "");
 
   if (!token) {
-    return res.status(401).json({ error: 'Authentication required' });
+    return res.status(401).json({ error: "Authentication required" });
   }
 
   try {
@@ -629,12 +632,12 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     req.user = decoded;
     next();
   } catch {
-    res.status(401).json({ error: 'Invalid token' });
+    res.status(401).json({ error: "Invalid token" });
   }
 }
 
 // Usage in routes:
-router.get('/protected', requireAuth, (req, res) => {
+router.get("/protected", requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
 ```
@@ -644,13 +647,13 @@ router.get('/protected', requireAuth, (req, res) => {
 Use the built-in logger for consistent structured logging:
 
 ```typescript
-import { logger } from '../utils/logger';
+import { logger } from "../utils/logger";
 
 // Different log levels
-logger.debug('Detailed debug info', { userId: 123 });
-logger.info('User logged in', { userId: 123 });
-logger.warn('Rate limit approaching', { currentRate: 95 });
-logger.error('Database connection failed', { error: err.message });
+logger.debug("Detailed debug info", { userId: 123 });
+logger.info("User logged in", { userId: 123 });
+logger.warn("Rate limit approaching", { currentRate: 95 });
+logger.error("Database connection failed", { error: err.message });
 ```
 
 ### Environment Variables in Backend
@@ -662,7 +665,7 @@ Access via `process.env` or the config module:
 const port = process.env.PORT || 4000;
 
 // Or via config (recommended - adds validation)
-import { config } from '../config';
+import { config } from "../config";
 const port = config.port;
 ```
 
@@ -672,9 +675,9 @@ const port = config.port;
 
 ### Docker Compose Files
 
-| File | Purpose |
-|------|---------|
-| `docker-compose.yml` | Base configuration (production-like) |
+| File                          | Purpose                                         |
+| ----------------------------- | ----------------------------------------------- |
+| `docker-compose.yml`          | Base configuration (production-like)            |
 | `docker-compose.override.yml` | Development overrides (hot reload, debug ports) |
 
 When you run `docker compose up`, Docker automatically merges both files.
@@ -791,21 +794,21 @@ cd hive && npm run test -- --watch
 
 ```tsx
 // honeycomb/src/components/Button.test.tsx
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
-import { Button } from './Button';
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { Button } from "./Button";
 
-describe('Button', () => {
-  it('renders children', () => {
+describe("Button", () => {
+  it("renders children", () => {
     render(<Button>Click me</Button>);
-    expect(screen.getByText('Click me')).toBeInTheDocument();
+    expect(screen.getByText("Click me")).toBeInTheDocument();
   });
 
-  it('calls onClick when clicked', () => {
+  it("calls onClick when clicked", () => {
     const handleClick = vi.fn();
     render(<Button onClick={handleClick}>Click me</Button>);
 
-    fireEvent.click(screen.getByText('Click me'));
+    fireEvent.click(screen.getByText("Click me"));
 
     expect(handleClick).toHaveBeenCalledTimes(1);
   });
@@ -816,22 +819,22 @@ describe('Button', () => {
 
 ```typescript
 // hive/src/routes/health.test.ts
-import { describe, it, expect } from 'vitest';
-import request from 'supertest';
-import { app } from '../server';
+import { describe, it, expect } from "vitest";
+import request from "supertest";
+import { app } from "../server";
 
-describe('Health Routes', () => {
-  it('GET /health returns healthy status', async () => {
-    const response = await request(app).get('/health');
+describe("Health Routes", () => {
+  it("GET /health returns healthy status", async () => {
+    const response = await request(app).get("/health");
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({
-      status: 'healthy',
+      status: "healthy",
     });
   });
 
-  it('GET /health/ready returns ready status', async () => {
-    const response = await request(app).get('/health/ready');
+  it("GET /health/ready returns ready status", async () => {
+    const response = await request(app).get("/health/ready");
 
     expect(response.status).toBe(200);
     expect(response.body.ready).toBe(true);
@@ -863,7 +866,8 @@ export function getUser(id: string): Promise<User | null> {
 }
 
 // Avoid
-export function getUser(id) {  // Missing types
+export function getUser(id) {
+  // Missing types
   // ...
 }
 ```
@@ -886,21 +890,22 @@ export function Button({ children, onClick }: ButtonProps) {
 }
 
 // Avoid
-export default function({ children, onClick }) {  // Missing types, default export
+export default function ({ children, onClick }) {
+  // Missing types, default export
   return <button onClick={onClick}>{children}</button>;
 }
 ```
 
 ### File Naming
 
-| Type | Convention | Example |
-|------|------------|---------|
-| Components | PascalCase | `UserCard.tsx` |
-| Hooks | camelCase with `use` prefix | `useAuth.ts` |
-| Utilities | camelCase | `formatDate.ts` |
-| Types | PascalCase | `User.ts` or in `types/index.ts` |
-| Tests | Same as file + `.test` | `UserCard.test.tsx` |
-| Styles | Same as component | `UserCard.css` |
+| Type       | Convention                  | Example                          |
+| ---------- | --------------------------- | -------------------------------- |
+| Components | PascalCase                  | `UserCard.tsx`                   |
+| Hooks      | camelCase with `use` prefix | `useAuth.ts`                     |
+| Utilities  | camelCase                   | `formatDate.ts`                  |
+| Types      | PascalCase                  | `User.ts` or in `types/index.ts` |
+| Tests      | Same as file + `.test`      | `UserCard.test.tsx`              |
+| Styles     | Same as component           | `UserCard.css`                   |
 
 ### Import Order
 
@@ -911,18 +916,18 @@ export default function({ children, onClick }) {  // Missing types, default expo
 
 ```tsx
 // External
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 // Internal absolute
-import { Button } from '@/components/Button';
-import { useApi } from '@/hooks/useApi';
+import { Button } from "@/components/Button";
+import { useApi } from "@/hooks/useApi";
 
 // Relative
-import { formatUserName } from './utils';
+import { formatUserName } from "./utils";
 
 // Styles
-import './UserCard.css';
+import "./UserCard.css";
 ```
 
 ---
@@ -952,6 +957,7 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 ```
 
 **Types:**
+
 - `feat` - New feature
 - `fix` - Bug fix
 - `docs` - Documentation only
@@ -991,11 +997,13 @@ chore(deps): update React to 18.2.0
 ### Frontend Debugging
 
 **React Developer Tools:**
+
 1. Install the [React DevTools browser extension](https://react.dev/learn/react-developer-tools)
 2. Open browser DevTools → React tab
 3. Inspect component tree, props, state, and hooks
 
 **VS Code Debugging:**
+
 1. Add Chrome debug configuration to `.vscode/launch.json`:
 
 ```json
@@ -1014,6 +1022,7 @@ chore(deps): update React to 18.2.0
 ### Backend Debugging
 
 **VS Code Debugging:**
+
 1. Add Node debug configuration:
 
 ```json
@@ -1032,13 +1041,14 @@ chore(deps): update React to 18.2.0
 3. Press F5 to start debugging
 
 **Logging:**
+
 ```typescript
-import { logger } from '../utils/logger';
+import { logger } from "../utils/logger";
 
 // Add debug logs
-logger.debug('Processing request', {
+logger.debug("Processing request", {
   userId: req.user.id,
-  body: req.body
+  body: req.body,
 });
 ```
 
@@ -1206,4 +1216,4 @@ npm run test -w honeycomb -- --clearCache
 
 ---
 
-*Happy coding!* 🐝
+_Happy coding!_ 🐝
