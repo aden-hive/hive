@@ -29,13 +29,12 @@ If applicable, add screenshots to help explain your problem.
 ## Environment
 
 - OS: [e.g., Ubuntu 22.04, macOS 14]
-- Docker version: [e.g., 24.0.0]
-- Node version: [e.g., 20.10.0]
-- Browser (if applicable): [e.g., Chrome 120]
+- Python version: [e.g., 3.11.0]
+- Docker version (if applicable): [e.g., 24.0.0]
 
 ## Configuration
 
-Relevant parts of your `config.yaml` (remove any sensitive data):
+Relevant parts of your agent configuration or environment setup (remove any sensitive data):
 
 ```yaml
 # paste here
