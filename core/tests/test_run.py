@@ -2,8 +2,8 @@
 Test the run module.
 """
 from datetime import datetime
-from framework.schemas.run import RunMetrics, Run, RunStatus, RunSummary, Problem
-from framework.schemas.decision import Decision, Outcome, DecisionEvaluation, Option
+from framework.schemas.run import RunMetrics, Run, RunStatus, RunSummary
+from framework.schemas.decision import Decision, Outcome, Option
 
 class TestRuntimeMetrics:
     """Test the RunMetrics class."""
@@ -127,7 +127,6 @@ class TestRun:
 class TestRunSummary:
     """Test the RunSummary class."""
     def test_from_run_basic(self):
-        """Test creating summary from a basic run."""
         run = Run(
             id="test_run",
             goal_id="test_goal",
@@ -147,7 +146,6 @@ class TestRunSummary:
         assert summary.narrative == "Test narrative"
     
     def test_from_run_with_decisions(self):
-        """Test summary with successful and failed decisions."""
         run = Run(
             id="test_run",
             goal_id="test_goal",
@@ -212,7 +210,6 @@ class TestRunSummary:
         assert summary.successes[0] == "Successfully greeted user"
     
     def test_from_run_with_problems(self):
-        """Test summary with critical and warning problems."""
         run = Run(
             id="test_run",
             goal_id="test_goal",
