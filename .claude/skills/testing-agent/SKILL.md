@@ -88,10 +88,11 @@ When generating tests, **ALWAYS include API key checks**:
 ```python
 import os
 import pytest
+from aden_tools.credentials import CredentialManager
 
 # At the top of every test file
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
     reason="API key required for real testing. Set ANTHROPIC_API_KEY or use MOCK_MODE=1 for structure validation only."
 )
 
@@ -99,7 +100,8 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture(scope="session", autouse=True)
 def check_api_key():
     """Ensure API key is set for real testing."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    creds = CredentialManager()
+    if not creds.is_available("anthropic"):
         if os.environ.get("MOCK_MODE"):
             print("\n⚠️  Running in MOCK MODE - structure validation only")
             print("   This does NOT test LLM behavior or agent quality")
@@ -121,8 +123,11 @@ def check_api_key():
 When the user asks to test an agent, **ALWAYS check for the API key first**:
 
 ```python
+from aden_tools.credentials import CredentialManager
+
 # Before running any tests
-if not os.environ.get("ANTHROPIC_API_KEY"):
+creds = CredentialManager()
+if not creds.is_available("anthropic"):
     print("⚠️  No ANTHROPIC_API_KEY found!")
     print()
     print("Testing requires a real API key to validate agent behavior.")
@@ -215,11 +220,12 @@ REQUIRES: ANTHROPIC_API_KEY for real testing.
 import os
 import pytest
 from exports.{agent_name} import default_agent
+from aden_tools.credentials import CredentialManager
 
 
 # Enforce API key for real testing
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
     reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
 )
 
@@ -318,11 +324,12 @@ REQUIRES: ANTHROPIC_API_KEY for real testing - mock mode cannot validate success
 import os
 import pytest
 from exports.{agent_name} import default_agent
+from aden_tools.credentials import CredentialManager
 
 
 # Enforce API key for real testing
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
     reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
 )
 
@@ -381,11 +388,12 @@ conftest_content = '''"""Shared test fixtures for {agent_name} tests."""
 import os
 import pytest
 import asyncio
+from aden_tools.credentials import CredentialManager
 
 
 # Enforce API key requirement for real testing
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
     reason="API key required for real testing. Set ANTHROPIC_API_KEY or use MOCK_MODE=1 for structure validation only."
 )
 
@@ -393,7 +401,8 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture(scope="session", autouse=True)
 def check_api_key():
     """Ensure API key is set for real testing."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    creds = CredentialManager()
+    if not creds.is_available("anthropic"):
         if os.environ.get("MOCK_MODE"):
             print("\\n⚠️  Running in MOCK MODE - structure validation only")
             print("   This does NOT test LLM behavior or agent quality")
@@ -408,6 +417,12 @@ def check_api_key():
                 "   MOCK_MODE=1 pytest exports/{agent_name}/tests/\\n\\n"
                 "Note: Mock mode does NOT validate agent behavior or quality."
             )
+
+
+@pytest.fixture
+def credentials():
+    """Provide CredentialManager instance to tests (with hot-reload support)."""
+    return CredentialManager()
 
 
 @pytest.fixture
@@ -752,11 +767,12 @@ Requires ANTHROPIC_API_KEY for real testing.
 import os
 import pytest
 from exports.{agent_name} import default_agent
+from aden_tools.credentials import CredentialManager
 
 
 # Enforce API key for real testing
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
     reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
 )
 
@@ -784,11 +800,12 @@ Requires ANTHROPIC_API_KEY for real testing - mock mode cannot validate success 
 import os
 import pytest
 from exports.{agent_name} import default_agent
+from aden_tools.credentials import CredentialManager
 
 
 # Enforce API key for real testing
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
     reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
 )
 
@@ -818,11 +835,12 @@ Requires ANTHROPIC_API_KEY for real testing.
 import os
 import pytest
 from exports.{agent_name} import default_agent
+from aden_tools.credentials import CredentialManager
 
 
 # Enforce API key for real testing
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
     reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
 )
 

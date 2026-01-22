@@ -144,10 +144,12 @@ class AnthropicProvider(LLMProvider):
             tool_results = []
             for tool_use in tool_uses:
                 result = tool_executor(tool_use)
+                # Ensure content is never empty (Anthropic API requires non-empty content)
+                content = result.content if result.content else "(empty result)"
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": result.tool_use_id,
-                    "content": result.content,
+                    "content": content,
                     "is_error": result.is_error,
                 })
 

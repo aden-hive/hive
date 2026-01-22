@@ -46,6 +46,82 @@ exports/my_agent/
 - Pause nodes stop execution, wait for user input
 - Resume entry points continue from pause with user's response
 
+## Tool Discovery & Validation
+
+**CRITICAL:** Before adding a node with tools, you MUST verify the tools exist.
+
+Tools are provided by MCP servers. Never assume a tool exists - always discover dynamically.
+
+### Step 1: Register MCP Server (if not already done)
+
+```python
+mcp__agent-builder__add_mcp_server(
+    name="aden-tools",
+    transport="stdio",
+    command="python",
+    args='["mcp_server.py", "--stdio"]',
+    cwd="../aden-tools"
+)
+```
+
+### Step 2: Discover Available Tools
+
+```python
+# List all tools from all registered servers
+mcp__agent-builder__list_mcp_tools()
+
+# Or list tools from a specific server
+mcp__agent-builder__list_mcp_tools(server_name="aden-tools")
+```
+
+This returns available tools with their descriptions and parameters:
+```json
+{
+  "success": true,
+  "tools_by_server": {
+    "aden-tools": [
+      {"name": "web_search", "description": "Search the web...", "parameters": ["query"]},
+      {"name": "web_scrape", "description": "Scrape a URL...", "parameters": ["url"]}
+    ]
+  },
+  "total_tools": 14
+}
+```
+
+### Step 3: Validate Before Adding Nodes
+
+Before writing a node with `tools=[...]`:
+1. Call `list_mcp_tools()` to get available tools
+2. Check each tool in your node exists in the response
+3. If a tool doesn't exist:
+   - **DO NOT proceed** with the node
+   - Inform the user: "The tool 'X' is not available. Available tools are: ..."
+   - Ask if they want to use an alternative or proceed without the tool
+
+### Tool Validation Anti-Patterns
+
+❌ **Never assume a tool exists** - always call `list_mcp_tools()` first
+❌ **Never write a node with unverified tools** - validate before writing
+❌ **Never silently drop tools** - if a tool doesn't exist, inform the user
+❌ **Never guess tool names** - use exact names from discovery response
+
+### Example Validation Flow
+
+```python
+# 1. User requests: "Add a node that searches the web"
+# 2. Discover available tools
+tools_response = mcp__agent-builder__list_mcp_tools()
+
+# 3. Check if web_search exists
+available = [t["name"] for tools in tools_response["tools_by_server"].values() for t in tools]
+if "web_search" not in available:
+    # Inform user and ask how to proceed
+    print("❌ 'web_search' not available. Available tools:", available)
+else:
+    # Proceed with node creation
+    # ...
+```
+
 ## Workflow: Incremental File Construction
 
 ```
@@ -128,6 +204,7 @@ from framework.graph.executor import GraphExecutor
 from framework.runtime import Runtime
 from framework.llm.anthropic import AnthropicProvider
 from framework.runner.tool_registry import ToolRegistry
+from aden_tools.credentials import CredentialManager
 
 # Goal will be added when defined
 # Nodes will be imported from .nodes
@@ -242,6 +319,11 @@ Open exports/technical_research_agent/agent.py to see the goal!
 ```
 
 ### Step 3: Add Nodes (Incremental)
+
+**⚠️ IMPORTANT:** Before adding any node with tools, you MUST:
+1. Call `mcp__agent-builder__list_mcp_tools()` to discover available tools
+2. Verify each tool exists in the response
+3. If a tool doesn't exist, inform the user and ask how to proceed
 
 For each node, **write immediately after approval**:
 
@@ -417,8 +499,11 @@ class {agent_class_name}:
         tool_registry = ToolRegistry()
 
         llm = None
-        if not mock_mode and os.environ.get("ANTHROPIC_API_KEY"):
-            llm = AnthropicProvider(model=self.config.model)
+        if not mock_mode:
+            creds = CredentialManager()
+            if creds.is_available("anthropic"):
+                api_key = creds.get("anthropic")
+                llm = AnthropicProvider(api_key=api_key, model=self.config.model)
 
         graph = GraphSpec(
             id="{agent_name}-graph",
