@@ -210,7 +210,7 @@ from dataclasses import dataclass
 
 @dataclass
 class RuntimeConfig:
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = "claude-haiku-4-5-20251001"
     temperature: float = 0.7
     max_tokens: int = 4096
 
@@ -260,7 +260,7 @@ goal = Goal(
             target="{sc.target}",
             weight={sc.weight},
         ),
-        # ... more criteria
+        # 3-5 success criteria total
     ],
     constraints=[
         Constraint(
@@ -269,7 +269,7 @@ goal = Goal(
             constraint_type="{c.constraint_type}",
             category="{c.category}",
         ),
-        # ... more constraints
+        # 1-5 constraints total
     ],
 )
 '''

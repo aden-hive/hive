@@ -16,7 +16,7 @@ from success_criteria and constraints, with mandatory user approval.
 - **Storage**: TestStorage for persisting tests and results
 - **Generation**: LLM-based test generation from Goal criteria
 - **Approval**: Mandatory user approval workflow (CLI and programmatic)
-- **Runner**: Parallel test execution with pytest-xdist inspired design
+- **Runner**: Test execution via pytest subprocess with pytest-xdist parallelization
 - **Debug**: Error categorization and fix suggestions
 
 ## MCP Tools
@@ -33,7 +33,7 @@ This ensures the building_agent skill has access to all testing functionality:
 from framework.testing import (
     Test, TestResult, TestStorage,
     ConstraintTestGenerator, SuccessCriteriaTestGenerator,
-    ParallelTestRunner, DebugTool,
+    DebugTool,
 )
 
 # Generate tests
@@ -45,9 +45,7 @@ for test in tests:
     test.approve("user")
     storage.save_test(test)
 
-# Run tests
-runner = ParallelTestRunner()
-result = runner.run_all(goal_id, agent_factory, tests)
+# Run tests via pytest subprocess (see MCP run_tests or CLI test-run)
 
 # Debug failures
 debug = DebugTool(storage)
@@ -97,10 +95,11 @@ from framework.testing.approval_types import (
 )
 from framework.testing.approval_cli import interactive_approval, batch_approval
 
-# Runner
-from framework.testing.executor import TestExecutor
-from framework.testing.parallel import ParallelTestRunner, ParallelConfig
+# Error categorization
 from framework.testing.categorizer import ErrorCategorizer
+
+# LLM Judge for semantic evaluation
+from framework.testing.llm_judge import LLMJudge
 
 # Debug
 from framework.testing.debug_tool import DebugTool, DebugInfo
@@ -131,11 +130,10 @@ __all__ = [
     "BatchApprovalResult",
     "interactive_approval",
     "batch_approval",
-    # Runner
-    "TestExecutor",
-    "ParallelTestRunner",
-    "ParallelConfig",
+    # Error categorization
     "ErrorCategorizer",
+    # LLM Judge
+    "LLMJudge",
     # Debug
     "DebugTool",
     "DebugInfo",

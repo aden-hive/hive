@@ -73,12 +73,14 @@ class ConstraintTestGenerator:
         """
         self.llm = llm
 
-    def generate(self, goal: Goal) -> list[Test]:
+    def generate(self, goal: Goal, agent_module: str = "my_agent") -> list[Test]:
         """
         Generate tests for all constraints in a goal.
 
         Args:
             goal: Goal with constraints to test
+            agent_module: The agent module name (e.g., "web_research_agent")
+                          Used to generate import: from exports.{agent_module} import default_agent
 
         Returns:
             List of Test objects with approval_status=PENDING.
@@ -92,6 +94,7 @@ class ConstraintTestGenerator:
             goal_name=goal.name,
             goal_description=goal.description,
             constraints_formatted=self._format_constraints(goal.constraints),
+            agent_module=agent_module,
         )
 
         # Collect tests via tool calls - Claude handles JSON escaping automatically
@@ -112,13 +115,13 @@ class ConstraintTestGenerator:
             system="You are a test generation expert. For each constraint, call the submit_test tool with the test details.",
             tools=[SUBMIT_TEST_TOOL],
             tool_executor=tool_executor,
-            max_iterations=20,
+            max_iterations=5,
         )
 
         return self._create_tests_from_collected(collected_tests, goal.id)
 
     def generate_for_constraint(
-        self, goal: Goal, constraint: Constraint
+        self, goal: Goal, constraint: Constraint, agent_module: str = "my_agent"
     ) -> list[Test]:
         """
         Generate tests for a single constraint.
@@ -126,6 +129,7 @@ class ConstraintTestGenerator:
         Args:
             goal: Goal containing the constraint
             constraint: Specific constraint to test
+            agent_module: The agent module name (e.g., "web_research_agent")
 
         Returns:
             List of Test objects for the constraint
@@ -135,6 +139,7 @@ class ConstraintTestGenerator:
             goal_name=goal.name,
             goal_description=goal.description,
             constraints_formatted=self._format_constraint(constraint),
+            agent_module=agent_module,
         )
 
         # Collect tests via tool calls
@@ -155,7 +160,7 @@ class ConstraintTestGenerator:
             system="You are a test generation expert. Call the submit_test tool with the test details.",
             tools=[SUBMIT_TEST_TOOL],
             tool_executor=tool_executor,
-            max_iterations=10,
+            max_iterations=3,
         )
 
         return self._create_tests_from_collected(collected_tests, goal.id)

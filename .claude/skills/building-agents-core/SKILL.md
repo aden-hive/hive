@@ -53,7 +53,7 @@ goal = Goal(
             target=">=0.9",
             weight=0.4,
         ),
-        # ... more criteria
+        # 3-5 success criteria total
     ],
     constraints=[
         Constraint(
@@ -62,7 +62,7 @@ goal = Goal(
             constraint_type="hard",
             category="quality",
         ),
-        # ... more constraints
+        # 1-5 constraints total
     ],
 )
 ```
