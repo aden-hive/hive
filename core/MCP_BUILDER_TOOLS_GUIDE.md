@@ -6,7 +6,7 @@ This guide explains how to use the new MCP integration tools in the agent builde
 
 The agent builder now supports registering external MCP servers as tool sources. This allows you to:
 
-1. Register MCP servers (like aden-tools) during agent building
+1. Register MCP servers (like tools) during agent building
 2. Discover available tools from those servers
 3. Use those tools in your agent nodes
 4. Automatically generate `mcp_servers.json` configuration on export
@@ -18,6 +18,7 @@ The agent builder now supports registering external MCP servers as tool sources.
 Register an MCP server as a tool source for your agent.
 
 **Parameters:**
+
 - `name` (string, required): Unique name for the MCP server
 - `transport` (string, required): Transport type - "stdio" or "http"
 - `command` (string): Command to run (for stdio transport)
@@ -29,21 +30,23 @@ Register an MCP server as a tool source for your agent.
 - `description` (string): Description of the MCP server
 
 **Example - STDIO:**
+
 ```json
 {
   "name": "add_mcp_server",
   "arguments": {
-    "name": "aden-tools",
+    "name": "tools",
     "transport": "stdio",
     "command": "python",
     "args": "[\"mcp_server.py\", \"--stdio\"]",
-    "cwd": "../aden-tools",
+    "cwd": "../tools",
     "description": "Aden tools for web search and file operations"
   }
 }
 ```
 
 **Example - HTTP:**
+
 ```json
 {
   "name": "add_mcp_server",
@@ -57,15 +60,16 @@ Register an MCP server as a tool source for your agent.
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
   "server": {
-    "name": "aden-tools",
+    "name": "tools",
     "transport": "stdio",
     "command": "python",
     "args": ["mcp_server.py", "--stdio"],
-    "cwd": "../aden-tools",
+    "cwd": "../tools",
     "description": "Aden tools..."
   },
   "tools_discovered": 6,
@@ -78,7 +82,7 @@ Register an MCP server as a tool source for your agent.
     "example_tool"
   ],
   "total_mcp_servers": 1,
-  "note": "MCP server 'aden-tools' registered with 6 tools. These tools can now be used in llm_tool_use nodes."
+  "note": "MCP server 'tools' registered with 6 tools. These tools can now be used in llm_tool_use nodes."
 }
 ```
 
@@ -89,15 +93,16 @@ List all registered MCP servers.
 **Parameters:** None
 
 **Response:**
+
 ```json
 {
   "mcp_servers": [
     {
-      "name": "aden-tools",
+      "name": "tools",
       "transport": "stdio",
       "command": "python",
       "args": ["mcp_server.py", "--stdio"],
-      "cwd": "../aden-tools",
+      "cwd": "../tools",
       "description": "Aden tools..."
     }
   ],
@@ -110,24 +115,27 @@ List all registered MCP servers.
 List tools available from registered MCP servers.
 
 **Parameters:**
+
 - `server_name` (string, optional): Name of specific server to list tools from. If omitted, lists tools from all servers.
 
 **Example:**
+
 ```json
 {
   "name": "list_mcp_tools",
   "arguments": {
-    "server_name": "aden-tools"
+    "server_name": "tools"
   }
 }
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
   "tools_by_server": {
-    "aden-tools": [
+    "tools": [
       {
         "name": "web_search",
         "description": "Search the web for information using Brave Search API...",
@@ -150,23 +158,26 @@ List tools available from registered MCP servers.
 Remove a registered MCP server.
 
 **Parameters:**
+
 - `name` (string, required): Name of the MCP server to remove
 
 **Example:**
+
 ```json
 {
   "name": "remove_mcp_server",
   "arguments": {
-    "name": "aden-tools"
+    "name": "tools"
   }
 }
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
-  "removed": "aden-tools",
+  "removed": "tools",
   "remaining_servers": 0
 }
 ```
@@ -176,6 +187,7 @@ Remove a registered MCP server.
 Here's a complete workflow for building an agent with MCP tools:
 
 ### 1. Create Session
+
 ```json
 {
   "name": "create_session",
@@ -186,30 +198,33 @@ Here's a complete workflow for building an agent with MCP tools:
 ```
 
 ### 2. Register MCP Server
+
 ```json
 {
   "name": "add_mcp_server",
   "arguments": {
-    "name": "aden-tools",
+    "name": "tools",
     "transport": "stdio",
     "command": "python",
     "args": "[\"mcp_server.py\", \"--stdio\"]",
-    "cwd": "../aden-tools"
+    "cwd": "../tools"
   }
 }
 ```
 
 ### 3. List Available Tools
+
 ```json
 {
   "name": "list_mcp_tools",
   "arguments": {
-    "server_name": "aden-tools"
+    "server_name": "tools"
   }
 }
 ```
 
 ### 4. Set Goal
+
 ```json
 {
   "name": "set_goal",
@@ -223,6 +238,7 @@ Here's a complete workflow for building an agent with MCP tools:
 ```
 
 ### 5. Add Node with MCP Tool
+
 ```json
 {
   "name": "add_node",
@@ -239,9 +255,10 @@ Here's a complete workflow for building an agent with MCP tools:
 }
 ```
 
-Note: `web_search` is now available because we registered the aden-tools MCP server!
+Note: `web_search` is now available because we registered the tools MCP server!
 
 ### 6. Export Agent
+
 ```json
 {
   "name": "export_graph",
@@ -250,6 +267,7 @@ Note: `web_search` is now available because we registered the aden-tools MCP ser
 ```
 
 The export will create:
+
 - `exports/web-research-agent/agent.json` - Agent specification
 - `exports/web-research-agent/README.md` - Documentation
 - `exports/web-research-agent/mcp_servers.json` - **MCP server configuration** ✨
@@ -262,11 +280,11 @@ When you export an agent with registered MCP servers, an `mcp_servers.json` file
 {
   "servers": [
     {
-      "name": "aden-tools",
+      "name": "tools",
       "transport": "stdio",
       "command": "python",
       "args": ["mcp_server.py", "--stdio"],
-      "cwd": "../aden-tools",
+      "cwd": "../tools",
       "description": "Aden tools for web search and file operations"
     }
   ]
@@ -288,7 +306,7 @@ runner = AgentRunner.load("exports/web-research-agent")
 # Run with input
 result = await runner.run({"query": "latest AI breakthroughs"})
 
-# The web_search tool from aden-tools is automatically available!
+# The web_search tool from tools is automatically available!
 ```
 
 ## Benefits
@@ -301,14 +319,17 @@ result = await runner.run({"query": "latest AI breakthroughs"})
 
 ## Common MCP Servers
 
-### aden-tools
+### tools
+
 Provides:
+
 - `web_search` - Brave Search API integration
 - `web_scrape` - Web page content extraction
 - `file_read` / `file_write` - File operations
 - `pdf_read` - PDF text extraction
 
 ### Custom MCP Servers
+
 You can register any MCP server that follows the Model Context Protocol specification.
 
 ## Troubleshooting
@@ -372,19 +393,21 @@ If credentials are missing, you'll receive a response like:
 
 1. Get the required API key from the URL in `help_url`
 2. Add it to your environment:
+
    ```bash
    # Option 1: Export directly
    export BRAVE_SEARCH_API_KEY=your-key-here
 
-   # Option 2: Add to aden-tools/.env
-   echo "BRAVE_SEARCH_API_KEY=your-key-here" >> aden-tools/.env
+   # Option 2: Add to tools/.env
+   echo "BRAVE_SEARCH_API_KEY=your-key-here" >> tools/.env
    ```
+
 3. Retry the `add_node` command
 
 ### Required Credentials by Tool
 
-| Tool | Credential | Get Key |
-|------|------------|---------|
+| Tool         | Credential             | Get Key                                               |
+| ------------ | ---------------------- | ----------------------------------------------------- |
 | `web_search` | `BRAVE_SEARCH_API_KEY` | [brave.com/search/api](https://brave.com/search/api/) |
 
 Note: The MCP server itself requires `ANTHROPIC_API_KEY` at startup for LLM operations.

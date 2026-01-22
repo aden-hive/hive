@@ -27,6 +27,7 @@ docker compose up
 ```
 
 The application will be available at:
+
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:4000
 - **Health Check**: http://localhost:4000/health
@@ -99,11 +100,11 @@ hive/
 
 ## AI Agent Tools Setup (Optional)
 
-If you're using the AI agent framework with aden-tools:
+If you're using the AI agent framework with tools:
 
 ```bash
-# 1. Navigate to aden-tools
-cd aden-tools
+# 1. Navigate to tools
+cd tools
 
 # 2. Copy environment template
 cp .env.example .env
@@ -114,6 +115,7 @@ cp .env.example .env
 ```
 
 Get your API keys:
+
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
 
@@ -132,7 +134,7 @@ If ports 3000 or 4000 are in use, update `config.yaml`:
 ```yaml
 server:
   frontend:
-    port: 3001  # Change to available port
+    port: 3001 # Change to available port
   backend:
     port: 4001
 ```
