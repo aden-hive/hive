@@ -238,12 +238,12 @@ Example format:
                     parts.append(f"   Options: {', '.join(q.options)}")
 
         if request.missing_info:
-            parts.append(f"\n📝 Missing Information:")
+            parts.append("\n📝 Missing Information:")
             for info in request.missing_info:
                 parts.append(f"  • {info}")
 
         if request.examples:
-            parts.append(f"\n📚 Examples:")
+            parts.append("\n📚 Examples:")
             for example in request.examples:
                 parts.append(f"  • {example}")
 

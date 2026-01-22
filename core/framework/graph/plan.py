@@ -10,7 +10,7 @@ The Plan is the contract between the external planner and the executor:
 - If replanning needed, returns feedback to external planner
 """
 
-from typing import Any, Literal
+from typing import Any
 from enum import Enum
 from datetime import datetime
 

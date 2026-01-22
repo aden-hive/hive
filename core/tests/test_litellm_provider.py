@@ -10,8 +10,7 @@ For live tests (requires API keys):
 """
 
 import os
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 from framework.llm.litellm import LiteLLMProvider
 from framework.llm.anthropic import AnthropicProvider

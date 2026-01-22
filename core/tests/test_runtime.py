@@ -1,10 +1,9 @@
 """Tests for the Runtime class - the agent's interface to record decisions."""
 
 import pytest
-import tempfile
 from pathlib import Path
 
-from framework import Runtime, Decision, Run
+from framework import Runtime
 from framework.schemas.decision import DecisionType
 
 

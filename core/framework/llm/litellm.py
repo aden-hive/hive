@@ -12,7 +12,7 @@ from typing import Any
 
 import litellm
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse, ToolResult
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse
 
 
 class LiteLLMProvider(LLMProvider):
