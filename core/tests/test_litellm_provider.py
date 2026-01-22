@@ -250,7 +250,7 @@ class TestAnthropicProviderBackwardCompatibility:
     def test_anthropic_provider_init_defaults(self):
         """Test AnthropicProvider initialization with defaults."""
         provider = AnthropicProvider(api_key="test-key")
-        assert provider.model == "claude-sonnet-4-20250514"
+        assert provider.model == "claude-haiku-4-5-20251001"
         assert provider.api_key == "test-key"
 
     def test_anthropic_provider_init_custom_model(self):
