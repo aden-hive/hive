@@ -88,6 +88,20 @@ docker compose up
 - API: http://localhost:4000
 - Health: http://localhost:4000/health
 
+### Python Agent Development
+
+For building and running goal-driven agents:
+
+```bash
+# One-time setup
+./scripts/setup-python.sh
+
+# Build and test agents
+# See ENVIRONMENT_SETUP.md for complete guide
+```
+
+**[📖 Python Setup Guide](ENVIRONMENT_SETUP.md)** - Complete instructions for agent development
+
 ## Features
 
 - **Goal-Driven Development** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
