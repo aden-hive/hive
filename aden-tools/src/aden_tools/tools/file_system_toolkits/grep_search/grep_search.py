@@ -25,14 +25,22 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with search results and match details, or error dict
         """
+        # 1. Early Regex Validation (Issue #55 Acceptance Criteria)
+        # Using .msg for a cleaner, less noisy error response
+        try:
+            regex = re.compile(pattern)
+        except re.error as e:
+            return {"error": f"Invalid regex pattern: {e.msg}"}
+
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
             # Use session dir root for relative path calculations
             session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
 
             matches = []
-            regex = re.compile(pattern)
 
+            # Identify target files
+            # Note: We let os.listdir/os.walk raise FileNotFoundError naturally (EAFP principle)
             if os.path.isfile(secure_path):
                 files = [secure_path]
             elif recursive:
@@ -41,7 +49,9 @@ def register_tools(mcp: FastMCP) -> None:
                     for filename in filenames:
                         files.append(os.path.join(root, filename))
             else:
-                files = [os.path.join(secure_path, f) for f in os.listdir(secure_path) if os.path.isfile(os.path.join(secure_path, f))]
+                # This will raise FileNotFoundError if secure_path doesn't exist
+                files = [os.path.join(secure_path, f) for f in os.listdir(secure_path) 
+                         if os.path.isfile(os.path.join(secure_path, f))]
 
             for file_path in files:
                 # Calculate relative path for display
@@ -56,6 +66,7 @@ def register_tools(mcp: FastMCP) -> None:
                                     "line_content": line.strip()
                                 })
                 except (UnicodeDecodeError, PermissionError):
+                    # As per README: Skips files that cannot be decoded or have permission errors
                     continue
 
             return {
@@ -66,5 +77,12 @@ def register_tools(mcp: FastMCP) -> None:
                 "matches": matches,
                 "total_matches": len(matches)
             }
+
+        # 2. Specific Exception Handling (Issue #55 Requirements)
+        except FileNotFoundError:
+            return {"error": f"Directory or file not found: {path}"}
+        except PermissionError:
+            return {"error": f"Permission denied accessing: {path}"}
         except Exception as e:
+            # 3. Generic Fallback
             return {"error": f"Failed to perform grep search: {str(e)}"}
