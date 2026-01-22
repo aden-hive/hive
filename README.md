@@ -2,6 +2,15 @@
   <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
 </p>
 
+<p align="center">
+  <a href="README.md">English</a> |
+  <a href="README.zh-CN.md">简体中文</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.pt.md">Português</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.ru.md">Русский</a>
+</p>
+
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
 [![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
 [![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
