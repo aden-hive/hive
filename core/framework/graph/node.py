@@ -259,7 +259,7 @@ Provide a concise, clear summary that a human can quickly understand. Focus on t
             summary = message.content[0].text.strip()
             return f"✓ {summary}"
 
-        except Exception as e:
+        except Exception:
             # Fallback on error
             parts = [f"✓ Completed with {len(self.output)} outputs:"]
             for key, value in list(self.output.items())[:3]:
@@ -380,7 +380,7 @@ class LLMNode(NodeProtocol):
             system = self._build_system_prompt(ctx)
 
             # Log the LLM call details
-            logger.info(f"      🤖 LLM Call:")
+            logger.info("      🤖 LLM Call:")
             logger.info(f"         System: {system[:150]}..." if len(system) > 150 else f"         System: {system}")
             logger.info(f"         User message: {messages[-1]['content'][:150]}..." if len(messages[-1]['content']) > 150 else f"         User message: {messages[-1]['content']}")
             if ctx.available_tools:
@@ -530,7 +530,7 @@ class LLMNode(NodeProtocol):
                 if start != -1 and end != -1:
                     json_str = raw_response[start:end+1]
                     return json.loads(json_str)
-            except:
+            except (ValueError, json.JSONDecodeError):
                 pass
             raise ValueError("Cannot parse JSON and no API key for Haiku cleanup")
 
@@ -565,7 +565,7 @@ IMPORTANT:
                     cleaned = match.group(1).strip()
 
             parsed = json.loads(cleaned)
-            logger.info(f"      ✓ Haiku cleaned JSON output")
+            logger.info("      ✓ Haiku cleaned JSON output")
             return parsed
 
         except Exception as e:
@@ -792,7 +792,7 @@ Based on the goal and current context, which route should we take?
 Respond with ONLY a JSON object:
 {{"chosen": "route_id", "reasoning": "brief explanation"}}"""
 
-        logger.info(f"      🤔 Router using LLM to choose path...")
+        logger.info("      🤔 Router using LLM to choose path...")
 
         try:
             response = ctx.llm.complete(

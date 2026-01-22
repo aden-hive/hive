@@ -10,7 +10,6 @@ Provides commands:
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from framework.graph.goal import Goal
@@ -293,7 +292,7 @@ def cmd_test_run(args: argparse.Namespace) -> int:
     print(f"Duration: {result.duration_ms}ms")
 
     if not result.all_passed:
-        print(f"\nFailed tests:")
+        print("\nFailed tests:")
         for r in result.get_failed_results():
             print(f"  - {r.test_id}: {r.error_message}")
             if r.error_category:
@@ -335,7 +334,7 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
         print(f"\nStack Trace:\n{info.stack_trace}")
 
     if info.iteration_guidance:
-        print(f"\nIteration Guidance:")
+        print("\nIteration Guidance:")
         print(f"  Stage: {info.iteration_guidance.get('stage')}")
         print(f"  Action: {info.iteration_guidance.get('action')}")
         print(f"  Restart Required: {info.iteration_guidance.get('restart_required')}")
@@ -395,7 +394,7 @@ def cmd_test_stats(args: argparse.Namespace) -> int:
 
     print(f"Statistics for goal {args.goal_id}:\n")
     print(f"  Total tests: {stats['total_tests']}")
-    print(f"\n  By approval status:")
+    print("\n  By approval status:")
     for status, count in stats["by_approval"].items():
         print(f"    {status}: {count}")
 
@@ -405,7 +404,7 @@ def cmd_test_stats(args: argparse.Namespace) -> int:
     failed = sum(1 for t in tests if t.last_result == "failed")
     not_run = sum(1 for t in tests if t.last_result is None)
 
-    print(f"\n  Execution results:")
+    print("\n  Execution results:")
     print(f"    Passed: {passed}")
     print(f"    Failed: {failed}")
     print(f"    Not run: {not_run}")
