@@ -8,10 +8,21 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def write_to_file(path: str, content: str, workspace_id: str, agent_id: str, session_id: str, append: bool = False) -> dict:
         """
-        Write content to a file within the session sandbox.
+        Purpose
+            Create a new file or append content to an existing file.
 
-        Use this when you need to create a new file or overwrite an existing file.
-        Set append=True to add content to the end of an existing file.
+        When to use
+            Append new events to append-only logs
+            Create new artifacts or summaries
+            Initialize new canonical memory files
+
+        Rules & Constraints
+            Must not overwrite canonical memory unless explicitly allowed
+            Should include structured data (JSON, Markdown with headers)
+            Every write must be intentional and minimal
+
+        Anti-pattern
+            Do NOT dump raw conversation transcripts without structure or reason.
 
         Args:
             path: The path to the file (relative to session root)

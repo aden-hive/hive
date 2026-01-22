@@ -8,9 +8,18 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def view_file(path: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
         """
-        Read the content of a file within the session sandbox.
+        Purpose
+            Read the content of a file within the session sandbox.
 
-        Use this when you need to view the contents of an existing file.
+        When to use
+            Inspect file contents before making changes
+            Retrieve stored data or configuration
+            Review logs or artifacts
+
+        Rules & Constraints
+            File must exist at the specified path
+            Returns full content with size and line count
+            Always read before patching or modifying
 
         Args:
             path: The path to the file (relative to session root)
