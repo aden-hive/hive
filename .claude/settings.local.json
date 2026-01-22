@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(npm install:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Skill(building-agents-construction)",
+      "Skill(building-agents-construction:*)",
+      "Bash(PYTHONPATH=core:exports pytest:*)",
+      "mcp__agent-builder__create_session",
+      "mcp__agent-builder__get_session_status",
+      "mcp__agent-builder__set_goal",
+      "mcp__agent-builder__list_mcp_servers",
+      "mcp__agent-builder__test_node",
+      "mcp__agent-builder__add_node",
+      "mcp__agent-builder__add_edge",
+      "mcp__agent-builder__validate_graph"
     ]
   }
 }

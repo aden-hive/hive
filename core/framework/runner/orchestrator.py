@@ -56,7 +56,7 @@ class AgentOrchestrator:
     def __init__(
         self,
         llm: LLMProvider | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-haiku-4-5-20251001",
     ):
         """
         Initialize the orchestrator.

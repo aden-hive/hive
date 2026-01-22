@@ -64,7 +64,7 @@ To use the agent builder with Claude Desktop or other MCP clients, add this to y
     "agent-builder": {
       "command": "python",
       "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "/path/to/hive/core"
+      "cwd": "/path/to/goal-agent"
     }
   }
 }
@@ -75,144 +75,48 @@ The MCP server provides tools for:
 - Defining goals with success criteria
 - Adding nodes (llm_generate, llm_tool_use, router, function)
 - Connecting nodes with edges
-- **Registering MCP servers as tool sources** ✨
-- **Discovering tools from MCP servers** ✨
 - Validating and exporting agent graphs
 - Testing nodes and full agent graphs
 
-When you register an MCP server during agent building, the tools from that server become available to your agent, and an `mcp_servers.json` configuration file is automatically created on export.
-
-See [MCP_SERVER_GUIDE.md](MCP_SERVER_GUIDE.md) for agent builder instructions and [MCP_BUILDER_TOOLS_GUIDE.md](MCP_BUILDER_TOOLS_GUIDE.md) for MCP integration tools.
-
-## MCP Tool Integration
-
-The framework also supports **connecting to MCP servers as tool providers**, allowing your agents to use tools from external MCP servers (like aden-tools). This enables you to extend your agents with powerful external capabilities.
-
-### Quick Example
-
-```python
-from framework.runner.runner import AgentRunner
-
-# Load an agent
-runner = AgentRunner.load("exports/task-planner")
-
-# Register an MCP server with tools
-runner.register_mcp_server(
-    name="aden-tools",
-    transport="stdio",
-    command="python",
-    args=["mcp_server.py", "--stdio"],
-    cwd="../aden-tools"
-)
-
-# Tools from the MCP server are now available to your agent
-result = await runner.run({"query": "Search for AI news"})
-```
-
-### Auto-loading MCP Servers
-
-Create `mcp_servers.json` in your agent folder:
-
-```json
-{
-  "servers": [
-    {
-      "name": "aden-tools",
-      "transport": "stdio",
-      "command": "python",
-      "args": ["mcp_server.py", "--stdio"],
-      "cwd": "../aden-tools"
-    }
-  ]
-}
-```
-
-MCP servers will be automatically loaded when you load the agent.
-
-### Available Tools from aden-tools
-
-When you register the aden-tools MCP server, these tools become available:
-- `web_search` - Search the web using Brave Search API
-- `web_scrape` - Extract content from web pages
-- `file_read` - Read file contents
-- `file_write` - Write content to files
-- `pdf_read` - Extract text from PDF files
-
-See [MCP_INTEGRATION_GUIDE.md](MCP_INTEGRATION_GUIDE.md) for detailed instructions on MCP tool integration.
-
 ## Quick Start
 
-### Running Agents
+### Calculator Agent
 
-The framework comes with pre-built example agents in the `exports/` directory:
+Run an LLM-powered calculator:
 
 ```bash
-# List available agents
-python -m framework list exports/
+# Single calculation
+python -m framework calculate "2 + 3 * 4"
 
-# Show agent information
-python -m framework info exports/task-planner
+# Interactive mode
+python -m framework interactive
 
-# Run an agent
-python -m framework run exports/task-planner --input '{"objective": "Build a web scraper"}'
-
-# Interactive shell mode (with human-in-the-loop approval)
-python -m framework shell exports/task-planner
+# Analyze runs with Builder
+python -m framework analyze calculator
 ```
 
-### Available Commands
-
-- `run` - Execute an exported agent with given input
-- `info` - Display agent details (goal, nodes, edges, success criteria)
-- `validate` - Check that an agent is valid and runnable
-- `list` - List all exported agents in a directory
-- `dispatch` - Route requests to multiple agents using the orchestrator
-- `shell` - Start an interactive session with an agent
-
-### Building Agents Programmatically
-
-You can build agents using the MCP server (recommended) or programmatically:
+### Using the Runtime
 
 ```python
 from framework import Runtime
 
-# Initialize runtime with storage path
-runtime = Runtime("./storage")
+runtime = Runtime("/path/to/storage")
 
-# Start a run for a goal
-run_id = runtime.start_run(
-    goal_id="data-processor",
-    goal_description="Process data with quality checks",
-    input_data={"dataset": "customers.csv"}
-)
-
-# Set the current node context
-runtime.set_node("processor-node")
+# Start a run
+run_id = runtime.start_run("my_goal", "Description of what we're doing")
 
 # Record a decision
 decision_id = runtime.decide(
     intent="Choose how to process the data",
     options=[
-        {
-            "id": "fast",
-            "description": "Quick processing",
-            "action_type": "tool_call",
-            "pros": ["Fast"],
-            "cons": ["Less accurate"]
-        },
-        {
-            "id": "thorough",
-            "description": "Detailed processing",
-            "action_type": "tool_call",
-            "pros": ["Accurate"],
-            "cons": ["Slower"]
-        },
+        {"id": "fast", "description": "Quick processing", "pros": ["Fast"], "cons": ["Less accurate"]},
+        {"id": "thorough", "description": "Detailed processing", "pros": ["Accurate"], "cons": ["Slower"]},
     ],
     chosen="thorough",
     reasoning="Accuracy is more important for this task"
 )
 
-# Record the outcome of the decision
+# Record the outcome
 runtime.record_outcome(
     decision_id=decision_id,
     success=True,
@@ -221,12 +125,31 @@ runtime.record_outcome(
 )
 
 # End the run
-runtime.end_run(
-    success=True,
-    narrative="Successfully processed all data",
-    output_data={"total_processed": 100}
-)
+runtime.end_run(success=True, narrative="Successfully processed all data")
 ```
+
+### Testing Agents
+
+The framework includes a goal-based testing framework for validating agent behavior.
+
+```bash
+# Generate tests from a goal definition
+python -m framework test-generate goal.json
+
+# Interactively approve generated tests
+python -m framework test-approve <goal_id>
+
+# Run tests against an agent
+python -m framework test-run <agent_path> --parallel 4
+
+# Debug failed tests
+python -m framework test-debug <goal_id> <test_id>
+
+# List tests by status
+python -m framework test-list <goal_id>
+```
+
+For detailed testing workflows, see the [testing-agent skill](.claude/skills/testing-agent/SKILL.md).
 
 ### Analyzing Agent Behavior with Builder
 
@@ -235,119 +158,50 @@ The BuilderQuery interface allows you to analyze agent runs and identify improve
 ```python
 from framework import BuilderQuery
 
-# Initialize Builder query interface
-query = BuilderQuery("./storage")
+query = BuilderQuery("/path/to/storage")
 
-# Find patterns across runs for a goal
-patterns = query.find_patterns("data-processor")
-if patterns:
-    print(f"Success rate: {patterns.success_rate:.1%}")
-    print(f"Runs analyzed: {patterns.run_count}")
+# Find patterns across runs
+patterns = query.find_patterns("my_goal")
+print(f"Success rate: {patterns.success_rate:.1%}")
 
-    # Show problematic nodes
-    for node_id, failure_rate in patterns.problematic_nodes:
-        print(f"Node '{node_id}' has {failure_rate:.1%} failure rate")
+# Analyze a failure
+analysis = query.analyze_failure("run_123")
+print(f"Root cause: {analysis.root_cause}")
+print(f"Suggestions: {analysis.suggestions}")
 
-# Analyze a specific failure
-analysis = query.analyze_failure("run_20260119_143022_abc123")
-if analysis:
-    print(f"Failure point: {analysis.failure_point}")
-    print(f"Root cause: {analysis.root_cause}")
-    print(f"\nSuggestions:")
-    for suggestion in analysis.suggestions:
-        print(f"  - {suggestion}")
-
-# Get improvement recommendations for a goal
-suggestions = query.suggest_improvements("data-processor")
+# Get improvement recommendations
+suggestions = query.suggest_improvements("my_goal")
 for s in suggestions:
     print(f"[{s['priority']}] {s['recommendation']}")
-    print(f"  Reason: {s['reason']}")
-
-# Get performance metrics for a specific node
-perf = query.get_node_performance("processor-node")
-print(f"Node: {perf['node_id']}")
-print(f"Success rate: {perf['success_rate']:.1%}")
-print(f"Avg latency: {perf['avg_latency_ms']:.0f}ms")
 ```
 
 ## Architecture
 
-The framework consists of several layers:
-
 ```
 ┌─────────────────┐
-│  Human Engineer │  ← Supervision, approval via HITL
+│  Human Engineer │  ← Supervision, approval
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│   Builder LLM   │  ← Analyzes runs, suggests improvements (via MCP)
+│   Builder LLM   │  ← Analyzes runs, suggests improvements
 │  (BuilderQuery) │
 └────────┬────────┘
          │
 ┌────────▼────────┐
-│   Agent Graph   │  ← Node-based execution flow
-│   (AgentRunner) │     (llm_generate, llm_tool_use, router, function)
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│    Runtime      │  ← Records decisions, outcomes, problems
-│   (Decision DB) │
+│   Agent LLM     │  ← Executes tasks, records decisions
+│    (Runtime)    │
 └─────────────────┘
 ```
 
 ## Key Concepts
 
-### Graph-Based Agents
-
-Agents are defined as directed graphs with:
-- **Nodes**: Execution steps (llm_generate, llm_tool_use, router, function)
-- **Edges**: Control flow between nodes, including conditional routing
-- **Goal**: What the agent is designed to accomplish with success criteria
-- **Constraints**: Hard and soft limits on agent behavior
-
-### Decision Recording
-
 - **Decision**: The atomic unit of agent behavior. Captures intent, options, choice, and reasoning.
-- **Outcome**: Result of executing a decision (success/failure, latency, tokens, state changes)
-- **Run**: A complete execution trace with all decisions and outcomes
-- **Problem**: Issues reported during execution with severity and suggested fixes
-
-### Analysis & Improvement
-
-- **Runtime**: Interface agents use to record their behavior during execution
-- **BuilderQuery**: Interface for analyzing agent runs and identifying patterns
-- **PatternAnalysis**: Cross-run analysis showing success rates, common failures, problematic nodes
-- **FailureAnalysis**: Deep dive into why a specific run failed with suggestions
-
-### Human-in-the-Loop (HITL)
-
-- **Approval Callbacks**: Nodes can require human approval before execution
-- **Interactive Shell**: Chat-like interface for running agents with approval prompts
-- **Session State**: Agents can pause and resume based on user input
-
-### Multi-Agent Orchestration
-
-- **AgentOrchestrator**: Dispatch requests to multiple agents
-- **Agent Discovery**: Automatically discover and register agents from a directory
-- **Dispatch Strategy**: Route requests to the most appropriate agent(s)
-
-## Example Agents
-
-The `exports/` directory contains example agents you can run or use as templates:
-
-- **task-planner**: Breaks down complex objectives into actionable tasks with dependencies
-- **research-summary-agent**: Conducts research and generates summaries
-- **outbound-sales-agent**: Handles outbound sales workflows
-- **youtube-comments-research**: Analyzes YouTube comments for insights
-
-Each agent includes:
-- `agent.json`: Graph definition with nodes, edges, goal, and constraints
-- `README.md`: Agent documentation
-- `tools.py` (optional): Custom tool implementations
+- **Run**: A complete execution with all decisions and outcomes.
+- **Runtime**: Interface agents use to record their behavior.
+- **BuilderQuery**: Interface Builder uses to analyze agent behavior.
 
 ## Requirements
 
 - Python 3.11+
 - pydantic >= 2.0
 - anthropic >= 0.40.0 (for LLM-powered agents)
-- mcp, fastmcp (optional, for MCP server)

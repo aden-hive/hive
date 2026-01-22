@@ -35,6 +35,7 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
+        self._session_context: dict[str, Any] = {}  # Auto-injected context for tools
 
     def register(
         self,
@@ -227,6 +228,15 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
+    def set_session_context(self, **context) -> None:
+        """
+        Set session context to auto-inject into tool calls.
+
+        Args:
+            **context: Key-value pairs to inject (e.g., workspace_id, agent_id, session_id)
+        """
+        self._session_context.update(context)
+
     def register_mcp_server(
         self,
         server_config: dict[str, Any],
@@ -279,10 +289,12 @@ class ToolRegistry:
                 tool = self._convert_mcp_tool_to_framework_tool(mcp_tool)
 
                 # Create executor that calls the MCP server
-                def make_mcp_executor(client_ref: MCPClient, tool_name: str):
+                def make_mcp_executor(client_ref: MCPClient, tool_name: str, registry_ref):
                     def executor(inputs: dict) -> Any:
                         try:
-                            result = client_ref.call_tool(tool_name, inputs)
+                            # Inject session context for tools that need it
+                            merged_inputs = {**registry_ref._session_context, **inputs}
+                            result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:
                                 if isinstance(result[0], dict) and "text" in result[0]:
@@ -298,7 +310,7 @@ class ToolRegistry:
                 self.register(
                     mcp_tool.name,
                     tool,
-                    make_mcp_executor(client, mcp_tool.name),
+                    make_mcp_executor(client, mcp_tool.name, self),
                 )
                 count += 1
 
