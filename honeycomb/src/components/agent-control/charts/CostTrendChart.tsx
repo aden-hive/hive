@@ -8,6 +8,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts'
+import { ReactNode } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { CostTrendData } from '@/types/agentControl'
 
@@ -35,7 +36,7 @@ export function CostTrendChart({
       maximumFractionDigits: 0,
     }).format(value)
 
-  const formatDate = (label: any) => {
+  const formatDate = (label: ReactNode) => {
     if (typeof label !== 'string') return String(label || '')
     const date = new Date(label)
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
