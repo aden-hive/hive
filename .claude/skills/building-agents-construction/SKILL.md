@@ -327,7 +327,7 @@ mcp__agent-builder__validate_graph()
 
 Write the agent class:
 
-```python
+````python
 agent_class_code = f'''
 
 class {agent_class_name}:
@@ -500,7 +500,7 @@ python -m {agent_name} run --input '{{"key": "value"}}'
 
 # Interactive shell
 python -m {agent_name} shell
-```
+````
 
 ## As Python Module
 
@@ -516,28 +516,31 @@ result = await default_agent.run({{"key": "value"}})
 - `nodes/__init__.py` - Node definitions
 - `config.py` - Runtime configuration
 - `__main__.py` - CLI interface
-'''
+  '''
 
 Write(
-    file_path=f"{package_path}/README.md",
-    content=readme_content
+file_path=f"{package_path}/README.md",
+content=readme_content
 )
+
 ```
 
 **Show user:**
 
 ```
+
 ✅ Agent class written to agent.py
-✅ Package exports finalized in __init__.py
+✅ Package exports finalized in **init**.py
 ✅ README.md generated
 
 🎉 Agent complete: exports/technical_research_agent/
 
 Commands:
-  python -m technical_research_agent info
-  python -m technical_research_agent validate
-  python -m technical_research_agent run --input '{"topic": "..."}'
-```
+python -m technical_research_agent info
+python -m technical_research_agent validate
+python -m technical_research_agent run --input '{"topic": "..."}'
+
+````
 
 ## CLI Template
 
@@ -623,7 +626,7 @@ def shell():
 if __name__ == "__main__":
     cli()
 '''
-```
+````
 
 ## Testing During Build
 
@@ -677,11 +680,13 @@ response = AskUserQuestion(
 After completing construction:
 
 **If agent structure complete:**
+
 - Validate: `python -m agent_name validate`
 - Test basic execution: `python -m agent_name info`
 - Proceed to testing-agent skill for comprehensive tests
 
 **If implementation needed:**
+
 - Check for STATUS.md or IMPLEMENTATION_GUIDE.md in agent directory
 - May need Python functions or MCP tool integration
 

@@ -2,6 +2,15 @@
   <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
 </p>
 
+<p align="center">
+  <a href="README.md">English</a> |
+  <a href="README.zh-CN.md">简体中文</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.pt.md">Português</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.ru.md">Русский</a>
+</p>
+
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
 [![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
 [![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
@@ -28,6 +37,20 @@
 Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
+
+## What is Aden
+
+<p align="center">
+  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+</p>
+
+Aden is a platform for building, deploying, operating, and adapting AI agents:
+
+- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
+- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
+- **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
+- **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
+- **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
 
 ## Quick Links
 
@@ -127,14 +150,14 @@ flowchart LR
 
 ### The Aden Advantage
 
-| Traditional Frameworks | Aden |
-|------------------------|------|
-| Hardcode agent workflows | Describe goals in natural language |
-| Manual graph definition | Auto-generated agent graphs |
-| Reactive error handling | Proactive self-evolution |
-| Static tool configurations | Dynamic SDK-wrapped nodes |
-| Separate monitoring setup | Built-in real-time observability |
-| DIY budget management | Integrated cost controls & degradation |
+| Traditional Frameworks     | Aden                                   |
+| -------------------------- | -------------------------------------- |
+| Hardcode agent workflows   | Describe goals in natural language     |
+| Manual graph definition    | Auto-generated agent graphs            |
+| Reactive error handling    | Proactive self-evolution               |
+| Static tool configurations | Dynamic SDK-wrapped nodes              |
+| Separate monitoring setup  | Built-in real-time observability       |
+| DIY budget management      | Integrated cost controls & degradation |
 
 ### How It Works
 
@@ -150,20 +173,21 @@ Aden takes a fundamentally different approach to agent development. While most f
 
 ### Comparison Table
 
-| Framework | Category | Approach | Aden Difference |
-|-----------|----------|----------|-----------------|
-| **LangChain, LlamaIndex, Haystack** | Component Libraries | Predefined components for RAG/LLM apps; manual connection logic | Generates entire graph and connection code upfront |
-| **CrewAI, AutoGen, Swarm** | Multi-Agent Orchestration | Role-based agents with predefined collaboration patterns | Dynamically creates agents/connections; adapts on failure |
-| **PydanticAI, Mastra, Agno** | Type-Safe Frameworks | Structured outputs and validation for known workflows | Evolving workflows; structure emerges through iteration |
-| **Agent Zero, Letta** | Personal AI Assistants | Memory and learning; OS-as-tool or stateful memory focus | Production multi-agent systems with self-healing |
-| **CAMEL** | Research Framework | Emergent behavior in large-scale simulations (up to 1M agents) | Production-oriented with reliable execution and recovery |
-| **TEN Framework, Genkit** | Infrastructure Frameworks | Real-time multimodal (TEN) or full-stack AI (Genkit) | Higher abstraction—generates and evolves agent logic |
-| **GPT Engineer, Motia** | Code Generation | Code from specs (GPT Engineer) or "Step" primitive (Motia) | Self-adapting graphs with automatic failure recovery |
-| **Trading Agents** | Domain-Specific | Hardcoded trading firm roles on LangGraph | Domain-agnostic; generates structures for any use case |
+| Framework                           | Category                  | Approach                                                        | Aden Difference                                           |
+| ----------------------------------- | ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------- |
+| **LangChain, LlamaIndex, Haystack** | Component Libraries       | Predefined components for RAG/LLM apps; manual connection logic | Generates entire graph and connection code upfront        |
+| **CrewAI, AutoGen, Swarm**          | Multi-Agent Orchestration | Role-based agents with predefined collaboration patterns        | Dynamically creates agents/connections; adapts on failure |
+| **PydanticAI, Mastra, Agno**        | Type-Safe Frameworks      | Structured outputs and validation for known workflows           | Evolving workflows; structure emerges through iteration   |
+| **Agent Zero, Letta**               | Personal AI Assistants    | Memory and learning; OS-as-tool or stateful memory focus        | Production multi-agent systems with self-healing          |
+| **CAMEL**                           | Research Framework        | Emergent behavior in large-scale simulations (up to 1M agents)  | Production-oriented with reliable execution and recovery  |
+| **TEN Framework, Genkit**           | Infrastructure Frameworks | Real-time multimodal (TEN) or full-stack AI (Genkit)            | Higher abstraction—generates and evolves agent logic      |
+| **GPT Engineer, Motia**             | Code Generation           | Code from specs (GPT Engineer) or "Step" primitive (Motia)      | Self-adapting graphs with automatic failure recovery      |
+| **Trading Agents**                  | Domain-Specific           | Hardcoded trading firm roles on LangGraph                       | Domain-agnostic; generates structures for any use case    |
 
 ### When to Choose Aden
 
 Choose Aden when you need:
+
 - Agents that **self-improve from failures** without manual intervention
 - **Goal-driven development** where you describe outcomes, not workflows
 - **Production reliability** with automatic recovery and redeployment
@@ -171,6 +195,7 @@ Choose Aden when you need:
 - **Full observability** with real-time monitoring and human oversight
 
 Choose other frameworks when you need:
+
 - **Type-safe, predictable workflows** (PydanticAI, Mastra)
 - **RAG and document processing** (LlamaIndex, Haystack)
 - **Research on agent emergence** (CAMEL)
@@ -181,9 +206,9 @@ Choose other frameworks when you need:
 
 ```
 hive/
-├── honeycomb/              # Frontend Dashboard 
-├── hive/                   # Backend API Server 
-├── aden-tools/             # MCP Tools Package - 19 tools for agent capabilities
+├── honeycomb/              # Frontend Dashboard
+├── hive/                   # Backend API Server
+├── tools/             # MCP Tools Package - 19 tools for agent capabilities
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
 ├── config.yaml.example     # Configuration template
@@ -290,11 +315,11 @@ No. Aden is built from the ground up with no dependencies on LangChain, CrewAI, 
 
 **Q: What LLM providers does Aden support?**
 
-Aden supports OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), and Google Gemini out of the box. The architecture is provider-agnostic through SDK abstraction, with LiteLLM integration on the roadmap for expanded model support.
+Aden supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
 
 **Q: Can I use Aden with local AI models like Ollama?**
 
-Local model support through LiteLLM integration is on our roadmap. The SDK's provider-agnostic design means adding local model support will be straightforward once implemented.
+Yes! Aden supports local models through LiteLLM. Simply use the model name format `ollama/model-name` (e.g., `ollama/llama3`, `ollama/mistral`) and ensure Ollama is running locally.
 
 **Q: What makes Aden different from other agent frameworks?**
 

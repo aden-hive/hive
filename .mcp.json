@@ -5,13 +5,13 @@
       "args": ["-m", "framework.mcp.agent_builder_server"],
       "cwd": "core",
       "env": {
-        "PYTHONPATH": "../aden-tools/src"
+        "PYTHONPATH": "../tools/src"
       }
     },
-    "aden-tools": {
+    "tools": {
       "command": "python",
       "args": ["mcp_server.py", "--stdio"],
-      "cwd": "aden-tools",
+      "cwd": "tools",
       "env": {
         "PYTHONPATH": "src"
       }

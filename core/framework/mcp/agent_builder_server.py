@@ -436,7 +436,7 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
             "warnings": [
                 f"⚠️ Credential validation SKIPPED: aden_tools not available ({e}). "
                 "Tools may fail at runtime if credentials are missing. "
-                "Add aden-tools/src to PYTHONPATH to enable validation."
+                "Add tools/src to PYTHONPATH to enable validation."
             ],
         }
 
@@ -1425,11 +1425,11 @@ def add_mcp_server(
 
     Example for stdio:
         add_mcp_server(
-            name="aden-tools",
+            name="tools",
             transport="stdio",
             command="python",
             args='["mcp_server.py", "--stdio"]',
-            cwd="../aden-tools"
+            cwd="../tools"
         )
 
     Example for http:
