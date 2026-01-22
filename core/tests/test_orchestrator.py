@@ -26,7 +26,7 @@ class TestOrchestratorLLMInitialization:
     def test_uses_custom_model_parameter(self):
         """Test that custom model parameter is passed to LiteLLMProvider."""
         with patch.object(LiteLLMProvider, '__init__', return_value=None) as mock_init:
-            orchestrator = AgentOrchestrator(model="gpt-4o")
+            AgentOrchestrator(model="gpt-4o")
 
             mock_init.assert_called_once_with(model="gpt-4o")
 

@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from framework.graph import Goal
 from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition
@@ -13,6 +13,9 @@ from framework.graph.executor import GraphExecutor, ExecutionResult
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.core import Runtime
+
+if TYPE_CHECKING:
+    from framework.runner.protocol import CapabilityResponse, AgentMessage
 
 
 @dataclass

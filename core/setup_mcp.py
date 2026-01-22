@@ -110,7 +110,7 @@ def main():
     print_step("Step 4: Testing MCP server...")
     try:
         # Try importing the MCP server module
-        result = subprocess.run(
+        subprocess.run(
             [sys.executable, "-c", "from framework.mcp import agent_builder_server"],
             check=True,
             capture_output=True,

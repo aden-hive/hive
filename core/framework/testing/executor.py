@@ -142,7 +142,7 @@ class SyncAgentWrapper:
 
         # Check if we're already in an async context
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # We're in an async context, can't use run_until_complete
             # This shouldn't happen in normal test execution
             raise RuntimeError("Cannot run sync wrapper from async context")

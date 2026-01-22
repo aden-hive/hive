@@ -97,7 +97,7 @@ class TestDecisionRecording:
         # Set node context
         runtime.set_node("search-node")
 
-        decision_id = runtime.decide(
+        runtime.decide(
             intent="Search query",
             options=[{"id": "web", "description": "Web search"}],
             chosen="web",
@@ -277,7 +277,7 @@ class TestConvenienceMethods:
         runtime = Runtime(tmp_path)
         runtime.start_run("test_goal", "Test")
 
-        decision_id = runtime.quick_decision(
+        runtime.quick_decision(
             intent="Log message",
             action="Write to stdout",
             reasoning="Standard logging",
