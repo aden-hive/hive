@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from "crypto";
+import { getErrorMessage } from "../../utils/error";
 import * as tsdbService from "../tsdb/tsdb_service";
 import pricingService from "../tsdb/pricing_service";
 import { getTeamPool, buildSchemaName } from "../tsdb/team_context";
@@ -225,7 +226,7 @@ async function calculateBudgetAnalyticsFromTsdb(teamId: string | number, budget:
               todayMidnight.toISOString(),
             ]);
             spent += parseFloat(caResult.rows[0]?.total_cost) || 0;
-          } catch (caErr) {
+          } catch (caErr: unknown) {
             // CA not available, will fall back to base table
           }
         } else if (canUseAgentCA) {
@@ -242,7 +243,7 @@ async function calculateBudgetAnalyticsFromTsdb(teamId: string | number, budget:
               budget.name,
             ]);
             spent += parseFloat(caResult.rows[0]?.total_cost) || 0;
-          } catch (caErr) {
+          } catch (caErr: unknown) {
             // CA not available, will fall back to base table
           }
         }
@@ -325,10 +326,10 @@ async function calculateBudgetAnalyticsFromTsdb(teamId: string | number, budget:
     } finally {
       client.release();
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error(
       `[Aden Control] Failed to calculate budget analytics from TSDB:`,
-      (error as Error).message
+      getErrorMessage(error)
     );
     // Fall back to in-memory tracker with minimal analytics
     const tracker = budgetTracker.get(budget.id);
@@ -580,8 +581,8 @@ async function processEvents(teamId: string | number | null, policyId: string | 
       } finally {
         client.release();
       }
-    } catch (error) {
-      console.error(`[Aden Control] Failed to store events in TSDB:`, (error as Error).message);
+    } catch (error: unknown) {
+      console.error(`[Aden Control] Failed to store events in TSDB:`, getErrorMessage(error));
     }
   }
 }
@@ -915,8 +916,8 @@ async function sendBudgetNotifications(budget: Budget, alertData: Record<string,
       } else {
         console.log(`[Aden Control] Sent webhook notification for budget ${budget.name}`);
       }
-    } catch (err) {
-      console.error(`[Aden Control] Failed to send webhook notification:`, (err as Error).message);
+    } catch (err: unknown) {
+      console.error(`[Aden Control] Failed to send webhook notification:`, getErrorMessage(err));
     }
   }
 
@@ -1046,11 +1047,11 @@ async function processControlEvent(teamId: string | number, event: Event, policy
           await sendBudgetNotifications(budget, alertData, "limit_action");
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(
         `[Aden Control] Failed to send control event notifications:`,
-        (err as Error).message,
-        (err as Error).stack
+        getErrorMessage(err),
+        err instanceof Error ? err.stack : undefined
       );
     }
   } else {
@@ -1178,8 +1179,8 @@ async function getEvents(teamId: string | number, policyId: string | null = null
     } finally {
       client.release();
     }
-  } catch (error) {
-    console.error(`[Aden Control] Failed to get events from TSDB:`, (error as Error).message);
+  } catch (error: unknown) {
+    console.error(`[Aden Control] Failed to get events from TSDB:`, getErrorMessage(error));
     return [];
   }
 }
@@ -1275,8 +1276,8 @@ async function getMetricsSummary(teamId: string | number, options: { start_date?
     } finally {
       client.release();
     }
-  } catch (error) {
-    console.error(`[Aden Control] Failed to get metrics summary:`, (error as Error).message);
+  } catch (error: unknown) {
+    console.error(`[Aden Control] Failed to get metrics summary:`, getErrorMessage(error));
     return { total_requests: 0, total_cost: 0, total_input_tokens: 0, total_output_tokens: 0, total_tokens: 0, breakdown_by_model: [] };
   }
 }
@@ -1565,8 +1566,8 @@ async function getUsageBreakdown(teamId: string | number, options: { days?: numb
     } finally {
       client.release();
     }
-  } catch (error) {
-    console.error(`[Aden Control] Failed to get usage breakdown:`, (error as Error).message);
+  } catch (error: unknown) {
+    console.error(`[Aden Control] Failed to get usage breakdown:`, getErrorMessage(error));
     return { daily: [], by_model: [], by_feature: [] };
   }
 }
@@ -1721,8 +1722,8 @@ async function getRateMetrics(teamId: string | number, options: { days?: number;
     } finally {
       client.release();
     }
-  } catch (error) {
-    console.error(`[Aden Control] Failed to get rate metrics:`, (error as Error).message);
+  } catch (error: unknown) {
+    console.error(`[Aden Control] Failed to get rate metrics:`, getErrorMessage(error));
     return {
       peak_rate: 0,
       p95_rate: 0,
@@ -2017,8 +2018,8 @@ async function storeContent(teamId: string | number, items: ContentItem[]): Prom
         { upsert: true }
       );
       stored++;
-    } catch (error) {
-      console.error(`[Aden Control] Failed to store content ${item.content_id}:`, (error as Error).message);
+    } catch (error: unknown) {
+      console.error(`[Aden Control] Failed to store content ${item.content_id}:`, getErrorMessage(error));
     }
   }
 

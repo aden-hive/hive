@@ -4,6 +4,7 @@
  */
 import express, { Request, Response, NextFunction } from "express";
 import passport from "passport";
+import { getErrorMessage } from "../utils/error";
 // Passport is initialized in app.js
 
 import * as quickstartService from "../services/quickstart/quickstart_service";
@@ -35,7 +36,7 @@ router.get("/options", async (req: Request, res: Response, next: NextFunction) =
   try {
     const options = quickstartService.getQuickstartOptions();
     res.send(options);
-  } catch (error) {
+  } catch (error: unknown) {
     next(error);
   }
 });
@@ -111,9 +112,9 @@ router.post(
           generatedAt: new Date().toISOString(),
         },
       });
-    } catch (error) {
-      if ((error as Error).message.includes("Invalid")) {
-        return res.status(400).send({ error: (error as Error).message });
+    } catch (error: unknown) {
+      if (getErrorMessage(error).includes("Invalid")) {
+        return res.status(400).send({ error: getErrorMessage(error) });
       }
       next(error);
     }
@@ -178,12 +179,12 @@ router.post("/generate-with-key", async (req: Request, res: Response, next: Next
         generatedAt: new Date().toISOString(),
       },
     });
-  } catch (error) {
+  } catch (error: unknown) {
     if (
-      (error as Error).message.includes("Invalid") ||
-      (error as Error).message.includes("required")
+      getErrorMessage(error).includes("Invalid") ||
+      getErrorMessage(error).includes("required")
     ) {
-      return res.status(400).send({ error: (error as Error).message });
+      return res.status(400).send({ error: getErrorMessage(error) });
     }
     next(error);
   }

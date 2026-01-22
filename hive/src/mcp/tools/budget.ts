@@ -37,7 +37,7 @@ export function registerBudgetTools(server: McpServer, api: ApiClient) {
       try {
         const result = await api.budget.getStatus(params.budgetId);
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_budget_get");
       }
     }
@@ -62,7 +62,7 @@ export function registerBudgetTools(server: McpServer, api: ApiClient) {
           reason: params.reason,
           reset_at: new Date().toISOString(),
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_budget_reset");
       }
     }
@@ -100,7 +100,7 @@ export function registerBudgetTools(server: McpServer, api: ApiClient) {
           localSpend: params.localSpend,
         });
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_budget_validate");
       }
     }
@@ -193,7 +193,7 @@ export function registerBudgetTools(server: McpServer, api: ApiClient) {
           budget_id: params.id,
           policy: result,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_budget_rule_create");
       }
     }
@@ -275,7 +275,7 @@ export function registerBudgetTools(server: McpServer, api: ApiClient) {
           ),
           policy: result,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_budget_rule_update");
       }
     }
@@ -327,7 +327,7 @@ export function registerBudgetTools(server: McpServer, api: ApiClient) {
           remaining_budgets: budgets.length,
           policy: result,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_budget_rule_delete");
       }
     }

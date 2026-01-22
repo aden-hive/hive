@@ -497,7 +497,7 @@ const ensureSchema = async (client?: PoolClient): Promise<void> => {
 
     try {
       await initPromise;
-    } catch (err) {
+    } catch (err: unknown) {
       _schemaReadyByName.delete(schemaName);
       throw err;
     }
@@ -518,7 +518,7 @@ const ensureSchema = async (client?: PoolClient): Promise<void> => {
 
   try {
     await _schemaReadyPromise;
-  } catch (err) {
+  } catch (err: unknown) {
     _schemaReadyPromise = null;
     throw err;
   }

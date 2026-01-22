@@ -74,7 +74,7 @@ export function RegisterForm({ orgPath, orgName }: RegisterFormProps) {
 
       await initUserProfile()
       handleRedirect()
-    } catch (err) {
+    } catch (err: unknown) {
       setError((err as Error)?.message || 'Failed to register. Please try again.')
     } finally {
       setIsSubmitting(false)

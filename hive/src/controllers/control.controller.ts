@@ -12,6 +12,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import createError from "http-errors";
 import passport from "passport";
+import { getErrorMessage } from "../utils/error";
 
 import controlService from "../services/control/control_service";
 import pricingService from "../services/tsdb/pricing_service";
@@ -142,8 +143,8 @@ router.get(
         policyId
       );
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error getting policy:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting policy:", getErrorMessage(error));
       next(createError(500, "Failed to get policy"));
     }
   }
@@ -179,8 +180,8 @@ router.post(
       );
 
       res.json({ success: true, processed: events.length });
-    } catch (error) {
-      console.error("[Aden Control] Error processing events:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error processing events:", getErrorMessage(error));
       next(createError(500, "Failed to process events"));
     }
   }
@@ -242,8 +243,8 @@ router.post(
       );
 
       res.json({ success: true, stored: result.stored });
-    } catch (error) {
-      console.error("[Aden Control] Error storing content:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error storing content:", getErrorMessage(error));
       next(createError(500, "Failed to store content"));
     }
   }
@@ -274,8 +275,8 @@ router.get(
       }
 
       res.json(content);
-    } catch (error) {
-      console.error("[Aden Control] Error getting content:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting content:", getErrorMessage(error));
       next(createError(500, "Failed to get content"));
     }
   }
@@ -332,8 +333,8 @@ router.get(
       } finally {
         client.release();
       }
-    } catch (error) {
-      console.error("[Aden Control] Error getting event content:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting event content:", getErrorMessage(error));
       next(createError(500, "Failed to get event content"));
     }
   }
@@ -387,8 +388,8 @@ router.get(
       } finally {
         client.release();
       }
-    } catch (error) {
-      console.error("[Aden Control] Error getting content by hash:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting content by hash:", getErrorMessage(error));
       next(createError(500, "Failed to get content"));
     }
   }
@@ -427,8 +428,8 @@ router.get(
       );
 
       res.json({ events, count: events.length });
-    } catch (error) {
-      console.error("[Aden Control] Error getting events:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting events:", getErrorMessage(error));
       next(createError(500, "Failed to get events"));
     }
   }
@@ -487,8 +488,8 @@ router.put(
       }
 
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error updating policy:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error updating policy:", getErrorMessage(error));
       next(createError(500, "Failed to update policy"));
     }
   }
@@ -527,8 +528,8 @@ router.delete(
       }
 
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error clearing policy:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error clearing policy:", getErrorMessage(error));
       next(createError(500, "Failed to clear policy"));
     }
   }
@@ -756,8 +757,8 @@ router.post(
       }
 
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error adding budget rule:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error adding budget rule:", getErrorMessage(error));
       next(createError(500, "Failed to add budget rule"));
     }
   }
@@ -802,8 +803,8 @@ router.post(
       }
 
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error adding throttle rule:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error adding throttle rule:", getErrorMessage(error));
       next(createError(500, "Failed to add throttle rule"));
     }
   }
@@ -846,8 +847,8 @@ router.post(
       }
 
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error adding block rule:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error adding block rule:", getErrorMessage(error));
       next(createError(500, "Failed to add block rule"));
     }
   }
@@ -940,8 +941,8 @@ router.post(
       }
 
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error adding degradation rule:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error adding degradation rule:", getErrorMessage(error));
       next(createError(500, "Failed to add degradation rule"));
     }
   }
@@ -1003,8 +1004,8 @@ router.post(
       }
 
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error adding alert rule:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error adding alert rule:", getErrorMessage(error));
       next(createError(500, "Failed to add alert rule"));
     }
   }
@@ -1026,8 +1027,8 @@ router.get(
       const { budgetId } = req.params;
       const status = await controlService.getBudgetStatus(budgetId);
       res.json(status);
-    } catch (error) {
-      console.error("[Aden Control] Error getting budget status:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting budget status:", getErrorMessage(error));
       next(createError(500, "Failed to get budget status"));
     }
   }
@@ -1045,8 +1046,8 @@ router.post(
       const { budgetId } = req.params;
       await controlService.resetBudget(budgetId);
       res.json({ success: true, id: budgetId });
-    } catch (error) {
-      console.error("[Aden Control] Error resetting budget:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error resetting budget:", getErrorMessage(error));
       next(createError(500, "Failed to reset budget"));
     }
   }
@@ -1080,8 +1081,8 @@ router.get(
       );
 
       res.json({ policies, count: policies.length });
-    } catch (error) {
-      console.error("[Aden Control] Error getting team policies:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting team policies:", getErrorMessage(error));
       next(createError(500, "Failed to get team policies"));
     }
   }
@@ -1115,8 +1116,8 @@ router.post(
       );
 
       res.status(201).json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error creating policy:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error creating policy:", getErrorMessage(error));
       next(createError(500, "Failed to create policy"));
     }
   }
@@ -1150,8 +1151,8 @@ router.get(
       }
 
       res.json(policy);
-    } catch (error) {
-      console.error("[Aden Control] Error getting policy:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting policy:", getErrorMessage(error));
       next(createError(500, "Failed to get policy"));
     }
   }
@@ -1189,8 +1190,8 @@ router.delete(
       );
 
       res.json({ success: true, id: policyId });
-    } catch (error) {
-      console.error("[Aden Control] Error deleting policy:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error deleting policy:", getErrorMessage(error));
       next(createError(500, "Failed to delete policy"));
     }
   }
@@ -1220,8 +1221,8 @@ router.get(
       );
 
       res.json(summary);
-    } catch (error) {
-      console.error("[Aden Control] Error getting metrics summary:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting metrics summary:", getErrorMessage(error));
       next(createError(500, "Failed to get metrics summary"));
     }
   }
@@ -1255,8 +1256,8 @@ router.get(
       );
 
       res.json(breakdown);
-    } catch (error) {
-      console.error("[Aden Control] Error getting usage breakdown:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting usage breakdown:", getErrorMessage(error));
       next(createError(500, "Failed to get usage breakdown"));
     }
   }
@@ -1283,8 +1284,8 @@ router.get(
       });
 
       res.json(rates);
-    } catch (error) {
-      console.error("[Aden Control] Error getting rate metrics:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting rate metrics:", getErrorMessage(error));
       next(createError(500, "Failed to get rate metrics"));
     }
   }
@@ -1318,8 +1319,8 @@ router.get(
       }
 
       res.json(budget);
-    } catch (error) {
-      console.error("[Aden Control] Error getting budget details:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting budget details:", getErrorMessage(error));
       next(createError(500, "Failed to get budget details"));
     }
   }
@@ -1365,8 +1366,8 @@ router.get(
       );
 
       res.json(breakdown);
-    } catch (error) {
-      console.error("[Aden Control] Error getting budget usage:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting budget usage:", getErrorMessage(error));
       next(createError(500, "Failed to get budget usage"));
     }
   }
@@ -1409,8 +1410,8 @@ router.get(
       });
 
       res.json(rates);
-    } catch (error) {
-      console.error("[Aden Control] Error getting budget rates:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting budget rates:", getErrorMessage(error));
       next(createError(500, "Failed to get budget rates"));
     }
   }
@@ -1552,8 +1553,8 @@ router.post(
         // Keep backward-compatible fields
         updated_spend: result.authoritative_spend,
       });
-    } catch (error) {
-      console.error("[Aden Control] Error validating budget:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error validating budget:", getErrorMessage(error));
       next(createError(500, "Failed to validate budget"));
     }
   }
@@ -1598,8 +1599,8 @@ router.get(
       }
 
       res.json(targets);
-    } catch (error) {
-      console.error("[Aden Control] Error getting degradation targets:", error);
+    } catch (error: unknown) {
+      console.error("[Aden Control] Error getting degradation targets:", getErrorMessage(error));
       next(createError(500, "Failed to get degradation targets"));
     }
   }
@@ -1860,7 +1861,7 @@ router.get(
         connected_count: agents.filter((a) => a.status === "connected").length,
         timestamp: new Date().toISOString(),
       });
-    } catch (error) {
+    } catch (error: unknown) {
       next(error);
     }
   }

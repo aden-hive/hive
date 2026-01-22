@@ -78,7 +78,7 @@ export const useUserStore = create<UserState>((set, get) => ({
       }
 
       return user
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('[UserStore] Failed to init user profile:', error)
       return null
     } finally {

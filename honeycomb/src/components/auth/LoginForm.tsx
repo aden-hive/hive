@@ -58,7 +58,7 @@ export function LoginForm({ orgPath, orgName, showSignup = true }: LoginFormProp
 
       await initUserProfile()
       handleRedirect()
-    } catch (err) {
+    } catch (err: unknown) {
       setError((err as Error)?.message || 'Failed to login. Please check your credentials.')
     } finally {
       setIsSubmitting(false)

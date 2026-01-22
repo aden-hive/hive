@@ -8,6 +8,7 @@ import { Server } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { Emitter } from '@socket.io/redis-emitter';
 import Redis from 'ioredis';
+import { getErrorMessage } from '../utils/error';
 import type { Server as HttpServer } from 'http';
 
 import initAdenControlSockets, { setUserDbService } from '../services/control/control_sockets';
@@ -69,8 +70,8 @@ async function initializeSockets(server: HttpServer): Promise<{ io: Server; cont
       controlEmitter = initAdenControlSockets(io, redisEmitter as unknown as { of: (namespace: string) => { to: (room: string) => { emit: (event: string, payload: unknown) => void }; emit: (event: string, payload: unknown) => void } });
 
       console.log('[Sockets] Redis adapter connected');
-    } catch (err) {
-      console.warn('[Sockets] Redis connection failed, using local adapter:', (err as Error).message);
+    } catch (err: unknown) {
+      console.warn('[Sockets] Redis connection failed, using local adapter:', getErrorMessage(err));
       // Create a mock emitter for local development
       const mockEmitter: MockEmitter = {
         of: () => ({

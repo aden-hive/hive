@@ -176,7 +176,7 @@ export function BudgetDetailPanel({
         message: `"${budget.name}" has been updated successfully.`,
       })
       onOpenChange(false)
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to update budget:', error)
       addNotification({
         type: 'error',
@@ -202,7 +202,7 @@ export function BudgetDetailPanel({
           message: `"${budget.name}" has been deleted.`,
         })
         onOpenChange(false)
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('Failed to delete budget:', error)
         addNotification({
           type: 'error',

@@ -520,7 +520,7 @@ export const buildAnalytics = async ({
           },
         };
       }
-    } catch (err) {
+    } catch (err: unknown) {
       // Fall through to base-table path
     }
   }

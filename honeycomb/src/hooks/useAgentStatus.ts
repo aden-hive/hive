@@ -120,7 +120,7 @@ export function useAgentStatus(
               } else {
                 setError(null)
               }
-            } catch (parseError) {
+            } catch (parseError: unknown) {
               console.error('[useAgentStatus] Failed to parse:', parseError)
             }
           }
@@ -134,7 +134,7 @@ export function useAgentStatus(
       if (autoReconnect) {
         reconnectTimeoutRef.current = setTimeout(() => connect(), RECONNECT_DELAY_MS)
       }
-    } catch (err) {
+    } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
         // User intentionally disconnected
         return

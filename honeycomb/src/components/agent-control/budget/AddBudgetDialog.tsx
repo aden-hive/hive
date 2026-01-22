@@ -95,7 +95,7 @@ export function AddBudgetDialog({ open, onOpenChange, policyId }: AddBudgetDialo
         message: `"${name.trim()}" has been created successfully.`,
       })
       handleClose()
-    } catch (err) {
+    } catch (err: unknown) {
       addNotification({
         type: 'error',
         title: 'Creation failed',

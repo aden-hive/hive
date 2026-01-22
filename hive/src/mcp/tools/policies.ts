@@ -65,7 +65,7 @@ export function registerPolicyTools(server: McpServer, api: ApiClient) {
           count: policies.length,
           policies: summary,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_policies_list");
       }
     }
@@ -93,7 +93,7 @@ export function registerPolicyTools(server: McpServer, api: ApiClient) {
         }
 
         return createSuccessResponse(policy);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_policy_get");
       }
     }
@@ -115,7 +115,7 @@ export function registerPolicyTools(server: McpServer, api: ApiClient) {
           message: "Policy created",
           policy,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_policy_create");
       }
     }
@@ -180,7 +180,7 @@ export function registerPolicyTools(server: McpServer, api: ApiClient) {
           updated_fields: Object.keys(updates),
           policy,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_policy_update");
       }
     }
@@ -216,7 +216,7 @@ export function registerPolicyTools(server: McpServer, api: ApiClient) {
           message: "All rules cleared from policy",
           policy,
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_policy_clear");
       }
     }

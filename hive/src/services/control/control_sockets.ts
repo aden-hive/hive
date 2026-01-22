@@ -10,6 +10,7 @@
  */
 
 import jwt from "jsonwebtoken";
+import { getErrorMessage } from "../../utils/error";
 // Note: userDB.findSaltByToken will be injected via initialization
 import controlService from "./control_service";
 import llmEventBatcher from "./llm_event_batcher";
@@ -389,8 +390,8 @@ function initAdenControlSockets(io: Server, rootEmitter: RedisEmitter): ControlE
       );
 
       next();
-    } catch (error) {
-      console.error("[Aden Control WS] Auth error:", (error as Error).message);
+    } catch (error: unknown) {
+      console.error("[Aden Control WS] Auth error:", getErrorMessage(error));
       next(new Error("Authentication failed"));
     }
   });
@@ -429,7 +430,7 @@ function initAdenControlSockets(io: Server, rootEmitter: RedisEmitter): ControlE
         type: "policy",
         policy,
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("[Aden Control WS] Error sending initial policy:", error);
     }
 
@@ -437,11 +438,11 @@ function initAdenControlSockets(io: Server, rootEmitter: RedisEmitter): ControlE
     socket.on("message", async (data: MessageData | string) => {
       try {
         await handleSdkMessage(socket, data);
-      } catch (error) {
+      } catch (error: unknown) {
         console.error("[Aden Control WS] Error handling message:", error);
         socket.emit("message", {
           type: "error",
-          error: (error as Error).message,
+          error: getErrorMessage(error),
         });
       }
     });
@@ -450,7 +451,7 @@ function initAdenControlSockets(io: Server, rootEmitter: RedisEmitter): ControlE
     socket.on("event", async (event: Record<string, unknown>) => {
       try {
         await controlService.processEvents(teamId!, policyId || null, [event as any]);
-      } catch (error) {
+      } catch (error: unknown) {
         console.error("[Aden Control WS] Error processing event:", error);
       }
     });

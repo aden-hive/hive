@@ -57,7 +57,7 @@ async function initMongoDB(): Promise<void> {
     };
 
     console.log("[MongoDB] Connected successfully");
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("[MongoDB] Connection error:", error);
     throw error;
   }

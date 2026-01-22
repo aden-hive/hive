@@ -58,7 +58,7 @@ export function VegaLiteChart({ spec, className, options }: VegaLiteChartProps) 
           ...options,
         })
         vegaResultRef.current = result
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('Failed to render VegaLite chart:', error)
       }
     }

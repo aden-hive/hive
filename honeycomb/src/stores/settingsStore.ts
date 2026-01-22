@@ -27,7 +27,7 @@ function getLocalSettings(): UISettings {
     if (stored) {
       return { ...DEFAULT_UI_SETTINGS, ...JSON.parse(stored) }
     }
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn('[SettingsStore] Failed to parse local settings:', e)
   }
   return DEFAULT_UI_SETTINGS
@@ -41,7 +41,7 @@ function setLocalSettings(settings: Partial<UISettings>): void {
   try {
     const current = getLocalSettings()
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...current, ...settings }))
-  } catch (e) {
+  } catch (e: unknown) {
     console.warn('[SettingsStore] Failed to save local settings:', e)
   }
 }

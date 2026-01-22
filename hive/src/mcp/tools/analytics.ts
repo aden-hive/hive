@@ -31,7 +31,7 @@ export function registerAnalyticsTools(server: McpServer, api: ApiClient) {
       try {
         const result = await api.analytics.getWide(params.window);
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_analytics_wide");
       }
     }
@@ -46,7 +46,7 @@ export function registerAnalyticsTools(server: McpServer, api: ApiClient) {
       try {
         const result = await api.analytics.getNarrow();
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_analytics_narrow");
       }
     }
@@ -68,7 +68,7 @@ export function registerAnalyticsTools(server: McpServer, api: ApiClient) {
       try {
         const result = await api.analytics.getInsights(params.days);
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_insights");
       }
     }
@@ -90,7 +90,7 @@ export function registerAnalyticsTools(server: McpServer, api: ApiClient) {
       try {
         const result = await api.analytics.getMetrics(params.days);
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_metrics");
       }
     }
@@ -161,7 +161,7 @@ export function registerAnalyticsTools(server: McpServer, api: ApiClient) {
         });
 
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_logs");
       }
     }

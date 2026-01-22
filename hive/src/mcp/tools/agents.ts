@@ -74,7 +74,7 @@ export function registerAgentTools(
         }
 
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_agents_list");
       }
     }
@@ -173,7 +173,7 @@ export function registerAgentTools(
             unhealthy: healthResults.filter((h) => h.status === "unhealthy").length,
           },
         });
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_agent_health_check");
       }
     }
@@ -189,7 +189,7 @@ export function registerAgentTools(
         const controlEmitter = getControlEmitter();
         const result = api.agents.getSummary(controlEmitter);
         return createSuccessResponse(result);
-      } catch (error) {
+      } catch (error: unknown) {
         return handleToolError(error, "hive_agents_summary");
       }
     }

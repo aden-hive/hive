@@ -133,7 +133,7 @@ export function createMcpRouter(
       try {
         // Handle the message through the transport
         await session.transport.handlePostMessage(req, res);
-      } catch (error) {
+      } catch (error: unknown) {
         console.error(`[MCP] Error handling message:`, error);
         res.status(500).json({
           error: "Failed to process message",

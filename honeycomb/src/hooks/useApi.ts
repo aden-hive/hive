@@ -24,7 +24,7 @@ export function useApi<T>(endpoint: string): UseApiResult<T> {
     try {
       const data = await apiClient.get<T>(endpoint);
       setState({ data, loading: false, error: null });
-    } catch (error) {
+    } catch (error: unknown) {
       setState({
         data: null,
         loading: false,

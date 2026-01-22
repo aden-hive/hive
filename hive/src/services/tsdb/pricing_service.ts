@@ -4,6 +4,9 @@
  * Centralized pricing table for calculating costs by provider and model.
  * Prices are stored in MongoDB and cached in memory for performance.
  * Prices are in USD per 1M tokens (industry standard).
+ */
+import { getErrorMessage } from "../../utils/error";
+/**
  *
  * Sources:
  * - OpenAI: https://openai.com/pricing
@@ -201,8 +204,8 @@ async function loadPricingFromDb(force = false): Promise<Map<string, PricingEntr
     cacheLoadedAt = Date.now();
     console.log(`[pricing_service] Loaded ${pricingCache.size} pricing entries from DB`);
     return pricingCache;
-  } catch (err) {
-    console.error("[pricing_service] Error loading from DB, using defaults:", (err as Error).message);
+  } catch (err: unknown) {
+    console.error("[pricing_service] Error loading from DB, using defaults:", getErrorMessage(err));
     loadFromDefaults();
     return pricingCache;
   }
@@ -547,8 +550,8 @@ async function seedDefaultPricing(userId: string | null = null, overwrite = fals
         await collection.insertOne(doc);
         results.inserted++;
       }
-    } catch (err) {
-      results.errors.push({ model, error: (err as Error).message });
+    } catch (err: unknown) {
+      results.errors.push({ model, error: getErrorMessage(err) });
     }
   }
 
@@ -707,8 +710,8 @@ async function initialize(): Promise<void> {
   try {
     await loadPricingFromDb(true);
     console.log("[pricing_service] Initialized successfully");
-  } catch (err) {
-    console.error("[pricing_service] Failed to initialize, using defaults:", (err as Error).message);
+  } catch (err: unknown) {
+    console.error("[pricing_service] Failed to initialize, using defaults:", getErrorMessage(err));
     loadFromDefaults();
   }
 }

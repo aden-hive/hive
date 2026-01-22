@@ -4,6 +4,7 @@
 import express, { Request, Response } from "express";
 import passport from "passport";
 import type { PoolClient } from "pg";
+import { getErrorMessage } from "../utils/error";
 
 import {
   ensureSchema,
@@ -113,9 +114,9 @@ router.post("/events", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
       rows_written: result.rowsWritten,
       normalized: result.normalized,
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] ingest error", err);
-    return res.status(500).json({ error: "ingest_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "ingest_failed", detail: getErrorMessage(err) });
   } finally {
     if (client) client.release();
   }
@@ -135,9 +136,9 @@ router.get("/sample", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
       [limit]
     );
     return res.json({ rows });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] sample error", err);
-    return res.status(500).json({ error: "sample_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "sample_failed", detail: getErrorMessage(err) });
   } finally {
     if (client) client.release();
   }
@@ -157,9 +158,9 @@ router.get("/counts", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
       [window]
     );
     return res.json({ window, count: Number(rows[0].count) });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] counts error", err);
-    return res.status(500).json({ error: "counts_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "counts_failed", detail: getErrorMessage(err) });
   } finally {
     if (client) client.release();
   }
@@ -175,9 +176,9 @@ router.get("/health", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
     client = await connectTeamClient(ctx.team_id);
     const { rows } = await client.query("SELECT NOW() AS now");
     return res.json({ status: "ok", now: rows[0].now });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] health error", err);
-    return res.status(500).json({ status: "error", detail: (err as Error).message });
+    return res.status(500).json({ status: "error", detail: getErrorMessage(err) });
   } finally {
     if (client) client.release();
   }
@@ -371,7 +372,7 @@ router.get("/logs", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
 
           rows = mergeResults(caRows, baseRows, keyFields).slice(offset, offset + limit) as unknown as QueryRow[];
           usedCA = hasFullBuckets;
-        } catch (err) {
+        } catch (err: unknown) {
           // CA not available, fall through to base table query
         }
       } else if (useAgentCA) {
@@ -404,7 +405,7 @@ router.get("/logs", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
 
           rows = mergeResults(caRows, baseRows, ["agent"]).slice(offset, offset + limit) as unknown as QueryRow[];
           usedCA = hasFullBuckets;
-        } catch (err) {
+        } catch (err: unknown) {
           // CA not available, fall through to base table query
         }
       }
@@ -512,9 +513,9 @@ router.get("/logs", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
       filters: { type: typeFilter || 'all', success: successFilter },
       rows,
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] logs error", err);
-    return res.status(500).json({ error: "logs_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "logs_failed", detail: getErrorMessage(err) });
   } finally {
     if (poolClient) poolClient.release();
   }
@@ -769,9 +770,9 @@ router.get("/metrics", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
     };
 
     return res.json(metrics);
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] metrics error", err);
-    return res.status(500).json({ error: "metrics_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "metrics_failed", detail: getErrorMessage(err) });
   } finally {
     if (client) client.release();
   }
@@ -802,8 +803,8 @@ router.post("/refresh-aggregates", AUTH_MIDDLEWARE, async (req: Request, res: Re
       try {
         await client.query(`CALL refresh_continuous_aggregate('${ca}', NULL, NOW())`);
         results.push({ ca, status: "refreshed" });
-      } catch (err) {
-        results.push({ ca, status: "error", error: (err as Error).message });
+      } catch (err: unknown) {
+        results.push({ ca, status: "error", error: getErrorMessage(err) });
       }
     }
 
@@ -812,9 +813,9 @@ router.post("/refresh-aggregates", AUTH_MIDDLEWARE, async (req: Request, res: Re
       results,
       refreshed_at: new Date().toISOString(),
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] refresh-aggregates error", err);
-    return res.status(500).json({ error: "refresh_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "refresh_failed", detail: getErrorMessage(err) });
   } finally {
     if (client) client.release();
   }
@@ -835,9 +836,9 @@ router.get("/pricing", AUTH_MIDDLEWARE, async (req: Request, res: Response) => {
 
     const pricing = await pricingService.getAllPricing();
     return res.json({ pricing, count: Object.keys(pricing).length });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] pricing list error", err);
-    return res.status(500).json({ error: "pricing_list_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "pricing_list_failed", detail: getErrorMessage(err) });
   }
 });
 
@@ -849,9 +850,9 @@ router.get("/pricing/:model", AUTH_MIDDLEWARE, async (req: Request, res: Respons
 
     const pricing = await pricingService.getModelPricing(model, provider as string | undefined);
     return res.json({ pricing });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] pricing get error", err);
-    return res.status(500).json({ error: "pricing_get_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "pricing_get_failed", detail: getErrorMessage(err) });
   }
 });
 
@@ -881,9 +882,9 @@ router.post("/pricing", AUTH_MIDDLEWARE, async (req: Request, res: Response) => 
     );
 
     return res.json({ message: "pricing_created", pricing: result });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] pricing create error", err);
-    return res.status(500).json({ error: "pricing_create_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "pricing_create_failed", detail: getErrorMessage(err) });
   }
 });
 
@@ -907,9 +908,9 @@ router.put("/pricing/:model", AUTH_MIDDLEWARE, async (req: Request, res: Respons
     );
 
     return res.json({ message: "pricing_updated", pricing: result });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] pricing update error", err);
-    return res.status(500).json({ error: "pricing_update_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "pricing_update_failed", detail: getErrorMessage(err) });
   }
 });
 
@@ -924,9 +925,9 @@ router.delete("/pricing/:model", AUTH_MIDDLEWARE, async (req: Request, res: Resp
     }
 
     return res.json({ message: "pricing_deleted", model });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] pricing delete error", err);
-    return res.status(500).json({ error: "pricing_delete_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "pricing_delete_failed", detail: getErrorMessage(err) });
   }
 });
 
@@ -942,9 +943,9 @@ router.post("/pricing/seed", AUTH_MIDDLEWARE, async (req: Request, res: Response
       message: "pricing_seeded",
       ...result,
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] pricing seed error", err);
-    return res.status(500).json({ error: "pricing_seed_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "pricing_seed_failed", detail: getErrorMessage(err) });
   }
 });
 
@@ -959,9 +960,9 @@ router.post("/pricing/refresh", AUTH_MIDDLEWARE, async (_req: Request, res: Resp
       count: Object.keys(pricing).length,
       refreshed_at: new Date().toISOString(),
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] pricing refresh error", err);
-    return res.status(500).json({ error: "pricing_refresh_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "pricing_refresh_failed", detail: getErrorMessage(err) });
   }
 });
 
@@ -984,9 +985,9 @@ router.get("/analytics-wide", AUTH_MIDDLEWARE, async (req: Request, res: Respons
     });
 
     return res.json({ analytics });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] analytics-wide error", err);
-    return res.status(500).json({ error: "analytics_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "analytics_failed", detail: getErrorMessage(err) });
   } finally {
     if (client) client.release();
   }
@@ -1009,9 +1010,9 @@ router.get("/analytics-narrow", AUTH_MIDDLEWARE, async (req: Request, res: Respo
     });
 
     return res.json({ analytics });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] analytics-narrow error", err);
-    return res.status(500).json({ error: "analytics_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "analytics_failed", detail: getErrorMessage(err) });
   } finally {
     if (client) client.release();
   }
@@ -1125,11 +1126,11 @@ router.post("/recalculate-costs", AUTH_MIDDLEWARE, async (req: Request, res: Res
           }
 
           results.processed++;
-        } catch (err) {
+        } catch (err: unknown) {
           results.errors.push({
             trace_id: row.trace_id,
             call_sequence: row.call_sequence,
-            error: (err as Error).message,
+            error: getErrorMessage(err),
           });
         }
       }
@@ -1151,8 +1152,8 @@ router.post("/recalculate-costs", AUTH_MIDDLEWARE, async (req: Request, res: Res
         try {
           await poolClient.query(updateSql, updateValues);
           results.updated += updates.length;
-        } catch (err) {
-          results.errors.push({ batch: results.batches, error: (err as Error).message });
+        } catch (err: unknown) {
+          results.errors.push({ batch: results.batches, error: getErrorMessage(err) });
         }
       }
 
@@ -1176,8 +1177,8 @@ router.post("/recalculate-costs", AUTH_MIDDLEWARE, async (req: Request, res: Res
           endDate.toISOString(),
         ]);
         caRefreshResults.push({ ca, status: "refreshed" });
-      } catch (err) {
-        caRefreshResults.push({ ca, status: "error", error: (err as Error).message });
+      } catch (err: unknown) {
+        caRefreshResults.push({ ca, status: "error", error: getErrorMessage(err) });
       }
     }
 
@@ -1194,9 +1195,9 @@ router.post("/recalculate-costs", AUTH_MIDDLEWARE, async (req: Request, res: Res
       errors: results.errors.slice(0, 10), // Limit error output
       error_count: results.errors.length,
     });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("[tsdb] recalculate-costs error", err);
-    return res.status(500).json({ error: "recalculate_failed", detail: (err as Error).message });
+    return res.status(500).json({ error: "recalculate_failed", detail: getErrorMessage(err) });
   } finally {
     if (poolClient) poolClient.release();
   }
