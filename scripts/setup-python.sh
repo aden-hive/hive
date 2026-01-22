@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# setup-python.sh - Python Environment Setup for Hive Agent Framework
+# setup-python.sh - Python Environment Setup for Aden Agent Framework
 #
 # This script sets up the Python environment with all required packages
 # for building and running goal-driven agents.
@@ -21,7 +21,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 echo ""
 echo "=================================================="
-echo "  Hive Agent Framework - Python Setup"
+echo "  Aden Agent Framework - Python Setup"
 echo "=================================================="
 echo ""
 
