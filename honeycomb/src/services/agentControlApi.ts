@@ -66,6 +66,14 @@ export function getAnalyticsNarrow(): Promise<RawJsonData> {
 // Logs Endpoints
 // =============================================================================
 
+// Default pagination limits for log queries.
+
+// Higher limit for raw logs - balances data completeness with response size.
+const DEFAULT_LOGS_LIMIT = 500
+
+// Lower limit for grouped results - typically fewer unique groups needed.
+const DEFAULT_AGGREGATED_LOGS_LIMIT = 100
+
 /**
  * Get raw logs for a time range
  * @param start - ISO date string
@@ -77,7 +85,7 @@ export function getAnalyticsNarrow(): Promise<RawJsonData> {
 export function getLogs(
   start: string,
   end: string,
-  limit = 500,
+  limit = DEFAULT_LOGS_LIMIT,
   offset = 0,
   filters?: { type?: string; success?: string }
 ): Promise<RawJsonData> {
@@ -103,7 +111,7 @@ export function getLogsAggregated(
   start: string,
   end: string,
   groupBy: string,
-  limit = 100
+  limit = DEFAULT_AGGREGATED_LOGS_LIMIT
 ): Promise<RawJsonData> {
   return hiveClient.get(
     `/tsdb/logs?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&group_by=${groupBy}&limit=${limit}`

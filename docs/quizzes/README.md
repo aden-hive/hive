@@ -2,6 +2,14 @@
 
 Welcome to the Aden Engineering Challenges! These quizzes are designed for students and applicants who want to join the Aden team or contribute to our open-source projects.
 
+---
+
+## 💼 We're Hiring!
+
+**[Software Development Engineer](./00-job-post.md)** - Full-stack TypeScript, React, Node.js, AI agents
+
+---
+
 ## How It Works
 
 1. **Choose your track** based on your interests and skill level

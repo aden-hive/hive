@@ -103,7 +103,7 @@ router.post(
         current_team_id: result.current_team_id,
         create_time: result.created_at,
       });
-    } catch (err) {
+    } catch (err: unknown) {
       const error = err as { message?: string; code?: string };
       console.error("[UserController] login-v2 error:", error.message);
 
@@ -219,11 +219,12 @@ router.post("/register", async (req: Request, res: Response) => {
       current_team_id: result.current_team_id,
       create_time: result.created_at,
     });
-  } catch (err: any) {
-    console.error("[UserController] register error:", err.message);
+  } catch (err: unknown) {
+    const error = err as { message?: string; code?: string };
+    console.error("[UserController] register error:", error.message);
 
     // Handle specific error codes
-    if (err.code === "EMAIL_EXISTS") {
+    if (error.code === "EMAIL_EXISTS") {
       return res.status(409).json({
         success: false,
         msg: "Email already registered",
@@ -278,8 +279,9 @@ router.get("/profile", async (req: Request, res: Response) => {
         roles: user.roles || ["user"],
       },
     });
-  } catch (err: any) {
-    console.error("[UserController] /profile error:", err.message);
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    console.error("[UserController] /profile error:", error.message);
     res.status(500).json({
       success: false,
       msg: "Failed to get user profile",
@@ -321,8 +323,9 @@ router.put("/profile", async (req: Request, res: Response) => {
     }
 
     res.json({ message: "Profile updated successfully" });
-  } catch (err: any) {
-    console.error("[UserController] PUT /profile error:", err.message);
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    console.error("[UserController] PUT /profile error:", error.message);
     res.status(500).json({
       success: false,
       msg: "Failed to update profile",
@@ -368,8 +371,9 @@ router.get("/me", async (req: Request, res: Response) => {
         avatar_url: user.avatar_url,
       },
     });
-  } catch (err: any) {
-    console.error("[UserController] /me error:", err.message);
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    console.error("[UserController] /me error:", error.message);
     res.status(500).json({
       success: false,
       msg: "Failed to get user info",
@@ -409,8 +413,9 @@ router.get("/get-dev-tokens", async (req: Request, res: Response) => {
       success: true,
       data: tokens,
     });
-  } catch (err: any) {
-    console.error("[UserController] /get-dev-tokens error:", err.message);
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    console.error("[UserController] /get-dev-tokens error:", error.message);
     res.status(500).json({
       success: false,
       msg: "Failed to get API tokens",
@@ -460,8 +465,9 @@ router.post("/generate-dev-token", async (req: Request, res: Response) => {
       success: true,
       data: tokenResult,
     });
-  } catch (err: any) {
-    console.error("[UserController] /generate-dev-token error:", err.message);
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    console.error("[UserController] /generate-dev-token error:", error.message);
     res.status(500).json({
       success: false,
       msg: "Failed to generate API token",
@@ -521,8 +527,9 @@ router.get("/settings", async (req: Request, res: Response) => {
       success: true,
       data: uiSettings,
     });
-  } catch (err: any) {
-    console.error("[UserController] GET /settings error:", err.message);
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    console.error("[UserController] GET /settings error:", error.message);
     res.status(500).json({
       success: false,
       msg: "Failed to get settings",
@@ -606,8 +613,9 @@ router.put("/settings", async (req: Request, res: Response) => {
       success: true,
       data: uiSettings,
     });
-  } catch (err: any) {
-    console.error("[UserController] PUT /settings error:", err.message);
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    console.error("[UserController] PUT /settings error:", error.message);
     res.status(500).json({
       success: false,
       msg: "Failed to update settings",

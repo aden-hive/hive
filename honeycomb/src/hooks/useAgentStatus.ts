@@ -2,6 +2,9 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import type { AgentStatus } from '@/types/agentControl'
 
 const HIVE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000'
+// Delay before attempting to reconnect after SSE stream disconnection or error
+// 5 seconds provides a reasonable balance between responsiveness and avoiding
+// rapid retry loops.
 const RECONNECT_DELAY_MS = 5000
 
 interface UseAgentStatusOptions {
