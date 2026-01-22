@@ -64,8 +64,8 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ### Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+)
-- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0+)
+- [Python 3.11+](https://www.python.org/downloads/) for agent development
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
 
 ### Installation
 
@@ -74,33 +74,32 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# Copy and configure
-cp config.yaml.example config.yaml
-
-# Run setup and start services
-npm run setup
-docker compose up
+# Run Python environment setup
+./scripts/setup-python.sh
 ```
 
-**Access the application:**
+This installs:
+- **framework** - Core agent runtime and graph executor
+- **aden_tools** - 19 MCP tools for agent capabilities
+- All required dependencies
 
-- Dashboard: http://localhost:3000
-- API: http://localhost:4000
-- Health: http://localhost:4000/health
-
-### Python Agent Development
-
-For building and running goal-driven agents:
+### Build Your First Agent
 
 ```bash
-# One-time setup
-./scripts/setup-python.sh
+# Install Claude Code skills (one-time)
+./quickstart.sh
 
-# Build and test agents
-# See ENVIRONMENT_SETUP.md for complete guide
+# Build an agent using Claude Code
+claude> /building-agents
+
+# Test your agent
+claude> /testing-agent
+
+# Run your agent
+PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 ```
 
-**[📖 Python Setup Guide](ENVIRONMENT_SETUP.md)** - Complete instructions for agent development
+**[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
 
 ## Features
 
@@ -220,13 +219,13 @@ Choose other frameworks when you need:
 
 ```
 hive/
-├── honeycomb/              # Frontend Dashboard
-├── hive/                   # Backend API Server
-├── tools/             # MCP Tools Package - 19 tools for agent capabilities
+├── core/                   # Core framework - Agent runtime, graph executor, protocols
+├── tools/                  # MCP Tools Package - 19 tools for agent capabilities
+├── exports/                # Agent packages - Pre-built agents and examples
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
-├── config.yaml.example     # Configuration template
-├── docker-compose.yml      # Container orchestration
+├── .claude/                # Claude Code skills for building agents
+├── ENVIRONMENT_SETUP.md    # Python setup guide for agent development
 ├── DEVELOPER.md            # Developer guide
 ├── CONTRIBUTING.md         # Contribution guidelines
 └── ROADMAP.md              # Product roadmap
@@ -234,31 +233,30 @@ hive/
 
 ## Development
 
-### Local Development with Hot Reload
+### Python Agent Development
+
+For building and running goal-driven agents with the framework:
 
 ```bash
-# Copy development overrides
-cp docker-compose.override.yml.example docker-compose.override.yml
+# One-time setup
+./scripts/setup-python.sh
 
-# Start with hot reload enabled
-docker compose up
+# This installs:
+# - framework package (core runtime)
+# - aden_tools package (19 MCP tools)
+# - All dependencies
+
+# Build new agents using Claude Code skills
+claude> /building-agents
+
+# Test agents
+claude> /testing-agent
+
+# Run agents
+PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 ```
 
-### Running Without Docker
-
-```bash
-# Install dependencies
-npm install
-
-# Generate environment files
-npm run generate:env
-
-# Start frontend (in honeycomb/)
-cd honeycomb && npm run dev
-
-# Start backend (in hive/)
-cd hive && npm run dev
-```
+See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.
 
 ## Documentation
 

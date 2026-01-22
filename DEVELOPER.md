@@ -1,43 +1,39 @@
 # Developer Guide
 
-This comprehensive guide covers everything you need to know to work on the Hive monorepo effectively.
+This guide covers everything you need to know to develop with the Aden Agent Framework.
 
 ## Table of Contents
 
 1. [Repository Overview](#repository-overview)
 2. [Initial Setup](#initial-setup)
 3. [Project Structure](#project-structure)
-4. [Configuration System](#configuration-system)
-5. [Development Workflow](#development-workflow)
-6. [Working with the Frontend (honeycomb)](#working-with-the-frontend-honeycomb)
-7. [Working with the Backend (hive)](#working-with-the-backend-hive)
-8. [Docker Development](#docker-development)
-9. [Testing](#testing)
-10. [Code Style & Conventions](#code-style--conventions)
-11. [Git Workflow](#git-workflow)
-12. [Debugging](#debugging)
-13. [Common Tasks](#common-tasks)
-14. [Troubleshooting](#troubleshooting)
+4. [Building Agents](#building-agents)
+5. [Testing Agents](#testing-agents)
+6. [Code Style & Conventions](#code-style--conventions)
+7. [Git Workflow](#git-workflow)
+8. [Common Tasks](#common-tasks)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Repository Overview
 
-Hive is a monorepo containing two main packages:
+Aden Agent Framework is a Python-based system for building goal-driven, self-improving AI agents.
 
-| Package       | Directory    | Description              | Tech Stack                   |
-| ------------- | ------------ | ------------------------ | ---------------------------- |
-| **honeycomb** | `/honeycomb` | Frontend web application | React 18, TypeScript, Vite   |
-| **hive**      | `/hive`      | Backend API server       | Node.js, Express, TypeScript |
-
-The repository uses **npm workspaces** to manage dependencies across packages from a single root `package.json`.
+| Package       | Directory  | Description                                  | Tech Stack        |
+| ------------- | ---------- | -------------------------------------------- | ----------------- |
+| **framework** | `/core`    | Core runtime, graph executor, protocols      | Python 3.11+      |
+| **tools**     | `/tools`   | 19 MCP tools for agent capabilities          | Python 3.11+      |
+| **exports**   | `/exports` | Agent packages and examples                  | Python 3.11+      |
+| **skills**    | `.claude`  | Claude Code skills for building/testing      | Markdown          |
 
 ### Key Principles
 
-- **Single source of configuration**: Edit `config.yaml` once, environment files are auto-generated
-- **Consistent tooling**: Both packages use TypeScript with strict mode
-- **Docker-first**: Production deployments use containerized builds
-- **Developer ergonomics**: Hot reload, clear error messages, minimal setup
+- **Goal-Driven Development**: Define objectives, framework generates agent graphs
+- **Self-Improving**: Agents adapt and evolve based on failures
+- **SDK-Wrapped Nodes**: Built-in memory, monitoring, and tool access
+- **Human-in-the-Loop**: Intervention points for human oversight
+- **Production-Ready**: Evaluation, testing, and deployment infrastructure
 
 ---
 
@@ -47,18 +43,17 @@ The repository uses **npm workspaces** to manage dependencies across packages fr
 
 Ensure you have installed:
 
-- **Node.js v20+** - [Download](https://nodejs.org/) or use nvm: `nvm install 20`
-- **npm v10+** - Comes with Node.js 20
-- **Docker v20.10+** - [Download](https://docs.docker.com/get-docker/)
-- **Docker Compose v2+** - Included with Docker Desktop
+- **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.12 or 3.13 recommended)
+- **pip** - Package installer for Python (comes with Python)
+- **git** - Version control
+- **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional, for using building skills)
 
 Verify installation:
 
 ```bash
-node --version    # Should be v20.x.x
-npm --version     # Should be 10.x.x
-docker --version  # Should be 20.10+
-docker compose version  # Should be v2.x.x
+python --version    # Should be 3.11+
+pip --version       # Should be latest
+git --version       # Any recent version
 ```
 
 ### Step-by-Step Setup
@@ -68,42 +63,55 @@ docker compose version  # Should be v2.x.x
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# 2. Create your configuration file
-cp config.yaml.example config.yaml
-
-# 3. (Optional) Edit config.yaml with your settings
-#    Most defaults work out of the box
-
-# 4. Run the automated setup
-npm run setup
+# 2. Run automated Python setup
+./scripts/setup-python.sh
 ```
 
-The `setup` script performs these actions:
+The setup script performs these actions:
 
-1. Installs all dependencies for root, honeycomb, and hive
-2. Generates `.env` files from your `config.yaml`
-3. Reports any issues
+1. Checks Python version (3.10+ required, 3.11+ recommended)
+2. Installs `framework` package from `/core` (editable mode)
+3. Installs `aden_tools` package from `/tools` (editable mode)
+4. Fixes package compatibility (upgrades openai for litellm)
+5. Verifies all installations
 
-### AI Agent Tools (Optional)
+### API Keys (Optional)
 
-If working with the agent framework:
+For running agents with real LLMs:
 
 ```bash
-# Set up tools credentials
-cd tools
-cp .env.example .env
-# Edit .env with your ANTHROPIC_API_KEY and BRAVE_SEARCH_API_KEY
+# Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+export ANTHROPIC_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-key-here"        # Optional
+export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search tool
 ```
+
+Get API keys:
+- **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
+- **OpenAI**: [platform.openai.com](https://platform.openai.com/)
+- **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
+
+### Install Claude Code Skills
+
+```bash
+# Install building-agents and testing-agent skills
+./quickstart.sh
+```
+
+This installs:
+- `/building-agents` - Build new goal-driven agents
+- `/testing-agent` - Test agents with evaluation framework
 
 ### Verify Setup
 
 ```bash
-# Build both packages to verify everything works
-npm run build
+# Verify package imports
+python -c "import framework; print('✓ framework OK')"
+python -c "import aden_tools; print('✓ aden_tools OK')"
+python -c "import litellm; print('✓ litellm OK')"
 
-# Or run in development mode
-npm run dev -w honeycomb  # Terminal 1: Frontend at http://localhost:3000
-npm run dev -w hive       # Terminal 2: Backend at http://localhost:4000
+# Run an example agent
+PYTHONPATH=core:exports python -m support_ticket_agent validate
 ```
 
 ---
@@ -111,823 +119,325 @@ npm run dev -w hive       # Terminal 2: Backend at http://localhost:4000
 ## Project Structure
 
 ```
-hive/                            # Repository root
+hive/                                    # Repository root
 │
-├── .github/                        # GitHub configuration
+├── .github/                             # GitHub configuration
 │   ├── workflows/
-│   │   ├── ci.yml                  # Runs on every PR: lint, test, build
-│   │   └── release.yml             # Runs on tags: publish Docker images
-│   ├── ISSUE_TEMPLATE/             # Bug report & feature request templates
-│   ├── PULL_REQUEST_TEMPLATE.md    # PR description template
-│   └── CODEOWNERS                  # Auto-assign reviewers
+│   │   ├── ci.yml                       # Runs on every PR
+│   │   └── release.yml                  # Runs on tags
+│   ├── ISSUE_TEMPLATE/                  # Bug report & feature request templates
+│   ├── PULL_REQUEST_TEMPLATE.md         # PR description template
+│   └── CODEOWNERS                       # Auto-assign reviewers
 │
-├── docs/                           # Documentation
-│   ├── getting-started.md          # Quick start guide
-│   ├── configuration.md            # Configuration reference
-│   └── architecture.md             # System architecture
+├── .claude/                             # Claude Code Skills
+│   └── skills/
+│       ├── building-agents/             # Skills for building agents
+│       │   ├── SKILL.md                 # Main skill definition
+│       │   ├── building-agents-core/
+│       │   ├── building-agents-patterns/
+│       │   └── building-agents-construction/
+│       ├── testing-agent/               # Skills for testing agents
+│       │   └── SKILL.md
+│       └── agent-workflow/              # Complete workflow orchestration
 │
-├── honeycomb/                      # FRONTEND PACKAGE
+├── core/                                # CORE FRAMEWORK PACKAGE
+│   ├── framework/                       # Main package code
+│   │   ├── runner/                      # AgentRunner - loads and runs agents
+│   │   ├── executor/                    # GraphExecutor - executes node graphs
+│   │   ├── protocols/                   # Standard protocols (hooks, tracing, etc.)
+│   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
+│   │   ├── memory/                      # Memory systems (STM, LTM/RLM)
+│   │   ├── tools/                       # Tool registry and management
+│   │   └── __init__.py
+│   ├── pyproject.toml                   # Package metadata and dependencies
+│   ├── requirements.txt                 # Python dependencies
+│   ├── README.md                        # Framework documentation
+│   ├── MCP_INTEGRATION_GUIDE.md         # MCP server integration guide
+│   └── docs/                            # Protocol documentation
+│
+├── tools/                               # TOOLS PACKAGE (19 MCP tools)
 │   ├── src/
-│   │   ├── components/             # Reusable UI components
-│   │   ├── hooks/                  # Custom React hooks
-│   │   │   └── useApi.ts           # Hook for API calls
-│   │   ├── pages/                  # Route-level page components
-│   │   │   ├── HomePage.tsx
-│   │   │   └── NotFoundPage.tsx
-│   │   ├── services/               # External service clients
-│   │   │   └── api.ts              # Backend API client
-│   │   ├── styles/                 # Global CSS
-│   │   │   └── index.css
-│   │   ├── types/                  # TypeScript type definitions
-│   │   │   └── index.ts
-│   │   ├── utils/                  # Utility functions
-│   │   │   └── index.ts
-│   │   ├── App.tsx                 # Root component with routing
-│   │   ├── main.tsx                # Application entry point
-│   │   └── vite-env.d.ts           # Vite type declarations
-│   ├── public/                     # Static assets (copied as-is)
-│   │   └── favicon.svg
-│   ├── index.html                  # HTML template
-│   ├── nginx.conf                  # Production nginx config
-│   ├── package.json                # Package dependencies & scripts
-│   ├── tsconfig.json               # TypeScript configuration
-│   ├── tsconfig.node.json          # TypeScript config for Vite
-│   ├── vite.config.ts              # Vite bundler configuration
-│   ├── Dockerfile                  # Production Docker build
-│   ├── Dockerfile.dev              # Development Docker build
-│   └── .env.example                # Environment variable template
+│   │   └── aden_tools/
+│   │       ├── tools/                   # Individual tool implementations
+│   │       │   ├── web_search_tool/
+│   │       │   ├── web_scrape_tool/
+│   │       │   ├── file_system_toolkits/
+│   │       │   └── ...                  # 19 tools total
+│   │       ├── mcp_server.py            # HTTP MCP server
+│   │       └── __init__.py
+│   ├── pyproject.toml                   # Package metadata
+│   ├── requirements.txt                 # Python dependencies
+│   └── README.md                        # Tools documentation
 │
-├── hive/                           # BACKEND PACKAGE
-│   ├── src/
-│   │   ├── config/                 # Configuration loading
-│   │   │   └── index.ts            # Env var parsing & validation
-│   │   ├── controllers/            # Request handlers (business logic)
-│   │   ├── middleware/             # Express middleware
-│   │   │   └── errorHandler.ts     # Global error handling
-│   │   ├── models/                 # Data models / database schemas
-│   │   ├── routes/                 # API route definitions
-│   │   │   ├── api.ts              # /api/* routes
-│   │   │   └── health.ts           # Health check endpoints
-│   │   ├── services/               # Business logic services
-│   │   ├── types/                  # TypeScript type definitions
-│   │   │   └── index.ts
-│   │   ├── utils/                  # Utility functions
-│   │   │   └── logger.ts           # Structured logging
-│   │   ├── index.ts                # Application entry point
-│   │   └── server.ts               # Express server setup
-│   ├── package.json                # Package dependencies & scripts
-│   ├── tsconfig.json               # TypeScript configuration
-│   ├── Dockerfile                  # Production Docker build
-│   ├── Dockerfile.dev              # Development Docker build
-│   └── .env.example                # Environment variable template
+├── exports/                             # AGENT PACKAGES
+│   ├── support_ticket_agent/            # Example: Support ticket handler
+│   ├── market_research_agent/           # Example: Market research
+│   ├── outbound_sales_agent/            # Example: Sales outreach
+│   ├── personal_assistant_agent/        # Example: Personal assistant
+│   └── ...                              # More agent examples
 │
-├── scripts/                        # Build & utility scripts
-│   ├── setup.sh                    # First-time setup script
-│   └── generate-env.ts             # Generates .env from config.yaml
+├── docs/                                # Documentation
+│   ├── getting-started.md               # Quick start guide
+│   ├── configuration.md                 # Configuration reference
+│   ├── architecture.md                  # System architecture
+│   └── articles/                        # Technical articles
 │
-├── config.yaml.example             # Configuration template (copy to config.yaml)
-├── config.yaml                     # Your local configuration (git-ignored)
-├── docker-compose.yml              # Production Docker Compose
-├── docker-compose.override.yml.example  # Dev overrides template
-├── docker-compose.override.yml     # Your local dev overrides (git-ignored)
+├── scripts/                             # Build & utility scripts
+│   ├── setup-python.sh                  # Python environment setup
+│   └── setup.sh                         # Legacy setup script
 │
-├── package.json                    # Root package.json (workspaces config)
-├── package-lock.json               # Dependency lock file
-├── tsconfig.base.json              # Shared TypeScript settings
-│
-├── .gitignore                      # Git ignore rules
-├── .editorconfig                   # Editor formatting rules
-├── .dockerignore                   # Docker ignore rules
-│
-├── README.md                       # Project overview
-├── DEVELOPER.md                    # This file
-├── CONTRIBUTING.md                 # Contribution guidelines
-├── CHANGELOG.md                    # Version history
-├── LICENSE                         # Apache 2.0 License
-├── CODE_OF_CONDUCT.md              # Community guidelines
-└── SECURITY.md                     # Security policy
+├── quickstart.sh                        # Install Claude Code skills
+├── ENVIRONMENT_SETUP.md                 # Complete Python setup guide
+├── README.md                            # Project overview
+├── DEVELOPER.md                         # This file
+├── CONTRIBUTING.md                      # Contribution guidelines
+├── CHANGELOG.md                         # Version history
+├── ROADMAP.md                           # Product roadmap
+├── LICENSE                              # Apache 2.0 License
+├── CODE_OF_CONDUCT.md                   # Community guidelines
+└── SECURITY.md                          # Security policy
 ```
 
 ---
 
-## Configuration System
+## Building Agents
 
-### How It Works
+### Using Claude Code Skills
 
-Instead of managing multiple `.env` files, you edit a single `config.yaml`:
-
-```
-┌─────────────────┐
-│  config.yaml    │  ← You edit this one file
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ generate-env.ts │  ← Script transforms YAML to .env
-└────────┬────────┘
-         │
-         ├──────────────────┬──────────────────┐
-         ▼                  ▼                  ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│     /.env       │ │ /honeycomb/.env │ │   /hive/.env    │
-│  (Docker Compose)│ │   (Frontend)    │ │   (Backend)     │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
-```
-
-### Configuration Reference
-
-The `config.yaml` file structure:
-
-```yaml
-# ===========================================
-# Application Configuration
-# ===========================================
-
-# Application metadata
-app:
-  name: hive # Used in logs and API responses
-  environment: development # development | staging | production
-
-# Server configuration
-server:
-  frontend:
-    port: 3000 # Frontend port
-    host: "0.0.0.0" # Bind address
-  backend:
-    port: 4000 # Backend API port
-    host: "0.0.0.0" # Bind address
-
-# API configuration
-api:
-  prefix: /api # API route prefix
-  cors:
-    origins: # Allowed CORS origins
-      - "http://localhost:3000"
-      - "http://localhost:4000"
-
-# Logging configuration
-logging:
-  level: debug # debug | info | warn | error
-  format: pretty # pretty | json
-
-# Security settings
-security:
-  jwt:
-    secret: "change-me-in-production-use-min-32-chars"
-    expiresIn: "7d" # Token expiration
-
-# Database configuration (when needed)
-database:
-  host: localhost
-  port: 5432
-  name: hive
-  user: postgres
-  password: postgres
-
-# Feature flags (optional)
-features:
-  enableMetrics: true
-  enableSwagger: true
-```
-
-### Regenerating Environment Files
-
-After editing `config.yaml`, regenerate the `.env` files:
+The fastest way to build agents is using the Claude Code skills:
 
 ```bash
-npm run generate:env
+# Install skills (one-time)
+./quickstart.sh
+
+# Build a new agent
+claude> /building-agents
+
+# Test the agent
+claude> /testing-agent
 ```
 
-This is required because:
-
-- Docker Compose reads from `.env` files
-- Vite reads frontend env vars from `/honeycomb/.env`
-- Node.js reads backend env vars from `/hive/.env`
-
----
-
-## Development Workflow
-
-### Option 1: Local Development (Recommended for Active Development)
-
-Best for rapid iteration with instant hot reload:
-
-```bash
-# Terminal 1: Start frontend
-npm run dev -w honeycomb
-
-# Terminal 2: Start backend
-npm run dev -w hive
-```
-
-| Service    | URL                          | Hot Reload      |
-| ---------- | ---------------------------- | --------------- |
-| Frontend   | http://localhost:3000        | Yes (Vite HMR)  |
-| Backend    | http://localhost:4000        | Yes (tsx watch) |
-| API Health | http://localhost:4000/health | -               |
-
-### Option 2: Docker Development
-
-Best for testing Docker builds or when you need consistent environments:
-
-```bash
-# Copy development overrides
-cp docker-compose.override.yml.example docker-compose.override.yml
-
-# Start containers with hot reload
-docker compose up
-
-# Or in detached mode
-docker compose up -d
-
-# View logs
-docker compose logs -f
-
-# Stop containers
-docker compose down
-```
-
-### Option 3: Mixed Mode
-
-Run backend in Docker, frontend locally (useful for frontend-focused work):
-
-```bash
-# Start only backend in Docker
-docker compose up hive -d
-
-# Run frontend locally
-npm run dev -w honeycomb
-```
-
-### Available NPM Scripts
-
-**Root level** (run from repository root):
-
-| Command                      | Description                               |
-| ---------------------------- | ----------------------------------------- |
-| `npm run setup`              | First-time setup (install + generate env) |
-| `npm run generate:env`       | Regenerate .env files from config.yaml    |
-| `npm run build`              | Build all packages                        |
-| `npm run build -w honeycomb` | Build frontend only                       |
-| `npm run build -w hive`      | Build backend only                        |
-| `npm run lint`               | Lint all packages                         |
-| `npm run test`               | Run all tests                             |
-| `npm run clean`              | Remove node_modules and build artifacts   |
-
-**Frontend** (`/honeycomb`):
-
-| Command                 | Description                         |
-| ----------------------- | ----------------------------------- |
-| `npm run dev`           | Start Vite dev server with HMR      |
-| `npm run build`         | Type-check and build for production |
-| `npm run preview`       | Preview production build locally    |
-| `npm run lint`          | Lint with ESLint                    |
-| `npm run test`          | Run tests with Vitest               |
-| `npm run test:coverage` | Run tests with coverage report      |
-
-**Backend** (`/hive`):
-
-| Command                 | Description                       |
-| ----------------------- | --------------------------------- |
-| `npm run dev`           | Start with hot reload (tsx watch) |
-| `npm run build`         | Compile TypeScript to JavaScript  |
-| `npm run start`         | Run compiled JavaScript           |
-| `npm run lint`          | Lint with ESLint                  |
-| `npm run test`          | Run tests with Vitest             |
-| `npm run test:coverage` | Run tests with coverage report    |
-
----
-
-## Working with the Frontend (honeycomb)
-
-### Tech Stack
-
-- **React 18** - UI library with hooks
-- **TypeScript** - Type safety
-- **Vite** - Build tool with instant HMR
-- **React Router v6** - Client-side routing
-- **Vitest** - Testing framework
-
-### Adding a New Page
-
-1. Create the page component:
-
-```tsx
-// honeycomb/src/pages/UsersPage.tsx
-import { useEffect, useState } from "react";
-import { useApi } from "../hooks/useApi";
-
-export function UsersPage() {
-  const { data, loading, error } = useApi<User[]>("/api/users");
-
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div>Error: {error.message}</div>;
-
-  return (
-    <div>
-      <h1>Users</h1>
-      <ul>
-        {data?.map((user) => (
-          <li key={user.id}>{user.name}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-```
-
-2. Add the route in `App.tsx`:
-
-```tsx
-// honeycomb/src/App.tsx
-import { UsersPage } from "./pages/UsersPage";
-
-// Inside Routes:
-<Route path="/users" element={<UsersPage />} />;
-```
-
-### Adding a New Component
-
-```tsx
-// honeycomb/src/components/Button.tsx
-interface ButtonProps {
-  children: React.ReactNode;
-  onClick?: () => void;
-  variant?: "primary" | "secondary";
-}
-
-export function Button({
-  children,
-  onClick,
-  variant = "primary",
-}: ButtonProps) {
-  return (
-    <button className={`btn btn-${variant}`} onClick={onClick}>
-      {children}
-    </button>
-  );
-}
-```
-
-### Making API Calls
-
-Use the provided `useApi` hook or the `api` service:
-
-```tsx
-// Using the hook (recommended for components)
-import { useApi } from "../hooks/useApi";
-
-function MyComponent() {
-  const { data, loading, error, refetch } = useApi<MyData>("/api/endpoint");
-  // ...
-}
-
-// Using the service directly (for non-component code)
-import { api } from "../services/api";
-
-async function fetchData() {
-  const response = await api.get("/api/endpoint");
-  return response.data;
-}
-```
-
-### Environment Variables in Frontend
-
-Access environment variables using `import.meta.env`:
-
-```tsx
-// Only VITE_* prefixed variables are exposed to the frontend
-const apiUrl = import.meta.env.VITE_API_URL;
-const appName = import.meta.env.VITE_APP_NAME;
-```
-
-**Important**: Never put secrets in frontend environment variables. They are bundled into the JavaScript and visible to users.
-
-### Path Aliases
-
-Use `@/` to import from the `src` directory:
-
-```tsx
-// Instead of:
-import { Button } from "../../../components/Button";
-
-// Use:
-import { Button } from "@/components/Button";
-```
-
----
-
-## Working with the Backend (hive)
-
-### Tech Stack
-
-- **Node.js 20** - Runtime
-- **Express** - Web framework
-- **TypeScript** - Type safety
-- **tsx** - TypeScript execution with hot reload
-- **Zod** - Runtime validation (recommended)
-- **Vitest** - Testing framework
-
-### Adding a New API Endpoint
-
-1. Create the route file:
-
-```typescript
-// hive/src/routes/users.ts
-import { Router } from "express";
-import type { Request, Response } from "express";
-
-const router = Router();
-
-// GET /api/users
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const users = await getUsersFromDatabase();
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch users" });
-  }
-});
-
-// GET /api/users/:id
-router.get("/:id", async (req: Request, res: Response) => {
-  const { id } = req.params;
-  try {
-    const user = await getUserById(id);
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-    res.json(user);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch user" });
-  }
-});
-
-// POST /api/users
-router.post("/", async (req: Request, res: Response) => {
-  const { name, email } = req.body;
-  try {
-    const user = await createUser({ name, email });
-    res.status(201).json(user);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to create user" });
-  }
-});
-
-export default router;
-```
-
-2. Register the route in `api.ts`:
-
-```typescript
-// hive/src/routes/api.ts
-import usersRouter from "./users";
-
-// Add to the router:
-router.use("/users", usersRouter);
-```
-
-### Request Validation with Zod
-
-```typescript
-// hive/src/routes/users.ts
-import { z } from "zod";
-
-const createUserSchema = z.object({
-  name: z.string().min(1).max(100),
-  email: z.string().email(),
-  age: z.number().int().positive().optional(),
-});
-
-router.post("/", async (req: Request, res: Response) => {
-  const result = createUserSchema.safeParse(req.body);
-
-  if (!result.success) {
-    return res.status(400).json({
-      error: "Validation failed",
-      details: result.error.issues,
-    });
-  }
-
-  const { name, email, age } = result.data;
-  // ... create user
-});
-```
-
-### Adding Middleware
-
-```typescript
-// hive/src/middleware/auth.ts
-import type { Request, Response, NextFunction } from "express";
-
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const token = req.headers.authorization?.replace("Bearer ", "");
-
-  if (!token) {
-    return res.status(401).json({ error: "Authentication required" });
-  }
-
-  try {
-    const decoded = verifyToken(token);
-    req.user = decoded;
-    next();
-  } catch {
-    res.status(401).json({ error: "Invalid token" });
-  }
-}
-
-// Usage in routes:
-router.get("/protected", requireAuth, (req, res) => {
-  res.json({ user: req.user });
-});
-```
-
-### Logging
-
-Use the built-in logger for consistent structured logging:
-
-```typescript
-import { logger } from "../utils/logger";
-
-// Different log levels
-logger.debug("Detailed debug info", { userId: 123 });
-logger.info("User logged in", { userId: 123 });
-logger.warn("Rate limit approaching", { currentRate: 95 });
-logger.error("Database connection failed", { error: err.message });
-```
-
-### Environment Variables in Backend
-
-Access via `process.env` or the config module:
-
-```typescript
-// Direct access
-const port = process.env.PORT || 4000;
-
-// Or via config (recommended - adds validation)
-import { config } from "../config";
-const port = config.port;
-```
-
----
-
-## Docker Development
-
-### Docker Compose Files
-
-| File                          | Purpose                                         |
-| ----------------------------- | ----------------------------------------------- |
-| `docker-compose.yml`          | Base configuration (production-like)            |
-| `docker-compose.override.yml` | Development overrides (hot reload, debug ports) |
-
-When you run `docker compose up`, Docker automatically merges both files.
-
-### Building Images
-
-```bash
-# Build all images
-docker compose build
-
-# Build specific service
-docker compose build honeycomb
-docker compose build hive
-
-# Build with no cache (fresh build)
-docker compose build --no-cache
-```
-
-### Running Containers
-
-```bash
-# Start all services
-docker compose up
-
-# Start in background
-docker compose up -d
-
-# Start specific service
-docker compose up hive
-
-# View logs
-docker compose logs -f
-docker compose logs -f hive  # Specific service
-
-# Stop all services
-docker compose down
-
-# Stop and remove volumes
-docker compose down -v
-```
-
-### Debugging in Docker
-
-The development override exposes debug ports:
-
-- **Backend debug port**: 9229 (Node.js inspector)
-
-To debug the backend in VS Code:
-
-1. Add to `.vscode/launch.json`:
-
-```json
+### Agent Development Workflow
+
+1. **Define Your Goal**
+   ```
+   claude> /building-agents
+   Enter goal: "Build an agent that processes customer support tickets"
+   ```
+
+2. **Design the Workflow**
+   - The skill guides you through defining nodes
+   - Each node is a unit of work (LLM call, function, router)
+   - Edges define how execution flows
+
+3. **Generate the Agent**
+   - The skill generates a complete Python package in `exports/`
+   - Includes: `agent.json`, `tools.py`, `README.md`
+
+4. **Validate the Agent**
+   ```bash
+   PYTHONPATH=core:exports python -m your_agent_name validate
+   ```
+
+5. **Test the Agent**
+   ```
+   claude> /testing-agent
+   ```
+
+### Manual Agent Development
+
+If you prefer to build agents manually:
+
+```python
+# exports/my_agent/agent.json
 {
-  "version": "0.2.0",
-  "configurations": [
+  "goal": {
+    "goal_id": "support_ticket",
+    "name": "Support Ticket Handler",
+    "description": "Process customer support tickets",
+    "success_criteria": "Ticket is categorized, prioritized, and routed correctly"
+  },
+  "nodes": [
     {
-      "name": "Attach to Docker",
-      "type": "node",
-      "request": "attach",
-      "port": 9229,
-      "address": "localhost",
-      "localRoot": "${workspaceFolder}/hive",
-      "remoteRoot": "/app",
-      "restart": true
+      "node_id": "analyze",
+      "name": "Analyze Ticket",
+      "node_type": "llm",
+      "system_prompt": "Analyze this support ticket...",
+      "input_keys": ["ticket_content"],
+      "output_keys": ["category", "priority"]
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "start_to_analyze",
+      "source": "START",
+      "target": "analyze",
+      "condition": "on_success"
     }
   ]
 }
 ```
 
-2. Start containers: `docker compose up`
-3. In VS Code, press F5 or select "Attach to Docker"
-
-### Useful Docker Commands
+### Running Agents
 
 ```bash
-# Execute command in running container
-docker compose exec hive sh
-docker compose exec honeycomb sh
+# Validate agent structure
+PYTHONPATH=core:exports python -m agent_name validate
 
-# View container resource usage
-docker stats
+# Show agent information
+PYTHONPATH=core:exports python -m agent_name info
 
-# Remove all stopped containers
-docker container prune
+# Run agent with input
+PYTHONPATH=core:exports python -m agent_name run --input '{
+  "ticket_content": "My login is broken",
+  "customer_id": "CUST-123"
+}'
 
-# Remove unused images
-docker image prune
+# Run in mock mode (no LLM calls)
+PYTHONPATH=core:exports python -m agent_name run --mock --input '{...}'
 ```
 
 ---
 
-## Testing
+## Testing Agents
 
-### Running Tests
+### Using the Testing Agent Skill
 
 ```bash
-# Run all tests
-npm run test
-
-# Run tests for specific package
-npm run test -w honeycomb
-npm run test -w hive
-
-# Run with coverage
-npm run test:coverage -w honeycomb
-npm run test:coverage -w hive
-
-# Run in watch mode (re-runs on file changes)
-cd honeycomb && npm run test -- --watch
-cd hive && npm run test -- --watch
+# Run tests for an agent
+claude> /testing-agent
 ```
 
-### Writing Frontend Tests
+This generates and runs:
+- **Constraint tests** - Verify agent respects constraints
+- **Success tests** - Verify agent achieves success criteria
+- **Integration tests** - End-to-end workflows
 
-```tsx
-// honeycomb/src/components/Button.test.tsx
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
-import { Button } from "./Button";
+### Manual Testing
 
-describe("Button", () => {
-  it("renders children", () => {
-    render(<Button>Click me</Button>);
-    expect(screen.getByText("Click me")).toBeInTheDocument();
-  });
+```bash
+# Run all tests for an agent
+PYTHONPATH=core:exports python -m agent_name test
 
-  it("calls onClick when clicked", () => {
-    const handleClick = vi.fn();
-    render(<Button onClick={handleClick}>Click me</Button>);
+# Run specific test type
+PYTHONPATH=core:exports python -m agent_name test --type constraint
+PYTHONPATH=core:exports python -m agent_name test --type success
 
-    fireEvent.click(screen.getByText("Click me"));
+# Run with parallel execution
+PYTHONPATH=core:exports python -m agent_name test --parallel 4
 
-    expect(handleClick).toHaveBeenCalledTimes(1);
-  });
-});
+# Fail fast (stop on first failure)
+PYTHONPATH=core:exports python -m agent_name test --fail-fast
 ```
 
-### Writing Backend Tests
+### Writing Custom Tests
 
-```typescript
-// hive/src/routes/health.test.ts
-import { describe, it, expect } from "vitest";
-import request from "supertest";
-import { app } from "../server";
+```python
+# exports/my_agent/tests/test_custom.py
+import pytest
+from framework.runner import AgentRunner
 
-describe("Health Routes", () => {
-  it("GET /health returns healthy status", async () => {
-    const response = await request(app).get("/health");
+def test_ticket_categorization():
+    """Test that tickets are categorized correctly"""
+    runner = AgentRunner.from_file("exports/my_agent/agent.json")
 
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      status: "healthy",
-    });
-  });
+    result = runner.run({
+        "ticket_content": "I can't log in to my account"
+    })
 
-  it("GET /health/ready returns ready status", async () => {
-    const response = await request(app).get("/health/ready");
-
-    expect(response.status).toBe(200);
-    expect(response.body.ready).toBe(true);
-  });
-});
+    assert result["category"] == "authentication"
+    assert result["priority"] in ["high", "medium", "low"]
 ```
 
 ---
 
 ## Code Style & Conventions
 
-### TypeScript
+### Python Code Style
 
-- **Strict mode enabled** - No implicit any, strict null checks
-- **Explicit return types** on exported functions
-- **Interface over type** for object shapes (unless unions needed)
-- **Readonly** where possible
+- **PEP 8** - Follow Python style guide
+- **Type hints** - Use for function signatures and class attributes
+- **Docstrings** - Document classes and public functions
+- **Black** - Code formatter (run with `black .`)
 
-```typescript
-// Good
-interface User {
-  readonly id: string;
-  name: string;
-  email: string;
-}
+```python
+# Good
+from typing import Optional, Dict, Any
 
-export function getUser(id: string): Promise<User | null> {
-  // ...
-}
+def process_ticket(
+    ticket_content: str,
+    customer_id: str,
+    priority: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Process a customer support ticket.
 
-// Avoid
-export function getUser(id) {
-  // Missing types
-  // ...
-}
+    Args:
+        ticket_content: The content of the ticket
+        customer_id: The customer's ID
+        priority: Optional priority override
+
+    Returns:
+        Dictionary with processing results
+    """
+    # Implementation
+    return {"status": "processed", "id": ticket_id}
+
+# Avoid
+def process_ticket(ticket_content, customer_id, priority=None):
+    # No types, no docstring
+    return {"status": "processed", "id": ticket_id}
 ```
 
-### React Components
+### Agent Package Structure
 
-- **Functional components** only (no class components)
-- **Named exports** for components
-- **Props interface** defined above component
-
-```tsx
-// Good
-interface ButtonProps {
-  children: React.ReactNode;
-  onClick?: () => void;
-}
-
-export function Button({ children, onClick }: ButtonProps) {
-  return <button onClick={onClick}>{children}</button>;
-}
-
-// Avoid
-export default function ({ children, onClick }) {
-  // Missing types, default export
-  return <button onClick={onClick}>{children}</button>;
-}
+```
+my_agent/
+├── __init__.py              # Package initialization
+├── __main__.py              # CLI entry point
+├── agent.json               # Agent definition (nodes, edges, goal)
+├── tools.py                 # Custom tools (optional)
+├── mcp_servers.json         # MCP server config (optional)
+├── README.md                # Agent documentation
+└── tests/                   # Test files
+    ├── __init__.py
+    ├── test_constraint.py   # Constraint tests
+    └── test_success.py      # Success criteria tests
 ```
 
 ### File Naming
 
-| Type       | Convention                  | Example                          |
-| ---------- | --------------------------- | -------------------------------- |
-| Components | PascalCase                  | `UserCard.tsx`                   |
-| Hooks      | camelCase with `use` prefix | `useAuth.ts`                     |
-| Utilities  | camelCase                   | `formatDate.ts`                  |
-| Types      | PascalCase                  | `User.ts` or in `types/index.ts` |
-| Tests      | Same as file + `.test`      | `UserCard.test.tsx`              |
-| Styles     | Same as component           | `UserCard.css`                   |
+| Type                | Convention               | Example                     |
+| ------------------- | ------------------------ | --------------------------- |
+| Modules             | snake_case               | `ticket_handler.py`         |
+| Classes             | PascalCase               | `TicketHandler`             |
+| Functions/Variables | snake_case               | `process_ticket()`          |
+| Constants           | UPPER_SNAKE_CASE         | `MAX_RETRIES = 3`           |
+| Test files          | `test_` prefix           | `test_ticket_handler.py`    |
+| Agent packages      | snake_case               | `support_ticket_agent/`     |
 
 ### Import Order
 
-1. External packages
-2. Internal absolute imports (`@/...`)
-3. Relative imports
-4. Style imports
+1. Standard library
+2. Third-party packages
+3. Framework imports
+4. Local imports
 
-```tsx
-// External
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+```python
+# Standard library
+import json
+from typing import Dict, Any
 
-// Internal absolute
-import { Button } from "@/components/Button";
-import { useApi } from "@/hooks/useApi";
+# Third-party
+import litellm
+from pydantic import BaseModel
 
-// Relative
-import { formatUserName } from "./utils";
+# Framework
+from framework.runner import AgentRunner
+from framework.context import NodeContext
 
-// Styles
-import "./UserCard.css";
+# Local
+from .tools import custom_tool
 ```
 
 ---
@@ -1056,80 +566,122 @@ logger.debug("Processing request", {
 
 ## Common Tasks
 
-### Adding a New Dependency
+### Adding Python Dependencies
 
 ```bash
-# Add to frontend
-npm install <package> -w honeycomb
+# Add to core framework
+cd core
+pip install <package>
+# Then add to requirements.txt or pyproject.toml
 
-# Add to backend
-npm install <package> -w hive
+# Add to tools package
+cd tools
+pip install <package>
+# Then add to requirements.txt or pyproject.toml
 
-# Add dev dependency
-npm install -D <package> -w honeycomb
-
-# Add to root (shared tooling)
-npm install -D <package> -w .
+# Reinstall in editable mode
+pip install -e .
 ```
 
-### Updating Dependencies
+### Creating a New Agent
 
 ```bash
-# Check for outdated packages
-npm outdated
+# Option 1: Use Claude Code skill (recommended)
+claude> /building-agents
 
-# Update all to latest minor/patch
-npm update
+# Option 2: Copy from example
+cp -r exports/support_ticket_agent exports/my_new_agent
+cd exports/my_new_agent
+# Edit agent.json, tools.py, README.md
 
-# Update specific package
-npm install <package>@latest -w honeycomb
+# Option 3: Use the agent builder MCP tools (advanced)
+# See core/MCP_BUILDER_TOOLS_GUIDE.md
 ```
 
-### Adding Environment Variables
+### Adding Custom Tools to an Agent
 
-1. Add to `config.yaml.example` (template):
+```python
+# exports/my_agent/tools.py
+from typing import Dict, Any
 
-```yaml
-myService:
-  apiKey: "your-api-key-here"
+def my_custom_tool(param1: str, param2: int) -> Dict[str, Any]:
+    """
+    Description of what this tool does.
+
+    Args:
+        param1: Description of param1
+        param2: Description of param2
+
+    Returns:
+        Dictionary with tool results
+    """
+    # Implementation
+    return {"result": "success", "data": ...}
+
+# Register tool in agent.json
+{
+  "nodes": [
+    {
+      "node_id": "use_tool",
+      "node_type": "function",
+      "tools": ["my_custom_tool"],
+      ...
+    }
+  ]
+}
 ```
 
-2. Add to your local `config.yaml`:
-
-```yaml
-myService:
-  apiKey: "actual-api-key"
-```
-
-3. Update `scripts/generate-env.ts` to output the new variable
-
-4. Regenerate env files:
+### Adding MCP Server Integration
 
 ```bash
-npm run generate:env
+# 1. Create mcp_servers.json in your agent package
+# exports/my_agent/mcp_servers.json
+{
+  "tools": {
+    "transport": "stdio",
+    "command": "python",
+    "args": ["-m", "aden_tools.mcp_server"],
+    "cwd": "tools/",
+    "description": "File system and web tools"
+  }
+}
+
+# 2. Reference tools in agent.json
+{
+  "nodes": [
+    {
+      "node_id": "search",
+      "tools": ["web_search", "web_scrape"],
+      ...
+    }
+  ]
+}
 ```
 
-5. Access in code:
-
-```typescript
-// Backend
-const apiKey = process.env.MY_SERVICE_API_KEY;
-
-// Frontend (must be prefixed with VITE_)
-const apiKey = import.meta.env.VITE_MY_SERVICE_API_KEY;
-```
-
-### Database Migrations (when added)
+### Setting Environment Variables
 
 ```bash
-# Create a new migration
-npm run migration:create -w hive -- --name add-users-table
+# Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+export ANTHROPIC_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-key-here"
+export BRAVE_SEARCH_API_KEY="your-key-here"
 
-# Run pending migrations
-npm run migration:run -w hive
+# Or create .env file (not committed to git)
+echo 'ANTHROPIC_API_KEY=your-key-here' >> .env
+```
 
-# Rollback last migration
-npm run migration:rollback -w hive
+### Debugging Agent Execution
+
+```python
+# Add debug logging to your agent
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# Run with verbose output
+PYTHONPATH=core:exports python -m agent_name run --input '{...}' --verbose
+
+# Use mock mode to test without LLM calls
+PYTHONPATH=core:exports python -m agent_name run --mock --input '{...}'
 ```
 
 ---
