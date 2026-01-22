@@ -9,11 +9,14 @@ handles all the structured logging.
 from datetime import datetime
 from typing import Any
 from pathlib import Path
+import logging
 import uuid
 
 from framework.schemas.decision import Decision, Option, Outcome, DecisionType
 from framework.schemas.run import Run, RunStatus
 from framework.storage.backend import FileStorage
+
+logger = logging.getLogger(__name__)
 
 
 class Runtime:
@@ -100,7 +103,10 @@ class Runtime:
             output_data: Final output of the run
         """
         if self._current_run is None:
-            raise RuntimeError("No run in progress")
+            # Gracefully handle case where run was already ended or never started
+            # This can happen during exception handling cascades
+            logger.warning("end_run called but no run in progress (already ended or never started)")
+            return
 
         status = RunStatus.COMPLETED if success else RunStatus.FAILED
         self._current_run.output_data = output_data or {}
@@ -158,10 +164,12 @@ class Runtime:
             context: Additional context available when deciding
 
         Returns:
-            The decision ID (use this to record outcome later)
+            The decision ID (use this to record outcome later), or empty string if no run in progress
         """
         if self._current_run is None:
-            raise RuntimeError("No run in progress. Call start_run() first.")
+            # Gracefully handle case where run ended during exception handling
+            logger.warning(f"decide called but no run in progress: {intent}")
+            return ""
 
         # Build Option objects
         option_objects = []
@@ -220,7 +228,10 @@ class Runtime:
             latency_ms: Time taken in milliseconds
         """
         if self._current_run is None:
-            raise RuntimeError("No run in progress")
+            # Gracefully handle case where run ended during exception handling
+            # This can happen in cascading error scenarios
+            logger.warning(f"record_outcome called but no run in progress (decision_id={decision_id})")
+            return
 
         outcome = Outcome(
             success=success,
@@ -258,10 +269,13 @@ class Runtime:
             suggested_fix: What might fix it (if known)
 
         Returns:
-            The problem ID
+            The problem ID, or empty string if no run in progress
         """
         if self._current_run is None:
-            raise RuntimeError("No run in progress")
+            # Gracefully handle case where run ended during exception handling
+            # Log the problem since we can't store it, then return empty ID
+            logger.warning(f"report_problem called but no run in progress: [{severity}] {description}")
+            return ""
 
         return self._current_run.add_problem(
             severity=severity,

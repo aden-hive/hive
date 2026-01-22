@@ -431,22 +431,13 @@ class LLMNode(NodeProtocol):
             # Write to output keys
             output = self._parse_output(response.content, ctx.node_spec)
 
-            # For llm_generate nodes, try to parse JSON and extract fields
-            if ctx.node_spec.node_type == "llm_generate" and len(ctx.node_spec.output_keys) > 1:
+            # For llm_generate and llm_tool_use nodes, try to parse JSON and extract fields
+            if ctx.node_spec.node_type in ("llm_generate", "llm_tool_use") and len(ctx.node_spec.output_keys) > 1:
                 try:
-                    # Try to parse as JSON
                     import json
-                    import re
 
-                    # Remove markdown code blocks if present
-                    content = response.content.strip()
-                    if content.startswith("```"):
-                        # Extract JSON from code block
-                        match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
-                        if match:
-                            content = match.group(1).strip()
-
-                    parsed = json.loads(content)
+                    # Try direct JSON parse first
+                    parsed = self._extract_json_with_haiku(response.content, ctx.node_spec.output_keys)
 
                     # If parsed successfully, write each field to its corresponding output key
                     if isinstance(parsed, dict):
@@ -454,8 +445,12 @@ class LLMNode(NodeProtocol):
                             if key in parsed:
                                 ctx.memory.write(key, parsed[key])
                                 output[key] = parsed[key]
+                            elif key in ctx.input_data:
+                                # Key not in parsed JSON but exists in input - pass through input value
+                                ctx.memory.write(key, ctx.input_data[key])
+                                output[key] = ctx.input_data[key]
                             else:
-                                # Key not in parsed JSON, write the whole response
+                                # Key not in parsed JSON or input, write the whole response
                                 ctx.memory.write(key, response.content)
                                 output[key] = response.content
                     else:
@@ -465,8 +460,8 @@ class LLMNode(NodeProtocol):
                             output[key] = response.content
 
                 except (json.JSONDecodeError, Exception) as e:
-                    # JSON parsing failed, fall back to writing entire response
-                    logger.warning(f"      ⚠ Failed to parse JSON output, using raw response: {e}")
+                    # JSON extraction failed completely
+                    logger.warning(f"      ⚠ Failed to extract JSON output: {e}")
                     for key in ctx.node_spec.output_keys:
                         ctx.memory.write(key, response.content)
                         output[key] = response.content
@@ -502,6 +497,80 @@ class LLMNode(NodeProtocol):
         """
         # Default output
         return {"result": content}
+
+    def _extract_json_with_haiku(self, raw_response: str, output_keys: list[str]) -> dict[str, Any]:
+        """Use Haiku to extract clean JSON from potentially verbose LLM response."""
+        import json
+        import re
+
+        # Try direct JSON parse first (fast path)
+        try:
+            content = raw_response.strip()
+            # Remove markdown code blocks if present
+            if content.startswith("```"):
+                match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
+                if match:
+                    content = match.group(1).strip()
+
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # JSON parse failed - use Haiku to extract clean JSON
+        import os
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            # No API key, try one more simple extraction
+            try:
+                # Find first { and last }
+                start = raw_response.find('{')
+                end = raw_response.rfind('}')
+                if start != -1 and end != -1:
+                    json_str = raw_response[start:end+1]
+                    return json.loads(json_str)
+            except:
+                pass
+            raise ValueError("Cannot parse JSON and no API key for Haiku cleanup")
+
+        # Use Haiku to clean the response
+        from framework.llm.anthropic import AnthropicProvider
+        haiku = AnthropicProvider(model="claude-3-5-haiku-20241022")
+
+        prompt = f"""Extract the JSON object from this LLM response. Extract ONLY the values that the LLM actually generated.
+
+Expected output keys: {output_keys}
+
+LLM Response:
+{raw_response}
+
+IMPORTANT:
+- Only extract keys that the LLM explicitly output in its response
+- Do NOT include keys that were just mentioned or passed through from input
+- If the LLM output multiple pieces of text/JSON, extract the LAST JSON object only
+- Output ONLY valid JSON with no extra text, no markdown, no explanations"""
+
+        try:
+            result = haiku.complete(
+                messages=[{"role": "user", "content": prompt}],
+                system="You extract clean JSON from messy responses. Output only valid JSON, nothing else.",
+            )
+
+            cleaned = result.content.strip()
+            # Remove markdown if Haiku added it
+            if cleaned.startswith("```"):
+                match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', cleaned, re.DOTALL)
+                if match:
+                    cleaned = match.group(1).strip()
+
+            parsed = json.loads(cleaned)
+            logger.info(f"      ✓ Haiku cleaned JSON output")
+            return parsed
+
+        except Exception as e:
+            logger.warning(f"      ⚠ Haiku JSON extraction failed: {e}")
+            raise
 
     def _build_messages(self, ctx: NodeContext) -> list[dict]:
         """Build the message list for the LLM."""

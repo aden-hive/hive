@@ -65,9 +65,14 @@ class MCPClient:
         self._session = None
         self._read_stream = None
         self._write_stream = None
+        self._stdio_context = None  # Context manager for stdio_client
         self._http_client: httpx.Client | None = None
         self._tools: dict[str, MCPTool] = {}
         self._connected = False
+
+        # Background event loop for persistent STDIO connection
+        self._loop = None
+        self._loop_thread = None
 
     def _run_async(self, coro):
         """
@@ -79,6 +84,13 @@ class MCPClient:
         Returns:
             Result of the coroutine
         """
+        # If we have a persistent loop (for STDIO), use it
+        if self._loop is not None:
+            import concurrent.futures
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            return future.result()
+
+        # Otherwise, use the standard approach
         try:
             # Try to get the current event loop
             asyncio.get_running_loop()
@@ -129,12 +141,12 @@ class MCPClient:
         self._connected = True
 
     def _connect_stdio(self) -> None:
-        """Connect to MCP server via STDIO transport using MCP SDK."""
+        """Connect to MCP server via STDIO transport using MCP SDK with persistent connection."""
         if not self.config.command:
             raise ValueError("command is required for STDIO transport")
 
         try:
-            # Import MCP SDK
+            import threading
             from mcp import StdioServerParameters
 
             # Create server parameters
@@ -145,10 +157,62 @@ class MCPClient:
                 cwd=self.config.cwd,
             )
 
-            # Store for later use in async context
+            # Store for later use
             self._server_params = server_params
 
-            logger.info(f"Connected to MCP server '{self.config.name}' via STDIO")
+            # Start background event loop for persistent connection
+            loop_started = threading.Event()
+            connection_ready = threading.Event()
+            connection_error = []
+
+            def run_event_loop():
+                """Run event loop in background thread."""
+                self._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._loop)
+                loop_started.set()
+
+                # Initialize persistent connection
+                async def init_connection():
+                    try:
+                        from mcp import ClientSession
+                        from mcp.client.stdio import stdio_client
+
+                        # Create persistent stdio client context
+                        self._stdio_context = stdio_client(server_params)
+                        self._read_stream, self._write_stream = await self._stdio_context.__aenter__()
+
+                        # Create persistent session
+                        self._session = ClientSession(self._read_stream, self._write_stream)
+                        await self._session.__aenter__()
+
+                        # Initialize session
+                        await self._session.initialize()
+
+                        connection_ready.set()
+                    except Exception as e:
+                        connection_error.append(e)
+                        connection_ready.set()
+
+                # Schedule connection initialization
+                self._loop.create_task(init_connection())
+
+                # Run loop forever
+                self._loop.run_forever()
+
+            self._loop_thread = threading.Thread(target=run_event_loop, daemon=True)
+            self._loop_thread.start()
+
+            # Wait for loop to start
+            loop_started.wait(timeout=5)
+            if not loop_started.is_set():
+                raise RuntimeError("Event loop failed to start")
+
+            # Wait for connection to be ready
+            connection_ready.wait(timeout=10)
+            if connection_error:
+                raise connection_error[0]
+
+            logger.info(f"Connected to MCP server '{self.config.name}' via STDIO (persistent)")
         except Exception as e:
             raise RuntimeError(f"Failed to connect to MCP server: {e}")
 
@@ -196,28 +260,23 @@ class MCPClient:
             raise
 
     async def _list_tools_stdio_async(self) -> list[dict]:
-        """List tools via STDIO protocol using MCP SDK."""
-        from mcp import ClientSession
-        from mcp.client.stdio import stdio_client
+        """List tools via STDIO protocol using persistent session."""
+        if not self._session:
+            raise RuntimeError("STDIO session not initialized")
 
-        async with stdio_client(self._server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                # Initialize the session
-                await session.initialize()
+        # List tools using persistent session
+        response = await self._session.list_tools()
 
-                # List tools
-                response = await session.list_tools()
+        # Convert tools to dict format
+        tools_list = []
+        for tool in response.tools:
+            tools_list.append({
+                "name": tool.name,
+                "description": tool.description,
+                "inputSchema": tool.inputSchema,
+            })
 
-                # Convert tools to dict format
-                tools_list = []
-                for tool in response.tools:
-                    tools_list.append({
-                        "name": tool.name,
-                        "description": tool.description,
-                        "inputSchema": tool.inputSchema,
-                    })
-
-                return tools_list
+        return tools_list
 
     def _list_tools_http(self) -> list[dict]:
         """List tools via HTTP protocol."""
@@ -280,31 +339,26 @@ class MCPClient:
             return self._call_tool_http(tool_name, arguments)
 
     async def _call_tool_stdio_async(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """Call tool via STDIO protocol using MCP SDK."""
-        from mcp import ClientSession
-        from mcp.client.stdio import stdio_client
+        """Call tool via STDIO protocol using persistent session."""
+        if not self._session:
+            raise RuntimeError("STDIO session not initialized")
 
-        async with stdio_client(self._server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                # Initialize the session
-                await session.initialize()
+        # Call tool using persistent session
+        result = await self._session.call_tool(tool_name, arguments=arguments)
 
-                # Call tool
-                result = await session.call_tool(tool_name, arguments=arguments)
+        # Extract content
+        if result.content:
+            # MCP returns content as a list of content items
+            if len(result.content) > 0:
+                content_item = result.content[0]
+                # Check if it's a text content item
+                if hasattr(content_item, 'text'):
+                    return content_item.text
+                elif hasattr(content_item, 'data'):
+                    return content_item.data
+            return result.content
 
-                # Extract content
-                if result.content:
-                    # MCP returns content as a list of content items
-                    if len(result.content) > 0:
-                        content_item = result.content[0]
-                        # Check if it's a text content item
-                        if hasattr(content_item, 'text'):
-                            return content_item.text
-                        elif hasattr(content_item, 'data'):
-                            return content_item.data
-                    return result.content
-
-                return None
+        return None
 
     def _call_tool_http(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call tool via HTTP protocol."""
@@ -336,6 +390,25 @@ class MCPClient:
 
     def disconnect(self) -> None:
         """Disconnect from the MCP server."""
+        # Clean up persistent STDIO connection
+        if self._loop is not None:
+            # Stop event loop - this will cause context managers to clean up naturally
+            if self._loop and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self._loop.stop)
+
+            # Wait for thread to finish
+            if self._loop_thread and self._loop_thread.is_alive():
+                self._loop_thread.join(timeout=2)
+
+            # Clear references
+            self._session = None
+            self._stdio_context = None
+            self._read_stream = None
+            self._write_stream = None
+            self._loop = None
+            self._loop_thread = None
+
+        # Clean up HTTP client
         if self._http_client:
             self._http_client.close()
             self._http_client = None

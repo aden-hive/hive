@@ -165,12 +165,7 @@ class GraphExecutor:
 
                 path.append(current_node_id)
 
-                # Check if terminal
-                if current_node_id in graph.terminal_nodes:
-                    self.logger.info(f"✓ Reached terminal node: {node_spec.name}")
-                    break
-
-                # Check if pause (HITL)
+                # Check if pause (HITL) before execution
                 if current_node_id in graph.pause_nodes:
                     self.logger.info(f"⏸ Paused at HITL node: {node_spec.name}")
                     # Execute this node, then pause
@@ -278,6 +273,11 @@ class GraphExecutor:
                         paused_at=node_spec.id,
                         session_state=session_state_out,
                     )
+
+                # Check if this is a terminal node - if so, we're done
+                if node_spec.id in graph.terminal_nodes:
+                    self.logger.info(f"✓ Reached terminal node: {node_spec.name}")
+                    break
 
                 # Determine next node
                 if result.next_node:

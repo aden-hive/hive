@@ -57,6 +57,9 @@ __pycache__/
 .eggs/
 *.egg
 
+# Generated runtime data
+core/data/
+
 # Misc
 *.local
 .cache/
@@ -64,3 +67,6 @@ tmp/
 temp/
 
 exports/*
+
+core/.agent-builder-sessions/*
+.agent-builder-sessions/
