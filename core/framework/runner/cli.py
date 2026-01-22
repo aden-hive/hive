@@ -649,7 +649,7 @@ Output ONLY valid JSON, no explanation:"""
         json_str = json_str.strip()
 
         return json.loads(json_str)
-    except Exception as e:
+    except Exception:
         # Fallback: try to infer the main field
         if len(input_keys) == 1:
             return {input_keys[0]: user_input}
@@ -766,19 +766,19 @@ def cmd_shell(args: argparse.Namespace) -> int:
         # Try to parse as JSON first
         try:
             context = json.loads(user_input)
-            print(f"✓ Parsed as JSON")
+            print("✓ Parsed as JSON")
         except json.JSONDecodeError:
             # Not JSON - check for key=value format
-            if "=" in user_input and not " " in user_input.split("=")[0]:
+            if "=" in user_input and " " not in user_input.split("=")[0]:
                 context = {}
                 for part in user_input.split():
                     if "=" in part:
                         key, value = part.split("=", 1)
                         context[key] = value
-                print(f"✓ Parsed as key=value")
+                print("✓ Parsed as key=value")
             else:
                 # Natural language - use Haiku to format
-                print(f"🤖 Formatting with Haiku...")
+                print("🤖 Formatting with Haiku...")
                 try:
                     context = _format_natural_language_to_json(
                         user_input,
@@ -858,7 +858,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
         if result.paused_at:
             agent_session_state = result.session_state
             print(f"⏸ Agent paused at: {result.paused_at}")
-            print(f"   Next input will resume from this point")
+            print("   Next input will resume from this point")
         else:
             # Execution completed (not paused), clear session state
             agent_session_state = None
@@ -950,7 +950,7 @@ def _interactive_multi(agents_dir: Path) -> int:
         return 1
 
     print(f"\n{'=' * 60}")
-    print(f"Multi-Agent Interactive Mode")
+    print("Multi-Agent Interactive Mode")
     print(f"Registered {agent_count} agents")
     print(f"{'=' * 60}")
     print("\nCommands:")

@@ -7,7 +7,6 @@ Supports both STDIO and HTTP transports using the official MCP Python SDK.
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -86,7 +85,6 @@ class MCPClient:
         """
         # If we have a persistent loop (for STDIO), use it
         if self._loop is not None:
-            import concurrent.futures
             future = asyncio.run_coroutine_threadsafe(coro, self._loop)
             return future.result()
 
