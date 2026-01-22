@@ -1,4 +1,4 @@
-"""Shared fixtures for aden-tools tests."""
+"""Shared fixtures for tools tests."""
 import pytest
 from pathlib import Path
 

@@ -5,12 +5,13 @@ Tool library for the Aden agent framework. Provides a collection of tools that A
 ## Installation
 
 ```bash
-pip install -e aden-tools
+pip install -e tools
 ```
 
 For development:
+
 ```bash
-pip install -e "aden-tools[dev]"
+pip install -e "tools[dev]"
 ```
 
 ## Environment Setup
@@ -21,12 +22,13 @@ Some tools require API keys to function. Copy the example file and add your cred
 cp .env.example .env
 ```
 
-| Variable | Required For | Get Key |
-|----------|--------------|---------|
-| `ANTHROPIC_API_KEY` | MCP server startup, LLM nodes | [console.anthropic.com](https://console.anthropic.com/) |
-| `BRAVE_SEARCH_API_KEY` | `web_search` tool | [brave.com/search/api](https://brave.com/search/api/) |
+| Variable               | Required For                  | Get Key                                                 |
+| ---------------------- | ----------------------------- | ------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`    | MCP server startup, LLM nodes | [console.anthropic.com](https://console.anthropic.com/) |
+| `BRAVE_SEARCH_API_KEY` | `web_search` tool             | [brave.com/search/api](https://brave.com/search/api/)   |
 
 Alternatively, export as environment variables:
+
 ```bash
 export ANTHROPIC_API_KEY=your-key-here
 export BRAVE_SEARCH_API_KEY=your-key-here
@@ -42,31 +44,32 @@ See [.env.example](.env.example) for details.
 from fastmcp import FastMCP
 from aden_tools.tools import register_all_tools
 
-mcp = FastMCP("aden-tools")
+mcp = FastMCP("tools")
 register_all_tools(mcp)
 mcp.run()
 ```
 
 Or run directly:
+
 ```bash
 python mcp_server.py
 ```
 
 ## Available Tools
 
-| Tool | Description |
-|------|-------------|
-| `example_tool` | Template tool demonstrating the pattern |
-| `file_read` | Read contents of local files |
-| `file_write` | Write content to local files |
-| `web_search` | Search the web using Brave Search API |
-| `web_scrape` | Scrape and extract content from webpages |
-| `pdf_read` | Read and extract text from PDF files |
+| Tool           | Description                              |
+| -------------- | ---------------------------------------- |
+| `example_tool` | Template tool demonstrating the pattern  |
+| `file_read`    | Read contents of local files             |
+| `file_write`   | Write content to local files             |
+| `web_search`   | Search the web using Brave Search API    |
+| `web_scrape`   | Scrape and extract content from webpages |
+| `pdf_read`     | Read and extract text from PDF files     |
 
 ## Project Structure
 
 ```
-aden-tools/
+tools/
 ├── src/aden_tools/
 │   ├── __init__.py          # Main exports
 │   ├── utils/               # Utility functions

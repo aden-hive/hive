@@ -39,7 +39,7 @@ def register_all_tools(
     credentials: Optional["CredentialManager"] = None,
 ) -> List[str]:
     """
-    Register all aden-tools with a FastMCP server.
+    Register all tools with a FastMCP server.
 
     Args:
         mcp: FastMCP server instance

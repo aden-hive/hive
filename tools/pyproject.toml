@@ -1,5 +1,5 @@
 [project]
-name = "aden-tools"
+name = "tools"
 version = "0.1.0"
 description = "Tools library for the Aden agent framework"
 readme = "README.md"

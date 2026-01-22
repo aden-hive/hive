@@ -315,16 +315,16 @@ class AgentRunner:
         Example:
             # Register STDIO MCP server
             runner.register_mcp_server(
-                name="aden-tools",
+                name="tools",
                 transport="stdio",
                 command="python",
                 args=["-m", "aden_tools.mcp_server", "--stdio"],
-                cwd="/path/to/aden-tools"
+                cwd="/path/to/tools"
             )
 
             # Register HTTP MCP server
             runner.register_mcp_server(
-                name="aden-tools",
+                name="tools",
                 transport="http",
                 url="http://localhost:4001"
             )

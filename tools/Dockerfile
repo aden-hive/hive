@@ -1,5 +1,5 @@
 # Aden Tools MCP Server
-# Exposes aden-tools via Model Context Protocol
+# Exposes tools via Model Context Protocol
 
 FROM python:3.11-slim
 

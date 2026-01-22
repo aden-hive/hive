@@ -2,7 +2,7 @@
 """
 Aden Tools MCP Server
 
-Exposes all aden-tools via Model Context Protocol using FastMCP.
+Exposes all tools via Model Context Protocol using FastMCP.
 
 Usage:
     # Run with HTTP transport (default, for Docker)
@@ -59,7 +59,7 @@ except CredentialError as e:
     print(f"[MCP] FATAL: {e}", file=sys.stderr)
     sys.exit(1)
 
-mcp = FastMCP("aden-tools")
+mcp = FastMCP("tools")
 
 # Register all tools with the MCP server, passing credential manager
 tools = register_all_tools(mcp, credentials=credentials)
