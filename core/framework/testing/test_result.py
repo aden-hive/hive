@@ -36,6 +36,7 @@ class TestResult(BaseModel):
     - Error details for debugging
     - Runtime logs and execution path
     """
+    __test__ = False  # Not a pytest test class
     test_id: str
     passed: bool
     duration_ms: int = Field(
@@ -93,6 +94,7 @@ class TestSuiteResult(BaseModel):
 
     Provides summary statistics and individual results.
     """
+    __test__ = False  # Not a pytest test class
     goal_id: str
     total: int
     passed: int
