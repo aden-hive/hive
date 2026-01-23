@@ -23,7 +23,7 @@ from framework.testing.success_gen import SuccessCriteriaTestGenerator
 from framework.testing.approval_cli import interactive_approval
 
 
-DEFAULT_STORAGE_PATH = Path("data/tests")
+DEFAULT_STORAGE_PATH = Path("exports")
 
 
 def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:

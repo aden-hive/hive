@@ -3,6 +3,80 @@ name: testing-agent
 description: Run goal-based evaluation tests for agents. Use when you need to verify an agent meets its goals, debug failing tests, or iterate on agent improvements based on test results.
 ---
 
+# ⛔ MANDATORY: USE MCP TOOLS ONLY
+
+**STOP. Read this before doing anything else.**
+
+You MUST use MCP tools for ALL testing operations. Never write test files directly.
+
+## Required MCP Workflow
+
+1. `mcp__agent-builder__list_tests` - Check what tests exist
+2. `mcp__agent-builder__generate_constraint_tests` or `mcp__agent-builder__generate_success_tests` - Generate tests
+3. `mcp__agent-builder__get_pending_tests` - Review pending tests
+4. `mcp__agent-builder__approve_tests` - Approve tests (this writes the files)
+5. `mcp__agent-builder__run_tests` - Execute tests
+6. `mcp__agent-builder__debug_test` - Debug failures
+
+## ❌ WRONG - Never Do This
+
+```python
+# WRONG: Writing test file directly with Write tool
+Write(file_path="exports/agent/tests/test_foo.py", content="def test_...")
+```
+
+```python
+# WRONG: Running pytest directly via Bash
+Bash(command="pytest exports/agent/tests/ -v")
+```
+
+```python
+# WRONG: Creating test code manually
+test_code = """
+def test_something():
+    assert True
+"""
+```
+
+## ✅ CORRECT - Always Do This
+
+```python
+# CORRECT: Generate tests via MCP tool
+mcp__agent-builder__generate_constraint_tests(
+    goal_id="my-goal",
+    goal_json='{"id": "...", "constraints": [...]}',
+    agent_path="exports/my_agent"
+)
+
+# CORRECT: Approve tests via MCP tool (this writes files)
+mcp__agent-builder__approve_tests(
+    goal_id="my-goal",
+    approvals='[{"test_id": "test-1", "action": "approve"}]'
+)
+
+# CORRECT: Run tests via MCP tool
+mcp__agent-builder__run_tests(
+    goal_id="my-goal",
+    agent_path="exports/my_agent"
+)
+
+# CORRECT: Debug failures via MCP tool
+mcp__agent-builder__debug_test(
+    goal_id="my-goal",
+    test_name="test_constraint_foo",
+    agent_path="exports/my_agent"
+)
+```
+
+## Self-Check Before Every Action
+
+Before you take any testing action, ask yourself:
+- Am I about to write `def test_...`? → **STOP, use `generate_*_tests` instead**
+- Am I about to use `Write` for a test file? → **STOP, use `approve_tests` instead**
+- Am I about to run `pytest` via Bash? → **STOP, use `run_tests` instead**
+
+---
+
 # Testing Agents with MCP Tools
 
 Run goal-based evaluation tests for agents built with the building-agents skill.
@@ -44,27 +118,7 @@ async def test_happy_path(mock_mode):
     assert len(result.output) > 0
 ```
 
-## ⚠️ CRITICAL: MCP Tools Are REQUIRED
-
-**You MUST use MCP tools for all testing operations. Never write test files directly.**
-
-### Required Workflow
-
-1. **Generate tests** → `generate_constraint_tests` or `generate_success_tests`
-2. **Review pending** → `get_pending_tests`
-3. **Approve tests** → `approve_tests` (this writes the files)
-4. **Run tests** → `run_tests`
-5. **Debug failures** → `debug_test`
-
-### MCP Tool Enforcement Anti-Patterns
-
-❌ **Never write test files directly with Write tool** - always use `generate_*_tests` + `approve_tests`
-❌ **Never run pytest directly via Bash** - always use `run_tests` MCP tool
-❌ **Never skip the approval step** - tests must be approved before they exist
-❌ **Never assume tests exist** - use `list_tests` to check first
-❌ **Never edit test files directly** - use `approve_tests` with `action: "modify"`
-
-### Why MCP Tools?
+## Why MCP Tools Are Required
 
 - Tests are generated with proper imports, fixtures, and API key enforcement
 - Approval workflow ensures user review before file creation
