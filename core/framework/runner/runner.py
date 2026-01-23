@@ -212,6 +212,7 @@ class AgentRunner:
         self._llm: LLMProvider | None = None
         self._executor: GraphExecutor | None = None
         self._approval_callback: Callable | None = None
+        self._checkpoint_manager: Any | None = None
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
@@ -373,6 +374,14 @@ class AgentRunner:
         """Set up runtime, LLM, and executor."""
         # Create runtime
         self._runtime = Runtime(storage_path=self._storage_path)
+        
+        # Create checkpoint manager
+        from framework.graph.checkpoint_manager import CheckpointManager
+        from framework.schemas.checkpoint import CheckpointConfig
+        self._checkpoint_manager = CheckpointManager(
+            storage=self._runtime.storage,
+            config=CheckpointConfig()
+        )
 
         # Set up session context for tools (workspace_id, agent_id, session_id)
         workspace_id = "default"  # Could be derived from storage path
@@ -399,6 +408,7 @@ class AgentRunner:
             tools=list(self._tool_registry.get_tools().values()),
             tool_executor=self._tool_registry.get_executor(),
             approval_callback=self._approval_callback,
+            checkpoint_manager=self._checkpoint_manager,
         )
 
     async def run(self, input_data: dict | None = None, session_state: dict | None = None) -> ExecutionResult:

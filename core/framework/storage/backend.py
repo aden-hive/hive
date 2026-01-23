@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 from framework.schemas.run import Run, RunSummary, RunStatus
+from framework.schemas.checkpoint import Checkpoint, CheckpointMetadata
 
 
 class FileStorage:
@@ -42,6 +43,8 @@ class FileStorage:
             self.base_path / "indexes" / "by_status",
             self.base_path / "indexes" / "by_node",
             self.base_path / "summaries",
+            self.base_path / "checkpoints" / "by_run",
+            self.base_path / "checkpoint_indexes",
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
@@ -163,6 +166,86 @@ class FileStorage:
             values.remove(value)
             with open(index_path, "w") as f:
                 json.dump(values, f)
+
+    # === CHECKPOINT OPERATIONS ===
+
+    def save_checkpoint(self, checkpoint: Checkpoint) -> None:
+        """Save a checkpoint to storage."""
+        # Create run-specific directory
+        run_dir = self.base_path / "checkpoints" / "by_run" / checkpoint.run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save checkpoint
+        checkpoint_path = run_dir / f"{checkpoint.id}.json"
+        with open(checkpoint_path, "w") as f:
+            f.write(checkpoint.model_dump_json(indent=2))
+        
+        # Update latest checkpoint index
+        latest_index = self.base_path / "checkpoint_indexes" / f"latest_{checkpoint.run_id}.txt"
+        with open(latest_index, "w") as f:
+            f.write(checkpoint.id)
+
+    def load_checkpoint(self, run_id: str, checkpoint_id: str) -> Checkpoint | None:
+        """Load a specific checkpoint."""
+        checkpoint_path = self.base_path / "checkpoints" / "by_run" / run_id / f"{checkpoint_id}.json"
+        if not checkpoint_path.exists():
+            return None
+        with open(checkpoint_path) as f:
+            return Checkpoint.model_validate_json(f.read())
+
+    def load_latest_checkpoint(self, run_id: str) -> Checkpoint | None:
+        """Load the most recent checkpoint for a run."""
+        latest_index = self.base_path / "checkpoint_indexes" / f"latest_{run_id}.txt"
+        if not latest_index.exists():
+            return None
+        
+        with open(latest_index) as f:
+            checkpoint_id = f.read().strip()
+        
+        return self.load_checkpoint(run_id, checkpoint_id)
+
+    def list_checkpoints(self, run_id: str) -> list[CheckpointMetadata]:
+        """List all checkpoints for a run."""
+        run_dir = self.base_path / "checkpoints" / "by_run" / run_id
+        if not run_dir.exists():
+            return []
+        
+        checkpoints = []
+        for checkpoint_file in sorted(run_dir.glob("*.json")):
+            try:
+                with open(checkpoint_file) as f:
+                    checkpoint = Checkpoint.model_validate_json(f.read())
+                    checkpoints.append(checkpoint.to_metadata())
+            except Exception:
+                continue
+        
+        # Sort by creation time
+        checkpoints.sort(key=lambda c: c.created_at)
+        return checkpoints
+
+    def delete_checkpoints(self, run_id: str) -> int:
+        """Delete all checkpoints for a run. Returns count of deleted checkpoints."""
+        run_dir = self.base_path / "checkpoints" / "by_run" / run_id
+        if not run_dir.exists():
+            return 0
+        
+        count = 0
+        for checkpoint_file in run_dir.glob("*.json"):
+            checkpoint_file.unlink()
+            count += 1
+        
+        # Remove directory if empty
+        try:
+            run_dir.rmdir()
+        except OSError:
+            pass
+        
+        # Remove latest index
+        latest_index = self.base_path / "checkpoint_indexes" / f"latest_{run_id}.txt"
+        if latest_index.exists():
+            latest_index.unlink()
+        
+        return count
 
     # === UTILITY ===
 

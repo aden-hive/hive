@@ -83,6 +83,7 @@ class FlexibleGraphExecutor:
         judge: HybridJudge | None = None,
         config: ExecutorConfig | None = None,
         approval_callback: ApprovalCallback | None = None,
+        checkpoint_manager: Any | None = None,
     ):
         """
         Initialize the FlexibleGraphExecutor.
@@ -97,6 +98,7 @@ class FlexibleGraphExecutor:
             config: Executor configuration
             approval_callback: Callback for human-in-the-loop approval.
                 If None, steps requiring approval will pause execution.
+            checkpoint_manager: Optional CheckpointManager for automatic recovery
         """
         self.runtime = runtime
         self.llm = llm
@@ -105,6 +107,7 @@ class FlexibleGraphExecutor:
         self.functions = functions or {}
         self.config = config or ExecutorConfig()
         self.approval_callback = approval_callback
+        self.checkpoint_manager = checkpoint_manager
 
         # Create judge
         self.judge = judge or create_default_judge(llm)
@@ -278,6 +281,48 @@ class FlexibleGraphExecutor:
                 severity="critical",
                 description=str(e),
             )
+            
+            # Attempt recovery from checkpoint
+            if self.checkpoint_manager:
+                from framework.graph.node import SharedMemory
+                memory_snapshot, resume_step = self.checkpoint_manager.restore_from_checkpoint(_run_id)
+                
+                if memory_snapshot and resume_step:
+                    # Restore context from checkpoint
+                    context.update(memory_snapshot)
+                    
+                    # Find the step to resume from
+                    resume_step_obj = None
+                    for s in plan.steps:
+                        if s.id == resume_step:
+                            resume_step_obj = s
+                            break
+                    
+                    if resume_step_obj:
+                        # Mark steps before resume point as completed
+                        for s in plan.steps:
+                            if s.id == resume_step:
+                                break
+                            if s.status == StepStatus.PENDING:
+                                s.status = StepStatus.COMPLETED
+                        
+                        self.runtime.end_run(
+                            success=False,
+                            narrative=f"Execution failed: {e}. Checkpoint available for recovery at step {resume_step}.",
+                        )
+                        
+                        return PlanExecutionResult(
+                            status=ExecutionStatus.FAILED,
+                            error=str(e),
+                            feedback=f"Execution error: {e}. Recovery checkpoint available.",
+                            feedback_context=plan.to_feedback_context(),
+                            completed_steps=[s.id for s in plan.get_completed_steps()],
+                            steps_executed=steps_executed,
+                            total_tokens=total_tokens,
+                            total_latency_ms=total_latency,
+                            results=context,
+                        )
+            
             self.runtime.end_run(
                 success=False,
                 narrative=f"Execution failed: {e}",
@@ -332,6 +377,29 @@ class FlexibleGraphExecutor:
 
             # Store in plan context for replanning feedback
             plan.context[step.id] = outputs_to_store
+            
+            # Save checkpoint after successful step
+            if self.checkpoint_manager and self.checkpoint_manager.should_checkpoint(steps_executed):
+                from framework.schemas.checkpoint import ExecutorType
+                # Create a temporary memory object for checkpointing
+                from framework.graph.node import SharedMemory
+                temp_memory = SharedMemory()
+                for key, value in context.items():
+                    temp_memory.write(key, value)
+                
+                self.checkpoint_manager.save_checkpoint(
+                    run_id=_run_id,
+                    node_id=step.id,
+                    memory=temp_memory,
+                    executor_type=ExecutorType.FLEXIBLE,
+                    metadata={
+                        "execution_path": [s.id for s in plan.get_completed_steps()],
+                        "step_number": steps_executed,
+                        "total_tokens": total_tokens,
+                        "total_latency_ms": total_latency,
+                        "context": {"plan_context": plan.context},
+                    }
+                )
 
             return None  # Continue execution
 

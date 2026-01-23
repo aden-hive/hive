@@ -70,6 +70,7 @@ class GraphExecutor:
         tool_executor: Callable | None = None,
         node_registry: dict[str, NodeProtocol] | None = None,
         approval_callback: Callable | None = None,
+        checkpoint_manager: Any | None = None,
     ):
         """
         Initialize the executor.
@@ -81,6 +82,7 @@ class GraphExecutor:
             tool_executor: Function to execute tools
             node_registry: Custom node implementations by ID
             approval_callback: Optional callback for human-in-the-loop approval
+            checkpoint_manager: Optional CheckpointManager for automatic recovery
         """
         self.runtime = runtime
         self.llm = llm
@@ -88,6 +90,7 @@ class GraphExecutor:
         self.tool_executor = tool_executor
         self.node_registry = node_registry or {}
         self.approval_callback = approval_callback
+        self.checkpoint_manager = checkpoint_manager
         self.logger = logging.getLogger(__name__)
 
     async def execute(
@@ -226,6 +229,23 @@ class GraphExecutor:
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
                             self.logger.info(f"      {key}: {value_str}")
+                    
+                    # Save checkpoint after successful execution
+                    if self.checkpoint_manager and self.checkpoint_manager.should_checkpoint(steps):
+                        from framework.schemas.checkpoint import ExecutorType
+                        self.checkpoint_manager.save_checkpoint(
+                            run_id=_run_id,
+                            node_id=current_node_id,
+                            memory=memory,
+                            executor_type=ExecutorType.GRAPH,
+                            metadata={
+                                "execution_path": path.copy(),
+                                "step_number": steps,
+                                "total_tokens": total_tokens,
+                                "total_latency_ms": total_latency,
+                                "next_node_id": None,  # Will be determined below
+                            }
+                        )
                 else:
                     self.logger.error(f"   ✗ Failed: {result.error}")
 
@@ -333,6 +353,35 @@ class GraphExecutor:
                 severity="critical",
                 description=str(e),
             )
+            
+            # Attempt recovery from checkpoint
+            if self.checkpoint_manager:
+                self.logger.warning(f"⚠️ Execution failed: {e}. Attempting checkpoint recovery...")
+                memory_snapshot, resume_node = self.checkpoint_manager.restore_from_checkpoint(_run_id)
+                
+                if memory_snapshot and resume_node:
+                    self.logger.info(f"🔄 Recovered from checkpoint, will resume from node: {resume_node}")
+                    # Return session state for caller to retry
+                    session_state_out = {
+                        "memory": memory_snapshot,
+                        "resume_from": resume_node,
+                        "execution_path": path,
+                        "recovered_from_failure": True,
+                    }
+                    
+                    self.runtime.end_run(
+                        success=False,
+                        narrative=f"Failed at step {steps}: {e}. Checkpoint available for recovery.",
+                    )
+                    
+                    return ExecutionResult(
+                        success=False,
+                        error=str(e),
+                        steps_executed=steps,
+                        path=path,
+                        session_state=session_state_out,
+                    )
+            
             self.runtime.end_run(
                 success=False,
                 narrative=f"Failed at step {steps}: {e}",
