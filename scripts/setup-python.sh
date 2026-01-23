@@ -72,7 +72,10 @@ echo ""
 
 # Upgrade pip, setuptools, and wheel
 echo "Upgrading pip, setuptools, and wheel..."
-$PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
+if ! $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
+  echo "Error: Failed to upgrade pip. Please check your python/venv configuration."
+  exit 1
+fi
 echo -e "${GREEN}✓${NC} Core packages upgraded"
 echo ""
 
