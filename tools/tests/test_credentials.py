@@ -1,5 +1,4 @@
 """Tests for CredentialManager."""
-from pathlib import Path
 
 import pytest
 
