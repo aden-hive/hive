@@ -65,7 +65,7 @@ def register_tools(mcp: FastMCP) -> None:
                                     "line_content": line.strip()
                                 })
                 except (UnicodeDecodeError, PermissionError):
-                    # As per README: Skips files that cannot be decoded or have permission errors
+                    # As per README: Skips the files that cannot be decoded or have permission errors
                     continue
 
             return {
@@ -85,3 +85,6 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception as e:
             # 3. Generic Fallback
             return {"error": f"Failed to perform grep search: {str(e)}"}
+# NOTE:
+# This comment exists to force GitHub to re-evaluate a stale merge conflict.
+# No functional behavior is changed.
