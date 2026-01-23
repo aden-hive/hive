@@ -9,21 +9,18 @@ Provides commands:
 """
 
 import argparse
-import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from framework.graph.goal import Goal
-from framework.testing.test_case import TestType
 from framework.testing.test_storage import TestStorage
 from framework.testing.constraint_gen import ConstraintTestGenerator
 from framework.testing.success_gen import SuccessCriteriaTestGenerator
 from framework.testing.approval_cli import interactive_approval
 
 
-DEFAULT_STORAGE_PATH = Path("data/tests")
+DEFAULT_STORAGE_PATH = Path("exports")
 
 
 def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -316,7 +313,6 @@ def cmd_test_run(args: argparse.Namespace) -> int:
 
 def cmd_test_debug(args: argparse.Namespace) -> int:
     """Debug a failed test by re-running with verbose output."""
-    import re
     import subprocess
 
     agent_path = Path(args.agent_path)

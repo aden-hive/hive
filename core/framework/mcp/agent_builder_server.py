@@ -29,12 +29,14 @@ from framework.graph import Goal, SuccessCriterion, Constraint, NodeSpec, EdgeSp
 from framework.graph.plan import Plan
 
 # Testing framework imports
-from framework.testing.test_case import Test, ApprovalStatus, TestType
-from framework.testing.test_storage import TestStorage
+from framework.testing.test_case import Test, TestType
 from framework.testing.constraint_gen import ConstraintTestGenerator
 from framework.testing.success_gen import SuccessCriteriaTestGenerator
 from framework.testing.approval_types import ApprovalRequest, ApprovalAction
-from framework.testing.debug_tool import DebugTool
+from framework.testing.prompts import (
+    PYTEST_TEST_FILE_HEADER,
+    PYTEST_CONFTEST_TEMPLATE,
+)
 
 
 # Initialize MCP server
@@ -2278,12 +2280,6 @@ def simulate_plan_execution(
 # Key is goal_id, value is tuple of (tests, agent_path)
 _pending_tests: dict[str, tuple[list[Test], str]] = {}
 
-# Import pytest-compatible templates
-from framework.testing.prompts import (
-    PYTEST_TEST_FILE_HEADER,
-    PYTEST_CONFTEST_TEMPLATE,
-)
-
 
 def _get_agent_module_from_path(agent_path: str) -> str:
     """Extract agent module name from path like 'exports/my_agent' -> 'my_agent'."""
@@ -2341,8 +2337,8 @@ def generate_constraint_tests(
         return json.dumps({"error": f"Invalid goal JSON: {e}"})
 
     # Derive agent_path from session if not provided
-    if not agent_path and _current_session:
-        agent_path = f"exports/{_current_session.name}"
+    if not agent_path and _session:
+        agent_path = f"exports/{_session.name}"
 
     if not agent_path:
         return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
@@ -2404,8 +2400,8 @@ def generate_success_tests(
         return json.dumps({"error": f"Invalid goal JSON: {e}"})
 
     # Derive agent_path from session if not provided
-    if not agent_path and _current_session:
-        agent_path = f"exports/{_current_session.name}"
+    if not agent_path and _session:
+        agent_path = f"exports/{_session.name}"
 
     if not agent_path:
         return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
@@ -2791,8 +2787,8 @@ def debug_test(
     import re
 
     # Derive agent_path from session if not provided
-    if not agent_path and _current_session:
-        agent_path = f"exports/{_current_session.name}"
+    if not agent_path and _session:
+        agent_path = f"exports/{_session.name}"
 
     if not agent_path:
         return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
@@ -2916,8 +2912,8 @@ def list_tests(
     import ast
 
     # Derive agent_path from session if not provided
-    if not agent_path and _current_session:
-        agent_path = f"exports/{_current_session.name}"
+    if not agent_path and _session:
+        agent_path = f"exports/{_session.name}"
 
     if not agent_path:
         return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
@@ -3012,10 +3008,11 @@ def get_pending_tests(
             "tests": [],
         })
 
-    tests = _pending_tests[goal_id]
+    tests, agent_path = _pending_tests[goal_id]
     return json.dumps({
         "goal_id": goal_id,
         "pending_count": len(tests),
+        "agent_path": agent_path,
         "tests": [
             {
                 "id": t.id,

@@ -162,7 +162,7 @@ test_edge_cases.py::test_large_files              PASSED
 ./RUN_AGENT.sh
 
 # Or manually
-PYTHONPATH=core:exports:aden-tools/src python -m file_monitor_agent run
+PYTHONPATH=core:exports:tools/src python -m file_monitor_agent run
 ```
 
 **Capabilities:**

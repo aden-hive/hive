@@ -118,7 +118,11 @@ class ConstraintTestGenerator:
             max_iterations=5,
         )
 
-        return self._create_tests_from_collected(collected_tests, goal.id)
+        tests = self._create_tests_from_collected(collected_tests, goal.id)
+        # Filter out skeleton tests (empty code with default confidence)
+        tests = [t for t in tests if t.test_code.strip() and t.llm_confidence != 0.5]
+        # Enforce max 5 tests total
+        return tests[:5]
 
     def generate_for_constraint(
         self, goal: Goal, constraint: Constraint, agent_module: str = "my_agent"

@@ -179,7 +179,7 @@ PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
 
 ```bash
 # Remove and reinstall
-pip uninstall -y framework aden-tools
+pip uninstall -y framework tools
 ./scripts/setup-python.sh
 ```
 
