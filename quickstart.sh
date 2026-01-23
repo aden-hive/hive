@@ -56,8 +56,8 @@ PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
 
 echo -e "  Detected Python: ${GREEN}$PYTHON_VERSION${NC}"
 
-if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]); then
-    echo -e "${RED}Error: Python 3.10+ is required (found $PYTHON_VERSION)${NC}"
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
+    echo -e "${RED}Error: Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
     echo "Please upgrade your Python installation"
     exit 1
 fi
