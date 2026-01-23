@@ -67,13 +67,6 @@ SAFE_BUILTINS = {
     "sorted": sorted,
     "sum": sum,
     "zip": zip,
-
-    # String methods via type
-    "str": str,
-
-    # Math (basic)
-    "abs": abs,
-    "round": round,
 }
 
 # Modules that can be imported

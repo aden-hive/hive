@@ -25,7 +25,7 @@ from framework.graph.node import (
     RouterNode,
     FunctionNode,
 )
-from framework.graph.edge import GraphSpec, EdgeSpec
+from framework.graph.edge import GraphSpec
 from framework.llm.provider import LLMProvider, Tool
 
 
@@ -144,7 +144,7 @@ class GraphExecutor:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
 
         # Start run
-        run_id = self.runtime.start_run(
+        _run_id = self.runtime.start_run(
             goal_id=goal.id,
             goal_description=goal.description,
             input_data=input_data or {},
@@ -165,12 +165,7 @@ class GraphExecutor:
 
                 path.append(current_node_id)
 
-                # Check if terminal
-                if current_node_id in graph.terminal_nodes:
-                    self.logger.info(f"✓ Reached terminal node: {node_spec.name}")
-                    break
-
-                # Check if pause (HITL)
+                # Check if pause (HITL) before execution
                 if current_node_id in graph.pause_nodes:
                     self.logger.info(f"⏸ Paused at HITL node: {node_spec.name}")
                     # Execute this node, then pause
@@ -190,7 +185,7 @@ class GraphExecutor:
 
                 # Log actual input data being read
                 if node_spec.input_keys:
-                    self.logger.info(f"   Reading from memory:")
+                    self.logger.info("   Reading from memory:")
                     for key in node_spec.input_keys:
                         value = memory.read(key)
                         if value is not None:
@@ -213,7 +208,7 @@ class GraphExecutor:
                     )
 
                 # Execute node
-                self.logger.info(f"   Executing...")
+                self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
 
                 if result.success:
@@ -225,7 +220,7 @@ class GraphExecutor:
 
                     # Log what was written to memory (detailed view)
                     if result.output:
-                        self.logger.info(f"   Written to memory:")
+                        self.logger.info("   Written to memory:")
                         for key, value in result.output.items():
                             value_str = str(value)
                             if len(value_str) > 200:
@@ -253,7 +248,7 @@ class GraphExecutor:
                 # Check if we just executed a pause node - if so, save state and return
                 # This must happen BEFORE determining next node, since pause nodes may have no edges
                 if node_spec.id in graph.pause_nodes:
-                    self.logger.info(f"💾 Saving session state after pause node")
+                    self.logger.info("💾 Saving session state after pause node")
                     saved_memory = memory.read_all()
                     session_state_out = {
                         "paused_at": node_spec.id,
@@ -279,6 +274,11 @@ class GraphExecutor:
                         session_state=session_state_out,
                     )
 
+                # Check if this is a terminal node - if so, we're done
+                if node_spec.id in graph.terminal_nodes:
+                    self.logger.info(f"✓ Reached terminal node: {node_spec.name}")
+                    break
+
                 # Determine next node
                 if result.next_node:
                     # Router explicitly set next node
@@ -295,7 +295,7 @@ class GraphExecutor:
                         memory=memory,
                     )
                     if next_node is None:
-                        self.logger.info(f"   → No more edges, ending execution")
+                        self.logger.info("   → No more edges, ending execution")
                         break  # No valid edge, end execution
                     next_spec = graph.get_node(next_node)
                     self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
@@ -307,7 +307,7 @@ class GraphExecutor:
             # Collect output
             output = memory.read_all()
 
-            self.logger.info(f"\n✓ Execution complete!")
+            self.logger.info("\n✓ Execution complete!")
             self.logger.info(f"   Steps: {steps}")
             self.logger.info(f"   Path: {' → '.join(path)}")
             self.logger.info(f"   Total tokens: {total_tokens}")

@@ -340,7 +340,7 @@ class GraphSpec(BaseModel):
     )
 
     # Default LLM settings
-    default_model: str = "claude-sonnet-4-20250514"
+    default_model: str = "claude-haiku-4-5-20251001"
     max_tokens: int = 1024
 
     # Execution limits

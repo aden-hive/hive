@@ -9,12 +9,10 @@ workdir/
 .next/
 out/
 
-# Environment files (generated from config.yaml)
+# Environment files
 .env
 .env.local
 .env.*.local
-honeycomb/.env
-hive/.env
 
 # User configuration (copied from .example)
 config.yaml
@@ -57,6 +55,9 @@ __pycache__/
 .eggs/
 *.egg
 
+# Generated runtime data
+core/data/
+
 # Misc
 *.local
 .cache/
@@ -64,3 +65,6 @@ tmp/
 temp/
 
 exports/*
+
+core/.agent-builder-sessions/*
+.agent-builder-sessions/

@@ -9,39 +9,171 @@ Usage:
 
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 from mcp.server import FastMCP
 
 from framework.graph import Goal, SuccessCriterion, Constraint, NodeSpec, EdgeSpec, EdgeCondition
-from framework.graph.edge import GraphSpec
+from framework.graph.plan import Plan
+
+# Testing framework imports
+from framework.testing.test_case import Test, ApprovalStatus, TestType
+from framework.testing.test_storage import TestStorage
+from framework.testing.constraint_gen import ConstraintTestGenerator
+from framework.testing.success_gen import SuccessCriteriaTestGenerator
+from framework.testing.approval_types import ApprovalRequest, ApprovalAction
+from framework.testing.debug_tool import DebugTool
+from framework.testing.parallel import AgentFactory
 
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
 
 
+# Session persistence directory
+SESSIONS_DIR = Path(".agent-builder-sessions")
+ACTIVE_SESSION_FILE = SESSIONS_DIR / ".active"
+
+
 # Session storage
 class BuildSession:
-    """In-memory build session."""
+    """Build session with persistence support."""
 
-    def __init__(self, name: str):
-        self.id = f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    def __init__(self, name: str, session_id: str | None = None):
+        self.id = session_id or f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.name = name
         self.goal: Goal | None = None
         self.nodes: list[NodeSpec] = []
         self.edges: list[EdgeSpec] = []
         self.mcp_servers: list[dict] = []  # MCP server configurations
+        self.created_at = datetime.now().isoformat()
+        self.last_modified = datetime.now().isoformat()
+
+    def to_dict(self) -> dict:
+        """Serialize session to dictionary."""
+        return {
+            "session_id": self.id,
+            "name": self.name,
+            "goal": self.goal.model_dump() if self.goal else None,
+            "nodes": [n.model_dump() for n in self.nodes],
+            "edges": [e.model_dump() for e in self.edges],
+            "mcp_servers": self.mcp_servers,
+            "created_at": self.created_at,
+            "last_modified": self.last_modified,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "BuildSession":
+        """Deserialize session from dictionary."""
+        session = cls(name=data["name"], session_id=data["session_id"])
+        session.created_at = data.get("created_at", session.created_at)
+        session.last_modified = data.get("last_modified", session.last_modified)
+
+        # Restore goal
+        if data.get("goal"):
+            goal_data = data["goal"]
+            session.goal = Goal(
+                id=goal_data["id"],
+                name=goal_data["name"],
+                description=goal_data["description"],
+                success_criteria=[
+                    SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
+                ],
+                constraints=[
+                    Constraint(**c) for c in goal_data.get("constraints", [])
+                ],
+            )
+
+        # Restore nodes
+        session.nodes = [NodeSpec(**n) for n in data.get("nodes", [])]
+
+        # Restore edges
+        edges_data = data.get("edges", [])
+        for e in edges_data:
+            # Convert condition string back to enum
+            condition_str = e.get("condition")
+            if isinstance(condition_str, str):
+                condition_map = {
+                    "always": EdgeCondition.ALWAYS,
+                    "on_success": EdgeCondition.ON_SUCCESS,
+                    "on_failure": EdgeCondition.ON_FAILURE,
+                    "conditional": EdgeCondition.CONDITIONAL,
+                }
+                e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
+            session.edges.append(EdgeSpec(**e))
+
+        # Restore MCP servers
+        session.mcp_servers = data.get("mcp_servers", [])
+
+        return session
 
 
 # Global session
 _session: BuildSession | None = None
 
 
+def _ensure_sessions_dir():
+    """Ensure sessions directory exists."""
+    SESSIONS_DIR.mkdir(exist_ok=True)
+
+
+def _save_session(session: BuildSession):
+    """Save session to disk."""
+    _ensure_sessions_dir()
+
+    # Update last modified
+    session.last_modified = datetime.now().isoformat()
+
+    # Save session file
+    session_file = SESSIONS_DIR / f"{session.id}.json"
+    with open(session_file, "w") as f:
+        json.dump(session.to_dict(), f, indent=2, default=str)
+
+    # Update active session pointer
+    with open(ACTIVE_SESSION_FILE, "w") as f:
+        f.write(session.id)
+
+
+def _load_session(session_id: str) -> BuildSession:
+    """Load session from disk."""
+    session_file = SESSIONS_DIR / f"{session_id}.json"
+    if not session_file.exists():
+        raise ValueError(f"Session '{session_id}' not found")
+
+    with open(session_file, "r") as f:
+        data = json.load(f)
+
+    return BuildSession.from_dict(data)
+
+
+def _load_active_session() -> BuildSession | None:
+    """Load the active session if one exists."""
+    if not ACTIVE_SESSION_FILE.exists():
+        return None
+
+    try:
+        with open(ACTIVE_SESSION_FILE, "r") as f:
+            session_id = f.read().strip()
+
+        if session_id:
+            return _load_session(session_id)
+    except Exception:
+        pass
+
+    return None
+
+
 def get_session() -> BuildSession:
     global _session
+
+    # Try to load active session if no session in memory
+    if _session is None:
+        _session = _load_active_session()
+
     if _session is None:
         raise ValueError("No active session. Call create_session first.")
+
     return _session
 
 
@@ -54,11 +186,120 @@ def create_session(name: Annotated[str, "Name for the agent being built"]) -> st
     """Create a new agent building session. Call this first before building an agent."""
     global _session
     _session = BuildSession(name)
+    _save_session(_session)  # Auto-save
     return json.dumps({
         "session_id": _session.id,
         "name": name,
         "status": "created",
+        "persisted": True,
     })
+
+
+@mcp.tool()
+def list_sessions() -> str:
+    """List all saved agent building sessions."""
+    _ensure_sessions_dir()
+
+    sessions = []
+    if SESSIONS_DIR.exists():
+        for session_file in SESSIONS_DIR.glob("*.json"):
+            try:
+                with open(session_file, "r") as f:
+                    data = json.load(f)
+                    sessions.append({
+                        "session_id": data["session_id"],
+                        "name": data["name"],
+                        "created_at": data.get("created_at"),
+                        "last_modified": data.get("last_modified"),
+                        "node_count": len(data.get("nodes", [])),
+                        "edge_count": len(data.get("edges", [])),
+                        "has_goal": data.get("goal") is not None,
+                    })
+            except Exception:
+                pass  # Skip corrupted files
+
+    # Check which session is currently active
+    active_id = None
+    if ACTIVE_SESSION_FILE.exists():
+        try:
+            with open(ACTIVE_SESSION_FILE, "r") as f:
+                active_id = f.read().strip()
+        except Exception:
+            pass
+
+    return json.dumps({
+        "sessions": sorted(sessions, key=lambda s: s["last_modified"], reverse=True),
+        "total": len(sessions),
+        "active_session_id": active_id,
+    }, indent=2)
+
+
+@mcp.tool()
+def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) -> str:
+    """Load a previously saved agent building session by its ID."""
+    global _session
+
+    try:
+        _session = _load_session(session_id)
+
+        # Update active session pointer
+        with open(ACTIVE_SESSION_FILE, "w") as f:
+            f.write(session_id)
+
+        return json.dumps({
+            "success": True,
+            "session_id": _session.id,
+            "name": _session.name,
+            "node_count": len(_session.nodes),
+            "edge_count": len(_session.edges),
+            "has_goal": _session.goal is not None,
+            "created_at": _session.created_at,
+            "last_modified": _session.last_modified,
+            "message": f"Session '{_session.name}' loaded successfully"
+        })
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        })
+
+
+@mcp.tool()
+def delete_session(session_id: Annotated[str, "ID of the session to delete"]) -> str:
+    """Delete a saved agent building session."""
+    global _session
+
+    session_file = SESSIONS_DIR / f"{session_id}.json"
+    if not session_file.exists():
+        return json.dumps({
+            "success": False,
+            "error": f"Session '{session_id}' not found"
+        })
+
+    try:
+        # Remove session file
+        session_file.unlink()
+
+        # Clear active session if it was the deleted one
+        if _session and _session.id == session_id:
+            _session = None
+
+        if ACTIVE_SESSION_FILE.exists():
+            with open(ACTIVE_SESSION_FILE, "r") as f:
+                active_id = f.read().strip()
+                if active_id == session_id:
+                    ACTIVE_SESSION_FILE.unlink()
+
+        return json.dumps({
+            "success": True,
+            "deleted_session_id": session_id,
+            "message": f"Session '{session_id}' deleted successfully"
+        })
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        })
 
 
 @mcp.tool()
@@ -122,6 +363,8 @@ def set_goal(
     if not constraint_list:
         warnings.append("Consider adding constraints")
 
+    _save_session(session)  # Auto-save
+
     return json.dumps({
         "valid": len(errors) == 0,
         "errors": errors,
@@ -151,6 +394,55 @@ def set_goal(
     }, default=str)
 
 
+def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
+    """
+    Validate that credentials are available for the specified tools.
+
+    Returns None if all credentials are available, or an error dict if any are missing.
+    """
+    if not tools_list:
+        return None
+
+    try:
+        from aden_tools.credentials import CredentialManager
+
+        cred_manager = CredentialManager()
+        missing_creds = cred_manager.get_missing_for_tools(tools_list)
+
+        if missing_creds:
+            cred_errors = []
+            for cred_name, spec in missing_creds:
+                affected_tools = [t for t in tools_list if t in spec.tools]
+                cred_errors.append({
+                    "credential": cred_name,
+                    "env_var": spec.env_var,
+                    "tools_affected": affected_tools,
+                    "help_url": spec.help_url,
+                    "description": spec.description,
+                })
+
+            return {
+                "valid": False,
+                "errors": [f"Missing credentials for tools: {[e['env_var'] for e in cred_errors]}"],
+                "missing_credentials": cred_errors,
+                "action_required": "Add the credentials to your .env file and retry",
+                "example": f"Add to .env:\n{cred_errors[0]['env_var']}=your_key_here",
+                "message": "Cannot add node: missing API credentials. Add them to .env and retry this command.",
+            }
+    except ImportError as e:
+        # Return a warning that credential validation was skipped
+        return {
+            "valid": True,
+            "warnings": [
+                f"⚠️ Credential validation SKIPPED: aden_tools not available ({e}). "
+                "Tools may fail at runtime if credentials are missing. "
+                "Add tools/src to PYTHONPATH to enable validation."
+            ],
+        }
+
+    return None
+
+
 @mcp.tool()
 def add_node(
     node_id: Annotated[str, "Unique identifier for the node"],
@@ -171,6 +463,11 @@ def add_node(
     output_keys_list = json.loads(output_keys)
     tools_list = json.loads(tools)
     routes_dict = json.loads(routes)
+
+    # Validate credentials for tools BEFORE adding the node
+    cred_error = _validate_tool_credentials(tools_list)
+    if cred_error:
+        return json.dumps(cred_error)
 
     # Check for duplicate
     if any(n.id == node_id for n in session.nodes):
@@ -204,6 +501,8 @@ def add_node(
         errors.append(f"Router node '{node_id}' must specify routes")
     if node_type in ("llm_generate", "llm_tool_use") and not system_prompt:
         warnings.append(f"LLM node '{node_id}' should have a system_prompt")
+
+    _save_session(session)  # Auto-save
 
     return json.dumps({
         "valid": len(errors) == 0,
@@ -281,6 +580,8 @@ def add_edge(
     if edge_condition == EdgeCondition.CONDITIONAL and not condition_expr:
         errors.append(f"Conditional edge '{edge_id}' needs condition_expr")
 
+    _save_session(session)  # Auto-save
+
     return json.dumps({
         "valid": len(errors) == 0,
         "errors": errors,
@@ -295,7 +596,7 @@ def add_edge(
             "options": [
                 {
                     "label": "✓ Approve (Recommended)",
-                    "description": f"Edge connection looks good"
+                    "description": "Edge connection looks good"
                 },
                 {
                     "label": "✗ Reject & Modify",
@@ -335,6 +636,13 @@ def update_node(
     if not node:
         return json.dumps({"valid": False, "errors": [f"Node '{node_id}' not found"]})
 
+    # Validate credentials for new tools BEFORE updating
+    if tools:
+        tools_list = json.loads(tools)
+        cred_error = _validate_tool_credentials(tools_list)
+        if cred_error:
+            return json.dumps(cred_error)
+
     # Update fields if provided
     if name:
         node.name = name
@@ -363,6 +671,8 @@ def update_node(
         errors.append(f"Router node '{node_id}' must specify routes")
     if node.node_type in ("llm_generate", "llm_tool_use") and not node.system_prompt:
         warnings.append(f"LLM node '{node_id}' should have a system_prompt")
+
+    _save_session(session)  # Auto-save
 
     return json.dumps({
         "valid": len(errors) == 0,
@@ -421,6 +731,8 @@ def delete_node(
         if not (e.source == node_id or e.target == node_id)
     ]
 
+    _save_session(session)  # Auto-save
+
     return json.dumps({
         "valid": True,
         "deleted_node": removed_node.model_dump(),
@@ -450,6 +762,8 @@ def delete_edge(
 
     # Remove the edge
     removed_edge = session.edges.pop(edge_idx)
+
+    _save_session(session)  # Auto-save
 
     return json.dumps({
         "valid": True,
@@ -870,7 +1184,6 @@ def export_graph() -> str:
     - exports/{agent-name}/agent.json - Full agent specification
     - exports/{agent-name}/README.md - Documentation
     """
-    import os
     from pathlib import Path
 
     session = get_session()
@@ -882,6 +1195,46 @@ def export_graph() -> str:
 
     entry_node = validation["entry_node"]
     terminal_nodes = validation["terminal_nodes"]
+
+    # Extract pause/resume configuration from validation
+    pause_nodes = validation.get("pause_nodes", [])
+    resume_entry_points = validation.get("resume_entry_points", [])
+
+    # Build entry_points dict for pause/resume architecture
+    entry_points = {}
+    if entry_node:
+        entry_points["start"] = entry_node
+
+    # Add resume entry points with {pause_node}_resume naming convention
+    if pause_nodes and resume_entry_points:
+        # Strategy 1: Try to match by checking which resume node uses the pause node's outputs
+        pause_to_resume = {}
+        for pause_node_id in pause_nodes:
+            pause_node = next((n for n in session.nodes if n.id == pause_node_id), None)
+            if not pause_node:
+                continue
+
+            # Find resume nodes that read the outputs of this pause node
+            for resume_node_id in resume_entry_points:
+                resume_node = next((n for n in session.nodes if n.id == resume_node_id), None)
+                if not resume_node:
+                    continue
+
+                # Check if resume node reads pause node's outputs
+                shared_keys = set(pause_node.output_keys) & set(resume_node.input_keys)
+                if shared_keys:
+                    pause_to_resume[pause_node_id] = resume_node_id
+                    break
+
+        # Strategy 2: Fallback - pair sequentially if no match found
+        unmatched_pause = [p for p in pause_nodes if p not in pause_to_resume]
+        unmatched_resume = [r for r in resume_entry_points if r not in pause_to_resume.values()]
+        for pause_id, resume_id in zip(unmatched_pause, unmatched_resume):
+            pause_to_resume[pause_id] = resume_id
+
+        # Build entry_points dict
+        for pause_id, resume_id in pause_to_resume.items():
+            entry_points[f"{pause_id}_resume"] = resume_id
 
     # Build edges list
     edges_list = [
@@ -927,6 +1280,8 @@ def export_graph() -> str:
         "goal_id": session.goal.id,
         "version": "1.0.0",
         "entry_node": entry_node,
+        "entry_points": entry_points,
+        "pause_nodes": pause_nodes,
         "terminal_nodes": terminal_nodes,
         "nodes": [node.model_dump() for node in session.nodes],
         "edges": edges_list,
@@ -1069,11 +1424,11 @@ def add_mcp_server(
 
     Example for stdio:
         add_mcp_server(
-            name="aden-tools",
+            name="tools",
             transport="stdio",
             command="python",
             args='["mcp_server.py", "--stdio"]',
-            cwd="../aden-tools"
+            cwd="../tools"
         )
 
     Example for http:
@@ -1161,6 +1516,7 @@ def add_mcp_server(
 
             # Add to session
             session.mcp_servers.append(server_config)
+            _save_session(session)  # Auto-save
 
             return json.dumps({
                 "success": True,
@@ -1280,6 +1636,7 @@ def remove_mcp_server(
     for i, server in enumerate(session.mcp_servers):
         if server["name"] == name:
             session.mcp_servers.pop(i)
+            _save_session(session)  # Auto-save
             return json.dumps({
                 "success": True,
                 "removed": name,
@@ -1344,7 +1701,7 @@ def test_node(
 
         if mock_llm_response:
             result["mock_response"] = mock_llm_response
-            result["simulation"] = f"LLM would receive prompt and produce response"
+            result["simulation"] = "LLM would receive prompt and produce response"
         else:
             result["simulation"] = "LLM would be called with the system prompt and input data"
 
@@ -1904,10 +2261,391 @@ def simulate_plan_execution(
 
 
 # =============================================================================
+# TESTING TOOLS (Goal-Based Evaluation)
+# =============================================================================
+
+# Session storage for pending tests (not yet persisted)
+_pending_tests: dict[str, list[Test]] = {}
+
+# Default storage path for tests
+DEFAULT_TEST_STORAGE_PATH = Path("data/tests")
+
+
+@mcp.tool()
+def generate_constraint_tests(
+    goal_id: Annotated[str, "ID of the goal to generate tests for"],
+    goal_json: Annotated[str, """JSON string of the Goal object. Constraint fields:
+- id: string (required)
+- description: string (required)
+- constraint_type: "hard" or "soft" (required)
+- category: string (optional, default: "general")
+- check: string (optional, how to validate: "llm_judge", expression, or function name)"""],
+) -> str:
+    """
+    Generate constraint tests for a goal.
+
+    Returns proposals for user approval. Tests are NOT persisted until approved.
+    """
+    try:
+        goal = Goal.model_validate_json(goal_json)
+    except Exception as e:
+        return json.dumps({"error": f"Invalid goal JSON: {e}"})
+
+    # Get LLM provider
+    try:
+        from framework.llm import AnthropicProvider
+        llm = AnthropicProvider()
+    except Exception as e:
+        return json.dumps({"error": f"Failed to initialize LLM: {e}"})
+
+    # Generate tests
+    generator = ConstraintTestGenerator(llm)
+    tests = generator.generate(goal)
+
+    # Store as pending (not persisted yet)
+    _pending_tests[goal_id] = tests
+
+    return json.dumps({
+        "goal_id": goal_id,
+        "generated_count": len(tests),
+        "tests": [
+            {
+                "id": t.id,
+                "test_name": t.test_name,
+                "parent_criteria_id": t.parent_criteria_id,
+                "description": t.description,
+                "confidence": t.llm_confidence,
+                "test_code_preview": t.test_code[:500] + "..." if len(t.test_code) > 500 else t.test_code,
+            }
+            for t in tests
+        ],
+        "next_step": "Call approve_tests to approve, modify, or reject each test",
+    })
+
+
+@mcp.tool()
+def generate_success_tests(
+    goal_id: Annotated[str, "ID of the goal to generate tests for"],
+    goal_json: Annotated[str, "JSON string of the Goal object"],
+    node_names: Annotated[str, "Comma-separated list of agent node names"] = "",
+    tool_names: Annotated[str, "Comma-separated list of available tool names"] = "",
+) -> str:
+    """
+    Generate success criteria tests for a goal.
+
+    Should be called during Eval stage after agent exists.
+    Returns proposals for user approval.
+    """
+    try:
+        goal = Goal.model_validate_json(goal_json)
+    except Exception as e:
+        return json.dumps({"error": f"Invalid goal JSON: {e}"})
+
+    # Get LLM provider
+    try:
+        from framework.llm import AnthropicProvider
+        llm = AnthropicProvider()
+    except Exception as e:
+        return json.dumps({"error": f"Failed to initialize LLM: {e}"})
+
+    # Parse node/tool names
+    nodes = [n.strip() for n in node_names.split(",") if n.strip()]
+    tools = [t.strip() for t in tool_names.split(",") if t.strip()]
+
+    # Generate tests
+    generator = SuccessCriteriaTestGenerator(llm)
+    tests = generator.generate(goal, node_names=nodes, tool_names=tools)
+
+    # Add to pending (may have constraint tests already)
+    if goal_id in _pending_tests:
+        _pending_tests[goal_id].extend(tests)
+    else:
+        _pending_tests[goal_id] = tests
+
+    return json.dumps({
+        "goal_id": goal_id,
+        "generated_count": len(tests),
+        "tests": [
+            {
+                "id": t.id,
+                "test_name": t.test_name,
+                "parent_criteria_id": t.parent_criteria_id,
+                "description": t.description,
+                "confidence": t.llm_confidence,
+                "test_code_preview": t.test_code[:500] + "..." if len(t.test_code) > 500 else t.test_code,
+            }
+            for t in tests
+        ],
+        "next_step": "Call approve_tests to approve, modify, or reject each test",
+    })
+
+
+@mcp.tool()
+def approve_tests(
+    goal_id: Annotated[str, "ID of the goal"],
+    approvals: Annotated[str, "JSON array of approval decisions"],
+) -> str:
+    """
+    Approve, reject, or modify generated tests.
+
+    Approvals format:
+    [
+        {"test_id": "...", "action": "approve"},
+        {"test_id": "...", "action": "modify", "modified_code": "..."},
+        {"test_id": "...", "action": "reject", "reason": "..."},
+        {"test_id": "...", "action": "skip"}
+    ]
+
+    Actions: approve, modify (requires modified_code), reject (requires reason), skip
+    """
+    if goal_id not in _pending_tests:
+        return json.dumps({"error": f"No pending tests for goal {goal_id}"})
+
+    try:
+        approvals_list = json.loads(approvals)
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid approvals JSON: {e}"})
+
+    # Create storage
+    storage = TestStorage(DEFAULT_TEST_STORAGE_PATH / goal_id)
+
+    # Build approval requests
+    requests = []
+    for a in approvals_list:
+        try:
+            action = ApprovalAction(a.get("action", "skip"))
+            requests.append(ApprovalRequest(
+                test_id=a["test_id"],
+                action=action,
+                modified_code=a.get("modified_code"),
+                reason=a.get("reason"),
+                approved_by="mcp_user",
+            ))
+        except (KeyError, ValueError) as e:
+            return json.dumps({"error": f"Invalid approval entry: {e}"})
+
+    # Find and save approved tests
+    pending = {t.id: t for t in _pending_tests[goal_id]}
+
+    results = []
+    for req in requests:
+        test = pending.get(req.test_id)
+        if not test:
+            results.append({"test_id": req.test_id, "error": "Not found in pending"})
+            continue
+
+        if req.action == ApprovalAction.APPROVE:
+            test.approve(req.approved_by)
+            storage.save_test(test)
+            results.append({"test_id": req.test_id, "status": "approved"})
+
+        elif req.action == ApprovalAction.MODIFY:
+            if req.modified_code:
+                test.modify(req.modified_code, req.approved_by)
+                storage.save_test(test)
+                results.append({"test_id": req.test_id, "status": "modified"})
+            else:
+                results.append({"test_id": req.test_id, "error": "modified_code required"})
+
+        elif req.action == ApprovalAction.REJECT:
+            test.reject(req.reason or "No reason provided")
+            storage.save_test(test)
+            results.append({"test_id": req.test_id, "status": "rejected"})
+
+        elif req.action == ApprovalAction.SKIP:
+            results.append({"test_id": req.test_id, "status": "skipped"})
+
+    # Clear pending for processed tests
+    processed_ids = {r["test_id"] for r in results if "error" not in r}
+    _pending_tests[goal_id] = [t for t in _pending_tests[goal_id] if t.id not in processed_ids]
+
+    # Clean up if empty
+    if not _pending_tests[goal_id]:
+        del _pending_tests[goal_id]
+
+    return json.dumps({"goal_id": goal_id, "results": results})
+
+
+@mcp.tool()
+def run_tests(
+    goal_id: Annotated[str, "ID of the goal to test"],
+    agent_path: Annotated[str, "Path to the agent export folder"],
+    test_types: Annotated[str, 'JSON array of test types: ["constraint", "outcome", "edge_case", "all"]'] = '["all"]',
+    parallel: Annotated[int, "Number of parallel workers (0 for sequential)"] = 0,
+    fail_fast: Annotated[bool, "Stop on first failure"] = False,
+) -> str:
+    """
+    Run evaluation tests for a goal.
+
+    Returns pass/fail summary with detailed results for each test.
+    """
+    from framework.testing.parallel import ParallelTestRunner, ParallelConfig
+
+    # Parse test types
+    try:
+        types_list = json.loads(test_types)
+    except json.JSONDecodeError:
+        types_list = ["all"]
+
+    # Load storage
+    storage = TestStorage(DEFAULT_TEST_STORAGE_PATH / goal_id)
+
+    # Get approved tests
+    tests = storage.get_approved_tests(goal_id)
+
+    # Filter by type if not "all"
+    if "all" not in types_list:
+        type_map = {
+            "constraint": TestType.CONSTRAINT,
+            "outcome": TestType.SUCCESS_CRITERIA,
+            "edge_case": TestType.EDGE_CASE,
+        }
+        filter_types = {type_map.get(t) for t in types_list if t in type_map}
+        tests = [t for t in tests if t.test_type in filter_types]
+
+    if not tests:
+        return json.dumps({
+            "goal_id": goal_id,
+            "error": "No approved tests found",
+            "hint": "Generate and approve tests first using generate_constraint_tests and approve_tests",
+        })
+
+    # Configure runner
+    config = ParallelConfig(
+        num_workers=parallel if parallel > 0 else 1,
+        fail_fast=fail_fast,
+    )
+
+    # Run tests - use AgentFactory for picklable parallel execution
+    runner = ParallelTestRunner(config, storage)
+    result = runner.run_all(
+        goal_id=goal_id,
+        agent_factory=AgentFactory(agent_path),
+        tests=tests,
+    )
+
+    return json.dumps({
+        "goal_id": goal_id,
+        "overall_passed": result.all_passed,
+        "summary": {
+            "total": result.total,
+            "passed": result.passed,
+            "failed": result.failed,
+            "pass_rate": f"{result.pass_rate:.1%}",
+        },
+        "duration_ms": result.duration_ms,
+        "results": [r.summary_dict() for r in result.results],
+    })
+
+
+@mcp.tool()
+def debug_test(
+    goal_id: Annotated[str, "ID of the goal"],
+    test_id: Annotated[str, "ID of the failed test"],
+    run_id: Annotated[str, "Optional Runtime run ID for detailed logs"] = "",
+) -> str:
+    """
+    Get detailed debug info for a failed test.
+
+    Includes error categorization, logs, and fix suggestions.
+    """
+    storage = TestStorage(DEFAULT_TEST_STORAGE_PATH / goal_id)
+
+    # Optionally load runtime storage
+    runtime_storage = None
+    try:
+        from framework.storage.backend import FileStorage
+        runtime_storage = FileStorage(f"data/runtime/{goal_id}")
+    except Exception:
+        pass
+
+    debug_tool = DebugTool(storage, runtime_storage)
+    info = debug_tool.analyze(goal_id, test_id, run_id or None)
+
+    return json.dumps(info.to_dict(), indent=2, default=str)
+
+
+@mcp.tool()
+def list_tests(
+    goal_id: Annotated[str, "ID of the goal"],
+    status: Annotated[str, "Filter by approval status: pending, approved, modified, rejected, all"] = "all",
+) -> str:
+    """
+    List tests for a goal.
+
+    Returns test metadata without full code (use debug_test for details).
+    """
+    storage = TestStorage(DEFAULT_TEST_STORAGE_PATH / goal_id)
+    tests = storage.get_tests_by_goal(goal_id)
+
+    # Filter by status
+    if status != "all":
+        try:
+            filter_status = ApprovalStatus(status)
+            tests = [t for t in tests if t.approval_status == filter_status]
+        except ValueError:
+            pass
+
+    return json.dumps({
+        "goal_id": goal_id,
+        "total": len(tests),
+        "tests": [
+            {
+                "id": t.id,
+                "test_name": t.test_name,
+                "test_type": t.test_type.value,
+                "parent_criteria_id": t.parent_criteria_id,
+                "approval_status": t.approval_status.value,
+                "last_result": t.last_result,
+                "confidence": t.llm_confidence,
+            }
+            for t in tests
+        ],
+    })
+
+
+@mcp.tool()
+def get_pending_tests(
+    goal_id: Annotated[str, "ID of the goal"],
+) -> str:
+    """
+    Get pending tests awaiting approval.
+
+    Returns tests that have been generated but not yet approved.
+    """
+    if goal_id not in _pending_tests:
+        return json.dumps({
+            "goal_id": goal_id,
+            "pending_count": 0,
+            "tests": [],
+        })
+
+    tests = _pending_tests[goal_id]
+    return json.dumps({
+        "goal_id": goal_id,
+        "pending_count": len(tests),
+        "tests": [
+            {
+                "id": t.id,
+                "test_name": t.test_name,
+                "test_type": t.test_type.value,
+                "parent_criteria_id": t.parent_criteria_id,
+                "description": t.description,
+                "confidence": t.llm_confidence,
+                "test_code": t.test_code,
+                "input": t.input,
+                "expected_output": t.expected_output,
+            }
+            for t in tests
+        ],
+    })
+
+
+# =============================================================================
 # PLAN LOADING AND EXECUTION
 # =============================================================================
 
-def load_plan_from_json(plan_json: str | dict) -> "Plan":
+def load_plan_from_json(plan_json: str | dict) -> Plan:
     """
     Load a Plan object from exported JSON.
 

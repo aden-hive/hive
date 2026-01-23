@@ -76,6 +76,7 @@ class Constraint(BaseModel):
         description="Category: 'time', 'cost', 'safety', 'scope', 'quality'"
     )
     check: str = Field(
+        default="",
         description="How to check: expression, function name, or 'llm_judge'"
     )
 
