@@ -9,10 +9,21 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def apply_patch(path: str, patch_text: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
         """
-        Apply a patch to a file within the session sandbox.
+        Purpose
+            Apply a scoped, line-level modification to an existing file.
 
-        Use this when you need to apply patch-formatted changes to a file.
-        This is an alias for apply_diff with the same functionality.
+        When to use
+            Update curated canonical memory
+            Fix or refine existing summaries or facts
+            Remove duplication or stale information
+
+        Rules & Constraints
+            Patch must be small and targeted
+            Must preserve unrelated content
+            Only allowed on approved files and sections
+
+        Best practice
+            Always read the file first. Never patch blindly.
 
         Args:
             path: The path to the file (relative to session root)

@@ -9,9 +9,18 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def apply_diff(path: str, diff_text: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
         """
-        Apply a diff to a file within the session sandbox.
+        Purpose
+            Apply a structured diff to update a file while preserving context.
 
-        Use this when you need to apply structured diff patches to modify file content.
+        When to use
+            Larger but still controlled updates
+            Refactoring structured memory (tables, sections)
+            Automated compaction or cleanup passes
+
+        Rules & Constraints
+            Diff must be context-aware
+            Rejected if it touches restricted sections
+            Prefer apply_patch for small changes
 
         Args:
             path: The path to the file (relative to session root)

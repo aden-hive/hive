@@ -8,10 +8,18 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def replace_file_content(path: str, target: str, replacement: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
         """
-        Replace content in a file within the session sandbox.
+        Purpose
+            Replace all occurrences of a target string with replacement text in a file.
 
-        Use this when you need to perform find-and-replace operations on file content.
-        All occurrences of the target string will be replaced.
+        When to use
+            Fixing repeated errors or typos
+            Updating deprecated terms or placeholders
+            Refactoring simple patterns across a file
+
+        Rules & Constraints
+            Target must exist in file
+            Replacement must be intentional
+            No regex or complex logic - pure string replacement
 
         Args:
             path: The path to the file (relative to session root)
