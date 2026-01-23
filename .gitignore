@@ -67,3 +67,5 @@ temp/
 exports/*
 
 .agent-builder-sessions/*
+
+.venv
