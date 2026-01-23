@@ -506,11 +506,19 @@ class LLMNode(NodeProtocol):
         # Try direct JSON parse first (fast path)
         try:
             content = raw_response.strip()
-            # Remove markdown code blocks if present
+
+            # Remove markdown code blocks if present - more robust extraction
             if content.startswith("```"):
-                match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
+                # Try multiple patterns for markdown code blocks
+                # Pattern 1: ```json\n...\n``` or ```\n...\n```
+                match = re.search(r'^```(?:json)?\s*\n([\s\S]*?)\n```\s*$', content)
                 if match:
                     content = match.group(1).strip()
+                else:
+                    # Pattern 2: Just strip the first and last lines if they're ```
+                    lines = content.split('\n')
+                    if lines[0].startswith('```') and lines[-1].strip() == '```':
+                        content = '\n'.join(lines[1:-1]).strip()
 
             parsed = json.loads(content)
             if isinstance(parsed, dict):
@@ -560,9 +568,14 @@ IMPORTANT:
             cleaned = result.content.strip()
             # Remove markdown if Haiku added it
             if cleaned.startswith("```"):
-                match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', cleaned, re.DOTALL)
+                match = re.search(r'^```(?:json)?\s*\n([\s\S]*?)\n```\s*$', cleaned)
                 if match:
                     cleaned = match.group(1).strip()
+                else:
+                    # Fallback: strip first/last lines
+                    lines = cleaned.split('\n')
+                    if lines[0].startswith('```') and lines[-1].strip() == '```':
+                        cleaned = '\n'.join(lines[1:-1]).strip()
 
             parsed = json.loads(cleaned)
             logger.info("      ✓ Haiku cleaned JSON output")
