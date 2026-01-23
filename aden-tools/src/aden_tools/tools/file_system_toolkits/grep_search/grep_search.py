@@ -53,7 +53,7 @@ def register_tools(mcp: FastMCP) -> None:
                 files = [os.path.join(secure_path, f) for f in os.listdir(secure_path) if os.path.isfile(os.path.join(secure_path, f))]
 
             for file_path in files:
-                # Calculate relative path for display
+                # Calculate the relative path for display
                 display_path = os.path.relpath(file_path, session_root)
                 try:
                     with open(file_path, "r", encoding="utf-8") as f:
