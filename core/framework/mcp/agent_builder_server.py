@@ -8,23 +8,35 @@ Usage:
 """
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
 from mcp.server import FastMCP
 
+# Load API key from credential manager if not already set
+if not os.environ.get("ANTHROPIC_API_KEY"):
+    try:
+        from aden_tools.credentials import CredentialManager
+        creds = CredentialManager()
+        if creds.is_available("anthropic"):
+            os.environ["ANTHROPIC_API_KEY"] = creds.get("anthropic")
+    except ImportError:
+        pass  # aden_tools not available
+
 from framework.graph import Goal, SuccessCriterion, Constraint, NodeSpec, EdgeSpec, EdgeCondition
 from framework.graph.plan import Plan
 
 # Testing framework imports
-from framework.testing.test_case import Test, ApprovalStatus, TestType
-from framework.testing.test_storage import TestStorage
+from framework.testing.test_case import Test, TestType
 from framework.testing.constraint_gen import ConstraintTestGenerator
 from framework.testing.success_gen import SuccessCriteriaTestGenerator
 from framework.testing.approval_types import ApprovalRequest, ApprovalAction
-from framework.testing.debug_tool import DebugTool
-from framework.testing.parallel import AgentFactory
+from framework.testing.prompts import (
+    PYTEST_TEST_FILE_HEADER,
+    PYTEST_CONFTEST_TEMPLATE,
+)
 
 
 # Initialize MCP server
@@ -2265,10 +2277,41 @@ def simulate_plan_execution(
 # =============================================================================
 
 # Session storage for pending tests (not yet persisted)
-_pending_tests: dict[str, list[Test]] = {}
+# Key is goal_id, value is tuple of (tests, agent_path)
+_pending_tests: dict[str, tuple[list[Test], str]] = {}
 
-# Default storage path for tests
-DEFAULT_TEST_STORAGE_PATH = Path("data/tests")
+
+def _get_agent_module_from_path(agent_path: str) -> str:
+    """Extract agent module name from path like 'exports/my_agent' -> 'my_agent'."""
+    path = Path(agent_path)
+    return path.name
+
+
+def _ensure_test_directory(agent_path: str) -> Path:
+    """Ensure the tests directory exists for an agent."""
+    tests_dir = Path(agent_path) / "tests"
+    tests_dir.mkdir(parents=True, exist_ok=True)
+    return tests_dir
+
+
+def _write_conftest_if_missing(agent_path: str, agent_module: str) -> None:
+    """Write conftest.py if it doesn't exist."""
+    tests_dir = _ensure_test_directory(agent_path)
+    conftest_path = tests_dir / "conftest.py"
+    if not conftest_path.exists():
+        content = PYTEST_CONFTEST_TEMPLATE.format(agent_name=agent_module)
+        conftest_path.write_text(content)
+
+
+def _append_test_to_file(test_file: Path, test_code: str) -> None:
+    """Append a test function to a test file."""
+    if test_file.exists():
+        existing = test_file.read_text()
+        # Add two newlines before the new test
+        test_file.write_text(existing.rstrip() + "\n\n\n" + test_code + "\n")
+    else:
+        # This shouldn't happen as we create the file with header first
+        test_file.write_text(test_code + "\n")
 
 
 @mcp.tool()
@@ -2280,16 +2323,27 @@ def generate_constraint_tests(
 - constraint_type: "hard" or "soft" (required)
 - category: string (optional, default: "general")
 - check: string (optional, how to validate: "llm_judge", expression, or function name)"""],
+    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
 ) -> str:
     """
     Generate constraint tests for a goal.
 
     Returns proposals for user approval. Tests are NOT persisted until approved.
+    Tests will be written to {agent_path}/tests/test_constraints.py when approved.
     """
     try:
         goal = Goal.model_validate_json(goal_json)
     except Exception as e:
         return json.dumps({"error": f"Invalid goal JSON: {e}"})
+
+    # Derive agent_path from session if not provided
+    if not agent_path and _session:
+        agent_path = f"exports/{_session.name}"
+
+    if not agent_path:
+        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+
+    agent_module = _get_agent_module_from_path(agent_path)
 
     # Get LLM provider
     try:
@@ -2298,15 +2352,16 @@ def generate_constraint_tests(
     except Exception as e:
         return json.dumps({"error": f"Failed to initialize LLM: {e}"})
 
-    # Generate tests
+    # Generate tests with agent_module for proper imports
     generator = ConstraintTestGenerator(llm)
-    tests = generator.generate(goal)
+    tests = generator.generate(goal, agent_module=agent_module)
 
-    # Store as pending (not persisted yet)
-    _pending_tests[goal_id] = tests
+    # Store as pending with agent_path (not persisted yet)
+    _pending_tests[goal_id] = (tests, agent_path)
 
     return json.dumps({
         "goal_id": goal_id,
+        "agent_path": agent_path,
         "generated_count": len(tests),
         "tests": [
             {
@@ -2320,6 +2375,7 @@ def generate_constraint_tests(
             for t in tests
         ],
         "next_step": "Call approve_tests to approve, modify, or reject each test",
+        "output_file": f"{agent_path}/tests/test_constraints.py",
     })
 
 
@@ -2329,17 +2385,28 @@ def generate_success_tests(
     goal_json: Annotated[str, "JSON string of the Goal object"],
     node_names: Annotated[str, "Comma-separated list of agent node names"] = "",
     tool_names: Annotated[str, "Comma-separated list of available tool names"] = "",
+    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
 ) -> str:
     """
     Generate success criteria tests for a goal.
 
     Should be called during Eval stage after agent exists.
     Returns proposals for user approval.
+    Tests will be written to {agent_path}/tests/test_success_criteria.py when approved.
     """
     try:
         goal = Goal.model_validate_json(goal_json)
     except Exception as e:
         return json.dumps({"error": f"Invalid goal JSON: {e}"})
+
+    # Derive agent_path from session if not provided
+    if not agent_path and _session:
+        agent_path = f"exports/{_session.name}"
+
+    if not agent_path:
+        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+
+    agent_module = _get_agent_module_from_path(agent_path)
 
     # Get LLM provider
     try:
@@ -2352,18 +2419,21 @@ def generate_success_tests(
     nodes = [n.strip() for n in node_names.split(",") if n.strip()]
     tools = [t.strip() for t in tool_names.split(",") if t.strip()]
 
-    # Generate tests
+    # Generate tests with agent_module for proper imports
     generator = SuccessCriteriaTestGenerator(llm)
-    tests = generator.generate(goal, node_names=nodes, tool_names=tools)
+    tests = generator.generate(goal, node_names=nodes, tool_names=tools, agent_module=agent_module)
 
     # Add to pending (may have constraint tests already)
     if goal_id in _pending_tests:
-        _pending_tests[goal_id].extend(tests)
+        existing_tests, existing_path = _pending_tests[goal_id]
+        existing_tests.extend(tests)
+        _pending_tests[goal_id] = (existing_tests, agent_path or existing_path)
     else:
-        _pending_tests[goal_id] = tests
+        _pending_tests[goal_id] = (tests, agent_path)
 
     return json.dumps({
         "goal_id": goal_id,
+        "agent_path": agent_path,
         "generated_count": len(tests),
         "tests": [
             {
@@ -2377,6 +2447,7 @@ def generate_success_tests(
             for t in tests
         ],
         "next_step": "Call approve_tests to approve, modify, or reject each test",
+        "output_file": f"{agent_path}/tests/test_success_criteria.py",
     })
 
 
@@ -2387,6 +2458,8 @@ def approve_tests(
 ) -> str:
     """
     Approve, reject, or modify generated tests.
+
+    Approved tests are written to Python files at {agent_path}/tests/test_*.py
 
     Approvals format:
     [
@@ -2406,8 +2479,13 @@ def approve_tests(
     except json.JSONDecodeError as e:
         return json.dumps({"error": f"Invalid approvals JSON: {e}"})
 
-    # Create storage
-    storage = TestStorage(DEFAULT_TEST_STORAGE_PATH / goal_id)
+    # Get pending tests and agent_path
+    pending_tests, agent_path = _pending_tests[goal_id]
+    agent_module = _get_agent_module_from_path(agent_path)
+
+    # Ensure tests directory and conftest.py exist
+    tests_dir = _ensure_test_directory(agent_path)
+    _write_conftest_if_missing(agent_path, agent_module)
 
     # Build approval requests
     requests = []
@@ -2424,8 +2502,13 @@ def approve_tests(
         except (KeyError, ValueError) as e:
             return json.dumps({"error": f"Invalid approval entry: {e}"})
 
-    # Find and save approved tests
-    pending = {t.id: t for t in _pending_tests[goal_id]}
+    # Find tests
+    pending = {t.id: t for t in pending_tests}
+
+    # Group approved tests by type for writing to files
+    constraint_tests: list[Test] = []
+    success_tests: list[Test] = []
+    edge_case_tests: list[Test] = []
 
     results = []
     for req in requests:
@@ -2436,50 +2519,108 @@ def approve_tests(
 
         if req.action == ApprovalAction.APPROVE:
             test.approve(req.approved_by)
-            storage.save_test(test)
+            # Group by test type
+            if test.test_type == TestType.CONSTRAINT:
+                constraint_tests.append(test)
+            elif test.test_type == TestType.SUCCESS_CRITERIA:
+                success_tests.append(test)
+            else:
+                edge_case_tests.append(test)
             results.append({"test_id": req.test_id, "status": "approved"})
 
         elif req.action == ApprovalAction.MODIFY:
             if req.modified_code:
                 test.modify(req.modified_code, req.approved_by)
-                storage.save_test(test)
+                # Group by test type
+                if test.test_type == TestType.CONSTRAINT:
+                    constraint_tests.append(test)
+                elif test.test_type == TestType.SUCCESS_CRITERIA:
+                    success_tests.append(test)
+                else:
+                    edge_case_tests.append(test)
                 results.append({"test_id": req.test_id, "status": "modified"})
             else:
                 results.append({"test_id": req.test_id, "error": "modified_code required"})
 
         elif req.action == ApprovalAction.REJECT:
             test.reject(req.reason or "No reason provided")
-            storage.save_test(test)
             results.append({"test_id": req.test_id, "status": "rejected"})
 
         elif req.action == ApprovalAction.SKIP:
             results.append({"test_id": req.test_id, "status": "skipped"})
 
+    # Write approved tests to Python files
+    files_written = []
+
+    def _write_tests_to_file(tests: list[Test], filename: str, test_type_desc: str) -> None:
+        if not tests:
+            return
+        test_file = tests_dir / filename
+        # Create file with header if it doesn't exist
+        if not test_file.exists():
+            header = PYTEST_TEST_FILE_HEADER.format(
+                test_type=test_type_desc,
+                agent_name=agent_module,
+                description=f"Tests validate that the agent respects its defined {test_type_desc.lower()}.",
+                agent_module=agent_module,
+            )
+            test_file.write_text(header)
+
+        # Append each test
+        for test in tests:
+            _append_test_to_file(test_file, test.test_code)
+
+        files_written.append(str(test_file))
+
+    _write_tests_to_file(constraint_tests, "test_constraints.py", "Constraint")
+    _write_tests_to_file(success_tests, "test_success_criteria.py", "Success criteria")
+    _write_tests_to_file(edge_case_tests, "test_edge_cases.py", "Edge case")
+
     # Clear pending for processed tests
     processed_ids = {r["test_id"] for r in results if "error" not in r}
-    _pending_tests[goal_id] = [t for t in _pending_tests[goal_id] if t.id not in processed_ids]
+    remaining_tests = [t for t in pending_tests if t.id not in processed_ids]
 
-    # Clean up if empty
-    if not _pending_tests[goal_id]:
+    # Clean up or update pending
+    if not remaining_tests:
         del _pending_tests[goal_id]
+    else:
+        _pending_tests[goal_id] = (remaining_tests, agent_path)
 
-    return json.dumps({"goal_id": goal_id, "results": results})
+    return json.dumps({
+        "goal_id": goal_id,
+        "results": results,
+        "files_written": files_written,
+        "run_tests_command": f"pytest {agent_path}/tests/ -v",
+    })
 
 
 @mcp.tool()
 def run_tests(
     goal_id: Annotated[str, "ID of the goal to test"],
     agent_path: Annotated[str, "Path to the agent export folder"],
-    test_types: Annotated[str, 'JSON array of test types: ["constraint", "outcome", "edge_case", "all"]'] = '["all"]',
-    parallel: Annotated[int, "Number of parallel workers (0 for sequential)"] = 0,
-    fail_fast: Annotated[bool, "Stop on first failure"] = False,
+    test_types: Annotated[str, 'JSON array of test types: ["constraint", "success", "edge_case", "all"]'] = '["all"]',
+    parallel: Annotated[int, "Number of parallel workers (-1 for auto/CPU count, 0 to disable)"] = -1,
+    fail_fast: Annotated[bool, "Stop on first failure (-x flag)"] = False,
+    verbose: Annotated[bool, "Verbose output (-v flag)"] = True,
 ) -> str:
     """
-    Run evaluation tests for a goal.
+    Run pytest on agent test files.
 
-    Returns pass/fail summary with detailed results for each test.
+    Tests are located at {agent_path}/tests/test_*.py
+    By default, tests run in parallel using pytest-xdist with auto-detected worker count.
+    Returns pass/fail summary with detailed results parsed from pytest output.
     """
-    from framework.testing.parallel import ParallelTestRunner, ParallelConfig
+    import subprocess
+    import re
+
+    tests_dir = Path(agent_path) / "tests"
+
+    if not tests_dir.exists():
+        return json.dumps({
+            "goal_id": goal_id,
+            "error": f"Tests directory not found: {tests_dir}",
+            "hint": "Generate and approve tests first using generate_constraint_tests and approve_tests",
+        })
 
     # Parse test types
     try:
@@ -2487,120 +2628,367 @@ def run_tests(
     except json.JSONDecodeError:
         types_list = ["all"]
 
-    # Load storage
-    storage = TestStorage(DEFAULT_TEST_STORAGE_PATH / goal_id)
+    # Build pytest command
+    cmd = ["pytest"]
 
-    # Get approved tests
-    tests = storage.get_approved_tests(goal_id)
-
-    # Filter by type if not "all"
-    if "all" not in types_list:
-        type_map = {
-            "constraint": TestType.CONSTRAINT,
-            "outcome": TestType.SUCCESS_CRITERIA,
-            "edge_case": TestType.EDGE_CASE,
+    # Add test path(s) based on type filter
+    if "all" in types_list:
+        cmd.append(str(tests_dir))
+    else:
+        type_to_file = {
+            "constraint": "test_constraints.py",
+            "success": "test_success_criteria.py",
+            "outcome": "test_success_criteria.py",  # alias
+            "edge_case": "test_edge_cases.py",
         }
-        filter_types = {type_map.get(t) for t in types_list if t in type_map}
-        tests = [t for t in tests if t.test_type in filter_types]
+        for t in types_list:
+            if t in type_to_file:
+                test_file = tests_dir / type_to_file[t]
+                if test_file.exists():
+                    cmd.append(str(test_file))
 
-    if not tests:
+    # Add flags
+    if verbose:
+        cmd.append("-v")
+    if fail_fast:
+        cmd.append("-x")
+
+    # Parallel execution (default: auto-detect CPU count)
+    if parallel == -1:
+        cmd.extend(["-n", "auto"])  # pytest-xdist auto-detects CPU count
+    elif parallel > 0:
+        cmd.extend(["-n", str(parallel)])
+
+    # Add short traceback and quiet summary
+    cmd.append("--tb=short")
+
+    # Set PYTHONPATH to project root so agents can import from core.framework
+    env = os.environ.copy()
+    pythonpath = env.get("PYTHONPATH", "")
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+
+    # Run pytest
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minute timeout
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
         return json.dumps({
             "goal_id": goal_id,
-            "error": "No approved tests found",
-            "hint": "Generate and approve tests first using generate_constraint_tests and approve_tests",
+            "error": "Test execution timed out after 10 minutes",
+            "command": " ".join(cmd),
+        })
+    except Exception as e:
+        return json.dumps({
+            "goal_id": goal_id,
+            "error": f"Failed to run pytest: {e}",
+            "command": " ".join(cmd),
         })
 
-    # Configure runner
-    config = ParallelConfig(
-        num_workers=parallel if parallel > 0 else 1,
-        fail_fast=fail_fast,
-    )
+    # Parse pytest output
+    output = result.stdout + "\n" + result.stderr
 
-    # Run tests - use AgentFactory for picklable parallel execution
-    runner = ParallelTestRunner(config, storage)
-    result = runner.run_all(
-        goal_id=goal_id,
-        agent_factory=AgentFactory(agent_path),
-        tests=tests,
+    # Extract summary line (e.g., "5 passed, 2 failed in 1.23s")
+    summary_match = re.search(
+        r"=+ ([\d\w,\s]+) in [\d.]+s =+",
+        output
     )
+    summary_text = summary_match.group(1) if summary_match else "unknown"
+
+    # Parse passed/failed counts
+    passed = 0
+    failed = 0
+    skipped = 0
+    error = 0
+
+    passed_match = re.search(r"(\d+) passed", summary_text)
+    if passed_match:
+        passed = int(passed_match.group(1))
+
+    failed_match = re.search(r"(\d+) failed", summary_text)
+    if failed_match:
+        failed = int(failed_match.group(1))
+
+    skipped_match = re.search(r"(\d+) skipped", summary_text)
+    if skipped_match:
+        skipped = int(skipped_match.group(1))
+
+    error_match = re.search(r"(\d+) error", summary_text)
+    if error_match:
+        error = int(error_match.group(1))
+
+    total = passed + failed + skipped + error
+
+    # Extract individual test results
+    test_results = []
+    # Match lines like: "test_constraints.py::test_constraint_foo PASSED"
+    test_pattern = re.compile(r"([\w/]+\.py)::(\w+)\s+(PASSED|FAILED|SKIPPED|ERROR)")
+    for match in test_pattern.finditer(output):
+        test_results.append({
+            "file": match.group(1),
+            "test_name": match.group(2),
+            "status": match.group(3).lower(),
+        })
+
+    # Extract failure details
+    failures = []
+    # Match FAILURES section
+    failure_section = re.search(r"=+ FAILURES =+(.+?)(?:=+ (?:short test summary|ERRORS|warnings) =+|$)", output, re.DOTALL)
+    if failure_section:
+        failure_text = failure_section.group(1)
+        # Split by test name headers
+        failure_blocks = re.split(r"_+ (test_\w+) _+", failure_text)
+        for i in range(1, len(failure_blocks), 2):
+            if i + 1 < len(failure_blocks):
+                test_name = failure_blocks[i]
+                details = failure_blocks[i + 1].strip()[:500]  # Limit detail length
+                failures.append({
+                    "test_name": test_name,
+                    "details": details,
+                })
 
     return json.dumps({
         "goal_id": goal_id,
-        "overall_passed": result.all_passed,
+        "overall_passed": result.returncode == 0,
         "summary": {
-            "total": result.total,
-            "passed": result.passed,
-            "failed": result.failed,
-            "pass_rate": f"{result.pass_rate:.1%}",
+            "total": total,
+            "passed": passed,
+            "failed": failed,
+            "skipped": skipped,
+            "errors": error,
+            "pass_rate": f"{(passed / total * 100):.1f}%" if total > 0 else "0%",
         },
-        "duration_ms": result.duration_ms,
-        "results": [r.summary_dict() for r in result.results],
+        "command": " ".join(cmd),
+        "return_code": result.returncode,
+        "test_results": test_results,
+        "failures": failures,
+        "raw_output": output[-2000:] if len(output) > 2000 else output,  # Last 2000 chars
     })
 
 
 @mcp.tool()
 def debug_test(
     goal_id: Annotated[str, "ID of the goal"],
-    test_id: Annotated[str, "ID of the failed test"],
-    run_id: Annotated[str, "Optional Runtime run ID for detailed logs"] = "",
+    test_name: Annotated[str, "Name of the test function (e.g., test_constraint_foo)"],
+    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
 ) -> str:
     """
-    Get detailed debug info for a failed test.
+    Run a specific test with verbose output for debugging.
 
-    Includes error categorization, logs, and fix suggestions.
+    Re-runs the test with pytest -vvs to capture full output.
+    Returns detailed failure information and suggestions.
     """
-    storage = TestStorage(DEFAULT_TEST_STORAGE_PATH / goal_id)
+    import subprocess
+    import re
 
-    # Optionally load runtime storage
-    runtime_storage = None
+    # Derive agent_path from session if not provided
+    if not agent_path and _session:
+        agent_path = f"exports/{_session.name}"
+
+    if not agent_path:
+        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+
+    tests_dir = Path(agent_path) / "tests"
+
+    if not tests_dir.exists():
+        return json.dumps({
+            "goal_id": goal_id,
+            "error": f"Tests directory not found: {tests_dir}",
+        })
+
+    # Find which file contains the test
+    test_file = None
+    for py_file in tests_dir.glob("test_*.py"):
+        content = py_file.read_text()
+        if f"def {test_name}" in content or f"async def {test_name}" in content:
+            test_file = py_file
+            break
+
+    if not test_file:
+        return json.dumps({
+            "goal_id": goal_id,
+            "error": f"Test '{test_name}' not found in {tests_dir}",
+            "hint": "Use list_tests to see available tests",
+        })
+
+    # Run specific test with verbose output
+    cmd = [
+        "pytest",
+        f"{test_file}::{test_name}",
+        "-vvs",  # Very verbose with stdout
+        "--tb=long",  # Full traceback
+    ]
+
+    # Set PYTHONPATH to project root (same as run_tests)
+    env = os.environ.copy()
+    pythonpath = env.get("PYTHONPATH", "")
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+
     try:
-        from framework.storage.backend import FileStorage
-        runtime_storage = FileStorage(f"data/runtime/{goal_id}")
-    except Exception:
-        pass
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,  # 2 minute timeout for single test
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return json.dumps({
+            "goal_id": goal_id,
+            "test_name": test_name,
+            "error": "Test execution timed out after 2 minutes",
+        })
+    except Exception as e:
+        return json.dumps({
+            "goal_id": goal_id,
+            "test_name": test_name,
+            "error": f"Failed to run pytest: {e}",
+        })
 
-    debug_tool = DebugTool(storage, runtime_storage)
-    info = debug_tool.analyze(goal_id, test_id, run_id or None)
+    output = result.stdout + "\n" + result.stderr
+    passed = result.returncode == 0
 
-    return json.dumps(info.to_dict(), indent=2, default=str)
+    # Categorize error if failed
+    error_category = None
+    suggestion = None
+
+    if not passed:
+        output_lower = output.lower()
+
+        if any(p in output_lower for p in ["typeerror", "attributeerror", "keyerror", "valueerror"]):
+            error_category = "IMPLEMENTATION_ERROR"
+            suggestion = "Fix the bug in agent code - check the traceback for the exact location"
+        elif any(p in output_lower for p in ["assertionerror", "assert", "expected"]):
+            error_category = "ASSERTION_FAILURE"
+            suggestion = "The test assertion failed - either fix the agent logic or update the test expectation"
+        elif any(p in output_lower for p in ["timeout", "timed out"]):
+            error_category = "TIMEOUT"
+            suggestion = "The test or agent took too long - check for infinite loops or slow operations"
+        elif any(p in output_lower for p in ["importerror", "modulenotfounderror"]):
+            error_category = "IMPORT_ERROR"
+            suggestion = "Missing module or incorrect import path - check your agent package structure"
+        elif any(p in output_lower for p in ["connectionerror", "api", "rate limit"]):
+            error_category = "API_ERROR"
+            suggestion = "External API issue - check API keys and network connectivity"
+        else:
+            error_category = "UNKNOWN"
+            suggestion = "Review the traceback and test output for clues"
+
+    # Extract the assertion/error message
+    error_message = None
+    error_match = re.search(r"(AssertionError|Error|Exception):\s*(.+?)(?:\n|$)", output)
+    if error_match:
+        error_message = error_match.group(2).strip()
+
+    return json.dumps({
+        "goal_id": goal_id,
+        "test_name": test_name,
+        "test_file": str(test_file),
+        "passed": passed,
+        "error_category": error_category,
+        "error_message": error_message,
+        "suggestion": suggestion,
+        "command": " ".join(cmd),
+        "output": output[-3000:] if len(output) > 3000 else output,  # Last 3000 chars
+    }, indent=2)
 
 
 @mcp.tool()
 def list_tests(
     goal_id: Annotated[str, "ID of the goal"],
-    status: Annotated[str, "Filter by approval status: pending, approved, modified, rejected, all"] = "all",
+    agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
 ) -> str:
     """
-    List tests for a goal.
+    List tests for an agent by scanning Python test files.
 
-    Returns test metadata without full code (use debug_test for details).
+    Returns test names and their locations from {agent_path}/tests/test_*.py
     """
-    storage = TestStorage(DEFAULT_TEST_STORAGE_PATH / goal_id)
-    tests = storage.get_tests_by_goal(goal_id)
+    import ast
 
-    # Filter by status
-    if status != "all":
+    # Derive agent_path from session if not provided
+    if not agent_path and _session:
+        agent_path = f"exports/{_session.name}"
+
+    if not agent_path:
+        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+
+    tests_dir = Path(agent_path) / "tests"
+
+    if not tests_dir.exists():
+        return json.dumps({
+            "goal_id": goal_id,
+            "agent_path": agent_path,
+            "total": 0,
+            "tests": [],
+            "hint": "No tests directory found. Generate tests with generate_constraint_tests or generate_success_tests",
+        })
+
+    # Scan all test files
+    tests = []
+    for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            filter_status = ApprovalStatus(status)
-            tests = [t for t in tests if t.approval_status == filter_status]
-        except ValueError:
-            pass
+            content = test_file.read_text()
+            tree = ast.parse(content)
+
+            # Find all async function definitions that start with "test_"
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if node.name.startswith("test_"):
+                        # Determine test type from filename
+                        if "constraint" in test_file.name:
+                            test_type = "constraint"
+                        elif "success" in test_file.name:
+                            test_type = "success_criteria"
+                        elif "edge" in test_file.name:
+                            test_type = "edge_case"
+                        else:
+                            test_type = "unknown"
+
+                        # Extract docstring
+                        docstring = ast.get_docstring(node) or ""
+
+                        tests.append({
+                            "test_name": node.name,
+                            "file": test_file.name,
+                            "file_path": str(test_file),
+                            "line": node.lineno,
+                            "test_type": test_type,
+                            "is_async": isinstance(node, ast.AsyncFunctionDef),
+                            "description": docstring[:200] if docstring else None,
+                        })
+        except SyntaxError as e:
+            tests.append({
+                "file": test_file.name,
+                "error": f"Syntax error: {e}",
+            })
+        except Exception as e:
+            tests.append({
+                "file": test_file.name,
+                "error": str(e),
+            })
+
+    # Group by type
+    by_type = {}
+    for t in tests:
+        ttype = t.get("test_type", "unknown")
+        if ttype not in by_type:
+            by_type[ttype] = 0
+        by_type[ttype] += 1
 
     return json.dumps({
         "goal_id": goal_id,
+        "agent_path": agent_path,
+        "tests_dir": str(tests_dir),
         "total": len(tests),
-        "tests": [
-            {
-                "id": t.id,
-                "test_name": t.test_name,
-                "test_type": t.test_type.value,
-                "parent_criteria_id": t.parent_criteria_id,
-                "approval_status": t.approval_status.value,
-                "last_result": t.last_result,
-                "confidence": t.llm_confidence,
-            }
-            for t in tests
-        ],
+        "by_type": by_type,
+        "tests": tests,
+        "run_command": f"pytest {tests_dir} -v",
     })
 
 
@@ -2620,10 +3008,11 @@ def get_pending_tests(
             "tests": [],
         })
 
-    tests = _pending_tests[goal_id]
+    tests, agent_path = _pending_tests[goal_id]
     return json.dumps({
         "goal_id": goal_id,
         "pending_count": len(tests),
+        "agent_path": agent_path,
         "tests": [
             {
                 "id": t.id,

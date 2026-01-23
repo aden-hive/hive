@@ -80,6 +80,7 @@ class SuccessCriteriaTestGenerator:
         goal: Goal,
         node_names: list[str] | None = None,
         tool_names: list[str] | None = None,
+        agent_module: str = "my_agent",
     ) -> list[Test]:
         """
         Generate tests for all success criteria in a goal.
@@ -88,6 +89,8 @@ class SuccessCriteriaTestGenerator:
             goal: Goal with success_criteria to test
             node_names: Names of agent nodes (for context)
             tool_names: Names of tools available to agent (for context)
+            agent_module: The agent module name (e.g., "web_research_agent")
+                          Used to generate import: from exports.{agent_module} import default_agent
 
         Returns:
             List of Test objects with approval_status=PENDING.
@@ -103,6 +106,7 @@ class SuccessCriteriaTestGenerator:
             success_criteria_formatted=self._format_criteria(goal.success_criteria),
             node_names=", ".join(node_names or ["(not specified)"]),
             tool_names=", ".join(tool_names or ["(not specified)"]),
+            agent_module=agent_module,
         )
 
         # Collect tests via tool calls - Claude handles JSON escaping automatically
@@ -123,10 +127,14 @@ class SuccessCriteriaTestGenerator:
             system="You are a test generation expert. For each success criterion, call the submit_test tool with the test details.",
             tools=[SUBMIT_TEST_TOOL],
             tool_executor=tool_executor,
-            max_iterations=20,
+            max_iterations=12,
         )
 
-        return self._create_tests_from_collected(collected_tests, goal.id)
+        tests = self._create_tests_from_collected(collected_tests, goal.id)
+        # Filter out skeleton tests (empty code with default confidence)
+        tests = [t for t in tests if t.test_code.strip() and t.llm_confidence != 0.5]
+        # Enforce max 12 tests total
+        return tests[:12]
 
     def generate_for_criterion(
         self,
@@ -134,6 +142,7 @@ class SuccessCriteriaTestGenerator:
         criterion: SuccessCriterion,
         node_names: list[str] | None = None,
         tool_names: list[str] | None = None,
+        agent_module: str = "my_agent",
     ) -> list[Test]:
         """
         Generate tests for a single success criterion.
@@ -143,6 +152,7 @@ class SuccessCriteriaTestGenerator:
             criterion: Specific criterion to test
             node_names: Names of agent nodes
             tool_names: Names of tools available
+            agent_module: The agent module name (e.g., "web_research_agent")
 
         Returns:
             List of Test objects for the criterion
@@ -153,6 +163,7 @@ class SuccessCriteriaTestGenerator:
             success_criteria_formatted=self._format_criterion(criterion),
             node_names=", ".join(node_names or ["(not specified)"]),
             tool_names=", ".join(tool_names or ["(not specified)"]),
+            agent_module=agent_module,
         )
 
         # Collect tests via tool calls
@@ -173,7 +184,7 @@ class SuccessCriteriaTestGenerator:
             system="You are a test generation expert. Call the submit_test tool with the test details.",
             tools=[SUBMIT_TEST_TOOL],
             tool_executor=tool_executor,
-            max_iterations=10,
+            max_iterations=5,
         )
 
         return self._create_tests_from_collected(collected_tests, goal.id)

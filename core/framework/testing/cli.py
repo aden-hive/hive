@@ -9,20 +9,18 @@ Provides commands:
 """
 
 import argparse
-import json
+import os
+import subprocess
 from pathlib import Path
 
 from framework.graph.goal import Goal
-from framework.testing.test_case import TestType
 from framework.testing.test_storage import TestStorage
 from framework.testing.constraint_gen import ConstraintTestGenerator
 from framework.testing.success_gen import SuccessCriteriaTestGenerator
 from framework.testing.approval_cli import interactive_approval
-from framework.testing.parallel import ParallelTestRunner, ParallelConfig, AgentFactory
-from framework.testing.debug_tool import DebugTool
 
 
-DEFAULT_STORAGE_PATH = Path("data/tests")
+DEFAULT_STORAGE_PATH = Path("exports")
 
 
 def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -89,8 +87,8 @@ def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
         "--parallel",
         "-p",
         type=int,
-        default=0,
-        help="Number of parallel workers (0 for sequential)",
+        default=-1,
+        help="Number of parallel workers (-1 for auto, 0 for sequential)",
     )
     run_parser.add_argument(
         "--fail-fast",
@@ -108,19 +106,21 @@ def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
     # test-debug
     debug_parser = subparsers.add_parser(
         "test-debug",
-        help="Debug a failed test",
+        help="Debug a failed test by re-running with verbose output",
     )
     debug_parser.add_argument(
-        "goal_id",
-        help="Goal ID",
+        "agent_path",
+        help="Path to agent export folder (e.g., exports/my_agent)",
     )
     debug_parser.add_argument(
-        "test_id",
-        help="Test ID to debug",
+        "test_name",
+        help="Name of the test function (e.g., test_constraint_foo)",
     )
     debug_parser.add_argument(
-        "--run-id",
-        help="Runtime run ID for detailed logs",
+        "--goal",
+        "-g",
+        default="",
+        help="Goal ID (optional, for display only)",
     )
     debug_parser.set_defaults(func=cmd_test_debug)
 
@@ -243,107 +243,129 @@ def cmd_test_approve(args: argparse.Namespace) -> int:
 
 
 def cmd_test_run(args: argparse.Namespace) -> int:
-    """Run tests for an agent."""
-    storage = TestStorage(DEFAULT_STORAGE_PATH / args.goal)
+    """Run tests for an agent using pytest subprocess."""
+    agent_path = Path(args.agent_path)
+    tests_dir = agent_path / "tests"
 
-    # Get approved tests
-    tests = storage.get_approved_tests(args.goal)
-
-    # Filter by type
-    if args.type != "all":
-        type_map = {
-            "constraint": TestType.CONSTRAINT,
-            "success": TestType.SUCCESS_CRITERIA,
-            "edge_case": TestType.EDGE_CASE,
-        }
-        filter_type = type_map.get(args.type)
-        if filter_type:
-            tests = [t for t in tests if t.test_type == filter_type]
-
-    if not tests:
-        print(f"No approved tests found for goal {args.goal}")
+    if not tests_dir.exists():
+        print(f"Error: Tests directory not found: {tests_dir}")
+        print("Hint: Generate and approve tests first using test-generate")
         return 1
 
-    print(f"Running {len(tests)} tests...\n")
+    # Build pytest command
+    cmd = ["pytest"]
 
-    # Configure runner
-    config = ParallelConfig(
-        num_workers=args.parallel if args.parallel > 0 else 1,
-        fail_fast=args.fail_fast,
-    )
+    # Add test path(s) based on type filter
+    if args.type == "all":
+        cmd.append(str(tests_dir))
+    else:
+        type_to_file = {
+            "constraint": "test_constraints.py",
+            "success": "test_success_criteria.py",
+            "edge_case": "test_edge_cases.py",
+        }
+        if args.type in type_to_file:
+            test_file = tests_dir / type_to_file[args.type]
+            if test_file.exists():
+                cmd.append(str(test_file))
+            else:
+                print(f"Error: Test file not found: {test_file}")
+                return 1
 
-    # Run with progress - use AgentFactory for picklable parallel execution
-    runner = ParallelTestRunner(config, storage)
+    # Add flags
+    cmd.append("-v")  # Always verbose for CLI
+    if args.fail_fast:
+        cmd.append("-x")
 
-    def on_result(result):
-        status = "✓" if result.passed else "✗"
-        print(f"  {status} {result.test_id} ({result.duration_ms}ms)")
+    # Parallel execution
+    if args.parallel > 0:
+        cmd.extend(["-n", str(args.parallel)])
+    elif args.parallel == -1:
+        cmd.extend(["-n", "auto"])
 
-    result = runner.run_all(
-        goal_id=args.goal,
-        agent_factory=AgentFactory(args.agent_path),
-        tests=tests,
-        on_result=on_result,
-    )
+    cmd.append("--tb=short")
 
-    # Print summary
-    print(f"\n{'=' * 40}")
-    print(f"Results: {result.passed}/{result.total} passed ({result.pass_rate:.1%})")
-    print(f"Duration: {result.duration_ms}ms")
+    # Set PYTHONPATH to project root
+    env = os.environ.copy()
+    pythonpath = env.get("PYTHONPATH", "")
+    # Find project root (parent of core/)
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
 
-    if not result.all_passed:
-        print("\nFailed tests:")
-        for r in result.get_failed_results():
-            print(f"  - {r.test_id}: {r.error_message}")
-            if r.error_category:
-                print(f"    Category: {r.error_category.value}")
+    print(f"Running: {' '.join(cmd)}\n")
 
-    return 0 if result.all_passed else 1
+    # Run pytest
+    try:
+        result = subprocess.run(
+            cmd,
+            env=env,
+            timeout=600,  # 10 minute timeout
+        )
+    except subprocess.TimeoutExpired:
+        print("Error: Test execution timed out after 10 minutes")
+        return 1
+    except Exception as e:
+        print(f"Error: Failed to run pytest: {e}")
+        return 1
+
+    return result.returncode
 
 
 def cmd_test_debug(args: argparse.Namespace) -> int:
-    """Debug a failed test."""
-    storage = TestStorage(DEFAULT_STORAGE_PATH / args.goal_id)
+    """Debug a failed test by re-running with verbose output."""
+    import subprocess
 
-    # Try to load runtime storage
-    runtime_storage = None
+    agent_path = Path(args.agent_path)
+    test_name = args.test_name
+    tests_dir = agent_path / "tests"
+
+    if not tests_dir.exists():
+        print(f"Error: Tests directory not found: {tests_dir}")
+        return 1
+
+    # Find which file contains the test
+    test_file = None
+    for py_file in tests_dir.glob("test_*.py"):
+        content = py_file.read_text()
+        if f"def {test_name}" in content or f"async def {test_name}" in content:
+            test_file = py_file
+            break
+
+    if not test_file:
+        print(f"Error: Test '{test_name}' not found in {tests_dir}")
+        print("Hint: Use test-list to see available tests")
+        return 1
+
+    # Run specific test with verbose output
+    cmd = [
+        "pytest",
+        f"{test_file}::{test_name}",
+        "-vvs",  # Very verbose with stdout
+        "--tb=long",  # Full traceback
+    ]
+
+    # Set PYTHONPATH to project root
+    env = os.environ.copy()
+    pythonpath = env.get("PYTHONPATH", "")
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+
+    print(f"Running: {' '.join(cmd)}\n")
+
     try:
-        from framework.storage.backend import FileStorage
-        runtime_storage = FileStorage(f"data/runtime/{args.goal_id}")
-    except Exception:
-        pass
+        result = subprocess.run(
+            cmd,
+            env=env,
+            timeout=120,  # 2 minute timeout for single test
+        )
+    except subprocess.TimeoutExpired:
+        print("Error: Test execution timed out after 2 minutes")
+        return 1
+    except Exception as e:
+        print(f"Error: Failed to run pytest: {e}")
+        return 1
 
-    debug_tool = DebugTool(storage, runtime_storage)
-    info = debug_tool.analyze(args.goal_id, args.test_id, args.run_id)
-
-    # Print debug info
-    print(f"Debug Info for: {info.test_name}")
-    print("=" * 50)
-
-    print(f"\nTest ID: {info.test_id}")
-    print(f"Passed: {info.passed}")
-
-    if info.error_category:
-        print(f"\nError Category: {info.error_category}")
-        print(f"Suggested Fix: {info.suggested_fix}")
-
-    if info.error_message:
-        print(f"\nError Message:\n{info.error_message}")
-
-    if info.stack_trace:
-        print(f"\nStack Trace:\n{info.stack_trace}")
-
-    if info.iteration_guidance:
-        print("\nIteration Guidance:")
-        print(f"  Stage: {info.iteration_guidance.get('stage')}")
-        print(f"  Action: {info.iteration_guidance.get('action')}")
-        print(f"  Restart Required: {info.iteration_guidance.get('restart_required')}")
-
-    print(f"\nInput:\n{json.dumps(info.input, indent=2)}")
-    print(f"\nExpected:\n{json.dumps(info.expected, indent=2)}")
-    print(f"\nActual:\n{json.dumps(info.actual, indent=2, default=str)}")
-
-    return 0
+    return result.returncode
 
 
 def cmd_test_list(args: argparse.Namespace) -> int:
