@@ -32,7 +32,7 @@ class TestRun:
             started_at=datetime.now(),
             completed_at=datetime.now(),
         )
-        assert run.duration_ms == (run.completed_at - run.started_at).total_seconds() * 1000
+        assert run.duration_ms == int((run.completed_at - run.started_at).total_seconds() * 1000)
 
     def test_add_decision(self):
         run = Run(
