@@ -78,6 +78,43 @@ assert isinstance(entry_points["start"], str), f"entry_points['start'] must be s
 
 **Why this matters:** GraphSpec uses Pydantic validation. The wrong format causes ValidationError at runtime, which blocks all agent execution and tests. This bug is not caught until you try to run the agent.
 
+## LLM Provider Configuration
+
+**Default:** All agents use **LiteLLM** with **Cerebras** as the primary provider for cost-effective, high-performance inference.
+
+### Environment Setup
+
+Set your Cerebras API key:
+```bash
+export CEREBRAS_API_KEY="your-api-key-here"
+```
+
+Or configure via aden_tools credentials:
+```bash
+# Store credential
+aden credentials set cerebras YOUR_API_KEY
+```
+
+### Model Configuration
+
+Default model in [config.py](config.py):
+```python
+model: str = "cerebras/zai-glm-4.7"  # Fast, cost-effective
+```
+
+### Supported Providers via LiteLLM
+
+The framework uses LiteLLM, which supports multiple providers. Priority order:
+1. **Cerebras** (default) - `cerebras/zai-glm-4.7`
+2. **OpenAI** - `gpt-4o-mini`, `gpt-4o`
+3. **Anthropic** - `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`
+4. **Local** - `ollama/llama3`
+
+To use a different provider, change the model in [config.py](config.py) and ensure the corresponding API key is available:
+- Cerebras: `CEREBRAS_API_KEY` or `aden credentials set cerebras`
+- OpenAI: `OPENAI_API_KEY` or `aden credentials set openai`
+- Anthropic: `ANTHROPIC_API_KEY` or `aden credentials set anthropic`
+
 ## Building Session Management with MCP
 
 **MANDATORY**: Use the agent-builder MCP server's BuildSession system for automatic bookkeeping and persistence.
@@ -192,7 +229,7 @@ from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Con
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.runtime import Runtime
-from framework.llm.anthropic import AnthropicProvider
+from framework.llm.litellm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
 from aden_tools.credentials import CredentialManager
 
@@ -210,7 +247,7 @@ from dataclasses import dataclass
 
 @dataclass
 class RuntimeConfig:
-    model: str = "claude-haiku-4-5-20251001"
+    model: str = "cerebras/zai-glm-4.7"
     temperature: float = 0.7
     max_tokens: int = 4096
 
@@ -599,9 +636,16 @@ class {agent_class_name}:
         llm = None
         if not mock_mode:
             creds = CredentialManager()
-            if creds.is_available("anthropic"):
+            # Try Cerebras first, fall back to other providers
+            if creds.is_available("cerebras"):
+                api_key = creds.get("cerebras")
+                llm = LiteLLMProvider(api_key=api_key, model=self.config.model)
+            elif creds.is_available("openai"):
+                api_key = creds.get("openai")
+                llm = LiteLLMProvider(api_key=api_key, model=self.config.model)
+            elif creds.is_available("anthropic"):
                 api_key = creds.get("anthropic")
-                llm = AnthropicProvider(api_key=api_key, model=self.config.model)
+                llm = LiteLLMProvider(api_key=api_key, model=self.config.model)
 
         graph = GraphSpec(
             id="{agent_name}-graph",
