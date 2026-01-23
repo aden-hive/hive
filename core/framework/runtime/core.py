@@ -322,6 +322,9 @@ class Runtime:
             **kwargs,
         )
 
+        if not decision_id:
+            raise RuntimeError("decide_and_execute called with no active run")
+
         # Execute and measure
         start = time.time()
         try:

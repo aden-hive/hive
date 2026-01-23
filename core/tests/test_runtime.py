@@ -336,6 +336,48 @@ class TestConvenienceMethods:
 
         runtime.end_run(success=False)
 
+    def test_decide_and_execute_without_run(self, tmp_path: Path):
+        """decide_and_execute should fail fast when no run is active."""
+        runtime = Runtime(tmp_path)
+        executed = False
+
+        def do_action():
+            nonlocal executed
+            executed = True
+            return {"ok": True}
+
+        with pytest.raises(RuntimeError, match="no active run"):
+            runtime.decide_and_execute(
+                intent="Compute value",
+                options=[{"id": "compute", "description": "Run computation"}],
+                chosen="compute",
+                reasoning="Need the value",
+                executor=do_action,
+            )
+
+        assert executed is False
+
+    def test_decide_and_execute_without_run(self, tmp_path: Path):
+        """decide_and_execute should fail fast when no run is active."""
+        runtime = Runtime(tmp_path)
+        executed = False
+
+        def do_action():
+            nonlocal executed
+            executed = True
+            return {"ok": True}
+
+        with pytest.raises(RuntimeError, match="no active run"):
+            runtime.decide_and_execute(
+                intent="Compute value",
+                options=[{"id": "compute", "description": "Run computation"}],
+                chosen="compute",
+                reasoning="Need the value",
+                executor=do_action,
+            )
+
+        assert executed is False
+
 
 class TestNarrativeGeneration:
     """Test automatic narrative generation."""
