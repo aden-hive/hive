@@ -310,11 +310,68 @@ def set_goal(
     """Define the goal for the agent. Goals are the source of truth - they define what success looks like."""
     session = get_session()
 
-    # Parse JSON inputs
-    criteria_list = json.loads(success_criteria)
-    constraint_list = json.loads(constraints)
+    # Parse JSON inputs with error handling
+    try:
+        criteria_list = json.loads(success_criteria)
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "valid": False,
+            "errors": [f"Invalid JSON in success_criteria: {e}"],
+            "warnings": [],
+        })
 
-    # Convert to proper objects
+    try:
+        constraint_list = json.loads(constraints)
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "valid": False,
+            "errors": [f"Invalid JSON in constraints: {e}"],
+            "warnings": [],
+        })
+
+    # Validate BEFORE object creation
+    errors = []
+    warnings = []
+
+    if not goal_id:
+        errors.append("Goal must have an id")
+    if not name:
+        errors.append("Goal must have a name")
+    if not description:
+        errors.append("Goal must have a description")
+    if not criteria_list:
+        errors.append("Goal must have at least one success criterion")
+    if not constraint_list:
+        warnings.append("Consider adding constraints")
+
+    # Validate required fields in criteria and constraints
+    for i, sc in enumerate(criteria_list):
+        if not isinstance(sc, dict):
+            errors.append(f"success_criteria[{i}] must be an object")
+        else:
+            if "id" not in sc:
+                errors.append(f"success_criteria[{i}] missing required field 'id'")
+            if "description" not in sc:
+                errors.append(f"success_criteria[{i}] missing required field 'description'")
+
+    for i, c in enumerate(constraint_list):
+        if not isinstance(c, dict):
+            errors.append(f"constraints[{i}] must be an object")
+        else:
+            if "id" not in c:
+                errors.append(f"constraints[{i}] missing required field 'id'")
+            if "description" not in c:
+                errors.append(f"constraints[{i}] missing required field 'description'")
+
+    # Return early if validation failed
+    if errors:
+        return json.dumps({
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+        })
+
+    # Convert to proper objects (now safe - we validated required fields)
     criteria = [
         SuccessCriterion(
             id=sc["id"],
@@ -344,21 +401,6 @@ def set_goal(
         success_criteria=criteria,
         constraints=constraint_objs,
     )
-
-    # Validate
-    errors = []
-    warnings = []
-
-    if not goal_id:
-        errors.append("Goal must have an id")
-    if not name:
-        errors.append("Goal must have a name")
-    if not description:
-        errors.append("Goal must have a description")
-    if not criteria_list:
-        errors.append("Goal must have at least one success criterion")
-    if not constraint_list:
-        warnings.append("Consider adding constraints")
 
     _save_session(session)  # Auto-save
 

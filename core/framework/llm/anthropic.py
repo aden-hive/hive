@@ -67,6 +67,7 @@ class AnthropicProvider(LLMProvider):
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 1024,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Generate a completion from Claude (via LiteLLM)."""
         return self._provider.complete(
@@ -74,6 +75,7 @@ class AnthropicProvider(LLMProvider):
             system=system,
             tools=tools,
             max_tokens=max_tokens,
+            json_mode=json_mode,
         )
 
     def complete_with_tools(

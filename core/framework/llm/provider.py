@@ -58,6 +58,7 @@ class LLMProvider(ABC):
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 1024,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """
         Generate a completion from the LLM.
@@ -67,6 +68,7 @@ class LLMProvider(ABC):
             system: System prompt
             tools: Available tools for the LLM to use
             max_tokens: Maximum tokens to generate
+            json_mode: If True, request structured JSON output from the LLM
 
         Returns:
             LLMResponse with content and metadata
