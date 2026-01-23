@@ -1,64 +1,34 @@
 """
 Goal-Based Testing Framework
 
-A three-stage framework (Goal → Agent → Eval) where tests are LLM-generated
-from success_criteria and constraints, with mandatory user approval.
+A framework where tests are written based on success_criteria and constraints,
+then run with pytest and debugged with LLM assistance.
 
 ## Core Flow
 
-1. **Goal Stage**: Define success_criteria and constraints, generate constraint tests
-2. **Agent Stage**: Build nodes + edges, run constraint tests during development
-3. **Eval Stage**: Generate success_criteria tests, run all tests, debug failures
+1. **Goal Stage**: Define success_criteria and constraints
+2. **Agent Stage**: Build nodes + edges, write tests
+3. **Eval Stage**: Run tests, debug failures
 
 ## Key Components
 
 - **Schemas**: Test, TestResult, TestSuiteResult, ApprovalStatus, ErrorCategory
 - **Storage**: TestStorage for persisting tests and results
-- **Generation**: LLM-based test generation from Goal criteria
-- **Approval**: Mandatory user approval workflow (CLI and programmatic)
 - **Runner**: Test execution via pytest subprocess with pytest-xdist parallelization
 - **Debug**: Error categorization and fix suggestions
 
 ## MCP Tools
 
-Testing tools are integrated into the main agent_builder_server.py (not a separate server).
-This ensures the building_agent skill has access to all testing functionality:
-- generate_constraint_tests, generate_success_tests
-- approve_tests, run_tests, debug_test
-- list_tests, get_pending_tests
-
-## Usage
-
-```python
-from framework.testing import (
-    Test, TestResult, TestStorage,
-    ConstraintTestGenerator, SuccessCriteriaTestGenerator,
-    DebugTool,
-)
-
-# Generate tests
-generator = ConstraintTestGenerator(llm)
-tests = generator.generate(goal)
-
-# Approve tests (required)
-for test in tests:
-    test.approve("user")
-    storage.save_test(test)
-
-# Run tests via pytest subprocess (see MCP run_tests or CLI test-run)
-
-# Debug failures
-debug = DebugTool(storage)
-info = debug.analyze(goal_id, test_id)
-```
+Testing tools are integrated into the main agent_builder_server.py:
+- generate_constraint_tests, generate_success_tests (return guidelines)
+- run_tests, debug_test, list_tests
 
 ## CLI Commands
 
 ```bash
-python -m framework test-generate goal.json
-python -m framework test-approve <goal_id>
 python -m framework test-run <agent_path> --goal <goal_id>
 python -m framework test-debug <goal_id> <test_id>
+python -m framework test-list <agent_path> --goal <goal_id>
 ```
 """
 
@@ -77,13 +47,6 @@ from framework.testing.test_result import (
 # Storage
 from framework.testing.test_storage import TestStorage
 
-# Generation
-from framework.testing.constraint_gen import ConstraintTestGenerator
-from framework.testing.success_gen import SuccessCriteriaTestGenerator
-from framework.testing.prompts import (
-    CONSTRAINT_TEST_PROMPT,
-    SUCCESS_CRITERIA_TEST_PROMPT,
-)
 
 # Approval
 from framework.testing.approval_types import (
@@ -117,12 +80,7 @@ __all__ = [
     "TestSuiteResult",
     # Storage
     "TestStorage",
-    # Generation
-    "ConstraintTestGenerator",
-    "SuccessCriteriaTestGenerator",
-    "CONSTRAINT_TEST_PROMPT",
-    "SUCCESS_CRITERIA_TEST_PROMPT",
-    # Approval
+    # Approval types (pure types, no LLM)
     "ApprovalAction",
     "ApprovalRequest",
     "ApprovalResult",
