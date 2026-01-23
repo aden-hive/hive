@@ -3012,10 +3012,11 @@ def get_pending_tests(
             "tests": [],
         })
 
-    tests = _pending_tests[goal_id]
+    tests, agent_path = _pending_tests[goal_id]
     return json.dumps({
         "goal_id": goal_id,
         "pending_count": len(tests),
+        "agent_path": agent_path,
         "tests": [
             {
                 "id": t.id,
