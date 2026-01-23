@@ -10,6 +10,16 @@ choice the agent makes is captured with:
 - Whether that was good or bad (evaluated post-hoc)
 
 This gives the Builder LLM the information it needs to improve agent behavior.
+
+## Testing Framework
+
+The framework includes a Goal-Based Testing system (Goal → Agent → Eval):
+- Generate tests from Goal success_criteria and constraints
+- Mandatory user approval before tests are stored
+- Parallel test execution with error categorization
+- Debug tools with fix suggestions
+
+See `framework.testing` for details.
 """
 
 from framework.schemas.decision import Decision, Option, Outcome, DecisionEvaluation
@@ -18,6 +28,21 @@ from framework.runtime.core import Runtime
 from framework.builder.query import BuilderQuery
 from framework.llm import LLMProvider, AnthropicProvider
 from framework.runner import AgentRunner, AgentOrchestrator
+
+# Testing framework
+from framework.testing import (
+    Test,
+    TestResult,
+    TestSuiteResult,
+    TestStorage,
+    ApprovalStatus,
+    ErrorCategory,
+    ConstraintTestGenerator,
+    SuccessCriteriaTestGenerator,
+    ParallelTestRunner,
+    ParallelConfig,
+    DebugTool,
+)
 
 __all__ = [
     # Schemas
@@ -38,4 +63,16 @@ __all__ = [
     # Runner
     "AgentRunner",
     "AgentOrchestrator",
+    # Testing
+    "Test",
+    "TestResult",
+    "TestSuiteResult",
+    "TestStorage",
+    "ApprovalStatus",
+    "ErrorCategory",
+    "ConstraintTestGenerator",
+    "SuccessCriteriaTestGenerator",
+    "ParallelTestRunner",
+    "ParallelConfig",
+    "DebugTool",
 ]

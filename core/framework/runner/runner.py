@@ -2,19 +2,20 @@
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 from framework.graph import Goal
 from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition
 from framework.graph.node import NodeSpec
 from framework.graph.executor import GraphExecutor, ExecutionResult
-from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
-from framework.llm.litellm import LiteLLMProvider
+from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.core import Runtime
+
+if TYPE_CHECKING:
+    from framework.runner.protocol import CapabilityResponse, AgentMessage
 
 
 @dataclass
@@ -45,6 +46,7 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     missing_tools: list[str] = field(default_factory=list)
+    missing_credentials: list[str] = field(default_factory=list)
 
 
 def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
@@ -172,7 +174,7 @@ class AgentRunner:
         goal: Goal,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-haiku-4-5-20251001",
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -197,8 +199,12 @@ class AgentRunner:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            self._temp_dir = tempfile.TemporaryDirectory()
-            self._storage_path = Path(self._temp_dir.name) / "runtime"
+            # Use persistent storage in ~/.hive by default
+            home = Path.home()
+            default_storage = home / ".hive" / "storage" / agent_path.name
+            default_storage.mkdir(parents=True, exist_ok=True)
+            self._storage_path = default_storage
+            self._temp_dir = None
 
         # Initialize components
         self._tool_registry = ToolRegistry()
@@ -223,7 +229,7 @@ class AgentRunner:
         agent_path: str | Path,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-haiku-4-5-20251001",
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -310,16 +316,16 @@ class AgentRunner:
         Example:
             # Register STDIO MCP server
             runner.register_mcp_server(
-                name="aden-tools",
+                name="tools",
                 transport="stdio",
                 command="python",
                 args=["-m", "aden_tools.mcp_server", "--stdio"],
-                cwd="/path/to/aden-tools"
+                cwd="/path/to/tools"
             )
 
             # Register HTTP MCP server
             runner.register_mcp_server(
-                name="aden-tools",
+                name="tools",
                 transport="http",
                 url="http://localhost:4001"
             )
@@ -368,11 +374,23 @@ class AgentRunner:
         # Create runtime
         self._runtime = Runtime(storage_path=self._storage_path)
 
-        # Create LLM provider (if not mock mode)
-        # Use LiteLLM as the unified backend for all providers
-        if not self.mock_mode:
-            # LiteLLM auto-detects the provider from model name and finds the right API key
-            self._llm = LiteLLMProvider(model=self.model)
+        # Set up session context for tools (workspace_id, agent_id, session_id)
+        workspace_id = "default"  # Could be derived from storage path
+        agent_id = self.graph.id or "unknown"
+        # Use "current" as a stable session_id for persistent memory
+        session_id = "current"
+
+        self._tool_registry.set_session_context(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+        # Create LLM provider (if not mock mode and API key available)
+        if not self.mock_mode and os.environ.get("ANTHROPIC_API_KEY"):
+            from framework.llm.anthropic import AnthropicProvider
+
+            self._llm = AnthropicProvider(model=self.model)
 
         # Create executor
         self._executor = GraphExecutor(
@@ -487,19 +505,51 @@ class AgentRunner:
         if missing_tools:
             warnings.append(f"Missing tool implementations: {', '.join(missing_tools)}")
 
-        # Check for LLM nodes without LLM
-        has_llm_nodes = any(
-            node.node_type in ("llm_generate", "llm_tool_use")
-            for node in self.graph.nodes
-        )
-        if has_llm_nodes and not os.environ.get("ANTHROPIC_API_KEY"):
-            warnings.append("Agent has LLM nodes but ANTHROPIC_API_KEY not set")
+        # Check credentials for required tools and node types
+        missing_credentials = []
+        try:
+            from aden_tools.credentials import CredentialManager
+
+            cred_manager = CredentialManager()
+
+            # Check tool credentials (Tier 2)
+            missing_creds = cred_manager.get_missing_for_tools(info.required_tools)
+            for cred_name, spec in missing_creds:
+                missing_credentials.append(spec.env_var)
+                affected_tools = [t for t in info.required_tools if t in spec.tools]
+                tools_str = ", ".join(affected_tools)
+                warning_msg = f"Missing {spec.env_var} for {tools_str}"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
+
+            # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
+            node_types = list(set(node.node_type for node in self.graph.nodes))
+            missing_node_creds = cred_manager.get_missing_for_node_types(node_types)
+            for cred_name, spec in missing_node_creds:
+                if spec.env_var not in missing_credentials:  # Avoid duplicates
+                    missing_credentials.append(spec.env_var)
+                    affected_types = [t for t in node_types if t in spec.node_types]
+                    types_str = ", ".join(affected_types)
+                    warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
+                    if spec.help_url:
+                        warning_msg += f"\n  Get it at: {spec.help_url}"
+                    warnings.append(warning_msg)
+        except ImportError:
+            # aden_tools not installed - fall back to direct check
+            has_llm_nodes = any(
+                node.node_type in ("llm_generate", "llm_tool_use")
+                for node in self.graph.nodes
+            )
+            if has_llm_nodes and not os.environ.get("ANTHROPIC_API_KEY"):
+                warnings.append("Agent has LLM nodes but ANTHROPIC_API_KEY not set")
 
         return ValidationResult(
             valid=len(errors) == 0,
             errors=errors,
             warnings=warnings,
             missing_tools=missing_tools,
+            missing_credentials=missing_credentials,
         )
 
     async def can_handle(self, request: dict, llm: LLMProvider | None = None) -> "CapabilityResponse":
@@ -588,7 +638,7 @@ Respond with JSON only:
                     reasoning=data.get("reasoning", ""),
                     estimated_steps=data.get("estimated_steps"),
                 )
-        except Exception as e:
+        except Exception:
             # Fall back to keyword matching on error
             pass
 
@@ -641,7 +691,7 @@ Respond with JSON only:
         Returns:
             Response message
         """
-        from framework.runner.protocol import AgentMessage, MessageType
+        from framework.runner.protocol import MessageType
 
         info = self.info()
 

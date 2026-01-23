@@ -39,8 +39,6 @@ def register_tools(mcp: FastMCP) -> None:
 
             matches = []
 
-            # Identify target files
-            # Note: We let os.listdir/os.walk raise FileNotFoundError naturally (EAFP principle)
             if os.path.isfile(secure_path):
                 files = [secure_path]
             elif recursive:
@@ -49,11 +47,10 @@ def register_tools(mcp: FastMCP) -> None:
                     for filename in filenames:
                         files.append(os.path.join(root, filename))
             else:
-                # This will raise FileNotFoundError if secure_path doesn't exist
                 files = [os.path.join(secure_path, f) for f in os.listdir(secure_path) if os.path.isfile(os.path.join(secure_path, f))]
 
             for file_path in files:
-                # Calculate the relative path for display
+                # Calculate relative path for display
                 display_path = os.path.relpath(file_path, session_root)
                 try:
                     with open(file_path, "r", encoding="utf-8") as f:
@@ -85,6 +82,4 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception as e:
             # 3. Generic Fallback
             return {"error": f"Failed to perform grep search: {str(e)}"}
-# NOTE:
-# This comment exists to force GitHub to re-evaluate a stale merge conflict.
-# No functional behavior is changed.
+
