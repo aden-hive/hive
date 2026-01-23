@@ -68,6 +68,16 @@ class NodeSpec(BaseModel):
         description="Keys this node writes to shared memory or output"
     )
 
+    # Optional schemas for validation and cleansing
+    input_schema: dict[str, dict] = Field(
+        default_factory=dict,
+        description="Optional schema for input validation. Format: {key: {type: 'string', required: True, description: '...'}}"
+    )
+    output_schema: dict[str, dict] = Field(
+        default_factory=dict,
+        description="Optional schema for output validation. Format: {key: {type: 'dict', required: True, description: '...'}}"
+    )
+
     # For LLM nodes
     system_prompt: str | None = Field(
         default=None,
@@ -518,9 +528,9 @@ class LLMNode(NodeProtocol):
         except json.JSONDecodeError:
             pass
 
-        # JSON parse failed - use Haiku to extract clean JSON
+        # JSON parse failed - use OutputCleaner to extract clean JSON
         import os
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             # No API key, try one more simple extraction
             try:
@@ -532,11 +542,20 @@ class LLMNode(NodeProtocol):
                     return json.loads(json_str)
             except (ValueError, json.JSONDecodeError):
                 pass
-            raise ValueError("Cannot parse JSON and no API key for Haiku cleanup")
+            raise ValueError("Cannot parse JSON and no API key for OutputCleaner (set CEREBRAS_API_KEY)")
 
-        # Use Haiku to clean the response
-        from framework.llm.anthropic import AnthropicProvider
-        haiku = AnthropicProvider(model="claude-3-5-haiku-20241022")
+        # Use fast LLM to clean the response (Cerebras llama-3.3-70b preferred)
+        from framework.llm.litellm import LiteLLMProvider
+        if os.environ.get("CEREBRAS_API_KEY"):
+            cleaner_llm = LiteLLMProvider(
+                api_key=os.environ.get("CEREBRAS_API_KEY"),
+                model="cerebras/llama-3.3-70b",
+                temperature=0.0
+            )
+        else:
+            # Fallback to Anthropic Haiku
+            from framework.llm.anthropic import AnthropicProvider
+            cleaner_llm = AnthropicProvider(model="claude-3-5-haiku-20241022")
 
         prompt = f"""Extract the JSON object from this LLM response. Extract ONLY the values that the LLM actually generated.
 
@@ -552,24 +571,24 @@ IMPORTANT:
 - Output ONLY valid JSON with no extra text, no markdown, no explanations"""
 
         try:
-            result = haiku.complete(
+            result = cleaner_llm.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You extract clean JSON from messy responses. Output only valid JSON, nothing else.",
             )
 
             cleaned = result.content.strip()
-            # Remove markdown if Haiku added it
+            # Remove markdown if OutputCleaner added it
             if cleaned.startswith("```"):
                 match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', cleaned, re.DOTALL)
                 if match:
                     cleaned = match.group(1).strip()
 
             parsed = json.loads(cleaned)
-            logger.info("      ✓ Haiku cleaned JSON output")
+            logger.info("      ✓ OutputCleaner extracted JSON")
             return parsed
 
         except Exception as e:
-            logger.warning(f"      ⚠ Haiku JSON extraction failed: {e}")
+            logger.warning(f"      ⚠ OutputCleaner JSON extraction failed: {e}")
             raise
 
     def _build_messages(self, ctx: NodeContext) -> list[dict]:

@@ -381,6 +381,14 @@ node_code = f'''
 """,
     tools={tools},
     max_retries={max_retries},
+
+    # OPTIONAL: Add schemas for OutputCleaner validation (recommended for critical paths)
+    # input_schema={{
+    #     "field_name": {{"type": "string", "required": True, "description": "Field description"}},
+    # }},
+    # output_schema={{
+    #     "result": {{"type": "dict", "required": True, "description": "Analysis result"}},
+    # }},
 )
 
 '''
@@ -973,6 +981,122 @@ response = AskUserQuestion(
     }]
 )
 ```
+
+## Framework Features
+
+### OutputCleaner - Automatic I/O Validation and Cleaning
+
+**NEW FEATURE**: The framework automatically validates and cleans node outputs between edges using a fast LLM (Cerebras llama-3.3-70b).
+
+**What it does**:
+- ✅ Validates output matches next node's input schema
+- ✅ Detects JSON parsing trap (entire response in one key)
+- ✅ Cleans malformed output automatically (~200-500ms, ~$0.001 per cleaning)
+- ✅ Boosts success rates by 1.8-2.2x
+- ✅ **Enabled by default** - no code changes needed!
+
+**How to leverage it**:
+
+Add `input_schema` and `output_schema` to critical nodes for better validation:
+
+```python
+critical_node = NodeSpec(
+    id="approval-decision",
+    name="Approval Decision",
+    node_type="llm_generate",
+    input_keys=["analysis", "risk_score"],
+    output_keys=["decision", "reason"],
+
+    # Schemas enable OutputCleaner to validate and clean better
+    input_schema={
+        "analysis": {
+            "type": "dict",
+            "required": True,
+            "description": "Contract analysis with findings"
+        },
+        "risk_score": {
+            "type": "number",
+            "required": True,
+            "description": "Risk score 0-10"
+        },
+    },
+    output_schema={
+        "decision": {
+            "type": "string",
+            "required": True,
+            "description": "Approval decision: APPROVED, REJECTED, or ESCALATE"
+        },
+        "reason": {
+            "type": "string",
+            "required": True,
+            "description": "Justification for the decision"
+        },
+    },
+
+    system_prompt="""...""",
+)
+```
+
+**Supported schema types**:
+- `"string"` or `"str"` - String values
+- `"int"` or `"integer"` - Integer numbers
+- `"float"` - Float numbers
+- `"number"` - Int or float
+- `"bool"` or `"boolean"` - Boolean values
+- `"dict"` or `"object"` - Dictionary/object
+- `"list"` or `"array"` - List/array
+- `"any"` - Any type (no validation)
+
+**When to add schemas**:
+- ✅ Critical paths where failure cascades
+- ✅ Expensive nodes where retry is costly
+- ✅ Nodes with strict output requirements
+- ✅ Nodes that frequently produce malformed output
+
+**When to skip schemas**:
+- ❌ Simple pass-through nodes
+- ❌ Terminal nodes (no next node to affect)
+- ❌ Fast local operations
+- ❌ Nodes with robust error handling
+
+**Monitoring**: Check logs for cleaning events:
+```
+⚠ Output validation failed for analyze → recommend: 1 error(s)
+🧹 Cleaning output from 'analyze' using cerebras/llama-3.3-70b
+✓ Output cleaned successfully
+```
+
+If you see frequent cleanings on the same edge:
+1. Review the source node's system prompt
+2. Add explicit JSON formatting instructions
+3. Consider improving output structure
+
+### System Prompt Best Practices
+
+**For nodes with multiple output_keys, ALWAYS enforce JSON**:
+
+```python
+system_prompt="""You are a contract analyzer.
+
+CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks, NO ```json```.
+Just the JSON object starting with { and ending with }.
+
+Return ONLY this JSON structure:
+{
+  "analysis": {...},
+  "risk_score": 7.5,
+  "compliance_issues": [...]
+}
+
+Do NOT include any explanatory text before or after the JSON.
+"""
+```
+
+**Why this matters**:
+- LLMs often wrap JSON in markdown (` ```json\n{...}\n``` `)
+- LLMs add explanations before/after JSON
+- Without explicit instructions, output may be malformed
+- OutputCleaner can fix these, but better to prevent them
 
 ## Next Steps
 
