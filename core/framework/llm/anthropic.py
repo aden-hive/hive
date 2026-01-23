@@ -1,9 +1,28 @@
 """Anthropic Claude LLM provider - backward compatible wrapper around LiteLLM."""
 
+import os
 from typing import Any
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.litellm import LiteLLMProvider
+
+
+def _get_api_key_from_credential_manager() -> str | None:
+    """Get API key from CredentialManager or environment.
+
+    Priority:
+    1. CredentialManager (supports .env hot-reload)
+    2. os.environ fallback
+    """
+    try:
+        from aden_tools.credentials import CredentialManager
+
+        creds = CredentialManager()
+        if creds.is_available("anthropic"):
+            return creds.get("anthropic")
+    except ImportError:
+        pass
+    return os.environ.get("ANTHROPIC_API_KEY")
 
 
 class AnthropicProvider(LLMProvider):
@@ -24,16 +43,23 @@ class AnthropicProvider(LLMProvider):
         Initialize the Anthropic provider.
 
         Args:
-            api_key: Anthropic API key. If not provided, uses ANTHROPIC_API_KEY env var.
+            api_key: Anthropic API key. If not provided, uses CredentialManager
+                     or ANTHROPIC_API_KEY env var.
             model: Model to use (default: claude-haiku-4-5-20251001)
         """
         # Delegate to LiteLLMProvider internally.
+        self.api_key = api_key or _get_api_key_from_credential_manager()
+        if not self.api_key:
+            raise ValueError(
+                "Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key."
+            )
+
+        self.model = model
+        
         self._provider = LiteLLMProvider(
             model=model,
-            api_key=api_key,
+            api_key=self.api_key,
         )
-        self.model = model
-        self.api_key = api_key
 
     def complete(
         self,

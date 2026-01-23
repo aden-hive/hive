@@ -202,7 +202,7 @@ PYTHONPATH=core:exports python -m support_ticket_agent validate
 
 ```bash
 # Remove broken installations
-pip uninstall -y framework tools aden-tools
+pip uninstall -y framework tools
 
 # Reinstall correctly
 cd /home/timothy/oss/hive

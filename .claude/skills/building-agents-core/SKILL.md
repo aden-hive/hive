@@ -53,7 +53,7 @@ goal = Goal(
             target=">=0.9",
             weight=0.4,
         ),
-        # ... more criteria
+        # 3-5 success criteria total
     ],
     constraints=[
         Constraint(
@@ -62,7 +62,7 @@ goal = Goal(
             constraint_type="hard",
             category="quality",
         ),
-        # ... more constraints
+        # 1-5 constraints total
     ],
 )
 ```
@@ -139,11 +139,11 @@ Tools are provided by MCP servers. Never assume a tool exists - always discover 
 
 ```python
 mcp__agent-builder__add_mcp_server(
-    name="aden-tools",
+    name="tools",
     transport="stdio",
     command="python",
     args='["mcp_server.py", "--stdio"]',
-    cwd="../aden-tools"
+    cwd="../tools"
 )
 ```
 
@@ -154,7 +154,7 @@ mcp__agent-builder__add_mcp_server(
 mcp__agent-builder__list_mcp_tools()
 
 # Or list tools from a specific server
-mcp__agent-builder__list_mcp_tools(server_name="aden-tools")
+mcp__agent-builder__list_mcp_tools(server_name="tools")
 ```
 
 This returns available tools with their descriptions and parameters:
@@ -163,7 +163,7 @@ This returns available tools with their descriptions and parameters:
 {
   "success": true,
   "tools_by_server": {
-    "aden-tools": [
+    "tools": [
       {
         "name": "web_search",
         "description": "Search the web...",

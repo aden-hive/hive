@@ -13,7 +13,11 @@
       "mcp__agent-builder__test_node",
       "mcp__agent-builder__add_node",
       "mcp__agent-builder__add_edge",
-      "mcp__agent-builder__validate_graph"
+      "mcp__agent-builder__validate_graph",
+      "Bash(ruff check:*)",
+      "Bash(PYTHONPATH=core:exports python:*)",
+      "mcp__agent-builder__list_tests",
+      "mcp__agent-builder__generate_constraint_tests"
     ]
   }
 }

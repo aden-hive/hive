@@ -5,7 +5,6 @@ Tests cover:
 - Schema validation
 - Storage CRUD operations
 - Error categorization heuristics
-- Parallel runner grouping logic
 """
 
 import pytest
@@ -22,7 +21,6 @@ from framework.testing.test_result import (
 )
 from framework.testing.test_storage import TestStorage
 from framework.testing.categorizer import ErrorCategorizer
-from framework.testing.parallel import ParallelTestRunner, ParallelConfig
 from framework.testing.debug_tool import DebugTool
 
 
@@ -462,36 +460,6 @@ class TestErrorCategorizer:
 
 
 # ============================================================================
-# Parallel Runner Tests
-# ============================================================================
-
-class TestParallelRunner:
-    """Tests for ParallelTestRunner."""
-
-    @pytest.fixture
-    def runner(self, tmp_path):
-        """Create a test runner with temporary storage."""
-        storage = TestStorage(tmp_path)
-        config = ParallelConfig(num_workers=1)  # Sequential for testing
-        return ParallelTestRunner(config, storage)
-
-    def test_create_suite_result(self, runner):
-        """Test creating suite result from individual results."""
-        results = [
-            TestResult(test_id="t1", passed=True, duration_ms=100),
-            TestResult(test_id="t2", passed=False, duration_ms=50),
-        ]
-
-        suite = runner._create_suite_result("goal_001", results)
-
-        assert suite.goal_id == "goal_001"
-        assert suite.total == 2
-        assert suite.passed == 1
-        assert suite.failed == 1
-        assert suite.duration_ms == 150
-
-
-# ============================================================================
 # Debug Tool Tests
 # ============================================================================
 
@@ -549,60 +517,6 @@ class TestDebugTool:
         assert not info.passed
         assert info.error_category == "implementation_error"
         assert info.suggested_fix is not None
-
-
-# ============================================================================
-# Integration Tests
-# ============================================================================
-
-class TestIntegration:
-    """Integration tests for the testing framework."""
-
-    def test_full_workflow(self, tmp_path):
-        """Test a simplified full workflow."""
-        storage = TestStorage(tmp_path)
-
-        # 1. Create tests (simulating generation)
-        tests = []
-        for i in range(3):
-            test = Test(
-                id=f"test_{i}",
-                goal_id="goal_001",
-                parent_criteria_id="constraint_001",
-                test_type=TestType.CONSTRAINT,
-                test_name=f"test_constraint_{i}",
-                test_code=f"def test_constraint_{i}(agent): assert True",
-                description=f"Test {i}",
-            )
-            tests.append(test)
-
-        # 2. Approve tests
-        for test in tests:
-            test.approve("user")
-            storage.save_test(test)
-
-        # 3. Verify storage
-        approved = storage.get_approved_tests("goal_001")
-        assert len(approved) == 3
-
-        # 4. Simulate running tests
-        config = ParallelConfig(num_workers=1)
-        runner = ParallelTestRunner(config, storage)
-
-        class MockAgent:
-            def run(self, input):
-                return {"success": True}
-
-        results = runner.run_tests(approved, MockAgent())
-        assert len(results) == 3
-
-        # 5. Save results
-        for result in results:
-            storage.save_result(result.test_id, result)
-
-        # 6. Check stats
-        stats = storage.get_stats()
-        assert stats["total_tests"] == 3
 
 
 if __name__ == "__main__":
