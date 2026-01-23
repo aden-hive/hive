@@ -126,6 +126,98 @@ When you call MCP tools like:
 
 **No manual bookkeeping needed** - the MCP server handles it all!
 
+### MCP Tool Parameter Formats
+
+**CRITICAL:** All MCP tools that accept complex data require **JSON-formatted strings**. This is the most common source of errors.
+
+#### mcp__agent-builder__set_goal
+
+```python
+# CORRECT FORMAT:
+mcp__agent-builder__set_goal(
+    goal_id="process-support-tickets",
+    name="Process Customer Support Tickets",
+    description="Automatically process incoming customer support tickets...",
+    success_criteria='[{"id": "accurate-categorization", "description": "Correctly classify ticket type", "metric": "classification_accuracy", "target": "90%", "weight": 0.25}, {"id": "response-quality", "description": "Provide helpful response", "metric": "customer_satisfaction", "target": "90%", "weight": 0.30}]',
+    constraints='[{"id": "privacy-protection", "description": "Must not expose sensitive data", "constraint_type": "security", "category": "data_privacy"}, {"id": "escalation-threshold", "description": "Escalate when confidence below 70%", "constraint_type": "quality", "category": "accuracy"}]'
+)
+
+# WRONG - Using pipe-delimited or custom formats:
+success_criteria="id1:desc1:metric1:target1|id2:desc2:metric2:target2"  # ❌ WRONG
+constraints="[constraint1, constraint2]"  # ❌ WRONG - not valid JSON
+```
+
+**Required fields for success_criteria JSON objects:**
+- `id` (string): Unique identifier
+- `description` (string): What this criterion measures
+- `metric` (string): Name of the metric
+- `target` (string): Target value (e.g., "90%", "<30")
+- `weight` (float): Weight for scoring (0.0-1.0, should sum to 1.0)
+
+**Required fields for constraints JSON objects:**
+- `id` (string): Unique identifier
+- `description` (string): What this constraint enforces
+- `constraint_type` (string): Type (e.g., "security", "quality", "performance", "functional")
+- `category` (string): Category (e.g., "data_privacy", "accuracy", "response_time")
+
+#### mcp__agent-builder__add_node
+
+```python
+# CORRECT FORMAT:
+mcp__agent-builder__add_node(
+    node_id="parse-ticket",
+    name="Parse Ticket",
+    description="Extract key information from incoming ticket",
+    node_type="llm",
+    input_keys='["ticket_content", "customer_id"]',  # JSON array of strings
+    output_keys='["parsed_data", "category_hint"]',   # JSON array of strings
+    system_prompt="You are a ticket parser. Extract: subject, body, sentiment, urgency indicators.",
+    tools='[]',  # JSON array of tool names, empty if none
+    routes='{}'  # JSON object for routing, empty if none
+)
+
+# WRONG formats:
+input_keys="ticket_content, customer_id"  # ❌ WRONG - not JSON
+input_keys=["ticket_content", "customer_id"]  # ❌ WRONG - Python list, not string
+tools="tool1, tool2"  # ❌ WRONG - not JSON array
+```
+
+**Node types:**
+- `"llm"` - LLM-powered node (most common)
+- `"function"` - Python function execution
+- `"router"` - Conditional routing node
+- `"parallel"` - Parallel execution node
+
+#### mcp__agent-builder__add_edge
+
+```python
+# CORRECT FORMAT:
+mcp__agent-builder__add_edge(
+    edge_id="parse-to-categorize",
+    source="parse-ticket",
+    target="categorize-issue",
+    condition="on_success",  # or "always", "on_failure", "conditional"
+    condition_expr="",  # Python expression for "conditional" type
+    priority=1
+)
+
+# For conditional routing:
+mcp__agent-builder__add_edge(
+    edge_id="confidence-check-high",
+    source="check-confidence",
+    target="finalize-output",
+    condition="conditional",
+    condition_expr="context.get('confidence', 0) >= 0.7",
+    priority=1
+)
+```
+
+**Edge conditions:**
+- `"always"` - Always traverse this edge
+- `"on_success"` - Traverse if source node succeeds
+- `"on_failure"` - Traverse if source node fails
+- `"conditional"` - Traverse if condition_expr evaluates to True
+
 ### Show Progress to User
 
 ```python
@@ -192,9 +284,8 @@ from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Con
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.runtime import Runtime
-from framework.llm.anthropic import AnthropicProvider
+from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
-from aden_tools.credentials import CredentialManager
 
 # Goal will be added when defined
 # Nodes will be imported from .nodes
@@ -598,10 +689,9 @@ class {agent_class_name}:
 
         llm = None
         if not mock_mode:
-            creds = CredentialManager()
-            if creds.is_available("anthropic"):
-                api_key = creds.get("anthropic")
-                llm = AnthropicProvider(api_key=api_key, model=self.config.model)
+            # LiteLLMProvider uses environment variables for API keys
+            # Supports: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.
+            llm = LiteLLMProvider(model=self.config.model)
 
         graph = GraphSpec(
             id="{agent_name}-graph",
