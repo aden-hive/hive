@@ -1,6 +1,7 @@
 import os
 
-WORKSPACES_DIR = os.path.abspath(os.path.join(os.getcwd(), "workdir/workspaces"))
+# Use user home directory for workspaces
+WORKSPACES_DIR = os.path.expanduser("~/.hive/workdir/workspaces")
 
 def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str) -> str:
     """Resolve and verify a path within a 3-layer sandbox (workspace/agent/session)."""

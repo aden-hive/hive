@@ -8,10 +8,18 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_dir(path: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
         """
-        List the contents of a directory within the session sandbox.
+        Purpose
+            List the contents of a directory within the session sandbox.
 
-        Use this when you need to explore directory contents and see what files
-        and subdirectories exist.
+        When to use
+            Explore directory structure and contents
+            Discover available files and subdirectories
+            Verify file existence before reading or writing
+
+        Rules & Constraints
+            Path must point to an existing directory
+            Returns file names, types, and sizes
+            Does not recurse into subdirectories
 
         Args:
             path: The directory path (relative to session root)

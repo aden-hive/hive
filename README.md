@@ -29,6 +29,21 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## What is Aden
+
+<p align="center">
+  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+</p>
+
+Aden is a platform for building, deploying, operating, and adapting AI agents:
+
+- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
+- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
+- **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
+- **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
+- **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
+
+
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
@@ -290,11 +305,11 @@ No. Aden is built from the ground up with no dependencies on LangChain, CrewAI, 
 
 **Q: What LLM providers does Aden support?**
 
-Aden supports OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), and Google Gemini out of the box. The architecture is provider-agnostic through SDK abstraction, with LiteLLM integration on the roadmap for expanded model support.
+Aden supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
 
 **Q: Can I use Aden with local AI models like Ollama?**
 
-Local model support through LiteLLM integration is on our roadmap. The SDK's provider-agnostic design means adding local model support will be straightforward once implemented.
+Yes! Aden supports local models through LiteLLM. Simply use the model name format `ollama/model-name` (e.g., `ollama/llama3`, `ollama/mistral`) and ensure Ollama is running locally.
 
 **Q: What makes Aden different from other agent frameworks?**
 

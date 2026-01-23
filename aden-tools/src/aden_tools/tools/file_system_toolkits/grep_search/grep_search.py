@@ -9,10 +9,18 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def grep_search(path: str, pattern: str, workspace_id: str, agent_id: str, session_id: str, recursive: bool = False) -> dict:
         """
-        Search for a pattern in a file or directory within the session sandbox.
+        Purpose
+            Search for a regex pattern in files within the session sandbox.
 
-        Use this when you need to find specific content or patterns in files using regex.
-        Set recursive=True to search through all subdirectories.
+        When to use
+            Find specific content or patterns across files
+            Locate references to variables, functions, or terms
+            Search through logs or data files for matching entries
+
+        Rules & Constraints
+            Pattern must be a valid regex expression
+            Set recursive=True to search through subdirectories
+            Binary files and permission-denied files are skipped
 
         Args:
             path: The path to search in (file or directory, relative to session root)
