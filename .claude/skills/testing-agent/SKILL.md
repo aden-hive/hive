@@ -716,6 +716,166 @@ This provides **immediate feedback** during development, catching issues early.
 
 **Note:** All test patterns should include API key enforcement via conftest.py.
 
+### ⚠️ CRITICAL: Framework Features You Must Know
+
+#### OutputCleaner - Automatic I/O Cleaning (NEW!)
+
+**The framework now automatically validates and cleans node outputs** using a fast LLM (Cerebras llama-3.3-70b) at edge traversal time. This prevents cascading failures from malformed output.
+
+**What OutputCleaner does**:
+- ✅ Validates output matches next node's input schema
+- ✅ Detects JSON parsing trap (entire response in one key)
+- ✅ Cleans malformed output automatically (~200-500ms, ~$0.001 per cleaning)
+- ✅ Boosts success rates by 1.8-2.2x
+
+**Impact on tests**: Tests should still use safe patterns because OutputCleaner may not catch all issues in test mode.
+
+#### Safe Test Patterns (REQUIRED)
+
+**❌ UNSAFE** (will cause test failures):
+```python
+# Direct key access - can crash!
+approval_decision = result.output["approval_decision"]
+assert approval_decision == "APPROVED"
+
+# Nested access without checks
+category = result.output["analysis"]["category"]
+
+# Assuming parsed JSON structure
+for issue in result.output["compliance_issues"]:
+    ...
+```
+
+**✅ SAFE** (correct patterns):
+```python
+# 1. Safe dict access with .get()
+output = result.output or {}
+approval_decision = output.get("approval_decision", "UNKNOWN")
+assert "APPROVED" in approval_decision or approval_decision == "APPROVED"
+
+# 2. Type checking before operations
+analysis = output.get("analysis", {})
+if isinstance(analysis, dict):
+    category = analysis.get("category", "unknown")
+
+# 3. Parse JSON from strings (the JSON parsing trap!)
+import json
+recommendation = output.get("recommendation", "{}")
+if isinstance(recommendation, str):
+    try:
+        parsed = json.loads(recommendation)
+        if isinstance(parsed, dict):
+            approval = parsed.get("approval_decision", "UNKNOWN")
+    except json.JSONDecodeError:
+        approval = "UNKNOWN"
+elif isinstance(recommendation, dict):
+    approval = recommendation.get("approval_decision", "UNKNOWN")
+
+# 4. Safe iteration with type check
+compliance_issues = output.get("compliance_issues", [])
+if isinstance(compliance_issues, list):
+    for issue in compliance_issues:
+        ...
+```
+
+#### Helper Functions for Safe Access
+
+**Add to conftest.py**:
+```python
+import json
+import re
+
+def _parse_json_from_output(result, key):
+    """Parse JSON from agent output (framework may store full LLM response as string)."""
+    response_text = result.output.get(key, "")
+    # Remove markdown code blocks if present
+    json_text = re.sub(r'```json\s*|\s*```', '', response_text).strip()
+
+    try:
+        return json.loads(json_text)
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return result.output.get(key)
+
+def safe_get_nested(result, key_path, default=None):
+    """Safely get nested value from result.output."""
+    output = result.output or {}
+    current = output
+
+    for key in key_path:
+        if isinstance(current, dict):
+            current = current.get(key)
+        elif isinstance(current, str):
+            try:
+                json_text = re.sub(r'```json\s*|\s*```', '', current).strip()
+                parsed = json.loads(json_text)
+                if isinstance(parsed, dict):
+                    current = parsed.get(key)
+                else:
+                    return default
+            except json.JSONDecodeError:
+                return default
+        else:
+            return default
+
+    return current if current is not None else default
+
+# Make available in tests
+pytest.parse_json_from_output = _parse_json_from_output
+pytest.safe_get_nested = safe_get_nested
+```
+
+**Usage in tests**:
+```python
+# Use helper to parse JSON safely
+parsed = pytest.parse_json_from_output(result, "recommendation")
+if isinstance(parsed, dict):
+    approval = parsed.get("approval_decision", "UNKNOWN")
+
+# Safe nested access
+risk_score = pytest.safe_get_nested(result, ["analysis", "risk_score"], default=0.0)
+```
+
+#### Test Count Guidance
+
+**Generate 8-15 tests total, NOT 30+**
+
+- ✅ 2-3 tests per success criterion
+- ✅ 1 happy path test
+- ✅ 1 boundary/edge case test
+- ✅ 1 error handling test (optional)
+
+**Why fewer tests?**:
+- Each test requires real LLM call (~3 seconds, costs money)
+- 30 tests = 90 seconds, $0.30+ in costs
+- 12 tests = 36 seconds, $0.12 in costs
+- Focus on quality over quantity
+
+#### ExecutionResult Fields (Important!)
+
+**`result.success=True` means NO exception, NOT goal achieved**
+
+```python
+# ❌ WRONG - assumes goal achieved
+assert result.success
+
+# ✅ RIGHT - check success AND output
+assert result.success, f"Agent failed: {result.error}"
+output = result.output or {}
+approval = output.get("approval_decision")
+assert approval == "APPROVED", f"Expected APPROVED, got {approval}"
+```
+
+**All ExecutionResult fields**:
+- `success: bool` - Execution completed without exception (NOT goal achieved!)
+- `output: dict` - Complete memory snapshot (may contain raw strings)
+- `error: str | None` - Error message if failed
+- `steps_executed: int` - Number of nodes executed
+- `total_tokens: int` - Cumulative token usage
+- `total_latency_ms: int` - Total execution time
+- `path: list[str]` - Node IDs traversed
+- `paused_at: str | None` - Node ID if HITL pause occurred
+- `session_state: dict` - State for resuming
+
 ### Happy Path Test
 ```python
 @pytest.mark.asyncio
