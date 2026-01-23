@@ -117,12 +117,11 @@ class GraphExecutor:
                 error=f"Invalid graph: {errors}",
             )
 
-        # Initialize execution state
+        # Initialize shared memory
         memory = SharedMemory()
 
-        # Restore session state if provided
+        # Restore session state if provided (for HITL resume)
         if session_state and "memory" in session_state:
-            # Restore memory from previous session
             for key, value in session_state["memory"].items():
                 memory.write(key, value)
             self.logger.info(f"📥 Restored session state with {len(session_state['memory'])} memory keys")
@@ -132,16 +131,16 @@ class GraphExecutor:
             for key, value in input_data.items():
                 memory.write(key, value)
 
-        path: list[str] = []
-        total_tokens = 0
-        total_latency = 0
-
-        # Determine entry point (may differ if resuming)
+        # Get entry point (may be different if resuming)
         current_node_id = graph.get_entry_point(session_state)
-        steps = 0
 
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
+
+        path: list[str] = []
+        total_tokens = 0
+        total_latency = 0
+        steps = 0
 
         # Start run
         _run_id = self.runtime.start_run(
@@ -168,8 +167,6 @@ class GraphExecutor:
                 # Check if pause (HITL) before execution
                 if current_node_id in graph.pause_nodes:
                     self.logger.info(f"⏸ Paused at HITL node: {node_spec.name}")
-                    # Execute this node, then pause
-                    # (We'll check again after execution and save state)
 
                 self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
@@ -189,7 +186,6 @@ class GraphExecutor:
                     for key in node_spec.input_keys:
                         value = memory.read(key)
                         if value is not None:
-                            # Truncate long values for readability
                             value_str = str(value)
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
@@ -218,7 +214,7 @@ class GraphExecutor:
                     summary = result.to_summary(node_spec)
                     self.logger.info(f"   📝 Summary: {summary}")
 
-                    # Log what was written to memory (detailed view)
+                    # Log what was written to memory
                     if result.output:
                         self.logger.info("   Written to memory:")
                         for key, value in result.output.items():
@@ -235,26 +231,23 @@ class GraphExecutor:
                 # Handle failure
                 if not result.success:
                     if ctx.attempt < ctx.max_attempts:
-                        # Retry
                         ctx.attempt += 1
                         continue
                     else:
-                        # Move to failure handling
                         self.runtime.report_problem(
                             severity="critical",
                             description=f"Node {current_node_id} failed: {result.error}",
                         )
 
-                # Check if we just executed a pause node - if so, save state and return
-                # This must happen BEFORE determining next node, since pause nodes may have no edges
+                # Check if we just executed a pause node
                 if node_spec.id in graph.pause_nodes:
                     self.logger.info("💾 Saving session state after pause node")
                     saved_memory = memory.read_all()
                     session_state_out = {
                         "paused_at": node_spec.id,
-                        "resume_from": f"{node_spec.id}_resume",  # Resume key
+                        "resume_from": f"{node_spec.id}_resume",
                         "memory": saved_memory,
-                        "next_node": None,  # Will resume from entry point
+                        "next_node": None,
                     }
 
                     self.runtime.end_run(
@@ -274,19 +267,18 @@ class GraphExecutor:
                         session_state=session_state_out,
                     )
 
-                # Check if this is a terminal node - if so, we're done
+                # Check if this is a terminal node
                 if node_spec.id in graph.terminal_nodes:
                     self.logger.info(f"✓ Reached terminal node: {node_spec.name}")
                     break
 
-                # Determine next node
+                # Follow edges to next node
+                next_node_id = None
+
                 if result.next_node:
-                    # Router explicitly set next node
-                    self.logger.info(f"   → Router directing to: {result.next_node}")
-                    current_node_id = result.next_node
+                    next_node_id = result.next_node
                 else:
-                    # Follow edges
-                    next_node = self._follow_edges(
+                    next_node_id = self._follow_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
@@ -294,12 +286,14 @@ class GraphExecutor:
                         result=result,
                         memory=memory,
                     )
-                    if next_node is None:
-                        self.logger.info("   → No more edges, ending execution")
-                        break  # No valid edge, end execution
-                    next_spec = graph.get_node(next_node)
-                    self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
-                    current_node_id = next_node
+
+                if next_node_id is None:
+                    self.logger.info("   → No more edges, ending execution")
+                    break
+
+                next_spec = graph.get_node(next_node_id)
+                self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node_id}")
+                current_node_id = next_node_id
 
                 # Update input_data for next node
                 input_data = result.output
