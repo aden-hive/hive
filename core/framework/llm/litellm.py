@@ -183,21 +183,23 @@ class LiteLLMProvider(LLMProvider):
 
             # Process tool calls.
             # Add assistant message with tool calls.
-            current_messages.append({
-                "role": "assistant",
-                "content": message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in message.tool_calls
-                ],
-            })
+            current_messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ],
+                }
+            )
 
             # Execute tools and add results.
             for tool_call in message.tool_calls:
@@ -216,11 +218,13 @@ class LiteLLMProvider(LLMProvider):
                 result = tool_executor(tool_use)
 
                 # Add tool result message
-                current_messages.append({
-                    "role": "tool",
-                    "tool_call_id": result.tool_use_id,
-                    "content": result.content,
-                })
+                current_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": result.tool_use_id,
+                        "content": result.content,
+                    }
+                )
 
         # Max iterations reached
         return LLMResponse(

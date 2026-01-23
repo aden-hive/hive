@@ -173,6 +173,7 @@ def cmd_test_generate(args: argparse.Namespace) -> int:
     # Get LLM provider
     try:
         from framework.llm import AnthropicProvider
+
         llm = AnthropicProvider()
     except Exception as e:
         print(f"Error: Failed to initialize LLM provider: {e}")
@@ -309,6 +310,7 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
     runtime_storage = None
     try:
         from framework.storage.backend import FileStorage
+
         runtime_storage = FileStorage(f"data/runtime/{args.goal_id}")
     except Exception:
         pass
@@ -354,6 +356,7 @@ def cmd_test_list(args: argparse.Namespace) -> int:
     # Filter by status
     if args.status != "all":
         from framework.testing.test_case import ApprovalStatus
+
         try:
             filter_status = ApprovalStatus(args.status)
             tests = [t for t in tests if t.approval_status == filter_status]

@@ -80,9 +80,7 @@ class BuildSession:
                 success_criteria=[
                     SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
                 ],
-                constraints=[
-                    Constraint(**c) for c in goal_data.get("constraints", [])
-                ],
+                constraints=[Constraint(**c) for c in goal_data.get("constraints", [])],
             )
 
         # Restore nodes
@@ -181,18 +179,21 @@ def get_session() -> BuildSession:
 # MCP TOOLS
 # =============================================================================
 
+
 @mcp.tool()
 def create_session(name: Annotated[str, "Name for the agent being built"]) -> str:
     """Create a new agent building session. Call this first before building an agent."""
     global _session
     _session = BuildSession(name)
     _save_session(_session)  # Auto-save
-    return json.dumps({
-        "session_id": _session.id,
-        "name": name,
-        "status": "created",
-        "persisted": True,
-    })
+    return json.dumps(
+        {
+            "session_id": _session.id,
+            "name": name,
+            "status": "created",
+            "persisted": True,
+        }
+    )
 
 
 @mcp.tool()
@@ -206,15 +207,17 @@ def list_sessions() -> str:
             try:
                 with open(session_file, "r") as f:
                     data = json.load(f)
-                    sessions.append({
-                        "session_id": data["session_id"],
-                        "name": data["name"],
-                        "created_at": data.get("created_at"),
-                        "last_modified": data.get("last_modified"),
-                        "node_count": len(data.get("nodes", [])),
-                        "edge_count": len(data.get("edges", [])),
-                        "has_goal": data.get("goal") is not None,
-                    })
+                    sessions.append(
+                        {
+                            "session_id": data["session_id"],
+                            "name": data["name"],
+                            "created_at": data.get("created_at"),
+                            "last_modified": data.get("last_modified"),
+                            "node_count": len(data.get("nodes", [])),
+                            "edge_count": len(data.get("edges", [])),
+                            "has_goal": data.get("goal") is not None,
+                        }
+                    )
             except Exception:
                 pass  # Skip corrupted files
 
@@ -227,11 +230,14 @@ def list_sessions() -> str:
         except Exception:
             pass
 
-    return json.dumps({
-        "sessions": sorted(sessions, key=lambda s: s["last_modified"], reverse=True),
-        "total": len(sessions),
-        "active_session_id": active_id,
-    }, indent=2)
+    return json.dumps(
+        {
+            "sessions": sorted(sessions, key=lambda s: s["last_modified"], reverse=True),
+            "total": len(sessions),
+            "active_session_id": active_id,
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -246,22 +252,21 @@ def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) 
         with open(ACTIVE_SESSION_FILE, "w") as f:
             f.write(session_id)
 
-        return json.dumps({
-            "success": True,
-            "session_id": _session.id,
-            "name": _session.name,
-            "node_count": len(_session.nodes),
-            "edge_count": len(_session.edges),
-            "has_goal": _session.goal is not None,
-            "created_at": _session.created_at,
-            "last_modified": _session.last_modified,
-            "message": f"Session '{_session.name}' loaded successfully"
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "session_id": _session.id,
+                "name": _session.name,
+                "node_count": len(_session.nodes),
+                "edge_count": len(_session.edges),
+                "has_goal": _session.goal is not None,
+                "created_at": _session.created_at,
+                "last_modified": _session.last_modified,
+                "message": f"Session '{_session.name}' loaded successfully",
+            }
+        )
     except Exception as e:
-        return json.dumps({
-            "success": False,
-            "error": str(e)
-        })
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -271,10 +276,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
 
     session_file = SESSIONS_DIR / f"{session_id}.json"
     if not session_file.exists():
-        return json.dumps({
-            "success": False,
-            "error": f"Session '{session_id}' not found"
-        })
+        return json.dumps({"success": False, "error": f"Session '{session_id}' not found"})
 
     try:
         # Remove session file
@@ -290,16 +292,15 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
                 if active_id == session_id:
                     ACTIVE_SESSION_FILE.unlink()
 
-        return json.dumps({
-            "success": True,
-            "deleted_session_id": session_id,
-            "message": f"Session '{session_id}' deleted successfully"
-        })
+        return json.dumps(
+            {
+                "success": True,
+                "deleted_session_id": session_id,
+                "message": f"Session '{session_id}' deleted successfully",
+            }
+        )
     except Exception as e:
-        return json.dumps({
-            "success": False,
-            "error": str(e)
-        })
+        return json.dumps({"success": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -307,8 +308,12 @@ def set_goal(
     goal_id: Annotated[str, "Unique identifier for the goal"],
     name: Annotated[str, "Human-readable name"],
     description: Annotated[str, "What the agent should accomplish"],
-    success_criteria: Annotated[str, "JSON array of success criteria objects with id, description, metric, target, weight"],
-    constraints: Annotated[str, "JSON array of constraint objects with id, description, constraint_type, category"] = "[]",
+    success_criteria: Annotated[
+        str, "JSON array of success criteria objects with id, description, metric, target, weight"
+    ],
+    constraints: Annotated[
+        str, "JSON array of constraint objects with id, description, constraint_type, category"
+    ] = "[]",
 ) -> str:
     """Define the goal for the agent. Goals are the source of truth - they define what success looks like."""
     session = get_session()
@@ -365,33 +370,36 @@ def set_goal(
 
     _save_session(session)  # Auto-save
 
-    return json.dumps({
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-        "goal": session.goal.model_dump(),
-        "approval_required": True,
-        "approval_question": {
-            "component_type": "goal",
-            "component_name": name,
-            "question": "Do you approve this goal definition?",
-            "header": "Approve Goal",
-            "options": [
-                {
-                    "label": "✓ Approve (Recommended)",
-                    "description": "Goal looks good, proceed to adding nodes"
-                },
-                {
-                    "label": "✗ Reject & Modify",
-                    "description": "Need to adjust goal criteria or constraints"
-                },
-                {
-                    "label": "⏸ Pause & Review",
-                    "description": "I need more time to review this goal"
-                }
-            ]
-        }
-    }, default=str)
+    return json.dumps(
+        {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "goal": session.goal.model_dump(),
+            "approval_required": True,
+            "approval_question": {
+                "component_type": "goal",
+                "component_name": name,
+                "question": "Do you approve this goal definition?",
+                "header": "Approve Goal",
+                "options": [
+                    {
+                        "label": "✓ Approve (Recommended)",
+                        "description": "Goal looks good, proceed to adding nodes",
+                    },
+                    {
+                        "label": "✗ Reject & Modify",
+                        "description": "Need to adjust goal criteria or constraints",
+                    },
+                    {
+                        "label": "⏸ Pause & Review",
+                        "description": "I need more time to review this goal",
+                    },
+                ],
+            },
+        },
+        default=str,
+    )
 
 
 def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
@@ -413,13 +421,15 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
             cred_errors = []
             for cred_name, spec in missing_creds:
                 affected_tools = [t for t in tools_list if t in spec.tools]
-                cred_errors.append({
-                    "credential": cred_name,
-                    "env_var": spec.env_var,
-                    "tools_affected": affected_tools,
-                    "help_url": spec.help_url,
-                    "description": spec.description,
-                })
+                cred_errors.append(
+                    {
+                        "credential": cred_name,
+                        "env_var": spec.env_var,
+                        "tools_affected": affected_tools,
+                        "help_url": spec.help_url,
+                        "description": spec.description,
+                    }
+                )
 
             return {
                 "valid": False,
@@ -453,7 +463,9 @@ def add_node(
     output_keys: Annotated[str, "JSON array of keys this node writes to shared memory"],
     system_prompt: Annotated[str, "Instructions for LLM nodes"] = "",
     tools: Annotated[str, "JSON array of tool names for llm_tool_use nodes"] = "[]",
-    routes: Annotated[str, "JSON object mapping conditions to target node IDs for router nodes"] = "{}",
+    routes: Annotated[
+        str, "JSON object mapping conditions to target node IDs for router nodes"
+    ] = "{}",
 ) -> str:
     """Add a node to the agent graph. Nodes are units of work that process inputs and produce outputs."""
     session = get_session()
@@ -504,34 +516,37 @@ def add_node(
 
     _save_session(session)  # Auto-save
 
-    return json.dumps({
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-        "node": node.model_dump(),
-        "total_nodes": len(session.nodes),
-        "approval_required": True,
-        "approval_question": {
-            "component_type": "node",
-            "component_name": name,
-            "question": f"Do you approve this {node_type} node: {name}?",
-            "header": "Approve Node",
-            "options": [
-                {
-                    "label": "✓ Approve (Recommended)",
-                    "description": f"Node '{name}' looks good, continue building"
-                },
-                {
-                    "label": "✗ Reject & Modify",
-                    "description": "Need to change node configuration"
-                },
-                {
-                    "label": "⏸ Pause & Review",
-                    "description": "I need more time to review this node"
-                }
-            ]
-        }
-    }, default=str)
+    return json.dumps(
+        {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "node": node.model_dump(),
+            "total_nodes": len(session.nodes),
+            "approval_required": True,
+            "approval_question": {
+                "component_type": "node",
+                "component_name": name,
+                "question": f"Do you approve this {node_type} node: {name}?",
+                "header": "Approve Node",
+                "options": [
+                    {
+                        "label": "✓ Approve (Recommended)",
+                        "description": f"Node '{name}' looks good, continue building",
+                    },
+                    {
+                        "label": "✗ Reject & Modify",
+                        "description": "Need to change node configuration",
+                    },
+                    {
+                        "label": "⏸ Pause & Review",
+                        "description": "I need more time to review this node",
+                    },
+                ],
+            },
+        },
+        default=str,
+    )
 
 
 @mcp.tool()
@@ -539,7 +554,9 @@ def add_edge(
     edge_id: Annotated[str, "Unique identifier for the edge"],
     source: Annotated[str, "Source node ID"],
     target: Annotated[str, "Target node ID"],
-    condition: Annotated[str, "When to traverse: always, on_success, on_failure, conditional"] = "on_success",
+    condition: Annotated[
+        str, "When to traverse: always, on_success, on_failure, conditional"
+    ] = "on_success",
     condition_expr: Annotated[str, "Python expression for conditional edges"] = "",
     priority: Annotated[int, "Priority when multiple edges match (higher = first)"] = 0,
 ) -> str:
@@ -582,33 +599,36 @@ def add_edge(
 
     _save_session(session)  # Auto-save
 
-    return json.dumps({
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "edge": edge.model_dump(),
-        "total_edges": len(session.edges),
-        "approval_required": True,
-        "approval_question": {
-            "component_type": "edge",
-            "component_name": f"{source} → {target}",
-            "question": f"Do you approve this edge: {source} → {target}?",
-            "header": "Approve Edge",
-            "options": [
-                {
-                    "label": "✓ Approve (Recommended)",
-                    "description": "Edge connection looks good"
-                },
-                {
-                    "label": "✗ Reject & Modify",
-                    "description": "Need to change edge condition or targets"
-                },
-                {
-                    "label": "⏸ Pause & Review",
-                    "description": "I need more time to review this edge"
-                }
-            ]
-        }
-    }, default=str)
+    return json.dumps(
+        {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "edge": edge.model_dump(),
+            "total_edges": len(session.edges),
+            "approval_required": True,
+            "approval_question": {
+                "component_type": "edge",
+                "component_name": f"{source} → {target}",
+                "question": f"Do you approve this edge: {source} → {target}?",
+                "header": "Approve Edge",
+                "options": [
+                    {
+                        "label": "✓ Approve (Recommended)",
+                        "description": "Edge connection looks good",
+                    },
+                    {
+                        "label": "✗ Reject & Modify",
+                        "description": "Need to change edge condition or targets",
+                    },
+                    {
+                        "label": "⏸ Pause & Review",
+                        "description": "I need more time to review this edge",
+                    },
+                ],
+            },
+        },
+        default=str,
+    )
 
 
 @mcp.tool()
@@ -674,34 +694,37 @@ def update_node(
 
     _save_session(session)  # Auto-save
 
-    return json.dumps({
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-        "node": node.model_dump(),
-        "total_nodes": len(session.nodes),
-        "approval_required": True,
-        "approval_question": {
-            "component_type": "node",
-            "component_name": node.name,
-            "question": f"Do you approve this updated {node.node_type} node: {node.name}?",
-            "header": "Approve Node Update",
-            "options": [
-                {
-                    "label": "✓ Approve (Recommended)",
-                    "description": f"Updated node '{node.name}' looks good"
-                },
-                {
-                    "label": "✗ Reject & Modify",
-                    "description": "Need to change node configuration"
-                },
-                {
-                    "label": "⏸ Pause & Review",
-                    "description": "I need more time to review this update"
-                }
-            ]
-        }
-    }, default=str)
+    return json.dumps(
+        {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "node": node.model_dump(),
+            "total_nodes": len(session.nodes),
+            "approval_required": True,
+            "approval_question": {
+                "component_type": "node",
+                "component_name": node.name,
+                "question": f"Do you approve this updated {node.node_type} node: {node.name}?",
+                "header": "Approve Node Update",
+                "options": [
+                    {
+                        "label": "✓ Approve (Recommended)",
+                        "description": f"Updated node '{node.name}' looks good",
+                    },
+                    {
+                        "label": "✗ Reject & Modify",
+                        "description": "Need to change node configuration",
+                    },
+                    {
+                        "label": "⏸ Pause & Review",
+                        "description": "I need more time to review this update",
+                    },
+                ],
+            },
+        },
+        default=str,
+    )
 
 
 @mcp.tool()
@@ -726,21 +749,21 @@ def delete_node(
 
     # Remove all edges connected to this node
     removed_edges = [e.id for e in session.edges if e.source == node_id or e.target == node_id]
-    session.edges = [
-        e for e in session.edges
-        if not (e.source == node_id or e.target == node_id)
-    ]
+    session.edges = [e for e in session.edges if not (e.source == node_id or e.target == node_id)]
 
     _save_session(session)  # Auto-save
 
-    return json.dumps({
-        "valid": True,
-        "deleted_node": removed_node.model_dump(),
-        "removed_edges": removed_edges,
-        "total_nodes": len(session.nodes),
-        "total_edges": len(session.edges),
-        "message": f"Node '{node_id}' and {len(removed_edges)} connected edge(s) removed"
-    }, default=str)
+    return json.dumps(
+        {
+            "valid": True,
+            "deleted_node": removed_node.model_dump(),
+            "removed_edges": removed_edges,
+            "total_nodes": len(session.nodes),
+            "total_edges": len(session.edges),
+            "message": f"Node '{node_id}' and {len(removed_edges)} connected edge(s) removed",
+        },
+        default=str,
+    )
 
 
 @mcp.tool()
@@ -765,12 +788,15 @@ def delete_edge(
 
     _save_session(session)  # Auto-save
 
-    return json.dumps({
-        "valid": True,
-        "deleted_edge": removed_edge.model_dump(),
-        "total_edges": len(session.edges),
-        "message": f"Edge '{edge_id}' removed: {removed_edge.source} → {removed_edge.target}"
-    }, default=str)
+    return json.dumps(
+        {
+            "valid": True,
+            "deleted_edge": removed_edge.model_dump(),
+            "total_edges": len(session.edges),
+            "message": f"Edge '{edge_id}' removed: {removed_edge.source} → {removed_edge.target}",
+        },
+        default=str,
+    )
 
 
 @mcp.tool()
@@ -793,12 +819,18 @@ def validate_graph() -> str:
     pause_nodes = [n.id for n in session.nodes if "PAUSE" in n.description.upper()]
 
     # Identify resume entry points (nodes marked as RESUME ENTRY POINT in description)
-    resume_entry_points = [n.id for n in session.nodes if "RESUME" in n.description.upper() and "ENTRY" in n.description.upper()]
+    resume_entry_points = [
+        n.id
+        for n in session.nodes
+        if "RESUME" in n.description.upper() and "ENTRY" in n.description.upper()
+    ]
 
     is_pause_resume_agent = len(pause_nodes) > 0 or len(resume_entry_points) > 0
 
     if is_pause_resume_agent:
-        warnings.append(f"Pause/resume architecture detected. Pause nodes: {pause_nodes}, Resume entry points: {resume_entry_points}")
+        warnings.append(
+            f"Pause/resume architecture detected. Pause nodes: {pause_nodes}, Resume entry points: {resume_entry_points}"
+        )
 
     # Find entry node (no incoming edges)
     entry_candidates = []
@@ -851,7 +883,9 @@ def validate_graph() -> str:
                 # Filter out resume entry points from unreachable list
                 unreachable_non_resume = [n for n in unreachable if n not in resume_entry_points]
                 if unreachable_non_resume:
-                    warnings.append(f"Nodes unreachable from primary entry (may be resume-only nodes): {unreachable_non_resume}")
+                    warnings.append(
+                        f"Nodes unreachable from primary entry (may be resume-only nodes): {unreachable_non_resume}"
+                    )
             else:
                 errors.append(f"Unreachable nodes: {unreachable}")
 
@@ -863,9 +897,7 @@ def validate_graph() -> str:
             dependencies[edge.target].append(edge.source)
 
     # Build output map (node_id -> keys it produces)
-    node_outputs: dict[str, set[str]] = {
-        node.id: set(node.output_keys) for node in session.nodes
-    }
+    node_outputs: dict[str, set[str]] = {node.id: set(node.output_keys) for node in session.nodes}
 
     # Compute available context for each node (what keys it can read)
     # Using topological order
@@ -959,9 +991,13 @@ def validate_graph() -> str:
                     for key in other_missing:
                         producers = [n.id for n in session.nodes if key in n.output_keys]
                         if producers:
-                            suggestions.append(f"'{key}' is produced by {producers} - ensure edge exists")
+                            suggestions.append(
+                                f"'{key}' is produced by {producers} - ensure edge exists"
+                            )
                         else:
-                            suggestions.append(f"'{key}' is not produced - add node or include in external inputs")
+                            suggestions.append(
+                                f"'{key}' is not produced - add node or include in external inputs"
+                            )
 
                     context_errors.append(
                         f"Resume node '{node_id}' requires {other_missing} but dependencies {deps} don't provide them. "
@@ -973,9 +1009,13 @@ def validate_graph() -> str:
                 for key in missing:
                     producers = [n.id for n in session.nodes if key in n.output_keys]
                     if producers:
-                        suggestions.append(f"'{key}' is produced by {producers} - add dependency edge")
+                        suggestions.append(
+                            f"'{key}' is produced by {producers} - add dependency edge"
+                        )
                     else:
-                        suggestions.append(f"'{key}' is not produced by any node - add a node that outputs it")
+                        suggestions.append(
+                            f"'{key}' is not produced by any node - add a node that outputs it"
+                        )
 
                 context_errors.append(
                     f"Node '{node_id}' requires {missing} but dependencies {deps} don't provide them. "
@@ -985,22 +1025,24 @@ def validate_graph() -> str:
     errors.extend(context_errors)
     warnings.extend(context_warnings)
 
-    return json.dumps({
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-        "entry_node": entry_candidates[0] if entry_candidates else None,
-        "terminal_nodes": terminal_candidates,
-        "node_count": len(session.nodes),
-        "edge_count": len(session.edges),
-        "pause_resume_detected": is_pause_resume_agent,
-        "pause_nodes": pause_nodes,
-        "resume_entry_points": resume_entry_points,
-        "all_entry_points": entry_candidates,
-        "context_flow": {
-            node_id: list(keys) for node_id, keys in available_context.items()
-        } if available_context else None,
-    })
+    return json.dumps(
+        {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "entry_node": entry_candidates[0] if entry_candidates else None,
+            "terminal_nodes": terminal_candidates,
+            "node_count": len(session.nodes),
+            "edge_count": len(session.edges),
+            "pause_resume_detected": is_pause_resume_agent,
+            "pause_nodes": pause_nodes,
+            "resume_entry_points": resume_entry_points,
+            "all_entry_points": entry_candidates,
+            "context_flow": {node_id: list(keys) for node_id, keys in available_context.items()}
+            if available_context
+            else None,
+        }
+    )
 
 
 def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -> str:
@@ -1054,7 +1096,9 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
     # Build success criteria section
     criteria_section = []
     for criterion in goal.success_criteria:
-        crit_dict = criterion.model_dump() if hasattr(criterion, 'model_dump') else criterion.__dict__
+        crit_dict = (
+            criterion.model_dump() if hasattr(criterion, "model_dump") else criterion.__dict__
+        )
         criteria_section.append(
             f"**{crit_dict.get('description', 'N/A')}** (weight {crit_dict.get('weight', 1.0)})\n"
             f"- Metric: {crit_dict.get('metric', 'N/A')}\n"
@@ -1064,7 +1108,9 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
     # Build constraints section
     constraints_section = []
     for constraint in goal.constraints:
-        const_dict = constraint.model_dump() if hasattr(constraint, 'model_dump') else constraint.__dict__
+        const_dict = (
+            constraint.model_dump() if hasattr(constraint, "model_dump") else constraint.__dict__
+        )
         constraints_section.append(
             f"**{const_dict.get('description', 'N/A')}** ({const_dict.get('constraint_type', 'hard')})\n"
             f"- Category: {const_dict.get('category', 'N/A')}"
@@ -1074,7 +1120,7 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
 
 **Version**: 1.0.0
 **Type**: Multi-node agent
-**Created**: {datetime.now().strftime('%Y-%m-%d')}
+**Created**: {datetime.now().strftime("%Y-%m-%d")}
 
 ## Overview
 
@@ -1117,15 +1163,31 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
 
 {"## MCP Tool Sources" if session.mcp_servers else ""}
 
-{chr(10).join(f'''### {s["name"]} ({s["transport"]})
+{
+        chr(10).join(
+            f'''### {s["name"]} ({s["transport"]})
 {s.get("description", "")}
 
 **Configuration:**
-''' + (f'''- Command: `{s.get("command")}`
+'''
+            + (
+                f'''- Command: `{s.get("command")}`
 - Args: `{s.get("args")}`
-- Working Directory: `{s.get("cwd")}`''' if s["transport"] == "stdio" else f'''- URL: `{s.get("url")}`''') for s in session.mcp_servers) if session.mcp_servers else ""}
+- Working Directory: `{s.get("cwd")}`'''
+                if s["transport"] == "stdio"
+                else f'''- URL: `{s.get("url")}`'''
+            )
+            for s in session.mcp_servers
+        )
+        if session.mcp_servers
+        else ""
+    }
 
-{"Tools from these MCP servers are automatically loaded when the agent runs." if session.mcp_servers else ""}
+{
+        "Tools from these MCP servers are automatically loaded when the agent runs."
+        if session.mcp_servers
+        else ""
+    }
 
 ## Usage
 
@@ -1159,11 +1221,11 @@ The agent's entry node `{export_data["graph"]["entry_node"]}` requires:
 
 ### Output Schema
 
-Terminal nodes: {', '.join(f'`{t}`' for t in export_data["graph"]["terminal_nodes"])}
+Terminal nodes: {", ".join(f"`{t}`" for t in export_data["graph"]["terminal_nodes"])}
 
 ## Version History
 
-- **1.0.0** ({datetime.now().strftime('%Y-%m-%d')}): Initial release
+- **1.0.0** ({datetime.now().strftime("%Y-%m-%d")}): Initial release
   - {len(nodes)} nodes, {len(edges)} edges
   - Goal: {goal.name}
 """
@@ -1257,22 +1319,27 @@ def export_graph() -> str:
             for route_name, target_node in node.routes.items():
                 # Check if edge already exists
                 edge_exists = any(
-                    e["source"] == node.id and e["target"] == target_node
-                    for e in edges_list
+                    e["source"] == node.id and e["target"] == target_node for e in edges_list
                 )
                 if not edge_exists:
                     # Auto-generate edge from router route
                     # Use on_success for most routes, on_failure for "fail"/"error"/"escalate"
-                    condition = "on_failure" if route_name in ["fail", "error", "escalate"] else "on_success"
-                    edges_list.append({
-                        "id": f"{node.id}_to_{target_node}",
-                        "source": node.id,
-                        "target": target_node,
-                        "condition": condition,
-                        "condition_expr": None,
-                        "priority": 0,
-                        "input_mapping": {},
-                    })
+                    condition = (
+                        "on_failure"
+                        if route_name in ["fail", "error", "escalate"]
+                        else "on_success"
+                    )
+                    edges_list.append(
+                        {
+                            "id": f"{node.id}_to_{target_node}",
+                            "source": node.id,
+                            "target": target_node,
+                            "condition": condition,
+                            "condition_expr": None,
+                            "priority": 0,
+                            "input_mapping": {},
+                        }
+                    )
 
     # Build GraphSpec
     graph_spec = {
@@ -1315,10 +1382,10 @@ def export_graph() -> str:
     }
 
     # Add enrichment if present in goal
-    if hasattr(session.goal, 'success_criteria'):
+    if hasattr(session.goal, "success_criteria"):
         enriched_criteria = []
         for criterion in session.goal.success_criteria:
-            crit_dict = criterion.model_dump() if hasattr(criterion, 'model_dump') else criterion
+            crit_dict = criterion.model_dump() if hasattr(criterion, "model_dump") else criterion
             enriched_criteria.append(crit_dict)
         export_data["goal"]["success_criteria"] = enriched_criteria
 
@@ -1342,9 +1409,7 @@ def export_graph() -> str:
     mcp_servers_path = None
     mcp_servers_size = 0
     if session.mcp_servers:
-        mcp_config = {
-            "servers": session.mcp_servers
-        }
+        mcp_config = {"servers": session.mcp_servers}
         mcp_servers_path = exports_dir / "mcp_servers.json"
         with open(mcp_servers_path, "w") as f:
             json.dump(mcp_config, f, indent=2)
@@ -1371,37 +1436,44 @@ def export_graph() -> str:
             "size_bytes": mcp_servers_size,
         }
 
-    return json.dumps({
-        "success": True,
-        "agent": export_data["agent"],
-        "files_written": files_written,
-        "graph": graph_spec,
-        "goal": session.goal.model_dump(),
-        "evaluation_rules": _evaluation_rules,
-        "required_tools": list(all_tools),
-        "node_count": len(session.nodes),
-        "edge_count": len(edges_list),
-        "mcp_servers_count": len(session.mcp_servers),
-        "note": f"Agent exported to {exports_dir}. Files: agent.json, README.md" + (", mcp_servers.json" if session.mcp_servers else ""),
-    }, default=str, indent=2)
+    return json.dumps(
+        {
+            "success": True,
+            "agent": export_data["agent"],
+            "files_written": files_written,
+            "graph": graph_spec,
+            "goal": session.goal.model_dump(),
+            "evaluation_rules": _evaluation_rules,
+            "required_tools": list(all_tools),
+            "node_count": len(session.nodes),
+            "edge_count": len(edges_list),
+            "mcp_servers_count": len(session.mcp_servers),
+            "note": f"Agent exported to {exports_dir}. Files: agent.json, README.md"
+            + (", mcp_servers.json" if session.mcp_servers else ""),
+        },
+        default=str,
+        indent=2,
+    )
 
 
 @mcp.tool()
 def get_session_status() -> str:
     """Get the current status of the build session."""
     session = get_session()
-    return json.dumps({
-        "session_id": session.id,
-        "name": session.name,
-        "has_goal": session.goal is not None,
-        "goal_name": session.goal.name if session.goal else None,
-        "node_count": len(session.nodes),
-        "edge_count": len(session.edges),
-        "mcp_servers_count": len(session.mcp_servers),
-        "nodes": [n.id for n in session.nodes],
-        "edges": [(e.source, e.target) for e in session.edges],
-        "mcp_servers": [s["name"] for s in session.mcp_servers],
-    })
+    return json.dumps(
+        {
+            "session_id": session.id,
+            "name": session.name,
+            "has_goal": session.goal is not None,
+            "goal_name": session.goal.name if session.goal else None,
+            "node_count": len(session.nodes),
+            "edge_count": len(session.edges),
+            "mcp_servers_count": len(session.mcp_servers),
+            "nodes": [n.id for n in session.nodes],
+            "edges": [(e.source, e.target) for e in session.edges],
+            "mcp_servers": [s["name"] for s in session.mcp_servers],
+        }
+    )
 
 
 @mcp.tool()
@@ -1442,17 +1514,16 @@ def add_mcp_server(
 
     # Validate transport
     if transport not in ["stdio", "http"]:
-        return json.dumps({
-            "success": False,
-            "error": f"Invalid transport '{transport}'. Must be 'stdio' or 'http'"
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Invalid transport '{transport}'. Must be 'stdio' or 'http'",
+            }
+        )
 
     # Check for duplicate
     if any(s["name"] == name for s in session.mcp_servers):
-        return json.dumps({
-            "success": False,
-            "error": f"MCP server '{name}' already registered"
-        })
+        return json.dumps({"success": False, "error": f"MCP server '{name}' already registered"})
 
     # Parse JSON inputs
     try:
@@ -1460,10 +1531,7 @@ def add_mcp_server(
         env_dict = json.loads(env)
         headers_dict = json.loads(headers)
     except json.JSONDecodeError as e:
-        return json.dumps({
-            "success": False,
-            "error": f"Invalid JSON: {e}"
-        })
+        return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
 
     # Validate required fields
     errors = []
@@ -1518,21 +1586,26 @@ def add_mcp_server(
             session.mcp_servers.append(server_config)
             _save_session(session)  # Auto-save
 
-            return json.dumps({
-                "success": True,
-                "server": server_config,
-                "tools_discovered": len(tool_names),
-                "tools": tool_names,
-                "total_mcp_servers": len(session.mcp_servers),
-                "note": f"MCP server '{name}' registered with {len(tool_names)} tools. These tools can now be used in llm_tool_use nodes.",
-            }, indent=2)
+            return json.dumps(
+                {
+                    "success": True,
+                    "server": server_config,
+                    "tools_discovered": len(tool_names),
+                    "tools": tool_names,
+                    "total_mcp_servers": len(session.mcp_servers),
+                    "note": f"MCP server '{name}' registered with {len(tool_names)} tools. These tools can now be used in llm_tool_use nodes.",
+                },
+                indent=2,
+            )
 
     except Exception as e:
-        return json.dumps({
-            "success": False,
-            "error": f"Failed to connect to MCP server: {str(e)}",
-            "suggestion": "Check that the command/url is correct and the server is accessible"
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Failed to connect to MCP server: {str(e)}",
+                "suggestion": "Check that the command/url is correct and the server is accessible",
+            }
+        )
 
 
 @mcp.tool()
@@ -1541,16 +1614,21 @@ def list_mcp_servers() -> str:
     session = get_session()
 
     if not session.mcp_servers:
-        return json.dumps({
-            "mcp_servers": [],
-            "total": 0,
-            "note": "No MCP servers registered. Use add_mcp_server to add tool sources."
-        })
+        return json.dumps(
+            {
+                "mcp_servers": [],
+                "total": 0,
+                "note": "No MCP servers registered. Use add_mcp_server to add tool sources.",
+            }
+        )
 
-    return json.dumps({
-        "mcp_servers": session.mcp_servers,
-        "total": len(session.mcp_servers),
-    }, indent=2)
+    return json.dumps(
+        {
+            "mcp_servers": session.mcp_servers,
+            "total": len(session.mcp_servers),
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -1566,20 +1644,14 @@ def list_mcp_tools(
     session = get_session()
 
     if not session.mcp_servers:
-        return json.dumps({
-            "success": False,
-            "error": "No MCP servers registered"
-        })
+        return json.dumps({"success": False, "error": "No MCP servers registered"})
 
     # Filter servers if name provided
     servers_to_query = session.mcp_servers
     if server_name:
         servers_to_query = [s for s in session.mcp_servers if s["name"] == server_name]
         if not servers_to_query:
-            return json.dumps({
-                "success": False,
-                "error": f"MCP server '{server_name}' not found"
-            })
+            return json.dumps({"success": False, "error": f"MCP server '{server_name}' not found"})
 
     all_tools = {}
 
@@ -1612,18 +1684,19 @@ def list_mcp_tools(
                 ]
 
         except Exception as e:
-            all_tools[server_config["name"]] = {
-                "error": f"Failed to connect: {str(e)}"
-            }
+            all_tools[server_config["name"]] = {"error": f"Failed to connect: {str(e)}"}
 
     total_tools = sum(len(tools) if isinstance(tools, list) else 0 for tools in all_tools.values())
 
-    return json.dumps({
-        "success": True,
-        "tools_by_server": all_tools,
-        "total_tools": total_tools,
-        "note": "Use these tool names in the 'tools' parameter when adding llm_tool_use nodes",
-    }, indent=2)
+    return json.dumps(
+        {
+            "success": True,
+            "tools_by_server": all_tools,
+            "total_tools": total_tools,
+            "note": "Use these tool names in the 'tools' parameter when adding llm_tool_use nodes",
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -1637,23 +1710,20 @@ def remove_mcp_server(
         if server["name"] == name:
             session.mcp_servers.pop(i)
             _save_session(session)  # Auto-save
-            return json.dumps({
-                "success": True,
-                "removed": name,
-                "remaining_servers": len(session.mcp_servers)
-            })
+            return json.dumps(
+                {"success": True, "removed": name, "remaining_servers": len(session.mcp_servers)}
+            )
 
-    return json.dumps({
-        "success": False,
-        "error": f"MCP server '{name}' not found"
-    })
+    return json.dumps({"success": False, "error": f"MCP server '{name}' not found"})
 
 
 @mcp.tool()
 def test_node(
     node_id: Annotated[str, "ID of the node to test"],
     test_input: Annotated[str, "JSON object with test input data for the node"],
-    mock_llm_response: Annotated[str, "Mock LLM response to simulate (for testing without API calls)"] = "",
+    mock_llm_response: Annotated[
+        str, "Mock LLM response to simulate (for testing without API calls)"
+    ] = "",
 ) -> str:
     """
     Test a single node with sample inputs. Use this during HITL approval to show
@@ -1714,11 +1784,14 @@ def test_node(
         "outputs_to_write": node_spec.output_keys,
     }
 
-    return json.dumps({
-        "success": True,
-        "test_result": result,
-        "recommendation": "Review the simulation above. Does this node behavior match your intent?",
-    }, indent=2)
+    return json.dumps(
+        {
+            "success": True,
+            "test_result": result,
+            "recommendation": "Review the simulation above. Does this node behavior match your intent?",
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -1744,11 +1817,13 @@ def test_graph(
     # Validate graph first
     validation = json.loads(validate_graph())
     if not validation["valid"]:
-        return json.dumps({
-            "success": False,
-            "error": "Graph is not valid",
-            "validation_errors": validation["errors"],
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "Graph is not valid",
+                "validation_errors": validation["errors"],
+            }
+        )
 
     # Parse test input
     try:
@@ -1775,10 +1850,12 @@ def test_graph(
                 break
 
         if current_node is None:
-            execution_trace.append({
-                "step": steps,
-                "error": f"Node '{current_node_id}' not found",
-            })
+            execution_trace.append(
+                {
+                    "step": steps,
+                    "error": f"Node '{current_node_id}' not found",
+                }
+            )
             break
 
         # Record this step
@@ -1792,7 +1869,11 @@ def test_graph(
         }
 
         if current_node.node_type in ("llm_generate", "llm_tool_use"):
-            step_info["prompt_preview"] = current_node.system_prompt[:200] + "..." if current_node.system_prompt and len(current_node.system_prompt) > 200 else current_node.system_prompt
+            step_info["prompt_preview"] = (
+                current_node.system_prompt[:200] + "..."
+                if current_node.system_prompt and len(current_node.system_prompt) > 200
+                else current_node.system_prompt
+            )
             step_info["tools_available"] = current_node.tools
 
         execution_trace.append(step_info)
@@ -1819,18 +1900,21 @@ def test_graph(
 
         current_node_id = next_node
 
-    return json.dumps({
-        "success": True,
-        "dry_run": dry_run,
-        "test_input": input_data,
-        "execution_trace": execution_trace,
-        "steps_executed": steps,
-        "goal": {
-            "name": session.goal.name,
-            "success_criteria": [sc.description for sc in session.goal.success_criteria],
+    return json.dumps(
+        {
+            "success": True,
+            "dry_run": dry_run,
+            "test_input": input_data,
+            "execution_trace": execution_trace,
+            "steps_executed": steps,
+            "goal": {
+                "name": session.goal.name,
+                "success_criteria": [sc.description for sc in session.goal.success_criteria],
+            },
+            "recommendation": "Review the execution trace above. Does this flow achieve the goal?",
         },
-        "recommendation": "Review the execution trace above. Does this flow achieve the goal?",
-    }, indent=2)
+        indent=2,
+    )
 
 
 # =============================================================================
@@ -1845,9 +1929,14 @@ _evaluation_rules: list[dict] = []
 def add_evaluation_rule(
     rule_id: Annotated[str, "Unique identifier for the rule"],
     description: Annotated[str, "Human-readable description of what this rule checks"],
-    condition: Annotated[str, "Python expression evaluated with result, step, goal context. E.g., 'result.get(\"success\") == True'"],
+    condition: Annotated[
+        str,
+        "Python expression evaluated with result, step, goal context. E.g., 'result.get(\"success\") == True'",
+    ],
     action: Annotated[str, "Action when rule matches: accept, retry, replan, escalate"],
-    feedback_template: Annotated[str, "Template for feedback message, can use {result}, {step}"] = "",
+    feedback_template: Annotated[
+        str, "Template for feedback message, can use {result}, {step}"
+    ] = "",
     priority: Annotated[int, "Rule priority (higher = checked first)"] = 0,
 ) -> str:
     """
@@ -1866,17 +1955,21 @@ def add_evaluation_rule(
     # Validate action
     valid_actions = ["accept", "retry", "replan", "escalate"]
     if action.lower() not in valid_actions:
-        return json.dumps({
-            "success": False,
-            "error": f"Invalid action '{action}'. Must be one of: {valid_actions}",
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Invalid action '{action}'. Must be one of: {valid_actions}",
+            }
+        )
 
     # Check for duplicate
     if any(r["id"] == rule_id for r in _evaluation_rules):
-        return json.dumps({
-            "success": False,
-            "error": f"Rule '{rule_id}' already exists",
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": f"Rule '{rule_id}' already exists",
+            }
+        )
 
     rule = {
         "id": rule_id,
@@ -1890,20 +1983,24 @@ def add_evaluation_rule(
     _evaluation_rules.append(rule)
     _evaluation_rules.sort(key=lambda r: -r["priority"])
 
-    return json.dumps({
-        "success": True,
-        "rule": rule,
-        "total_rules": len(_evaluation_rules),
-    })
+    return json.dumps(
+        {
+            "success": True,
+            "rule": rule,
+            "total_rules": len(_evaluation_rules),
+        }
+    )
 
 
 @mcp.tool()
 def list_evaluation_rules() -> str:
     """List all configured evaluation rules for the HybridJudge."""
-    return json.dumps({
-        "rules": _evaluation_rules,
-        "total": len(_evaluation_rules),
-    })
+    return json.dumps(
+        {
+            "rules": _evaluation_rules,
+            "total": len(_evaluation_rules),
+        }
+    )
 
 
 @mcp.tool()
@@ -1926,7 +2023,10 @@ def create_plan(
     plan_id: Annotated[str, "Unique identifier for the plan"],
     goal_id: Annotated[str, "ID of the goal this plan achieves"],
     description: Annotated[str, "Description of what this plan does"],
-    steps: Annotated[str, "JSON array of plan steps with id, description, action, inputs, expected_outputs, dependencies"],
+    steps: Annotated[
+        str,
+        "JSON array of plan steps with id, description, action, inputs, expected_outputs, dependencies",
+    ],
     context: Annotated[str, "JSON object with initial context for execution"] = "{}",
 ) -> str:
     """
@@ -2000,12 +2100,15 @@ def create_plan(
         "created_at": datetime.now().isoformat(),
     }
 
-    return json.dumps({
-        "success": True,
-        "plan": plan,
-        "step_count": len(steps_list),
-        "note": "Plan created. Use execute_plan to run it with the Worker-Judge loop.",
-    }, indent=2)
+    return json.dumps(
+        {
+            "success": True,
+            "plan": plan,
+            "step_count": len(steps_list),
+            "note": "Plan created. Use execute_plan to run it with the Worker-Judge loop.",
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -2166,7 +2269,9 @@ def validate_plan(
                     if producers:
                         suggestions.append(f"${var} is produced by {producers} - add as dependency")
                     else:
-                        suggestions.append(f"${var} is not produced by any step - add a step that outputs '{var}'")
+                        suggestions.append(
+                            f"${var} is not produced by any step - add a step that outputs '{var}'"
+                        )
 
                 context_errors.append(
                     f"Step '{step_id}' references ${missing_vars} but dependencies {deps} don't provide them. "
@@ -2176,15 +2281,17 @@ def validate_plan(
     errors.extend(context_errors)
     warnings.extend(context_warnings)
 
-    return json.dumps({
-        "valid": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-        "step_count": len(steps),
-        "context_flow": {
-            step_id: list(keys) for step_id, keys in available_context.items()
-        } if available_context else None,
-    })
+    return json.dumps(
+        {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "step_count": len(steps),
+            "context_flow": {step_id: list(keys) for step_id, keys in available_context.items()}
+            if available_context
+            else None,
+        }
+    )
 
 
 @mcp.tool()
@@ -2206,11 +2313,13 @@ def simulate_plan_execution(
     # Validate first
     validation = json.loads(validate_plan(plan_json))
     if not validation["valid"]:
-        return json.dumps({
-            "success": False,
-            "error": "Plan is not valid",
-            "validation_errors": validation["errors"],
-        })
+        return json.dumps(
+            {
+                "success": False,
+                "error": "Plan is not valid",
+                "validation_errors": validation["errors"],
+            }
+        )
 
     steps = plan.get("steps", [])
     completed = set()
@@ -2237,27 +2346,32 @@ def simulate_plan_execution(
         step = ready[0]
         step_id = step.get("id")
 
-        execution_order.append({
-            "iteration": iteration,
-            "step_id": step_id,
-            "description": step.get("description"),
-            "action_type": step.get("action", {}).get("action_type"),
-            "dependencies_met": list(step.get("dependencies", [])),
-            "parallel_candidates": [s.get("id") for s in ready[1:]],
-        })
+        execution_order.append(
+            {
+                "iteration": iteration,
+                "step_id": step_id,
+                "description": step.get("description"),
+                "action_type": step.get("action", {}).get("action_type"),
+                "dependencies_met": list(step.get("dependencies", [])),
+                "parallel_candidates": [s.get("id") for s in ready[1:]],
+            }
+        )
 
         completed.add(step_id)
 
     remaining = [s.get("id") for s in steps if s.get("id") not in completed]
 
-    return json.dumps({
-        "success": True,
-        "execution_order": execution_order,
-        "steps_simulated": len(execution_order),
-        "remaining_steps": remaining,
-        "plan_complete": len(remaining) == 0,
-        "note": "This is a simulation. Actual execution may differ based on step results and judge decisions.",
-    }, indent=2)
+    return json.dumps(
+        {
+            "success": True,
+            "execution_order": execution_order,
+            "steps_simulated": len(execution_order),
+            "remaining_steps": remaining,
+            "plan_complete": len(remaining) == 0,
+            "note": "This is a simulation. Actual execution may differ based on step results and judge decisions.",
+        },
+        indent=2,
+    )
 
 
 # =============================================================================
@@ -2274,12 +2388,15 @@ DEFAULT_TEST_STORAGE_PATH = Path("data/tests")
 @mcp.tool()
 def generate_constraint_tests(
     goal_id: Annotated[str, "ID of the goal to generate tests for"],
-    goal_json: Annotated[str, """JSON string of the Goal object. Constraint fields:
+    goal_json: Annotated[
+        str,
+        """JSON string of the Goal object. Constraint fields:
 - id: string (required)
 - description: string (required)
 - constraint_type: "hard" or "soft" (required)
 - category: string (optional, default: "general")
-- check: string (optional, how to validate: "llm_judge", expression, or function name)"""],
+- check: string (optional, how to validate: "llm_judge", expression, or function name)""",
+    ],
 ) -> str:
     """
     Generate constraint tests for a goal.
@@ -2294,6 +2411,7 @@ def generate_constraint_tests(
     # Get LLM provider
     try:
         from framework.llm import AnthropicProvider
+
         llm = AnthropicProvider()
     except Exception as e:
         return json.dumps({"error": f"Failed to initialize LLM: {e}"})
@@ -2305,22 +2423,26 @@ def generate_constraint_tests(
     # Store as pending (not persisted yet)
     _pending_tests[goal_id] = tests
 
-    return json.dumps({
-        "goal_id": goal_id,
-        "generated_count": len(tests),
-        "tests": [
-            {
-                "id": t.id,
-                "test_name": t.test_name,
-                "parent_criteria_id": t.parent_criteria_id,
-                "description": t.description,
-                "confidence": t.llm_confidence,
-                "test_code_preview": t.test_code[:500] + "..." if len(t.test_code) > 500 else t.test_code,
-            }
-            for t in tests
-        ],
-        "next_step": "Call approve_tests to approve, modify, or reject each test",
-    })
+    return json.dumps(
+        {
+            "goal_id": goal_id,
+            "generated_count": len(tests),
+            "tests": [
+                {
+                    "id": t.id,
+                    "test_name": t.test_name,
+                    "parent_criteria_id": t.parent_criteria_id,
+                    "description": t.description,
+                    "confidence": t.llm_confidence,
+                    "test_code_preview": t.test_code[:500] + "..."
+                    if len(t.test_code) > 500
+                    else t.test_code,
+                }
+                for t in tests
+            ],
+            "next_step": "Call approve_tests to approve, modify, or reject each test",
+        }
+    )
 
 
 @mcp.tool()
@@ -2344,6 +2466,7 @@ def generate_success_tests(
     # Get LLM provider
     try:
         from framework.llm import AnthropicProvider
+
         llm = AnthropicProvider()
     except Exception as e:
         return json.dumps({"error": f"Failed to initialize LLM: {e}"})
@@ -2362,22 +2485,26 @@ def generate_success_tests(
     else:
         _pending_tests[goal_id] = tests
 
-    return json.dumps({
-        "goal_id": goal_id,
-        "generated_count": len(tests),
-        "tests": [
-            {
-                "id": t.id,
-                "test_name": t.test_name,
-                "parent_criteria_id": t.parent_criteria_id,
-                "description": t.description,
-                "confidence": t.llm_confidence,
-                "test_code_preview": t.test_code[:500] + "..." if len(t.test_code) > 500 else t.test_code,
-            }
-            for t in tests
-        ],
-        "next_step": "Call approve_tests to approve, modify, or reject each test",
-    })
+    return json.dumps(
+        {
+            "goal_id": goal_id,
+            "generated_count": len(tests),
+            "tests": [
+                {
+                    "id": t.id,
+                    "test_name": t.test_name,
+                    "parent_criteria_id": t.parent_criteria_id,
+                    "description": t.description,
+                    "confidence": t.llm_confidence,
+                    "test_code_preview": t.test_code[:500] + "..."
+                    if len(t.test_code) > 500
+                    else t.test_code,
+                }
+                for t in tests
+            ],
+            "next_step": "Call approve_tests to approve, modify, or reject each test",
+        }
+    )
 
 
 @mcp.tool()
@@ -2414,13 +2541,15 @@ def approve_tests(
     for a in approvals_list:
         try:
             action = ApprovalAction(a.get("action", "skip"))
-            requests.append(ApprovalRequest(
-                test_id=a["test_id"],
-                action=action,
-                modified_code=a.get("modified_code"),
-                reason=a.get("reason"),
-                approved_by="mcp_user",
-            ))
+            requests.append(
+                ApprovalRequest(
+                    test_id=a["test_id"],
+                    action=action,
+                    modified_code=a.get("modified_code"),
+                    reason=a.get("reason"),
+                    approved_by="mcp_user",
+                )
+            )
         except (KeyError, ValueError) as e:
             return json.dumps({"error": f"Invalid approval entry: {e}"})
 
@@ -2470,7 +2599,9 @@ def approve_tests(
 def run_tests(
     goal_id: Annotated[str, "ID of the goal to test"],
     agent_path: Annotated[str, "Path to the agent export folder"],
-    test_types: Annotated[str, 'JSON array of test types: ["constraint", "outcome", "edge_case", "all"]'] = '["all"]',
+    test_types: Annotated[
+        str, 'JSON array of test types: ["constraint", "outcome", "edge_case", "all"]'
+    ] = '["all"]',
     parallel: Annotated[int, "Number of parallel workers (0 for sequential)"] = 0,
     fail_fast: Annotated[bool, "Stop on first failure"] = False,
 ) -> str:
@@ -2504,11 +2635,13 @@ def run_tests(
         tests = [t for t in tests if t.test_type in filter_types]
 
     if not tests:
-        return json.dumps({
-            "goal_id": goal_id,
-            "error": "No approved tests found",
-            "hint": "Generate and approve tests first using generate_constraint_tests and approve_tests",
-        })
+        return json.dumps(
+            {
+                "goal_id": goal_id,
+                "error": "No approved tests found",
+                "hint": "Generate and approve tests first using generate_constraint_tests and approve_tests",
+            }
+        )
 
     # Configure runner
     config = ParallelConfig(
@@ -2524,18 +2657,20 @@ def run_tests(
         tests=tests,
     )
 
-    return json.dumps({
-        "goal_id": goal_id,
-        "overall_passed": result.all_passed,
-        "summary": {
-            "total": result.total,
-            "passed": result.passed,
-            "failed": result.failed,
-            "pass_rate": f"{result.pass_rate:.1%}",
-        },
-        "duration_ms": result.duration_ms,
-        "results": [r.summary_dict() for r in result.results],
-    })
+    return json.dumps(
+        {
+            "goal_id": goal_id,
+            "overall_passed": result.all_passed,
+            "summary": {
+                "total": result.total,
+                "passed": result.passed,
+                "failed": result.failed,
+                "pass_rate": f"{result.pass_rate:.1%}",
+            },
+            "duration_ms": result.duration_ms,
+            "results": [r.summary_dict() for r in result.results],
+        }
+    )
 
 
 @mcp.tool()
@@ -2555,6 +2690,7 @@ def debug_test(
     runtime_storage = None
     try:
         from framework.storage.backend import FileStorage
+
         runtime_storage = FileStorage(f"data/runtime/{goal_id}")
     except Exception:
         pass
@@ -2568,7 +2704,9 @@ def debug_test(
 @mcp.tool()
 def list_tests(
     goal_id: Annotated[str, "ID of the goal"],
-    status: Annotated[str, "Filter by approval status: pending, approved, modified, rejected, all"] = "all",
+    status: Annotated[
+        str, "Filter by approval status: pending, approved, modified, rejected, all"
+    ] = "all",
 ) -> str:
     """
     List tests for a goal.
@@ -2586,22 +2724,24 @@ def list_tests(
         except ValueError:
             pass
 
-    return json.dumps({
-        "goal_id": goal_id,
-        "total": len(tests),
-        "tests": [
-            {
-                "id": t.id,
-                "test_name": t.test_name,
-                "test_type": t.test_type.value,
-                "parent_criteria_id": t.parent_criteria_id,
-                "approval_status": t.approval_status.value,
-                "last_result": t.last_result,
-                "confidence": t.llm_confidence,
-            }
-            for t in tests
-        ],
-    })
+    return json.dumps(
+        {
+            "goal_id": goal_id,
+            "total": len(tests),
+            "tests": [
+                {
+                    "id": t.id,
+                    "test_name": t.test_name,
+                    "test_type": t.test_type.value,
+                    "parent_criteria_id": t.parent_criteria_id,
+                    "approval_status": t.approval_status.value,
+                    "last_result": t.last_result,
+                    "confidence": t.llm_confidence,
+                }
+                for t in tests
+            ],
+        }
+    )
 
 
 @mcp.tool()
@@ -2614,36 +2754,41 @@ def get_pending_tests(
     Returns tests that have been generated but not yet approved.
     """
     if goal_id not in _pending_tests:
-        return json.dumps({
-            "goal_id": goal_id,
-            "pending_count": 0,
-            "tests": [],
-        })
+        return json.dumps(
+            {
+                "goal_id": goal_id,
+                "pending_count": 0,
+                "tests": [],
+            }
+        )
 
     tests = _pending_tests[goal_id]
-    return json.dumps({
-        "goal_id": goal_id,
-        "pending_count": len(tests),
-        "tests": [
-            {
-                "id": t.id,
-                "test_name": t.test_name,
-                "test_type": t.test_type.value,
-                "parent_criteria_id": t.parent_criteria_id,
-                "description": t.description,
-                "confidence": t.llm_confidence,
-                "test_code": t.test_code,
-                "input": t.input,
-                "expected_output": t.expected_output,
-            }
-            for t in tests
-        ],
-    })
+    return json.dumps(
+        {
+            "goal_id": goal_id,
+            "pending_count": len(tests),
+            "tests": [
+                {
+                    "id": t.id,
+                    "test_name": t.test_name,
+                    "test_type": t.test_type.value,
+                    "parent_criteria_id": t.parent_criteria_id,
+                    "description": t.description,
+                    "confidence": t.llm_confidence,
+                    "test_code": t.test_code,
+                    "input": t.input,
+                    "expected_output": t.expected_output,
+                }
+                for t in tests
+            ],
+        }
+    )
 
 
 # =============================================================================
 # PLAN LOADING AND EXECUTION
 # =============================================================================
+
 
 def load_plan_from_json(plan_json: str | dict) -> Plan:
     """
@@ -2656,6 +2801,7 @@ def load_plan_from_json(plan_json: str | dict) -> Plan:
         Plan object ready for FlexibleGraphExecutor
     """
     from framework.graph.plan import Plan
+
     return Plan.from_json(plan_json)
 
 
@@ -2670,22 +2816,25 @@ def load_exported_plan(
     """
     try:
         plan = load_plan_from_json(plan_json)
-        return json.dumps({
-            "success": True,
-            "plan_id": plan.id,
-            "goal_id": plan.goal_id,
-            "description": plan.description,
-            "step_count": len(plan.steps),
-            "steps": [
-                {
-                    "id": s.id,
-                    "description": s.description,
-                    "action_type": s.action.action_type.value,
-                    "dependencies": s.dependencies,
-                }
-                for s in plan.steps
-            ],
-        }, indent=2)
+        return json.dumps(
+            {
+                "success": True,
+                "plan_id": plan.id,
+                "goal_id": plan.goal_id,
+                "description": plan.description,
+                "step_count": len(plan.steps),
+                "steps": [
+                    {
+                        "id": s.id,
+                        "description": s.description,
+                        "action_type": s.action.action_type.value,
+                        "dependencies": s.dependencies,
+                    }
+                    for s in plan.steps
+                ],
+            },
+            indent=2,
+        )
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 

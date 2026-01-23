@@ -89,6 +89,7 @@ class AgentFactory:
 
     def create(self):
         from framework.runner import AgentRunner
+
         return AgentRunner.load(self.agent_path)
 
 
@@ -340,5 +341,3 @@ class ParallelTestRunner:
             results=results,
             duration_ms=total_duration,
         )
-
-

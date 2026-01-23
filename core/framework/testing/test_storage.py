@@ -197,8 +197,7 @@ class TestStorage:
 
         # Get all result files except latest.json
         result_files = sorted(
-            [f for f in results_dir.glob("*.json") if f.name != "latest.json"],
-            reverse=True
+            [f for f in results_dir.glob("*.json") if f.name != "latest.json"], reverse=True
         )[:limit]
 
         results = []

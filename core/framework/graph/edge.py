@@ -29,11 +29,12 @@ from pydantic import BaseModel, Field
 
 class EdgeCondition(str, Enum):
     """When an edge should be traversed."""
-    ALWAYS = "always"           # Always after source completes
-    ON_SUCCESS = "on_success"   # Only if source succeeds
-    ON_FAILURE = "on_failure"   # Only if source fails
-    CONDITIONAL = "conditional" # Based on expression
-    LLM_DECIDE = "llm_decide"   # Let LLM decide based on goal and context
+
+    ALWAYS = "always"  # Always after source completes
+    ON_SUCCESS = "on_success"  # Only if source succeeds
+    ON_FAILURE = "on_failure"  # Only if source fails
+    CONDITIONAL = "conditional"  # Based on expression
+    LLM_DECIDE = "llm_decide"  # Let LLM decide based on goal and context
 
 
 class EdgeSpec(BaseModel):
@@ -68,6 +69,7 @@ class EdgeSpec(BaseModel):
             description="Only filter if results need refinement to meet goal",
         )
     """
+
     id: str
     source: str = Field(description="Source node ID")
     target: str = Field(description="Target node ID")
@@ -76,20 +78,17 @@ class EdgeSpec(BaseModel):
     condition: EdgeCondition = EdgeCondition.ALWAYS
     condition_expr: str | None = Field(
         default=None,
-        description="Expression for CONDITIONAL edges, e.g., 'output.confidence > 0.8'"
+        description="Expression for CONDITIONAL edges, e.g., 'output.confidence > 0.8'",
     )
 
     # Data flow
     input_mapping: dict[str, str] = Field(
         default_factory=dict,
-        description="Map source outputs to target inputs: {target_key: source_key}"
+        description="Map source outputs to target inputs: {target_key: source_key}",
     )
 
     # Priority for multiple outgoing edges
-    priority: int = Field(
-        default=0,
-        description="Higher priority edges are evaluated first"
-    )
+    priority: int = Field(default=0, description="Higher priority edges are evaluated first")
 
     # Metadata
     description: str = ""
@@ -164,7 +163,7 @@ class EdgeSpec(BaseModel):
             "output": output,
             "memory": memory,
             "result": output.get("result"),
-            "true": True,   # Allow lowercase true/false in conditions
+            "true": True,  # Allow lowercase true/false in conditions
             "false": False,
             **memory,  # Unpack memory keys directly into context
         }
@@ -175,6 +174,7 @@ class EdgeSpec(BaseModel):
         except Exception as e:
             # Log the error for debugging
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
@@ -235,7 +235,8 @@ Respond with ONLY a JSON object:
 
             # Parse response
             import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 proceed = data.get("proceed", False)
@@ -243,6 +244,7 @@ Respond with ONLY a JSON object:
 
                 # Log the decision (using basic print for now)
                 import logging
+
                 logger = logging.getLogger(__name__)
                 logger.info(f"      🤔 LLM routing decision: {'PROCEED' if proceed else 'SKIP'}")
                 logger.info(f"         Reason: {reasoning}")
@@ -252,6 +254,7 @@ Respond with ONLY a JSON object:
         except Exception as e:
             # Fallback: proceed on success
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ LLM routing failed, defaulting to on_success: {e}")
             return source_success
@@ -304,6 +307,7 @@ class GraphSpec(BaseModel):
             edges=[...],
         )
     """
+
     id: str
     goal_id: str
     version: str = "1.0.0"
@@ -312,31 +316,24 @@ class GraphSpec(BaseModel):
     entry_node: str = Field(description="ID of the first node to execute")
     entry_points: dict[str, str] = Field(
         default_factory=dict,
-        description="Named entry points for resuming execution. Format: {name: node_id}"
+        description="Named entry points for resuming execution. Format: {name: node_id}",
     )
     terminal_nodes: list[str] = Field(
-        default_factory=list,
-        description="IDs of nodes that end execution"
+        default_factory=list, description="IDs of nodes that end execution"
     )
     pause_nodes: list[str] = Field(
-        default_factory=list,
-        description="IDs of nodes that pause execution for HITL input"
+        default_factory=list, description="IDs of nodes that pause execution for HITL input"
     )
 
     # Components
     nodes: list[Any] = Field(  # NodeSpec, but avoiding circular import
-        default_factory=list,
-        description="All node specifications"
+        default_factory=list, description="All node specifications"
     )
-    edges: list[EdgeSpec] = Field(
-        default_factory=list,
-        description="All edge specifications"
-    )
+    edges: list[EdgeSpec] = Field(default_factory=list, description="All edge specifications")
 
     # Shared memory keys
     memory_keys: list[str] = Field(
-        default_factory=list,
-        description="Keys available in shared memory"
+        default_factory=list, description="Keys available in shared memory"
     )
 
     # Default LLM settings
@@ -344,10 +341,7 @@ class GraphSpec(BaseModel):
     max_tokens: int = 1024
 
     # Execution limits
-    max_steps: int = Field(
-        default=100,
-        description="Maximum node executions before timeout"
-    )
+    max_steps: int = Field(default=100, description="Maximum node executions before timeout")
     max_retries_per_node: int = 3
 
     # Metadata

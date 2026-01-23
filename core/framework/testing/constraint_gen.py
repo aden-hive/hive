@@ -100,12 +100,8 @@ class ConstraintTestGenerator:
         def tool_executor(tool_use: ToolUse) -> ToolResult:
             if tool_use.name == "submit_test":
                 collected_tests.append(tool_use.input)
-                return ToolResult(
-                    tool_use_id=tool_use.id, content="Test recorded successfully"
-                )
-            return ToolResult(
-                tool_use_id=tool_use.id, content="Unknown tool", is_error=True
-            )
+                return ToolResult(tool_use_id=tool_use.id, content="Test recorded successfully")
+            return ToolResult(tool_use_id=tool_use.id, content="Unknown tool", is_error=True)
 
         self.llm.complete_with_tools(
             messages=[{"role": "user", "content": prompt}],
@@ -117,9 +113,7 @@ class ConstraintTestGenerator:
 
         return self._create_tests_from_collected(collected_tests, goal.id)
 
-    def generate_for_constraint(
-        self, goal: Goal, constraint: Constraint
-    ) -> list[Test]:
+    def generate_for_constraint(self, goal: Goal, constraint: Constraint) -> list[Test]:
         """
         Generate tests for a single constraint.
 
@@ -143,12 +137,8 @@ class ConstraintTestGenerator:
         def tool_executor(tool_use: ToolUse) -> ToolResult:
             if tool_use.name == "submit_test":
                 collected_tests.append(tool_use.input)
-                return ToolResult(
-                    tool_use_id=tool_use.id, content="Test recorded successfully"
-                )
-            return ToolResult(
-                tool_use_id=tool_use.id, content="Unknown tool", is_error=True
-            )
+                return ToolResult(tool_use_id=tool_use.id, content="Test recorded successfully")
+            return ToolResult(tool_use_id=tool_use.id, content="Unknown tool", is_error=True)
 
         self.llm.complete_with_tools(
             messages=[{"role": "user", "content": prompt}],
@@ -177,9 +167,7 @@ class ConstraintTestGenerator:
 - Description: {constraint.description}
 - Check: {constraint.check}"""
 
-    def _create_tests_from_collected(
-        self, collected: list[dict], goal_id: str
-    ) -> list[Test]:
+    def _create_tests_from_collected(self, collected: list[dict], goal_id: str) -> list[Test]:
         """Create Test objects from tool call data."""
         tests = []
         for td in collected:

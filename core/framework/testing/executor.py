@@ -33,6 +33,7 @@ class LLMJudge:
         if self._client is None:
             try:
                 import anthropic
+
                 self._client = anthropic.Anthropic()
             except ImportError:
                 raise RuntimeError("anthropic package required for LLM judge")
@@ -81,11 +82,12 @@ Only output the JSON, nothing else."""
             response = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
             )
 
             # Parse the response
             import json
+
             text = response.content[0].text.strip()
             # Handle potential markdown code blocks
             if text.startswith("```"):
@@ -97,14 +99,11 @@ Only output the JSON, nothing else."""
             result = json.loads(text)
             return {
                 "passes": bool(result.get("passes", False)),
-                "explanation": result.get("explanation", "No explanation provided")
+                "explanation": result.get("explanation", "No explanation provided"),
             }
         except Exception as e:
             # On error, fail the test with explanation
-            return {
-                "passes": False,
-                "explanation": f"LLM judge error: {e}"
-            }
+            return {"passes": False, "explanation": f"LLM judge error: {e}"}
 
 
 @runtime_checkable

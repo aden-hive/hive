@@ -32,6 +32,7 @@ from framework.llm.provider import LLMProvider, Tool
 @dataclass
 class ExecutionResult:
     """Result of executing a graph."""
+
     success: bool
     output: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
@@ -125,7 +126,9 @@ class GraphExecutor:
             # Restore memory from previous session
             for key, value in session_state["memory"].items():
                 memory.write(key, value)
-            self.logger.info(f"📥 Restored session state with {len(session_state['memory'])} memory keys")
+            self.logger.info(
+                f"📥 Restored session state with {len(session_state['memory'])} memory keys"
+            )
 
         # Write new input data to memory (each key individually)
         if input_data:
@@ -212,7 +215,9 @@ class GraphExecutor:
                 result = await node_impl.execute(ctx)
 
                 if result.success:
-                    self.logger.info(f"   ✓ Success (tokens: {result.tokens_used}, latency: {result.latency_ms}ms)")
+                    self.logger.info(
+                        f"   ✓ Success (tokens: {result.tokens_used}, latency: {result.latency_ms}ms)"
+                    )
 
                     # Generate and log human-readable summary
                     summary = result.to_summary(node_spec)
@@ -394,8 +399,7 @@ class GraphExecutor:
         if node_spec.node_type == "function":
             # Function nodes need explicit registration
             raise RuntimeError(
-                f"Function node '{node_spec.id}' not registered. "
-                "Register with node_registry."
+                f"Function node '{node_spec.id}' not registered. Register with node_registry."
             )
 
         # Default to LLM node

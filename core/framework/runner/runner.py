@@ -113,23 +113,27 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
 
     success_criteria = []
     for sc_data in goal_data.get("success_criteria", []):
-        success_criteria.append(SuccessCriterion(
-            id=sc_data["id"],
-            description=sc_data["description"],
-            metric=sc_data.get("metric", ""),
-            target=sc_data.get("target", ""),
-            weight=sc_data.get("weight", 1.0),
-        ))
+        success_criteria.append(
+            SuccessCriterion(
+                id=sc_data["id"],
+                description=sc_data["description"],
+                metric=sc_data.get("metric", ""),
+                target=sc_data.get("target", ""),
+                weight=sc_data.get("weight", 1.0),
+            )
+        )
 
     constraints = []
     for c_data in goal_data.get("constraints", []):
-        constraints.append(Constraint(
-            id=c_data["id"],
-            description=c_data["description"],
-            constraint_type=c_data.get("constraint_type", "hard"),
-            category=c_data.get("category", "safety"),
-            check=c_data.get("check", ""),
-        ))
+        constraints.append(
+            Constraint(
+                id=c_data["id"],
+                description=c_data["description"],
+                constraint_type=c_data.get("constraint_type", "hard"),
+                category=c_data.get("category", "safety"),
+                check=c_data.get("check", ""),
+            )
+        )
 
     goal = Goal(
         id=goal_data.get("id", ""),
@@ -353,7 +357,9 @@ class AgentRunner:
                 try:
                     self._tool_registry.register_mcp_server(server_config)
                 except Exception as e:
-                    print(f"Warning: Failed to register MCP server '{server_config.get('name', 'unknown')}': {e}")
+                    print(
+                        f"Warning: Failed to register MCP server '{server_config.get('name', 'unknown')}': {e}"
+                    )
         except Exception as e:
             print(f"Warning: Failed to load MCP servers config from {config_path}: {e}")
 
@@ -401,7 +407,9 @@ class AgentRunner:
             approval_callback=self._approval_callback,
         )
 
-    async def run(self, input_data: dict | None = None, session_state: dict | None = None) -> ExecutionResult:
+    async def run(
+        self, input_data: dict | None = None, session_state: dict | None = None
+    ) -> ExecutionResult:
         """
         Execute the agent with given input data.
 
@@ -466,7 +474,12 @@ class AgentRunner:
             entry_node=self.graph.entry_node,
             terminal_nodes=self.graph.terminal_nodes,
             success_criteria=[
-                {"id": sc.id, "description": sc.description, "metric": sc.metric, "target": sc.target}
+                {
+                    "id": sc.id,
+                    "description": sc.description,
+                    "metric": sc.metric,
+                    "target": sc.target,
+                }
                 for sc in self.goal.success_criteria
             ],
             constraints=[
@@ -538,8 +551,7 @@ class AgentRunner:
         except ImportError:
             # aden_tools not installed - fall back to direct check
             has_llm_nodes = any(
-                node.node_type in ("llm_generate", "llm_tool_use")
-                for node in self.graph.nodes
+                node.node_type in ("llm_generate", "llm_tool_use") for node in self.graph.nodes
             )
             if has_llm_nodes and not os.environ.get("ANTHROPIC_API_KEY"):
                 warnings.append("Agent has LLM nodes but ANTHROPIC_API_KEY not set")
@@ -552,7 +564,9 @@ class AgentRunner:
             missing_credentials=missing_credentials,
         )
 
-    async def can_handle(self, request: dict, llm: LLMProvider | None = None) -> "CapabilityResponse":
+    async def can_handle(
+        self, request: dict, llm: LLMProvider | None = None
+    ) -> "CapabilityResponse":
         """
         Ask the agent if it can handle this request.
 
@@ -622,7 +636,8 @@ Respond with JSON only:
 
             # Parse response
             import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 level_map = {
