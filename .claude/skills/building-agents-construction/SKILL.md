@@ -78,6 +78,43 @@ assert isinstance(entry_points["start"], str), f"entry_points['start'] must be s
 
 **Why this matters:** GraphSpec uses Pydantic validation. The wrong format causes ValidationError at runtime, which blocks all agent execution and tests. This bug is not caught until you try to run the agent.
 
+## LLM Provider Configuration
+
+**Default:** All agents use **LiteLLM** with **Cerebras** as the primary provider for cost-effective, high-performance inference.
+
+### Environment Setup
+
+Set your Cerebras API key:
+```bash
+export CEREBRAS_API_KEY="your-api-key-here"
+```
+
+Or configure via aden_tools credentials:
+```bash
+# Store credential
+aden credentials set cerebras YOUR_API_KEY
+```
+
+### Model Configuration
+
+Default model in [config.py](config.py):
+```python
+model: str = "cerebras/zai-glm-4.7"  # Fast, cost-effective
+```
+
+### Supported Providers via LiteLLM
+
+The framework uses LiteLLM, which supports multiple providers. Priority order:
+1. **Cerebras** (default) - `cerebras/zai-glm-4.7`
+2. **OpenAI** - `gpt-4o-mini`, `gpt-4o`
+3. **Anthropic** - `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`
+4. **Local** - `ollama/llama3`
+
+To use a different provider, change the model in [config.py](config.py) and ensure the corresponding API key is available:
+- Cerebras: `CEREBRAS_API_KEY` or `aden credentials set cerebras`
+- OpenAI: `OPENAI_API_KEY` or `aden credentials set openai`
+- Anthropic: `ANTHROPIC_API_KEY` or `aden credentials set anthropic`
+
 ## Building Session Management with MCP
 
 **MANDATORY**: Use the agent-builder MCP server's BuildSession system for automatic bookkeeping and persistence.
@@ -192,7 +229,7 @@ from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Con
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.runtime import Runtime
-from framework.llm.anthropic import AnthropicProvider
+from framework.llm.litellm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
 from aden_tools.credentials import CredentialManager
 
@@ -210,7 +247,7 @@ from dataclasses import dataclass
 
 @dataclass
 class RuntimeConfig:
-    model: str = "claude-haiku-4-5-20251001"
+    model: str = "cerebras/zai-glm-4.7"
     temperature: float = 0.7
     max_tokens: int = 4096
 
@@ -344,6 +381,14 @@ node_code = f'''
 """,
     tools={tools},
     max_retries={max_retries},
+
+    # OPTIONAL: Add schemas for OutputCleaner validation (recommended for critical paths)
+    # input_schema={{
+    #     "field_name": {{"type": "string", "required": True, "description": "Field description"}},
+    # }},
+    # output_schema={{
+    #     "result": {{"type": "dict", "required": True, "description": "Analysis result"}},
+    # }},
 )
 
 '''
@@ -599,9 +644,16 @@ class {agent_class_name}:
         llm = None
         if not mock_mode:
             creds = CredentialManager()
-            if creds.is_available("anthropic"):
+            # Try Cerebras first, fall back to other providers
+            if creds.is_available("cerebras"):
+                api_key = creds.get("cerebras")
+                llm = LiteLLMProvider(api_key=api_key, model=self.config.model)
+            elif creds.is_available("openai"):
+                api_key = creds.get("openai")
+                llm = LiteLLMProvider(api_key=api_key, model=self.config.model)
+            elif creds.is_available("anthropic"):
                 api_key = creds.get("anthropic")
-                llm = AnthropicProvider(api_key=api_key, model=self.config.model)
+                llm = LiteLLMProvider(api_key=api_key, model=self.config.model)
 
         graph = GraphSpec(
             id="{agent_name}-graph",
@@ -929,6 +981,122 @@ response = AskUserQuestion(
     }]
 )
 ```
+
+## Framework Features
+
+### OutputCleaner - Automatic I/O Validation and Cleaning
+
+**NEW FEATURE**: The framework automatically validates and cleans node outputs between edges using a fast LLM (Cerebras llama-3.3-70b).
+
+**What it does**:
+- ✅ Validates output matches next node's input schema
+- ✅ Detects JSON parsing trap (entire response in one key)
+- ✅ Cleans malformed output automatically (~200-500ms, ~$0.001 per cleaning)
+- ✅ Boosts success rates by 1.8-2.2x
+- ✅ **Enabled by default** - no code changes needed!
+
+**How to leverage it**:
+
+Add `input_schema` and `output_schema` to critical nodes for better validation:
+
+```python
+critical_node = NodeSpec(
+    id="approval-decision",
+    name="Approval Decision",
+    node_type="llm_generate",
+    input_keys=["analysis", "risk_score"],
+    output_keys=["decision", "reason"],
+
+    # Schemas enable OutputCleaner to validate and clean better
+    input_schema={
+        "analysis": {
+            "type": "dict",
+            "required": True,
+            "description": "Contract analysis with findings"
+        },
+        "risk_score": {
+            "type": "number",
+            "required": True,
+            "description": "Risk score 0-10"
+        },
+    },
+    output_schema={
+        "decision": {
+            "type": "string",
+            "required": True,
+            "description": "Approval decision: APPROVED, REJECTED, or ESCALATE"
+        },
+        "reason": {
+            "type": "string",
+            "required": True,
+            "description": "Justification for the decision"
+        },
+    },
+
+    system_prompt="""...""",
+)
+```
+
+**Supported schema types**:
+- `"string"` or `"str"` - String values
+- `"int"` or `"integer"` - Integer numbers
+- `"float"` - Float numbers
+- `"number"` - Int or float
+- `"bool"` or `"boolean"` - Boolean values
+- `"dict"` or `"object"` - Dictionary/object
+- `"list"` or `"array"` - List/array
+- `"any"` - Any type (no validation)
+
+**When to add schemas**:
+- ✅ Critical paths where failure cascades
+- ✅ Expensive nodes where retry is costly
+- ✅ Nodes with strict output requirements
+- ✅ Nodes that frequently produce malformed output
+
+**When to skip schemas**:
+- ❌ Simple pass-through nodes
+- ❌ Terminal nodes (no next node to affect)
+- ❌ Fast local operations
+- ❌ Nodes with robust error handling
+
+**Monitoring**: Check logs for cleaning events:
+```
+⚠ Output validation failed for analyze → recommend: 1 error(s)
+🧹 Cleaning output from 'analyze' using cerebras/llama-3.3-70b
+✓ Output cleaned successfully
+```
+
+If you see frequent cleanings on the same edge:
+1. Review the source node's system prompt
+2. Add explicit JSON formatting instructions
+3. Consider improving output structure
+
+### System Prompt Best Practices
+
+**For nodes with multiple output_keys, ALWAYS enforce JSON**:
+
+```python
+system_prompt="""You are a contract analyzer.
+
+CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks, NO ```json```.
+Just the JSON object starting with { and ending with }.
+
+Return ONLY this JSON structure:
+{
+  "analysis": {...},
+  "risk_score": 7.5,
+  "compliance_issues": [...]
+}
+
+Do NOT include any explanatory text before or after the JSON.
+"""
+```
+
+**Why this matters**:
+- LLMs often wrap JSON in markdown (` ```json\n{...}\n``` `)
+- LLMs add explanations before/after JSON
+- Without explicit instructions, output may be malformed
+- OutputCleaner can fix these, but better to prevent them
 
 ## Next Steps
 
