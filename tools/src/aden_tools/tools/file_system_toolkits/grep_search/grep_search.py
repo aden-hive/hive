@@ -34,25 +34,37 @@ def register_tools(mcp: FastMCP) -> None:
             Dict with search results and match details, or error dict
         """
         try:
+            regex = re.compile(pattern)
+        except re.error as e:
+            return {"error": f"Invalid regex pattern: {str(e)}"}
+
+        try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-            # Use session dir root for relative path calculations
             session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
 
-            matches = []
-            regex = re.compile(pattern)
+            if not os.path.exists(secure_path):
+                return {"error": f"Directory or file not found: {path}"}
 
-            if os.path.isfile(secure_path):
-                files = [secure_path]
-            elif recursive:
-                files = []
-                for root, _, filenames in os.walk(secure_path):
-                    for filename in filenames:
-                        files.append(os.path.join(root, filename))
-            else:
-                files = [os.path.join(secure_path, f) for f in os.listdir(secure_path) if os.path.isfile(os.path.join(secure_path, f))]
+            matches = []
+            files = []
+
+            try:
+                if os.path.isfile(secure_path):
+                    files = [secure_path]
+                elif recursive:
+                    for root, _, filenames in os.walk(secure_path):
+                        for filename in filenames:
+                            files.append(os.path.join(root, filename))
+                else:
+                    files = [
+                        os.path.join(secure_path, f) 
+                        for f in os.listdir(secure_path) 
+                        if os.path.isfile(os.path.join(secure_path, f))
+                    ]
+            except PermissionError:
+                return {"error": f"Permission denied accessing: {path}"}
 
             for file_path in files:
-                # Calculate relative path for display
                 display_path = os.path.relpath(file_path, session_root)
                 try:
                     with open(file_path, "r", encoding="utf-8") as f:
@@ -63,7 +75,11 @@ def register_tools(mcp: FastMCP) -> None:
                                     "line_number": i,
                                     "line_content": line.strip()
                                 })
-                except (UnicodeDecodeError, PermissionError):
+                except UnicodeDecodeError:
+                    if len(files) == 1:
+                        return {"error": f"Failed to decode file: {display_path}. Ensure it is a text file."}
+                    continue
+                except PermissionError:
                     continue
 
             return {
@@ -74,5 +90,10 @@ def register_tools(mcp: FastMCP) -> None:
                 "matches": matches,
                 "total_matches": len(matches)
             }
+
+        except FileNotFoundError:
+            return {"error": f"Directory not found: {path}"}
+        except PermissionError:
+            return {"error": f"Permission denied accessing: {path}"}
         except Exception as e:
             return {"error": f"Failed to perform grep search: {str(e)}"}
