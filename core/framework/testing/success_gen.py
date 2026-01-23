@@ -130,7 +130,11 @@ class SuccessCriteriaTestGenerator:
             max_iterations=12,
         )
 
-        return self._create_tests_from_collected(collected_tests, goal.id)
+        tests = self._create_tests_from_collected(collected_tests, goal.id)
+        # Filter out skeleton tests (empty code with default confidence)
+        tests = [t for t in tests if t.test_code.strip() and t.llm_confidence != 0.5]
+        # Enforce max 12 tests total
+        return tests[:12]
 
     def generate_for_criterion(
         self,

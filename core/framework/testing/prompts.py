@@ -122,10 +122,10 @@ For EACH test, call the `submit_test` tool with:
 - expected_output: Expected output as an object
 - confidence: 0-1 score based on how testable/well-defined the constraint is
 
-Consider for each constraint:
-- Happy path: Normal execution that should satisfy the constraint
-- Boundary conditions: Inputs at the edge of constraint boundaries
-- Violation scenarios: Inputs that should trigger constraint violation
+IMPORTANT: Generate exactly 5 tests TOTAL for ALL constraints combined.
+Distribute tests across constraints based on importance and testability.
+Prioritize the most critical constraints. Each test should cover a unique scenario.
+Do NOT generate more than 5 tests.
 
 ## REQUIRED Test Code Format
 
@@ -137,16 +137,28 @@ async def test_constraint_<constraint_id>_<scenario>(mock_mode):
     \"\"\"Test: <description>\"\"\"
     result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
 
+    # IMPORTANT: result is an ExecutionResult object with these attributes:
+    # - result.success: bool - whether the agent succeeded
+    # - result.output: dict - the agent's output data (access data here!)
+    # - result.error: str or None - error message if failed
+
+    # Example: Access output data via result.output
+    output_data = result.output or {{}}
+    emails = output_data.get("emails", [])
+
     # Assertions with descriptive messages
+    assert result.success, f"Agent failed: {{result.error}}"
     assert condition, "Error message explaining what failed"
 ```
 
-IMPORTANT:
+CRITICAL RULES:
 - Every test function MUST be async with @pytest.mark.asyncio decorator
 - Every test MUST accept `mock_mode` as a parameter
 - Use `await default_agent.run(input, mock_mode=mock_mode)` to execute the agent
 - `default_agent` is already imported - do NOT add import statements
 - Do NOT include any imports in test_code - they're in the file header
+- NEVER call result.get() - result is NOT a dict! Use result.output.get() instead
+- Always check result.success before accessing result.output
 
 Generate tests now by calling submit_test for each test."""
 
@@ -178,10 +190,10 @@ For EACH test, call the `submit_test` tool with:
 - expected_output: Expected output as an object
 - confidence: 0-1 score based on how measurable/specific the criterion is
 
-Consider for each criterion:
-- Happy path: Normal successful execution
-- Boundary conditions: Exactly at target thresholds (if applicable)
-- Graceful handling: Near-misses and edge cases
+IMPORTANT: Generate exactly 12 tests TOTAL for ALL success criteria combined.
+Distribute tests across criteria based on importance and measurability.
+Prioritize the most critical success criteria. Each test should cover a unique scenario.
+Do NOT generate more than 12 tests.
 
 ## REQUIRED Test Code Format
 
@@ -193,17 +205,29 @@ async def test_success_<criteria_id>_<scenario>(mock_mode):
     \"\"\"Test: <description>\"\"\"
     result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
 
+    # IMPORTANT: result is an ExecutionResult object with these attributes:
+    # - result.success: bool - whether the agent succeeded
+    # - result.output: dict - the agent's output data (access data here!)
+    # - result.error: str or None - error message if failed
+
     assert result.success, f"Agent failed: {{result.error}}"
+
+    # Example: Access output data via result.output
+    output_data = result.output or {{}}
+    emails = output_data.get("emails", [])
+
     # Additional assertions with descriptive messages
     assert condition, "Error message explaining what failed"
 ```
 
-IMPORTANT:
+CRITICAL RULES:
 - Every test function MUST be async with @pytest.mark.asyncio decorator
 - Every test MUST accept `mock_mode` as a parameter
 - Use `await default_agent.run(input, mock_mode=mock_mode)` to execute the agent
 - `default_agent` is already imported - do NOT add import statements
 - Do NOT include any imports in test_code - they're in the file header
+- NEVER call result.get() - result is NOT a dict! Use result.output.get() instead
+- Always check result.success before accessing result.output
 
 Generate tests now by calling submit_test for each test."""
 
@@ -252,15 +276,27 @@ async def test_edge_case_<scenario>(mock_mode):
     \"\"\"Test: <description>\"\"\"
     result = await default_agent.run({{"edge": "case_input"}}, mock_mode=mock_mode)
 
+    # IMPORTANT: result is an ExecutionResult object with these attributes:
+    # - result.success: bool - whether the agent succeeded
+    # - result.output: dict - the agent's output data (access data here!)
+    # - result.error: str or None - error message if failed
+
     # Verify graceful handling
     assert result.success or result.error is not None, "Should handle edge case gracefully"
+
+    # Example: Access output data via result.output (if success)
+    if result.success:
+        output_data = result.output or {{}}
+        # Check output contents...
 ```
 
-IMPORTANT:
+CRITICAL RULES:
 - Every test function MUST be async with @pytest.mark.asyncio decorator
 - Every test MUST accept `mock_mode` as a parameter
 - Use `await default_agent.run(input, mock_mode=mock_mode)` to execute the agent
 - `default_agent` is already imported - do NOT add import statements
 - Do NOT include any imports in test_code - they're in the file header
+- NEVER call result.get() - result is NOT a dict! Use result.output.get() instead
+- Always check result.success before accessing result.output
 
 Generate edge case tests now by calling submit_test for each test."""
