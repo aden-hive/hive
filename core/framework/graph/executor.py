@@ -26,6 +26,7 @@ from framework.graph.node import (
     FunctionNode,
 )
 from framework.graph.edge import GraphSpec
+from framework.graph.output_cleaner import OutputCleaner, CleansingConfig
 from framework.llm.provider import LLMProvider, Tool
 
 
@@ -70,6 +71,7 @@ class GraphExecutor:
         tool_executor: Callable | None = None,
         node_registry: dict[str, NodeProtocol] | None = None,
         approval_callback: Callable | None = None,
+        cleansing_config: CleansingConfig | None = None,
     ):
         """
         Initialize the executor.
@@ -81,6 +83,7 @@ class GraphExecutor:
             tool_executor: Function to execute tools
             node_registry: Custom node implementations by ID
             approval_callback: Optional callback for human-in-the-loop approval
+            cleansing_config: Optional output cleansing configuration
         """
         self.runtime = runtime
         self.llm = llm
@@ -89,6 +92,13 @@ class GraphExecutor:
         self.node_registry = node_registry or {}
         self.approval_callback = approval_callback
         self.logger = logging.getLogger(__name__)
+
+        # Initialize output cleaner
+        self.cleansing_config = cleansing_config or CleansingConfig()
+        self.output_cleaner = OutputCleaner(
+            config=self.cleansing_config,
+            llm_provider=llm,
+        )
 
     async def execute(
         self,
@@ -425,6 +435,51 @@ class GraphExecutor:
                 source_node_name=current_node_spec.name if current_node_spec else current_node_id,
                 target_node_name=target_node_spec.name if target_node_spec else edge.target,
             ):
+                # Validate and clean output before mapping inputs
+                if self.cleansing_config.enabled and target_node_spec:
+                    output_to_validate = result.output
+
+                    validation = self.output_cleaner.validate_output(
+                        output=output_to_validate,
+                        source_node_id=current_node_id,
+                        target_node_spec=target_node_spec,
+                    )
+
+                    if not validation.valid:
+                        self.logger.warning(
+                            f"⚠ Output validation failed: {validation.errors}"
+                        )
+
+                        # Clean the output
+                        cleaned_output = self.output_cleaner.clean_output(
+                            output=output_to_validate,
+                            source_node_id=current_node_id,
+                            target_node_spec=target_node_spec,
+                            validation_errors=validation.errors,
+                        )
+
+                        # Update result with cleaned output
+                        result.output = cleaned_output
+
+                        # Write cleaned output back to memory
+                        for key, value in cleaned_output.items():
+                            memory.write(key, value)
+
+                        # Revalidate
+                        revalidation = self.output_cleaner.validate_output(
+                            output=cleaned_output,
+                            source_node_id=current_node_id,
+                            target_node_spec=target_node_spec,
+                        )
+
+                        if revalidation.valid:
+                            self.logger.info("✓ Output cleaned and validated successfully")
+                        else:
+                            self.logger.error(
+                                f"✗ Cleaning failed, errors remain: {revalidation.errors}"
+                            )
+                            # Continue anyway if fallback_to_raw is True
+
                 # Map inputs
                 mapped = edge.map_inputs(result.output, memory.read_all())
                 for key, value in mapped.items():
