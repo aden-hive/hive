@@ -20,9 +20,6 @@ docker-compose.override.yml
 
 # IDE
 .idea/
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json.example
 *.swp
 *.swo
 *~
@@ -68,3 +65,7 @@ exports/*
 
 core/.agent-builder-sessions/*
 .agent-builder-sessions/
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
+branch_structure.json
