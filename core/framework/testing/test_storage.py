@@ -34,6 +34,7 @@ class TestStorage:
       suites/
         {goal_id}_suite.json       # Test suite metadata
     """
+    __test__ = False  # Not a pytest test class
 
     def __init__(self, base_path: str | Path):
         self.base_path = Path(base_path)

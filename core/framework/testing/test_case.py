@@ -22,6 +22,7 @@ class ApprovalStatus(str, Enum):
 
 class TestType(str, Enum):
     """Type of test based on what it validates."""
+    __test__ = False  # Not a pytest test class
     CONSTRAINT = "constraint"           # Validates constraint boundaries
     SUCCESS_CRITERIA = "outcome"        # Validates success criteria achievement
     EDGE_CASE = "edge_case"            # Validates edge case handling
@@ -37,6 +38,7 @@ class Test(BaseModel):
 
     All tests require approval before being added to the test suite.
     """
+    __test__ = False  # Not a pytest test class
     id: str
     goal_id: str
     parent_criteria_id: str = Field(

@@ -11,7 +11,7 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 
 This will:
 
-- Check Python version (requires 3.10+, recommends 3.11+)
+- Check Python version (requires 3.11+)
 - Install the core framework package (`framework`)
 - Install the tools package (`aden_tools`)
 - Fix package compatibility issues (openai + litellm)
@@ -54,7 +54,7 @@ python -c "import litellm; print('✓ litellm OK')"
 
 ### Python Version
 
-- **Minimum:** Python 3.10
+- **Minimum:** Python 3.11
 - **Recommended:** Python 3.11 or 3.12
 - **Tested on:** Python 3.11, 3.12, 3.13
 
