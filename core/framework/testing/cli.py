@@ -4,19 +4,15 @@ CLI commands for goal-based testing.
 Provides commands:
 - test-run: Run tests for an agent
 - test-debug: Debug a failed test
-- test-list: List tests for a goal
-- test-stats: Show test statistics
+- test-list: List tests for an agent
+- test-stats: Show test statistics for an agent
 """
 
 import argparse
+import ast
 import os
 import subprocess
 from pathlib import Path
-
-from framework.testing.test_storage import TestStorage
-
-
-DEFAULT_STORAGE_PATH = Path("exports")
 
 
 def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -81,28 +77,28 @@ def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
     # test-list
     list_parser = subparsers.add_parser(
         "test-list",
-        help="List tests for a goal",
+        help="List tests for an agent by scanning test files",
     )
     list_parser.add_argument(
-        "goal_id",
-        help="Goal ID",
+        "agent_path",
+        help="Path to agent export folder (e.g., exports/my_agent)",
     )
     list_parser.add_argument(
-        "--status",
-        choices=["pending", "approved", "modified", "rejected", "all"],
+        "--type",
+        choices=["constraint", "success", "edge_case", "all"],
         default="all",
-        help="Filter by approval status",
+        help="Filter by test type",
     )
     list_parser.set_defaults(func=cmd_test_list)
 
     # test-stats
     stats_parser = subparsers.add_parser(
         "test-stats",
-        help="Show test statistics for a goal",
+        help="Show test statistics for an agent",
     )
     stats_parser.add_argument(
-        "goal_id",
-        help="Goal ID",
+        "agent_path",
+        help="Path to agent export folder (e.g., exports/my_agent)",
     )
     stats_parser.set_defaults(func=cmd_test_stats)
 
@@ -114,7 +110,7 @@ def cmd_test_run(args: argparse.Namespace) -> int:
 
     if not tests_dir.exists():
         print(f"Error: Tests directory not found: {tests_dir}")
-        print("Hint: Generate and approve tests first using test-generate")
+        print("Hint: Use generate_constraint_tests/generate_success_tests MCP tools, then write tests with Write tool")
         return 1
 
     # Build pytest command
@@ -233,67 +229,131 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
     return result.returncode
 
 
-def cmd_test_list(args: argparse.Namespace) -> int:
-    """List tests for a goal."""
-    storage = TestStorage(DEFAULT_STORAGE_PATH / args.goal_id)
-    tests = storage.get_tests_by_goal(args.goal_id)
+def _scan_test_files(tests_dir: Path) -> list[dict]:
+    """Scan test files and extract test functions using AST parsing."""
+    tests = []
 
-    # Filter by status
-    if args.status != "all":
-        from framework.testing.test_case import ApprovalStatus
+    for test_file in sorted(tests_dir.glob("test_*.py")):
         try:
-            filter_status = ApprovalStatus(args.status)
-            tests = [t for t in tests if t.approval_status == filter_status]
-        except ValueError:
-            pass
+            content = test_file.read_text()
+            tree = ast.parse(content)
 
-    if not tests:
-        print(f"No tests found for goal {args.goal_id}")
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if node.name.startswith("test_"):
+                        # Determine test type from filename
+                        if "constraint" in test_file.name:
+                            test_type = "constraint"
+                        elif "success" in test_file.name:
+                            test_type = "success"
+                        elif "edge" in test_file.name:
+                            test_type = "edge_case"
+                        else:
+                            test_type = "unknown"
+
+                        docstring = ast.get_docstring(node) or ""
+
+                        tests.append({
+                            "test_name": node.name,
+                            "file": test_file.name,
+                            "line": node.lineno,
+                            "test_type": test_type,
+                            "is_async": isinstance(node, ast.AsyncFunctionDef),
+                            "description": docstring[:100] if docstring else None,
+                        })
+        except SyntaxError as e:
+            print(f"  Warning: Syntax error in {test_file.name}: {e}")
+        except Exception as e:
+            print(f"  Warning: Error parsing {test_file.name}: {e}")
+
+    return tests
+
+
+def cmd_test_list(args: argparse.Namespace) -> int:
+    """List tests for an agent by scanning pytest files."""
+    agent_path = Path(args.agent_path)
+    tests_dir = agent_path / "tests"
+
+    if not tests_dir.exists():
+        print(f"No tests directory found at: {tests_dir}")
+        print("Hint: Generate tests using the MCP generate_constraint_tests or generate_success_tests tools")
         return 0
 
-    print(f"Tests for goal {args.goal_id}:\n")
+    tests = _scan_test_files(tests_dir)
+
+    # Filter by type if specified
+    if args.type != "all":
+        tests = [t for t in tests if t["test_type"] == args.type]
+
+    if not tests:
+        print(f"No tests found in {tests_dir}")
+        return 0
+
+    print(f"Tests in {tests_dir}:\n")
+
+    # Group by type
+    by_type: dict[str, list] = {}
     for t in tests:
-        status_icon = {
-            "pending": "⏳",
-            "approved": "✓",
-            "modified": "✓*",
-            "rejected": "✗",
-        }.get(t.approval_status.value, "?")
+        ttype = t["test_type"]
+        if ttype not in by_type:
+            by_type[ttype] = []
+        by_type[ttype].append(t)
 
-        result_icon = ""
-        if t.last_result:
-            result_icon = " [PASS]" if t.last_result == "passed" else " [FAIL]"
-
-        print(f"  {status_icon} {t.test_name} ({t.test_type.value}){result_icon}")
-        print(f"      ID: {t.id}")
-        print(f"      Criteria: {t.parent_criteria_id}")
-        if t.llm_confidence:
-            print(f"      Confidence: {t.llm_confidence:.0%}")
+    for test_type, type_tests in sorted(by_type.items()):
+        print(f"  [{test_type.upper()}] ({len(type_tests)} tests)")
+        for t in type_tests:
+            async_marker = "async " if t["is_async"] else ""
+            desc = f" - {t['description']}" if t.get("description") else ""
+            print(f"    {async_marker}{t['test_name']}{desc}")
+            print(f"        {t['file']}:{t['line']}")
         print()
+
+    print(f"Total: {len(tests)} tests")
+    print(f"\nRun with: pytest {tests_dir} -v")
 
     return 0
 
 
 def cmd_test_stats(args: argparse.Namespace) -> int:
-    """Show test statistics."""
-    storage = TestStorage(DEFAULT_STORAGE_PATH / args.goal_id)
-    stats = storage.get_stats()
+    """Show test statistics by scanning pytest files."""
+    agent_path = Path(args.agent_path)
+    tests_dir = agent_path / "tests"
 
-    print(f"Statistics for goal {args.goal_id}:\n")
-    print(f"  Total tests: {stats['total_tests']}")
-    print("\n  By approval status:")
-    for status, count in stats["by_approval"].items():
-        print(f"    {status}: {count}")
+    if not tests_dir.exists():
+        print(f"No tests directory found at: {tests_dir}")
+        return 0
 
-    # Get pass/fail stats
-    tests = storage.get_approved_tests(args.goal_id)
-    passed = sum(1 for t in tests if t.last_result == "passed")
-    failed = sum(1 for t in tests if t.last_result == "failed")
-    not_run = sum(1 for t in tests if t.last_result is None)
+    tests = _scan_test_files(tests_dir)
 
-    print("\n  Execution results:")
-    print(f"    Passed: {passed}")
-    print(f"    Failed: {failed}")
-    print(f"    Not run: {not_run}")
+    if not tests:
+        print(f"No tests found in {tests_dir}")
+        return 0
+
+    print(f"Test Statistics for {agent_path}:\n")
+    print(f"  Total tests: {len(tests)}")
+
+    # Count by type
+    by_type: dict[str, int] = {}
+    async_count = 0
+    for t in tests:
+        ttype = t["test_type"]
+        by_type[ttype] = by_type.get(ttype, 0) + 1
+        if t["is_async"]:
+            async_count += 1
+
+    print("\n  By type:")
+    for test_type, count in sorted(by_type.items()):
+        print(f"    {test_type}: {count}")
+
+    print(f"\n  Async tests: {async_count}/{len(tests)}")
+
+    # List test files
+    test_files = list(tests_dir.glob("test_*.py"))
+    print(f"\n  Test files ({len(test_files)}):")
+    for f in sorted(test_files):
+        count = sum(1 for t in tests if t["file"] == f.name)
+        print(f"    {f.name} ({count} tests)")
+
+    print(f"\nRun all tests: pytest {tests_dir} -v")
 
     return 0

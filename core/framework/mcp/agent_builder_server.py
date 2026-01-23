@@ -19,10 +19,8 @@ from framework.graph import Goal, SuccessCriterion, Constraint, NodeSpec, EdgeSp
 from framework.graph.plan import Plan
 
 # Testing framework imports
-from framework.testing.test_case import Test, TestType
 from framework.testing.prompts import (
     PYTEST_TEST_FILE_HEADER,
-    PYTEST_CONFTEST_TEMPLATE,
 )
 
 
@@ -2268,33 +2266,6 @@ def _get_agent_module_from_path(agent_path: str) -> str:
     """Extract agent module name from path like 'exports/my_agent' -> 'my_agent'."""
     path = Path(agent_path)
     return path.name
-
-
-def _ensure_test_directory(agent_path: str) -> Path:
-    """Ensure the tests directory exists for an agent."""
-    tests_dir = Path(agent_path) / "tests"
-    tests_dir.mkdir(parents=True, exist_ok=True)
-    return tests_dir
-
-
-def _write_conftest_if_missing(agent_path: str, agent_module: str) -> None:
-    """Write conftest.py if it doesn't exist."""
-    tests_dir = _ensure_test_directory(agent_path)
-    conftest_path = tests_dir / "conftest.py"
-    if not conftest_path.exists():
-        content = PYTEST_CONFTEST_TEMPLATE.format(agent_name=agent_module)
-        conftest_path.write_text(content)
-
-
-def _append_test_to_file(test_file: Path, test_code: str) -> None:
-    """Append a test function to a test file."""
-    if test_file.exists():
-        existing = test_file.read_text()
-        # Add two newlines before the new test
-        test_file.write_text(existing.rstrip() + "\n\n\n" + test_code + "\n")
-    else:
-        # This shouldn't happen as we create the file with header first
-        test_file.write_text(test_code + "\n")
 
 
 def _format_constraint(constraint: Constraint) -> str:
