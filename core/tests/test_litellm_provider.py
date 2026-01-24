@@ -329,3 +329,135 @@ class TestAnthropicProviderBackwardCompatibility:
 
         assert result.content == "The time is 3:00 PM."
         mock_completion.assert_called_once()
+
+
+class TestJsonMode:
+    """Test json_mode parameter for structured JSON output via prompt engineering."""
+
+    @patch("litellm.completion")
+    def test_json_mode_adds_instruction_to_system_prompt(self, mock_completion):
+        """Test that json_mode=True adds JSON instruction to system prompt."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"key": "value"}'
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "gpt-4o-mini"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_completion.return_value = mock_response
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+        provider.complete(
+            messages=[{"role": "user", "content": "Return JSON"}],
+            system="You are helpful.",
+            json_mode=True
+        )
+
+        call_kwargs = mock_completion.call_args[1]
+        # Should NOT use response_format (prompt engineering instead)
+        assert "response_format" not in call_kwargs
+        # Should have JSON instruction appended to system message
+        messages = call_kwargs["messages"]
+        assert messages[0]["role"] == "system"
+        assert "You are helpful." in messages[0]["content"]
+        assert "Please respond with a valid JSON object" in messages[0]["content"]
+
+    @patch("litellm.completion")
+    def test_json_mode_creates_system_prompt_if_none(self, mock_completion):
+        """Test that json_mode=True creates system prompt if none provided."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"key": "value"}'
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "gpt-4o-mini"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_completion.return_value = mock_response
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+        provider.complete(
+            messages=[{"role": "user", "content": "Return JSON"}],
+            json_mode=True
+        )
+
+        call_kwargs = mock_completion.call_args[1]
+        messages = call_kwargs["messages"]
+        # Should insert a system message with JSON instruction
+        assert messages[0]["role"] == "system"
+        assert "Please respond with a valid JSON object" in messages[0]["content"]
+
+    @patch("litellm.completion")
+    def test_json_mode_false_no_instruction(self, mock_completion):
+        """Test that json_mode=False does not add JSON instruction."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Hello"
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "gpt-4o-mini"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_completion.return_value = mock_response
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+        provider.complete(
+            messages=[{"role": "user", "content": "Hello"}],
+            system="You are helpful.",
+            json_mode=False
+        )
+
+        call_kwargs = mock_completion.call_args[1]
+        assert "response_format" not in call_kwargs
+        messages = call_kwargs["messages"]
+        assert messages[0]["role"] == "system"
+        assert "Please respond with a valid JSON object" not in messages[0]["content"]
+
+    @patch("litellm.completion")
+    def test_json_mode_default_is_false(self, mock_completion):
+        """Test that json_mode defaults to False (no JSON instruction)."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Hello"
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "gpt-4o-mini"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_completion.return_value = mock_response
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+        provider.complete(
+            messages=[{"role": "user", "content": "Hello"}],
+            system="You are helpful."
+        )
+
+        call_kwargs = mock_completion.call_args[1]
+        assert "response_format" not in call_kwargs
+        messages = call_kwargs["messages"]
+        # System prompt should be unchanged
+        assert messages[0]["content"] == "You are helpful."
+
+    @patch("litellm.completion")
+    def test_anthropic_provider_passes_json_mode(self, mock_completion):
+        """Test that AnthropicProvider passes json_mode through (prompt engineering)."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"result": "ok"}'
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "claude-haiku-4-5-20251001"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_completion.return_value = mock_response
+
+        provider = AnthropicProvider(api_key="test-key")
+        provider.complete(
+            messages=[{"role": "user", "content": "Return JSON"}],
+            system="You are helpful.",
+            json_mode=True
+        )
+
+        call_kwargs = mock_completion.call_args[1]
+        # Should NOT use response_format
+        assert "response_format" not in call_kwargs
+        # Should have JSON instruction in system prompt
+        messages = call_kwargs["messages"]
+        assert messages[0]["role"] == "system"
+        assert "Please respond with a valid JSON object" in messages[0]["content"]

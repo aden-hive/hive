@@ -267,7 +267,7 @@ If you prefer to build agents manually:
     {
       "node_id": "analyze",
       "name": "Analyze Ticket",
-      "node_type": "llm",
+      "node_type": "llm_generate",
       "system_prompt": "Analyze this support ticket...",
       "input_keys": ["ticket_content"],
       "output_keys": ["category", "priority"]
