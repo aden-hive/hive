@@ -3,64 +3,53 @@ name: testing-agent
 description: Run goal-based evaluation tests for agents. Use when you need to verify an agent meets its goals, debug failing tests, or iterate on agent improvements based on test results.
 ---
 
-# ⛔ MANDATORY: USE MCP TOOLS ONLY
+# Testing Workflow
 
-**STOP. Read this before doing anything else.**
+This skill provides tools for testing agents built with the building-agents skill.
 
-You MUST use MCP tools for ALL testing operations. Never write test files directly.
-
-## Required MCP Workflow
+## Workflow Overview
 
 1. `mcp__agent-builder__list_tests` - Check what tests exist
-2. `mcp__agent-builder__generate_constraint_tests` or `mcp__agent-builder__generate_success_tests` - Generate tests
-3. `mcp__agent-builder__get_pending_tests` - Review pending tests
-4. `mcp__agent-builder__approve_tests` - Approve tests (this writes the files)
-5. `mcp__agent-builder__run_tests` - Execute tests
-6. `mcp__agent-builder__debug_test` - Debug failures
+2. `mcp__agent-builder__generate_constraint_tests` or `mcp__agent-builder__generate_success_tests` - Get test guidelines
+3. **Write tests directly** using the Write tool with the guidelines provided
+4. `mcp__agent-builder__run_tests` - Execute tests
+5. `mcp__agent-builder__debug_test` - Debug failures
 
-## ❌ WRONG - Never Do This
+## How Test Generation Works
 
-```python
-# WRONG: Writing test file directly with Write tool
-Write(file_path="exports/agent/tests/test_foo.py", content="def test_...")
-```
+The `generate_*_tests` MCP tools return **guidelines and templates** - they do NOT generate test code via LLM.
+You (Claude) write the tests directly using the Write tool based on the guidelines.
 
-```python
-# WRONG: Running pytest directly via Bash
-Bash(command="pytest exports/agent/tests/ -v")
-```
+### Example Workflow
 
 ```python
-# WRONG: Creating test code manually
-test_code = """
-def test_something():
-    assert True
-"""
-```
-
-## ✅ CORRECT - Always Do This
-
-```python
-# CORRECT: Generate tests via MCP tool
-mcp__agent-builder__generate_constraint_tests(
+# Step 1: Get test guidelines
+result = mcp__agent-builder__generate_constraint_tests(
     goal_id="my-goal",
     goal_json='{"id": "...", "constraints": [...]}',
     agent_path="exports/my_agent"
 )
 
-# CORRECT: Approve tests via MCP tool (this writes files)
-mcp__agent-builder__approve_tests(
-    goal_id="my-goal",
-    approvals='[{"test_id": "test-1", "action": "approve"}]'
+# Step 2: The result contains:
+# - output_file: where to write tests
+# - file_header: imports and fixtures to use
+# - test_template: format for test functions
+# - constraints_formatted: the constraints to test
+# - test_guidelines: rules for writing tests
+
+# Step 3: Write tests directly using the Write tool
+Write(
+    file_path=result["output_file"],
+    content=result["file_header"] + test_code_you_write
 )
 
-# CORRECT: Run tests via MCP tool
+# Step 4: Run tests via MCP tool
 mcp__agent-builder__run_tests(
     goal_id="my-goal",
     agent_path="exports/my_agent"
 )
 
-# CORRECT: Debug failures via MCP tool
+# Step 5: Debug failures via MCP tool
 mcp__agent-builder__debug_test(
     goal_id="my-goal",
     test_name="test_constraint_foo",
@@ -68,22 +57,15 @@ mcp__agent-builder__debug_test(
 )
 ```
 
-## Self-Check Before Every Action
-
-Before you take any testing action, ask yourself:
-- Am I about to write `def test_...`? → **STOP, use `generate_*_tests` instead**
-- Am I about to use `Write` for a test file? → **STOP, use `approve_tests` instead**
-- Am I about to run `pytest` via Bash? → **STOP, use `run_tests` instead**
-
 ---
 
 # Testing Agents with MCP Tools
 
 Run goal-based evaluation tests for agents built with the building-agents skill.
 
-**Key Principle: Tests are generated via MCP tools and written as Python files**
-- ✅ Generate tests: `generate_constraint_tests`, `generate_success_tests`
-- ✅ Review and approve: `get_pending_tests`, `approve_tests` → writes to Python files
+**Key Principle: MCP tools provide guidelines, Claude writes tests directly**
+- ✅ Get guidelines: `generate_constraint_tests`, `generate_success_tests` → returns templates and guidelines
+- ✅ Write tests: Use the Write tool with the provided file_header and test_template
 - ✅ Run tests: `run_tests` (runs pytest via subprocess)
 - ✅ Debug failures: `debug_test` (re-runs single test with verbose output)
 - ✅ List tests: `list_tests` (scans Python test files)
@@ -118,19 +100,19 @@ async def test_happy_path(mock_mode):
     assert len(result.output) > 0
 ```
 
-## Why MCP Tools Are Required
+## Why This Approach
 
-- Tests are generated with proper imports, fixtures, and API key enforcement
-- Approval workflow ensures user review before file creation
+- MCP tools provide consistent test guidelines with proper imports, fixtures, and API key enforcement
+- Claude writes tests directly, eliminating circular LLM dependencies in the MCP server
 - `run_tests` parses pytest output into structured results for iteration
 - `debug_test` provides formatted output with actionable debugging info
-- `conftest.py` is auto-created with proper fixtures
+- File headers include conftest.py setup with proper fixtures
 
 ## Quick Start
 
 1. **Check existing tests** - `list_tests(goal_id, agent_path)`
-2. **Generate test files** - `generate_constraint_tests` or `generate_success_tests`
-3. **User reviews and approves** - `get_pending_tests` → `approve_tests`
+2. **Get test guidelines** - `generate_constraint_tests` or `generate_success_tests`
+3. **Write tests** - Use the Write tool with the provided file_header and guidelines
 4. **Run tests** - `run_tests(goal_id, agent_path)`
 5. **Debug failures** - `debug_test(goal_id, test_name, agent_path)`
 6. **Iterate** - Repeat steps 4-5 until all pass
@@ -284,17 +266,17 @@ This shows what test files already exist. If tests exist:
 - Review the list to see what's covered
 - Ask user if they want to add more or run existing tests
 
-### Step 2: Generate Constraint Tests (Goal Stage)
+### Step 2: Get Constraint Test Guidelines (Goal Stage)
 
-After goal is defined, generate constraint tests using the MCP tool:
+After goal is defined, get test guidelines using the MCP tool:
 
 ```python
 # First, read the goal from agent.py to get the goal JSON
 goal_code = Read(file_path="exports/your_agent/agent.py")
 # Extract the goal definition and convert to JSON
 
-# Generate constraint tests via MCP tool
-mcp__agent-builder__generate_constraint_tests(
+# Get constraint test guidelines via MCP tool
+result = mcp__agent-builder__generate_constraint_tests(
     goal_id="your-goal-id",
     goal_json='{"id": "goal-id", "name": "...", "constraints": [...]}',
     agent_path="exports/your_agent"
@@ -302,37 +284,30 @@ mcp__agent-builder__generate_constraint_tests(
 ```
 
 **Response includes:**
-- `generated_count`: Number of tests generated
-- `tests`: List with id, test_name, description, confidence, test_code_preview
-- `next_step`: "Call approve_tests to approve, modify, or reject each test"
-- `output_file`: Where tests will be written when approved
+- `output_file`: Where to write tests (e.g., `exports/your_agent/tests/test_constraints.py`)
+- `file_header`: Imports, fixtures, and pytest setup to use at the top of the file
+- `test_template`: Format for test functions
+- `constraints_formatted`: The constraints to test
+- `test_guidelines`: Rules and best practices for writing tests
+- `instruction`: How to proceed
 
-**USER APPROVAL REQUIRED**: Review generated tests and approve:
+**Write tests directly** using the provided guidelines:
 
 ```python
-# Review pending tests
-mcp__agent-builder__get_pending_tests(goal_id="your-goal-id")
-
-# Approve tests (this writes them to files)
-mcp__agent-builder__approve_tests(
-    goal_id="your-goal-id",
-    approvals='[{"test_id": "test-1", "action": "approve"}, {"test_id": "test-2", "action": "approve"}]'
+# Write tests using the Write tool
+Write(
+    file_path=result["output_file"],
+    content=result["file_header"] + "\n\n" + your_test_code
 )
 ```
 
-**Approval actions:**
-- `approve` - Accept test as-is, write to file
-- `modify` - Accept with changes: `{"test_id": "...", "action": "modify", "modified_code": "..."}`
-- `reject` - Reject with reason: `{"test_id": "...", "action": "reject", "reason": "..."}`
-- `skip` - Skip for now
+### Step 3: Get Success Criteria Test Guidelines (Eval Stage)
 
-### Step 3: Generate Success Criteria Tests (Eval Stage)
-
-After agent is fully built, generate success criteria tests:
+After agent is fully built, get success criteria test guidelines:
 
 ```python
-# Generate success criteria tests via MCP tool
-mcp__agent-builder__generate_success_tests(
+# Get success criteria test guidelines via MCP tool
+result = mcp__agent-builder__generate_success_tests(
     goal_id="your-goal-id",
     goal_json='{"id": "goal-id", "name": "...", "success_criteria": [...]}',
     node_names="analyze_request,search_web,format_results",
@@ -341,26 +316,28 @@ mcp__agent-builder__generate_success_tests(
 )
 ```
 
-**USER APPROVAL REQUIRED**: Same approval flow as constraint tests:
+**Write tests directly** using the provided guidelines:
 
 ```python
-# Review and approve
-mcp__agent-builder__get_pending_tests(goal_id="your-goal-id")
-mcp__agent-builder__approve_tests(
-    goal_id="your-goal-id",
-    approvals='[{"test_id": "...", "action": "approve"}]'
+# Write tests using the Write tool
+Write(
+    file_path=result["output_file"],
+    content=result["file_header"] + "\n\n" + your_test_code
 )
 ```
 
 ### Step 4: Test Fixtures (conftest.py)
 
-**conftest.py is auto-created** when you approve tests via `approve_tests`. It includes:
-- API key enforcement fixtures
-- `mock_mode` fixture
-- `credentials` fixture
-- `sample_inputs` fixture
+The `file_header` returned by the MCP tools includes proper imports and fixtures.
+You should also create a conftest.py file in the tests directory with shared fixtures:
 
-You do NOT need to create conftest.py manually - the MCP tool handles this.
+```python
+# Create conftest.py with the conftest template
+Write(
+    file_path="exports/your_agent/tests/conftest.py",
+    content=conftest_content  # Use PYTEST_CONFTEST_TEMPLATE format
+)
+```
 
 ### Step 5: Run Tests
 
@@ -739,6 +716,166 @@ This provides **immediate feedback** during development, catching issues early.
 
 **Note:** All test patterns should include API key enforcement via conftest.py.
 
+### ⚠️ CRITICAL: Framework Features You Must Know
+
+#### OutputCleaner - Automatic I/O Cleaning (NEW!)
+
+**The framework now automatically validates and cleans node outputs** using a fast LLM (Cerebras llama-3.3-70b) at edge traversal time. This prevents cascading failures from malformed output.
+
+**What OutputCleaner does**:
+- ✅ Validates output matches next node's input schema
+- ✅ Detects JSON parsing trap (entire response in one key)
+- ✅ Cleans malformed output automatically (~200-500ms, ~$0.001 per cleaning)
+- ✅ Boosts success rates by 1.8-2.2x
+
+**Impact on tests**: Tests should still use safe patterns because OutputCleaner may not catch all issues in test mode.
+
+#### Safe Test Patterns (REQUIRED)
+
+**❌ UNSAFE** (will cause test failures):
+```python
+# Direct key access - can crash!
+approval_decision = result.output["approval_decision"]
+assert approval_decision == "APPROVED"
+
+# Nested access without checks
+category = result.output["analysis"]["category"]
+
+# Assuming parsed JSON structure
+for issue in result.output["compliance_issues"]:
+    ...
+```
+
+**✅ SAFE** (correct patterns):
+```python
+# 1. Safe dict access with .get()
+output = result.output or {}
+approval_decision = output.get("approval_decision", "UNKNOWN")
+assert "APPROVED" in approval_decision or approval_decision == "APPROVED"
+
+# 2. Type checking before operations
+analysis = output.get("analysis", {})
+if isinstance(analysis, dict):
+    category = analysis.get("category", "unknown")
+
+# 3. Parse JSON from strings (the JSON parsing trap!)
+import json
+recommendation = output.get("recommendation", "{}")
+if isinstance(recommendation, str):
+    try:
+        parsed = json.loads(recommendation)
+        if isinstance(parsed, dict):
+            approval = parsed.get("approval_decision", "UNKNOWN")
+    except json.JSONDecodeError:
+        approval = "UNKNOWN"
+elif isinstance(recommendation, dict):
+    approval = recommendation.get("approval_decision", "UNKNOWN")
+
+# 4. Safe iteration with type check
+compliance_issues = output.get("compliance_issues", [])
+if isinstance(compliance_issues, list):
+    for issue in compliance_issues:
+        ...
+```
+
+#### Helper Functions for Safe Access
+
+**Add to conftest.py**:
+```python
+import json
+import re
+
+def _parse_json_from_output(result, key):
+    """Parse JSON from agent output (framework may store full LLM response as string)."""
+    response_text = result.output.get(key, "")
+    # Remove markdown code blocks if present
+    json_text = re.sub(r'```json\s*|\s*```', '', response_text).strip()
+
+    try:
+        return json.loads(json_text)
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return result.output.get(key)
+
+def safe_get_nested(result, key_path, default=None):
+    """Safely get nested value from result.output."""
+    output = result.output or {}
+    current = output
+
+    for key in key_path:
+        if isinstance(current, dict):
+            current = current.get(key)
+        elif isinstance(current, str):
+            try:
+                json_text = re.sub(r'```json\s*|\s*```', '', current).strip()
+                parsed = json.loads(json_text)
+                if isinstance(parsed, dict):
+                    current = parsed.get(key)
+                else:
+                    return default
+            except json.JSONDecodeError:
+                return default
+        else:
+            return default
+
+    return current if current is not None else default
+
+# Make available in tests
+pytest.parse_json_from_output = _parse_json_from_output
+pytest.safe_get_nested = safe_get_nested
+```
+
+**Usage in tests**:
+```python
+# Use helper to parse JSON safely
+parsed = pytest.parse_json_from_output(result, "recommendation")
+if isinstance(parsed, dict):
+    approval = parsed.get("approval_decision", "UNKNOWN")
+
+# Safe nested access
+risk_score = pytest.safe_get_nested(result, ["analysis", "risk_score"], default=0.0)
+```
+
+#### Test Count Guidance
+
+**Generate 8-15 tests total, NOT 30+**
+
+- ✅ 2-3 tests per success criterion
+- ✅ 1 happy path test
+- ✅ 1 boundary/edge case test
+- ✅ 1 error handling test (optional)
+
+**Why fewer tests?**:
+- Each test requires real LLM call (~3 seconds, costs money)
+- 30 tests = 90 seconds, $0.30+ in costs
+- 12 tests = 36 seconds, $0.12 in costs
+- Focus on quality over quantity
+
+#### ExecutionResult Fields (Important!)
+
+**`result.success=True` means NO exception, NOT goal achieved**
+
+```python
+# ❌ WRONG - assumes goal achieved
+assert result.success
+
+# ✅ RIGHT - check success AND output
+assert result.success, f"Agent failed: {result.error}"
+output = result.output or {}
+approval = output.get("approval_decision")
+assert approval == "APPROVED", f"Expected APPROVED, got {approval}"
+```
+
+**All ExecutionResult fields**:
+- `success: bool` - Execution completed without exception (NOT goal achieved!)
+- `output: dict` - Complete memory snapshot (may contain raw strings)
+- `error: str | None` - Error message if failed
+- `steps_executed: int` - Number of nodes executed
+- `total_tokens: int` - Cumulative token usage
+- `total_latency_ms: int` - Total execution time
+- `path: list[str]` - Node IDs traversed
+- `paused_at: str | None` - Node ID if HITL pause occurred
+- `session_state: dict` - State for resuming
+
 ### Happy Path Test
 ```python
 @pytest.mark.asyncio
@@ -803,25 +940,24 @@ async def test_performance_latency(mock_mode):
 
 ## Anti-Patterns
 
-### MCP Tool Enforcement
+### Testing Best Practices
 
 | Don't | Do Instead |
 |-------|------------|
-| ❌ Write test files with Write tool | ✅ Use `generate_*_tests` + `approve_tests` |
-| ❌ Run pytest via Bash | ✅ Use `run_tests` MCP tool |
-| ❌ Debug tests with Bash pytest -vvs | ✅ Use `debug_test` MCP tool |
-| ❌ Edit test files directly | ✅ Use `approve_tests` with `action: "modify"` |
+| ❌ Write tests without getting guidelines first | ✅ Use `generate_*_tests` to get proper file_header and guidelines |
+| ❌ Run pytest via Bash | ✅ Use `run_tests` MCP tool for structured results |
+| ❌ Debug tests with Bash pytest -vvs | ✅ Use `debug_test` MCP tool for formatted output |
 | ❌ Check for tests with Glob | ✅ Use `list_tests` MCP tool |
+| ❌ Skip the file_header from guidelines | ✅ Always include the file_header for proper imports and fixtures |
 
 ### General Testing
 
 | Don't | Do Instead |
 |-------|------------|
-| ❌ Auto-approve generated tests | ✅ Always require user approval via approve_tests |
 | ❌ Treat all failures the same | ✅ Use debug_test to categorize and iterate appropriately |
 | ❌ Rebuild entire agent for small bugs | ✅ Edit code directly, re-run tests |
 | ❌ Run tests without API key | ✅ Always set ANTHROPIC_API_KEY first |
-| ❌ Skip user review of generated tests | ✅ Show test code to user before approving |
+| ❌ Write tests without understanding the constraints/criteria | ✅ Read the formatted constraints/criteria from guidelines |
 
 ## Workflow Summary
 
@@ -829,11 +965,11 @@ async def test_performance_latency(mock_mode):
 1. Check existing tests: list_tests(goal_id, agent_path)
    → Scans exports/{agent}/tests/test_*.py
    ↓
-2. Generate tests: generate_constraint_tests, generate_success_tests
-   → Returns pending tests (stored in memory)
+2. Get test guidelines: generate_constraint_tests, generate_success_tests
+   → Returns file_header, test_template, constraints/criteria, guidelines
    ↓
-3. Review and approve: get_pending_tests → approve_tests → USER APPROVAL
-   → Writes approved tests to exports/{agent}/tests/test_*.py
+3. Write tests: Use Write tool with the provided guidelines
+   → Write tests to exports/{agent}/tests/test_*.py
    ↓
 4. Run tests: run_tests(goal_id, agent_path)
    → Executes: pytest exports/{agent}/tests/ -v
@@ -861,14 +997,15 @@ mcp__agent-builder__list_tests(
     agent_path="exports/your_agent"
 )
 
-# Generate constraint tests (returns pending tests for approval)
+# Get constraint test guidelines (returns templates and guidelines, NOT generated tests)
 mcp__agent-builder__generate_constraint_tests(
     goal_id="your-goal-id",
     goal_json='{"id": "...", "constraints": [...]}',
     agent_path="exports/your_agent"
 )
+# Returns: output_file, file_header, test_template, constraints_formatted, test_guidelines
 
-# Generate success criteria tests
+# Get success criteria test guidelines
 mcp__agent-builder__generate_success_tests(
     goal_id="your-goal-id",
     goal_json='{"id": "...", "success_criteria": [...]}',
@@ -876,15 +1013,7 @@ mcp__agent-builder__generate_success_tests(
     tool_names="tool1,tool2",
     agent_path="exports/your_agent"
 )
-
-# Review pending tests
-mcp__agent-builder__get_pending_tests(goal_id="your-goal-id")
-
-# Approve tests → writes to Python files at exports/{agent}/tests/
-mcp__agent-builder__approve_tests(
-    goal_id="your-goal-id",
-    approvals='[{"test_id": "...", "action": "approve"}]'
-)
+# Returns: output_file, file_header, test_template, success_criteria_formatted, test_guidelines
 
 # Run tests via pytest subprocess
 mcp__agent-builder__run_tests(

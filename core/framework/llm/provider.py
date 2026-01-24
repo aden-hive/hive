@@ -59,6 +59,7 @@ class LLMProvider(ABC):
         tools: list[Tool] | None = None,
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """
         Generate a completion from the LLM.
@@ -72,6 +73,7 @@ class LLMProvider(ABC):
                 - {"type": "json_object"} for basic JSON mode
                 - {"type": "json_schema", "json_schema": {"name": "...", "schema": {...}}}
                   for strict JSON schema enforcement
+            json_mode: If True, request structured JSON output from the LLM
 
         Returns:
             LLMResponse with content and metadata

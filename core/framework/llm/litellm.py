@@ -79,6 +79,7 @@ class LiteLLMProvider(LLMProvider):
         tools: list[Tool] | None = None,
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
         # Prepare messages with system prompt
@@ -86,6 +87,17 @@ class LiteLLMProvider(LLMProvider):
         if system:
             full_messages.append({"role": "system", "content": system})
         full_messages.extend(messages)
+
+        # Add JSON mode via prompt engineering (works across all providers)
+        if json_mode:
+            json_instruction = (
+                "\n\nPlease respond with a valid JSON object."
+            )
+            # Append to system message if present, otherwise add as system message
+            if full_messages and full_messages[0]["role"] == "system":
+                full_messages[0]["content"] += json_instruction
+            else:
+                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
 
         # Build kwargs
         kwargs: dict[str, Any] = {
