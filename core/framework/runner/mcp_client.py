@@ -6,6 +6,7 @@ Supports both STDIO and HTTP transports using the official MCP Python SDK.
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -148,10 +149,12 @@ class MCPClient:
             from mcp import StdioServerParameters
 
             # Create server parameters
+            # Always inherit parent environment and merge with any custom env vars
+            merged_env = {**os.environ, **(self.config.env or {})}
             server_params = StdioServerParameters(
                 command=self.config.command,
                 args=self.config.args,
-                env=self.config.env or None,
+                env=merged_env,
                 cwd=self.config.cwd,
             )
 

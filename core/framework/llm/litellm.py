@@ -78,6 +78,7 @@ class LiteLLMProvider(LLMProvider):
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
@@ -114,6 +115,11 @@ class LiteLLMProvider(LLMProvider):
         # Add tools if provided
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+
+        # Add response_format for structured output
+        # LiteLLM passes this through to the underlying provider
+        if response_format:
+            kwargs["response_format"] = response_format
 
         # Make the call
         response = litellm.completion(**kwargs)

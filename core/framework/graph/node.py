@@ -153,6 +153,11 @@ class NodeSpec(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class MemoryWriteError(Exception):
+    """Raised when an invalid value is written to memory."""
+    pass
+
+
 @dataclass
 class SharedMemory:
     """
@@ -171,10 +176,38 @@ class SharedMemory:
             raise PermissionError(f"Node not allowed to read key: {key}")
         return self._data.get(key)
 
-    def write(self, key: str, value: Any) -> None:
-        """Write a value to shared memory."""
+    def write(self, key: str, value: Any, validate: bool = True) -> None:
+        """
+        Write a value to shared memory.
+
+        Args:
+            key: The memory key to write to
+            value: The value to write
+            validate: If True, check for suspicious content (default True)
+
+        Raises:
+            PermissionError: If node doesn't have write permission
+            MemoryWriteError: If value appears to be hallucinated content
+        """
         if self._allowed_write and key not in self._allowed_write:
             raise PermissionError(f"Node not allowed to write key: {key}")
+
+        if validate and isinstance(value, str):
+            # Check for obviously hallucinated content
+            if len(value) > 5000:
+                # Long strings that look like code are suspicious
+                code_indicators = ["```python", "def ", "class ", "import ", "async def "]
+                if any(indicator in value[:500] for indicator in code_indicators):
+                    logger.warning(
+                        f"⚠ Suspicious write to key '{key}': appears to be code "
+                        f"({len(value)} chars). Consider using validate=False if intended."
+                    )
+                    raise MemoryWriteError(
+                        f"Rejected suspicious content for key '{key}': "
+                        f"appears to be hallucinated code ({len(value)} chars). "
+                        "If this is intentional, use validate=False."
+                    )
+
         self._data[key] = value
 
     def read_all(self) -> dict[str, Any]:
@@ -392,8 +425,9 @@ class LLMNode(NodeProtocol):
     The LLM decides how to achieve the goal within constraints.
     """
 
-    def __init__(self, tool_executor: Callable | None = None):
+    def __init__(self, tool_executor: Callable | None = None, require_tools: bool = False):
         self.tool_executor = tool_executor
+        self.require_tools = require_tools
 
     def _strip_code_blocks(self, content: str) -> str:
         """Strip markdown code block wrappers from content.
@@ -415,6 +449,15 @@ class LLMNode(NodeProtocol):
 
         if ctx.llm is None:
             return NodeResult(success=False, error="LLM not available")
+
+        # Fail fast if tools are required but not available
+        if self.require_tools and not ctx.available_tools:
+            return NodeResult(
+                success=False,
+                error=f"Node '{ctx.node_spec.name}' requires tools but none are available. "
+                      f"Declared tools: {ctx.node_spec.tools}. "
+                      "Register tools via ToolRegistry before running the agent."
+            )
 
         ctx.runtime.set_node(ctx.node_id)
 
@@ -470,11 +513,16 @@ class LLMNode(NodeProtocol):
                     tool_executor=executor,
                 )
             else:
-                # Use JSON mode for llm_generate nodes with structured output
+                # Use JSON mode for llm_generate nodes with output_keys
+                # Skip strict schema validation - just validate keys after parsing
                 use_json_mode = (
                     ctx.node_spec.node_type == "llm_generate"
+                    and ctx.node_spec.output_keys
                     and len(ctx.node_spec.output_keys) >= 1
                 )
+                if use_json_mode:
+                    logger.info(f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}")
+
                 response = ctx.llm.complete(
                     messages=messages,
                     system=system,
@@ -535,12 +583,24 @@ class LLMNode(NodeProtocol):
                             output[key] = stripped_content
 
                 except (json.JSONDecodeError, Exception) as e:
+                    # JSON extraction failed - fail explicitly instead of polluting memory
+                    logger.error(f"      ✗ Failed to extract structured output: {e}")
+                    logger.error(f"      Raw response (first 500 chars): {response.content[:500]}...")
+
+                    # Return failure instead of writing garbage to all keys
+                    return NodeResult(
+                        success=False,
+                        error=f"Output extraction failed: {e}. LLM returned non-JSON response. Expected keys: {ctx.node_spec.output_keys}",
+                        output={},
+                        tokens_used=response.input_tokens + response.output_tokens,
+                        latency_ms=latency_ms,
+                    )
                     # JSON extraction failed completely - still strip code blocks
-                    logger.warning(f"      ⚠ Failed to extract JSON output: {e}")
-                    stripped_content = self._strip_code_blocks(response.content)
-                    for key in ctx.node_spec.output_keys:
-                        ctx.memory.write(key, stripped_content)
-                        output[key] = stripped_content
+                    # logger.warning(f"      ⚠ Failed to extract JSON output: {e}")
+                    # stripped_content = self._strip_code_blocks(response.content)
+                    # for key in ctx.node_spec.output_keys:
+                    #     ctx.memory.write(key, stripped_content)
+                    #     output[key] = stripped_content
             else:
                 # For non-llm_generate or single output nodes, write entire response (stripped)
                 stripped_content = self._strip_code_blocks(response.content)
@@ -591,6 +651,21 @@ class LLMNode(NodeProtocol):
 
         # Try direct JSON parse first (fast path)
         try:
+            content = raw_response.strip()
+
+            # Remove markdown code blocks if present - more robust extraction
+            if content.startswith("```"):
+                # Try multiple patterns for markdown code blocks
+                # Pattern 1: ```json\n...\n``` or ```\n...\n```
+                match = re.search(r'^```(?:json)?\s*\n([\s\S]*?)\n```\s*$', content)
+                if match:
+                    content = match.group(1).strip()
+                else:
+                    # Pattern 2: Just strip the first and last lines if they're ```
+                    lines = content.split('\n')
+                    if lines[0].startswith('```') and lines[-1].strip() == '```':
+                        content = '\n'.join(lines[1:-1]).strip()
+
             parsed = json.loads(content)
             if isinstance(parsed, dict):
                 return parsed
@@ -657,9 +732,14 @@ Output ONLY the JSON object, nothing else."""
             cleaned = result.content.strip()
             # Remove markdown if LLM added it
             if cleaned.startswith("```"):
-                match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', cleaned, re.DOTALL)
+                match = re.search(r'^```(?:json)?\s*\n([\s\S]*?)\n```\s*$', cleaned)
                 if match:
                     cleaned = match.group(1).strip()
+                else:
+                    # Fallback: strip first/last lines
+                    lines = cleaned.split('\n')
+                    if lines[0].startswith('```') and lines[-1].strip() == '```':
+                        cleaned = '\n'.join(lines[1:-1]).strip()
 
             parsed = json.loads(cleaned)
             logger.info("      ✓ LLM cleaned JSON output")
