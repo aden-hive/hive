@@ -35,6 +35,7 @@ class OutputValidator:
         output: dict[str, Any],
         expected_keys: list[str],
         allow_empty: bool = False,
+        nullable_keys: list[str] | None = None,
     ) -> ValidationResult:
         """
         Validate that all expected keys are present and non-empty.
@@ -43,11 +44,13 @@ class OutputValidator:
             output: The output dict to validate
             expected_keys: Keys that must be present
             allow_empty: If True, allow empty string values
+            nullable_keys: Keys that are allowed to be None
 
         Returns:
             ValidationResult with success status and any errors
         """
         errors = []
+        nullable_keys = nullable_keys or []
 
         if not isinstance(output, dict):
             return ValidationResult(
@@ -61,7 +64,8 @@ class OutputValidator:
             elif not allow_empty:
                 value = output[key]
                 if value is None:
-                    errors.append(f"Output key '{key}' is None")
+                    if key not in nullable_keys:
+                        errors.append(f"Output key '{key}' is None")
                 elif isinstance(value, str) and len(value.strip()) == 0:
                     errors.append(f"Output key '{key}' is empty string")
 
@@ -148,6 +152,7 @@ class OutputValidator:
         expected_keys: list[str] | None = None,
         schema: dict[str, Any] | None = None,
         check_hallucination: bool = True,
+        nullable_keys: list[str] | None = None,
     ) -> ValidationResult:
         """
         Run all applicable validations on output.
@@ -157,6 +162,7 @@ class OutputValidator:
             expected_keys: Optional list of required keys
             schema: Optional JSON schema
             check_hallucination: Whether to check for hallucination patterns
+            nullable_keys: Keys that are allowed to be None
 
         Returns:
             Combined ValidationResult
@@ -165,7 +171,7 @@ class OutputValidator:
 
         # Validate keys if provided
         if expected_keys:
-            result = self.validate_output_keys(output, expected_keys)
+            result = self.validate_output_keys(output, expected_keys, nullable_keys=nullable_keys)
             all_errors.extend(result.errors)
 
         # Validate schema if provided
