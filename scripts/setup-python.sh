@@ -8,19 +8,18 @@
 set -e
 
 # Colors for output
-NC='[0m' # No Color
-BOLD='[1m'
-RED='[91m'
-GREEN='[92m'
-YELLOW='[93m'
+NC=$'\e[0m' # No Color
+BOLD=$'\e[1m'
+RED=$'\e[91m'
+GREEN=$'\e[92m'
+YELLOW=$'\e[93m'
+BLUE=$'\e[94m'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 is_installed() { command -v "$1" &> /dev/null; }
-
-is_file() { [ -f "$1" ]; }
 
 echo
 echo "$BOLD=================================================="
@@ -58,21 +57,14 @@ if [ "$PYTHON_MAJOR" -lt 3 ] ||
   exit 1
 fi
 
-if [ "$PYTHON_MINOR" -lt 11 ]; then
-  echo "${YELLOW}Warning: Python 3.11+ is recommended for best compatibility$NC"
-  echo "${YELLOW}You have Python $PYTHON_VERSION which may work but is not \
-officially supported$NC"
-  echo
-fi
-
 echo "$GREEN✓$NC Python version check passed"
 echo
 
 # Check for pip
 # shellcheck source=/dev/null
-if is_file "$VENV_ACTIVATE"; then
+if [ -f "$VENV_ACTIVATE" ]; then
   source "$VENV_ACTIVATE"
-elif is_file "../$VENV_ACTIVATE"; then
+elif [ -f "../$VENV_ACTIVATE" ]; then
   source "../$VENV_ACTIVATE"
 fi
 if ! "$PYTHON_CMD" -m pip --version &> /dev/null; then
@@ -101,7 +93,7 @@ echo "=================================================="
 echo
 cd "$PROJECT_ROOT/core"
 
-if is_file "pyproject.toml"; then
+if [ -f "pyproject.toml" ]; then
   echo "Installing framework from core/ (editable mode)..."
   if "$PYTHON_CMD" -m pip install -e . > /dev/null 2>&1; then
     echo "$GREEN✓$NC Framework package installed"
@@ -122,7 +114,7 @@ echo "=================================================="
 echo
 cd "$PROJECT_ROOT/tools"
 
-if is_file "pyproject.toml"; then
+if [ -f "pyproject.toml" ]; then
   echo "Installing aden_tools from tools/ (editable mode)..."
   if "$PYTHON_CMD" -m pip install -e . > /dev/null 2>&1; then
     echo "$GREEN✓$NC Tools package installed"

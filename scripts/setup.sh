@@ -11,8 +11,6 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 is_installed() { command -v "$1" &> /dev/null; }
 
-is_file() { [ -f "$1" ]; }
-
 echo "==================================="
 echo "  Legacy Web App Setup (Archived)"
 echo "==================================="
@@ -46,7 +44,7 @@ fi
 echo
 
 # Create config.yaml if it doesn't exist
-if ! is_file "$PROJECT_ROOT/config.yaml"; then
+if [ ! -f "$PROJECT_ROOT/config.yaml" ]; then
   echo "Creating config.yaml from template..."
   cp "$PROJECT_ROOT/config.yaml.example" "$PROJECT_ROOT/config.yaml"
   echo "✓ Created config.yaml"
@@ -71,7 +69,7 @@ npx tsx scripts/generate-env.ts
 echo "✓ Environment files generated"
 
 # Create docker-compose.override.yml for development
-if ! is_file "$PROJECT_ROOT/docker-compose.override.yml"; then
+if [ ! -f "$PROJECT_ROOT/docker-compose.override.yml" ]; then
   cp "$PROJECT_ROOT/docker-compose.override.yml.example" \
     "$PROJECT_ROOT/docker-compose.override.yml"
   echo "✓ Created docker-compose.override.yml for development"

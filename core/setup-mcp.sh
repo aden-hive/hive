@@ -6,11 +6,11 @@
 set -e
 
 # Colors for output
-NC='[0m' # No Color
-BOLD='[1m'
-RED='[91m'
-GREEN='[92m'
-YELLOW='[93m'
+NC=$'\e[0m' # No Color
+BOLD=$'\e[1m'
+RED=$'\e[91m'
+GREEN=$'\e[92m'
+YELLOW=$'\e[93m'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
