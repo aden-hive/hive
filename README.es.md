@@ -9,6 +9,7 @@
   <a href="README.pt.md">Português</a> |
   <a href="README.ja.md">日本語</a> |
   <a href="README.ru.md">Русский</a>
+  <a href="README.ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
