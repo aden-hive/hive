@@ -236,6 +236,7 @@ class AgentRuntime:
         entry_point_id: str,
         input_data: dict[str, Any],
         correlation_id: str | None = None,
+        session_state: dict[str, Any] | None = None,
     ) -> str:
         """
         Trigger execution at a specific entry point.
@@ -246,6 +247,7 @@ class AgentRuntime:
             entry_point_id: Which entry point to trigger
             input_data: Input data for the execution
             correlation_id: Optional ID to correlate related executions
+            session_state: Optional session state to resume from (with paused_at, memory)
 
         Returns:
             Execution ID for tracking
@@ -261,13 +263,14 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
-        return await stream.execute(input_data, correlation_id)
+        return await stream.execute(input_data, correlation_id, session_state)
 
     async def trigger_and_wait(
         self,
         entry_point_id: str,
         input_data: dict[str, Any],
         timeout: float | None = None,
+        session_state: dict[str, Any] | None = None,
     ) -> ExecutionResult | None:
         """
         Trigger execution and wait for completion.
@@ -276,11 +279,12 @@ class AgentRuntime:
             entry_point_id: Which entry point to trigger
             input_data: Input data for the execution
             timeout: Maximum time to wait (seconds)
+            session_state: Optional session state to resume from (with paused_at, memory)
 
         Returns:
             ExecutionResult or None if timeout
         """
-        exec_id = await self.trigger(entry_point_id, input_data)
+        exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
         stream = self._streams[entry_point_id]
         return await stream.wait_for_completion(exec_id, timeout)
 

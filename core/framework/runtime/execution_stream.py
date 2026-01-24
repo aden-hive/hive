@@ -55,6 +55,7 @@ class ExecutionContext:
     entry_point: str
     input_data: dict[str, Any]
     isolation_level: IsolationLevel
+    session_state: dict[str, Any] | None = None  # For resuming from pause
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
     status: str = "pending"  # pending, running, completed, failed, paused
@@ -203,6 +204,7 @@ class ExecutionStream:
         self,
         input_data: dict[str, Any],
         correlation_id: str | None = None,
+        session_state: dict[str, Any] | None = None,
     ) -> str:
         """
         Queue an execution and return its ID.
@@ -212,6 +214,7 @@ class ExecutionStream:
         Args:
             input_data: Input data for this execution
             correlation_id: Optional ID to correlate related executions
+            session_state: Optional session state to resume from (with paused_at, memory)
 
         Returns:
             Execution ID for tracking
@@ -232,6 +235,7 @@ class ExecutionStream:
             entry_point=self.entry_spec.id,
             input_data=input_data,
             isolation_level=self.entry_spec.get_isolation_level(),
+            session_state=session_state,
         )
 
         async with self._lock:
@@ -290,6 +294,7 @@ class ExecutionStream:
                     graph=modified_graph,
                     goal=self.goal,
                     input_data=ctx.input_data,
+                    session_state=ctx.session_state,
                 )
 
                 # Store result

@@ -93,12 +93,6 @@ class OutputValidator:
             if not isinstance(value, str):
                 continue
 
-            # Check for code blocks (suggests hallucination)
-            if value.strip().startswith("```"):
-                errors.append(
-                    f"Output key '{key}' contains a code block - likely hallucination"
-                )
-
             # Check for Python-like code
             code_indicators = [
                 "def ", "class ", "import ", "from ", "if __name__",

@@ -180,6 +180,8 @@ class GraphExecutor:
         path: list[str] = []
         total_tokens = 0
         total_latency = 0
+        node_retry_counts: dict[str, int] = {}  # Track retries per node
+        max_retries_per_node = 3
 
         # Determine entry point (may differ if resuming)
         current_node_id = graph.get_entry_point(session_state)
@@ -297,15 +299,34 @@ class GraphExecutor:
 
                 # Handle failure
                 if not result.success:
-                    if ctx.attempt < ctx.max_attempts:
-                        # Retry
-                        ctx.attempt += 1
+                    # Track retries per node
+                    node_retry_counts[current_node_id] = node_retry_counts.get(current_node_id, 0) + 1
+
+                    if node_retry_counts[current_node_id] < max_retries_per_node:
+                        # Retry - don't increment steps for retries
+                        steps -= 1
+                        self.logger.info(f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries_per_node})...")
                         continue
                     else:
-                        # Move to failure handling
+                        # Max retries exceeded - fail the execution
+                        self.logger.error(f"   ✗ Max retries ({max_retries_per_node}) exceeded for node {current_node_id}")
                         self.runtime.report_problem(
                             severity="critical",
-                            description=f"Node {current_node_id} failed: {result.error}",
+                            description=f"Node {current_node_id} failed after {max_retries_per_node} attempts: {result.error}",
+                        )
+                        self.runtime.end_run(
+                            success=False,
+                            output_data=memory.read_all(),
+                            narrative=f"Failed at {node_spec.name} after {max_retries_per_node} retries: {result.error}",
+                        )
+                        return ExecutionResult(
+                            success=False,
+                            error=f"Node '{node_spec.name}' failed after {max_retries_per_node} attempts: {result.error}",
+                            output=memory.read_all(),
+                            steps_executed=steps,
+                            total_tokens=total_tokens,
+                            total_latency_ms=total_latency,
+                            path=path,
                         )
 
                 # Check if we just executed a pause node - if so, save state and return

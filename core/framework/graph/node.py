@@ -513,35 +513,19 @@ class LLMNode(NodeProtocol):
                     tool_executor=executor,
                 )
             else:
-                # Build structured output format when output_keys are defined
-                response_format = None
-                if ctx.node_spec.output_keys and len(ctx.node_spec.output_keys) > 0:
-                    # Build JSON schema from output keys
-                    schema = {
-                        "type": "object",
-                        "properties": {key: {"type": "string"} for key in ctx.node_spec.output_keys},
-                        "required": ctx.node_spec.output_keys,
-                        "additionalProperties": False,
-                    }
-                    response_format = {
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "output",
-                            "strict": True,
-                            "schema": schema,
-                        }
-                    }
-                    logger.info(f"         📋 Using structured output for keys: {ctx.node_spec.output_keys}")
-
-                # Use JSON mode for llm_generate nodes with structured output
+                # Use JSON mode for llm_generate nodes with output_keys
+                # Skip strict schema validation - just validate keys after parsing
                 use_json_mode = (
                     ctx.node_spec.node_type == "llm_generate"
+                    and ctx.node_spec.output_keys
                     and len(ctx.node_spec.output_keys) >= 1
                 )
+                if use_json_mode:
+                    logger.info(f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}")
+
                 response = ctx.llm.complete(
                     messages=messages,
                     system=system,
-                    response_format=response_format,
                     json_mode=use_json_mode,
                 )
 
