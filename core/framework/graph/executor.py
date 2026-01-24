@@ -26,6 +26,7 @@ from framework.graph.node import (
     FunctionNode,
 )
 from framework.graph.edge import GraphSpec
+from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
 
 
@@ -88,7 +89,29 @@ class GraphExecutor:
         self.tool_executor = tool_executor
         self.node_registry = node_registry or {}
         self.approval_callback = approval_callback
+        self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
+
+    def _validate_tools(self, graph: GraphSpec) -> list[str]:
+        """
+        Validate that all tools declared by nodes are available.
+
+        Returns:
+            List of error messages (empty if all tools are available)
+        """
+        errors = []
+        available_tool_names = {t.name for t in self.tools}
+
+        for node in graph.nodes:
+            if node.tools:
+                missing = set(node.tools) - available_tool_names
+                if missing:
+                    errors.append(
+                        f"Node '{node.name}' (id={node.id}) requires tools {sorted(missing)} "
+                        f"but they are not registered. Available tools: {sorted(available_tool_names) if available_tool_names else 'none'}"
+                    )
+
+        return errors
 
     async def execute(
         self,
@@ -115,6 +138,17 @@ class GraphExecutor:
             return ExecutionResult(
                 success=False,
                 error=f"Invalid graph: {errors}",
+            )
+
+        # Validate tool availability
+        tool_errors = self._validate_tools(graph)
+        if tool_errors:
+            self.logger.error("❌ Tool validation failed:")
+            for err in tool_errors:
+                self.logger.error(f"   • {err}")
+            return ExecutionResult(
+                success=False,
+                error=f"Missing tools: {'; '.join(tool_errors)}. Register tools via ToolRegistry or remove tool declarations from nodes.",
             )
 
         # Initialize execution state
@@ -210,6 +244,24 @@ class GraphExecutor:
                 # Execute node
                 self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
+
+                if result.success:
+                    # Validate output before accepting it
+                    if result.output and node_spec.output_keys:
+                        validation = self.validator.validate_all(
+                            output=result.output,
+                            expected_keys=node_spec.output_keys,
+                            check_hallucination=True,
+                        )
+                        if not validation.success:
+                            self.logger.error(f"   ✗ Output validation failed: {validation.error}")
+                            result = NodeResult(
+                                success=False,
+                                error=f"Output validation failed: {validation.error}",
+                                output={},
+                                tokens_used=result.tokens_used,
+                                latency_ms=result.latency_ms,
+                            )
 
                 if result.success:
                     self.logger.info(f"   ✓ Success (tokens: {result.tokens_used}, latency: {result.latency_ms}ms)")
@@ -375,18 +427,34 @@ class GraphExecutor:
             goal=goal,  # Pass Goal object for LLM-powered routers
         )
 
+    # Valid node types - no ambiguous "llm" type allowed
+    VALID_NODE_TYPES = {"llm_tool_use", "llm_generate", "router", "function", "human_input"}
+
     def _get_node_implementation(self, node_spec: NodeSpec) -> NodeProtocol:
         """Get or create a node implementation."""
         # Check registry first
         if node_spec.id in self.node_registry:
             return self.node_registry[node_spec.id]
 
+        # Validate node type
+        if node_spec.node_type not in self.VALID_NODE_TYPES:
+            raise RuntimeError(
+                f"Invalid node type '{node_spec.node_type}' for node '{node_spec.id}'. "
+                f"Must be one of: {sorted(self.VALID_NODE_TYPES)}. "
+                f"Use 'llm_tool_use' for nodes that call tools, 'llm_generate' for text generation."
+            )
+
         # Create based on type
         if node_spec.node_type == "llm_tool_use":
-            return LLMNode(tool_executor=self.tool_executor)
+            if not node_spec.tools:
+                raise RuntimeError(
+                    f"Node '{node_spec.id}' is type 'llm_tool_use' but declares no tools. "
+                    "Either add tools to the node or change type to 'llm_generate'."
+                )
+            return LLMNode(tool_executor=self.tool_executor, require_tools=True)
 
         if node_spec.node_type == "llm_generate":
-            return LLMNode()
+            return LLMNode(tool_executor=None, require_tools=False)
 
         if node_spec.node_type == "router":
             return RouterNode()
@@ -398,8 +466,12 @@ class GraphExecutor:
                 "Register with node_registry."
             )
 
-        # Default to LLM node
-        return LLMNode(tool_executor=self.tool_executor)
+        if node_spec.node_type == "human_input":
+            # Human input nodes are handled specially by HITL mechanism
+            return LLMNode(tool_executor=None, require_tools=False)
+
+        # Should never reach here due to validation above
+        raise RuntimeError(f"Unhandled node type: {node_spec.node_type}")
 
     def _follow_edges(
         self,
