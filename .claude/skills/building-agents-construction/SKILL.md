@@ -678,10 +678,10 @@ class {agent_class_name}:
 
     def _create_executor(self, mock_mode=False):
         """Create executor instance."""
-        import tempfile
         from pathlib import Path
 
-        storage_path = Path(tempfile.gettempdir()) / "{agent_name}"
+        # Persistent storage in ~/.hive for telemetry and run history
+        storage_path = Path.home() / ".hive" / "{agent_name}"
         storage_path.mkdir(parents=True, exist_ok=True)
 
         runtime = Runtime(storage_path=storage_path)
@@ -896,10 +896,24 @@ CLI entry point for agent.
 
 import asyncio
 import json
+import logging
 import sys
 import click
 
 from .agent import default_agent
+
+
+def setup_logging(verbose=False, debug=False):
+    """Configure logging for execution visibility."""
+    if debug:
+        level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
+    elif verbose:
+        level, fmt = logging.INFO, "%(message)s"
+    else:
+        level, fmt = logging.WARNING, "%(levelname)s: %(message)s"
+    logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
+    logging.getLogger("framework").setLevel(level)
+
 
 @click.group()
 @click.version_option(version="1.0.0")
@@ -907,26 +921,33 @@ def cli():
     """Agent CLI."""
     pass
 
+
 @cli.command()
 @click.option("--input", "-i", "input_json", type=str, required=True)
 @click.option("--mock", is_flag=True, help="Run in mock mode")
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
-def run(input_json, mock, quiet):
+@click.option("--verbose", "-v", is_flag=True, help="Show execution details (nodes, context, tools)")
+@click.option("--debug", is_flag=True, help="Show debug logging")
+def run(input_json, mock, quiet, verbose, debug):
     """Execute the agent."""
+    if not quiet:
+        setup_logging(verbose=verbose, debug=debug)
+
     try:
         context = json.loads(input_json)
     except json.JSONDecodeError as e:
         click.echo(f"Error parsing input JSON: {e}", err=True)
         sys.exit(1)
 
-    if not quiet:
-        click.echo(f"Running agent with input: {json.dumps(context)}")
+    if not quiet and not verbose:
+        click.echo("Tip: Use -v to see execution details", err=True)
 
     result = asyncio.run(default_agent.run(context, mock_mode=mock))
 
     output_data = {
         "success": result.success,
         "steps_executed": result.steps_executed,
+        "path": result.path,
         "output": result.output,
     }
     if result.error:
@@ -937,6 +958,7 @@ def run(input_json, mock, quiet):
     click.echo(json.dumps(output_data, indent=2, default=str))
     sys.exit(0 if result.success else 1)
 
+
 @cli.command()
 @click.option("--json", "output_json", is_flag=True)
 def info(output_json):
@@ -946,27 +968,34 @@ def info(output_json):
         click.echo(json.dumps(info_data, indent=2))
     else:
         click.echo(f"Agent: {info_data['name']}")
-        click.echo(f"Description: {info_data['description']}")
-        click.echo(f"Nodes: {len(info_data['nodes'])}")
-        click.echo(f"Edges: {len(info_data['edges'])}")
+        click.echo(f"Nodes: {', '.join(info_data['nodes'])}")
+        click.echo(f"Entry: {info_data['entry_node']}")
+
 
 @cli.command()
 def validate():
     """Validate agent structure."""
     validation = default_agent.validate()
-    if validation["valid"]:
-        click.echo("✓ Agent is valid")
-    else:
-        click.echo("✗ Agent has errors:")
-        for error in validation["errors"]:
-            click.echo(f"  ERROR: {error}")
+    click.echo("Agent is valid" if validation["valid"] else f"Errors: {validation['errors']}")
     sys.exit(0 if validation["valid"] else 1)
 
+
 @cli.command()
-def shell():
+@click.option("--verbose", "-v", is_flag=True)
+def shell(verbose):
     """Interactive agent session."""
-    click.echo("Interactive mode - enter JSON input:")
-    # ... implementation
+    setup_logging(verbose=verbose)
+    click.echo("Enter JSON input (quit to exit):")
+    while True:
+        try:
+            user_input = input("> ")
+            if user_input.lower() in ("quit", "exit", "q"):
+                break
+            result = asyncio.run(default_agent.run(json.loads(user_input)))
+            click.echo(json.dumps({"success": result.success, "path": result.path}, indent=2, default=str))
+        except (json.JSONDecodeError, KeyboardInterrupt):
+            break
+
 
 if __name__ == "__main__":
     cli()

@@ -17,7 +17,11 @@
       "Bash(ruff check:*)",
       "Bash(PYTHONPATH=core:exports python:*)",
       "mcp__agent-builder__list_tests",
-      "mcp__agent-builder__generate_constraint_tests"
+      "mcp__agent-builder__generate_constraint_tests",
+      "Bash(python -m agent:*)",
+      "Bash(python agent.py:*)",
+      "Bash(python -c:*)",
+      "Bash(done)"
     ]
   }
 }
