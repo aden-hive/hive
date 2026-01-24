@@ -51,13 +51,13 @@ from aden_tools.tools import register_all_tools
 # Create credential manager
 credentials = CredentialManager()
 
-# Tier 1: Validate startup-required credentials (ANTHROPIC_API_KEY)
+# Tier 1: Validate startup-required credentials (if any)
 try:
     credentials.validate_startup()
     print("[MCP] Startup credentials validated")
 except CredentialError as e:
-    print(f"[MCP] FATAL: {e}", file=sys.stderr)
-    sys.exit(1)
+    # Non-fatal - tools will validate their own credentials when called
+    print(f"[MCP] Warning: {e}", file=sys.stderr)
 
 mcp = FastMCP("tools")
 

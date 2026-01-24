@@ -49,154 +49,155 @@ First, load the goal that was defined during the Goal stage:
 }
 ```
 
-## Step 2: Generate Constraint Tests
+## Step 2: Get Constraint Test Guidelines
 
-During the Goal stage (or early Eval), generate tests for constraints:
+During the Goal stage (or early Eval), get test guidelines for constraints:
 
 ```python
 result = generate_constraint_tests(
     goal_id="youtube-research",
-    goal_json='<goal JSON above>'
+    goal_json='<goal JSON above>',
+    agent_path="exports/youtube-research"
 )
 ```
 
-**Generated tests (awaiting approval):**
+**The result contains guidelines (not generated tests):**
+- `output_file`: Where to write tests
+- `file_header`: Imports and fixtures to use
+- `test_template`: Format for test functions
+- `constraints_formatted`: The constraints to test
+- `test_guidelines`: Rules for writing tests
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Generated Constraint Tests (2 tests)                             │
-├─────────────────────────────────────────────────────────────────┤
-│ [1/2] test_constraint_api_limits_respected                       │
-│       Constraint: api_limits                                     │
-│       Confidence: 88%                                            │
-│                                                                  │
-│       def test_constraint_api_limits_respected(agent):           │
-│           """Verify API rate limits are not exceeded."""         │
-│           import time                                            │
-│           for i in range(10):                                    │
-│               result = agent.run({"topic": f"test_{i}"})         │
-│               time.sleep(0.1)                                    │
-│           # Should complete without rate limit errors            │
-│           assert "rate limit" not in str(result).lower()         │
-│                                                                  │
-│       [a]pprove  [r]eject  [e]dit  [s]kip                       │
-├─────────────────────────────────────────────────────────────────┤
-│ [2/2] test_constraint_content_safety_filter                      │
-│       Constraint: content_safety                                 │
-│       Confidence: 91%                                            │
-│                                                                  │
-│       def test_constraint_content_safety_filter(agent):          │
-│           """Verify inappropriate content is filtered."""        │
-│           result = agent.run({"topic": "general topic"})         │
-│           for video in result.videos:                            │
-│               assert video.safe_for_work is True                 │
-│               assert video.age_restricted is False               │
-│                                                                  │
-│       [a]pprove  [r]eject  [e]dit  [s]kip                       │
-└─────────────────────────────────────────────────────────────────┘
-```
+## Step 3: Write Constraint Tests
 
-## Step 3: Approve Constraint Tests
-
-Review and approve each test:
+Using the guidelines, write tests directly with the Write tool:
 
 ```python
-result = approve_tests(
-    goal_id="youtube-research",
-    approvals='[
-        {"test_id": "test_constraint_api_001", "action": "approve"},
-        {"test_id": "test_constraint_content_001", "action": "approve"}
-    ]'
+# Write constraint tests using the provided file_header and guidelines
+Write(
+    file_path="exports/youtube-research/tests/test_constraints.py",
+    content='''
+"""Constraint tests for youtube-research agent."""
+
+import os
+import pytest
+from exports.youtube_research import default_agent
+
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required for real testing."
+)
+
+
+@pytest.mark.asyncio
+async def test_constraint_api_limits_respected():
+    """Verify API rate limits are not exceeded."""
+    import time
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+
+    for i in range(10):
+        result = await default_agent.run({"topic": f"test_{i}"}, mock_mode=mock_mode)
+        time.sleep(0.1)
+
+    # Should complete without rate limit errors
+    assert "rate limit" not in str(result).lower()
+
+
+@pytest.mark.asyncio
+async def test_constraint_content_safety_filter():
+    """Verify inappropriate content is filtered."""
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+    result = await default_agent.run({"topic": "general topic"}, mock_mode=mock_mode)
+
+    for video in result.videos:
+        assert video.safe_for_work is True
+        assert video.age_restricted is False
+'''
 )
 ```
 
-## Step 4: Generate Success Criteria Tests
+## Step 4: Get Success Criteria Test Guidelines
 
-After the agent is built, generate success criteria tests:
+After the agent is built, get success criteria test guidelines:
 
 ```python
 result = generate_success_tests(
     goal_id="youtube-research",
     goal_json='<goal JSON>',
     node_names="search_node,filter_node,rank_node,format_node",
-    tool_names="youtube_search,video_details,channel_info"
+    tool_names="youtube_search,video_details,channel_info",
+    agent_path="exports/youtube-research"
 )
 ```
 
-**Generated tests (awaiting approval):**
+## Step 5: Write Success Criteria Tests
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ Generated Success Criteria Tests (4 tests)                       │
-├─────────────────────────────────────────────────────────────────┤
-│ [1/4] test_find_videos_happy_path                               │
-│       Criteria: find_videos                                      │
-│       Confidence: 95%                                            │
-│                                                                  │
-│       def test_find_videos_happy_path(agent):                    │
-│           """Test finding videos for a common topic."""          │
-│           result = agent.run({"topic": "machine learning"})      │
-│           assert result.success                                  │
-│           assert 3 <= len(result.videos) <= 5                    │
-│           assert all(v.title for v in result.videos)             │
-│           assert all(v.video_id for v in result.videos)          │
-│                                                                  │
-│       [a]pprove  [r]eject  [e]dit  [s]kip                       │
-├─────────────────────────────────────────────────────────────────┤
-│ [2/4] test_find_videos_minimum_boundary                          │
-│       Criteria: find_videos                                      │
-│       Confidence: 87%                                            │
-│                                                                  │
-│       def test_find_videos_minimum_boundary(agent):              │
-│           """Test at minimum threshold (3 videos)."""            │
-│           result = agent.run({"topic": "niche topic xyz"})       │
-│           assert len(result.videos) >= 3                         │
-│                                                                  │
-│       [a]pprove  [r]eject  [e]dit  [s]kip                       │
-├─────────────────────────────────────────────────────────────────┤
-│ [3/4] test_relevance_score_threshold                             │
-│       Criteria: relevance                                        │
-│       Confidence: 92%                                            │
-│                                                                  │
-│       def test_relevance_score_threshold(agent):                 │
-│           """Test relevance scoring meets threshold."""          │
-│           result = agent.run({"topic": "python programming"})    │
-│           for video in result.videos:                            │
-│               assert video.relevance_score > 0.8                 │
-│                                                                  │
-│       [a]pprove  [r]eject  [e]dit  [s]kip                       │
-├─────────────────────────────────────────────────────────────────┤
-│ [4/4] test_find_videos_no_results_graceful                       │
-│       Criteria: find_videos                                      │
-│       Confidence: 84%                                            │
-│                                                                  │
-│       def test_find_videos_no_results_graceful(agent):           │
-│           """Test graceful handling of no results."""            │
-│           result = agent.run({"topic": "xyznonexistent123"})     │
-│           # Should not crash, return empty or message            │
-│           assert result.videos == [] or result.message           │
-│                                                                  │
-│       [a]pprove  [r]eject  [e]dit  [s]kip                       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## Step 5: Approve Success Criteria Tests
+Using the guidelines, write success criteria tests:
 
 ```python
-result = approve_tests(
-    goal_id="youtube-research",
-    approvals='[
-        {"test_id": "test_success_001", "action": "approve"},
-        {"test_id": "test_success_002", "action": "approve"},
-        {"test_id": "test_success_003", "action": "approve"},
-        {"test_id": "test_success_004", "action": "approve"}
-    ]'
+Write(
+    file_path="exports/youtube-research/tests/test_success_criteria.py",
+    content='''
+"""Success criteria tests for youtube-research agent."""
+
+import os
+import pytest
+from exports.youtube_research import default_agent
+
+
+pytestmark = pytest.mark.skipif(
+    not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("MOCK_MODE"),
+    reason="API key required for real testing."
+)
+
+
+@pytest.mark.asyncio
+async def test_find_videos_happy_path():
+    """Test finding videos for a common topic."""
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+    result = await default_agent.run({"topic": "machine learning"}, mock_mode=mock_mode)
+
+    assert result.success
+    assert 3 <= len(result.videos) <= 5
+    assert all(v.title for v in result.videos)
+    assert all(v.video_id for v in result.videos)
+
+
+@pytest.mark.asyncio
+async def test_find_videos_minimum_boundary():
+    """Test at minimum threshold (3 videos)."""
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+    result = await default_agent.run({"topic": "niche topic xyz"}, mock_mode=mock_mode)
+
+    assert len(result.videos) >= 3
+
+
+@pytest.mark.asyncio
+async def test_relevance_score_threshold():
+    """Test relevance scoring meets threshold."""
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+    result = await default_agent.run({"topic": "python programming"}, mock_mode=mock_mode)
+
+    for video in result.videos:
+        assert video.relevance_score > 0.8
+
+
+@pytest.mark.asyncio
+async def test_find_videos_no_results_graceful():
+    """Test graceful handling of no results."""
+    mock_mode = bool(os.environ.get("MOCK_MODE"))
+    result = await default_agent.run({"topic": "xyznonexistent123"}, mock_mode=mock_mode)
+
+    # Should not crash, return empty or message
+    assert result.videos == [] or result.message
+'''
 )
 ```
 
 ## Step 6: Run All Tests
 
-Execute all approved tests:
+Execute all tests:
 
 ```python
 result = run_tests(
@@ -238,7 +239,8 @@ result = run_tests(
 ```python
 result = debug_test(
     goal_id="youtube-research",
-    test_id="test_success_004"
+    test_name="test_find_videos_no_results_graceful",
+    agent_path="exports/youtube-research"
 )
 ```
 
@@ -335,14 +337,15 @@ result = run_tests(
 
 ## Summary
 
-1. **Generated** constraint tests during Goal stage
-2. **Generated** success criteria tests during Eval stage
-3. **Approved** all tests with user review
-4. **Ran** tests in parallel
-5. **Debugged** the one failure
-6. **Categorized** as IMPLEMENTATION_ERROR
-7. **Fixed** the agent (not the goal)
-8. **Re-ran** Eval only (didn't restart full flow)
-9. **Passed** all tests
+1. **Got guidelines** for constraint tests during Goal stage
+2. **Wrote** constraint tests using Write tool
+3. **Got guidelines** for success criteria tests during Eval stage
+4. **Wrote** success criteria tests using Write tool
+5. **Ran** tests in parallel
+6. **Debugged** the one failure
+7. **Categorized** as IMPLEMENTATION_ERROR
+8. **Fixed** the agent (not the goal)
+9. **Re-ran** Eval only (didn't restart full flow)
+10. **Passed** all tests
 
 The agent is now validated and ready for production use.

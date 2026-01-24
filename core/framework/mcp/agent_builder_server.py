@@ -15,27 +15,12 @@ from typing import Annotated
 
 from mcp.server import FastMCP
 
-# Load API key from credential manager if not already set
-if not os.environ.get("ANTHROPIC_API_KEY"):
-    try:
-        from aden_tools.credentials import CredentialManager
-        creds = CredentialManager()
-        if creds.is_available("anthropic"):
-            os.environ["ANTHROPIC_API_KEY"] = creds.get("anthropic")
-    except ImportError:
-        pass  # aden_tools not available
-
 from framework.graph import Goal, SuccessCriterion, Constraint, NodeSpec, EdgeSpec, EdgeCondition
 from framework.graph.plan import Plan
 
 # Testing framework imports
-from framework.testing.test_case import Test, TestType
-from framework.testing.constraint_gen import ConstraintTestGenerator
-from framework.testing.success_gen import SuccessCriteriaTestGenerator
-from framework.testing.approval_types import ApprovalRequest, ApprovalAction
 from framework.testing.prompts import (
     PYTEST_TEST_FILE_HEADER,
-    PYTEST_CONFTEST_TEMPLATE,
 )
 
 
@@ -325,11 +310,68 @@ def set_goal(
     """Define the goal for the agent. Goals are the source of truth - they define what success looks like."""
     session = get_session()
 
-    # Parse JSON inputs
-    criteria_list = json.loads(success_criteria)
-    constraint_list = json.loads(constraints)
+    # Parse JSON inputs with error handling
+    try:
+        criteria_list = json.loads(success_criteria)
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "valid": False,
+            "errors": [f"Invalid JSON in success_criteria: {e}"],
+            "warnings": [],
+        })
 
-    # Convert to proper objects
+    try:
+        constraint_list = json.loads(constraints)
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "valid": False,
+            "errors": [f"Invalid JSON in constraints: {e}"],
+            "warnings": [],
+        })
+
+    # Validate BEFORE object creation
+    errors = []
+    warnings = []
+
+    if not goal_id:
+        errors.append("Goal must have an id")
+    if not name:
+        errors.append("Goal must have a name")
+    if not description:
+        errors.append("Goal must have a description")
+    if not criteria_list:
+        errors.append("Goal must have at least one success criterion")
+    if not constraint_list:
+        warnings.append("Consider adding constraints")
+
+    # Validate required fields in criteria and constraints
+    for i, sc in enumerate(criteria_list):
+        if not isinstance(sc, dict):
+            errors.append(f"success_criteria[{i}] must be an object")
+        else:
+            if "id" not in sc:
+                errors.append(f"success_criteria[{i}] missing required field 'id'")
+            if "description" not in sc:
+                errors.append(f"success_criteria[{i}] missing required field 'description'")
+
+    for i, c in enumerate(constraint_list):
+        if not isinstance(c, dict):
+            errors.append(f"constraints[{i}] must be an object")
+        else:
+            if "id" not in c:
+                errors.append(f"constraints[{i}] missing required field 'id'")
+            if "description" not in c:
+                errors.append(f"constraints[{i}] missing required field 'description'")
+
+    # Return early if validation failed
+    if errors:
+        return json.dumps({
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+        })
+
+    # Convert to proper objects (now safe - we validated required fields)
     criteria = [
         SuccessCriterion(
             id=sc["id"],
@@ -359,21 +401,6 @@ def set_goal(
         success_criteria=criteria,
         constraints=constraint_objs,
     )
-
-    # Validate
-    errors = []
-    warnings = []
-
-    if not goal_id:
-        errors.append("Goal must have an id")
-    if not name:
-        errors.append("Goal must have a name")
-    if not description:
-        errors.append("Goal must have a description")
-    if not criteria_list:
-        errors.append("Goal must have at least one success criterion")
-    if not constraint_list:
-        warnings.append("Consider adding constraints")
 
     _save_session(session)  # Auto-save
 
@@ -2276,10 +2303,6 @@ def simulate_plan_execution(
 # TESTING TOOLS (Goal-Based Evaluation)
 # =============================================================================
 
-# Session storage for pending tests (not yet persisted)
-# Key is goal_id, value is tuple of (tests, agent_path)
-_pending_tests: dict[str, tuple[list[Test], str]] = {}
-
 
 def _get_agent_module_from_path(agent_path: str) -> str:
     """Extract agent module name from path like 'exports/my_agent' -> 'my_agent'."""
@@ -2287,31 +2310,82 @@ def _get_agent_module_from_path(agent_path: str) -> str:
     return path.name
 
 
-def _ensure_test_directory(agent_path: str) -> Path:
-    """Ensure the tests directory exists for an agent."""
-    tests_dir = Path(agent_path) / "tests"
-    tests_dir.mkdir(parents=True, exist_ok=True)
-    return tests_dir
+def _format_constraint(constraint: Constraint) -> str:
+    """Format a single constraint for display."""
+    severity = "HARD" if constraint.constraint_type == "hard" else "SOFT"
+    return f"""### Constraint: {constraint.id}
+- Type: {severity} ({constraint.constraint_type})
+- Category: {constraint.category}
+- Description: {constraint.description}
+- Check: {constraint.check}"""
 
 
-def _write_conftest_if_missing(agent_path: str, agent_module: str) -> None:
-    """Write conftest.py if it doesn't exist."""
-    tests_dir = _ensure_test_directory(agent_path)
-    conftest_path = tests_dir / "conftest.py"
-    if not conftest_path.exists():
-        content = PYTEST_CONFTEST_TEMPLATE.format(agent_name=agent_module)
-        conftest_path.write_text(content)
+def _format_constraints(constraints: list[Constraint]) -> str:
+    """Format constraints for display."""
+    lines = []
+    for c in constraints:
+        lines.append(_format_constraint(c))
+        lines.append("")
+    return "\n".join(lines)
 
 
-def _append_test_to_file(test_file: Path, test_code: str) -> None:
-    """Append a test function to a test file."""
-    if test_file.exists():
-        existing = test_file.read_text()
-        # Add two newlines before the new test
-        test_file.write_text(existing.rstrip() + "\n\n\n" + test_code + "\n")
-    else:
-        # This shouldn't happen as we create the file with header first
-        test_file.write_text(test_code + "\n")
+def _format_criterion(criterion: SuccessCriterion) -> str:
+    """Format a single success criterion for display."""
+    return f"""### Success Criterion: {criterion.id}
+- Description: {criterion.description}
+- Metric: {criterion.metric}
+- Target: {criterion.target}
+- Weight: {criterion.weight}
+- Currently met: {criterion.met}"""
+
+
+def _format_success_criteria(criteria: list[SuccessCriterion]) -> str:
+    """Format success criteria for display."""
+    lines = []
+    for c in criteria:
+        lines.append(_format_criterion(c))
+        lines.append("")
+    return "\n".join(lines)
+
+
+# Test template for Claude to use when writing tests
+CONSTRAINT_TEST_TEMPLATE = '''@pytest.mark.asyncio
+async def test_constraint_{constraint_id}_{scenario}(mock_mode):
+    """Test: {description}"""
+    result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
+
+    # IMPORTANT: result is an ExecutionResult object with these attributes:
+    # - result.success: bool - whether the agent succeeded
+    # - result.output: dict - the agent's output data (access data here!)
+    # - result.error: str or None - error message if failed
+
+    assert result.success, f"Agent failed: {{result.error}}"
+
+    # Access output data via result.output
+    output_data = result.output or {{}}
+
+    # Add constraint-specific assertions here
+    assert condition, "Error message explaining what failed"
+'''
+
+SUCCESS_TEST_TEMPLATE = '''@pytest.mark.asyncio
+async def test_success_{criteria_id}_{scenario}(mock_mode):
+    """Test: {description}"""
+    result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
+
+    # IMPORTANT: result is an ExecutionResult object with these attributes:
+    # - result.success: bool - whether the agent succeeded
+    # - result.output: dict - the agent's output data (access data here!)
+    # - result.error: str or None - error message if failed
+
+    assert result.success, f"Agent failed: {{result.error}}"
+
+    # Access output data via result.output
+    output_data = result.output or {{}}
+
+    # Add success criteria-specific assertions here
+    assert condition, "Error message explaining what failed"
+'''
 
 
 @mcp.tool()
@@ -2326,10 +2400,13 @@ def generate_constraint_tests(
     agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
 ) -> str:
     """
-    Generate constraint tests for a goal.
+    Get constraint test guidelines for a goal.
 
-    Returns proposals for user approval. Tests are NOT persisted until approved.
-    Tests will be written to {agent_path}/tests/test_constraints.py when approved.
+    Returns formatted guidelines and goal data. The calling LLM should use these
+    to write tests directly using the Write tool.
+
+    NOTE: This tool no longer generates tests via LLM. Instead, it returns
+    guidelines and templates for the calling agent (Claude) to write tests directly.
     """
     try:
         goal = Goal.model_validate_json(goal_json)
@@ -2345,37 +2422,48 @@ def generate_constraint_tests(
 
     agent_module = _get_agent_module_from_path(agent_path)
 
-    # Get LLM provider
-    try:
-        from framework.llm import AnthropicProvider
-        llm = AnthropicProvider()
-    except Exception as e:
-        return json.dumps({"error": f"Failed to initialize LLM: {e}"})
+    # Format constraints for display
+    constraints_formatted = _format_constraints(goal.constraints) if goal.constraints else "No constraints defined"
 
-    # Generate tests with agent_module for proper imports
-    generator = ConstraintTestGenerator(llm)
-    tests = generator.generate(goal, agent_module=agent_module)
+    # Generate the file header that should be used
+    file_header = PYTEST_TEST_FILE_HEADER.format(
+        test_type="Constraint",
+        agent_name=agent_module,
+        description=f"Tests for constraints defined in goal: {goal.name}",
+        agent_module=agent_module,
+    )
 
-    # Store as pending with agent_path (not persisted yet)
-    _pending_tests[goal_id] = (tests, agent_path)
-
+    # Return guidelines + data for Claude to write tests directly
     return json.dumps({
         "goal_id": goal_id,
         "agent_path": agent_path,
-        "generated_count": len(tests),
-        "tests": [
-            {
-                "id": t.id,
-                "test_name": t.test_name,
-                "parent_criteria_id": t.parent_criteria_id,
-                "description": t.description,
-                "confidence": t.llm_confidence,
-                "test_code_preview": t.test_code[:500] + "..." if len(t.test_code) > 500 else t.test_code,
-            }
-            for t in tests
-        ],
-        "next_step": "Call approve_tests to approve, modify, or reject each test",
+        "agent_module": agent_module,
         "output_file": f"{agent_path}/tests/test_constraints.py",
+        "constraints": [c.model_dump() for c in goal.constraints] if goal.constraints else [],
+        "constraints_formatted": constraints_formatted,
+        "test_guidelines": {
+            "max_tests": 5,
+            "naming_convention": "test_constraint_<constraint_id>_<scenario>",
+            "required_decorator": "@pytest.mark.asyncio",
+            "required_fixture": "mock_mode",
+            "agent_call_pattern": "result = await default_agent.run(input_dict, mock_mode=mock_mode)",
+            "result_type": "ExecutionResult with .success (bool), .output (dict), .error (str|None)",
+            "critical_rules": [
+                "Every test function MUST be async with @pytest.mark.asyncio decorator",
+                "Every test MUST accept mock_mode as a parameter",
+                "Use await default_agent.run(input, mock_mode=mock_mode) to execute the agent",
+                "default_agent is already imported - do NOT add import statements",
+                "NEVER call result.get() - result is NOT a dict! Use result.output.get() instead",
+                "Always check result.success before accessing result.output",
+            ],
+        },
+        "file_header": file_header,
+        "test_template": CONSTRAINT_TEST_TEMPLATE,
+        "instruction": (
+            "Write tests directly to the output_file using the Write tool. "
+            "Use the file_header as the start of the file, then add test functions following the test_template format. "
+            "Generate up to 5 tests covering the most critical constraints."
+        ),
     })
 
 
@@ -2388,11 +2476,13 @@ def generate_success_tests(
     agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
 ) -> str:
     """
-    Generate success criteria tests for a goal.
+    Get success criteria test guidelines for a goal.
 
-    Should be called during Eval stage after agent exists.
-    Returns proposals for user approval.
-    Tests will be written to {agent_path}/tests/test_success_criteria.py when approved.
+    Returns formatted guidelines and goal data. The calling LLM should use these
+    to write tests directly using the Write tool.
+
+    NOTE: This tool no longer generates tests via LLM. Instead, it returns
+    guidelines and templates for the calling agent (Claude) to write tests directly.
     """
     try:
         goal = Goal.model_validate_json(goal_json)
@@ -2408,189 +2498,56 @@ def generate_success_tests(
 
     agent_module = _get_agent_module_from_path(agent_path)
 
-    # Get LLM provider
-    try:
-        from framework.llm import AnthropicProvider
-        llm = AnthropicProvider()
-    except Exception as e:
-        return json.dumps({"error": f"Failed to initialize LLM: {e}"})
-
-    # Parse node/tool names
+    # Parse node/tool names for context
     nodes = [n.strip() for n in node_names.split(",") if n.strip()]
     tools = [t.strip() for t in tool_names.split(",") if t.strip()]
 
-    # Generate tests with agent_module for proper imports
-    generator = SuccessCriteriaTestGenerator(llm)
-    tests = generator.generate(goal, node_names=nodes, tool_names=tools, agent_module=agent_module)
+    # Format success criteria for display
+    criteria_formatted = _format_success_criteria(goal.success_criteria) if goal.success_criteria else "No success criteria defined"
 
-    # Add to pending (may have constraint tests already)
-    if goal_id in _pending_tests:
-        existing_tests, existing_path = _pending_tests[goal_id]
-        existing_tests.extend(tests)
-        _pending_tests[goal_id] = (existing_tests, agent_path or existing_path)
-    else:
-        _pending_tests[goal_id] = (tests, agent_path)
+    # Generate the file header that should be used
+    file_header = PYTEST_TEST_FILE_HEADER.format(
+        test_type="Success criteria",
+        agent_name=agent_module,
+        description=f"Tests for success criteria defined in goal: {goal.name}",
+        agent_module=agent_module,
+    )
 
+    # Return guidelines + data for Claude to write tests directly
     return json.dumps({
         "goal_id": goal_id,
         "agent_path": agent_path,
-        "generated_count": len(tests),
-        "tests": [
-            {
-                "id": t.id,
-                "test_name": t.test_name,
-                "parent_criteria_id": t.parent_criteria_id,
-                "description": t.description,
-                "confidence": t.llm_confidence,
-                "test_code_preview": t.test_code[:500] + "..." if len(t.test_code) > 500 else t.test_code,
-            }
-            for t in tests
-        ],
-        "next_step": "Call approve_tests to approve, modify, or reject each test",
+        "agent_module": agent_module,
         "output_file": f"{agent_path}/tests/test_success_criteria.py",
-    })
-
-
-@mcp.tool()
-def approve_tests(
-    goal_id: Annotated[str, "ID of the goal"],
-    approvals: Annotated[str, "JSON array of approval decisions"],
-) -> str:
-    """
-    Approve, reject, or modify generated tests.
-
-    Approved tests are written to Python files at {agent_path}/tests/test_*.py
-
-    Approvals format:
-    [
-        {"test_id": "...", "action": "approve"},
-        {"test_id": "...", "action": "modify", "modified_code": "..."},
-        {"test_id": "...", "action": "reject", "reason": "..."},
-        {"test_id": "...", "action": "skip"}
-    ]
-
-    Actions: approve, modify (requires modified_code), reject (requires reason), skip
-    """
-    if goal_id not in _pending_tests:
-        return json.dumps({"error": f"No pending tests for goal {goal_id}"})
-
-    try:
-        approvals_list = json.loads(approvals)
-    except json.JSONDecodeError as e:
-        return json.dumps({"error": f"Invalid approvals JSON: {e}"})
-
-    # Get pending tests and agent_path
-    pending_tests, agent_path = _pending_tests[goal_id]
-    agent_module = _get_agent_module_from_path(agent_path)
-
-    # Ensure tests directory and conftest.py exist
-    tests_dir = _ensure_test_directory(agent_path)
-    _write_conftest_if_missing(agent_path, agent_module)
-
-    # Build approval requests
-    requests = []
-    for a in approvals_list:
-        try:
-            action = ApprovalAction(a.get("action", "skip"))
-            requests.append(ApprovalRequest(
-                test_id=a["test_id"],
-                action=action,
-                modified_code=a.get("modified_code"),
-                reason=a.get("reason"),
-                approved_by="mcp_user",
-            ))
-        except (KeyError, ValueError) as e:
-            return json.dumps({"error": f"Invalid approval entry: {e}"})
-
-    # Find tests
-    pending = {t.id: t for t in pending_tests}
-
-    # Group approved tests by type for writing to files
-    constraint_tests: list[Test] = []
-    success_tests: list[Test] = []
-    edge_case_tests: list[Test] = []
-
-    results = []
-    for req in requests:
-        test = pending.get(req.test_id)
-        if not test:
-            results.append({"test_id": req.test_id, "error": "Not found in pending"})
-            continue
-
-        if req.action == ApprovalAction.APPROVE:
-            test.approve(req.approved_by)
-            # Group by test type
-            if test.test_type == TestType.CONSTRAINT:
-                constraint_tests.append(test)
-            elif test.test_type == TestType.SUCCESS_CRITERIA:
-                success_tests.append(test)
-            else:
-                edge_case_tests.append(test)
-            results.append({"test_id": req.test_id, "status": "approved"})
-
-        elif req.action == ApprovalAction.MODIFY:
-            if req.modified_code:
-                test.modify(req.modified_code, req.approved_by)
-                # Group by test type
-                if test.test_type == TestType.CONSTRAINT:
-                    constraint_tests.append(test)
-                elif test.test_type == TestType.SUCCESS_CRITERIA:
-                    success_tests.append(test)
-                else:
-                    edge_case_tests.append(test)
-                results.append({"test_id": req.test_id, "status": "modified"})
-            else:
-                results.append({"test_id": req.test_id, "error": "modified_code required"})
-
-        elif req.action == ApprovalAction.REJECT:
-            test.reject(req.reason or "No reason provided")
-            results.append({"test_id": req.test_id, "status": "rejected"})
-
-        elif req.action == ApprovalAction.SKIP:
-            results.append({"test_id": req.test_id, "status": "skipped"})
-
-    # Write approved tests to Python files
-    files_written = []
-
-    def _write_tests_to_file(tests: list[Test], filename: str, test_type_desc: str) -> None:
-        if not tests:
-            return
-        test_file = tests_dir / filename
-        # Create file with header if it doesn't exist
-        if not test_file.exists():
-            header = PYTEST_TEST_FILE_HEADER.format(
-                test_type=test_type_desc,
-                agent_name=agent_module,
-                description=f"Tests validate that the agent respects its defined {test_type_desc.lower()}.",
-                agent_module=agent_module,
-            )
-            test_file.write_text(header)
-
-        # Append each test
-        for test in tests:
-            _append_test_to_file(test_file, test.test_code)
-
-        files_written.append(str(test_file))
-
-    _write_tests_to_file(constraint_tests, "test_constraints.py", "Constraint")
-    _write_tests_to_file(success_tests, "test_success_criteria.py", "Success criteria")
-    _write_tests_to_file(edge_case_tests, "test_edge_cases.py", "Edge case")
-
-    # Clear pending for processed tests
-    processed_ids = {r["test_id"] for r in results if "error" not in r}
-    remaining_tests = [t for t in pending_tests if t.id not in processed_ids]
-
-    # Clean up or update pending
-    if not remaining_tests:
-        del _pending_tests[goal_id]
-    else:
-        _pending_tests[goal_id] = (remaining_tests, agent_path)
-
-    return json.dumps({
-        "goal_id": goal_id,
-        "results": results,
-        "files_written": files_written,
-        "run_tests_command": f"pytest {agent_path}/tests/ -v",
+        "success_criteria": [c.model_dump() for c in goal.success_criteria] if goal.success_criteria else [],
+        "success_criteria_formatted": criteria_formatted,
+        "agent_context": {
+            "node_names": nodes if nodes else ["(not specified)"],
+            "tool_names": tools if tools else ["(not specified)"],
+        },
+        "test_guidelines": {
+            "max_tests": 12,
+            "naming_convention": "test_success_<criteria_id>_<scenario>",
+            "required_decorator": "@pytest.mark.asyncio",
+            "required_fixture": "mock_mode",
+            "agent_call_pattern": "result = await default_agent.run(input_dict, mock_mode=mock_mode)",
+            "result_type": "ExecutionResult with .success (bool), .output (dict), .error (str|None)",
+            "critical_rules": [
+                "Every test function MUST be async with @pytest.mark.asyncio decorator",
+                "Every test MUST accept mock_mode as a parameter",
+                "Use await default_agent.run(input, mock_mode=mock_mode) to execute the agent",
+                "default_agent is already imported - do NOT add import statements",
+                "NEVER call result.get() - result is NOT a dict! Use result.output.get() instead",
+                "Always check result.success before accessing result.output",
+            ],
+        },
+        "file_header": file_header,
+        "test_template": SUCCESS_TEST_TEMPLATE,
+        "instruction": (
+            "Write tests directly to the output_file using the Write tool. "
+            "Use the file_header as the start of the file, then add test functions following the test_template format. "
+            "Generate up to 12 tests covering the most critical success criteria."
+        ),
     })
 
 
@@ -2619,7 +2576,7 @@ def run_tests(
         return json.dumps({
             "goal_id": goal_id,
             "error": f"Tests directory not found: {tests_dir}",
-            "hint": "Generate and approve tests first using generate_constraint_tests and approve_tests",
+            "hint": "Use generate_constraint_tests or generate_success_tests to get guidelines, then write tests with the Write tool",
         })
 
     # Parse test types
@@ -2989,44 +2946,6 @@ def list_tests(
         "by_type": by_type,
         "tests": tests,
         "run_command": f"pytest {tests_dir} -v",
-    })
-
-
-@mcp.tool()
-def get_pending_tests(
-    goal_id: Annotated[str, "ID of the goal"],
-) -> str:
-    """
-    Get pending tests awaiting approval.
-
-    Returns tests that have been generated but not yet approved.
-    """
-    if goal_id not in _pending_tests:
-        return json.dumps({
-            "goal_id": goal_id,
-            "pending_count": 0,
-            "tests": [],
-        })
-
-    tests, agent_path = _pending_tests[goal_id]
-    return json.dumps({
-        "goal_id": goal_id,
-        "pending_count": len(tests),
-        "agent_path": agent_path,
-        "tests": [
-            {
-                "id": t.id,
-                "test_name": t.test_name,
-                "test_type": t.test_type.value,
-                "parent_criteria_id": t.parent_criteria_id,
-                "description": t.description,
-                "confidence": t.llm_confidence,
-                "test_code": t.test_code,
-                "input": t.input,
-                "expected_output": t.expected_output,
-            }
-            for t in tests
-        ],
     })
 
 
