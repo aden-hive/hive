@@ -4,7 +4,6 @@ Test OutputCleaner with real Cerebras LLM.
 Demonstrates how OutputCleaner fixes the JSON parsing trap using llama-3.3-70b.
 """
 
-import asyncio
 import json
 import os
 from framework.graph.output_cleaner import OutputCleaner, CleansingConfig
@@ -68,7 +67,7 @@ def test_cleaning_with_cerebras():
         target_node_spec=target_spec,
     )
 
-    print(f"\nMalformed output:")
+    print("\nMalformed output:")
     print(json.dumps(malformed_output, indent=2))
     print(f"\nValidation errors: {validation.errors}")
 
@@ -81,7 +80,7 @@ def test_cleaning_with_cerebras():
         validation_errors=validation.errors,
     )
 
-    print(f"\n✓ Cleaned output:")
+    print("\n✓ Cleaned output:")
     print(json.dumps(cleaned, indent=2))
 
     assert isinstance(cleaned, dict), "Should return dict"
@@ -114,7 +113,7 @@ def test_cleaning_with_cerebras():
         target_node_spec=target_spec2,
     )
 
-    print(f"\nMalformed output:")
+    print("\nMalformed output:")
     print(json.dumps(malformed_output2, indent=2))
     print(f"\nValidation errors: {validation2.errors}")
 
@@ -127,7 +126,7 @@ def test_cleaning_with_cerebras():
             validation_errors=validation2.errors,
         )
 
-        print(f"\n✓ Cleaned output:")
+        print("\n✓ Cleaned output:")
         print(json.dumps(cleaned2, indent=2))
 
         assert isinstance(cleaned2, dict), "Should return dict"
@@ -138,7 +137,7 @@ def test_cleaning_with_cerebras():
 
     # Stats
     stats = cleaner.get_stats()
-    print(f"\n\nCleaner Statistics:")
+    print("\n\nCleaner Statistics:")
     print(f"  Total cleanings: {stats['total_cleanings']}")
     print(f"  Cache size: {stats['cache_size']}")
 
