@@ -202,7 +202,11 @@ class LiteLLMProvider(LLMProvider):
             # Check if we're done (no tool calls)
             if choice.finish_reason == "stop" or not message.tool_calls:
                 model_name = response.model or self.model
-                estimated_cost = LLMCostCalculator.calculate_from_response(response)
+                estimated_cost = LLMCostCalculator.calculate(
+                    model=model_name,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                )
                 return LLMResponse(
                     content=message.content or "",
                     model=model_name,

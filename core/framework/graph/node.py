@@ -596,6 +596,8 @@ class LLMNode(NodeProtocol):
                         output={},
                         tokens_used=response.input_tokens + response.output_tokens,
                         latency_ms=latency_ms,
+                        cost_usd=response.estimated_cost_usd,
+                        llm_model=response.model,
                     )
                     # JSON extraction failed completely - still strip code blocks
                     # logger.warning(f"      ⚠ Failed to extract JSON output: {e}")

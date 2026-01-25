@@ -41,12 +41,16 @@ class LLMCostCalculator:
             or if an error occurs.
         """
         try:
-            prompt_cost, completion_cost = litellm.cost_per_token(
+            prompt_cost, completion_cost, total_cost = litellm.cost_per_token(
                 model=model,
                 prompt_tokens=input_tokens,
                 completion_tokens=output_tokens,
             )
-            return prompt_cost + completion_cost
+            if total_cost is not None:
+                return total_cost
+            if prompt_cost is not None and completion_cost is not None:
+                return prompt_cost + completion_cost
+            return 0.0
         except Exception:
             return 0.0
 
