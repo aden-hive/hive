@@ -2,6 +2,16 @@
 
 Complete setup guide for building and running goal-driven agents with the Aden Agent Framework.
 
+## Before You Start
+
+This guide assumes:
+- You are running commands from the root of the `hive/` repository
+- Python 3.11+ is already installed on your system
+- You are using macOS or Linux (the setup script uses bash)
+
+If you are new to Python, you do not need to understand all details immediately.
+The automated setup script handles most configuration for you.
+
 ## Quick Setup
 
 ```bash
