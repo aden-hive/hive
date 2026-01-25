@@ -10,6 +10,8 @@ Escalation path: rules → LLM → human
 
 from typing import Any
 from dataclasses import dataclass, field
+import asyncio
+import re
 
 from framework.graph.plan import (
     PlanStep,
@@ -52,6 +54,7 @@ class HybridJudge:
         llm: LLMProvider | None = None,
         rules: list[EvaluationRule] | None = None,
         llm_confidence_threshold: float = 0.7,
+        llm_timeout: int = 30,
     ):
         """
         Initialize the HybridJudge.
@@ -64,6 +67,7 @@ class HybridJudge:
         self.llm = llm
         self.rules: list[EvaluationRule] = rules or []
         self.llm_confidence_threshold = llm_confidence_threshold
+        self.llm_timeout = llm_timeout
 
         # Sort rules by priority (higher first)
         self._sort_rules()
@@ -136,12 +140,13 @@ class HybridJudge:
 
         # Build evaluation context
         eval_context = {
-            "step": step.model_dump() if hasattr(step, 'model_dump') else step,
+            "step": step,
             "result": result,
-            "goal": goal.model_dump() if hasattr(goal, 'model_dump') else goal,
+            "goal": goal,
             "context": context,
             "success": isinstance(result, dict) and result.get("success", False),
             "error": isinstance(result, dict) and result.get("error"),
+            "error_type": isinstance(result, dict) and result.get("error_type"),
         }
 
         for rule in self.rules:
@@ -150,7 +155,10 @@ class HybridJudge:
             # Evaluate rule condition
             eval_result = safe_eval(rule.condition, eval_context)
 
-            if eval_result.success and eval_result.result:
+            if not eval_result.success:
+                continue
+
+            if eval_result.result:
                 # Rule matched!
                 feedback = self._format_feedback(rule.feedback_template, eval_context)
 
@@ -163,6 +171,7 @@ class HybridJudge:
                         rule_matched=rule.id,
                         confidence=1.0,
                         llm_used=False,
+                        context={"rules_checked": rules_checked},
                     ),
                     rules_checked=rules_checked,
                     rule_matched=rule.id,
@@ -186,7 +195,7 @@ class HybridJudge:
 
         try:
             return template.format(**context)
-        except (KeyError, ValueError):
+        except Exception:
             return template
 
     async def _evaluate_llm(
@@ -202,9 +211,12 @@ class HybridJudge:
         user_prompt = self._build_llm_user_prompt(step, result, context, rule_result)
 
         try:
-            response = self.llm.complete(
-                messages=[{"role": "user", "content": user_prompt}],
-                system=system_prompt,
+            response = await asyncio.wait_for(
+                self.llm.complete(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    system=system_prompt,
+                ),
+                timeout=self.llm_timeout,
             )
 
             # Parse LLM response
@@ -253,12 +265,6 @@ ACTION: [ACCEPT|RETRY|REPLAN|ESCALATE]
 CONFIDENCE: [0.0-1.0]
 REASONING: [Your reasoning]
 FEEDBACK: [Feedback for retry/replan, or empty if accepting]
-
-Actions:
-- ACCEPT: Step completed successfully, continue to next step
-- RETRY: Step failed but can be retried with feedback
-- REPLAN: Step failed in a way that requires replanning
-- ESCALATE: Requires human intervention
 """
 
     def _build_llm_user_prompt(
@@ -288,37 +294,28 @@ Please evaluate and provide your judgment."""
 
     def _parse_llm_response(self, response: str) -> Judgment:
         """Parse LLM response into Judgment."""
-        lines = response.strip().split("\n")
+        def extract(pattern: str, default: str = "") -> str:
+            match = re.search(pattern, response, re.IGNORECASE | re.MULTILINE)
+            return match.group(1).strip() if match else default
 
-        action = JudgmentAction.ACCEPT
-        confidence = 0.8
-        reasoning = ""
-        feedback = ""
+        action_raw = extract(r"ACTION:\s*(\w+)", "ESCALATE").upper()
+        confidence_raw = extract(r"CONFIDENCE:\s*([0-9.]+)", "0.5")
+        reasoning = extract(r"REASONING:\s*(.+)", "LLM evaluation")
+        feedback = extract(r"FEEDBACK:\s*(.*)", "")
 
-        for line in lines:
-            line = line.strip()
-            if line.startswith("ACTION:"):
-                action_str = line.split(":", 1)[1].strip().upper()
-                try:
-                    action = JudgmentAction(action_str.lower())
-                except ValueError:
-                    action = JudgmentAction.ESCALATE
+        try:
+            action = JudgmentAction(action_raw.lower())
+        except ValueError:
+            action = JudgmentAction.ESCALATE
 
-            elif line.startswith("CONFIDENCE:"):
-                try:
-                    confidence = float(line.split(":", 1)[1].strip())
-                except ValueError:
-                    confidence = 0.5
-
-            elif line.startswith("REASONING:"):
-                reasoning = line.split(":", 1)[1].strip()
-
-            elif line.startswith("FEEDBACK:"):
-                feedback = line.split(":", 1)[1].strip()
+        try:
+            confidence = float(confidence_raw)
+        except ValueError:
+            confidence = 0.5
 
         return Judgment(
             action=action,
-            reasoning=reasoning or "LLM evaluation",
+            reasoning=reasoning,
             feedback=feedback if feedback else None,
             confidence=confidence,
         )
@@ -350,9 +347,9 @@ def create_default_judge(llm: LLMProvider | None = None) -> HybridJudge:
     judge.add_rule(EvaluationRule(
         id="transient_error_retry",
         description="Transient error that can be retried",
-        condition="isinstance(result, dict) and result.get('error_type') in ['timeout', 'rate_limit', 'connection_error']",
+        condition="error_type in ['timeout', 'rate_limit', 'connection_error']",
         action=JudgmentAction.RETRY,
-        feedback_template="Transient error: {result[error]}. Please retry.",
+        feedback_template="Transient error: {error}. Please retry.",
         priority=90,
     ))
 
@@ -360,9 +357,9 @@ def create_default_judge(llm: LLMProvider | None = None) -> HybridJudge:
     judge.add_rule(EvaluationRule(
         id="missing_data_replan",
         description="Required data not available",
-        condition="isinstance(result, dict) and result.get('error_type') == 'missing_data'",
+        condition="error_type == 'missing_data'",
         action=JudgmentAction.REPLAN,
-        feedback_template="Missing required data: {result[error]}. Plan needs adjustment.",
+        feedback_template="Missing required data: {error}. Plan needs adjustment.",
         priority=80,
     ))
 
@@ -370,9 +367,9 @@ def create_default_judge(llm: LLMProvider | None = None) -> HybridJudge:
     judge.add_rule(EvaluationRule(
         id="security_escalate",
         description="Security issue detected",
-        condition="isinstance(result, dict) and result.get('error_type') == 'security'",
+        condition="error_type == 'security'",
         action=JudgmentAction.ESCALATE,
-        feedback_template="Security issue detected: {result[error]}",
+        feedback_template="Security issue detected: {error}",
         priority=200,
     ))
 
@@ -380,9 +377,9 @@ def create_default_judge(llm: LLMProvider | None = None) -> HybridJudge:
     judge.add_rule(EvaluationRule(
         id="max_retries_fail",
         description="Maximum retries exceeded",
-        condition="step.get('attempts', 0) >= step.get('max_retries', 3)",
+        condition="getattr(step, 'attempts', 0) >= getattr(step, 'max_retries', 3)",
         action=JudgmentAction.REPLAN,
-        feedback_template="Step '{step[id]}' failed after {step[attempts]} attempts",
+        feedback_template="Step '{step.id}' failed after {step.attempts} attempts",
         priority=150,
     ))
 
