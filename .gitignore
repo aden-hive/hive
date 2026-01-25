@@ -69,4 +69,7 @@ exports/*
 
 .agent-builder-sessions/*
 
+# Codex CLI (generated config has machine-specific paths)
+.codex/config.toml
+
 .venv

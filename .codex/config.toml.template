@@ -1,0 +1,20 @@
+# Hive Agent Builder - Codex CLI MCP Configuration
+#
+# Copy this to config.toml and update PROJECT_ROOT to your actual path.
+# Or run: ./scripts/setup-codex.sh to generate automatically.
+#
+# This configures Codex to use the same MCP servers as Claude Code.
+# The agent-builder server provides tools for building AI agents.
+# The hive-tools server provides runtime tools (web search, file ops, etc.)
+
+[mcp_servers.agent-builder]
+command = "python"
+args = ["-m", "framework.mcp.agent_builder_server"]
+cwd = "PROJECT_ROOT/core"  # Replace PROJECT_ROOT with actual path
+env = { PYTHONPATH = "PROJECT_ROOT/tools/src" }
+
+[mcp_servers.hive-tools]
+command = "python"
+args = ["mcp_server.py", "--stdio"]
+cwd = "PROJECT_ROOT/tools"  # Replace PROJECT_ROOT with actual path
+env = { PYTHONPATH = "src" }

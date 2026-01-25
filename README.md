@@ -85,6 +85,8 @@ This installs:
 
 ### Build Your First Agent
 
+#### Using Claude Code
+
 ```bash
 # Install Claude Code skills (one-time)
 ./quickstart.sh
@@ -98,6 +100,22 @@ claude> /testing-agent
 # Run your agent
 PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 ```
+
+#### Using Codex CLI
+
+```bash
+# Setup Codex CLI configuration (one-time)
+./scripts/setup-codex.sh
+
+# Build an agent using Codex
+cd /path/to/hive
+codex
+> "Build me a research agent that searches the web and writes a summary"
+```
+
+#### Using Cursor
+
+The `.mcp.json` at project root configures MCP servers for Cursor. Just open the project and use the MCP tools directly.
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
 
