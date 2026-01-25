@@ -42,20 +42,15 @@ class StateChange:
 
 class SharedStateManager:
     def __init__(self, max_history: int = 1000, cache_ttl: int = 3600):
-        # State storage
         self._global_state: dict[str, Any] = {}
         self._stream_state: dict[str, dict[str, Any]] = {}
         self._execution_state: dict[str, dict[str, Any]] = {}
-        
-        # TTL tracking
         self._execution_last_active: dict[str, float] = {}
 
-        # Locks
         self._global_lock = asyncio.Lock()
         self._stream_locks: dict[str, asyncio.Lock] = {}
         self._key_locks: dict[str, asyncio.Lock] = {}
 
-        # History and Config
         self._change_history: list[StateChange] = []
         self._max_history = max_history
         self._cache_ttl = cache_ttl
@@ -77,6 +72,11 @@ class SharedStateManager:
         self._execution_last_active.pop(execution_id, None)
         logger.debug(f"Cleaned up state for execution: {execution_id}")
 
+    def cleanup_stream(self, stream_id: str) -> None:
+        self._stream_state.pop(stream_id, None)
+        self._stream_locks.pop(stream_id, None)
+        logger.debug(f"Cleaned up state for stream: {stream_id}")
+
     def purge_expired_state(self) -> int:
         """Purges stale states based on TTL cleanup."""
         now = time.time()
@@ -87,12 +87,9 @@ class SharedStateManager:
 
     async def read(self, key: str, execution_id: str, stream_id: str, isolation: IsolationLevel) -> Any:
         self._execution_last_active[execution_id] = time.time()
-        
         if execution_id in self._execution_state:
             if key in self._execution_state[execution_id]:
                 val = self._execution_state[execution_id][key]
-                
-                # EPHEMERAL logic
                 is_ephemeral = any(c.key == key and c.execution_id == execution_id and c.scope == StateScope.EPHEMERAL 
                                    for c in reversed(self._change_history[-10:]))
                 if is_ephemeral:
@@ -110,15 +107,12 @@ class SharedStateManager:
     async def write(self, key: str, value: Any, execution_id: str, stream_id: str, isolation: IsolationLevel, scope: StateScope = StateScope.EXECUTION) -> None:
         self._execution_last_active[execution_id] = time.time()
         old_value = await self.read(key, execution_id, stream_id, isolation)
-
         if isolation == IsolationLevel.ISOLATED:
             scope = StateScope.EXECUTION
-
         if isolation == IsolationLevel.SYNCHRONIZED and scope != StateScope.EXECUTION:
             await self._write_with_lock(key, value, execution_id, stream_id, scope)
         else:
             await self._write_direct(key, value, execution_id, stream_id, scope)
-
         self._record_change(StateChange(key=key, old_value=old_value, new_value=value, scope=scope, execution_id=execution_id, stream_id=stream_id))
 
     async def _write_direct(self, key: str, value: Any, execution_id: str, stream_id: str, scope: StateScope) -> None:
@@ -158,7 +152,6 @@ class SharedStateManager:
             self._change_history = self._change_history[-self._max_history:]
 
     async def read_all(self, execution_id: str, stream_id: str, isolation: IsolationLevel) -> dict[str, Any]:
-        """Read all visible state for an execution."""
         result = {}
         if isolation != IsolationLevel.ISOLATED:
             result.update(self._global_state)
@@ -169,7 +162,6 @@ class SharedStateManager:
         return result
 
     def get_stats(self) -> dict:
-        """Get state manager statistics."""
         return {
             "global_keys": len(self._global_state),
             "stream_count": len(self._stream_state),
@@ -180,17 +172,53 @@ class SharedStateManager:
 
 
 class StreamMemory:
-    """Memory interface for a single execution."""
+    """Memory interface for a single execution with permission support."""
     def __init__(self, manager: SharedStateManager, execution_id: str, stream_id: str, isolation: IsolationLevel):
         self._manager = manager
         self._execution_id = execution_id
         self._stream_id = stream_id
         self._isolation = isolation
-        self._allowed_read = None
-        self._allowed_write = None
+        self._allowed_read: set[str] | None = None
+        self._allowed_write: set[str] | None = None
+
+    def with_permissions(self, read_keys: list[str], write_keys: list[str]) -> "StreamMemory":
+        scoped = StreamMemory(self._manager, self._execution_id, self._stream_id, self._isolation)
+        scoped._allowed_read = set(read_keys)
+        scoped._allowed_write = set(write_keys)
+        return scoped
 
     async def read(self, key: str) -> Any:
+        if self._allowed_read is not None and key not in self._allowed_read:
+            raise PermissionError(f"Not allowed to read key: {key}")
         return await self._manager.read(key, self._execution_id, self._stream_id, self._isolation)
 
     async def write(self, key: str, value: Any, scope: StateScope = StateScope.EXECUTION) -> None:
+        if self._allowed_write is not None and key not in self._allowed_write:
+            raise PermissionError(f"Not allowed to write key: {key}")
         await self._manager.write(key, value, self._execution_id, self._stream_id, self._isolation, scope)
+
+    async def read_all(self) -> dict[str, Any]:
+        all_state = await self._manager.read_all(self._execution_id, self._stream_id, self._isolation)
+        if self._allowed_read is not None:
+            return {k: v for k, v in all_state.items() if k in self._allowed_read}
+        return all_state
+
+    # === BACKWARD COMPATIBILITY SYNC API ===
+    def read_sync(self, key: str) -> Any:
+        if self._allowed_read is not None and key not in self._allowed_read:
+            raise PermissionError(f"Not allowed to read key: {key}")
+        exec_state = self._manager._execution_state.get(self._execution_id, {})
+        if key in exec_state: return exec_state[key]
+        if self._isolation != IsolationLevel.ISOLATED:
+            stream_state = self._manager._stream_state.get(self._stream_id, {})
+            if key in stream_state: return stream_state[key]
+            if key in self._manager._global_state: return self._manager._global_state[key]
+        return None
+
+    def write_sync(self, key: str, value: Any) -> None:
+        if self._allowed_write is not None and key not in self._allowed_write:
+            raise PermissionError(f"Not allowed to write key: {key}")
+        if self._execution_id not in self._manager._execution_state:
+            self._manager._execution_state[self._execution_id] = {}
+        self._manager._execution_state[self._execution_id][key] = value
+        self._manager._version += 1
