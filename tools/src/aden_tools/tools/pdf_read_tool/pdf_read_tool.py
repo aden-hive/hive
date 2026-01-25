@@ -2,13 +2,16 @@
 PDF Read Tool - Parse and extract text from PDF files.
 
 Uses pypdf to read PDF documents and extract text content
-along with metadata.
+along with metadata. Supports both local file paths and URLs.
 """
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import Any, List
+from urllib.parse import urlparse
 
+import httpx
 from fastmcp import FastMCP
 from pypdf import PdfReader
 
@@ -75,9 +78,10 @@ def register_tools(mcp: FastMCP) -> None:
 
         Returns text content with page markers and optional metadata.
         Use for reading PDFs, reports, documents, or any PDF file.
+        Supports both local file paths and URLs.
 
         Args:
-            file_path: Path to the PDF file to read (absolute or relative)
+            file_path: Path or URL to the PDF file (local path, or http://https:// URL)
             pages: Page range to extract - 'all'/None for all, '5' for single, '1-10' for range, '1,3,5' for specific
             max_pages: Maximum number of pages to process (1-1000, memory safety)
             include_metadata: Include PDF metadata (author, title, creation date, etc.)
@@ -85,8 +89,46 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with extracted text and metadata, or error dict
         """
+        temp_file = None
         try:
-            path = Path(file_path).resolve()
+            # Check if input is a URL
+            is_url = file_path.startswith(("http://", "https://"))
+            
+            if is_url:
+                # Download PDF from URL to temporary file
+                try:
+                    response = httpx.get(
+                        file_path,
+                        headers={"User-Agent": "AdenBot/1.0 (PDF Reader)"},
+                        follow_redirects=True,
+                        timeout=60.0,
+                    )
+                    
+                    if response.status_code != 200:
+                        return {"error": f"Failed to download PDF: HTTP {response.status_code}"}
+                    
+                    # Validate content-type
+                    content_type = response.headers.get("content-type", "").lower()
+                    if "application/pdf" not in content_type:
+                        return {
+                            "error": f"URL does not point to a PDF file. Content-Type: {content_type}",
+                            "content_type": content_type,
+                            "url": file_path,
+                        }
+                    
+                    # Save to temporary file
+                    temp_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.pdf', delete=False)
+                    temp_file.write(response.content)
+                    temp_file.close()
+                    path = Path(temp_file.name)
+                    
+                except httpx.TimeoutException:
+                    return {"error": "PDF download timed out"}
+                except httpx.RequestError as e:
+                    return {"error": f"Failed to download PDF: {str(e)}"}
+            else:
+                # Local file path
+                path = Path(file_path).resolve()
 
             # Validate file exists
             if not path.exists():
@@ -155,3 +197,10 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Permission denied: {file_path}"}
         except Exception as e:
             return {"error": f"Failed to read PDF: {str(e)}"}
+        finally:
+            # Clean up temporary file if it was created
+            if temp_file is not None:
+                try:
+                    Path(temp_file.name).unlink(missing_ok=True)
+                except Exception:
+                    pass  # Ignore cleanup errors
