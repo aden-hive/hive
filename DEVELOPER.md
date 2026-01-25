@@ -82,15 +82,19 @@ For running agents with real LLMs:
 ```bash
 # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 export ANTHROPIC_API_KEY="your-key-here"
+export GOOGLE_API_KEY="your-key-here"        # Google Gemini (free tier available)
 export OPENAI_API_KEY="your-key-here"        # Optional
 export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search tool
 ```
 
 Get API keys:
 
+- **Google Gemini**: [aistudio.google.com/apikey](https://aistudio.google.com/apikey) - Free tier for development (1500 req/day)
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
+
+**Note:** Google Gemini offers a free tier with no credit card required. See [docs/gemini-setup.md](docs/gemini-setup.md) for setup details.
 
 ### Install Claude Code Skills
 

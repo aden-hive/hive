@@ -69,8 +69,26 @@ python -c "import litellm; print('✓ litellm OK')"
 For running agents with real LLMs:
 
 ```bash
+# Anthropic Claude
 export ANTHROPIC_API_KEY="your-key-here"
+
+# Google Gemini (Free tier: 1500 requests/day)
+export GOOGLE_API_KEY="your-key-here"
+
+# OpenAI (Optional)
+export OPENAI_API_KEY="your-key-here"
+
+# Brave Search (Optional, for web search tool)
+export BRAVE_SEARCH_API_KEY="your-key-here"
 ```
+
+**Get API Keys:**
+- **Google Gemini**: [https://aistudio.google.com/apikey](https://aistudio.google.com/apikey) - Free tier available for development
+- **Anthropic**: [https://console.anthropic.com](https://console.anthropic.com)
+- **OpenAI**: [https://platform.openai.com](https://platform.openai.com)
+- **Brave Search**: [https://brave.com/search/api](https://brave.com/search/api)
+
+**Note:** Google Gemini offers a free tier with no credit card required, suitable for development and testing.
 
 ## Running Agents
 
