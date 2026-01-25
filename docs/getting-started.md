@@ -85,7 +85,10 @@ hive/
 │
 ├── .claude/                # Claude Code Skills
 │   └── skills/
-│       ├── building-agents/
+│       ├── agent-workflow/
+│       ├── building-agents-construction/
+│       ├── building-agents-core/
+│       ├── building-agents-patterns/
 │       └── testing-agent/
 │
 └── docs/                   # Documentation
