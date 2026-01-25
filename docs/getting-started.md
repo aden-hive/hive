@@ -19,7 +19,11 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # 2. Run automated Python setup
+# On Linux/macOS:
 ./scripts/setup-python.sh
+
+# On Windows:
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-python.ps1
 
 # 3. Verify installation
 python -c "import framework; import aden_tools; print('✓ Setup complete')"

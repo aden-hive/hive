@@ -20,10 +20,15 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
 ```bash
 # Install Python packages
+
+# On Linux/macOS:
 ./scripts/setup-python.sh
 
+# On Windows:
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-python.ps1
+
 # Verify installation
-python -c "import framework; import aden_tools; print('✓ Setup complete')"
+python -c "import framework; import aden_tools; print('`n✓ Setup complete')"
 
 # Install Claude Code skills (optional)
 ./quickstart.sh
