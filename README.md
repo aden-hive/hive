@@ -221,7 +221,7 @@ Choose other frameworks when you need:
 hive/
 ├── core/                   # Core framework - Agent runtime, graph executor, protocols
 ├── tools/                  # MCP Tools Package - 19 tools for agent capabilities
-├── exports/                # Agent packages - Pre-built agents and examples
+├── exports/                # Agent packages (user-generated; not tracked in repo)
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
 ├── .claude/                # Claude Code skills for building agents
