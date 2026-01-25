@@ -93,7 +93,7 @@ def main():
         config = {
             "mcpServers": {
                 "agent-builder": {
-                    "command": "python",
+                    "command": sys.executable,
                     "args": ["-m", "framework.mcp.agent_builder_server"],
                     "cwd": str(script_dir)
                 }
@@ -141,7 +141,7 @@ def main():
     example_config = {
         "mcpServers": {
             "agent-builder": {
-                "command": "python",
+                "command": sys.executable,
                 "args": ["-m", "framework.mcp.agent_builder_server"],
                 "cwd": str(script_dir)
             }
