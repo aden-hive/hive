@@ -10,7 +10,10 @@ See: https://docs.litellm.ai/docs/providers
 import json
 from typing import Any
 
-import litellm
+try:
+    import litellm
+except ImportError:
+    litellm = None
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse
 
@@ -71,6 +74,11 @@ class LiteLLMProvider(LLMProvider):
         self.api_key = api_key
         self.api_base = api_base
         self.extra_kwargs = kwargs
+
+        if litellm is None:
+            raise ImportError(
+                "LiteLLM is not installed. Please install it with: pip install litellm"
+            )
 
     def complete(
         self,
