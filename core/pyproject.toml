@@ -16,8 +16,7 @@ dependencies = [
   "pytest-xdist>=3.0",
 ]
 
-[project.optional-dependencies]
-dev = ["ty>=0.0.13", "ruff>=0.14.14"]
+# [project.optional-dependencies]
 
 [build-system]
 requires = ["hatchling"]
@@ -51,3 +50,6 @@ lint.isort.section-order = [
   "first-party",
   "local-folder",
 ]
+
+[dependency-groups]
+dev = ["ty>=0.0.13", "ruff>=0.14.14"]

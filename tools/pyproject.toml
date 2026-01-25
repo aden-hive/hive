@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0", "ty>=0.0.13", "ruff>=0.14.14"]
+dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0"]
 sandbox = ["RestrictedPython>=7.0"]
 ocr = ["pytesseract>=0.3.10", "pillow>=10.0.0"]
 all = ["RestrictedPython>=7.0", "pytesseract>=0.3.10", "pillow>=10.0.0"]
@@ -44,3 +44,6 @@ packages = ["src/aden_tools"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = ["ty>=0.0.13", "ruff>=0.14.14"]
