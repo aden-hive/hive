@@ -60,6 +60,19 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 <!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
+## Development Workflows
+
+Hive supports two primary development paths:
+
+- **Framework & Tooling Development (Node.js / TypeScript)**  
+  For working on the core framework, tooling, and infrastructure.
+
+- **Agent Development (Python)**  
+  For building and running goal-driven agents using the framework.
+
+New contributors can choose a workflow based on what they want to work on.  
+Node.js setup is not required for Python-only agent development.
+
 ## Quick Start
 
 ### Prerequisites
