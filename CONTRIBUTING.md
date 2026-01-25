@@ -28,6 +28,19 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 # Install Claude Code skills (optional)
 ./quickstart.sh
 ```
+### Windows (PowerShell)
+```powershell
+# Create and activate virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# Install packages
+pip install -e core
+pip install -e tools
+pip install pytest
+
+# Verify installation
+python -c "import framework; import aden_tools; print('✓ Setup complete')"
 
 ## Commit Convention
 
