@@ -188,7 +188,7 @@ pip install --upgrade "openai>=1.0.0"
 
 **Cause:** Not running from project root or missing PYTHONPATH
 
-**Solution:** Ensure you're in `/home/timothy/oss/hive/` and use:
+**Solution:** Ensure you're in the project root directory and use:
 
 ```bash
 PYTHONPATH=core:exports python -m support_ticket_agent validate
