@@ -96,7 +96,8 @@ claude> /building-agents
 claude> /testing-agent
 
 # Run your agent
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+# After building an agent with Claude Code:
+# python -m framework run your_agent_name --input '{...}'
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
@@ -253,7 +254,8 @@ claude> /building-agents
 claude> /testing-agent
 
 # Run agents
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+# Run agents after building with /building-agents:
+# python -m framework run agent_name --input '{...}'
 ```
 
 See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.

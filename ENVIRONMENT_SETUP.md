@@ -78,20 +78,20 @@ All agent commands must be run from the project root with `PYTHONPATH` set:
 
 ```bash
 # From /hive/ directory
-PYTHONPATH=core:exports python -m agent_name COMMAND
+python -m framework run agent_name COMMAND
 ```
 
-### Example: Support Ticket Agent
+### Example: Verifying Framework Installation
 
 ```bash
 # Validate agent structure
-PYTHONPATH=core:exports python -m support_ticket_agent validate
+python -m framework --help
 
 # Show agent information
-PYTHONPATH=core:exports python -m support_ticket_agent info
+python core/examples/mcp_integration_example.py
 
 # Run agent with input
-PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
+python -m framework --help
   "ticket_content": "My login is broken. Error 401.",
   "customer_id": "CUST-123",
   "ticket_id": "TKT-456"
@@ -191,7 +191,7 @@ pip install --upgrade "openai>=1.0.0"
 **Solution:** Ensure you're in `/home/timothy/oss/hive/` and use:
 
 ```bash
-PYTHONPATH=core:exports python -m support_ticket_agent validate
+python -m framework --help
 ```
 
 ### Agent imports fail with "broken installation"
@@ -263,7 +263,7 @@ Enter goal: "Build an agent that processes customer support tickets"
 ### 3. Validate Agent
 
 ```bash
-PYTHONPATH=core:exports python -m support_ticket_agent validate
+python -m framework --help
 ```
 
 ### 4. Test Agent
@@ -275,7 +275,7 @@ claude> /testing-agent
 ### 5. Run Agent
 
 ```bash
-PYTHONPATH=core:exports python -m support_ticket_agent run --input '{...}'
+python -m framework --help
 ```
 
 ## IDE Setup

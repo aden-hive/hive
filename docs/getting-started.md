@@ -47,14 +47,14 @@ Follow the interactive prompts to:
 
 ```bash
 # Copy an example agent
-cp -r exports/support_ticket_agent exports/my_agent
+# After building with /building-agents, agents are created in exports/
 
 # Customize the agent
 cd exports/my_agent
 # Edit agent.json, tools.py, README.md
 
 # Validate the agent
-PYTHONPATH=core:exports python -m my_agent validate
+python -m framework run my_agent validate
 ```
 
 ## Project Structure
@@ -95,18 +95,18 @@ hive/
 
 ```bash
 # Validate agent structure
-PYTHONPATH=core:exports python -m my_agent validate
+python -m framework run my_agent validate
 
 # Show agent information
-PYTHONPATH=core:exports python -m my_agent info
+python -m framework run my_agent info
 
 # Run agent with input
-PYTHONPATH=core:exports python -m my_agent run --input '{
+python -m framework run my_agent run --input '{
   "task": "Your input here"
 }'
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
+python -m framework run my_agent run --mock --input '{...}'
 ```
 
 ## API Keys Setup
@@ -132,11 +132,11 @@ Get your API keys:
 claude> /testing-agent
 
 # Or manually
-PYTHONPATH=core:exports python -m my_agent test
+python -m framework run my_agent test
 
 # Run with specific test type
-PYTHONPATH=core:exports python -m my_agent test --type constraint
-PYTHONPATH=core:exports python -m my_agent test --type success
+python -m framework run my_agent test --type constraint
+python -m framework run my_agent test --type success
 ```
 
 ## Next Steps
@@ -172,7 +172,7 @@ pip install -e .
 echo $ANTHROPIC_API_KEY
 
 # Run in mock mode to test without API
-PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
+python -m framework run my_agent run --mock --input '{...}'
 ```
 
 ### Package Installation Issues

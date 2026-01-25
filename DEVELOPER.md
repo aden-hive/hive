@@ -113,7 +113,7 @@ python -c "import aden_tools; print('✓ aden_tools OK')"
 python -c "import litellm; print('✓ litellm OK')"
 
 # Run an example agent
-PYTHONPATH=core:exports python -m support_ticket_agent validate
+python -m framework --help
 ```
 
 ---
@@ -242,7 +242,7 @@ claude> /testing-agent
 4. **Validate the Agent**
 
    ```bash
-   PYTHONPATH=core:exports python -m your_agent_name validate
+   python -m framework run your_agent_name validate
    ```
 
 5. **Test the Agent**
@@ -288,19 +288,19 @@ If you prefer to build agents manually:
 
 ```bash
 # Validate agent structure
-PYTHONPATH=core:exports python -m agent_name validate
+python -m framework run agent_name validate
 
 # Show agent information
-PYTHONPATH=core:exports python -m agent_name info
+python -m framework run agent_name info
 
 # Run agent with input
-PYTHONPATH=core:exports python -m agent_name run --input '{
+python -m framework run agent_name run --input '{
   "ticket_content": "My login is broken",
   "customer_id": "CUST-123"
 }'
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=core:exports python -m agent_name run --mock --input '{...}'
+python -m framework run agent_name run --mock --input '{...}'
 ```
 
 ---
@@ -324,17 +324,17 @@ This generates and runs:
 
 ```bash
 # Run all tests for an agent
-PYTHONPATH=core:exports python -m agent_name test
+python -m framework run agent_name test
 
 # Run specific test type
-PYTHONPATH=core:exports python -m agent_name test --type constraint
-PYTHONPATH=core:exports python -m agent_name test --type success
+python -m framework run agent_name test --type constraint
+python -m framework run agent_name test --type success
 
 # Run with parallel execution
-PYTHONPATH=core:exports python -m agent_name test --parallel 4
+python -m framework run agent_name test --parallel 4
 
 # Fail fast (stop on first failure)
-PYTHONPATH=core:exports python -m agent_name test --fail-fast
+python -m framework run agent_name test --fail-fast
 ```
 
 ### Writing Custom Tests
@@ -597,7 +597,7 @@ pip install -e .
 claude> /building-agents
 
 # Option 2: Copy from example
-cp -r exports/support_ticket_agent exports/my_new_agent
+# After building with /building-agents, your agent will be in exports/
 cd exports/my_new_agent
 # Edit agent.json, tools.py, README.md
 
@@ -685,10 +685,10 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 # Run with verbose output
-PYTHONPATH=core:exports python -m agent_name run --input '{...}' --verbose
+python -m framework run agent_name run --input '{...}' --verbose
 
 # Use mock mode to test without LLM calls
-PYTHONPATH=core:exports python -m agent_name run --mock --input '{...}'
+python -m framework run agent_name run --mock --input '{...}'
 ```
 
 ---
