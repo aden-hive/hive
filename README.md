@@ -295,6 +295,12 @@ We use [Discord](https://discord.com/invite/MXE49hrKDk) for support, feature req
 - Twitter/X - [@adenhq](https://x.com/aden_hq)
 - LinkedIn - [Company Page](https://www.linkedin.com/company/teamaden/)
 
+## First Contribution
+
+New contributors can start by improving documentation, fixing typos, or clarifying instructions. 
+Simply fork the repo, create a branch, edit files, and submit a pull request. 
+This is a great way to get familiar with the project before tackling code issues.
+
 ## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
