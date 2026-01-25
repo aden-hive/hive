@@ -225,8 +225,80 @@ class CodeSandbox:
                 signal.alarm(0)
                 signal.signal(signal.SIGALRM, old_handler)
         else:
-            # Windows: no timeout support, just execute
+            # Windows: use threading-based timeout
             yield
+
+    def _execute_with_timeout_windows(
+        self,
+        code: str,
+        namespace: dict[str, Any],
+        timeout_seconds: int,
+    ) -> None:
+        """
+        Execute code with timeout on Windows using ThreadPoolExecutor.
+
+        Raises:
+            TimeoutError: If execution exceeds timeout
+            Exception: Any exception from the executed code
+        """
+        import concurrent.futures
+
+        exception_holder = [None]  # Use list to allow modification in nested function
+
+        def run_code():
+            try:
+                compiled = compile(code, "<sandbox>", "exec")
+                exec(compiled, namespace)
+            except Exception as e:
+                exception_holder[0] = e
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_code)
+            try:
+                future.result(timeout=timeout_seconds)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(f"Code execution timed out after {timeout_seconds} seconds")
+
+        # Re-raise any exception from the executed code
+        if exception_holder[0] is not None:
+            raise exception_holder[0]
+
+    def _eval_with_timeout_windows(
+        self,
+        expression: str,
+        namespace: dict[str, Any],
+        timeout_seconds: int,
+    ) -> Any:
+        """
+        Evaluate expression with timeout on Windows using ThreadPoolExecutor.
+
+        Raises:
+            TimeoutError: If execution exceeds timeout
+            Exception: Any exception from the evaluated expression
+        """
+        import concurrent.futures
+
+        result_holder = [None]
+        exception_holder = [None]
+
+        def run_eval():
+            try:
+                result_holder[0] = eval(expression, namespace)
+            except Exception as e:
+                exception_holder[0] = e
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_eval)
+            try:
+                future.result(timeout=timeout_seconds)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(f"Code execution timed out after {timeout_seconds} seconds")
+
+        # Re-raise any exception from the evaluated expression
+        if exception_holder[0] is not None:
+            raise exception_holder[0]
+
+        return result_holder[0]
 
     def _create_namespace(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Create isolated namespace for code execution."""
@@ -281,10 +353,15 @@ class CodeSandbox:
         start_time = time.time()
 
         try:
-            with self._timeout_context(self.timeout_seconds):
-                # Compile and execute
-                compiled = compile(code, "<sandbox>", "exec")
-                exec(compiled, namespace)
+            # Use platform-appropriate timeout mechanism
+            if hasattr(signal, 'SIGALRM'):
+                # Unix: use signal-based timeout
+                with self._timeout_context(self.timeout_seconds):
+                    compiled = compile(code, "<sandbox>", "exec")
+                    exec(compiled, namespace)
+            else:
+                # Windows: use thread-based timeout
+                self._execute_with_timeout_windows(code, namespace, self.timeout_seconds)
 
             execution_time_ms = int((time.time() - start_time) * 1000)
 
@@ -357,8 +434,14 @@ class CodeSandbox:
         namespace = self._create_namespace(inputs)
 
         try:
-            with self._timeout_context(self.timeout_seconds):
-                result = eval(expression, namespace)
+            # Use platform-appropriate timeout mechanism
+            if hasattr(signal, 'SIGALRM'):
+                # Unix: use signal-based timeout
+                with self._timeout_context(self.timeout_seconds):
+                    result = eval(expression, namespace)
+            else:
+                # Windows: use thread-based timeout
+                result = self._eval_with_timeout_windows(expression, namespace, self.timeout_seconds)
 
             return SandboxResult(success=True, result=result)
 
