@@ -1,0 +1,23 @@
+# Testing Framework Requirements
+
+# Property-based testing
+hypothesis==6.92.1
+
+# Performance testing
+pytest-benchmark==4.0.0
+locust==2.18.3
+
+# Mutation testing
+mutmut==2.4.2
+
+# Contract testing
+pact-python==2.1.2
+
+# Testing framework
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-xdist==3.5.0
+
+# Coverage
+coverage==7.3.2

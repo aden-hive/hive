@@ -1,0 +1,115 @@
+_format_version: "3.0"
+
+services:
+  # Auth Service
+  - name: auth-service
+    url: http://auth-service:8002
+    routes:
+      - name: auth-routes
+        paths:
+          - /api/v1/auth
+        strip_path: false
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 20
+          hour: 200
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+
+  # Config Service
+  - name: config-service
+    url: http://config-service:8004
+    routes:
+      - name: config-routes
+        paths:
+          - /api/v1/config
+          - /api/v1/feature-flags
+        strip_path: false
+    plugins:
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 50
+          hour: 500
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+
+  # Agent Service
+  - name: agent-service
+    url: http://agent-service:8001
+    routes:
+      - name: agent-routes
+        paths:
+          - /api/v1/agents
+        strip_path: false
+    plugins:
+      - name: jwt
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 100
+          hour: 1000
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+
+  # Tool Service
+  - name: tool-service
+    url: http://tool-service:8003
+    routes:
+      - name: tool-routes
+        paths:
+          - /api/v1/tools
+        strip_path: false
+    plugins:
+      - name: jwt
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 200
+          hour: 2000
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+
+  # Storage Service
+  - name: storage-service
+    url: http://storage-service:8005
+    routes:
+      - name: storage-routes
+        paths:
+          - /api/v1/storage
+        strip_path: false
+    plugins:
+      - name: jwt
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 100
+          hour: 1000
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+
+  # Workflow Service
+  - name: workflow-service
+    url: http://workflow-service:8006
+    routes:
+      - name: workflow-routes
+        paths:
+          - /api/v1/workflows
+        strip_path: false
+    plugins:
+      - name: jwt
+      - name: cors
+      - name: rate-limiting
+        config:
+          minute: 50
+          hour: 500
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
