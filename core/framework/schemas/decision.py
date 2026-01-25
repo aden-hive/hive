@@ -45,7 +45,7 @@ class Option(BaseModel):
     cons: list[str] = Field(default_factory=list)
 
     # Agent's confidence in this option (0-1)
-    confidence: float = 0.5
+    confidence: float = Field(0.5, ge=0.0, le=1.0)
 
     model_config = {"extra": "allow"}
 
