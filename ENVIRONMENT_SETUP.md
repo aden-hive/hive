@@ -72,6 +72,14 @@ For running agents with real LLMs:
 export ANTHROPIC_API_KEY="your-key-here"
 ```
 
+ On Windows PowerShell, use the following instead of export:
+
+
+ ```powershell
+ $env:ANTHROPIC_API_KEY="your-key-here"
+```
+
+
 ## Running Agents
 
 All agent commands must be run from the project root with `PYTHONPATH` set:
@@ -79,6 +87,28 @@ All agent commands must be run from the project root with `PYTHONPATH` set:
 ```bash
 # From /hive/ directory
 PYTHONPATH=core:exports python -m agent_name COMMAND
+```
+
+### Windows (PowerShell)
+
+Linux-style commands like the above do not work in PowerShell. Use the following instead:
+
+
+```powershell
+$env:PYTHONPATH="core;exports"
+python -m agent_name COMMAND
+```
+
+### agent_name Placeholder
+
+`agent_name` is a placeholder value.
+
+Replace it with the actual agent module name located inside the `exports/` directory.
+
+Example:
+
+```powershell
+python -m my_agent run --input "{...}"
 ```
 
 ### Example: Support Ticket Agent
@@ -230,6 +260,16 @@ hive/
     ├── market_research_agent/
     ├── outbound_sales_agent/
     └── personal_assistant_agent/
+```
+
+### exports Directory Note
+
+The `exports/` directory may not exist after cloning the repository.
+
+If you are creating or running agents locally, create it manually from the project root:
+
+```powershell
+mkdir exports
 ```
 
 ### Why PYTHONPATH is Required
