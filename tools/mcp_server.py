@@ -54,7 +54,8 @@ credentials = CredentialManager()
 # Tier 1: Validate startup-required credentials (if any)
 try:
     credentials.validate_startup()
-    print("[MCP] Startup credentials validated")
+    if "--stdio" not in sys.argv:
+        print("[MCP] Startup credentials validated")
 except CredentialError as e:
     # Non-fatal - tools will validate their own credentials when called
     print(f"[MCP] Warning: {e}", file=sys.stderr)

@@ -197,6 +197,8 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str = "cerebras/zai-glm-4.7",
+        api_key: str | None = None,
+        api_base: str | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -209,12 +211,16 @@ class AgentRunner:
             storage_path: Path for runtime storage (defaults to temp)
             model: Model to use - any LiteLLM-compatible model name
                    (e.g., "claude-sonnet-4-20250514", "gpt-4o-mini", "gemini/gemini-pro")
+            api_key: Optional API key (overrides environment variables)
+            api_base: Optional API base URL (for proxies or local models)
         """
         self.agent_path = agent_path
         self.graph = graph
         self.goal = goal
         self.mock_mode = mock_mode
         self.model = model
+        self.api_key = api_key
+        self.api_base = api_base
 
         # Set up storage
         if storage_path:
@@ -256,6 +262,8 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str = "cerebras/zai-glm-4.7",
+        api_key: str | None = None,
+        api_base: str | None = None,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -265,6 +273,8 @@ class AgentRunner:
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to temp)
             model: LLM model to use (any LiteLLM-compatible model name)
+            api_key: Optional API key (overrides environment variables)
+            api_base: Optional API base URL (for proxies or local models)
 
         Returns:
             AgentRunner instance ready to run
@@ -286,6 +296,8 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+            api_key=api_key,
+            api_base=api_base,
         )
 
     def register_tool(
@@ -412,14 +424,23 @@ class AgentRunner:
         # Create LLM provider (if not mock mode and API key available)
         # Uses LiteLLM which auto-detects the provider from model name
         if not self.mock_mode:
-            # Detect required API key from model name
+            # Check if API key is provided directly or via environment
+            api_key = self.api_key
             api_key_env = self._get_api_key_env_var(self.model)
-            if api_key_env and os.environ.get(api_key_env):
+            
+            if not api_key and api_key_env:
+                api_key = os.environ.get(api_key_env)
+
+            if api_key or not api_key_env:
                 from framework.llm.litellm import LiteLLMProvider
-                self._llm = LiteLLMProvider(model=self.model)
+                self._llm = LiteLLMProvider(
+                    model=self.model,
+                    api_key=api_key,
+                    api_base=self.api_base
+                )
             elif api_key_env:
-                print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                print(f"Set it with: export {api_key_env}=your-api-key")
+                print(f"Warning: {api_key_env} not set and no api_key provided. LLM calls will fail.")
+                print(f"Set it with: export {api_key_env}=your-api-key or pass api_key to AgentRunner")
 
         # Get tools for executor/runtime
         tools = list(self._tool_registry.get_tools().values())
