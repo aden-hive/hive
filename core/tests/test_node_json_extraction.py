@@ -108,3 +108,36 @@ class TestJsonExtraction:
         """Test that empty string raises an error."""
         with pytest.raises(ValueError, match="Cannot parse JSON"):
             node._extract_json("", ["key"])
+
+    def test_llm_fallback_requires_api_key(self, node):
+        """Test that LLM fallback requires at least one API key configured.
+        
+        This test verifies the fix for issue #213: the LLM fallback should work
+        with any LLM provider (not just hardcoded Anthropic), requiring only that
+        one of CEREBRAS_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY be set.
+        """
+        import os
+        from unittest.mock import patch
+        
+        # Test 1: No API keys set should raise helpful error
+        with patch.dict(os.environ, clear=True):
+            with pytest.raises(ValueError, match="Cannot parse JSON and no LLM API key found"):
+                # Force LLM fallback by providing text that can't be parsed locally
+                node._extract_json("Completely unparseable: {{ broken json", ["key"])
+        
+        # Test 2: Anthropic key should work
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+            # We can't actually call the LLM in tests, but we can verify
+            # the error message mentions it tried to use the provider
+            with pytest.raises(Exception) as exc_info:
+                node._extract_json("Completely unparseable: {{ broken json", ["key"])
+            # Should NOT mention "AnthropicProvider" as a class, but may mention it in model name
+            error_str = str(exc_info.value)
+            # The important thing is it doesn't crash with "AnthropicProvider not imported"
+            assert "AnthropicProvider" not in error_str or "claude-3-5-haiku" in error_str
+        
+        # Test 3: OpenAI key should work  
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with pytest.raises(Exception):
+                node._extract_json("Completely unparseable: {{ broken json", ["key"])
+

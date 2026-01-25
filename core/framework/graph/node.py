@@ -694,24 +694,35 @@ class LLMNode(NodeProtocol):
                 pass
 
         # All local extraction methods failed - use LLM as last resort
-        # Prefer Cerebras (faster/cheaper), fallback to Anthropic Haiku
+        # Use provider-agnostic LiteLLMProvider to support any configured LLM
         import os
-        api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("Cannot parse JSON and no API key for LLM cleanup (set CEREBRAS_API_KEY or ANTHROPIC_API_KEY)")
-
-        # Use fast LLM to clean the response (Cerebras llama-3.3-70b preferred)
         from framework.llm.litellm import LiteLLMProvider
+        
+        # Try multiple API keys in order of preference
+        api_key = None
+        model = None
+        
         if os.environ.get("CEREBRAS_API_KEY"):
-            cleaner_llm = LiteLLMProvider(
-                api_key=os.environ.get("CEREBRAS_API_KEY"),
-                model="cerebras/llama-3.3-70b",
-                temperature=0.0
-            )
+            api_key = os.environ.get("CEREBRAS_API_KEY")
+            model = "cerebras/llama-3.3-70b"
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            model = "claude-3-5-haiku-20241022"
+        elif os.environ.get("OPENAI_API_KEY"):
+            api_key = os.environ.get("OPENAI_API_KEY")
+            model = "gpt-4o-mini"
         else:
-            # Fallback to Anthropic Haiku
-            from framework.llm.anthropic import AnthropicProvider
-            cleaner_llm = AnthropicProvider(model="claude-3-5-haiku-20241022")
+            raise ValueError(
+                "Cannot parse JSON and no LLM API key found. "
+                "Set one of: CEREBRAS_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY"
+            )
+        
+        # Use LiteLLMProvider to support any LLM provider
+        cleaner_llm = LiteLLMProvider(
+            api_key=api_key,
+            model=model,
+            temperature=0.0
+        )
 
         prompt = f"""Extract the JSON object from this LLM response.
 
