@@ -35,15 +35,21 @@ jobs:
           ruff check .
 
   test:
-    name: Test Python Framework
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }} / Py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11', '3.12']
+    
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
       - name: Install dependencies
@@ -79,9 +85,5 @@ jobs:
       - name: Validate exported agents
         run: |
           # Check that agent exports have valid structure
-          for agent_dir in exports/*/; do
-            if [ -f "$agent_dir/agent.json" ]; then
-              echo "Validating $agent_dir"
-              python -c "import json; json.load(open('$agent_dir/agent.json'))"
-            fi
-          done
+          # Using python script for cross-platform compatibility
+          python -c "import glob, json, os; [json.load(open(os.path.join(d, 'agent.json'))) for d in glob.glob('exports/*/')] and print('Validation passed')"
