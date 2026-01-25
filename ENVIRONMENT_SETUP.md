@@ -4,9 +4,18 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 
 ## Quick Setup
 
+**Linux/macOS:**
+
 ```bash
 # Run the automated setup script
 ./scripts/setup-python.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# Run the automated setup script
+.\scripts\setup-python.ps1
 ```
 
 This will:
@@ -68,20 +77,39 @@ python -c "import litellm; print('✓ litellm OK')"
 
 For running agents with real LLMs:
 
+**Linux/macOS:**
+
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
+```
+
+**Windows (PowerShell):**
+
+```powershell
+$env:ANTHROPIC_API_KEY="your-key-here"
 ```
 
 ## Running Agents
 
 All agent commands must be run from the project root with `PYTHONPATH` set:
 
+**Linux/macOS:**
+
 ```bash
 # From /hive/ directory
 PYTHONPATH=core:exports python -m agent_name COMMAND
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# From /hive/ directory
+$env:PYTHONPATH="core;exports"; python -m agent_name COMMAND
+```
+
 ### Example: Support Ticket Agent
+
+**Linux/macOS:**
 
 ```bash
 # Validate agent structure
@@ -101,7 +129,29 @@ PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
 PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{...}'
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# Validate agent structure
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent validate
+
+# Show agent information
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent info
+
+# Run agent with input
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent run --input '{
+  "ticket_content": "My login is broken. Error 401.",
+  "customer_id": "CUST-123",
+  "ticket_id": "TKT-456"
+}'
+
+# Run in mock mode (no LLM calls)
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent run --mock --input '{...}'
+```
+
 ### Example: Other Agents
+
+**Linux/macOS:**
 
 ```bash
 # Market Research Agent
@@ -114,14 +164,35 @@ PYTHONPATH=core:exports python -m outbound_sales_agent validate
 PYTHONPATH=core:exports python -m personal_assistant_agent run --input '{...}'
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# Market Research Agent
+$env:PYTHONPATH="core;exports"; python -m market_research_agent info
+
+# Outbound Sales Agent
+$env:PYTHONPATH="core;exports"; python -m outbound_sales_agent validate
+
+# Personal Assistant Agent
+$env:PYTHONPATH="core;exports"; python -m personal_assistant_agent run --input '{...}'
+```
+
 ## Building New Agents
 
 Use Claude Code CLI with the agent building skills:
 
 ### 1. Install Skills (One-time)
 
+**Linux/macOS:**
+
 ```bash
 ./quickstart.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\quickstart.ps1
 ```
 
 This installs:

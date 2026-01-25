@@ -56,6 +56,7 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
+- **[Windows Setup Guide](docs/WINDOWS_SETUP.md)** - Native Windows development setup
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
 <!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
@@ -69,6 +70,8 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ### Installation
 
+**Linux/macOS:**
+
 ```bash
 # Clone the repository
 git clone https://github.com/adenhq/hive.git
@@ -78,12 +81,26 @@ cd hive
 ./scripts/setup-python.sh
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# Clone the repository
+git clone https://github.com/adenhq/hive.git
+cd hive
+
+# Run Python environment setup
+.\scripts\setup-python.ps1
+```
+
 This installs:
+
 - **framework** - Core agent runtime and graph executor
 - **aden_tools** - 19 MCP tools for agent capabilities
 - All required dependencies
 
 ### Build Your First Agent
+
+**Linux/macOS:**
 
 ```bash
 # Install Claude Code skills (one-time)
@@ -97,6 +114,22 @@ claude> /testing-agent
 
 # Run your agent
 PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# Install Claude Code skills (one-time)
+.\quickstart.ps1
+
+# Build an agent using Claude Code
+claude> /building-agents
+
+# Test your agent
+claude> /testing-agent
+
+# Run your agent
+$env:PYTHONPATH="core;exports"; python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development

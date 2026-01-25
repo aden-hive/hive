@@ -13,6 +13,8 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 
 The fastest way to get started:
 
+**Linux/macOS:**
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/adenhq/hive.git
@@ -25,9 +27,25 @@ cd hive
 python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# 1. Clone the repository
+git clone https://github.com/adenhq/hive.git
+cd hive
+
+# 2. Run automated Python setup
+.\scripts\setup-python.ps1
+
+# 3. Verify installation
+python -c "import framework; import aden_tools; print('✓ Setup complete')"
+```
+
 ## Building Your First Agent
 
 ### Option 1: Using Claude Code Skills (Recommended)
+
+**Linux/macOS:**
 
 ```bash
 # Install Claude Code skills (one-time)
@@ -37,7 +55,18 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 claude> /building-agents
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# Install Claude Code skills (one-time)
+.\quickstart.ps1
+
+# Start Claude Code and build an agent
+claude> /building-agents
+```
+
 Follow the interactive prompts to:
+
 1. Define your agent's goal
 2. Design the workflow (nodes and edges)
 3. Generate the agent package
@@ -93,6 +122,8 @@ hive/
 
 ## Running an Agent
 
+**Linux/macOS:**
+
 ```bash
 # Validate agent structure
 PYTHONPATH=core:exports python -m my_agent validate
@@ -109,9 +140,29 @@ PYTHONPATH=core:exports python -m my_agent run --input '{
 PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# Validate agent structure
+$env:PYTHONPATH="core;exports"; python -m my_agent validate
+
+# Show agent information
+$env:PYTHONPATH="core;exports"; python -m my_agent info
+
+# Run agent with input
+$env:PYTHONPATH="core;exports"; python -m my_agent run --input '{
+  "task": "Your input here"
+}'
+
+# Run in mock mode (no LLM calls)
+$env:PYTHONPATH="core;exports"; python -m my_agent run --mock --input '{...}'
+```
+
 ## API Keys Setup
 
 For running agents with real LLMs:
+
+**Linux/macOS:**
 
 ```bash
 # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
@@ -120,12 +171,27 @@ export OPENAI_API_KEY="your-key-here"        # Optional
 export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# Set environment variables for current session
+$env:ANTHROPIC_API_KEY="your-key-here"
+$env:OPENAI_API_KEY="your-key-here"        # Optional
+$env:BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search
+
+# Or set permanently (requires admin)
+[System.Environment]::SetEnvironmentVariable('ANTHROPIC_API_KEY', 'your-key-here', 'User')
+```
+
 Get your API keys:
+
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
 
 ## Testing Your Agent
+
+**Linux/macOS:**
 
 ```bash
 # Using Claude Code
@@ -137,6 +203,20 @@ PYTHONPATH=core:exports python -m my_agent test
 # Run with specific test type
 PYTHONPATH=core:exports python -m my_agent test --type constraint
 PYTHONPATH=core:exports python -m my_agent test --type success
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# Using Claude Code
+claude> /testing-agent
+
+# Or manually
+$env:PYTHONPATH="core;exports"; python -m my_agent test
+
+# Run with specific test type
+$env:PYTHONPATH="core;exports"; python -m my_agent test --type constraint
+$env:PYTHONPATH="core;exports"; python -m my_agent test --type success
 ```
 
 ## Next Steps
@@ -167,6 +247,8 @@ pip install -e .
 
 ### LLM API Errors
 
+**Linux/macOS:**
+
 ```bash
 # Verify API key is set
 echo $ANTHROPIC_API_KEY
@@ -175,12 +257,32 @@ echo $ANTHROPIC_API_KEY
 PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
 ```
 
+**Windows (PowerShell):**
+
+```powershell
+# Verify API key is set
+echo $env:ANTHROPIC_API_KEY
+
+# Run in mock mode to test without API
+$env:PYTHONPATH="core;exports"; python -m my_agent run --mock --input '{...}'
+```
+
 ### Package Installation Issues
+
+**Linux/macOS:**
 
 ```bash
 # Remove and reinstall
 pip uninstall -y framework tools
 ./scripts/setup-python.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# Remove and reinstall
+pip uninstall -y framework tools
+.\scripts\setup-python.ps1
 ```
 
 ## Getting Help
