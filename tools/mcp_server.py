@@ -56,8 +56,14 @@ try:
     credentials.validate_startup()
     print("[MCP] Startup credentials validated")
 except CredentialError as e:
-    # Non-fatal - tools will validate their own credentials when called
-    print(f"[MCP] Warning: {e}", file=sys.stderr)
+    print(
+        "[MCP] Warning: Startup credentials missing or invalid.\n"
+        f"Details: {e}\n"
+        "The server will start, but tools requiring LLM access "
+        "may fail at runtime. Please configure required credentials.",
+        file=sys.stderr
+    )
+
 
 mcp = FastMCP("tools")
 
