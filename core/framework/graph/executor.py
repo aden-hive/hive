@@ -10,6 +10,7 @@ The executor:
 """
 
 import logging
+import asyncio  # <--- Added this import
 from typing import Any, Callable
 from dataclasses import dataclass, field
 
@@ -305,6 +306,15 @@ class GraphExecutor:
                     if node_retry_counts[current_node_id] < max_retries_per_node:
                         # Retry - don't increment steps for retries
                         steps -= 1
+                        
+                        # --- ADDED EXPONENTIAL BACKOFF HERE ---
+                        retry_count = node_retry_counts[current_node_id]
+                        # Backoff formula: 1.0 * (2^(retry - 1)) -> 1s, 2s, 4s...
+                        delay = 1.0 * (2 ** (retry_count - 1))
+                        self.logger.info(f"   Using backoff: Sleeping {delay}s before retry...")
+                        await asyncio.sleep(delay)
+                        # --------------------------------------
+
                         self.logger.info(f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries_per_node})...")
                         continue
                     else:
