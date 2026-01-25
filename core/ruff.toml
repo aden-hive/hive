@@ -1,0 +1,12 @@
+target-version = "py310"
+line-length = 88
+
+[lint]
+# Enable Pyflakes (F), pycodestyle (E, W), and isort (I) for import sorting
+select = ["F", "E", "W", "I"]
+# Ignore: Line too long (E501) - we let the formatter handle this
+ignore = ["E501"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
