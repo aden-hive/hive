@@ -65,7 +65,10 @@ core/data/
 tmp/
 temp/
 
+# User-generated agents (ignored)
 exports/*
+# But keep the example agents for onboarding
+!exports/hello_agent/
 
 .agent-builder-sessions/*
 

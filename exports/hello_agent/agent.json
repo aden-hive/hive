@@ -1,0 +1,44 @@
+{
+  "goal": {
+    "goal_id": "hello_agent",
+    "name": "Hello Agent",
+    "description": "A minimal example agent that greets the user and demonstrates the basic framework concepts.",
+    "success_criteria": [
+      "Generate a personalized greeting for the user",
+      "Include the user's name in the response"
+    ],
+    "constraints": [
+      "Response must be friendly and professional",
+      "Response must be under 100 words"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "greeter",
+      "name": "Greeting Generator",
+      "description": "Generates a personalized greeting message for the user",
+      "node_type": "llm_generate",
+      "system_prompt": "You are a friendly assistant. Generate a warm, personalized greeting for the user. Include their name and make them feel welcome. Keep the response concise (under 100 words).",
+      "input_keys": ["user_name"],
+      "output_keys": ["greeting"],
+      "max_retries": 2
+    }
+  ],
+  "edges": [
+    {
+      "id": "start_to_greeter",
+      "source": "START",
+      "target": "greeter",
+      "condition": "on_start"
+    },
+    {
+      "id": "greeter_to_end",
+      "source": "greeter",
+      "target": "END",
+      "condition": "on_success"
+    }
+  ],
+  "entry_node": "greeter",
+  "terminal_nodes": ["greeter"],
+  "max_steps": 10
+}
