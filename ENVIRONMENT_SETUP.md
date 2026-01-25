@@ -9,6 +9,21 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ./scripts/setup-python.sh
 ```
 
+## macOS (Homebrew Python)
+
+If you installed Python using Homebrew, pip enforces PEP 668 and blocks
+system-wide package installation.
+
+Before running the setup script, create and activate a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+./scripts/setup-python.sh
+```
+
+This avoids externally-managed-environment errors.
+
 This will:
 
 - Check Python version (requires 3.11+)

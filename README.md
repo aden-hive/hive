@@ -78,6 +78,9 @@ cd hive
 ./scripts/setup-python.sh
 ```
 
+> macOS users with Homebrew Python should activate a virtual environment
+> before running the setup script. See ENVIRONMENT_SETUP.md.
+
 This installs:
 - **framework** - Core agent runtime and graph executor
 - **aden_tools** - 19 MCP tools for agent capabilities

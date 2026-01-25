@@ -73,6 +73,14 @@ echo ""
 # Upgrade pip, setuptools, and wheel
 echo "Upgrading pip, setuptools, and wheel..."
 if ! $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
+    echo ""
+    echo "If you are using Homebrew Python on macOS, pip may be blocked by PEP 668."
+    echo "Please create and activate a virtual environment before running this script:"
+    echo ""
+    echo "  python3 -m venv .venv"
+    echo "  source .venv/bin/activate"
+    echo "  ./scripts/setup-python.sh"
+    echo ""
   echo "Error: Failed to upgrade pip. Please check your python/venv configuration."
   exit 1
 fi
