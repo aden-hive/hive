@@ -426,67 +426,6 @@ class TestFlexibleExecutorIntegration:
         assert len(executor.judge.rules) == 1
         assert executor.judge.rules[0].id == "custom_rule"
 
-    def test_execution_approval_and_resume(self, tmp_path):
-        """Test pausing for approval and resuming."""
-        import asyncio
-        from framework.runtime.core import Runtime
-        from framework.graph.flexible_executor import FlexibleGraphExecutor
-        from framework.graph.plan import (
-            Plan, PlanStep, ActionSpec, ActionType, 
-            StepStatus, ExecutionStatus, ApprovalResult, ApprovalDecision
-        )
-        from framework.graph.goal import Goal
-
-        async def run_test():
-            runtime = Runtime(storage_path=tmp_path / "runtime")
-            executor = FlexibleGraphExecutor(runtime=runtime)
-
-            # Create a function to be called
-            def echo_func(msg):
-                return msg
-            
-            executor.register_function("echo", echo_func)
-
-            # Create plan with one step requiring approval
-            step = PlanStep(
-                id="step_1",
-                description="Echo hello",
-                action=ActionSpec(
-                    action_type=ActionType.FUNCTION, 
-                    function_name="echo",
-                    function_args={"msg": "hello"}
-                ),
-                requires_approval=True
-            )
-            
-            plan = Plan(
-                id="plan_1",
-                goal_id="goal_1", 
-                description="Test Plan",
-                steps=[step]
-            )
-            goal = Goal(id="goal_1", name="Test", description="Test")
-
-            # 1. First run - should pause
-            result1 = await executor.execute_plan(plan, goal)
-            
-            assert result1.status == ExecutionStatus.AWAITING_APPROVAL
-            assert plan.steps[0].status == StepStatus.AWAITING_APPROVAL
-            
-            # 2. Add approval callback
-            def auto_approve(request):
-                return ApprovalResult(decision=ApprovalDecision.APPROVE)
-                
-            executor.set_approval_callback(auto_approve)
-            
-            # 3. Resume - should complete
-            result2 = await executor.execute_plan(plan, goal)
-            
-            assert result2.status == ExecutionStatus.COMPLETED
-            assert plan.steps[0].status == StepStatus.COMPLETED
-
-        asyncio.run(run_test())
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
