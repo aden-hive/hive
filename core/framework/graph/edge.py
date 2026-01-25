@@ -570,4 +570,93 @@ class GraphSpec(BaseModel):
                     continue
                 errors.append(f"Node '{node.id}' is unreachable from entry")
 
+        # Check for cycles
+        visited = set()
+        recursion_stack = set()
+        
+        def has_cycle_dfs(node_id):
+            visited.add(node_id)
+            recursion_stack.add(node_id)
+            
+            for edge in self.get_outgoing_edges(node_id):
+                if edge.target not in visited:
+                    if has_cycle_dfs(edge.target):
+                        return True
+                elif edge.target in recursion_stack:
+                    return True
+            
+            recursion_stack.remove(node_id)
+            return False
+
+        # Run DFS from all nodes to catch disconnected cycles too
+        for node in self.nodes:
+            if node.id not in visited:
+                if has_cycle_dfs(node.id):
+                    errors.append("Graph contains a cycle")
+                    break
+
+        # Data Flow Validation
+        # 1. Check if edge input mappings are valid (source has the output)
+        for edge in self.edges:
+            source_node = self.get_node(edge.source)
+            if not source_node: continue
+            
+            valid_sources = set(source_node.output_keys) | set(self.memory_keys)
+            for target_key, source_key in edge.input_mapping.items():
+                if source_key not in valid_sources:
+                    errors.append(
+                        f"Edge '{edge.id}' maps missing key '{source_key}' "
+                        f"(not in source '{edge.source}' output or global memory)"
+                    )
+        
+        # 2. Check if node required inputs are satisfied
+        # Identify all available inputs for each node
+        node_supplies = {node.id: set() for node in self.nodes}
+        
+        # Global memory is always available
+        global_memory = set(self.memory_keys)
+        
+        # Map what each edge provides to its target
+        for edge in self.edges:
+            if edge.target not in node_supplies: continue
+            source_node = self.get_node(edge.source)
+            if not source_node: continue
+            
+            # If no mapping, it passes through everything from source + memory?
+            # Edge.map_inputs doc says: "Default: pass through all outputs". 
+            # So if mapping is empty, all source outputs are available to target?
+            # Actually map_inputs implementation: 
+            # if not self.input_mapping: return dict(source_output)
+            # So yes, logic implies all source outputs are effectively passed if no mapping.
+            # But normally we want explicit data flow.
+            
+            if not edge.input_mapping:
+                # Assuming all output keys flow through
+                node_supplies[edge.target].update(source_node.output_keys)
+            else:
+                # Only mapped keys allow flow
+                node_supplies[edge.target].update(edge.input_mapping.keys())
+        
+        for node in self.nodes:
+            required_inputs = set(node.input_keys)
+            available = node_supplies[node.id] | global_memory
+            
+            missing = required_inputs - available
+            if missing:
+                # It's possible inputs come from somewhere else? 
+                # Or node reads directly from memory? 
+                # If node.input_keys implies "needs this in context", it should be provided.
+                # But NodeProtocol.validate_input checks: "if key not in ctx.input_data and ctx.memory.read(key) is None"
+                # So it can come from input_data (via edge) OR directly from memory.
+                
+                # So if it's in global memory keys, it's fine (we checked that above).
+                # If it's not in global memory and not supplied by any edge, it's potentially missing.
+                
+                # However, for an initial node (entry node), inputs must be in memory or initial context.
+                # This static check might be too strict if initial context isn't defined here.
+                # But we can warn.
+                
+                # Refined check: missing inputs that are NOT in memory_keys and NOT provided by edges.
+                errors.append(f"Node '{node.id}' has potentially missing required inputs: {missing}")
+                
         return errors

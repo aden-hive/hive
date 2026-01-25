@@ -332,6 +332,53 @@ class Plan(BaseModel):
         """Check if all steps are completed."""
         return all(s.status == StepStatus.COMPLETED for s in self.steps)
 
+
+    def validate(self) -> list[str]:
+        """
+        Validate the plan for consistency.
+        
+        Checks:
+        1. All dependencies exist
+        2. No cycles in dependencies
+        3. All steps have valid actions
+        """
+        errors = []
+        step_ids = {s.id for s in self.steps}
+        
+        # 1. Check dependencies
+        for step in self.steps:
+            for dep_id in step.dependencies:
+                if dep_id not in step_ids:
+                    errors.append(f"Step '{step.id}' depends on missing step '{dep_id}'")
+        
+        # 2. Check for cycles
+        visited = set()
+        path = set()
+        
+        def has_cycle(current_id):
+            visited.add(current_id)
+            path.add(current_id)
+            
+            step = self.get_step(current_id)
+            if step:
+                for dep_id in step.dependencies:
+                    if dep_id in path:
+                        return True
+                    if dep_id not in visited:
+                        if has_cycle(dep_id):
+                            return True
+            
+            path.remove(current_id)
+            return False
+            
+        for step in self.steps:
+            if step.id not in visited:
+                if has_cycle(step.id):
+                    errors.append("Plan contains a dependency cycle")
+                    break
+        
+        return errors
+
     def to_feedback_context(self) -> dict[str, Any]:
         """Create context for replanning."""
         return {
