@@ -1,0 +1,32 @@
+{
+  "goal": {
+    "goal_id": "hello_world",
+    "name": "Hello World Agent",
+    "description": "A simple example agent that demonstrates the basic structure of Hive agents",
+    "success_criteria": "Returns a greeting message with the provided name"
+  },
+  "nodes": [
+    {
+      "node_id": "echo_greeting",
+      "name": "Echo Greeting",
+      "node_type": "function",
+      "function": "exports.hello_world_agent.tools.echo_function",
+      "input_keys": ["name"],
+      "output_keys": ["greeting"]
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "start_to_echo",
+      "source": "START",
+      "target": "echo_greeting",
+      "condition": "on_success"
+    },
+    {
+      "edge_id": "echo_to_end",
+      "source": "echo_greeting",
+      "target": "END",
+      "condition": "on_success"
+    }
+  ]
+}
