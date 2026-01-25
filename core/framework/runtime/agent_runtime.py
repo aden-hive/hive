@@ -18,6 +18,7 @@ from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
+from framework.graph.mutation import GraphDelta
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -122,6 +123,26 @@ class AgentRuntime:
             base_path=storage_path,
             cache_ttl=self._config.cache_ttl,
             batch_interval=self._config.batch_interval,
+        )
+        
+        # Initialize Memory Hub (MVP Integration)
+        # In production this would be injected or configured via config
+        from framework.memory.providers.local import LocalJSONLProvider
+        from framework.memory.hub import MemoryHub
+        
+        # Quick Mock Embedder for Runtime (so valid agents don't crash)
+        from framework.memory.provider import BaseEmbeddingProvider
+        class RuntimeMockEmbedder(BaseEmbeddingProvider):
+            async def embed(self, text: str) -> list[float]:
+                # Deterministic fake embedding
+                val = len(text) % 10 / 10.0
+                return [val, 0.5, 0.5]
+
+        # Use shared memory file in .hive storage
+        mem_path = Path(storage_path) / "agent_memory.jsonl"
+        self.memory_hub = MemoryHub(
+            provider=LocalJSONLProvider(str(mem_path)),
+            embedder=RuntimeMockEmbedder()
         )
 
         # Initialize shared components
@@ -415,6 +436,133 @@ class AgentRuntime:
     def is_running(self) -> bool:
         """Check if runtime is running."""
         return self._running
+
+    async def apply_mutation(self, delta: "GraphDelta") -> bool:
+        """
+        Applies a structural change (mutation) to the active graph.
+        
+        Args:
+            delta: The structural changes to apply.
+            
+        Returns:
+            True if applied successfully.
+        """
+        logger.info(f"Applying graph mutation: {delta.reason}")
+        
+        # 1. Validation (Safety)
+        # Create a simulation of the graph to check safety BEFORE applying
+        import copy
+        from framework.graph.validator import GraphValidator
+        
+        # Deep copy the current graph structure (nodes/edges lists) to simulate delta
+        # We need a temporary object that looks like GraphSpec
+        # Since GraphSpec is pydantic, we can try to copy it, or just build a dummy object with the lists
+        
+        class GraphSimulation:
+            def __init__(self, nodes, edges, entry_node):
+                self.nodes = copy.deepcopy(nodes)
+                self.edges = copy.deepcopy(edges)
+                self.entry_node = entry_node
+        
+        sim_graph = GraphSimulation(self.graph.nodes, self.graph.edges, self.graph.entry_node)
+        
+        # Apply Delta to Simulation
+        # (Replicating logic - ideally logic should be a shared method, but for now inline is fine for MVP)
+        for node_spec in delta.nodes_to_add:
+            existing_idx = next((i for i, n in enumerate(sim_graph.nodes) if n.id == node_spec.id), -1)
+            if existing_idx >= 0:
+                sim_graph.nodes[existing_idx] = node_spec
+            else:
+                sim_graph.nodes.append(node_spec)
+                
+        for node_id in delta.nodes_to_remove:
+            sim_graph.nodes = [n for n in sim_graph.nodes if n.id != node_id]
+
+        from framework.graph.edge import EdgeSpec
+        for src, tgt in delta.edges_to_add.items():
+            existing_edge = next((e for e in sim_graph.edges if e.source == src and e.target == tgt), None)
+            if not existing_edge:
+                sim_graph.edges.append(EdgeSpec(id=f"{src}_{tgt}", source=src, target=tgt))
+        
+        for src, tgt in delta.edges_to_remove.items():
+            sim_graph.edges = [e for e in sim_graph.edges if not (e.source == src and e.target == tgt)]
+
+        # Validate Simulation
+        validation = GraphValidator.validate(sim_graph)
+        if not validation.valid:
+            logger.error(f"Mutation REJECTED by GraphValidator: {validation.error}")
+            
+            # Record failure in memory
+            await self.memory_hub.remember(
+                f"Graph mutation rejected: {validation.error}",
+                {"mutation_reason": delta.reason},
+                outcome="failure",
+                source_type="system",
+                agent_version="evolution-1.0"
+            )
+            return False
+
+        logger.info("Mutation validated successfully. Applying to live graph.")
+        
+        # 2. Apply Changes under lock
+        async with self._lock:
+            # Add Nodes
+            for node_spec in delta.nodes_to_add:
+                # Dynamic import/instantiation logic would go here
+                # For MVP, we assume the node instances are pre-built or we use a factory
+                # This is a placeholder for the actual dynamic instantiation
+                logger.info(f"Mutating: Adding node {node_spec.id} ({node_spec.node_type})")
+                
+                # Actual Graph Mutation
+                # GraphSpec.nodes is a list of NodeSpec objects
+                
+                # Check if node already exists (update)
+                existing_idx = next((i for i, n in enumerate(self.graph.nodes) if n.id == node_spec.id), -1)
+                if existing_idx >= 0:
+                     self.graph.nodes[existing_idx] = node_spec
+                     logger.info(f"Mutating: Updated node {node_spec.id}")
+                else:
+                     self.graph.nodes.append(node_spec)
+                     logger.info(f"Mutating: Added node {node_spec.id} ({node_spec.node_type})")
+                
+            # Remove Nodes
+            for node_id in delta.nodes_to_remove:
+                # Filter out the node to remove
+                initial_len = len(self.graph.nodes)
+                self.graph.nodes = [n for n in self.graph.nodes if n.id != node_id]
+                if len(self.graph.nodes) < initial_len:
+                    logger.info(f"Mutating: Removed node {node_id}")
+                
+            # Update Edges
+            for src, tgt in delta.edges_to_add.items():
+                # GraphSpec.edges is a list of EdgeSpec objects
+                # Need to check if edge exists or add new EdgeSpec
+                from framework.graph.edge import EdgeSpec
+                
+                # Check existing edge src->tgt
+                existing_edge = next((e for e in self.graph.edges if e.source == src and e.target == tgt), None)
+                if not existing_edge:
+                    edge_id = f"{src}_to_{tgt}"
+                    # Add new edge
+                    new_edge = EdgeSpec(id=edge_id, source=src, target=tgt)
+                    self.graph.edges.append(new_edge)
+                    logger.info(f"Mutating: Added edge {src} -> {tgt}")
+
+            for src, tgt in delta.edges_to_remove.items():
+                 self.graph.edges = [e for e in self.graph.edges if not (e.source == src and e.target == tgt)]
+                 logger.info(f"Mutating: Removed edge {src} -> {tgt}")
+                
+        # 3. Memory Event
+        if delta.source_memory_id:
+            await self.memory_hub.remember(
+                f"Graph mutated: {delta.reason}",
+                {"mutation_id": str(delta.source_memory_id)},
+                outcome="success", 
+                source_type="system",
+                agent_version="evolution-1.0"
+            )
+            
+        return True
 
 
 # === CONVENIENCE FACTORY ===

@@ -1,13 +1,7 @@
-"""Output validation for agent nodes.
 
-Validates node outputs against schemas and expected keys to prevent
-garbage from propagating through the graph.
-"""
-
+from typing import List, Dict, Any, Set
 import logging
 from dataclasses import dataclass
-from typing import Any
-
 from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -20,17 +14,110 @@ class ValidationResult:
     success: bool
     errors: list[str]
 
-    @property
-    def error(self) -> str:
-        """Get combined error message."""
-        return "; ".join(self.errors) if self.errors else ""
+    def __bool__(self):
+        return self.success
+
+
+class GraphValidator:
+    """
+    Validates graph structure reliability.
+    Prevents 'technical cornas' (infinite loops, disconnected nodes).
+    """
+
+    @staticmethod
+    def validate(graph_spec: Any) -> ValidationResult:
+        """
+        Run all validation checks on a GraphSpec-like object.
+        Expected object structure: 
+        - nodes: list of NodeSpec (with 'id')
+        - edges: list of EdgeSpec (with 'source', 'target')
+        - entry_node: str
+        """
+        
+        # 1. Integrity Check (Basic Fields)
+        if not hasattr(graph_spec, "nodes") or not hasattr(graph_spec, "edges") or not hasattr(graph_spec, "entry_node"):
+             return ValidationResult(success=False, errors=["GraphSpec missing required attributes (nodes, edges, entry_node)"])
+
+        # Convert list-based spec to fast-lookup dicts
+        node_ids = {n.id for n in graph_spec.nodes}
+        adj_list = {n_id: [] for n_id in node_ids}
+        
+        for edge in graph_spec.edges:
+            if edge.source not in node_ids:
+                return ValidationResult(success=False, errors=[f"Edge references missing source node: {edge.source}"])
+            if edge.target not in node_ids:
+                return ValidationResult(success=False, errors=[f"Edge references missing target node: {edge.target}"])
+            adj_list[edge.source].append(edge.target)
+
+        # 2. Cycle Detection (DFS)
+        # We assume directed graphs. A cycle is fatal for simple DAG agents, 
+        # but some agents MAY want loops (Retry Loops). 
+        # However, for Safety, we usually warn or error on unintended cycles.
+        # For this implementation, we will act as a strict DAG enforcer to prevent infinite loops 
+        # unless specifically annotated (future feature).
+        
+        # Checking for cycles using recursion stack
+        visited = set()
+        rec_stack = set()
+        
+        def has_cycle(u):
+            visited.add(u)
+            rec_stack.add(u)
+            
+            for v in adj_list[u]:
+                if v not in visited:
+                    if has_cycle(v):
+                        return True
+                elif v in rec_stack:
+                    return True
+            
+            rec_stack.remove(u)
+            return False
+
+        # Check from entry node first (most important)
+        if graph_spec.entry_node not in node_ids:
+             return ValidationResult(success=False, errors=[f"Entry node '{graph_spec.entry_node}' not found in nodes"])
+             
+        # Full scan (in case of disconnected components that might be triggered async)
+        # But actually, only reachable cycles matter usually? 
+        # Let's scan all nodes to be safe.
+        for node_id in node_ids:
+            if node_id not in visited:
+                if has_cycle(node_id):
+                    return ValidationResult(success=False, errors=[f"Cycle detected involving node '{node_id}'"])
+
+        # 3. Connectivity/Reachability (optional strictness)
+        # Verify that all nodes are reachable from entry_node (BFS)
+        # Disconnected islands are technically dead code.
+        reachable = set()
+        from collections import deque
+        q = deque([graph_spec.entry_node])
+        reachable.add(graph_spec.entry_node)
+        
+        while q:
+            u = q.popleft()
+            for v in adj_list[u]:
+                if v not in reachable:
+                    reachable.add(v)
+                    q.append(v)
+                    
+        # Check against all nodes
+        unreachable = node_ids - reachable
+        # Note: "start" node might be isolated if we are mutating? 
+        # For now, we Log Warn but maybe not Fail? 
+        # User requested "Connectivity", let's fail if significant islands exist?
+        # Let's return Valid but with warning logic handled by caller? 
+        # No, simpler: Fail. Dead code is messy.
+        if unreachable:
+             return ValidationResult(success=False, errors=[f"Unreachable nodes detected: {unreachable}"])
+
+        return ValidationResult(success=True, errors=[])
 
 
 class OutputValidator:
     """
-    Validates node outputs against schemas and expected keys.
-
-    Used by the executor to catch bad outputs before they pollute memory.
+    Validates output from nodes against schema.
+    Restored to maintain compatibility with GraphExecutor.
     """
 
     def _contains_code_indicators(self, value: str) -> bool:

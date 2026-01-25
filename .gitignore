@@ -70,3 +70,7 @@ exports/*
 .agent-builder-sessions/*
 
 .venv
+
+# Testing Artifacts
+*.jsonl
+memory_suite_report.html
