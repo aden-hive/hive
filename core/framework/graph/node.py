@@ -709,9 +709,12 @@ class LLMNode(NodeProtocol):
                 temperature=0.0
             )
         else:
-            # Fallback to Anthropic Haiku
-            from framework.llm.anthropic import AnthropicProvider
-            cleaner_llm = AnthropicProvider(model="claude-3-5-haiku-20241022")
+            # Fallback to Anthropic Haiku via LiteLLM for consistency
+            cleaner_llm = LiteLLMProvider(
+                api_key=api_key,
+                model="claude-3-5-haiku-20241022",
+                temperature=0.0
+            )
 
         prompt = f"""Extract the JSON object from this LLM response.
 
