@@ -358,6 +358,67 @@ class TestReplaceFileContentTool:
         assert result["occurrences_replaced"] == 2
         assert test_file.read_text() == "Line 1\nDONE: fix this\nLine 3\nDONE: add tests\n"
 
+    def test_replace_empty_target_rejected(self, replace_file_content_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Replacing with empty target string is rejected to prevent corruption."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("Hello World")
+
+        result = replace_file_content_fn(
+            path="test.txt",
+            target="",  # Empty target should be rejected
+            replacement="X",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+        # File should remain unchanged
+        assert test_file.read_text() == "Hello World"
+
+    def test_replace_atomic_write(self, replace_file_content_fn, mock_workspace, mock_secure_path, tmp_path):
+        """File replacement uses atomic write-then-swap pattern."""
+        test_file = tmp_path / "atomic.txt"
+        original_content = "Original content"
+        test_file.write_text(original_content)
+
+        # Get original inode (if supported by OS)
+        original_stat = test_file.stat()
+
+        result = replace_file_content_fn(
+            path="atomic.txt",
+            target="Original",
+            replacement="Modified",
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert test_file.read_text() == "Modified content"
+        
+        # Verify no temp files left behind
+        temp_files = list(tmp_path.glob(".tmp_*"))
+        assert len(temp_files) == 0, "Temporary files should be cleaned up"
+
+    def test_replace_large_file_rejected(self, replace_file_content_fn, mock_workspace, mock_secure_path, tmp_path, monkeypatch):
+        """Files exceeding size limit are rejected to prevent memory exhaustion."""
+        test_file = tmp_path / "large.txt"
+        test_file.write_text("Small content for testing")
+
+        # Mock getsize to simulate large file
+        def mock_getsize(path):
+            return 200 * 1024 * 1024  # 200 MB (exceeds 100 MB limit)
+
+        monkeypatch.setattr("os.path.getsize", mock_getsize)
+
+        result = replace_file_content_fn(
+            path="large.txt",
+            target="Small",
+            replacement="Big",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "too large" in result["error"].lower() or "size" in result["error"].lower()
+
 
 class TestGrepSearchTool:
     """Tests for grep_search tool."""
