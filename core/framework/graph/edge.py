@@ -154,7 +154,7 @@ class EdgeSpec(BaseModel):
         output: dict[str, Any],
         memory: dict[str, Any],
     ) -> bool:
-        """Evaluate a conditional expression."""
+        """Evaluate a conditional expression safely using AST-based evaluation."""
         if not self.condition_expr:
             return True
 
@@ -170,13 +170,26 @@ class EdgeSpec(BaseModel):
         }
 
         try:
-            # Safe evaluation (in production, use a proper expression evaluator)
-            return bool(eval(self.condition_expr, {"__builtins__": {}}, context))
+            # Use AST-based safe evaluation instead of eval()
+            # This prevents code injection and sandbox escape vulnerabilities
+            from framework.graph.code_sandbox import safe_eval
+            
+            result = safe_eval(self.condition_expr, inputs=context, timeout_seconds=2)
+            
+            if not result.success:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
+                logger.warning(f"         Error: {result.error}")
+                logger.warning(f"         Available context keys: {list(context.keys())}")
+                return False
+            
+            return bool(result.result)
         except Exception as e:
             # Log the error for debugging
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
+            logger.warning(f"      ⚠ Condition evaluation exception: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
             logger.warning(f"         Available context keys: {list(context.keys())}")
             return False
