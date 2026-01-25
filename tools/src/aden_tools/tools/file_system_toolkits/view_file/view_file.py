@@ -31,6 +31,21 @@ def register_tools(mcp: FastMCP) -> None:
             Dict with file content and metadata, or error dict
         """
         try:
+            if not isinstance(path, str) or not path.strip():
+                return {"error": "Invalid path: must be a non-empty string"}
+            if "\x00" in path:
+                return {"error": "Invalid path: contains null byte"}
+            if os.path.isabs(path):
+                return {"error": "Invalid path: must be relative to the session root"}
+
+            for field_name, field_value in {
+                "workspace_id": workspace_id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+            }.items():
+                if not isinstance(field_value, str) or not field_value.strip():
+                    return {"error": f"Invalid {field_name}: must be a non-empty string"}
+
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
             if not os.path.exists(secure_path):
                 return {"error": f"File not found at {path}"}

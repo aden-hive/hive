@@ -83,6 +83,8 @@ PYTHONPATH=core:exports python -m agent_name COMMAND
 
 ### Example: Support Ticket Agent
 
+These examples assume you have created agents under `exports/` (not included in the main branch by default).
+
 ```bash
 # Validate agent structure
 PYTHONPATH=core:exports python -m support_ticket_agent validate
@@ -126,13 +128,18 @@ Use Claude Code CLI with the agent building skills:
 
 This installs:
 
-- `/building-agents` - Build new agents
+- `/building-agents-core` - Core concepts
+- `/building-agents-construction` - Build new agents
+- `/building-agents-patterns` - Best practices
 - `/testing-agent` - Test agents
+- `/agent-workflow` - End-to-end guided flow
+
+Note: `quickstart.sh` installs skills only. You still need the Claude Code CLI (`claude`) on your PATH.
 
 ### 2. Build an Agent
 
 ```
-claude> /building-agents
+claude> /building-agents-construction
 ```
 
 Follow the prompts to:
@@ -186,12 +193,30 @@ pip install --upgrade "openai>=1.0.0"
 
 ### "No module named 'support_ticket_agent'"
 
-**Cause:** Not running from project root or missing PYTHONPATH
+**Cause:** Not running from project root, missing PYTHONPATH, or no agents have been created yet
 
-**Solution:** Ensure you're in `/home/timothy/oss/hive/` and use:
+**Solution:** Ensure you're in the project root and use:
 
 ```bash
 PYTHONPATH=core:exports python -m support_ticket_agent validate
+```
+
+If you don't have any agents yet, create one first (see [docs/examples/hello-agent.md](docs/examples/hello-agent.md)).
+
+### "claude: command not found"
+
+**Cause:** Claude Code CLI is not installed or not on your PATH.
+
+**Solution:** Install the CLI and ensure the global npm bin directory is on PATH:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+On Git Bash (Windows), you may need:
+
+```bash
+export PATH="/c/Users/<you>/AppData/Roaming/npm:$PATH"
 ```
 
 ### Agent imports fail with "broken installation"
@@ -225,11 +250,8 @@ hive/
 │   ├── pyproject.toml
 │   └── README.md
 │
-└── exports/                 # Agent packages (your agents go here)
-    ├── support_ticket_agent/
-    ├── market_research_agent/
-    ├── outbound_sales_agent/
-    └── personal_assistant_agent/
+└── exports/                 # Agent packages (created locally; gitignored by default)
+    └── your_agent/
 ```
 
 ### Why PYTHONPATH is Required
@@ -256,7 +278,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-claude> /building-agents
+claude> /building-agents-construction
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 
@@ -325,7 +347,7 @@ export AGENT_STORAGE_PATH="/custom/storage"
 
 - **Framework Documentation:** [core/README.md](core/README.md)
 - **Tools Documentation:** [tools/README.md](tools/README.md)
-- **Example Agents:** [exports/](exports/)
+- **Hello Agent Example:** [docs/examples/hello-agent.md](docs/examples/hello-agent.md)
 - **Agent Building Guide:** [.claude/skills/building-agents-construction/SKILL.md](.claude/skills/building-agents-construction/SKILL.md)
 - **Testing Guide:** [.claude/skills/testing-agent/SKILL.md](.claude/skills/testing-agent/SKILL.md)
 

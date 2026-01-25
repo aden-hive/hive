@@ -90,16 +90,22 @@ This installs:
 ./quickstart.sh
 
 # Build an agent using Claude Code
-claude> /building-agents
+# Note: quickstart installs skills only; install Claude Code CLI separately if needed.
+claude> /building-agents-construction
+
+# Or use the full guided workflow
+claude> /agent-workflow
 
 # Test your agent
 claude> /testing-agent
 
 # Run your agent
+# If your agent doesn't expose a module entrypoint, use: python -m core run exports/your_agent --input '{...}'
 PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
+**Minimal Example:** [docs/examples/hello-agent.md](docs/examples/hello-agent.md)
 
 ## Features
 
@@ -221,7 +227,7 @@ Choose other frameworks when you need:
 hive/
 ├── core/                   # Core framework - Agent runtime, graph executor, protocols
 ├── tools/                  # MCP Tools Package - 19 tools for agent capabilities
-├── exports/                # Agent packages - Pre-built agents and examples
+├── exports/                # Agent packages (created locally; gitignored by default)
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
 ├── .claude/                # Claude Code skills for building agents
@@ -247,7 +253,10 @@ For building and running goal-driven agents with the framework:
 # - All dependencies
 
 # Build new agents using Claude Code skills
-claude> /building-agents
+claude> /building-agents-construction
+
+# Or use the full guided workflow
+claude> /agent-workflow
 
 # Test agents
 claude> /testing-agent

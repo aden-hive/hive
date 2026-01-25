@@ -34,8 +34,10 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ./quickstart.sh
 
 # Start Claude Code and build an agent
-claude> /building-agents
+claude> /building-agents-construction
 ```
+
+Note: `quickstart.sh` installs skills only. You still need the Claude Code CLI (`claude`) on your PATH.
 
 Follow the interactive prompts to:
 1. Define your agent's goal
@@ -46,15 +48,8 @@ Follow the interactive prompts to:
 ### Option 2: From an Example
 
 ```bash
-# Copy an example agent
-cp -r exports/support_ticket_agent exports/my_agent
-
-# Customize the agent
-cd exports/my_agent
-# Edit agent.json, tools.py, README.md
-
-# Validate the agent
-PYTHONPATH=core:exports python -m my_agent validate
+# Create a minimal example agent
+# Follow: docs/examples/hello-agent.md
 ```
 
 ## Project Structure
@@ -78,14 +73,14 @@ hive/
 │       │   └── file_system_toolkits/
 │       └── mcp_server.py   # HTTP MCP server
 │
-├── exports/                # Agent Packages
-│   ├── support_ticket_agent/
-│   ├── market_research_agent/
-│   └── ...                 # Your agents go here
+├── exports/                # Agent packages (created locally; gitignored by default)
+│   └── your_agent/
 │
 ├── .claude/                # Claude Code Skills
 │   └── skills/
-│       ├── building-agents/
+│       ├── building-agents-construction/
+│       ├── building-agents-core/
+│       ├── building-agents-patterns/
 │       └── testing-agent/
 │
 └── docs/                   # Documentation
@@ -143,7 +138,7 @@ PYTHONPATH=core:exports python -m my_agent test --type success
 
 1. **Detailed Setup**: See [ENVIRONMENT_SETUP.md](../ENVIRONMENT_SETUP.md)
 2. **Developer Guide**: See [DEVELOPER.md](../DEVELOPER.md)
-3. **Agent Patterns**: Explore examples in `/exports`
+3. **Hello Agent Example**: See [docs/examples/hello-agent.md](examples/hello-agent.md)
 4. **Custom Tools**: Learn to integrate MCP servers
 5. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
@@ -183,9 +178,23 @@ pip uninstall -y framework tools
 ./scripts/setup-python.sh
 ```
 
+### "claude: command not found"
+
+Install the Claude Code CLI and make sure your global npm bin directory is on PATH:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+On Git Bash (Windows), you may need:
+
+```bash
+export PATH="/c/Users/<you>/AppData/Roaming/npm:$PATH"
+```
+
 ## Getting Help
 
 - **Documentation**: Check the `/docs` folder
 - **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
-- **Examples**: Explore `/exports` for working agents
+- **Examples**: See [docs/examples/hello-agent.md](examples/hello-agent.md)
