@@ -391,4 +391,4 @@ python -m agent_name
 Script Pattern:
 
 bash
-./scripts/run_agent.py agent_na
+./scripts/run_agent.py agent_name
