@@ -10,12 +10,30 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ```
 
 This will:
-
 - Check Python version (requires 3.11+)
 - Install the core framework package (`framework`)
 - Install the tools package (`aden_tools`)
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
+
+## Development Workflows
+
+The project supports **two main workflows**, depending on what you want to work on:
+
+### 1. Python Agent Development
+- Use `./scripts/setup-python.sh` or the manual Python setup.
+- Required for building, testing, and running agents.
+- Needed for most core logic, LLM interactions, and Python-based tools.
+
+### 2. Node.js / npm Tooling
+- Run `npm install` in the project root.
+- Required for JavaScript-based CLI scripts, frontend tooling, or agent helpers.
+- Not needed if you only work with Python agents.
+
+### Choosing a Workflow
+- **Only building/testing agents:** Python setup is enough.
+- **Contributing JS tools or scripts:** Run both Python and npm setups.
+
 
 ## Manual Setup (Alternative)
 
