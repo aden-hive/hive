@@ -70,6 +70,27 @@ fi
 echo -e "${GREEN}✓${NC} pip detected"
 echo ""
 
+# --------------------------------------------------
+# Handle externally managed Python environments (PEP 668)
+# --------------------------------------------------
+if $PYTHON_CMD -m pip install --dry-run pip 2>&1 | grep -q "externally managed"; then
+    echo -e "${YELLOW}Detected externally managed Python environment (PEP 668).${NC}"
+    echo "Creating and activating virtual environment..."
+
+    $PYTHON_CMD -m venv .venv
+    source .venv/bin/activate
+
+    echo -e "${GREEN}✓${NC} Virtual environment created and activated (.venv)"
+fi
+
+# Upgrade pip, setuptools, and wheel
+echo "Upgrading pip, setuptools, and wheel..."
+if ! $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
+  echo "Error: Failed to upgrade pip. Please check your python/venv configuration."
+  exit 1
+fi
+
+
 # Upgrade pip, setuptools, and wheel
 echo "Upgrading pip, setuptools, and wheel..."
 if ! $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
