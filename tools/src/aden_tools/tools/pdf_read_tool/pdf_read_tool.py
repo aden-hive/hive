@@ -11,6 +11,12 @@ from typing import Any, List
 
 from fastmcp import FastMCP
 from pypdf import PdfReader
+from pypdf.errors import (
+    PdfReadError,
+    EmptyFileError,
+    ParseError,
+    PdfStreamError,
+)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -151,6 +157,14 @@ def register_tools(mcp: FastMCP) -> None:
 
             return result
 
+        except EmptyFileError:
+            return {"error": f"PDF file is empty: {file_path}"}
+        except PdfReadError as e:
+            return {"error": f"Corrupted or malformed PDF: {str(e)}"}
+        except ParseError as e:
+            return {"error": f"Failed to parse PDF structure: {str(e)}"}
+        except PdfStreamError as e:
+            return {"error": f"PDF stream error: {str(e)}"}
         except PermissionError:
             return {"error": f"Permission denied: {file_path}"}
         except Exception as e:
