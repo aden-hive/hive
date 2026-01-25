@@ -60,6 +60,28 @@ fi
 echo -e "${GREEN}✓${NC} Python version check passed"
 echo ""
 
+
+# --------------------------------------------------
+# Ensure virtual environment (PEP 668 safe)
+# --------------------------------------------------
+
+if [ -z "$VIRTUAL_ENV" ]; then
+    VENV_DIR="$PROJECT_ROOT/.venv"
+
+    if [ ! -d "$VENV_DIR" ]; then
+        echo "Creating virtual environment at .venv..."
+        $PYTHON_CMD -m venv "$VENV_DIR"
+    fi
+
+    echo "Activating virtual environment..."
+    source "$VENV_DIR/bin/activate"
+
+    # Ensure pip inside venv
+    PYTHON_CMD="python"
+fi
+
+
+
 # Check for pip
 if ! $PYTHON_CMD -m pip --version &> /dev/null; then
     echo -e "${RED}Error: pip is not installed${NC}"
