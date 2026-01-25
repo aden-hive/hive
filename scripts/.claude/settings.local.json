@@ -1,0 +1,7 @@
+{
+  "enabledMcpjsonServers": [
+    "agent-builder",
+    "tools"
+  ],
+  "enableAllProjectMcpServers": true
+}

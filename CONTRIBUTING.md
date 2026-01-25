@@ -16,18 +16,65 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 6. Commit your changes following our commit conventions
 7. Push to your fork and submit a Pull Request
 
-## Development Setup
+## Development Setup (Recommended)
+
+> ⚠️ **Important (Ubuntu 23.10+ / WSL / Linux)**  
+> This project must be installed inside a **Python virtual environment** due to PEP 668 restrictions.
+
+### 1️⃣ System Requirements
+
+- Python **3.11+** (3.12 supported)
+- Linux / macOS / **Windows via WSL2 (Ubuntu recommended)**
+
+Install required system packages:
+```bash
+sudo apt update
+sudo apt install -y python3-full python3-venv
+```
+
+---
+
+### 2️⃣ Create & Activate Virtual Environment
+
+From the project root:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+You should now see:
+```
+(.venv) user@machine:~/hive
+```
+
+---
+
+### 3️⃣ Install Python Dependencies
 
 ```bash
-# Install Python packages
-./scripts/setup-python.sh
-
-# Verify installation
-python -c "import framework; import aden_tools; print('✓ Setup complete')"
-
-# Install Claude Code skills (optional)
-./quickstart.sh
+bash scripts/setup-python.sh
 ```
+
+---
+
+### 4️⃣ Verify Installation
+
+```bash
+python -c "import framework; import aden_tools; print('✓ Setup complete')"
+```
+
+---
+
+### 5️⃣ Install Claude Code Skills (Optional)
+
+```bash
+bash quickstart.sh
+# or
+bash quickstart.sh how
+```
+
+---
+
 
 ## Commit Convention
 
