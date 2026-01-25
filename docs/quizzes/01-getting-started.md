@@ -76,6 +76,13 @@ Clone your fork and explore the codebase:
 ```bash
 git clone https://github.com/YOUR_USERNAME/hive.git
 cd hive
+
+> **Note:** Some example agents referenced elsewhere in the documentation
+> (for example, under an `exports/` directory) are generated when running
+> `quickstart.sh` using Claude Code. Contributors without Claude access
+> may not see these generated agents and can proceed with the exploration
+> tasks using the existing repository structure.
+
 ```
 
 Answer these questions:
