@@ -3,7 +3,20 @@
 from framework.graph.goal import Goal, SuccessCriterion, Constraint, GoalStatus
 from framework.graph.node import NodeSpec, NodeContext, NodeResult, NodeProtocol
 from framework.graph.edge import EdgeSpec, EdgeCondition
-from framework.graph.executor import GraphExecutor
+from framework.graph.executor import GraphExecutor, ExecutionResult
+
+# Error handling
+from framework.graph.execution_errors import (
+    ExecutionError,
+    FatalExecutionError,
+    RetriableExecutionError,
+    ValidationExecutionError,
+    DependencyExecutionError,
+    UserExecutionError,
+    ErrorCode,
+    ErrorCategory,
+    classify_error,
+)
 
 # Flexible execution (Worker-Judge pattern)
 from framework.graph.plan import (
@@ -44,10 +57,17 @@ __all__ = [
     "EdgeCondition",
     # Executor (fixed graph)
     "GraphExecutor",
-    # Plan (flexible execution)
-    "Plan",
-    "PlanStep",
-    "ActionSpec",
+    "ExecutionResult",
+    # Error handling
+    "ExecutionError",
+    "FatalExecutionError",
+    "RetriableExecutionError",
+    "ValidationExecutionError",
+    "DependencyExecutionError",
+    "UserExecutionError",
+    "ErrorCode",
+    "ErrorCategory",
+    "classify_error",
     "ActionType",
     "StepStatus",
     "Judgment",
