@@ -33,6 +33,7 @@ class AgentRuntimeConfig:
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
     max_history: int = 1000
+    state_cleanup_interval: float = 300.0  # Runs cleanup every 5 minutes
 
 
 class AgentRuntime:
@@ -45,46 +46,6 @@ class AgentRuntime:
     - Manage shared state across streams
     - Aggregate decisions/outcomes for goal evaluation
     - Handle lifecycle events (start, pause, shutdown)
-
-    Example:
-        # Create runtime
-        runtime = AgentRuntime(
-            graph=support_agent_graph,
-            goal=support_agent_goal,
-            storage_path=Path("./storage"),
-            llm=llm_provider,
-        )
-
-        # Register entry points
-        runtime.register_entry_point(EntryPointSpec(
-            id="webhook",
-            name="Zendesk Webhook",
-            entry_node="process-webhook",
-            trigger_type="webhook",
-            isolation_level="shared",
-        ))
-
-        runtime.register_entry_point(EntryPointSpec(
-            id="api",
-            name="API Handler",
-            entry_node="process-request",
-            trigger_type="api",
-            isolation_level="shared",
-        ))
-
-        # Start runtime
-        await runtime.start()
-
-        # Trigger executions (non-blocking)
-        exec_1 = await runtime.trigger("webhook", {"ticket_id": "123"})
-        exec_2 = await runtime.trigger("api", {"query": "help"})
-
-        # Check goal progress
-        progress = await runtime.get_goal_progress()
-        print(f"Progress: {progress['overall_progress']:.1%}")
-
-        # Stop runtime
-        await runtime.stop()
     """
 
     def __init__(
@@ -121,7 +82,7 @@ class AgentRuntime:
         )
 
         # Initialize shared components
-        self._state_manager = SharedStateManager()
+        self._state_manager = SharedStateManager(max_history=self._config.max_history)
         self._event_bus = EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
 
@@ -137,6 +98,7 @@ class AgentRuntime:
         # State
         self._running = False
         self._lock = asyncio.Lock()
+        self._cleanup_task: asyncio.Task | None = None
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
@@ -183,6 +145,27 @@ class AgentRuntime:
             return True
         return False
 
+    async def _cleanup_loop(self) -> None:
+        """Periodic background task to clean up stale state."""
+        logger.info("🧹 State cleanup task started")
+        while self._running:
+            try:
+                await asyncio.sleep(self._config.state_cleanup_interval)
+                
+                # Use 10x cache_ttl as the timeout for stale state to be safe
+                ttl = self._config.cache_ttl * 10
+                cleaned = self._state_manager.cleanup_stale_executions(ttl)
+                
+                if cleaned > 0:
+                    logger.info(f"🧹 Cleaned up {cleaned} stale execution states")
+                    
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in cleanup loop: {e}")
+                # Wait a bit before retrying if there was an error
+                await asyncio.sleep(60)
+
     async def start(self) -> None:
         """Start the agent runtime and all registered entry points."""
         if self._running:
@@ -211,6 +194,10 @@ class AgentRuntime:
                 self._streams[ep_id] = stream
 
             self._running = True
+            
+            # Start background cleanup task
+            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+            
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")
 
     async def stop(self) -> None:
@@ -219,6 +206,17 @@ class AgentRuntime:
             return
 
         async with self._lock:
+            self._running = False
+            
+            # Stop cleanup task
+            if self._cleanup_task:
+                self._cleanup_task.cancel()
+                try:
+                    await self._cleanup_task
+                except asyncio.CancelledError:
+                    pass
+                self._cleanup_task = None
+
             # Stop all streams
             for stream in self._streams.values():
                 await stream.stop()
@@ -228,7 +226,6 @@ class AgentRuntime:
             # Stop storage
             await self._storage.stop()
 
-            self._running = False
             logger.info("AgentRuntime stopped")
 
     async def trigger(

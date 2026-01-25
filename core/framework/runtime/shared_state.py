@@ -10,6 +10,7 @@ Provides different isolation levels:
 import asyncio
 import logging
 import time
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -29,6 +30,7 @@ class StateScope(str, Enum):
     EXECUTION = "execution"   # Local to a single execution
     STREAM = "stream"         # Shared within a stream
     GLOBAL = "global"         # Shared across all streams
+    EPHEMERAL = "ephemeral"   # Read-once, auto-delete (for large temporary data)
 
 
 @dataclass
@@ -56,27 +58,17 @@ class SharedStateManager:
     - ISOLATED: Only sees execution state
     - SHARED: Sees all levels, writes propagate up based on scope
     - SYNCHRONIZED: Like SHARED but with write locks
-
-    Example:
-        manager = SharedStateManager()
-
-        # Create memory for an execution
-        memory = manager.create_memory(
-            execution_id="exec_123",
-            stream_id="webhook",
-            isolation=IsolationLevel.SHARED,
-        )
-
-        # Read/write through the memory
-        await memory.write("customer_id", "cust_456", scope=StateScope.STREAM)
-        value = await memory.read("customer_id")
     """
 
-    def __init__(self):
+    def __init__(self, max_history: int = 1000):
         # State storage at each level
         self._global_state: dict[str, Any] = {}
         self._stream_state: dict[str, dict[str, Any]] = {}  # stream_id -> {key: value}
         self._execution_state: dict[str, dict[str, Any]] = {}  # execution_id -> {key: value}
+
+        # Lifecycle tracking for cleanup
+        self._execution_last_access: dict[str, float] = {}  # execution_id -> timestamp
+        self._ephemeral_keys: dict[str, set[str]] = {}      # execution_id -> set of ephemeral keys
 
         # Locks for synchronized access
         self._global_lock = asyncio.Lock()
@@ -85,7 +77,7 @@ class SharedStateManager:
 
         # Change history for debugging/auditing
         self._change_history: list[StateChange] = []
-        self._max_history = 1000
+        self._max_history = max_history
 
         # Version tracking
         self._version = 0
@@ -110,6 +102,7 @@ class SharedStateManager:
         # Initialize execution state
         if execution_id not in self._execution_state:
             self._execution_state[execution_id] = {}
+            self._execution_last_access[execution_id] = time.time()
 
         # Initialize stream state
         if stream_id not in self._stream_state:
@@ -131,6 +124,8 @@ class SharedStateManager:
             execution_id: Execution to clean up
         """
         self._execution_state.pop(execution_id, None)
+        self._execution_last_access.pop(execution_id, None)
+        self._ephemeral_keys.pop(execution_id, None)
         logger.debug(f"Cleaned up state for execution: {execution_id}")
 
     def cleanup_stream(self, stream_id: str) -> None:
@@ -143,6 +138,25 @@ class SharedStateManager:
         self._stream_state.pop(stream_id, None)
         self._stream_locks.pop(stream_id, None)
         logger.debug(f"Cleaned up state for stream: {stream_id}")
+
+    def cleanup_stale_executions(self, ttl_seconds: float) -> int:
+        """
+        Remove execution state accessed longer than ttl_seconds ago.
+        
+        Returns:
+            Number of executions cleaned up.
+        """
+        now = time.time()
+        to_remove = []
+        
+        for exec_id, last_access in self._execution_last_access.items():
+            if now - last_access > ttl_seconds:
+                to_remove.append(exec_id)
+        
+        for exec_id in to_remove:
+            self.cleanup_execution(exec_id)
+            
+        return len(to_remove)
 
     # === LOW-LEVEL STATE OPERATIONS ===
 
@@ -161,10 +175,22 @@ class SharedStateManager:
         2. Stream state (if isolation != ISOLATED)
         3. Global state (if isolation != ISOLATED)
         """
+        # Track access
+        if execution_id:
+            self._execution_last_access[execution_id] = time.time()
+
         # Always check execution-local first
         if execution_id in self._execution_state:
             if key in self._execution_state[execution_id]:
-                return self._execution_state[execution_id][key]
+                val = self._execution_state[execution_id][key]
+                
+                # Handle Ephemeral (Read-Once)
+                if execution_id in self._ephemeral_keys and key in self._ephemeral_keys[execution_id]:
+                    # Delete immediately after reading to free memory
+                    del self._execution_state[execution_id][key]
+                    self._ephemeral_keys[execution_id].discard(key)
+                
+                return val
 
         # Check stream-level (unless isolated)
         if isolation != IsolationLevel.ISOLATED:
@@ -203,10 +229,11 @@ class SharedStateManager:
 
         # ISOLATED can only write to execution scope
         if isolation == IsolationLevel.ISOLATED:
-            scope = StateScope.EXECUTION
+            if scope != StateScope.EPHEMERAL:
+                scope = StateScope.EXECUTION
 
         # SYNCHRONIZED requires locks for stream/global writes
-        if isolation == IsolationLevel.SYNCHRONIZED and scope != StateScope.EXECUTION:
+        if isolation == IsolationLevel.SYNCHRONIZED and scope != StateScope.EXECUTION and scope != StateScope.EPHEMERAL:
             await self._write_with_lock(key, value, execution_id, stream_id, scope)
         else:
             await self._write_direct(key, value, execution_id, stream_id, scope)
@@ -229,11 +256,24 @@ class SharedStateManager:
         stream_id: str,
         scope: StateScope,
     ) -> None:
-        """Write without locking (for ISOLATED and SHARED)."""
+        """Write without locking (for ISOLATED, SHARED, and EPHEMERAL)."""
+        # Track access
+        if execution_id:
+            self._execution_last_access[execution_id] = time.time()
+
         if scope == StateScope.EXECUTION:
             if execution_id not in self._execution_state:
                 self._execution_state[execution_id] = {}
             self._execution_state[execution_id][key] = value
+
+        elif scope == StateScope.EPHEMERAL:
+            if execution_id not in self._execution_state:
+                self._execution_state[execution_id] = {}
+            if execution_id not in self._ephemeral_keys:
+                self._ephemeral_keys[execution_id] = set()
+            
+            self._execution_state[execution_id][key] = value
+            self._ephemeral_keys[execution_id].add(key)
 
         elif scope == StateScope.STREAM:
             if stream_id not in self._stream_state:
@@ -274,6 +314,20 @@ class SharedStateManager:
 
     def _record_change(self, change: StateChange) -> None:
         """Record a state change for auditing."""
+        
+        # Compaction Logic: Prevent memory bloat from large values
+        def compact(val):
+            val_str = str(val)
+            if len(val_str) > 1000:
+                # Store preview + hash instead of full data
+                val_hash = hashlib.md5(val_str.encode()).hexdigest()
+                return f"<LargeData size={len(val_str)} hash={val_hash} preview='{val_str[:50]}...'>"
+            return val
+
+        # Compact the values in the change record
+        change.old_value = compact(change.old_value)
+        change.new_value = compact(change.new_value)
+
         self._change_history.append(change)
 
         # Trim history if too long
@@ -294,6 +348,10 @@ class SharedStateManager:
         Returns merged state from all visible levels.
         """
         result = {}
+        
+        # Track access
+        if execution_id:
+            self._execution_last_access[execution_id] = time.time()
 
         # Start with global (if visible)
         if isolation != IsolationLevel.ISOLATED:
@@ -331,6 +389,7 @@ class SharedStateManager:
             "execution_count": len(self._execution_state),
             "total_changes": len(self._change_history),
             "version": self._version,
+            "ephemeral_tracked": sum(len(keys) for keys in self._ephemeral_keys.values()),
         }
 
     def get_recent_changes(self, limit: int = 10) -> list[StateChange]:
@@ -441,11 +500,20 @@ class StreamMemory:
         # Direct access for sync usage
         if self._allowed_read is not None and key not in self._allowed_read:
             raise PermissionError(f"Not allowed to read key: {key}")
+            
+        # Track access
+        if self._execution_id:
+            self._manager._execution_last_access[self._execution_id] = time.time()
 
         # Check execution state
         exec_state = self._manager._execution_state.get(self._execution_id, {})
         if key in exec_state:
-            return exec_state[key]
+            val = exec_state[key]
+            # Handle Ephemeral in sync mode too
+            if self._execution_id in self._manager._ephemeral_keys and key in self._manager._ephemeral_keys[self._execution_id]:
+                del self._manager._execution_state[self._execution_id][key]
+                self._manager._ephemeral_keys[self._execution_id].discard(key)
+            return val
 
         # Check stream/global if not isolated
         if self._isolation != IsolationLevel.ISOLATED:
@@ -466,6 +534,10 @@ class StreamMemory:
         """
         if self._allowed_write is not None and key not in self._allowed_write:
             raise PermissionError(f"Not allowed to write key: {key}")
+            
+        # Track access
+        if self._execution_id:
+            self._manager._execution_last_access[self._execution_id] = time.time()
 
         if self._execution_id not in self._manager._execution_state:
             self._manager._execution_state[self._execution_id] = {}
@@ -476,6 +548,10 @@ class StreamMemory:
     def read_all_sync(self) -> dict[str, Any]:
         """Synchronous read all."""
         result = {}
+        
+        # Track access
+        if self._execution_id:
+            self._manager._execution_last_access[self._execution_id] = time.time()
 
         # Global (if visible)
         if self._isolation != IsolationLevel.ISOLATED:
