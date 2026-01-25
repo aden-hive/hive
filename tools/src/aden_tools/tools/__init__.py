@@ -51,7 +51,6 @@ def register_all_tools(
     """
     # Tools that don't need credentials
     register_example(mcp)
-    register_web_search(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
 
