@@ -353,7 +353,7 @@ class WorkerNode:
         for key, value in args.items():
             if isinstance(value, str) and value.startswith("$"):
                 ref_key = value[1:]  # Remove $
-                resolved_args[key] = args.get(ref_key, value)
+                resolved_args[key] = inputs.get(ref_key, value)
             else:
                 resolved_args[key] = value
         args = resolved_args
