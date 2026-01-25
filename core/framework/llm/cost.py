@@ -40,16 +40,14 @@ class LLMCostCalculator:
         "gemini/gemini-1.5-pro": (1.25, 5.00),
         "gemini/gemini-1.5-flash": (0.075, 0.30),
         # Mistral models
-        "mistral-large-latest": (2.00, 6.00),
-        "mistral-medium-latest": (2.70, 8.10),
-        "mistral-small-latest": (0.20, 0.60),
-        # Groq models (approximate, often free tier available)
-        "groq/llama-3.1-70b-versatile": (0.59, 0.79),
-        "groq/llama-3.1-8b-instant": (0.05, 0.08),
-        "groq/mixtral-8x7b-32768": (0.24, 0.24),
-        # Cerebras (fast inference)
-        "cerebras/llama3.1-8b": (0.10, 0.10),
-        "cerebras/llama3.1-70b": (0.60, 0.60),
+        "mistral-large-latest": (0.50, 1.50),
+        "mistral-medium-latest": (0.40, 2.00),
+        "mistral-small-latest": (0.10, 0.30),
+        # Groq models
+        "groq/openai/gpt-oss-20b": (0.075, 0.30),
+        "groq/openai/gpt-oss-120b": (0.15, 0.075),
+        "groq/llama-3.3-70b-versatile": (0.59, 0.79),
+        "groq/meta-llama/llama-4-maverick-17b-128e-instruct": (0.20, 0.60)
     }
 
     @classmethod
@@ -71,7 +69,7 @@ class LLMCostCalculator:
             Estimated cost in USD. Returns 0.0 if model pricing is not available.
         """
         if model not in cls.PRICING:
-            return 0.0
+            return 0.0 # TODO: Add error handling, or need to let user know the model is not supported for cost calculation
 
         input_cost_per_1m, output_cost_per_1m = cls.PRICING[model]
 
