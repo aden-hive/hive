@@ -4,12 +4,49 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 
 ## Quick Setup
 
+### Linux / macOS
+
 ```bash
 # Run the automated setup script
 ./scripts/setup-python.sh
 ```
 
-This will:
+### Windows (PowerShell)
+
+```powershell
+# Navigate to the hive directory
+cd hive
+
+# Install core framework package
+cd core
+pip install -e .
+cd ..
+
+# Install tools package
+cd tools
+pip install -e .
+cd ..
+
+# Upgrade OpenAI package for litellm compatibility
+pip install --upgrade "openai>=1.0.0"
+
+# Verify installation
+python -c "import framework; print('✓ framework OK')"
+python -c "import aden_tools; print('✓ aden_tools OK')"
+python -c "import litellm; print('✓ litellm OK')"
+```
+
+### Windows (Git Bash)
+
+If you have Git Bash installed, you can run the bash script directly:
+
+```bash
+./scripts/setup-python.sh
+```
+
+---
+
+The setup will:
 
 - Check Python version (requires 3.11+)
 - Install the core framework package (`framework`)
@@ -76,12 +113,24 @@ export ANTHROPIC_API_KEY="your-key-here"
 
 All agent commands must be run from the project root with `PYTHONPATH` set:
 
+### Linux / macOS / Git Bash
+
 ```bash
 # From /hive/ directory
 PYTHONPATH=core:exports python -m agent_name COMMAND
 ```
 
+### Windows (PowerShell)
+
+```powershell
+# From the hive folder
+$env:PYTHONPATH = "core;exports"
+python -m agent_name COMMAND
+```
+
 ### Example: Support Ticket Agent
+
+**Linux/macOS:**
 
 ```bash
 # Validate agent structure
@@ -99,6 +148,25 @@ PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
 
 # Run in mock mode (no LLM calls)
 PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{...}'
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# Set PYTHONPATH for your session
+$env:PYTHONPATH = "core;exports"
+
+# Validate agent structure
+python -m support_ticket_agent validate
+
+# Show agent information
+python -m support_ticket_agent info
+
+# Run agent with input (use double quotes for JSON)
+python -m support_ticket_agent run --input '{\"ticket_content\": \"My login is broken. Error 401.\", \"customer_id\": \"CUST-123\", \"ticket_id\": \"TKT-456\"}'
+
+# Run in mock mode (no LLM calls)
+python -m support_ticket_agent run --mock --input '{...}'
 ```
 
 ### Example: Other Agents
