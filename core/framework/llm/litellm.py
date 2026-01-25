@@ -7,12 +7,27 @@ Groq, and local models.
 See: https://docs.litellm.ai/docs/providers
 """
 
+import asyncio
 import json
 from typing import Any
 
+import httpx
 import litellm
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse
+from framework.errors import (
+    RateLimitError,
+    AuthenticationError,
+    TransientError,
+    ValidationError,
+    AgentError,
+)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -72,7 +87,30 @@ class LiteLLMProvider(LLMProvider):
         self.api_base = api_base
         self.extra_kwargs = kwargs
 
-    def complete(
+    def _handle_litellm_error(self, e: Exception) -> None:
+        """Map LiteLLM/OpenAI exceptions to framework errors."""
+        error_msg = str(e)
+        if isinstance(e, litellm.RateLimitError):
+            retry_after = getattr(e, "retry_after", 1.0)
+            raise RateLimitError(error_msg, retry_after=float(retry_after))
+        elif isinstance(e, litellm.AuthenticationError):
+            raise AuthenticationError(error_msg)
+        elif isinstance(e, litellm.BadRequestError):
+            raise ValidationError(error_msg)
+        elif isinstance(e, (litellm.Timeout, litellm.APIConnectionError, httpx.NetworkError, httpx.TimeoutException)):
+            raise TransientError(error_msg)
+        elif isinstance(e, litellm.APIError):
+            raise TransientError(f"API Error: {error_msg}")
+        else:
+            raise AgentError(error_msg) from e
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception_type((TransientError, RateLimitError)),
+        reraise=True,
+    )
+    async def complete_async(
         self,
         messages: list[dict[str, Any]],
         system: str = "",
@@ -81,19 +119,16 @@ class LiteLLMProvider(LLMProvider):
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
     ) -> LLMResponse:
-        """Generate a completion using LiteLLM."""
+        """Generate a completion using LiteLLM asynchronously with retries."""
         # Prepare messages with system prompt
         full_messages = []
         if system:
             full_messages.append({"role": "system", "content": system})
         full_messages.extend(messages)
 
-        # Add JSON mode via prompt engineering (works across all providers)
+        # Add JSON mode via prompt engineering
         if json_mode:
-            json_instruction = (
-                "\n\nPlease respond with a valid JSON object."
-            )
-            # Append to system message if present, otherwise add as system message
+            json_instruction = "\n\nPlease respond with a valid JSON object."
             if full_messages and full_messages[0]["role"] == "system":
                 full_messages[0]["content"] += json_instruction
             else:
@@ -112,33 +147,55 @@ class LiteLLMProvider(LLMProvider):
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
-        # Add tools if provided
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
 
-        # Add response_format for structured output
-        # LiteLLM passes this through to the underlying provider
         if response_format:
             kwargs["response_format"] = response_format
 
-        # Make the call
-        response = litellm.completion(**kwargs)
+        try:
+            # Make the async call
+            response = await litellm.acompletion(**kwargs)
+            
+            # Extract content
+            content = response.choices[0].message.content or ""
+            
+            # Get usage info
+            usage = response.usage
+            input_tokens = usage.prompt_tokens if usage else 0
+            output_tokens = usage.completion_tokens if usage else 0
 
-        # Extract content
-        content = response.choices[0].message.content or ""
+            return LLMResponse(
+                content=content,
+                model=response.model or self.model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                stop_reason=response.choices[0].finish_reason or "",
+                raw_response=response,
+            )
+        except Exception as e:
+            self._handle_litellm_error(e)
+            raise  # Should be unreachable due to re-raise in handle_error
 
-        # Get usage info
-        usage = response.usage
-        input_tokens = usage.prompt_tokens if usage else 0
-        output_tokens = usage.completion_tokens if usage else 0
-
-        return LLMResponse(
-            content=content,
-            model=response.model or self.model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            stop_reason=response.choices[0].finish_reason or "",
-            raw_response=response,
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+    ) -> LLMResponse:
+        """Synchronous wrapper for complete_async."""
+        return asyncio.run(
+            self.complete_async(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            )
         )
 
     def complete_with_tools(
@@ -240,9 +297,15 @@ class LiteLLMProvider(LLMProvider):
                     "content": result.content,
                 })
 
-        # Max iterations reached
+        # Max iterations reached - Return structured error response
         return LLMResponse(
-            content="Max tool iterations reached",
+            content=json.dumps({
+                "status": "max_iterations_reached",
+                "iterations_completed": max_iterations,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "recommendation": "Consider breaking task into smaller steps or increasing max_retries."
+            }),
             model=self.model,
             input_tokens=total_input_tokens,
             output_tokens=total_output_tokens,
