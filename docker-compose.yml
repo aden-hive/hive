@@ -1,0 +1,28 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aden-hive:latest
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:cached
+    environment:
+      PYTHONPATH: /workspace/core:/workspace/exports
+    entrypoint: ["/bin/bash"]
+    tty: true
+
+  tools:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aden-hive:tools
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:cached
+    environment:
+      MCP_PORT: 4001
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+    ports:
+      - "4001:4001"
+    command: python tools/mcp_server.py --port 4001
