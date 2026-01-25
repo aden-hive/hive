@@ -28,6 +28,7 @@ dependencies = [
     "fastmcp>=2.0.0",
     "diff-match-patch>=20230430",
     "python-dotenv>=1.0.0",
+    "starlette>=0.40,<0.42",
 ]
 
 [project.optional-dependencies]
