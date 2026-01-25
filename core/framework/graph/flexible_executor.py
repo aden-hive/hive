@@ -278,6 +278,16 @@ class FlexibleGraphExecutor:
                 severity="critical",
                 description=str(e),
             )
+            
+            # Record failure for analysis
+            from framework.testing.failure_record import FailureSource, FailureSeverity
+            self.runtime.record_failure(
+                exception=e,
+                source=FailureSource.GRAPH_EXECUTOR,
+                severity=FailureSeverity.CRITICAL,
+                input_data={"plan_id": plan.id if hasattr(plan, 'id') else None},
+            )
+            
             self.runtime.end_run(
                 success=False,
                 narrative=f"Execution failed: {e}",

@@ -47,6 +47,15 @@ from framework.testing.test_result import (
 # Storage
 from framework.testing.test_storage import TestStorage
 
+# Failure Recording
+from framework.testing.failure_record import (
+    FailureSeverity,
+    FailureSource,
+    FailureRecord,
+    FailureStats,
+)
+from framework.testing.failure_storage import FailureStorage
+
 
 # Approval
 from framework.testing.approval_types import (
@@ -80,6 +89,12 @@ __all__ = [
     "TestSuiteResult",
     # Storage
     "TestStorage",
+    # Failure Recording
+    "FailureSeverity",
+    "FailureSource",
+    "FailureRecord",
+    "FailureStats",
+    "FailureStorage",
     # Approval types (pure types, no LLM)
     "ApprovalAction",
     "ApprovalRequest",

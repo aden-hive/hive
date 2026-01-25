@@ -623,6 +623,18 @@ class LLMNode(NodeProtocol):
                 error=str(e),
                 latency_ms=latency_ms,
             )
+            
+            # Record failure for analysis
+            from framework.testing.failure_record import FailureSource, FailureSeverity
+            ctx.runtime.record_failure(
+                exception=e,
+                source=FailureSource.LLM_CALL,
+                severity=FailureSeverity.ERROR,
+                node_id=ctx.node_spec.id,
+                input_data=ctx.input_data,
+                memory_snapshot=ctx.memory.read_all() if hasattr(ctx.memory, 'read_all') else {},
+            )
+            
             return NodeResult(success=False, error=str(e), latency_ms=latency_ms)
 
     def _parse_output(self, content: str, node_spec: NodeSpec) -> dict[str, Any]:

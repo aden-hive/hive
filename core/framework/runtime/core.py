@@ -10,11 +10,18 @@ from datetime import datetime
 from typing import Any
 from pathlib import Path
 import logging
+import traceback
 import uuid
 
 from framework.schemas.decision import Decision, Option, Outcome, DecisionType
 from framework.schemas.run import Run, RunStatus
 from framework.storage.backend import FileStorage
+from framework.testing.failure_record import (
+    FailureRecord,
+    FailureSeverity,
+    FailureSource,
+)
+from framework.testing.failure_storage import FailureStorage
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,7 @@ class Runtime:
 
     def __init__(self, storage_path: str | Path):
         self.storage = FileStorage(storage_path)
+        self.failure_storage = FailureStorage(Path(storage_path) / "failures")
         self._current_run: Run | None = None
         self._current_node: str = "unknown"
 
@@ -284,6 +292,104 @@ class Runtime:
             root_cause=root_cause,
             suggested_fix=suggested_fix,
         )
+
+    # === FAILURE RECORDING ===
+
+    def record_failure(
+        self,
+        exception: Exception,
+        source: FailureSource = FailureSource.UNKNOWN,
+        severity: FailureSeverity = FailureSeverity.ERROR,
+        node_id: str | None = None,
+        input_data: dict[str, Any] | None = None,
+        memory_snapshot: dict[str, Any] | None = None,
+        attempt_number: int = 1,
+        max_attempts: int = 1,
+        test_id: str | None = None,
+        environment: dict[str, Any] | None = None,
+    ) -> str | None:
+        """
+        Record a failure for later analysis.
+        
+        This captures comprehensive context about what went wrong, making it
+        easier to debug issues and identify patterns in agent failures.
+        
+        Args:
+            exception: The exception that occurred
+            source: Where the failure originated (node, tool, LLM, etc.)
+            severity: How critical the failure is
+            node_id: Which node failed (uses current if not set)
+            input_data: Input that was being processed
+            memory_snapshot: Agent memory state at failure time
+            attempt_number: Which attempt this was (for retries)
+            max_attempts: Maximum attempts configured
+            test_id: If this failure occurred during a test
+            environment: Environment context (model, config, etc.)
+            
+        Returns:
+            The failure ID, or None if no run in progress
+        """
+        if self._current_run is None:
+            logger.warning(f"record_failure called but no run in progress: {exception}")
+            return None
+        
+        # Build execution path from decisions
+        execution_path = [
+            f"{d.node_id}:{d.intent}" 
+            for d in self._current_run.decisions[-10:]  # Last 10 decisions
+        ]
+        
+        # Get decisions before failure
+        decisions_before = [
+            {
+                "id": d.id,
+                "node_id": d.node_id,
+                "intent": d.intent,
+                "chosen": d.chosen_option_id,
+                "reasoning": d.reasoning,
+            }
+            for d in self._current_run.decisions[-5:]  # Last 5 decisions
+        ]
+        
+        failure = FailureRecord(
+            run_id=self._current_run.id,
+            goal_id=self._current_run.goal_id,
+            node_id=node_id or self._current_node,
+            severity=severity,
+            source=source,
+            error_type=type(exception).__name__,
+            error_message=str(exception),
+            stack_trace=traceback.format_exc(),
+            input_data=input_data or {},
+            memory_snapshot=memory_snapshot or {},
+            execution_path=execution_path,
+            decisions_before_failure=decisions_before,
+            attempt_number=attempt_number,
+            max_attempts=max_attempts,
+            environment=environment or {},
+            test_id=test_id,
+        )
+        
+        failure_id = self.failure_storage.record_failure(failure)
+        logger.debug(f"Recorded failure {failure_id}: {exception}")
+        
+        return failure_id
+    
+    def get_failure_stats(self, goal_id: str | None = None) -> dict[str, Any]:
+        """
+        Get failure statistics.
+        
+        Args:
+            goal_id: Specific goal to get stats for, or None for storage stats
+            
+        Returns:
+            Dict with failure statistics
+        """
+        if goal_id:
+            stats = self.failure_storage.get_failure_stats(goal_id)
+            return stats.model_dump()
+        else:
+            return self.failure_storage.get_storage_stats()
 
     # === CONVENIENCE METHODS ===
 

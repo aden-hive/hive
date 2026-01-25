@@ -102,6 +102,74 @@ def register_testing_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     stats_parser.set_defaults(func=cmd_test_stats)
 
+    # failures-list
+    failures_list_parser = subparsers.add_parser(
+        "failures-list",
+        help="List recorded failures for an agent",
+    )
+    failures_list_parser.add_argument(
+        "agent_path",
+        help="Path to agent export folder (e.g., exports/my_agent)",
+    )
+    failures_list_parser.add_argument(
+        "--goal",
+        "-g",
+        default="",
+        help="Filter by goal ID",
+    )
+    failures_list_parser.add_argument(
+        "--severity",
+        choices=["critical", "error", "warning"],
+        default="",
+        help="Filter by severity level",
+    )
+    failures_list_parser.add_argument(
+        "--limit",
+        "-n",
+        type=int,
+        default=20,
+        help="Maximum number of failures to show",
+    )
+    failures_list_parser.set_defaults(func=cmd_failures_list)
+
+    # failures-show
+    failures_show_parser = subparsers.add_parser(
+        "failures-show",
+        help="Show details of a specific failure",
+    )
+    failures_show_parser.add_argument(
+        "agent_path",
+        help="Path to agent export folder (e.g., exports/my_agent)",
+    )
+    failures_show_parser.add_argument(
+        "failure_id",
+        help="Failure ID to show details for",
+    )
+    failures_show_parser.add_argument(
+        "--goal",
+        "-g",
+        required=True,
+        help="Goal ID the failure belongs to",
+    )
+    failures_show_parser.set_defaults(func=cmd_failures_show)
+
+    # failures-stats
+    failures_stats_parser = subparsers.add_parser(
+        "failures-stats",
+        help="Show failure statistics for an agent",
+    )
+    failures_stats_parser.add_argument(
+        "agent_path",
+        help="Path to agent export folder (e.g., exports/my_agent)",
+    )
+    failures_stats_parser.add_argument(
+        "--goal",
+        "-g",
+        default="",
+        help="Goal ID to get stats for (omit for overall stats)",
+    )
+    failures_stats_parser.set_defaults(func=cmd_failures_stats)
+
 
 def cmd_test_run(args: argparse.Namespace) -> int:
     """Run tests for an agent using pytest subprocess."""
@@ -356,4 +424,212 @@ def cmd_test_stats(args: argparse.Namespace) -> int:
 
     print(f"\nRun all tests: pytest {tests_dir} -v")
 
+    return 0
+
+
+def cmd_failures_list(args: argparse.Namespace) -> int:
+    """List recorded failures for an agent."""
+    from framework.testing.failure_storage import FailureStorage
+    from framework.testing.failure_record import FailureSeverity
+    
+    agent_path = Path(args.agent_path)
+    failures_path = agent_path / ".aden" / "failures"
+    
+    if not failures_path.exists():
+        print(f"No failures recorded for agent at: {agent_path}")
+        print("Failures are recorded during agent execution when errors occur.")
+        return 0
+    
+    storage = FailureStorage(failures_path)
+    
+    # Get failures
+    if args.goal:
+        # Filter by severity if provided
+        severity = None
+        if args.severity:
+            severity = FailureSeverity(args.severity)
+        failures = storage.get_failures_by_goal(args.goal, limit=args.limit, severity=severity)
+    else:
+        failures = storage.get_recent_failures(limit=args.limit)
+    
+    if not failures:
+        if args.goal:
+            print(f"No failures found for goal: {args.goal}")
+        else:
+            print("No failures recorded.")
+        return 0
+    
+    print(f"Recorded Failures ({len(failures)} shown):\n")
+    
+    for f in failures:
+        severity_icon = {"critical": "🔴", "error": "🟠", "warning": "🟡"}.get(f.severity.value, "⚪")
+        timestamp = f.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        
+        print(f"  {severity_icon} [{f.id}]")
+        print(f"      Goal: {f.goal_id}")
+        if f.node_id:
+            print(f"      Node: {f.node_id}")
+        print(f"      Error: {f.error_type}: {f.error_message[:80]}...")
+        print(f"      Source: {f.source.value}")
+        print(f"      Time: {timestamp}")
+        print()
+    
+    print(f"\nShow details: python -m framework failures-show {args.agent_path} <failure_id> --goal <goal_id>")
+    
+    return 0
+
+
+def cmd_failures_show(args: argparse.Namespace) -> int:
+    """Show detailed information about a specific failure."""
+    from framework.testing.failure_storage import FailureStorage
+    
+    agent_path = Path(args.agent_path)
+    failures_path = agent_path / ".aden" / "failures"
+    
+    if not failures_path.exists():
+        print(f"No failures recorded for agent at: {agent_path}")
+        return 1
+    
+    storage = FailureStorage(failures_path)
+    failure = storage.get_failure(args.goal, args.failure_id)
+    
+    if not failure:
+        print(f"Failure not found: {args.failure_id}")
+        print(f"Hint: Use 'failures-list' to see available failure IDs")
+        return 1
+    
+    severity_icon = {"critical": "🔴", "error": "🟠", "warning": "🟡"}.get(failure.severity.value, "⚪")
+    
+    print(f"Failure Details: {failure.id}")
+    print("=" * 60)
+    print()
+    
+    print(f"  {severity_icon} Severity: {failure.severity.value.upper()}")
+    print(f"  Source: {failure.source.value}")
+    print(f"  Goal: {failure.goal_id}")
+    print(f"  Run: {failure.run_id}")
+    if failure.node_id:
+        print(f"  Node: {failure.node_id}")
+    print(f"  Time: {failure.timestamp}")
+    
+    print(f"\nError:")
+    print(f"  Type: {failure.error_type}")
+    print(f"  Message: {failure.error_message}")
+    
+    if failure.attempt_number > 1 or failure.max_attempts > 1:
+        print(f"\nRetry Info:")
+        print(f"  Attempt: {failure.attempt_number}/{failure.max_attempts}")
+    
+    if failure.stack_trace:
+        print(f"\nStack Trace:")
+        for line in failure.stack_trace.split('\n')[-15:]:  # Last 15 lines
+            print(f"  {line}")
+    
+    if failure.input_data:
+        print(f"\nInput Data:")
+        for key, value in list(failure.input_data.items())[:5]:
+            val_str = str(value)[:100]
+            print(f"  {key}: {val_str}...")
+    
+    if failure.execution_path:
+        print(f"\nExecution Path (last {len(failure.execution_path)} steps):")
+        for step in failure.execution_path[-5:]:
+            print(f"  → {step}")
+    
+    if failure.decisions_before_failure:
+        print(f"\nDecisions Before Failure:")
+        for dec in failure.decisions_before_failure[-3:]:
+            print(f"  • [{dec.get('node_id', 'unknown')}] {dec.get('intent', 'N/A')}")
+            print(f"    Chose: {dec.get('chosen', 'N/A')}")
+    
+    # Find similar failures
+    print(f"\nSimilar Failures:")
+    similar = storage.get_similar_failures(args.failure_id, args.goal, limit=3)
+    if similar:
+        for s in similar:
+            print(f"  • {s.id} ({s.error_type}) - {s.timestamp.strftime('%Y-%m-%d')}")
+    else:
+        print("  No similar failures found.")
+    
+    return 0
+
+
+def cmd_failures_stats(args: argparse.Namespace) -> int:
+    """Show failure statistics for an agent."""
+    from framework.testing.failure_storage import FailureStorage
+    
+    agent_path = Path(args.agent_path)
+    failures_path = agent_path / ".aden" / "failures"
+    
+    if not failures_path.exists():
+        print(f"No failures recorded for agent at: {agent_path}")
+        return 0
+    
+    storage = FailureStorage(failures_path)
+    
+    if args.goal:
+        # Stats for specific goal
+        stats = storage.get_failure_stats(args.goal)
+        
+        print(f"Failure Statistics for Goal: {args.goal}")
+        print("=" * 60)
+        print()
+        
+        print(f"  Total Failures: {stats.total_failures}")
+        
+        if stats.first_failure:
+            print(f"  First Failure: {stats.first_failure.strftime('%Y-%m-%d %H:%M')}")
+        if stats.last_failure:
+            print(f"  Last Failure: {stats.last_failure.strftime('%Y-%m-%d %H:%M')}")
+        
+        if stats.by_severity:
+            print(f"\n  By Severity:")
+            for sev, count in sorted(stats.by_severity.items()):
+                icon = {"critical": "🔴", "error": "🟠", "warning": "🟡"}.get(sev, "⚪")
+                print(f"    {icon} {sev}: {count}")
+        
+        if stats.by_source:
+            print(f"\n  By Source:")
+            for source, count in sorted(stats.by_source.items(), key=lambda x: -x[1]):
+                print(f"    {source}: {count}")
+        
+        if stats.top_errors:
+            print(f"\n  Top Error Types:")
+            for err in stats.top_errors[:5]:
+                print(f"    • {err['error_type']}: {err['count']}")
+        
+        if stats.top_failing_nodes:
+            print(f"\n  Top Failing Nodes:")
+            for node in stats.top_failing_nodes[:5]:
+                print(f"    • {node['node_id']}: {node['count']}")
+    
+    else:
+        # Overall storage stats
+        stats = storage.get_storage_stats()
+        
+        print(f"Failure Storage Statistics")
+        print("=" * 60)
+        print()
+        
+        print(f"  Total Goals with Failures: {stats['total_goals']}")
+        print(f"  Total Failures: {stats['total_failures']}")
+        
+        if stats.get('by_severity'):
+            print(f"\n  By Severity:")
+            for sev, count in sorted(stats['by_severity'].items()):
+                icon = {"critical": "🔴", "error": "🟠", "warning": "🟡"}.get(sev, "⚪")
+                print(f"    {icon} {sev}: {count}")
+        
+        print(f"\n  Storage Path: {stats['storage_path']}")
+        
+        # List goals with failures
+        goals = storage.list_all_goals()
+        if goals:
+            print(f"\n  Goals with Failures ({len(goals)}):")
+            for goal in goals[:10]:
+                goal_count = len(storage._get_index("by_goal", goal))
+                print(f"    • {goal}: {goal_count} failures")
+            if len(goals) > 10:
+                print(f"    ... and {len(goals) - 10} more")
+    
     return 0
