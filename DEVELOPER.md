@@ -144,18 +144,22 @@ hive/                                    # Repository root
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
-│   │   ├── runner/                      # AgentRunner - loads and runs agents
-│   │   ├── executor/                    # GraphExecutor - executes node graphs
-│   │   ├── protocols/                   # Standard protocols (hooks, tracing, etc.)
+│   │   ├── builder/                     # Agent builder logic
+│   │   ├── graph/                       # Graph execution engine (Nodes, Edges, Executor)
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
-│   │   ├── memory/                      # Memory systems (STM, LTM/RLM)
-│   │   ├── tools/                       # Tool registry and management
+│   │   ├── mcp/                         # MCP server tools and integration
+│   │   ├── runner/                      # AgentRunner - loads and runs agents
+│   │   ├── runtime/                     # Runtime engine (Shared State, Event Bus)
+│   │   ├── schemas/                     # Core data schemas
+│   │   ├── storage/                     # Storage backends
+│   │   ├── testing/                     # Testing utilities
 │   │   └── __init__.py
 │   ├── pyproject.toml                   # Package metadata and dependencies
 │   ├── requirements.txt                 # Python dependencies
-│   ├── README.md                        # Framework documentation
 │   ├── MCP_INTEGRATION_GUIDE.md         # MCP server integration guide
-│   └── docs/                            # Protocol documentation
+│   ├── MCP_SERVER_GUIDE.md              # MCP server guide
+│   ├── MCP_BUILDER_TOOLS_GUIDE.md       # MCP builder tools guide
+│   └── README.md                        # Framework documentation
 │
 ├── tools/                               # TOOLS PACKAGE (19 MCP tools)
 │   ├── src/
