@@ -38,7 +38,6 @@ claude> /building-agents
 ```
 
 Follow the interactive prompts to:
-
 1. Define your agent's goal
 2. Design the workflow (nodes and edges)
 3. Generate the agent package
@@ -86,11 +85,8 @@ hive/
 │
 ├── .claude/                # Claude Code Skills
 │   └── skills/
-│       ├── building-agents-core/
-│       ├── building-agents-patterns/
-│       ├── building-agents-construction/
-│       ├── testing-agent/
-│       └── agent-workflow/
+│       ├── building-agents/
+│       └── testing-agent/
 │
 └── docs/                   # Documentation
 ```
@@ -125,7 +121,6 @@ export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search
 ```
 
 Get your API keys:
-
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)

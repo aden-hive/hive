@@ -131,7 +131,7 @@ hive/                                    # Repository root
 │   ├── PULL_REQUEST_TEMPLATE.md         # PR description template
 │   └── CODEOWNERS                       # Auto-assign reviewers
 │
-Code Skills
+├── .claude/                             # Claude Code Skills
 │   └── skills/
 │       ├── building-agents-core/        # Core agent primitives
 │       │   └── SKILL.md
