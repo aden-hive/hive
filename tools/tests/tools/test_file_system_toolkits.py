@@ -519,8 +519,13 @@ class TestExecuteCommandTool:
         # Create a test file
         (tmp_path / "testfile.txt").write_text("content")
 
+        if os.name == "nt":
+            command = f"dir {tmp_path}"
+        else:
+            command = f"ls {tmp_path}"
+
         result = execute_command_fn(
-            command=f"ls {tmp_path}",
+            command=command,
             **mock_workspace
         )
 
@@ -528,6 +533,7 @@ class TestExecuteCommandTool:
         assert result["return_code"] == 0
         assert "testfile.txt" in result["stdout"]
 
+    @pytest.mark.skipif(os.name == "nt", reason="tr command not available on Windows")
     def test_execute_command_with_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
         """Executing a command with pipe works correctly."""
         result = execute_command_fn(

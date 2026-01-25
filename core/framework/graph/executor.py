@@ -191,7 +191,7 @@ class GraphExecutor:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
 
         # Start run
-        _run_id = self.runtime.start_run(
+        _run_id = await self.runtime.start_run(
             goal_id=goal.id,
             goal_description=goal.description,
             input_data=input_data or {},
@@ -249,7 +249,7 @@ class GraphExecutor:
                 validation_errors = node_impl.validate_input(ctx)
                 if validation_errors:
                     self.logger.warning(f"⚠ Validation warnings: {validation_errors}")
-                    self.runtime.report_problem(
+                    await self.runtime.report_problem(
                         severity="warning",
                         description=f"Validation errors for {current_node_id}: {validation_errors}",
                     )
@@ -310,11 +310,11 @@ class GraphExecutor:
                     else:
                         # Max retries exceeded - fail the execution
                         self.logger.error(f"   ✗ Max retries ({max_retries_per_node}) exceeded for node {current_node_id}")
-                        self.runtime.report_problem(
+                        await self.runtime.report_problem(
                             severity="critical",
                             description=f"Node {current_node_id} failed after {max_retries_per_node} attempts: {result.error}",
                         )
-                        self.runtime.end_run(
+                        await self.runtime.end_run(
                             success=False,
                             output_data=memory.read_all(),
                             narrative=f"Failed at {node_spec.name} after {max_retries_per_node} retries: {result.error}",
@@ -341,7 +341,7 @@ class GraphExecutor:
                         "next_node": None,  # Will resume from entry point
                     }
 
-                    self.runtime.end_run(
+                    await self.runtime.end_run(
                         success=True,
                         output_data=saved_memory,
                         narrative=f"Paused at {node_spec.name} after {steps} steps",
@@ -397,7 +397,7 @@ class GraphExecutor:
             self.logger.info(f"   Total tokens: {total_tokens}")
             self.logger.info(f"   Total latency: {total_latency}ms")
 
-            self.runtime.end_run(
+            await self.runtime.end_run(
                 success=True,
                 output_data=output,
                 narrative=f"Executed {steps} steps through path: {' -> '.join(path)}",
@@ -413,11 +413,11 @@ class GraphExecutor:
             )
 
         except Exception as e:
-            self.runtime.report_problem(
+            await self.runtime.report_problem(
                 severity="critical",
                 description=str(e),
             )
-            self.runtime.end_run(
+            await self.runtime.end_run(
                 success=False,
                 narrative=f"Failed at step {steps}: {e}",
             )

@@ -140,7 +140,7 @@ class FlexibleGraphExecutor:
         context.update(plan.context)  # Merge plan's accumulated context
 
         # Start run
-        _run_id = self.runtime.start_run(
+        _run_id = await self.runtime.start_run(
             goal_id=goal.id,
             goal_description=goal.description,
             input_data={"plan_id": plan.id, "revision": plan.revision},
@@ -251,14 +251,14 @@ class FlexibleGraphExecutor:
 
                 if result is not None:
                     # Judgment resulted in early return (replan/escalate)
-                    self.runtime.end_run(
+                    await self.runtime.end_run(
                         success=False,
                         narrative=f"Execution stopped: {result.status.value}",
                     )
                     return result
 
             # All steps completed successfully
-            self.runtime.end_run(
+            await self.runtime.end_run(
                 success=True,
                 output_data=context,
                 narrative=f"Plan completed: {steps_executed} steps executed",
@@ -274,11 +274,11 @@ class FlexibleGraphExecutor:
             )
 
         except Exception as e:
-            self.runtime.report_problem(
+            await self.runtime.report_problem(
                 severity="critical",
                 description=str(e),
             )
-            self.runtime.end_run(
+            await self.runtime.end_run(
                 success=False,
                 narrative=f"Execution failed: {e}",
             )
@@ -342,7 +342,7 @@ class FlexibleGraphExecutor:
                 step.error = judgment.feedback
 
                 # Record retry decision
-                self.runtime.decide(
+                await self.runtime.decide(
                     intent=f"Retry step {step.id}",
                     options=[{"id": "retry", "description": "Retry with feedback"}],
                     chosen="retry",

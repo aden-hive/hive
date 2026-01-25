@@ -28,6 +28,12 @@ from framework.graph.worker_node import WorkerNode, StepExecutionResult
 from framework.graph.flexible_executor import FlexibleGraphExecutor, ExecutorConfig
 from framework.graph.code_sandbox import CodeSandbox, safe_exec, safe_eval
 
+# Parallel execution (high-performance)
+from framework.graph.parallel_executor import (
+    ParallelGraphExecutor,
+    ParallelExecutionResult,
+)
+
 __all__ = [
     # Goal
     "Goal",
@@ -44,6 +50,9 @@ __all__ = [
     "EdgeCondition",
     # Executor (fixed graph)
     "GraphExecutor",
+    # Parallel Executor (high-performance)
+    "ParallelGraphExecutor",
+    "ParallelExecutionResult",
     # Plan (flexible execution)
     "Plan",
     "PlanStep",
@@ -72,3 +81,4 @@ __all__ = [
     "safe_exec",
     "safe_eval",
 ]
+

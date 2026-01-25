@@ -1,0 +1,160 @@
+{
+    "graph": {
+        "id": "async-demo-agent",
+        "description": "Demonstrates high-performance async capabilities",
+        "version": "1.0.0",
+        "goal_id": "process-concurrent-data",
+        "entry_node": "start",
+        "terminal_nodes": [
+            "finish"
+        ],
+        "nodes": [
+            {
+                "id": "start",
+                "name": "Start Node",
+                "node_type": "llm_generate",
+                "description": "Initializes the parallel workload",
+                "input_keys": [],
+                "output_keys": [
+                    "topic_list"
+                ]
+            },
+            {
+                "id": "research_topic_1",
+                "name": "Research Topic A",
+                "node_type": "llm_tool_use",
+                "description": "Simulates heavy research on topic A",
+                "tools": [
+                    "simulate_research"
+                ],
+                "input_keys": [
+                    "topic_list"
+                ],
+                "output_keys": [
+                    "result_a"
+                ]
+            },
+            {
+                "id": "research_topic_2",
+                "name": "Research Topic B",
+                "node_type": "llm_tool_use",
+                "description": "Simulates heavy research on topic B",
+                "tools": [
+                    "simulate_research"
+                ],
+                "input_keys": [
+                    "topic_list"
+                ],
+                "output_keys": [
+                    "result_b"
+                ]
+            },
+            {
+                "id": "research_topic_3",
+                "name": "Research Topic C",
+                "node_type": "llm_tool_use",
+                "description": "Simulates heavy research on topic C",
+                "tools": [
+                    "simulate_research"
+                ],
+                "input_keys": [
+                    "topic_list"
+                ],
+                "output_keys": [
+                    "result_c"
+                ]
+            },
+            {
+                "id": "aggregator",
+                "name": "Aggregate Results",
+                "node_type": "llm_generate",
+                "description": "Combines all research results",
+                "input_keys": [
+                    "result_a",
+                    "result_b",
+                    "result_c"
+                ],
+                "output_keys": [
+                    "final_report"
+                ]
+            },
+            {
+                "id": "finish",
+                "name": "Finish",
+                "node_type": "llm_generate",
+                "description": "Ends the process",
+                "input_keys": [
+                    "final_report"
+                ],
+                "output_keys": []
+            }
+        ],
+        "edges": [
+            {
+                "id": "e1",
+                "source": "start",
+                "target": "research_topic_1",
+                "condition": "always"
+            },
+            {
+                "id": "e2",
+                "source": "start",
+                "target": "research_topic_2",
+                "condition": "always"
+            },
+            {
+                "id": "e3",
+                "source": "start",
+                "target": "research_topic_3",
+                "condition": "always"
+            },
+            {
+                "id": "e4",
+                "source": "research_topic_1",
+                "target": "aggregator",
+                "condition": "always"
+            },
+            {
+                "id": "e5",
+                "source": "research_topic_2",
+                "target": "aggregator",
+                "condition": "always"
+            },
+            {
+                "id": "e6",
+                "source": "research_topic_3",
+                "target": "aggregator",
+                "condition": "always"
+            },
+            {
+                "id": "e7",
+                "source": "aggregator",
+                "target": "finish",
+                "condition": "always"
+            }
+        ],
+        "parallel_groups": [
+            {
+                "nodes": [
+                    "research_topic_1",
+                    "research_topic_2",
+                    "research_topic_3"
+                ],
+                "min_completed": 3
+            }
+        ]
+    },
+    "goal": {
+        "id": "process-concurrent-data",
+        "name": "Process Concurrent Data Streams",
+        "description": "Demonstrate ability to handle multiple tasks in parallel without blocking",
+        "success_criteria": [
+            {
+                "id": "all-processed",
+                "description": "All 3 topics researched concurrently",
+                "metric": "completeness",
+                "target": "100%"
+            }
+        ]
+    }
+}
