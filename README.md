@@ -52,6 +52,30 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
 - **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
 
+
+## Agent Generation and Exports
+
+This repository starts in a framework-only state.
+
+Exported agents (located under `exports/`) are generated dynamically using
+Claude Code skills such as `/building-agents`.
+
+### Important notes for first-time contributors
+
+- The `exports/` directory does not exist on a fresh clone
+- Agent modules (e.g. `support_ticket_agent`) are created only after running
+  the Claude Code agent generation workflow
+- Agent generation and testing require Anthropic API credits
+
+If you want to explore the framework without generating agents, you can:
+- Inspect example agents under `examples/`
+- Run the framework CLI directly:
+  ```bash
+  PYTHONPATH=core python -m framework.cli --help
+
+
+
+
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
@@ -59,6 +83,10 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
 <!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+
+
+
+
 
 ## Quick Start
 
