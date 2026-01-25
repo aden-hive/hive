@@ -8,18 +8,27 @@ This example demonstrates how to:
 3. Load MCP servers from configuration files
 """
 
-import asyncio
-from pathlib import Path
+"""
+NOTE:
+  This file is intended as a reference example.
+  It is not required to understand the full framework internals to use MCP tools.
 
-from framework.runner.runner import AgentRunner
+"""
 
 
-async def example_1_programmatic_registration():
+import asyncio                      #This liberary used for async agent execution
+from pathlib import Path             #This liberary used for file system handling
+
+from framework.runner.runner import AgentRunner        #This liberary used for (agent load + run + cleanup)
+
+
+async def example_1_programmatic_registration()-> None:
     """Example 1: Register MCP server programmatically"""
     print("\n=== Example 1: Programmatic MCP Server Registration ===\n")
 
-    # Load an existing agent
+    # Load an existing agent from the exports directory
     runner = AgentRunner.load("exports/task-planner")
+
 
     # Register tools MCP server via STDIO
     num_tools = runner.register_mcp_server(
@@ -32,8 +41,9 @@ async def example_1_programmatic_registration():
 
     print(f"Registered {num_tools} tools from tools MCP server")
 
-    # List all available tools
+    # _tool_registry is an internal registry holding all MCP-discovered tools
     tools = runner._tool_registry.get_tools()
+
     print(f"\nAvailable tools: {list(tools.keys())}")
 
     # Run the agent with MCP tools available
@@ -47,7 +57,7 @@ async def example_1_programmatic_registration():
     runner.cleanup()
 
 
-async def example_2_http_transport():
+async def example_2_http_transport()-> None:
     """Example 2: Connect to MCP server via HTTP"""
     print("\n=== Example 2: HTTP MCP Server Connection ===\n")
 
@@ -69,7 +79,7 @@ async def example_2_http_transport():
     runner.cleanup()
 
 
-async def example_3_config_file():
+async def example_3_config_file()-> None:
     """Example 3: Load MCP servers from configuration file"""
     print("\n=== Example 3: Load from Configuration File ===\n")
 
@@ -97,7 +107,7 @@ async def example_3_config_file():
     (test_agent_path / "mcp_servers.json").unlink()
 
 
-async def example_4_custom_agent_with_mcp_tools():
+async def example_4_custom_agent_with_mcp_tools()-> None:
     """Example 4: Build custom agent that uses MCP tools"""
     print("\n=== Example 4: Custom Agent with MCP Tools ===\n")
 
