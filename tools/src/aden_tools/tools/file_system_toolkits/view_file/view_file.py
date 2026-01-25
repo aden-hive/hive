@@ -35,15 +35,31 @@ def register_tools(mcp: FastMCP) -> None:
             if not os.path.exists(secure_path):
                 return {"error": f"File not found at {path}"}
 
+            # SAFETY CHECK: Prevent reading massive files that crash the agent
+            MAX_FILE_SIZE = 100 * 1024  # 100KB limit
+            file_size = os.path.getsize(secure_path)
+            
+            truncated = False
             with open(secure_path, "r", encoding="utf-8") as f:
-                content = f.read()
+                if file_size > MAX_FILE_SIZE:
+                    content = f.read(MAX_FILE_SIZE)
+                    truncated = True
+                else:
+                    content = f.read()
 
-            return {
+            result = {
                 "success": True,
                 "path": path,
                 "content": content,
                 "size_bytes": len(content.encode("utf-8")),
                 "lines": len(content.splitlines())
             }
+            
+            if truncated:
+                result["warning"] = f"File too large ({file_size} bytes). Output truncated to first 100KB."
+                result["content"] += "\n\n[...File truncated due to size limit...]"
+                
+            return result
+
         except Exception as e:
             return {"error": f"Failed to read file: {str(e)}"}
