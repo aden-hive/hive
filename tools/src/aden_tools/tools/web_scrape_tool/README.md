@@ -14,6 +14,8 @@ Use when you need to read the content of a specific URL, extract data from a web
 | `selector` | str | No | `None` | CSS selector to target specific content (e.g., 'article', '.main-content') |
 | `include_links` | bool | No | `False` | Include extracted links in the response |
 | `max_length` | int | No | `50000` | Maximum length of extracted text (1000-500000) |
+| `respect_robots_txt` | bool | No | `True` | Whether to respect robots.txt rules |
+| `timeout` | float | No | `30.0` | Request timeout in seconds |
 
 ## Environment Variables
 
@@ -22,11 +24,32 @@ This tool does not require any environment variables.
 ## Error Handling
 
 Returns error dicts for common issues:
+
 - `HTTP <status>: Failed to fetch URL` - Server returned error status
 - `No elements found matching selector: <selector>` - CSS selector matched nothing
-- `Request timed out` - Request exceeded 30s timeout
+- `Request timed out` - Request exceeded the specified timeout
 - `Network error: <error>` - Connection or DNS issues
 - `Scraping failed: <error>` - HTML parsing or other error
+
+## Examples
+
+### Basic scraping
+
+```python
+result = web_scrape("https://example.com")
+```
+
+### Custom timeout for slow pages
+
+```python
+result = web_scrape("https://slow-loading-site.com", timeout=60.0)
+```
+
+### Quick timeout for fast-fail
+
+```python
+result = web_scrape("https://site.com", timeout=5.0)
+```
 
 ## Notes
 
