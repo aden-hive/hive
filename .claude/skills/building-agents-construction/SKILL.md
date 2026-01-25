@@ -531,6 +531,13 @@ Write(
     file_path=f"{package_path}/__main__.py",
     content=CLI_TEMPLATE  # Full CLI template (see below)
 )
+
+Write(
+    file_path=f"{package_path}/requirements.txt",
+    content='''pydantic>=2.0
+click>=8.0
+'''
+)
 ```
 
 **Show user:**
@@ -543,6 +550,7 @@ Write(
    - agent.py (skeleton)
    - nodes/__init__.py (empty)
    - config.py (skeleton)
+   - requirements.txt
 
 You can open these files now and watch them grow as we build!
 ```
