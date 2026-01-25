@@ -164,8 +164,12 @@ class ToolRegistry:
 
                     self.register(name, tool, make_executor(name))
                 else:
-                    # Register tool without executor (will use mock)
-                    self.register(name, tool, lambda inputs: {"mock": True, "inputs": inputs})
+                    # Register tool without executor (will use mock) - capture 'name'
+                    self.register(
+                        name,
+                        tool,
+                        lambda inputs, n=name: {"mock": True, "tool_name": n, "inputs": inputs},
+                    )
                 count += 1
 
         # Check for @tool decorated functions
