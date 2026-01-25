@@ -21,11 +21,45 @@ class CleansingConfig:
     """Configuration for output cleansing."""
 
     enabled: bool = True
-    fast_model: str = "cerebras/llama-3.3-70b"  # Fast, cheap model for cleaning
+    # Model to use - if not specified, auto-detect from available providers
+    fast_model: str | None = None
+    # Explicit API key override (optional - will auto-detect from env if not set)
+    api_key: str | None = None
     max_retries: int = 2
     cache_successful_patterns: bool = True
     fallback_to_raw: bool = True  # If cleaning fails, pass raw output
     log_cleanings: bool = True  # Log when cleansing happens
+
+
+# Provider detection order (fast, cheap models preferred for cleaning tasks)
+# Each tuple: (env_var, model, display_name)
+PROVIDER_CONFIG = [
+    ("CEREBRAS_API_KEY", "cerebras/llama-3.3-70b", "Cerebras"),
+    ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile", "Groq"),
+    ("OPENAI_API_KEY", "gpt-4o-mini", "OpenAI"),
+    ("ANTHROPIC_API_KEY", "claude-3-haiku-20240307", "Anthropic"),
+    ("GEMINI_API_KEY", "gemini/gemini-1.5-flash", "Google Gemini"),
+    ("TOGETHER_API_KEY", "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo", "Together AI"),
+]
+
+
+def _detect_provider() -> tuple[str | None, str | None, str | None]:
+    """
+    Auto-detect available LLM provider from environment variables.
+
+    Checks for API keys in priority order, preferring fast/cheap providers
+    suitable for output cleaning tasks.
+
+    Returns:
+        Tuple of (api_key, model, provider_name) or (None, None, None) if no provider found
+    """
+    import os
+
+    for env_var, model, name in PROVIDER_CONFIG:
+        api_key = os.environ.get(env_var)
+        if api_key:
+            return api_key, model, name
+    return None, None, None
 
 
 @dataclass
@@ -75,7 +109,7 @@ class OutputCleaner:
         Args:
             config: Cleansing configuration
             llm_provider: Optional LLM provider. If None and cleaning is enabled,
-                         will create a LiteLLMProvider with the configured fast_model.
+                         will auto-detect from available providers in environment.
         """
         self.config = config
         self.success_cache: dict[str, Any] = {}  # Cache successful patterns
@@ -86,30 +120,53 @@ class OutputCleaner:
         if llm_provider:
             self.llm = llm_provider
         elif config.enabled:
-            # Create dedicated fast LLM provider for cleaning
-            try:
-                from framework.llm.litellm import LiteLLMProvider
-                import os
-
-                api_key = os.environ.get("CEREBRAS_API_KEY")
-                if api_key:
-                    self.llm = LiteLLMProvider(
-                        api_key=api_key,
-                        model=config.fast_model,
-                        temperature=0.0,  # Deterministic cleaning
-                    )
-                    logger.info(
-                        f"✓ Initialized OutputCleaner with {config.fast_model}"
-                    )
-                else:
-                    logger.warning(
-                        "⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled"
-                    )
-                    self.llm = None
-            except ImportError:
-                logger.warning("⚠ LiteLLMProvider not available, output cleaning disabled")
-                self.llm = None
+            self._initialize_llm()
         else:
+            self.llm = None
+
+    def _initialize_llm(self):
+        """Initialize LLM provider with auto-detection or explicit config."""
+        try:
+            from framework.llm.litellm import LiteLLMProvider
+
+            # Case 1: Explicit API key and model configured
+            if self.config.api_key and self.config.fast_model:
+                self.llm = LiteLLMProvider(
+                    api_key=self.config.api_key,
+                    model=self.config.fast_model,
+                    temperature=0.0,  # Deterministic cleaning
+                )
+                logger.info(
+                    f"✓ Initialized OutputCleaner with {self.config.fast_model} (explicit config)"
+                )
+                return
+
+            # Case 2: Auto-detect provider from environment
+            api_key, model, provider_name = _detect_provider()
+
+            # Allow model override even with auto-detected provider
+            if self.config.fast_model:
+                model = self.config.fast_model
+
+            if api_key and model:
+                self.llm = LiteLLMProvider(
+                    api_key=api_key,
+                    model=model,
+                    temperature=0.0,  # Deterministic cleaning
+                )
+                logger.info(
+                    f"✓ Initialized OutputCleaner with {model} ({provider_name})"
+                )
+            else:
+                logger.warning(
+                    "⚠ No LLM provider found for output cleaning. "
+                    "Set one of: CEREBRAS_API_KEY, GROQ_API_KEY, OPENAI_API_KEY, "
+                    "ANTHROPIC_API_KEY, GEMINI_API_KEY, or TOGETHER_API_KEY"
+                )
+                self.llm = None
+
+        except ImportError:
+            logger.warning("⚠ LiteLLMProvider not available, output cleaning disabled")
             self.llm = None
 
     def validate_output(
