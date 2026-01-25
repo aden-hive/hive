@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from fastmcp import FastMCP
 from aden_tools.tools.file_system_toolkits.list_dir.list_dir import register_tools
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 @pytest.fixture
 def list_dir_fn(mcp: FastMCP):
@@ -16,12 +16,13 @@ def list_dir_fn(mcp: FastMCP):
 class TestListDirTool:
     """Tests for list_dir tool."""
 
+    @patch("aden_tools.tools.file_system_toolkits.list_dir.list_dir.os.stat")
     @patch("aden_tools.tools.file_system_toolkits.list_dir.list_dir.os.path.getsize")
     @patch("aden_tools.tools.file_system_toolkits.list_dir.list_dir.os.path.exists")
     @patch("aden_tools.tools.file_system_toolkits.list_dir.list_dir.os.path.islink")
     @patch("aden_tools.tools.file_system_toolkits.list_dir.list_dir.os.path.isdir")
     @patch("aden_tools.tools.file_system_toolkits.list_dir.list_dir.os.listdir")
-    def test_list_dir_mocked_symlinks(self, mock_listdir, mock_isdir, mock_islink, mock_exists, mock_getsize, mock_secure, list_dir_fn):
+    def test_list_dir_mocked_symlinks(self, mock_listdir, mock_isdir, mock_islink, mock_exists, mock_getsize, mock_stat, mock_secure, list_dir_fn):
         """Test symlink logic with mocks (works on Windows without admin)."""
         # Setup path mock
         mock_secure.return_value = "/secure/path"
@@ -35,6 +36,11 @@ class TestListDirTool:
         def exists_side_effect(path):
             if "broken_link" in path: return False
             return True
+
+        def stat_side_effect(path, follow_symlinks=True):
+            if "broken_link" in path:
+                raise FileNotFoundError("Broken link")
+            return MagicMock() # Return mock for valid files
             
         def isdir_side_effect(path):
             if "regular_file" in path: return False # file
@@ -44,6 +50,7 @@ class TestListDirTool:
         mock_islink.side_effect = islink_side_effect
         mock_exists.side_effect = exists_side_effect
         mock_isdir.side_effect = isdir_side_effect
+        mock_stat.side_effect = stat_side_effect
         mock_getsize.return_value = 100
         
         result = list_dir_fn(
