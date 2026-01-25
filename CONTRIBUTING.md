@@ -104,8 +104,12 @@ cd core && python -m pytest
 # Run all tests for tools
 cd tools && python -m pytest
 
-# Run tests for a specific agent
+# 3. Run tests for a specific agent
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name test
+
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name test)
 ```
 
 ## Questions?

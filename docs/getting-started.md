@@ -50,15 +50,21 @@ Follow the interactive prompts to:
 ### Option 2: From an Example
 
 ```bash
-# Copy an example agent
+# 1. Copy an example agent
+# Linux/macOS:
 cp -r exports/support_ticket_agent exports/my_agent
+# Windows (PowerShell):
+Copy-Item -Recurse exports/support_ticket_agent exports/my_agent
 
-# Customize the agent
-cd exports/my_agent
-# Edit agent.json, tools.py, README.md
+# 2. Customize the agent
+# Stay in the root directory to edit files, or return to root after editing
+# (Use your editor like VS Code or PyCharm to modify files in exports/my_agent/)
 
-# Validate the agent
+# 3. Validate the agent (Must be run from the /hive root directory)
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent validate
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent validate)
 ```
 
 ## Project Structure
@@ -99,18 +105,30 @@ hive/
 
 ```bash
 # Validate agent structure
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent validate
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent validate)
 
 # Show agent information
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent info
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent info)
 
 # Run agent with input
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent run --input '{
   "task": "Your input here"
 }'
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent run --input '{"task": "Your input here"}')
 
 # Run in mock mode (no LLM calls)
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent run --mock --input '{...}')
 ```
 
 ## API Keys Setup
@@ -136,11 +154,21 @@ Get your API keys:
 claude> /testing-agent
 
 # Or manually
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent test
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent test)
 
 # Run with specific test type
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent test --type constraint
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent test --type constraint)
+
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent test --type success
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent test --type success)
 ```
 
 ## Next Steps
@@ -173,10 +201,16 @@ pip install -e .
 
 ```bash
 # Verify API key is set
+# Linux/macOS:
 echo $ANTHROPIC_API_KEY
+# Windows (PowerShell):
+$env:ANTHROPIC_API_KEY
 
 # Run in mock mode to test without API
+# Linux/macOS:
 PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m my_agent run --mock --input '{...}')
 ```
 
 ### Package Installation Issues

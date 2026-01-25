@@ -246,7 +246,11 @@ claude> /testing-agent
 4. **Validate the Agent**
 
    ```bash
-   PYTHONPATH=core:exports python -m your_agent_name validate
+  # Linux/macOS:
+PYTHONPATH=core:exports python -m your_agent_name validate
+
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m your_agent_name validate)
    ```
 
 5. **Test the Agent**
@@ -292,19 +296,28 @@ If you prefer to build agents manually:
 
 ```bash
 # Validate agent structure
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name validate
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name validate)
 
 # Show agent information
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name info
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name info)
 
 # Run agent with input
-PYTHONPATH=core:exports python -m agent_name run --input '{
-  "ticket_content": "My login is broken",
-  "customer_id": "CUST-123"
-}'
+# Linux/macOS:
+PYTHONPATH=core:exports python -m agent_name run --input '{"ticket_content": "broken", "customer_id": "123"}'
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name run --input '{"ticket_content": "broken", "customer_id": "123"}')
 
 # Run in mock mode (no LLM calls)
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name run --mock --input '{...}'
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name run --mock --input '{...}')
 ```
 
 ---
@@ -328,17 +341,28 @@ This generates and runs:
 
 ```bash
 # Run all tests for an agent
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name test
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name test)
 
 # Run specific test type
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name test --type constraint
-PYTHONPATH=core:exports python -m agent_name test --type success
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name test --type constraint)
 
 # Run with parallel execution
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name test --parallel 4
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name test --parallel 4)
 
 # Fail fast (stop on first failure)
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name test --fail-fast
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name test --fail-fast)
 ```
 
 ### Writing Custom Tests
@@ -689,10 +713,16 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 # Run with verbose output
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name run --input '{...}' --verbose
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name run --input '{...}' --verbose)
 
 # Use mock mode to test without LLM calls
+# Linux/macOS:
 PYTHONPATH=core:exports python -m agent_name run --mock --input '{...}'
+# Windows (PowerShell):
+($env:PYTHONPATH='core;exports'; python -m agent_name run --mock --input '{...}')
 ```
 
 ---
