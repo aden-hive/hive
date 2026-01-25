@@ -96,7 +96,10 @@ claude> /building-agents
 claude> /testing-agent
 
 # Run your agent
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+# Example agent name: sales_agent
+# Example task: generate sales outreach plan
+PYTHONPATH=core:exports python -m sales_agent run --input '{"task":"generate sales outreach plan"}'
+
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
