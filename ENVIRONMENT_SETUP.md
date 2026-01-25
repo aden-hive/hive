@@ -7,6 +7,9 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ```bash
 # Run the automated setup script
 ./scripts/setup-python.sh
+
+# Or on Windows (PowerShell):
+.\scripts\setup-python.ps1
 ```
 
 This will:

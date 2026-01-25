@@ -76,6 +76,9 @@ cd hive
 
 # Run Python environment setup
 ./scripts/setup-python.sh
+
+# Or on Windows (PowerShell):
+.\scripts\setup-python.ps1
 ```
 
 This installs:
