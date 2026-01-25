@@ -25,8 +25,14 @@ echo "  Aden Agent Framework - Python Setup"
 echo "=================================================="
 echo ""
 
-# Check for Python (any of python/python3/python3.11/python3.12)
-if ! command -v python &> /dev/null \
+# Check for Python, honoring $PYTHON even if it's not on PATH
+if [ -n "$PYTHON" ]; then
+    if [ ! -x "$PYTHON" ] && ! command -v "$PYTHON" &> /dev/null; then
+        echo -e "${RED}Error: PYTHON is set to '$PYTHON' but it was not found or not executable.${NC}"
+        echo "Example: PYTHON=/opt/python3.12/bin/python3.12 ./scripts/setup-python.sh"
+        exit 1
+    fi
+elif ! command -v python &> /dev/null \
    && ! command -v python3 &> /dev/null \
    && ! command -v python3.11 &> /dev/null \
    && ! command -v python3.12 &> /dev/null; then
@@ -45,9 +51,13 @@ fi
 PYTHON_CMD="${PYTHON:-}"
 
 if [ -n "$PYTHON_CMD" ]; then
-    if ! command -v "$PYTHON_CMD" &> /dev/null; then
-        echo -e "${RED}Error: PYTHON is set to '$PYTHON_CMD' but it was not found in PATH.${NC}"
-        echo "Example: PYTHON=python3.11 ./scripts/setup-python.sh"
+    if [ -x "$PYTHON_CMD" ]; then
+        : # absolute / explicit path provided and executable
+    elif command -v "$PYTHON_CMD" &> /dev/null; then
+        : # found on PATH
+    else
+        echo -e "${RED}Error: PYTHON is set to '$PYTHON_CMD' but it was not found in PATH or as an absolute path.${NC}"
+        echo "Example: PYTHON=/opt/python3.12/bin/python3.12 ./scripts/setup-python.sh"
         exit 1
     fi
 elif command -v python3.12 &> /dev/null; then
