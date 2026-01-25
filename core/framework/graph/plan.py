@@ -159,7 +159,7 @@ class PlanStep(BaseModel):
 
     def is_ready(self, completed_step_ids: set[str]) -> bool:
         """Check if this step is ready to execute (all dependencies met)."""
-        if self.status != StepStatus.PENDING:
+        if self.status not in (StepStatus.PENDING, StepStatus.AWAITING_APPROVAL):
             return False
         return all(dep in completed_step_ids for dep in self.dependencies)
 
