@@ -169,16 +169,67 @@ class EdgeSpec(BaseModel):
             **memory,  # Unpack memory keys directly into context
         }
 
+        # Safe AST-based evaluation
+        import ast
+        import operator
+
+        # Supported operators
+        operators = {
+            ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+            ast.Div: operator.truediv, ast.Pow: operator.pow, ast.Mod: operator.mod,
+            ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt,
+            ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge,
+            ast.And: lambda x, y: x and y, ast.Or: lambda x, y: x or y,
+            ast.Not: operator.not_, ast.In: lambda x, y: x in y,
+            ast.NotIn: lambda x, y: x not in y, ast.Is: operator.is_,
+            ast.IsNot: operator.is_not, ast.USub: operator.neg, ast.UAdd: operator.pos,
+        }
+
+        def _safe_eval(node, ctx):
+            if isinstance(node, ast.Expression):
+                return _safe_eval(node.body, ctx)
+            elif isinstance(node, ast.Constant):
+                return node.value
+            elif isinstance(node, ast.Name):
+                if node.id in ctx:
+                    return ctx[node.id]
+                raise NameError(f"Name '{node.id}' is not defined")
+            elif isinstance(node, ast.Subscript):
+                return _safe_eval(node.value, ctx)[_safe_eval(node.slice, ctx)]
+            elif isinstance(node, ast.BinOp):
+                return operators[type(node.op)](_safe_eval(node.left, ctx), _safe_eval(node.right, ctx))
+            elif isinstance(node, ast.UnaryOp):
+                return operators[type(node.op)](_safe_eval(node.operand, ctx))
+            elif isinstance(node, ast.Compare):
+                left = _safe_eval(node.left, ctx)
+                for op, right in zip(node.ops, node.comparators):
+                    if not operators[type(op)](left, _safe_eval(right, ctx)):
+                        return False
+                    left = _safe_eval(right, ctx) # For chained comparisons (a < b < c) - simplified approximation
+                return True
+            elif isinstance(node, ast.BoolOp):
+                if isinstance(node.op, ast.And):
+                    return all(_safe_eval(v, ctx) for v in node.values)
+                elif isinstance(node.op, ast.Or):
+                    return any(_safe_eval(v, ctx) for v in node.values)
+            elif isinstance(node, ast.Call):
+                raise ValueError("Function calls are not allowed in conditions")
+            elif isinstance(node, ast.Attribute):
+                # Basic attribute access allowed (e.g. output.confidence)
+                obj = _safe_eval(node.value, ctx)
+                return getattr(obj, node.attr)
+            else:
+                raise ValueError(f"Unsupported operation: {type(node).__name__}")
+
         try:
-            # Safe evaluation (in production, use a proper expression evaluator)
-            return bool(eval(self.condition_expr, {"__builtins__": {}}, context))
+            tree = ast.parse(self.condition_expr, mode='eval')
+            return bool(_safe_eval(tree, context))
         except Exception as e:
             # Log the error for debugging
             import logging
             logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
-            logger.warning(f"         Available context keys: {list(context.keys())}")
             return False
 
     def _llm_decide(
