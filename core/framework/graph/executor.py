@@ -370,7 +370,7 @@ class GraphExecutor:
                     current_node_id = result.next_node
                 else:
                     # Follow edges
-                    next_node = self._follow_edges(
+                    next_node = await self._follow_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
@@ -505,7 +505,7 @@ class GraphExecutor:
         # Should never reach here due to validation above
         raise RuntimeError(f"Unhandled node type: {node_spec.node_type}")
 
-    def _follow_edges(
+    async def _follow_edges(
         self,
         graph: GraphSpec,
         goal: Goal,
@@ -520,7 +520,7 @@ class GraphExecutor:
         for edge in edges:
             target_node_spec = graph.get_node(edge.target)
 
-            if edge.should_traverse(
+            if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
                 memory=memory.read_all(),

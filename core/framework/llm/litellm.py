@@ -110,7 +110,13 @@ class LiteLLMProvider(LLMProvider):
         retry=retry_if_exception_type((TransientError, RateLimitError)),
         reraise=True,
     )
-    async def complete_async(
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception_type((TransientError, RateLimitError)),
+        reraise=True,
+    )
+    async def complete(
         self,
         messages: list[dict[str, Any]],
         system: str = "",
@@ -177,28 +183,7 @@ class LiteLLMProvider(LLMProvider):
             self._handle_litellm_error(e)
             raise  # Should be unreachable due to re-raise in handle_error
 
-    def complete(
-        self,
-        messages: list[dict[str, Any]],
-        system: str = "",
-        tools: list[Tool] | None = None,
-        max_tokens: int = 1024,
-        response_format: dict[str, Any] | None = None,
-        json_mode: bool = False,
-    ) -> LLMResponse:
-        """Synchronous wrapper for complete_async."""
-        return asyncio.run(
-            self.complete_async(
-                messages=messages,
-                system=system,
-                tools=tools,
-                max_tokens=max_tokens,
-                response_format=response_format,
-                json_mode=json_mode,
-            )
-        )
-
-    def complete_with_tools(
+    async def complete_with_tools(
         self,
         messages: list[dict[str, Any]],
         system: str,
@@ -234,7 +219,12 @@ class LiteLLMProvider(LLMProvider):
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
-            response = litellm.completion(**kwargs)
+            # ASYNC Call
+            try:
+                response = await litellm.acompletion(**kwargs)
+            except Exception as e:
+                self._handle_litellm_error(e)
+                raise
 
             # Track tokens
             usage = response.usage
@@ -275,6 +265,8 @@ class LiteLLMProvider(LLMProvider):
             })
 
             # Execute tools and add results.
+            # Execute synchronously for now (unless tool_executor supports async)
+            # TODO: Make tool_executor async-aware if needed
             for tool_call in message.tool_calls:
                 # Parse arguments
                 try:
@@ -288,6 +280,8 @@ class LiteLLMProvider(LLMProvider):
                     input=args,
                 )
 
+                # Tool execution might block if not threaded/async
+                # Assuming simple tools for now
                 result = tool_executor(tool_use)
 
                 # Add tool result message

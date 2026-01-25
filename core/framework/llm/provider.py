@@ -52,7 +52,7 @@ class LLMProvider(ABC):
     """
 
     @abstractmethod
-    def complete(
+    async def complete(
         self,
         messages: list[dict[str, Any]],
         system: str = "",
@@ -81,7 +81,7 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    def complete_with_tools(
+    async def complete_with_tools(
         self,
         messages: list[dict[str, Any]],
         system: str,

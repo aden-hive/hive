@@ -506,7 +506,7 @@ class LLMNode(NodeProtocol):
                     logger.info(f"         ✓ Tool result: {result_str}")
                     return result
 
-                response = ctx.llm.complete_with_tools(
+                response = await ctx.llm.complete_with_tools(
                     messages=messages,
                     system=system,
                     tools=ctx.available_tools,
@@ -523,7 +523,7 @@ class LLMNode(NodeProtocol):
                 if use_json_mode:
                     logger.info(f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}")
 
-                response = ctx.llm.complete(
+                response = await ctx.llm.complete(
                     messages=messages,
                     system=system,
                     json_mode=use_json_mode,
