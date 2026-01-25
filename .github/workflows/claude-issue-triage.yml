@@ -1,0 +1,66 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Issue Triage
+        id: claude-triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE NUMBER: ${{ github.event.issue.number }}
+            TITLE: ${{ github.event.issue.title }}
+            BODY: ${{ github.event.issue.body }}
+            AUTHOR: ${{ github.event.issue.user.login }}
+
+            Analyze this new issue and perform the following:
+
+            1. **Categorize the issue type using ONLY these labels:**
+               - bug: Something isn't working
+               - enhancement: New feature or request
+               - question: Further information is requested
+               - documentation: Improvements or additions to documentation
+               - good first issue: Good for newcomers (if issue is well-defined and small scope)
+               - help wanted: Extra attention is needed (if issue needs community input)
+               - backlog: Tracked for the future, but not currently planned or prioritized
+
+            2. **Check for duplicates:**
+               Search for similar existing issues using:
+               `gh issue list --state all --search "<key terms from title/body>"`
+
+               If a duplicate exists:
+               - Add the "duplicate" label
+               - Comment mentioning the original issue number
+
+            3. **Check for invalid issues:**
+               If the issue lacks sufficient information, is spam, or doesn't make sense:
+               - Add the "invalid" label
+               - Comment asking for clarification or explaining why it's invalid
+
+            4. **Apply labels:**
+               Based on your analysis, add appropriate labels using:
+               `gh issue edit ${{ github.event.issue.number }} --add-label "label1,label2"`
+
+               You may apply multiple labels if appropriate (e.g., "bug,help wanted").
+
+            5. **Add a brief comment** summarizing your triage decision to help maintainers.
+
+          claude_args: |
+            --allowedTools "Bash(gh issue:*),Bash(gh search:*)"
