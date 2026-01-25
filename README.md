@@ -38,6 +38,18 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## For Contributors
+
+If you’re looking to contribute to Hive, the following files provide the most relevant starting points:
+
+1. `CONTRIBUTING.md` – Contribution workflow and PR guidelines  
+2. `DEVELOPER.md` – Local development setup and developer-specific instructions  
+3. `docs/getting-started.md` – Core concepts and first agent walkthrough  
+4. `SECURITY.md` – Reporting security issues responsibly  
+
+This reading order is recommended before working on issues or submitting pull requests.
+
+
 ## What is Aden
 
 <p align="center">
