@@ -17,6 +17,13 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
+## Windows Notes
+
+- The setup script (`./scripts/setup-python.sh`) requires Bash-compatible shell. On Windows, use **Git Bash** or **WSL** (PowerShell/CMD won’t run `.sh` scripts default).
+- Ensure Git is installed and available in PATH (`git --version`) before cloning or contributing.
+- Run setup commands from the project root (`hive/`) in the same shell session.
+
+
 ## Manual Setup (Alternative)
 
 If you prefer to set up manually or the script fails:
@@ -57,6 +64,11 @@ python -c "import litellm; print('✓ litellm OK')"
 - **Minimum:** Python 3.11
 - **Recommended:** Python 3.11 or 3.12
 - **Tested on:** Python 3.11, 3.12, 3.13
+
+- **Verify yout Python Version**
+```bash
+python --version
+
 
 ### System Requirements
 
