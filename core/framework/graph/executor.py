@@ -144,7 +144,7 @@ class GraphExecutor:
             ExecutionResult with output and metrics
         """
         # Validate graph
-        errors = graph.validate()
+        errors = graph.validate(initial_inputs=list(input_data.keys()) if input_data else None)
         if errors:
             return ExecutionResult(
                 success=False,

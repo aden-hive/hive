@@ -484,8 +484,155 @@ class GraphSpec(BaseModel):
 
         # Default to main entry
         return self.entry_node
+    
+    def _find_orphaned_nodes(self) -> list[str]:
+        """Find nodes that are disconnected from the graph flow."""
+        errors = []
 
-    def validate(self) -> list[str]:
+        # Get all valid entry points
+        entry_nodes = {self.entry_node}
+        entry_nodes.update(self.entry_points.values())
+        entry_nodes.update(ep.entry_node for ep in self.async_entry_points)
+
+        # Find nodes with no incoming edges (orphaned sources)
+        nodes_with_incoming = {edge.target for edge in self.edges}
+        for node in self.nodes:
+            if node.id not in entry_nodes and node.id not in nodes_with_incoming:
+                errors.append(f"Node '{node.id}' has no incoming edges and is not an entry point")
+
+        # Find nodes with no outgoing edges that aren't terminal/pause
+        nodes_with_outgoing = {edge.source for edge in self.edges}
+        for node in self.nodes:
+            if (node.id not in self.terminal_nodes and
+                node.id not in self.pause_nodes and
+                node.id not in nodes_with_outgoing):
+                errors.append(f"Node '{node.id}' has no outgoing edges and is not terminal/pause")
+
+        return errors
+    
+    def _find_cycles(self) -> tuple[list[str], list[list[str]]]:
+      """
+      Detect cycles in the graph using DFS.
+
+      Returns:
+          Tuple of (error messages, list of cycles found)
+      """
+      errors = []
+      cycles_found = []
+
+      # Build adjacency list
+      adjacency: dict[str, list[str]] = {node.id: [] for node in self.nodes}
+      for edge in self.edges:
+          if edge.source in adjacency:
+              adjacency[edge.source].append(edge.target)
+
+      # Track visit state: 0=unvisited, 1=visiting, 2=visited
+      state: dict[str, int] = {node.id: 0 for node in self.nodes}
+
+      def dfs(node_id: str, path: list[str]) -> None:
+          if state.get(node_id, 0) == 1:  # Back edge - cycle
+              cycle_start = path.index(node_id)
+              cycle = path[cycle_start:] + [node_id]
+              cycles_found.append(cycle)
+              errors.append(f"Cycle detected: {' → '.join(cycle)}")
+              return
+
+          if state.get(node_id, 0) == 2:
+              return
+
+          state[node_id] = 1
+          path.append(node_id)
+
+          for neighbor in adjacency.get(node_id, []):
+              dfs(neighbor, path.copy())
+
+          path.pop()
+          state[node_id] = 2
+
+      for node in self.nodes:
+          if state[node.id] == 0:
+              dfs(node.id, [])
+
+      return errors, cycles_found
+    
+    def _validate_input_availability(
+      self,
+      initial_inputs: list[str] | None = None
+  ) -> list[str]:
+      """
+      Validate that all nodes will have their required inputs available.
+
+      Args:
+          initial_inputs: Keys provided in initial input_data (e.g., ["topic"])
+      """
+      errors = []
+      initial_inputs_set = set(initial_inputs or [])
+
+      # Build map of available keys at each node
+      available_at: dict[str, set[str]] = {}
+
+      # Get all entry points
+      entry_nodes = {self.entry_node}
+      entry_nodes.update(self.entry_points.values())
+      entry_nodes.update(ep.entry_node for ep in self.async_entry_points)
+
+      # Initialize entry nodes
+      for entry in entry_nodes:
+          available_at[entry] = initial_inputs_set.copy()
+
+      # Calculate in-degrees for topological processing
+      in_degree: dict[str, int] = {node.id: 0 for node in self.nodes}
+      for edge in self.edges:
+          if edge.target in in_degree:
+              in_degree[edge.target] += 1
+
+      # BFS in topological order
+      queue = list(entry_nodes)
+      processed = set()
+
+      while queue:
+          current_id = queue.pop(0)
+          if current_id in processed:
+              continue
+          processed.add(current_id)
+
+          node = self.get_node(current_id)
+          if not node:
+              continue
+
+          available = available_at.get(current_id, initial_inputs_set.copy())
+
+          # Check required inputs
+          missing = [k for k in node.input_keys if k not in available]
+          if missing:
+              errors.append(
+                  f"Node '{current_id}' requires {missing}, "
+                  f"available: {sorted(available) if available else '[]'}"
+              )
+
+          # Propagate outputs to successors
+          outputs = set(node.output_keys)
+          for edge in self.get_outgoing_edges(current_id):
+              target = edge.target
+              if target not in available_at:
+                  available_at[target] = available.copy()
+              available_at[target].update(outputs)
+
+              if edge.input_mapping:
+                  available_at[target].update(edge.input_mapping.keys())
+
+              if target in in_degree:
+                  in_degree[target] -= 1
+                  if in_degree[target] <= 0 and target not in processed:
+                      queue.append(target)
+
+      return errors
+
+    def validate(
+        self,
+        initial_inputs: list[str] | None = None,
+        allow_cycles: bool = False
+    )-> list[str]:
         """Validate the graph structure."""
         errors = []
 
@@ -534,6 +681,22 @@ class GraphSpec(BaseModel):
                 errors.append(f"Edge '{edge.id}' references missing source '{edge.source}'")
             if not self.get_node(edge.target):
                 errors.append(f"Edge '{edge.id}' references missing target '{edge.target}'")
+        
+         # Check for orphaned nodes
+        orphan_errors = self._find_orphaned_nodes()
+        errors.extend(orphan_errors)
+
+        # Check for cycles
+        cycle_errors, cycles = self._find_cycles()
+        if allow_cycles:
+            warnings.extend(cycle_errors)
+        else:
+            errors.extend(cycle_errors)
+
+        # Check input availability (only if no structural errors)
+        if not errors:
+            input_errors = self._validate_input_availability(initial_inputs)
+            errors.extend(input_errors)
 
         # Check for unreachable nodes
         # Start with main entry node and all entry points (for pause/resume architecture)
