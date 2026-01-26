@@ -3,6 +3,8 @@ name: PR Requirements Check
 on:
   pull_request:
     types: [opened, reopened, edited, synchronize]
+  issue_comment:
+    types: [created]
 
 jobs:
   check-requirements:
@@ -10,14 +12,36 @@ jobs:
     permissions:
       pull-requests: write
       issues: write
+    # Run on PR events OR when someone comments /check on a PR
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       github.event.comment.body == '/check')
 
     steps:
       - name: Check PR has linked issue with assignee
         uses: actions/github-script@v7
         with:
           script: |
-            const pr = context.payload.pull_request;
-            const prNumber = pr.number;
+            let pr;
+            let prNumber;
+
+            // Handle both pull_request and issue_comment events
+            if (context.eventName === 'issue_comment') {
+              const { data: pullRequest } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.issue.number,
+              });
+              pr = pullRequest;
+              prNumber = pullRequest.number;
+              console.log(`Triggered by /check comment on PR #${prNumber}`);
+            } else {
+              pr = context.payload.pull_request;
+              prNumber = pr.number;
+            }
+
             const prBody = pr.body || '';
             const prTitle = pr.title || '';
 
@@ -41,7 +65,7 @@ jobs:
 
             **To fix:**
             1. Create or find an existing issue for this work
-            2. Ensure the issue has an assignee
+            2. Assign yourself to the issue
             3. Re-open this PR and add \`Fixes #123\` in the description`;
 
               const comments = await github.rest.issues.listComments({
@@ -51,7 +75,7 @@ jobs:
               });
 
               const botComment = comments.data.find(
-                (c) => c.user.type === 'Bot' && c.body.includes('PR Requirements Not Met')
+                (c) => c.user.type === 'Bot' && c.body.includes('PR Closed - Requirements Not Met')
               );
 
               if (!botComment) {
@@ -63,7 +87,6 @@ jobs:
                 });
               }
 
-              // Close the PR
               await github.rest.pulls.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -129,7 +152,7 @@ jobs:
               });
 
               const botComment = comments.data.find(
-                (c) => c.user.type === 'Bot' && c.body.includes('PR Requirements Not Met')
+                (c) => c.user.type === 'Bot' && c.body.includes('PR Closed - Requirements Not Met')
               );
 
               if (!botComment) {
@@ -141,7 +164,6 @@ jobs:
                 });
               }
 
-              // Close the PR
               await github.rest.pulls.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
