@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from framework.llm.provider import LLMProvider, Tool
     from framework.runtime.event_bus import EventBus
     from framework.runtime.outcome_aggregator import OutcomeAggregator
+    from framework.runtime.trace_inspector import TraceInspector
     from framework.storage.concurrent import ConcurrentStorage
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ class ExecutionContext:
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
     status: str = "pending"  # pending, running, completed, failed, paused
+    trace: Any = None  # ExecutionTrace if trace collection enabled
 
 
 class ExecutionStream:
@@ -106,6 +108,7 @@ class ExecutionStream:
         llm: "LLMProvider | None" = None,
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
+        trace_inspector: "TraceInspector | None" = None,
     ):
         """
         Initialize execution stream.
@@ -122,6 +125,7 @@ class ExecutionStream:
             llm: LLM provider for nodes
             tools: Available tools
             tool_executor: Function to execute tools
+            trace_inspector: Optional trace inspector for debugging
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -134,6 +138,7 @@ class ExecutionStream:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
+        self._trace_inspector = trace_inspector
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -275,8 +280,23 @@ class ExecutionStream:
                     isolation=ctx.isolation_level,
                 )
 
-                # Create runtime adapter for this execution
-                runtime_adapter = StreamRuntimeAdapter(self._runtime, execution_id)
+                # Start trace if inspector available
+                trace = None
+                if self._trace_inspector:
+                    trace = self._trace_inspector.start_trace(
+                        execution_id=execution_id,
+                        stream_id=self.stream_id,
+                        goal_id=self.goal.id,
+                        input_data=ctx.input_data,
+                    )
+                    ctx.trace = trace  # Store in context for later access
+
+                # Create runtime adapter for this execution (with trace hook)
+                runtime_adapter = StreamRuntimeAdapter(
+                    self._runtime,
+                    execution_id,
+                    trace=trace,
+                )
 
                 # Create executor for this execution
                 executor = GraphExecutor(
@@ -306,6 +326,13 @@ class ExecutionStream:
                 ctx.status = "completed" if result.success else "failed"
                 if result.paused_at:
                     ctx.status = "paused"
+
+                # Complete trace if available (use inspector to auto-save)
+                if hasattr(ctx, "trace") and ctx.trace and self._trace_inspector:
+                    status = "completed" if result.success else "failed"
+                    if result.paused_at:
+                        status = "paused"
+                    self._trace_inspector.complete_trace(execution_id, status, result.output)
 
                 # Emit completion/failure event
                 if self._event_bus:
@@ -339,6 +366,11 @@ class ExecutionStream:
                     success=False,
                     error=str(e),
                 )
+
+                # Complete trace with error (use inspector to auto-save)
+                ctx = self._active_executions.get(execution_id)
+                if ctx and hasattr(ctx, "trace") and ctx.trace and self._trace_inspector:
+                    self._trace_inspector.complete_trace(execution_id, "failed", {"error": str(e)})
 
                 # Emit failure event
                 if self._event_bus:

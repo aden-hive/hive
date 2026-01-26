@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from framework.runtime.trace_inspector import TraceInspector
+
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
@@ -165,6 +167,50 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Disable human-in-the-loop approval (auto-approve all steps)",
     )
     shell_parser.set_defaults(func=cmd_shell)
+
+    # trace-inspect command
+    trace_parser = subparsers.add_parser(
+        "trace-inspect",
+        help="Inspect execution traces",
+        description="Analyze and inspect agent execution traces for debugging.",
+    )
+    trace_parser.add_argument(
+        "execution_id",
+        type=str,
+        nargs="?",
+        help="Execution ID to inspect (use --list to see available traces)",
+    )
+    trace_parser.add_argument(
+        "--agent-path",
+        type=str,
+        help="Path to agent folder (for loading trace from storage)",
+    )
+    trace_parser.add_argument(
+        "--trace-file",
+        type=str,
+        help="Path to trace JSON file (for offline analysis)",
+    )
+    trace_parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List available traces",
+    )
+    trace_parser.add_argument(
+        "--export",
+        type=str,
+        help="Export trace analysis to JSON file",
+    )
+    trace_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output analysis as JSON",
+    )
+    trace_parser.add_argument(
+        "--timeline",
+        action="store_true",
+        help="Show detailed event timeline",
+    )
+    trace_parser.set_defaults(func=cmd_trace_inspect)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -927,6 +973,292 @@ def cmd_shell(args: argparse.Namespace) -> int:
         print()
 
     runner.cleanup()
+    return 0
+
+
+def cmd_trace_inspect(args: argparse.Namespace) -> int:
+    """Inspect an execution trace."""
+    inspector = TraceInspector()
+    
+    # List available traces if requested
+    if args.list:
+        if not args.agent_path:
+            print("Error: --agent-path required when using --list", file=sys.stderr)
+            return 1
+        
+        agent_path = Path(args.agent_path)
+        
+        # Check if agent exists
+        agent_json_path = agent_path / "agent.json"
+        if not agent_json_path.exists():
+            print(f"Error: agent.json not found in {agent_path}", file=sys.stderr)
+            print(f"Make sure the agent path is correct and contains agent.json", file=sys.stderr)
+            return 1
+        
+        # Try to load agent to get actual agent name (graph.id)
+        agent_name = agent_path.name  # Default to folder name
+        try:
+            from framework.runner.runner import load_agent_export
+            with open(agent_json_path) as f:
+                graph, _ = load_agent_export(f.read())
+                if graph and graph.id:
+                    agent_name = graph.id
+        except Exception:
+            # If we can't load, fall back to folder name
+            pass
+        
+        # Check multiple possible trace storage locations
+        # 1. Agent path storage (if explicitly set)
+        # 2. Default ~/.hive/storage/{agent_name}/traces (using graph.id if available)
+        # 3. Default ~/.hive/storage/{folder_name}/traces (fallback)
+        possible_storage_paths = [
+            agent_path / "storage" / "traces",
+            Path.home() / ".hive" / "storage" / agent_name / "traces",
+        ]
+        # Also check folder name if different from agent name
+        if agent_path.name != agent_name:
+            possible_storage_paths.append(
+                Path.home() / ".hive" / "storage" / agent_path.name / "traces"
+            )
+        
+        trace_storage = None
+        for path in possible_storage_paths:
+            if path.exists():
+                trace_storage = path
+                break
+        
+        if not trace_storage:
+            print(f"No trace storage found. Checked:", file=sys.stderr)
+            for path in possible_storage_paths:
+                print(f"  - {path}", file=sys.stderr)
+            print("\nTraces are only available if agent was run with trace collection enabled.", file=sys.stderr)
+            print(f"Note: Traces are saved to ~/.hive/storage/{agent_name}/traces by default.", file=sys.stderr)
+            print(f"\nTo generate traces, run the agent first:", file=sys.stderr)
+            print(f"  python3 -m framework run {agent_path} --input '{{...}}'", file=sys.stderr)
+            return 1
+        
+        # List all trace files
+        trace_files = list(trace_storage.glob("*.json"))
+        if not trace_files:
+            print(f"No traces found in {trace_storage}", file=sys.stderr)
+            return 0
+        
+        print(f"Available traces in {trace_storage}:")
+        print()
+        
+        for trace_file in sorted(trace_files, key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                trace = inspector.import_trace(trace_file)
+                status_icon = "✓" if trace.status == "completed" else "✗" if trace.status == "failed" else "⏳"
+                print(f"  {status_icon} {trace.execution_id}")
+                print(f"     Status: {trace.status}")
+                print(f"     Started: {trace.started_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                if trace.completed_at:
+                    duration = (trace.completed_at - trace.started_at).total_seconds()
+                    print(f"     Duration: {duration:.1f}s")
+                print(f"     Decisions: {trace.metrics.decisions}")
+                if trace.metrics.total_cost_usd > 0:
+                    print(f"     Cost: ${trace.metrics.total_cost_usd:.4f}")
+                print()
+            except Exception as e:
+                print(f"  ⚠️  {trace_file.stem} (error loading: {e})")
+                print()
+        
+        return 0
+    
+    # Require execution_id if not listing
+    if not args.execution_id:
+        print("Error: execution_id required (or use --list to see available traces)", file=sys.stderr)
+        print("Usage: python -m framework trace-inspect <execution_id> --agent-path <path>", file=sys.stderr)
+        return 1
+    
+    trace = None
+    
+    # Load trace from file or storage
+    if args.trace_file:
+        try:
+            trace = inspector.import_trace(args.trace_file)
+        except Exception as e:
+            print(f"Error loading trace file: {e}", file=sys.stderr)
+            return 1
+    elif args.agent_path:
+        # Load from agent storage
+        agent_path = Path(args.agent_path)
+        
+        # Check if agent exists
+        agent_json_path = agent_path / "agent.json"
+        if not agent_json_path.exists():
+            print(f"Error: agent.json not found in {agent_path}", file=sys.stderr)
+            return 1
+        
+        # Try to load agent to get actual agent name (graph.id)
+        agent_name = agent_path.name  # Default to folder name
+        try:
+            from framework.runner.runner import load_agent_export
+            with open(agent_json_path) as f:
+                graph, _ = load_agent_export(f.read())
+                if graph and graph.id:
+                    agent_name = graph.id
+        except Exception:
+            # If we can't load, fall back to folder name
+            pass
+        
+        # Check multiple possible trace storage locations
+        possible_storage_paths = [
+            agent_path / "storage" / "traces",
+            Path.home() / ".hive" / "storage" / agent_name / "traces",
+        ]
+        # Also check folder name if different from agent name
+        if agent_path.name != agent_name:
+            possible_storage_paths.append(
+                Path.home() / ".hive" / "storage" / agent_path.name / "traces"
+            )
+        
+        trace_storage = None
+        for path in possible_storage_paths:
+            if path.exists():
+                trace_storage = path
+                break
+        
+        if not trace_storage:
+            print(f"Trace storage not found. Checked:", file=sys.stderr)
+            for path in possible_storage_paths:
+                print(f"  - {path}", file=sys.stderr)
+            print("\nTraces are only available if agent was run with trace collection enabled.", file=sys.stderr)
+            print(f"Note: Traces are saved to ~/.hive/storage/{agent_name}/traces by default.", file=sys.stderr)
+            print(f"\nTo generate traces, run the agent first:", file=sys.stderr)
+            print(f"  python3 -m framework run {agent_path} --input '{{...}}'", file=sys.stderr)
+            return 1
+        
+        # Look for trace file
+        trace_file = trace_storage / f"{args.execution_id}.json"
+        if not trace_file.exists():
+            print(f"Trace not found: {trace_file}", file=sys.stderr)
+            trace_files = list(trace_storage.glob("*.json"))
+            if trace_files:
+                print(f"Available traces in {trace_storage}:", file=sys.stderr)
+                for f in sorted(trace_files, key=lambda p: p.stat().st_mtime, reverse=True)[:10]:
+                    print(f"  - {f.stem}", file=sys.stderr)
+                if len(trace_files) > 10:
+                    print(f"  ... and {len(trace_files) - 10} more", file=sys.stderr)
+            else:
+                print(f"No traces found in {trace_storage}", file=sys.stderr)
+            return 1
+        
+        try:
+            trace = inspector.import_trace(trace_file)
+        except Exception as e:
+            print(f"Error loading trace: {e}", file=sys.stderr)
+            return 1
+    else:
+        print("Error: Must provide either --trace-file or --agent-path", file=sys.stderr)
+        return 1
+    
+    if not trace:
+        print("Error: Could not load trace", file=sys.stderr)
+        return 1
+    
+    # Analyze trace
+    analysis = inspector.analyze(trace)
+    
+    # Export if requested
+    if args.export:
+        with open(args.export, "w") as f:
+            json.dump(analysis, f, indent=2, default=str)
+        print(f"Analysis exported to {args.export}")
+        return 0
+    
+    # Output analysis
+    if args.json:
+        print(json.dumps(analysis, indent=2, default=str))
+    else:
+        # Human-readable output
+        print("=" * 60)
+        print("Execution Trace Analysis")
+        print("=" * 60)
+        print()
+        
+        print(f"Execution ID: {analysis['execution_id']}")
+        print(f"Status: {analysis['status']}")
+        duration_ms = analysis['duration_ms']
+        if duration_ms < 1000:
+            print(f"Duration: {duration_ms}ms")
+        elif duration_ms < 60000:
+            print(f"Duration: {duration_ms/1000:.1f}s")
+        else:
+            print(f"Duration: {duration_ms/60000:.1f}m")
+        print()
+        
+        print("Summary:")
+        print(f"  {analysis['summary']}")
+        print()
+        
+        # Decisions
+        decisions = analysis['decisions']
+        print("Decisions:")
+        print(f"  Total: {decisions['total']}")
+        print(f"  Successful: {decisions['successful']}")
+        print(f"  Failed: {decisions['failed']}")
+        print(f"  Success Rate: {decisions['success_rate']:.1%}")
+        print()
+        
+        if decisions['failed'] > 0:
+            print("Failed Decisions:")
+            for fd in decisions['failed_decisions'][:3]:
+                print(f"  - [{fd['node_id']}] {fd['intent']}")
+                if fd.get('error'):
+                    print(f"    Error: {fd['error']}")
+            print()
+        
+        # Performance
+        perf = analysis['performance']
+        print("Performance:")
+        print(f"  Total Duration: {perf['total_duration_ms']}ms")
+        print(f"  Avg Decision Latency: {perf['avg_decision_latency_ms']:.0f}ms")
+        print(f"  Max Decision Latency: {perf['max_decision_latency_ms']}ms")
+        print(f"  Nodes Executed: {perf['nodes_executed']}")
+        if perf.get('insights'):
+            print("  Insights:")
+            for insight in perf['insights']:
+                print(f"    - {insight}")
+        print()
+        
+        # Cost
+        cost = analysis['cost']
+        if cost['total_cost_usd'] > 0:
+            print("Cost:")
+            print(f"  Total: ${cost['total_cost_usd']:.4f}")
+            print(f"  Per Decision: ${cost['cost_per_decision']:.6f}")
+            print(f"  Per Token: ${cost['cost_per_token']:.8f}")
+            print(f"  Total Tokens: {cost['total_tokens']:,}")
+            print()
+        
+        # Problems
+        problems = analysis['problems']
+        if problems:
+            print("Problems Detected:")
+            for prob in problems:
+                severity_icon = "🔴" if prob['severity'] == "error" else "⚠️" if prob['severity'] == "warning" else "ℹ️"
+                print(f"  {severity_icon} [{prob['severity']}] {prob['description']}")
+            print()
+        
+        # Recommendations
+        recommendations = analysis['recommendations']
+        if recommendations:
+            print("Recommendations:")
+            for rec in recommendations:
+                print(f"  • {rec}")
+            print()
+        
+        # Timeline
+        if args.timeline:
+            print("Event Timeline:")
+            for event in analysis['timeline'][:20]:  # Show first 20 events
+                print(f"  [{event['timestamp']}] {event['event_type']}: {event['description']}")
+            if len(analysis['timeline']) > 20:
+                print(f"  ... and {len(analysis['timeline']) - 20} more events")
+            print()
+    
     return 0
 
 

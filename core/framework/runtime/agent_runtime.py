@@ -17,6 +17,7 @@ from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
+from framework.runtime.trace_inspector import TraceInspector
 from framework.storage.concurrent import ConcurrentStorage
 
 if TYPE_CHECKING:
@@ -125,6 +126,10 @@ class AgentRuntime:
         self._state_manager = SharedStateManager()
         self._event_bus = EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
+        
+        # Initialize trace inspector (optional, for debugging)
+        trace_storage = Path(storage_path) / "traces" if isinstance(storage_path, (str, Path)) else None
+        self._trace_inspector = TraceInspector(storage_path=trace_storage)
 
         # LLM and tools
         self._llm = llm
@@ -207,6 +212,7 @@ class AgentRuntime:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    trace_inspector=self._trace_inspector,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -408,6 +414,11 @@ class AgentRuntime:
     def is_running(self) -> bool:
         """Check if runtime is running."""
         return self._running
+    
+    @property
+    def trace_inspector(self) -> TraceInspector:
+        """Access the trace inspector for debugging."""
+        return self._trace_inspector
 
 
 # === CONVENIENCE FACTORY ===

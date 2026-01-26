@@ -26,6 +26,7 @@ from framework.builder.query import BuilderQuery
 from framework.llm import AnthropicProvider, LLMProvider
 from framework.runner import AgentOrchestrator, AgentRunner
 from framework.runtime.core import Runtime
+from framework.runtime.trace_inspector import TraceInspector
 from framework.schemas.decision import Decision, DecisionEvaluation, Option, Outcome
 from framework.schemas.run import Problem, Run, RunSummary
 
@@ -51,6 +52,7 @@ __all__ = [
     "Problem",
     # Runtime
     "Runtime",
+    "TraceInspector",
     # Builder
     "BuilderQuery",
     # LLM

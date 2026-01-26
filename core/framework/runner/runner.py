@@ -245,6 +245,12 @@ class AgentRunner:
         # Multi-entry-point support (AgentRuntime)
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
+        
+        # Trace inspector for debugging (available for all agents)
+        from framework.runtime.trace_inspector import TraceInspector
+        trace_storage = self._storage_path / "traces" if self._storage_path else None
+        self._trace_inspector = TraceInspector(storage_path=trace_storage)
+        self._current_trace = None  # Current trace being collected
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
@@ -474,8 +480,52 @@ class AgentRunner:
 
     def _setup_legacy_executor(self, tools: list, tool_executor: Callable | None) -> None:
         """Set up legacy single-entry-point execution using GraphExecutor."""
-        # Create runtime
-        self._runtime = Runtime(storage_path=self._storage_path)
+        # Create runtime with trace collection wrapper
+        base_runtime = Runtime(storage_path=self._storage_path)
+        
+        # Wrap runtime to collect traces
+        class TracedRuntime:
+            """Wrapper around Runtime that collects trace data."""
+            def __init__(self, base: Runtime, runner: "AgentRunner"):
+                self._base = base
+                self._runner = runner
+            
+            def __getattr__(self, name):
+                """Forward attribute access to base runtime."""
+                return getattr(self._base, name)
+            
+            def end_run(self, *args, **kwargs):
+                """Intercept end_run to collect trace data."""
+                # Collect trace data before run ends
+                if self._runner._current_trace and self._base.current_run:
+                    run = self._base.current_run
+                    for decision in run.decisions:
+                        self._runner._current_trace.add_decision(decision)
+                        if decision.outcome:
+                            self._runner._current_trace.record_outcome(decision.id, decision.outcome)
+                
+                # Call original end_run
+                return self._base.end_run(*args, **kwargs)
+        
+        self._runtime = TracedRuntime(base_runtime, self)
+
+        # Register function nodes from tools.py if available
+        node_registry = {}
+        tools_path = self.agent_path / "tools.py"
+        if tools_path.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("tools", tools_path)
+            if spec and spec.loader:
+                tools_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(tools_module)
+                
+                # Look for functions that match node IDs
+                for node in self.graph.nodes:
+                    if node.node_type == "function" and node.function:
+                        func_name = node.function
+                        if hasattr(tools_module, func_name):
+                            from framework.graph.node import FunctionNode
+                            node_registry[node.id] = FunctionNode(getattr(tools_module, func_name))
 
         # Create executor
         self._executor = GraphExecutor(
@@ -484,6 +534,7 @@ class AgentRunner:
             tools=tools,
             tool_executor=tool_executor,
             approval_callback=self._approval_callback,
+            node_registry=node_registry,
         )
 
     def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
@@ -557,12 +608,40 @@ class AgentRunner:
         if self._executor is None:
             self._setup()
 
-        return await self._executor.execute(
-            graph=self.graph,
-            goal=self.goal,
+        # Generate execution ID for trace collection
+        import uuid
+        execution_id = f"exec_main_{uuid.uuid4().hex[:8]}"
+        
+        # Start trace
+        trace = self._trace_inspector.start_trace(
+            execution_id=execution_id,
+            stream_id="main",
+            goal_id=self.goal.id,
             input_data=input_data,
-            session_state=session_state,
         )
+        
+        # Store trace reference for hooking
+        self._current_trace = trace
+        
+        try:
+            result = await self._executor.execute(
+                graph=self.graph,
+                goal=self.goal,
+                input_data=input_data,
+                session_state=session_state,
+            )
+            
+            # Complete trace (decisions already collected by TracedRuntime wrapper)
+            status = "completed" if result.success else "failed"
+            self._trace_inspector.complete_trace(execution_id, status, result.output)
+            
+            return result
+        except Exception as e:
+            # Complete trace with error
+            self._trace_inspector.complete_trace(execution_id, "failed", {"error": str(e)})
+            raise
+        finally:
+            self._current_trace = None
 
     async def _run_with_agent_runtime(
         self,
@@ -710,6 +789,11 @@ class AgentRunner:
         if self._agent_runtime is None:
             return False
         return self._agent_runtime.is_running
+    
+    @property
+    def trace_inspector(self):
+        """Access the trace inspector for debugging."""
+        return self._trace_inspector
 
     def info(self) -> AgentInfo:
         """Return agent metadata (nodes, edges, goal, required tools)."""

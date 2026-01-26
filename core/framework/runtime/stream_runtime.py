@@ -416,17 +416,24 @@ class StreamRuntimeAdapter:
     by providing the same API as Runtime but routing to a specific execution.
     """
 
-    def __init__(self, stream_runtime: StreamRuntime, execution_id: str):
+    def __init__(
+        self,
+        stream_runtime: StreamRuntime,
+        execution_id: str,
+        trace: Any = None,
+    ):
         """
         Create adapter for a specific execution.
 
         Args:
             stream_runtime: The underlying stream runtime
             execution_id: Which execution this adapter is for
+            trace: Optional ExecutionTrace for trace collection
         """
         self._runtime = stream_runtime
         self._execution_id = execution_id
         self._current_node = "unknown"
+        self._trace = trace
 
     # Expose storage for compatibility
     @property
@@ -478,7 +485,7 @@ class StreamRuntimeAdapter:
         constraints: list[str] | None = None,
         context: dict[str, Any] | None = None,
     ) -> str:
-        return self._runtime.decide(
+        decision_id = self._runtime.decide(
             execution_id=self._execution_id,
             intent=intent,
             options=options,
@@ -489,6 +496,18 @@ class StreamRuntimeAdapter:
             constraints=constraints,
             context=context,
         )
+        
+        # Add decision to trace if available
+        if self._trace and decision_id:
+            run = self._runtime.get_run(self._execution_id)
+            if run:
+                # Find the decision we just added
+                for decision in run.decisions:
+                    if decision.id == decision_id:
+                        self._trace.add_decision(decision)
+                        break
+        
+        return decision_id
 
     def record_outcome(
         self,
@@ -512,6 +531,20 @@ class StreamRuntimeAdapter:
             tokens_used=tokens_used,
             latency_ms=latency_ms,
         )
+        
+        # Add outcome to trace if available
+        if self._trace:
+            from framework.schemas.decision import Outcome
+            outcome = Outcome(
+                success=success,
+                result=result,
+                error=error,
+                summary=summary,
+                state_changes=state_changes or {},
+                tokens_used=tokens_used,
+                latency_ms=latency_ms,
+            )
+            self._trace.record_outcome(decision_id, outcome)
 
     def report_problem(
         self,
