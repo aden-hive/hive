@@ -289,7 +289,9 @@ class AgentRuntime:
             ExecutionResult or None if timeout
         """
         exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
-        stream = self._streams[entry_point_id]
+        stream = self._streams.get(entry_point_id)
+        if stream is None:
+            raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
 
     async def get_goal_progress(self) -> dict[str, Any]:
