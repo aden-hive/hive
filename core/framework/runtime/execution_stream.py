@@ -353,10 +353,6 @@ class ExecutionStream:
                 self._state_manager.cleanup_execution(execution_id)
 
                 # Remove task from tracking dict to prevent memory leak
-                # This must happen regardless of how execution exits:
-                # - normal completion
-                # - cancellation (CancelledError)
-                # - any other exception
                 async with self._lock:
                     self._execution_tasks.pop(execution_id, None)
                     self._active_executions.pop(execution_id, None)
