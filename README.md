@@ -264,7 +264,7 @@ See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions
 - **[Developer Guide](DEVELOPER.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
 - [Configuration Guide](docs/configuration.md) - All configuration options
-- [Architecture Overview](docs/architecture.md) - System design and structure
+- [Architecture Overview](docs/architecture/README.md) - System design and structure
 
 ## Roadmap
 
