@@ -11,9 +11,10 @@ our edges can be created dynamically by a Builder agent based on the goal.
 
 Edge Types:
 - always: Always traverse after source completes
+- always: Always traverse after source completes
 - on_success: Traverse only if source succeeds
 - on_failure: Traverse only if source fails
-- conditional: Traverse based on expression evaluation
+- conditional: Traverse based on expression evaluation (SAFE SUBSET ONLY)
 - llm_decide: Let LLM decide based on goal and context (goal-aware routing)
 
 The llm_decide condition is particularly powerful for goal-driven agents,
@@ -25,6 +26,8 @@ from typing import Any
 from enum import Enum
 
 from pydantic import BaseModel, Field
+
+from framework.graph.safe_eval import safe_eval
 
 
 class EdgeCondition(str, Enum):
@@ -170,8 +173,8 @@ class EdgeSpec(BaseModel):
         }
 
         try:
-            # Safe evaluation (in production, use a proper expression evaluator)
-            return bool(eval(self.condition_expr, {"__builtins__": {}}, context))
+            # Safe evaluation using AST-based whitelist
+            return bool(safe_eval(self.condition_expr, context))
         except Exception as e:
             # Log the error for debugging
             import logging

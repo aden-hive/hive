@@ -33,6 +33,8 @@ class AgentRuntimeConfig:
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
     max_history: int = 1000
+    execution_result_max: int = 1000
+    execution_result_ttl_seconds: float | None = None
 
 
 class AgentRuntime:
@@ -206,6 +208,8 @@ class AgentRuntime:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    result_retention_max=self._config.execution_result_max,
+                    result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream

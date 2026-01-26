@@ -181,7 +181,6 @@ class GraphExecutor:
         total_tokens = 0
         total_latency = 0
         node_retry_counts: dict[str, int] = {}  # Track retries per node
-        max_retries_per_node = 3
 
         # Determine entry point (may differ if resuming)
         current_node_id = graph.get_entry_point(session_state)
@@ -302,26 +301,26 @@ class GraphExecutor:
                     # Track retries per node
                     node_retry_counts[current_node_id] = node_retry_counts.get(current_node_id, 0) + 1
 
-                    if node_retry_counts[current_node_id] < max_retries_per_node:
+                    if node_retry_counts[current_node_id] < node_spec.max_retries:
                         # Retry - don't increment steps for retries
                         steps -= 1
-                        self.logger.info(f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries_per_node})...")
+                        self.logger.info(f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{node_spec.max_retries})...")
                         continue
                     else:
                         # Max retries exceeded - fail the execution
-                        self.logger.error(f"   ✗ Max retries ({max_retries_per_node}) exceeded for node {current_node_id}")
+                        self.logger.error(f"   ✗ Max retries ({node_spec.max_retries}) exceeded for node {current_node_id}")
                         self.runtime.report_problem(
                             severity="critical",
-                            description=f"Node {current_node_id} failed after {max_retries_per_node} attempts: {result.error}",
+                            description=f"Node {current_node_id} failed after {node_spec.max_retries} attempts: {result.error}",
                         )
                         self.runtime.end_run(
                             success=False,
                             output_data=memory.read_all(),
-                            narrative=f"Failed at {node_spec.name} after {max_retries_per_node} retries: {result.error}",
+                            narrative=f"Failed at {node_spec.name} after {node_spec.max_retries} retries: {result.error}",
                         )
                         return ExecutionResult(
                             success=False,
-                            error=f"Node '{node_spec.name}' failed after {max_retries_per_node} attempts: {result.error}",
+                            error=f"Node '{node_spec.name}' failed after {node_spec.max_retries} attempts: {result.error}",
                             output=memory.read_all(),
                             steps_executed=steps,
                             total_tokens=total_tokens,

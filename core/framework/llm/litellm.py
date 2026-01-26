@@ -72,6 +72,11 @@ class LiteLLMProvider(LLMProvider):
         self.api_base = api_base
         self.extra_kwargs = kwargs
 
+        if litellm is None:
+            raise ImportError(
+                "LiteLLM is not installed. Please install it with: pip install litellm"
+            )
+
     def complete(
         self,
         messages: list[dict[str, Any]],
