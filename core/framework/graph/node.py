@@ -15,6 +15,8 @@ Protocol:
     The framework provides NodeContext with everything the node needs.
 """
 
+import asyncio
+import inspect
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Callable
@@ -1110,8 +1112,11 @@ class FunctionNode(NodeProtocol):
         start = time.time()
 
         try:
-            # Call the function
-            result = self.func(**ctx.input_data)
+            # Call the function - run sync functions in a thread to avoid blocking event loop
+            if inspect.iscoroutinefunction(self.func):
+                result = await self.func(**ctx.input_data)
+            else:
+                result = await asyncio.to_thread(self.func, **ctx.input_data)
 
             latency_ms = int((time.time() - start) * 1000)
 
