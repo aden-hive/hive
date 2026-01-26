@@ -626,7 +626,7 @@ class GraphExecutor:
 
                 return edge.target
 
-        return 
+        return None
 
     def register_node(self, node_id: str, implementation: NodeProtocol) -> None:
         """Register a custom node implementation."""
