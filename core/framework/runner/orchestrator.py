@@ -19,6 +19,7 @@ from framework.runner.protocol import (
     RegisteredAgent,
 )
 from framework.runner.runner import AgentRunner
+from framework.config import DEFAULT_ROUTING_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class AgentOrchestrator:
     def __init__(
         self,
         llm: LLMProvider | None = None,
-        model: str = "claude-haiku-4-5-20251001",
+        model: str = DEFAULT_ROUTING_MODEL,
     ):
         """
         Initialize the orchestrator.

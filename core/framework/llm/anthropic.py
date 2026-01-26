@@ -5,6 +5,7 @@ from typing import Any
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.litellm import LiteLLMProvider
+from framework.config import DEFAULT_ROUTING_MODEL
 
 
 def _get_api_key_from_credential_manager() -> str | None:
@@ -37,7 +38,7 @@ class AnthropicProvider(LLMProvider):
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "claude-haiku-4-5-20251001",
+        model: str = DEFAULT_ROUTING_MODEL,
     ):
         """
         Initialize the Anthropic provider.
@@ -45,7 +46,7 @@ class AnthropicProvider(LLMProvider):
         Args:
             api_key: Anthropic API key. If not provided, uses CredentialManager
                      or ANTHROPIC_API_KEY env var.
-            model: Model to use (default: claude-haiku-4-5-20251001)
+            model: Model to use (default: checks config.py)
         """
         # Delegate to LiteLLMProvider internally.
         self.api_key = api_key or _get_api_key_from_credential_manager()

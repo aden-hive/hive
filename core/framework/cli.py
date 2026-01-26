@@ -18,6 +18,7 @@ Testing commands:
 
 import argparse
 import sys
+from framework.config import DEFAULT_ROUTING_MODEL
 
 
 def main():
@@ -26,7 +27,7 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="claude-haiku-4-5-20251001",
+        default=DEFAULT_ROUTING_MODEL,
         help="Anthropic model to use",
     )
 
