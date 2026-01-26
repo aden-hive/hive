@@ -150,6 +150,37 @@ claude> /testing-agent
 
 Creates comprehensive test suites for your agent.
 
+## Windows (WSL) Setup Notes
+
+If you are using Windows, it is strongly recommended to set up the project using WSL (Windows Subsystem for Linux) with an Ubuntu distribution.
+
+The setup-python.sh script is designed for Linux/macOS environments and may fail when run directly in Git Bash or PowerShell.
+
+Recommended setup for Windows users
+
+Install WSL and Ubuntu
+https://learn.microsoft.com/windows/wsl/install
+
+Clone the repository inside the WSL home directory (not under /mnt/c):
+
+cd ~
+git clone https://github.com/YOUR_USERNAME/hive.git
+cd hive
+
+
+Create and activate a Python virtual environment (required for Python 3.12 due to PEP 668):
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+
+Run the setup script:
+
+./scripts/setup-python.sh
+
+
+Note: Running the project from /mnt/c may cause permission and script execution issues. Working inside the WSL filesystem (~) is recommended.
+
 ## Troubleshooting
 
 ### "ModuleNotFoundError: No module named 'framework'"
