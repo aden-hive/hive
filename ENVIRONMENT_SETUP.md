@@ -2,6 +2,37 @@
 
 Complete setup guide for building and running goal-driven agents with the Aden Agent Framework.
 
+## Before You Start (Important)
+
+### Supported Platforms
+
+This project is officially supported on:
+
+- **macOS** (Intel and Apple Silicon)
+- **Linux** (Ubuntu, Debian, Fedora, etc.)
+- **Windows** (via WSL 2 - Windows Subsystem for Linux)
+
+> ⚠️ **Note:** Native Windows PowerShell is not officially supported. If you're on Windows, please use WSL 2 for the best experience.
+
+### Virtual Environment (Strongly Recommended)
+
+We recommend using a Python virtual environment to avoid dependency conflicts. Follow the steps below before running the setup script:
+
+```bash
+# Create a virtual environment
+python3 -m venv .venv
+
+# Activate it
+source .venv/bin/activate       # macOS/Linux
+# .venv\Scripts\activate         # Windows (if not using WSL)
+```
+
+Always activate the virtual environment before running any commands:
+
+```bash
+source .venv/bin/activate
+```
+
 ## Quick Setup
 
 ```bash
@@ -16,6 +47,8 @@ This will:
 - Install the tools package (`aden_tools`)
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
+
+> **Note:** If the setup script fails, it's usually due to Python environment issues. Please refer to the [Troubleshooting](#troubleshooting) section below for common solutions.
 
 ## Manual Setup (Alternative)
 
@@ -72,6 +105,28 @@ For running agents with real LLMs:
 export ANTHROPIC_API_KEY="your-key-here"
 ```
 
+## Important: PYTHONPATH Requirement
+
+**Why is PYTHONPATH needed?**
+
+The `exports/` folder (where agents are located) is NOT installed as a Python package. Instead, it's part of your project structure. The `PYTHONPATH` environment variable tells Python where to find these agent modules.
+
+All agent commands MUST include `PYTHONPATH=core:exports` before the Python command:
+
+```bash
+PYTHONPATH=core:exports python -m agent_name COMMAND
+```
+
+**Common errors if PYTHONPATH is missing:**
+
+- `ModuleNotFoundError: No module named 'support_ticket_agent'`
+- `ModuleNotFoundError: No module named 'your_agent_name'`
+
+If you see these errors, make sure to:
+
+1. Run from the project root directory (`/hive/`)
+2. Include `PYTHONPATH=core:exports` in your command
+
 ## Running Agents
 
 All agent commands must be run from the project root with `PYTHONPATH` set:
@@ -116,7 +171,9 @@ PYTHONPATH=core:exports python -m personal_assistant_agent run --input '{...}'
 
 ## Building New Agents
 
-Use Claude Code CLI with the agent building skills:
+> **Optional:** Claude Code CLI is optional and only needed if you want to build new agents. If you're only running existing agents, you can skip this section entirely.
+
+To build custom agents, use Claude Code CLI with the agent building skills:
 
 ### 1. Install Skills (One-time)
 
