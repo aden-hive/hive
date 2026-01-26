@@ -8,6 +8,7 @@
 /hive/ @adenhq/maintainers
 
 # Infrastructure
+# Root-scoped patterns (leading / ensures patterns match only at repo root)
 /docker-compose*.yml @adenhq/maintainers
 /.github/ @adenhq/maintainers
 
