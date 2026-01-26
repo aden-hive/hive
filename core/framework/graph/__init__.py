@@ -26,7 +26,7 @@ from framework.graph.plan import (
 from framework.graph.judge import HybridJudge, create_default_judge
 from framework.graph.worker_node import WorkerNode, StepExecutionResult
 from framework.graph.flexible_executor import FlexibleGraphExecutor, ExecutorConfig
-from framework.graph.code_sandbox import CodeSandbox, safe_exec, safe_eval
+from framework.graph.code_sandbox import CodeSandbox, sandbox_exec, sandbox_eval
 
 __all__ = [
     # Goal
@@ -70,6 +70,6 @@ __all__ = [
     "ExecutorConfig",
     # Code Sandbox
     "CodeSandbox",
-    "safe_exec",
-    "safe_eval",
+    "sandbox_exec",
+    "sandbox_eval",
 ]

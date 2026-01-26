@@ -18,7 +18,7 @@ from framework.graph.plan import (
     EvaluationRule,
 )
 from framework.graph.goal import Goal
-from framework.graph.code_sandbox import safe_eval
+from framework.graph.code_sandbox import sandbox_eval
 from framework.llm.provider import LLMProvider
 
 
@@ -148,7 +148,7 @@ class HybridJudge:
             rules_checked += 1
 
             # Evaluate rule condition
-            eval_result = safe_eval(rule.condition, eval_context)
+            eval_result = sandbox_eval(rule.condition, eval_context)
 
             if eval_result.success and eval_result.result:
                 # Rule matched!

@@ -373,13 +373,13 @@ class CodeSandbox:
 default_sandbox = CodeSandbox()
 
 
-def safe_exec(
+def sandbox_exec(
     code: str,
     inputs: dict[str, Any] | None = None,
     timeout_seconds: int = 10,
 ) -> SandboxResult:
     """
-    Convenience function for safe code execution.
+    Convenience function for safe code execution in sandbox.
 
     Args:
         code: Python code to execute
@@ -388,18 +388,21 @@ def safe_exec(
 
     Returns:
         SandboxResult
+        
+    Note:
+        Renamed from safe_exec() to avoid confusion with safe_eval.py module.
     """
     sandbox = CodeSandbox(timeout_seconds=timeout_seconds)
     return sandbox.execute(code, inputs)
 
 
-def safe_eval(
+def sandbox_eval(
     expression: str,
     inputs: dict[str, Any] | None = None,
     timeout_seconds: int = 5,
 ) -> SandboxResult:
     """
-    Convenience function for safe expression evaluation.
+    Convenience function for safe expression evaluation in sandbox.
 
     Args:
         expression: Python expression to evaluate
@@ -408,6 +411,10 @@ def safe_eval(
 
     Returns:
         SandboxResult
+        
+    Note:
+        Renamed from safe_eval() to avoid collision with framework.graph.safe_eval
+        which returns the direct result. This function returns a SandboxResult object.
     """
     sandbox = CodeSandbox(timeout_seconds=timeout_seconds)
     return sandbox.execute_expression(expression, inputs)

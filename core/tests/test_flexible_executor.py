@@ -26,8 +26,8 @@ from framework.graph.plan import (
 )
 from framework.graph.code_sandbox import (
     CodeSandbox,
-    safe_exec,
-    safe_eval,
+    sandbox_exec,
+    sandbox_eval,
 )
 from framework.graph.judge import HybridJudge, create_default_judge
 from framework.graph.goal import Goal, SuccessCriterion
@@ -158,14 +158,14 @@ class TestCodeSandbox:
 
     def test_simple_execution(self):
         """Test simple code execution."""
-        result = safe_exec("x = 1 + 2\nresult = x * 3")
+        result = sandbox_exec("x = 1 + 2\nresult = x * 3")
         assert result.success is True
         assert result.variables.get("x") == 3
         assert result.result == 9
 
     def test_input_injection(self):
         """Test passing inputs to sandbox."""
-        result = safe_exec(
+        result = sandbox_exec(
             "result = x + y",
             inputs={"x": 10, "y": 20},
         )
@@ -174,23 +174,23 @@ class TestCodeSandbox:
 
     def test_blocked_import(self):
         """Test that dangerous imports are blocked."""
-        result = safe_exec("import os")
+        result = sandbox_exec("import os")
         assert result.success is False
         assert "blocked" in result.error.lower() or "import" in result.error.lower()
 
     def test_blocked_private_access(self):
         """Test that private attribute access is blocked."""
-        result = safe_exec("x = [].__class__.__bases__")
+        result = sandbox_exec("x = [].__class__.__bases__")
         assert result.success is False
 
     def test_blocked_exec_eval(self):
         """Test that exec/eval are blocked."""
-        result = safe_exec("exec('print(1)')")
+        result = sandbox_exec("exec('print(1)')")
         assert result.success is False
 
     def test_safe_eval_expression(self):
         """Test safe_eval for expressions."""
-        result = safe_eval("x + y", inputs={"x": 5, "y": 3})
+        result = sandbox_eval("x + y", inputs={"x": 5, "y": 3})
         assert result.success is True
         assert result.result == 8
 
