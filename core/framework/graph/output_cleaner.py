@@ -268,7 +268,23 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                 if match:
                     cleaned_text = match.group(1).strip()
 
-            cleaned = json.loads(cleaned_text)
+            # Validate cleaned_text before parsing
+            if not cleaned_text or not cleaned_text.strip():
+                raise ValueError(
+                    "Empty or whitespace-only cleaned text - LLM returned no content"
+                )
+
+            # Parse JSON with explicit error handling
+            try:
+                cleaned = json.loads(cleaned_text)
+            except json.JSONDecodeError as e:
+                # Log the actual content for debugging (truncated if too long)
+                preview = cleaned_text[:200] + "..." if len(cleaned_text) > 200 else cleaned_text
+                logger.error(
+                    f"✗ Failed to parse cleaned JSON: {e}\n"
+                    f"  Content preview: {repr(preview)}"
+                )
+                raise
 
             if isinstance(cleaned, dict):
                 self.cleansing_count += 1
@@ -288,7 +304,8 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                         f"Cleaning produced {type(cleaned)}, expected dict"
                     )
 
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, ValueError) as e:
+            # Handle both JSON parsing errors and validation errors (empty text)
             logger.error(f"✗ Failed to parse cleaned JSON: {e}")
             if self.config.fallback_to_raw:
                 logger.info("↩ Falling back to raw output")
