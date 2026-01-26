@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,8 @@ from framework.runner.protocol import (
     RegisteredAgent,
 )
 from framework.runner.runner import AgentRunner
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -462,8 +466,7 @@ Respond with JSON only:
                 max_tokens=256,
             )
 
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 selected = data.get("selected", [])
@@ -476,13 +479,33 @@ Respond with JSON only:
                         confidence=0.8,
                         should_parallelize=data.get("parallel", False),
                     )
-        except Exception:
-            pass
+            else:
+                logger.warning(
+                    "LLM routing response did not contain valid JSON, using fallback",
+                    extra={"response_preview": response.content[:100]},
+                )
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Failed to parse LLM routing response as JSON, using fallback: %s",
+                str(e),
+            )
+        except Exception as e:
+            # Log unexpected errors but allow graceful fallback
+            logger.warning(
+                "LLM routing failed unexpectedly, using fallback routing: %s",
+                str(e),
+                exc_info=True,
+            )
 
-        # Fallback: use highest confidence
+        # Fallback: use highest confidence agent
+        logger.debug(
+            "Using fallback routing to agent '%s' with confidence %.2f",
+            capable[0][0],
+            capable[0][1].confidence,
+        )
         return RoutingDecision(
             selected_agents=[capable[0][0]],
-            reasoning=capable[0][1].reasoning,
+            reasoning=f"Fallback routing: {capable[0][1].reasoning}",
             confidence=capable[0][1].confidence,
         )
 
