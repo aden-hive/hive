@@ -837,8 +837,14 @@ class AgentRunner:
                 node.node_type in ("llm_generate", "llm_tool_use")
                 for node in self.graph.nodes
             )
-            if has_llm_nodes and not os.environ.get("ANTHROPIC_API_KEY"):
-                warnings.append("Agent has LLM nodes but ANTHROPIC_API_KEY not set")
+            if has_llm_nodes:
+                api_key_env = self._get_api_key_env_var(self.model)
+                if api_key_env and not os.environ.get(api_key_env):
+                    if api_key_env not in missing_credentials:
+                        missing_credentials.append(api_key_env)
+                    warnings.append(
+                        f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
+                    )
 
         return ValidationResult(
             valid=len(errors) == 0,
