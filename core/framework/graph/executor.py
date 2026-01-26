@@ -445,6 +445,22 @@ class GraphExecutor:
             read_keys=node_spec.input_keys,
             write_keys=node_spec.output_keys,
         )
+        
+        # Create tool access layer if tools are available
+        tool_access_layer = None
+        if self.tools and self.tool_executor:
+            from framework.graph.tool_access_layer import ToolAccessLayer
+            
+            # Convert list of tools to dict for ToolAccessLayer
+            tools_dict = {t.name: t for t in self.tools}
+            
+            tool_access_layer = ToolAccessLayer(
+                tools=tools_dict,
+                tool_executor=self.tool_executor,
+                runtime=self.runtime,
+                node_id=node_spec.id,
+                allowed_tools=node_spec.tools,  # Respect node's tool restrictions
+            )
 
         return NodeContext(
             runtime=self.runtime,
@@ -453,7 +469,8 @@ class GraphExecutor:
             memory=scoped_memory,
             input_data=input_data,
             llm=self.llm,
-            available_tools=available_tools,
+            available_tools=available_tools,  # Keep for backward compatibility
+            tools=tool_access_layer,  # NEW: Unified tool access layer
             goal_context=goal.to_prompt_context(),
             goal=goal,  # Pass Goal object for LLM-powered routers
         )
