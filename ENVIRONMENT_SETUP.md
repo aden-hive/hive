@@ -152,6 +152,31 @@ Creates comprehensive test suites for your agent.
 
 ## Troubleshooting
 
+### "externally-managed-environment" error (PEP 668)
+
+**Cause:** Python 3.12+ on macOS/Homebrew, WSL, or some Linux distros prevents system-wide pip installs.
+
+**Solution:** Create and use a virtual environment:
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+
+# Activate it
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate   # Windows
+
+# Then run setup
+./scripts/setup-python.sh
+```
+
+Always activate the venv before running agents:
+
+```bash
+source .venv/bin/activate
+PYTHONPATH=core:exports python -m your_agent_name demo
+```
+
 ### "ModuleNotFoundError: No module named 'framework'"
 
 **Solution:** Install the core package:
@@ -188,7 +213,7 @@ pip install --upgrade "openai>=1.0.0"
 
 **Cause:** Not running from project root or missing PYTHONPATH
 
-**Solution:** Ensure you're in `/home/timothy/oss/hive/` and use:
+**Solution:** Ensure you're in the project root directory and use:
 
 ```bash
 PYTHONPATH=core:exports python -m support_ticket_agent validate
