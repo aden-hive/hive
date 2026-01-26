@@ -78,4 +78,9 @@ __all__ = [
     "CodeSandbox",
     "safe_exec",
     "safe_eval",
+    # Tool Access Layer
+    "ToolAccessLayer",
+    "ToolPermission",
+    "ToolMetadata",
+    "ToolExecutionResult",
 ]
