@@ -13,6 +13,12 @@ Framework provides a runtime framework that captures **decisions**, not just act
 
 ## Installation
 
+Ensure you have the following prerequisites installed:
+- [Python 3.11+](https://www.python.org/downloads/) for agent development
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
+
+If you encounter issues during installation, please check the [troubleshooting guide](https://docs.adenhq.com/getting-started/troubleshooting) for assistance.
+
 ```bash
 pip install -e .
 ```
@@ -22,6 +28,8 @@ pip install -e .
 The framework includes an MCP (Model Context Protocol) server for building agents. To set up the MCP server:
 
 ### Automated Setup
+
+The MCP server setup script will install the framework package and its dependencies. If you encounter issues during setup, please refer to the [troubleshooting guide](https://docs.adenhq.com/getting-started/troubleshooting) for assistance.
 
 **Using bash (Linux/macOS):**
 ```bash

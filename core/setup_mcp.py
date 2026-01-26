@@ -22,21 +22,25 @@ class Colors:
 
 
 def print_step(message: str, color: str = Colors.YELLOW):
+    """Print a colored step message. This function outputs messages in a specified color to indicate the progress of the setup process."""
     """Print a colored step message."""
     print(f"{color}{message}{Colors.NC}")
 
 
 def print_success(message: str):
+    """Print a success message. This function outputs a success message in green to indicate successful completion of a step."""
     """Print a success message."""
     print(f"{Colors.GREEN}✓ {message}{Colors.NC}")
 
 
 def print_error(message: str):
+    """Print an error message. This function outputs an error message in red to indicate a failure during the setup process."""
     """Print an error message."""
     print(f"{Colors.RED}✗ {message}{Colors.NC}", file=sys.stderr)
 
 
 def run_command(cmd: list, error_msg: str) -> bool:
+    """Run a command and return success status. This function executes a command in the shell and returns True if successful, otherwise prints an error message and returns False."""
     """Run a command and return success status."""
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -48,6 +52,7 @@ def run_command(cmd: list, error_msg: str) -> bool:
 
 
 def main():
+    """Main setup function. This function orchestrates the setup process for the MCP server, including installing the framework and dependencies, and verifying the configuration."""
     """Main setup function."""
     print("=== Aden Hive Framework MCP Server Setup ===")
     print()

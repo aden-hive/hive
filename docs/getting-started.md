@@ -206,3 +206,234 @@ pip uninstall -y framework tools
 - **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
 - **Build Agents**: Use `/building-agents` skill to create agents
+
+## Common Use Cases & Examples
+
+### 1. Building a Web Research Agent
+
+**Goal**: Create an agent that researches topics and summarizes findings
+
+```bash
+# Start Claude Code
+claude> /building-agents
+
+# Define goal:
+# "Research a given topic and return a comprehensive summary with sources"
+
+# The agent will:
+# 1. Accept a topic as input
+# 2. Use web_search_tool to find relevant sources
+# 3. Use web_scrape_tool to extract content
+# 4. Process and summarize findings
+# 5. Return results with sources
+
+# Once generated, run with:
+PYTHONPATH=core:exports python -m web_research_agent run --input '{
+  "topic": "Climate change impacts on agriculture",
+  "max_sources": 5
+}'
+```
+
+### 2. Building an E-commerce Order Processing Agent
+
+**Goal**: Automate order validation and processing
+
+```bash
+# Create agent to:
+# 1. Validate order data
+# 2. Check inventory
+# 3. Calculate shipping
+# 4. Process payment
+# 5. Generate confirmation
+
+# Uses file_system_tools to manage inventory
+# Uses variables to track order state
+```
+
+### 3. Building a Customer Support Agent
+
+**Goal**: Automate customer inquiry responses
+
+```bash
+# Agent handles:
+# 1. Customer question parsing
+# 2. Knowledge base search
+# 3. Issue categorization
+# 4. Response generation
+# 5. Escalation if needed
+
+# Uses memory to track conversation history
+```
+
+## Running Agents in Production
+
+### Mock Mode (Testing)
+
+```bash
+# Test agent logic without LLM calls
+PYTHONPATH=core:exports python -m my_agent run \
+  --mock \
+  --input '{"query": "test"}'
+
+# Useful for:
+# - Testing workflow logic
+# - Developing agent without API costs
+# - Debugging node execution
+```
+
+### Production Mode
+
+```bash
+# Run with real LLM calls
+export ANTHROPIC_API_KEY="your-key"
+PYTHONPATH=core:exports python -m my_agent run \
+  --input '{"query": "production-query"}' \
+  --verbose
+
+# Monitor execution:
+# - Check logs for decisions and outcomes
+# - Review tokens used
+# - Monitor error handling
+```
+
+## Performance Optimization
+
+### Memory Management
+
+```python
+# In your agent's tools.py
+def configure_memory():
+    # Short-term memory for current session
+    stm_size = 10  # Keep last 10 decisions
+    
+    # Long-term memory for learning
+    ltm_enabled = True
+    ltm_retention = "7d"  # Retain 7 days
+```
+
+### Token Optimization
+
+```bash
+# Use appropriate model sizes
+# claude-3-5-sonnet: Better cost/performance
+# claude-3-opus: Better reasoning for complex tasks
+
+# Run with token tracking
+PYTHONPATH=core:exports python -m my_agent run \
+  --input '...' \
+  --track-tokens
+```
+
+## Extending the Framework
+
+### Adding Custom Tools
+
+```bash
+# Implement MCP servers following:
+# tools/README.md - Tool development guide
+
+# Once implemented, register in agent:
+# 1. Update agent.json with tool config
+# 2. Add tool imports in tools.py
+# 3. Test with /testing-agent skill
+```
+
+### Custom Decision Logic
+
+```python
+# In your agent's nodes, implement custom decision logic
+runtime.decide(
+    intent="Evaluate customer sentiment",
+    options=[
+        {"id": "positive", "description": "Positive sentiment"},
+        {"id": "negative", "description": "Negative sentiment"},
+        {"id": "neutral", "description": "Neutral sentiment"},
+    ],
+    chosen="positive",  # Your logic determines this
+    reasoning="High confidence keywords detected"
+)
+```
+
+## Real-World Patterns
+
+### Pattern 1: Multi-Stage Decision Making
+
+```
+Input → Analyze → Plan → Execute → Validate → Output
+         (decision) (decision) (decision)
+```
+
+### Pattern 2: Error Recovery
+
+```
+Try Operation → Failed? → Apply Fix → Retry → Success/Escalate
+```
+
+### Pattern 3: Human in the Loop
+
+```
+Autonomous Action → Requires Approval? → Wait for Human → Continue
+```
+
+## Debugging Agents
+
+### View Agent Decisions
+
+```bash
+# Enable verbose logging
+PYTHONPATH=core:exports python -m my_agent run \
+  --input '...' \
+  --verbose \
+  --log-level debug
+```
+
+### Test Individual Nodes
+
+```bash
+# Use mock mode to test specific nodes
+claude> /testing-agent
+
+# Generate constraint tests for:
+# 1. Data validation nodes
+# 2. Decision logic nodes
+# 3. Tool invocation nodes
+```
+
+### Performance Profiling
+
+```bash
+# Track execution time and token usage
+PYTHONPATH=core:exports python -m my_agent run \
+  --input '...' \
+  --profile \
+  --metrics
+```
+
+## Advanced Topics
+
+### Multi-Agent Coordination
+
+The framework supports:
+- Agents calling other agents
+- Shared memory between agents
+- Orchestrated workflows
+
+### Real-time Monitoring
+
+```bash
+# Integration with observability platforms:
+# - LangSmith
+# - Arize
+# - Custom dashboards
+```
+
+### Continuous Learning
+
+Agents can:
+- Learn from execution outcomes
+- Update decision strategies
+- Improve over time
+
+---
+
+**Need help?** Check the [Troubleshooting Guide](troubleshooting.md) or visit [Discord](https://discord.com/invite/MXE49hrKDk)

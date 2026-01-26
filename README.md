@@ -55,6 +55,18 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## Quick Links
 
+## Contribution Guidelines
+
+We welcome contributions to the Hive project! Here’s how you can help:
+
+1. **Star, Fork, and Watch**: Show your support by starring the repository, forking it to your own account, and watching for updates.
+2. **Report Issues**: If you encounter any bugs or have feature requests, please report them in the [issues section](https://github.com/adenhq/hive/issues).
+3. **Submit Pull Requests**: When you make changes, submit a pull request with a clear description of your changes and why they are necessary.
+4. **Follow Coding Standards**: Ensure your code adheres to the project's coding standards and includes appropriate tests.
+5. **Documentation**: Update documentation as needed to reflect your changes.
+
+Thank you for contributing to Hive!
+
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
@@ -69,6 +81,12 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
 
 ### Installation
+
+Ensure you have the following prerequisites installed:
+- [Python 3.11+](https://www.python.org/downloads/) for agent development
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
+
+If you encounter issues during installation, please check the [troubleshooting guide](https://docs.adenhq.com/getting-started/troubleshooting) for assistance.
 
 ```bash
 # Clone the repository
