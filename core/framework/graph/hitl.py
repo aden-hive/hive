@@ -170,8 +170,9 @@ class HITLProtocol:
 
         # Use Haiku to extract answers
         try:
-            import anthropic
             import json
+
+            import anthropic
 
             questions_str = "\n".join([
                 f"{i+1}. {q.question} (id: {q.id})"
@@ -201,7 +202,7 @@ Example format:
             # Parse Haiku's response
             import re
             response_text = message.content[0].text.strip()
-            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", response_text, re.DOTALL)
 
             if json_match:
                 parsed = json.loads(json_match.group())

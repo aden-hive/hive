@@ -15,28 +15,29 @@ using a Worker-Judge loop:
 This keeps planning external while execution/evaluation is internal.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from framework.runtime.core import Runtime
+from framework.graph.code_sandbox import CodeSandbox
 from framework.graph.goal import Goal
+from framework.graph.judge import HybridJudge, create_default_judge
 from framework.graph.plan import (
-    Plan,
-    PlanStep,
-    PlanExecutionResult,
-    ExecutionStatus,
-    StepStatus,
-    Judgment,
-    JudgmentAction,
+    ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
-    ApprovalDecision,
+    ExecutionStatus,
+    Judgment,
+    JudgmentAction,
+    Plan,
+    PlanExecutionResult,
+    PlanStep,
+    StepStatus,
 )
-from framework.graph.judge import HybridJudge, create_default_judge
-from framework.graph.worker_node import WorkerNode, StepExecutionResult
-from framework.graph.code_sandbox import CodeSandbox
+from framework.graph.worker_node import StepExecutionResult, WorkerNode
 from framework.llm.provider import LLMProvider, Tool
+from framework.runtime.core import Runtime
 
 # Type alias for approval callback
 ApprovalCallback = Callable[[ApprovalRequest], ApprovalResult]
@@ -165,7 +166,10 @@ class FlexibleGraphExecutor:
                             status=ExecutionStatus.NEEDS_REPLAN,
                             plan=plan,
                             context=context,
-                            feedback="No executable steps available but plan not complete. Check dependencies.",
+                            feedback=(
+                                "No executable steps available but plan not complete. "
+                                "Check dependencies."
+                            ),
                             steps_executed=steps_executed,
                             total_tokens=total_tokens,
                             total_latency=total_latency,
@@ -174,7 +178,8 @@ class FlexibleGraphExecutor:
                 # Execute next step (for now, sequential; could be parallel)
                 step = ready_steps[0]
                 # Debug: show ready steps
-                # print(f"  [DEBUG] Ready steps: {[s.id for s in ready_steps]}, executing: {step.id}")
+                # ready_ids = [s.id for s in ready_steps]
+                # print(f"  [DEBUG] Ready steps: {ready_ids}, executing: {step.id}")
 
                 # APPROVAL CHECK - before execution
                 if step.requires_approval:
@@ -360,7 +365,10 @@ class FlexibleGraphExecutor:
                     status=ExecutionStatus.NEEDS_REPLAN,
                     plan=plan,
                     context=context,
-                    feedback=f"Step '{step.id}' failed after {step.attempts} attempts: {judgment.feedback}",
+                    feedback=(
+                        f"Step '{step.id}' failed after {step.attempts} attempts: "
+                        f"{judgment.feedback}"
+                    ),
                     steps_executed=steps_executed,
                     total_tokens=total_tokens,
                     total_latency=total_latency,
@@ -455,7 +463,10 @@ class FlexibleGraphExecutor:
                     args_preview = args_preview[:500] + "..."
                 preview_parts.append(f"Args: {args_preview}")
         elif step.action.prompt:
-            prompt_preview = step.action.prompt[:300] + "..." if len(step.action.prompt) > 300 else step.action.prompt
+            prompt = step.action.prompt
+            prompt_preview = (
+                prompt[:300] + "..." if len(prompt) > 300 else prompt
+            )
             preview_parts.append(f"Prompt: {prompt_preview}")
 
         # Include step inputs resolved from context (what will be sent/used)

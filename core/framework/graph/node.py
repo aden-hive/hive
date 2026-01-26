@@ -17,13 +17,14 @@ Protocol:
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from framework.runtime.core import Runtime
 from framework.llm.provider import LLMProvider, Tool
+from framework.runtime.core import Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +32,9 @@ logger = logging.getLogger(__name__)
 def find_json_object(text: str) -> str | None:
     """Find the first valid JSON object in text using balanced brace matching.
 
-    This handles nested objects correctly, unlike simple regex like r'\\{[^{}]*\\}'.
+    This handles nested objects correctly, unlike simple regex like r"\\{[^{}]*\\}".
     """
-    start = text.find('{')
+    start = text.find("{")
     if start == -1:
         return None
 
@@ -46,7 +47,7 @@ def find_json_object(text: str) -> str | None:
             escape_next = False
             continue
 
-        if char == '\\' and in_string:
+        if char == "\\" and in_string:
             escape_next = True
             continue
 
@@ -57,9 +58,9 @@ def find_json_object(text: str) -> str | None:
         if in_string:
             continue
 
-        if char == '{':
+        if char == "{":
             depth += 1
-        elif char == '}':
+        elif char == "}":
             depth -= 1
             if depth == 0:
                 return text[start:i + 1]
@@ -110,11 +111,17 @@ class NodeSpec(BaseModel):
     # Optional schemas for validation and cleansing
     input_schema: dict[str, dict] = Field(
         default_factory=dict,
-        description="Optional schema for input validation. Format: {key: {type: 'string', required: True, description: '...'}}"
+        description=(
+            "Optional schema for input validation. "
+            "Format: {key: {type: 'string', required: True, description: '...'}}"
+        ),
     )
     output_schema: dict[str, dict] = Field(
         default_factory=dict,
-        description="Optional schema for output validation. Format: {key: {type: 'dict', required: True, description: '...'}}"
+        description=(
+            "Optional schema for output validation. "
+            "Format: {key: {type: 'dict', required: True, description: '...'}}"
+        ),
     )
 
     # For LLM nodes
@@ -361,17 +368,19 @@ class NodeResult:
 
         # Use Haiku to generate intelligent summary
         try:
-            import anthropic
             import json
+
+            import anthropic
 
             node_context = ""
             if node_spec:
                 node_context = f"\nNode: {node_spec.name}\nPurpose: {node_spec.description}"
 
+            output_preview = json.dumps(self.output, indent=2, default=str)[:2000]
             prompt = f"""Generate a 1-2 sentence human-readable summary of what this node produced.{node_context}
 
 Node output:
-{json.dumps(self.output, indent=2, default=str)[:2000]}
+{output_preview}
 
 Provide a concise, clear summary that a human can quickly understand. Focus on the key information produced."""
 

@@ -13,11 +13,11 @@ Security measures:
 """
 
 import ast
-import sys
 import signal
-from typing import Any
-from dataclasses import dataclass, field
+import sys
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any
 
 # Safe builtins whitelist
 SAFE_BUILTINS = {
@@ -161,8 +161,9 @@ class CodeValidator:
         for node in ast.walk(tree):
             # Check for blocked node types
             if type(node) in self.blocked_nodes:
+                lineno = getattr(node, "lineno", "?")
                 issues.append(
-                    f"Blocked operation: {type(node).__name__} at line {getattr(node, 'lineno', '?')}"
+                    f"Blocked operation: {type(node).__name__} at line {lineno}"
                 )
 
             # Check for dangerous attribute access
@@ -216,7 +217,7 @@ class CodeSandbox:
             raise TimeoutError(f"Code execution timed out after {seconds} seconds")
 
         # Only works on Unix-like systems
-        if hasattr(signal, 'SIGALRM'):
+        if hasattr(signal, "SIGALRM"):
             old_handler = signal.signal(signal.SIGALRM, handler)
             signal.alarm(seconds)
             try:

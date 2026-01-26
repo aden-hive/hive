@@ -8,17 +8,17 @@ The HybridJudge evaluates step execution results using:
 Escalation path: rules → LLM → human
 """
 
-from typing import Any
 from dataclasses import dataclass, field
+from typing import Any
 
+from framework.graph.code_sandbox import safe_eval
+from framework.graph.goal import Goal
 from framework.graph.plan import (
-    PlanStep,
+    EvaluationRule,
     Judgment,
     JudgmentAction,
-    EvaluationRule,
+    PlanStep,
 )
-from framework.graph.goal import Goal
-from framework.graph.code_sandbox import safe_eval
 from framework.llm.provider import LLMProvider
 
 
@@ -136,9 +136,9 @@ class HybridJudge:
 
         # Build evaluation context
         eval_context = {
-            "step": step.model_dump() if hasattr(step, 'model_dump') else step,
+            "step": step.model_dump() if hasattr(step, "model_dump") else step,
             "result": result,
-            "goal": goal.model_dump() if hasattr(goal, 'model_dump') else goal,
+            "goal": goal.model_dump() if hasattr(goal, "model_dump") else goal,
             "context": context,
             "success": isinstance(result, dict) and result.get("success", False),
             "error": isinstance(result, dict) and result.get("error"),
@@ -214,9 +214,14 @@ class HybridJudge:
             # Check confidence threshold
             if judgment.confidence < self.llm_confidence_threshold:
                 # Low confidence - escalate
+                confidence = judgment.confidence
+                threshold = self.llm_confidence_threshold
+                reasoning = (
+                    f"LLM confidence ({confidence:.2f}) below threshold ({threshold})"
+                )
                 return Judgment(
                     action=JudgmentAction.ESCALATE,
-                    reasoning=f"LLM confidence ({judgment.confidence:.2f}) below threshold ({self.llm_confidence_threshold})",
+                    reasoning=reasoning,
                     feedback=judgment.feedback,
                     confidence=judgment.confidence,
                     llm_used=True,
@@ -350,7 +355,10 @@ def create_default_judge(llm: LLMProvider | None = None) -> HybridJudge:
     judge.add_rule(EvaluationRule(
         id="transient_error_retry",
         description="Transient error that can be retried",
-        condition="isinstance(result, dict) and result.get('error_type') in ['timeout', 'rate_limit', 'connection_error']",
+        condition=(
+            "isinstance(result, dict) and result.get('error_type') in "
+            "['timeout', 'rate_limit', 'connection_error']"
+        ),
         action=JudgmentAction.RETRY,
         feedback_template="Transient error: {result[error]}. Please retry.",
         priority=90,

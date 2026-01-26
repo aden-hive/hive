@@ -22,8 +22,8 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
-from typing import Any
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -238,7 +238,7 @@ Respond with ONLY a JSON object:
 
             # Parse response
             import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 proceed = data.get("proceed", False)
@@ -385,7 +385,10 @@ class GraphSpec(BaseModel):
     )
     async_entry_points: list[AsyncEntryPointSpec] = Field(
         default_factory=list,
-        description="Asynchronous entry points for concurrent execution streams (used with AgentRuntime)"
+        description=(
+            "Asynchronous entry points for concurrent execution streams "
+            "(used with AgentRuntime)"
+        ),
     )
     terminal_nodes: list[str] = Field(
         default_factory=list,
@@ -506,8 +509,10 @@ class GraphSpec(BaseModel):
 
             # Check entry node exists
             if not self.get_node(entry_point.entry_node):
+                entry_id = entry_point.id
+                entry_node = entry_point.entry_node
                 errors.append(
-                    f"Async entry point '{entry_point.id}' references missing node '{entry_point.entry_node}'"
+                    f"Async entry point '{entry_id}' references missing node '{entry_node}'"
                 )
 
             # Validate isolation level
@@ -565,8 +570,9 @@ class GraphSpec(BaseModel):
 
         for node in self.nodes:
             if node.id not in reachable:
-                # Skip this error if the node is a pause node, entry point target, or async entry point
-                # (pause/resume architecture and async entry points make these reachable)
+                # Skip this error if the node is a pause node, entry point target,
+                # or async entry point (pause/resume architecture and async entry
+                # points make these reachable)
                 if (node.id in self.pause_nodes or
                     node.id in self.entry_points.values() or
                     node.id in async_entry_nodes):
