@@ -9,6 +9,42 @@ A visual drag-and-drop interface for building AI agents without code. Design com
 
 ---
 
+## Screenshots
+
+### Visual Node Editor with Data Flow
+![Visual Editor](./docs/images/01-visual-editor.png)
+*Drag-and-drop nodes, see data flow between them with edge labels showing which keys pass between nodes*
+
+### Run Your Agent
+![Run Modal](./docs/images/02-run-modal.png)
+*Execute your agent with custom input and see the execution flow*
+
+### Agent Execution
+![Executing](./docs/images/03-executing.png)
+*Watch your agent process through each node in real-time*
+
+### Execution Results
+![Execution Complete](./docs/images/04-execution-complete.png)
+*View the complete output with structured JSON results*
+
+### Export Python Code
+![Export Code](./docs/images/05-export-code.png)
+*Export production-ready Python code compatible with Hive runtime*
+
+### Pre-built Templates
+![Templates](./docs/images/06-templates.png)
+*Start quickly with pre-built templates like Research Agent, Profile Scraper, and more*
+
+### Learn How It Works
+![How It Works](./docs/images/07-how-it-works.png)
+*Built-in guide explaining node types and how to build agents*
+
+### LLM Settings
+![LLM Settings](./docs/images/08-llm-settings.png)
+*Configure your preferred LLM provider (Gemini, OpenAI, Anthropic)*
+
+---
+
 ## How This Fits Into Hive
 
 The [Hive Framework](https://github.com/adenhq/hive) offers **two ways** to build AI agents:
