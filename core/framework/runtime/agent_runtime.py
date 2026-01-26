@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
+from pydantic import BaseModel, Field
 
 from framework.graph.executor import ExecutionResult
 from framework.runtime.shared_state import SharedStateManager
@@ -26,13 +27,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class AgentRuntimeConfig:
+class AgentRuntimeConfig(BaseModel):
     """Configuration for AgentRuntime."""
-    max_concurrent_executions: int = 100
-    cache_ttl: float = 60.0
-    batch_interval: float = 0.1
-    max_history: int = 1000
+    max_concurrent_executions: int = Field(default=100, gt=0, description="Max parallel executions")
+    cache_ttl: float = Field(default=60.0, gt=0, description="Cache TTL in seconds")
+    batch_interval: float = Field(default=0.1, gt=0, description="Batch processing interval")
+    max_history: int = Field(default=1000, gt=0, description="Event bus history size")
 
 
 class AgentRuntime:
