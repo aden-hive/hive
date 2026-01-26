@@ -15,14 +15,10 @@ from typing import Annotated
 
 from mcp.server import FastMCP
 
-from framework.graph import Goal, SuccessCriterion, Constraint, NodeSpec, EdgeSpec, EdgeCondition
+from framework.graph import Constraint, EdgeCondition, EdgeSpec, Goal, NodeSpec, SuccessCriterion
 from framework.graph.plan import Plan
 
 # Testing framework imports
-from framework.testing.prompts import (
-    PYTEST_TEST_FILE_HEADER,
-)
-
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
@@ -173,7 +169,7 @@ def _load_session(session_id: str) -> BuildSession:
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file, "r") as f:
+    with open(session_file) as f:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
@@ -185,7 +181,7 @@ def _load_active_session() -> BuildSession | None:
         return None
 
     try:
-        with open(ACTIVE_SESSION_FILE, "r") as f:
+        with open(ACTIVE_SESSION_FILE) as f:
             session_id = f.read().strip()
 
         if session_id:
@@ -236,7 +232,7 @@ def list_sessions() -> str:
     if SESSIONS_DIR.exists():
         for session_file in SESSIONS_DIR.glob("*.json"):
             try:
-                with open(session_file, "r") as f:
+                with open(session_file) as f:
                     data = json.load(f)
                     sessions.append({
                         "session_id": data["session_id"],
@@ -254,7 +250,7 @@ def list_sessions() -> str:
     active_id = None
     if ACTIVE_SESSION_FILE.exists():
         try:
-            with open(ACTIVE_SESSION_FILE, "r") as f:
+            with open(ACTIVE_SESSION_FILE) as f:
                 active_id = f.read().strip()
         except Exception:
             pass
@@ -317,7 +313,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
             _session = None
 
         if ACTIVE_SESSION_FILE.exists():
-            with open(ACTIVE_SESSION_FILE, "r") as f:
+            with open(ACTIVE_SESSION_FILE) as f:
                 active_id = f.read().strip()
                 if active_id == session_id:
                     ACTIVE_SESSION_FILE.unlink()
@@ -1128,7 +1124,7 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
     # Build success criteria section
     criteria_section = []
     for criterion in goal.success_criteria:
-        crit_dict = criterion.model_dump() if hasattr(criterion, 'model_dump') else criterion.__dict__
+        crit_dict = criterion.model_dump() if hasattr(criterion, "model_dump") else criterion.__dict__
         criteria_section.append(
             f"**{crit_dict.get('description', 'N/A')}** (weight {crit_dict.get('weight', 1.0)})\n"
             f"- Metric: {crit_dict.get('metric', 'N/A')}\n"
@@ -1138,7 +1134,7 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
     # Build constraints section
     constraints_section = []
     for constraint in goal.constraints:
-        const_dict = constraint.model_dump() if hasattr(constraint, 'model_dump') else constraint.__dict__
+        const_dict = constraint.model_dump() if hasattr(constraint, "model_dump") else constraint.__dict__
         constraints_section.append(
             f"**{const_dict.get('description', 'N/A')}** ({const_dict.get('constraint_type', 'hard')})\n"
             f"- Category: {const_dict.get('category', 'N/A')}"
@@ -1389,10 +1385,10 @@ def export_graph() -> str:
     }
 
     # Add enrichment if present in goal
-    if hasattr(session.goal, 'success_criteria'):
+    if hasattr(session.goal, "success_criteria"):
         enriched_criteria = []
         for criterion in session.goal.success_criteria:
-            crit_dict = criterion.model_dump() if hasattr(criterion, 'model_dump') else criterion
+            crit_dict = criterion.model_dump() if hasattr(criterion, "model_dump") else criterion
             enriched_criteria.append(crit_dict)
         export_data["goal"]["success_criteria"] = enriched_criteria
 
@@ -2603,8 +2599,8 @@ def run_tests(
     By default, tests run in parallel using pytest-xdist with auto-detected worker count.
     Returns pass/fail summary with detailed results parsed from pytest output.
     """
-    import subprocess
     import re
+    import subprocess
 
     tests_dir = Path(agent_path) / "tests"
 
@@ -2776,8 +2772,8 @@ def debug_test(
     Re-runs the test with pytest -vvs to capture full output.
     Returns detailed failure information and suggestions.
     """
-    import subprocess
     import re
+    import subprocess
 
     # Derive agent_path from session if not provided
     if not agent_path and _session:
