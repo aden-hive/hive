@@ -52,13 +52,13 @@ class FileStorage:
         """Save a run to storage."""
         # Save full run using Pydantic's model_dump_json
         run_path = self.base_path / "runs" / f"{run.id}.json"
-        with open(run_path, "w") as f:
+        with open(run_path, "w", encoding="utf-8") as f:
             f.write(run.model_dump_json(indent=2))
 
         # Save summary
         summary = RunSummary.from_run(run)
         summary_path = self.base_path / "summaries" / f"{run.id}.json"
-        with open(summary_path, "w") as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             f.write(summary.model_dump_json(indent=2))
 
         # Update indexes
