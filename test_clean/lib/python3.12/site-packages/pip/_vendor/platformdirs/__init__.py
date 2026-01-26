@@ -19,18 +19,18 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import Literal
 
+if sys.platform == "win32":
+    from pip._vendor.platformdirs.windows import Windows as _Result
+elif sys.platform == "darwin":
+    from pip._vendor.platformdirs.macos import MacOS as _Result
+else:
+    from pip._vendor.platformdirs.unix import Unix as _Result
+
 
 def _set_platform_dir_class() -> type[PlatformDirsABC]:
-    if sys.platform == "win32":
-        from pip._vendor.platformdirs.windows import Windows as Result  # noqa: PLC0415
-    elif sys.platform == "darwin":
-        from pip._vendor.platformdirs.macos import MacOS as Result  # noqa: PLC0415
-    else:
-        from pip._vendor.platformdirs.unix import Unix as Result  # noqa: PLC0415
-
     if os.getenv("ANDROID_DATA") == "/data" and os.getenv("ANDROID_ROOT") == "/system":
         if os.getenv("SHELL") or os.getenv("PREFIX"):
-            return Result
+            return _Result
 
         from pip._vendor.platformdirs.android import _android_folder  # noqa: PLC0415
 
@@ -39,16 +39,20 @@ def _set_platform_dir_class() -> type[PlatformDirsABC]:
 
             return Android  # return to avoid redefinition of a result
 
-    return Result
+    return _Result
 
 
-PlatformDirs = _set_platform_dir_class()  #: Currently active platform
+if TYPE_CHECKING:
+    # Work around mypy issue: https://github.com/python/mypy/issues/10962
+    PlatformDirs = _Result
+else:
+    PlatformDirs = _set_platform_dir_class()  #: Currently active platform
 AppDirs = PlatformDirs  #: Backwards compatibility with appdirs
 
 
 def user_data_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     roaming: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -72,7 +76,7 @@ def user_data_dir(
 
 def site_data_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     multipath: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -96,7 +100,7 @@ def site_data_dir(
 
 def user_config_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     roaming: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -120,7 +124,7 @@ def user_config_dir(
 
 def site_config_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     multipath: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -144,7 +148,7 @@ def site_config_dir(
 
 def user_cache_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -168,7 +172,7 @@ def user_cache_dir(
 
 def site_cache_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -192,7 +196,7 @@ def site_cache_dir(
 
 def user_state_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     roaming: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -216,7 +220,7 @@ def user_state_dir(
 
 def user_log_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -270,7 +274,7 @@ def user_desktop_dir() -> str:
 
 def user_runtime_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -294,7 +298,7 @@ def user_runtime_dir(
 
 def site_runtime_dir(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -318,7 +322,7 @@ def site_runtime_dir(
 
 def user_data_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     roaming: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -342,7 +346,7 @@ def user_data_path(
 
 def site_data_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     multipath: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -366,7 +370,7 @@ def site_data_path(
 
 def user_config_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     roaming: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -390,7 +394,7 @@ def user_config_path(
 
 def site_config_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     multipath: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -414,7 +418,7 @@ def site_config_path(
 
 def site_cache_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -438,7 +442,7 @@ def site_cache_path(
 
 def user_cache_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -462,7 +466,7 @@ def user_cache_path(
 
 def user_state_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     roaming: bool = False,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -486,7 +490,7 @@ def user_state_path(
 
 def user_log_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -540,7 +544,7 @@ def user_desktop_path() -> Path:
 
 def user_runtime_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002
@@ -564,7 +568,7 @@ def user_runtime_path(
 
 def site_runtime_path(
     appname: str | None = None,
-    appauthor: str | None | Literal[False] = None,
+    appauthor: str | Literal[False] | None = None,
     version: str | None = None,
     opinion: bool = True,  # noqa: FBT001, FBT002
     ensure_exists: bool = False,  # noqa: FBT001, FBT002

@@ -1,4 +1,4 @@
-from typing import FrozenSet, Optional, Set
+from __future__ import annotations
 
 from pip._vendor.packaging.utils import canonicalize_name
 
@@ -12,8 +12,8 @@ class FormatControl:
 
     def __init__(
         self,
-        no_binary: Optional[Set[str]] = None,
-        only_binary: Optional[Set[str]] = None,
+        no_binary: set[str] | None = None,
+        only_binary: set[str] | None = None,
     ) -> None:
         if no_binary is None:
             no_binary = set()
@@ -36,7 +36,7 @@ class FormatControl:
         return f"{self.__class__.__name__}({self.no_binary}, {self.only_binary})"
 
     @staticmethod
-    def handle_mutual_excludes(value: str, target: Set[str], other: Set[str]) -> None:
+    def handle_mutual_excludes(value: str, target: set[str], other: set[str]) -> None:
         if value.startswith("-"):
             raise CommandError(
                 "--no-binary / --only-binary option requires 1 argument."
@@ -58,7 +58,7 @@ class FormatControl:
             other.discard(name)
             target.add(name)
 
-    def get_allowed_formats(self, canonical_name: str) -> FrozenSet[str]:
+    def get_allowed_formats(self, canonical_name: str) -> frozenset[str]:
         result = {"binary", "source"}
         if canonical_name in self.only_binary:
             result.discard("source")

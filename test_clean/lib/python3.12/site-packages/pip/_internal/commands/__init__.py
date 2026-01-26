@@ -2,9 +2,11 @@
 Package containing all pip commands
 """
 
+from __future__ import annotations
+
 import importlib
 from collections import namedtuple
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pip._internal.cli.base_command import Command
 
@@ -17,11 +19,16 @@ CommandInfo = namedtuple("CommandInfo", "module_path, class_name, summary")
 # Even though the module path starts with the same "pip._internal.commands"
 # prefix, the full path makes testing easier (specifically when modifying
 # `commands_dict` in test setup / teardown).
-commands_dict: Dict[str, CommandInfo] = {
+commands_dict: dict[str, CommandInfo] = {
     "install": CommandInfo(
         "pip._internal.commands.install",
         "InstallCommand",
         "Install packages.",
+    ),
+    "lock": CommandInfo(
+        "pip._internal.commands.lock",
+        "LockCommand",
+        "Generate a lock file.",
     ),
     "download": CommandInfo(
         "pip._internal.commands.download",
@@ -118,7 +125,7 @@ def create_command(name: str, **kwargs: Any) -> Command:
     return command
 
 
-def get_similar_commands(name: str) -> Optional[str]:
+def get_similar_commands(name: str) -> str | None:
     """Command name auto-correct."""
     from difflib import get_close_matches
 

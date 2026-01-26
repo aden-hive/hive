@@ -1,4 +1,4 @@
-from typing import Optional
+from __future__ import annotations
 
 from pip._internal.models.direct_url import ArchiveInfo, DirectUrl, DirInfo, VcsInfo
 from pip._internal.models.link import Link
@@ -37,7 +37,7 @@ def direct_url_for_editable(source_dir: str) -> DirectUrl:
 
 
 def direct_url_from_link(
-    link: Link, source_dir: Optional[str] = None, link_is_in_wheel_cache: bool = False
+    link: Link, source_dir: str | None = None, link_is_in_wheel_cache: bool = False
 ) -> DirectUrl:
     if link.is_vcs:
         vcs_backend = vcs.get_backend_for_scheme(link.scheme)

@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import importlib.metadata
 import os
-from typing import Any, Optional, Protocol, Tuple, cast
+from typing import Any, Protocol, cast
 
 from pip._vendor.packaging.utils import NormalizedName, canonicalize_name
 
@@ -30,11 +32,11 @@ class BasePath(Protocol):
         raise NotImplementedError()
 
     @property
-    def parent(self) -> "BasePath":
+    def parent(self) -> BasePath:
         raise NotImplementedError()
 
 
-def get_info_location(d: importlib.metadata.Distribution) -> Optional[BasePath]:
+def get_info_location(d: importlib.metadata.Distribution) -> BasePath | None:
     """Find the path to the distribution's metadata directory.
 
     HACK: This relies on importlib.metadata's private ``_path`` attribute. Not
@@ -48,7 +50,7 @@ def get_info_location(d: importlib.metadata.Distribution) -> Optional[BasePath]:
 
 def parse_name_and_version_from_info_directory(
     dist: importlib.metadata.Distribution,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """Get a name and version from the metadata directory name.
 
     This is much faster than reading distribution metadata.

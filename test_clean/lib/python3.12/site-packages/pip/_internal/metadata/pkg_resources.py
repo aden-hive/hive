@@ -1,16 +1,13 @@
+from __future__ import annotations
+
 import email.message
 import email.parser
 import logging
 import os
 import zipfile
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from typing import (
-    Collection,
-    Iterable,
-    Iterator,
-    List,
-    Mapping,
     NamedTuple,
-    Optional,
 )
 
 from pip._vendor import pkg_resources
@@ -73,7 +70,7 @@ class InMemoryMetadata:
     def metadata_isdir(self, name: str) -> bool:
         return False
 
-    def metadata_listdir(self, name: str) -> List[str]:
+    def metadata_listdir(self, name: str) -> list[str]:
         return []
 
     def run_script(self, script_name: str, namespace: str) -> None:
@@ -85,7 +82,7 @@ class Distribution(BaseDistribution):
         self._dist = dist
         # This is populated lazily, to avoid loading metadata for all possible
         # distributions eagerly.
-        self.__extra_mapping: Optional[Mapping[NormalizedName, str]] = None
+        self.__extra_mapping: Mapping[NormalizedName, str] | None = None
 
     @property
     def _extra_mapping(self) -> Mapping[NormalizedName, str]:
@@ -155,11 +152,11 @@ class Distribution(BaseDistribution):
         return cls(dist)
 
     @property
-    def location(self) -> Optional[str]:
+    def location(self) -> str | None:
         return self._dist.location
 
     @property
-    def installed_location(self) -> Optional[str]:
+    def installed_location(self) -> str | None:
         egg_link = egg_link_path_from_location(self.raw_name)
         if egg_link:
             location = egg_link
@@ -170,7 +167,7 @@ class Distribution(BaseDistribution):
         return normalize_path(location)
 
     @property
-    def info_location(self) -> Optional[str]:
+    def info_location(self) -> str | None:
         return self._dist.egg_info
 
     @property
@@ -259,14 +256,14 @@ class Environment(BaseEnvironment):
         return cls(pkg_resources.working_set)
 
     @classmethod
-    def from_paths(cls, paths: Optional[List[str]]) -> BaseEnvironment:
+    def from_paths(cls, paths: list[str] | None) -> BaseEnvironment:
         return cls(pkg_resources.WorkingSet(paths))
 
     def _iter_distributions(self) -> Iterator[BaseDistribution]:
         for dist in self._ws:
             yield Distribution(dist)
 
-    def _search_distribution(self, name: str) -> Optional[BaseDistribution]:
+    def _search_distribution(self, name: str) -> BaseDistribution | None:
         """Find a distribution matching the ``name`` in the environment.
 
         This searches from *all* distributions available in the environment, to
@@ -278,7 +275,7 @@ class Environment(BaseEnvironment):
                 return dist
         return None
 
-    def get_distribution(self, name: str) -> Optional[BaseDistribution]:
+    def get_distribution(self, name: str) -> BaseDistribution | None:
         # Search the distribution by looking through the working set.
         dist = self._search_distribution(name)
         if dist:

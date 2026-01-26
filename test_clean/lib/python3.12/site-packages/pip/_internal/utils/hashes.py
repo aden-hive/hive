@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import hashlib
-from typing import TYPE_CHECKING, BinaryIO, Dict, Iterable, List, NoReturn, Optional
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, BinaryIO, NoReturn
 
 from pip._internal.exceptions import HashMismatch, HashMissing, InstallationError
 from pip._internal.utils.misc import read_chunks
@@ -24,7 +27,7 @@ class Hashes:
 
     """
 
-    def __init__(self, hashes: Optional[Dict[str, List[str]]] = None) -> None:
+    def __init__(self, hashes: dict[str, list[str]] | None = None) -> None:
         """
         :param hashes: A dict of algorithm names pointing to lists of allowed
             hex digests
@@ -36,7 +39,7 @@ class Hashes:
                 allowed[alg] = [k.lower() for k in sorted(keys)]
         self._allowed = allowed
 
-    def __and__(self, other: "Hashes") -> "Hashes":
+    def __and__(self, other: Hashes) -> Hashes:
         if not isinstance(other, Hashes):
             return NotImplemented
 
@@ -86,7 +89,7 @@ class Hashes:
                 return
         self._raise(gots)
 
-    def _raise(self, gots: Dict[str, "_Hash"]) -> "NoReturn":
+    def _raise(self, gots: dict[str, _Hash]) -> NoReturn:
         raise HashMismatch(self._allowed, gots)
 
     def check_against_file(self, file: BinaryIO) -> None:
@@ -101,7 +104,7 @@ class Hashes:
         with open(path, "rb") as file:
             return self.check_against_file(file)
 
-    def has_one_of(self, hashes: Dict[str, str]) -> bool:
+    def has_one_of(self, hashes: dict[str, str]) -> bool:
         """Return whether any of the given hashes are allowed."""
         for hash_name, hex_digest in hashes.items():
             if self.is_hash_allowed(hash_name, hex_digest):
@@ -143,5 +146,5 @@ class MissingHashes(Hashes):
         # empty list, it will never match, so an error will always raise.
         super().__init__(hashes={FAVORITE_HASH: []})
 
-    def _raise(self, gots: Dict[str, "_Hash"]) -> "NoReturn":
+    def _raise(self, gots: dict[str, _Hash]) -> NoReturn:
         raise HashMissing(gots[FAVORITE_HASH].hexdigest())

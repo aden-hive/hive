@@ -1,11 +1,5 @@
-import sys
 from itertools import chain
-from typing import TYPE_CHECKING, Iterable, Optional
-
-if sys.version_info >= (3, 8):
-    from typing import Literal
-else:
-    from pip._vendor.typing_extensions import Literal  # pragma: no cover
+from typing import TYPE_CHECKING, Iterable, Optional, Literal
 
 from .constrain import Constrain
 from .jupyter import JupyterMixin
@@ -240,6 +234,7 @@ class VerticalCenter(JupyterMixin):
 
     Args:
         renderable (RenderableType): A renderable object.
+        style (StyleType, optional): An optional style to apply to the background. Defaults to None.
     """
 
     def __init__(

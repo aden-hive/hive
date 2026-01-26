@@ -1,14 +1,30 @@
+from __future__ import annotations
+
 import contextlib
 import itertools
 import logging
 import sys
 import time
-from typing import IO, Generator, Optional
+from collections.abc import Generator
+from typing import IO, Final
+
+from pip._vendor.rich.console import (
+    Console,
+    ConsoleOptions,
+    RenderableType,
+    RenderResult,
+)
+from pip._vendor.rich.live import Live
+from pip._vendor.rich.measure import Measurement
+from pip._vendor.rich.text import Text
 
 from pip._internal.utils.compat import WINDOWS
-from pip._internal.utils.logging import get_indentation
+from pip._internal.utils.logging import get_console, get_indentation
 
 logger = logging.getLogger(__name__)
+
+SPINNER_CHARS: Final = r"-\|/"
+SPINS_PER_SECOND: Final = 8
 
 
 class SpinnerInterface:
@@ -23,10 +39,10 @@ class InteractiveSpinner(SpinnerInterface):
     def __init__(
         self,
         message: str,
-        file: Optional[IO[str]] = None,
-        spin_chars: str = "-\\|/",
+        file: IO[str] | None = None,
+        spin_chars: str = SPINNER_CHARS,
         # Empirically, 8 updates/second looks nice
-        min_update_interval_seconds: float = 0.125,
+        min_update_interval_seconds: float = 1 / SPINS_PER_SECOND,
     ):
         self._message = message
         if file is None:
@@ -134,6 +150,66 @@ def open_spinner(message: str) -> Generator[SpinnerInterface, None, None]:
         raise
     else:
         spinner.finish("done")
+
+
+class _PipRichSpinner:
+    """
+    Custom rich spinner that matches the style of the legacy spinners.
+
+    (*) Updates will be handled in a background thread by a rich live panel
+        which will call render() automatically at the appropriate time.
+    """
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self._spin_cycle = itertools.cycle(SPINNER_CHARS)
+        self._spinner_text = ""
+        self._finished = False
+        self._indent = get_indentation() * " "
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        yield self.render()
+
+    def __rich_measure__(
+        self, console: Console, options: ConsoleOptions
+    ) -> Measurement:
+        text = self.render()
+        return Measurement.get(console, options, text)
+
+    def render(self) -> RenderableType:
+        if not self._finished:
+            self._spinner_text = next(self._spin_cycle)
+
+        return Text.assemble(self._indent, self.label, " ... ", self._spinner_text)
+
+    def finish(self, status: str) -> None:
+        """Stop spinning and set a final status message."""
+        self._spinner_text = status
+        self._finished = True
+
+
+@contextlib.contextmanager
+def open_rich_spinner(label: str, console: Console | None = None) -> Generator[None]:
+    if not logger.isEnabledFor(logging.INFO):
+        # Don't show spinner if --quiet is given.
+        yield
+        return
+
+    console = console or get_console()
+    spinner = _PipRichSpinner(label)
+    with Live(spinner, refresh_per_second=SPINS_PER_SECOND, console=console):
+        try:
+            yield
+        except KeyboardInterrupt:
+            spinner.finish("canceled")
+            raise
+        except Exception:
+            spinner.finish("error")
+            raise
+        else:
+            spinner.finish("done")
 
 
 HIDE_CURSOR = "\x1b[?25l"

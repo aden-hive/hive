@@ -1,20 +1,18 @@
+from __future__ import annotations
+
 import errno
 import itertools
 import logging
 import os.path
 import tempfile
 import traceback
+from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import (
     Any,
     Callable,
-    Dict,
-    Generator,
-    List,
-    Optional,
     TypeVar,
-    Union,
 )
 
 from pip._internal.utils.misc import enum, rmtree
@@ -33,7 +31,7 @@ tempdir_kinds = enum(
 )
 
 
-_tempdir_manager: Optional[ExitStack] = None
+_tempdir_manager: ExitStack | None = None
 
 
 @contextmanager
@@ -51,7 +49,7 @@ class TempDirectoryTypeRegistry:
     """Manages temp directory behavior"""
 
     def __init__(self) -> None:
-        self._should_delete: Dict[str, bool] = {}
+        self._should_delete: dict[str, bool] = {}
 
     def set_delete(self, kind: str, value: bool) -> None:
         """Indicate whether a TempDirectory of the given kind should be
@@ -66,7 +64,7 @@ class TempDirectoryTypeRegistry:
         return self._should_delete.get(kind, True)
 
 
-_tempdir_registry: Optional[TempDirectoryTypeRegistry] = None
+_tempdir_registry: TempDirectoryTypeRegistry | None = None
 
 
 @contextmanager
@@ -113,8 +111,8 @@ class TempDirectory:
 
     def __init__(
         self,
-        path: Optional[str] = None,
-        delete: Union[bool, None, _Default] = _default,
+        path: str | None = None,
+        delete: bool | None | _Default = _default,
         kind: str = "temp",
         globally_managed: bool = False,
         ignore_cleanup_errors: bool = True,
@@ -184,7 +182,7 @@ class TempDirectory:
         if not os.path.exists(self._path):
             return
 
-        errors: List[BaseException] = []
+        errors: list[BaseException] = []
 
         def onerror(
             func: Callable[..., Any],
@@ -245,7 +243,7 @@ class AdjacentTempDirectory(TempDirectory):
     # with leading '-' and invalid metadata
     LEADING_CHARS = "-~.=%0123456789"
 
-    def __init__(self, original: str, delete: Optional[bool] = None) -> None:
+    def __init__(self, original: str, delete: bool | None = None) -> None:
         self.original = original.rstrip("/\\")
         super().__init__(delete=delete)
 

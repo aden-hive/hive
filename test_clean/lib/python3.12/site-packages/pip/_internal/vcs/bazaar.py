@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 import logging
-from typing import List, Optional, Tuple
 
 from pip._internal.utils.misc import HiddenText, display_path
 from pip._internal.utils.subprocess import make_command
@@ -30,7 +31,7 @@ class Bazaar(VersionControl):
     )
 
     @staticmethod
-    def get_base_rev_args(rev: str) -> List[str]:
+    def get_base_rev_args(rev: str) -> list[str]:
         return ["-r", rev]
 
     def fetch_new(
@@ -54,24 +55,41 @@ class Bazaar(VersionControl):
         )
         self.run_command(cmd_args)
 
-    def switch(self, dest: str, url: HiddenText, rev_options: RevOptions) -> None:
+    def switch(
+        self,
+        dest: str,
+        url: HiddenText,
+        rev_options: RevOptions,
+        verbosity: int = 0,
+    ) -> None:
         self.run_command(make_command("switch", url), cwd=dest)
 
-    def update(self, dest: str, url: HiddenText, rev_options: RevOptions) -> None:
+    def update(
+        self,
+        dest: str,
+        url: HiddenText,
+        rev_options: RevOptions,
+        verbosity: int = 0,
+    ) -> None:
+        flags = []
+
+        if verbosity <= 0:
+            flags.append("-q")
+
         output = self.run_command(
             make_command("info"), show_stdout=False, stdout_only=True, cwd=dest
         )
         if output.startswith("Standalone "):
             # Older versions of pip used to create standalone branches.
             # Convert the standalone branch to a checkout by calling "bzr bind".
-            cmd_args = make_command("bind", "-q", url)
+            cmd_args = make_command("bind", *flags, url)
             self.run_command(cmd_args, cwd=dest)
 
-        cmd_args = make_command("update", "-q", rev_options.to_args())
+        cmd_args = make_command("update", *flags, rev_options.to_args())
         self.run_command(cmd_args, cwd=dest)
 
     @classmethod
-    def get_url_rev_and_auth(cls, url: str) -> Tuple[str, Optional[str], AuthInfo]:
+    def get_url_rev_and_auth(cls, url: str) -> tuple[str, str | None, AuthInfo]:
         # hotfix the URL scheme after removing bzr+ from bzr+ssh:// re-add it
         url, rev, user_pass = super().get_url_rev_and_auth(url)
         if url.startswith("ssh://"):
@@ -104,7 +122,7 @@ class Bazaar(VersionControl):
         return revision.splitlines()[-1]
 
     @classmethod
-    def is_commit_id_equal(cls, dest: str, name: Optional[str]) -> bool:
+    def is_commit_id_equal(cls, dest: str, name: str | None) -> bool:
         """Always assume the versions don't match"""
         return False
 

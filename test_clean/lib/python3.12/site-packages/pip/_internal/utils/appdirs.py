@@ -8,7 +8,6 @@ and eventually drop this after all usages are changed.
 
 import os
 import sys
-from typing import List
 
 from pip._vendor import platformdirs as _appdirs
 
@@ -40,9 +39,10 @@ def user_config_dir(appname: str, roaming: bool = True) -> str:
 
 # for the discussion regarding site_config_dir locations
 # see <https://github.com/pypa/pip/issues/1733>
-def site_config_dirs(appname: str) -> List[str]:
+def site_config_dirs(appname: str) -> list[str]:
     if sys.platform == "darwin":
-        return [_appdirs.site_data_dir(appname, appauthor=False, multipath=True)]
+        dirval = _appdirs.site_data_dir(appname, appauthor=False, multipath=True)
+        return dirval.split(os.pathsep)
 
     dirval = _appdirs.site_config_dir(appname, appauthor=False, multipath=True)
     if sys.platform == "win32":

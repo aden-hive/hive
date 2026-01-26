@@ -100,7 +100,7 @@ from pip._vendor.platformdirs import user_cache_dir as _user_cache_dir
 
 if TYPE_CHECKING:
     from _typeshed import BytesPath, StrPath, StrOrBytesPath
-    from pip._vendor.typing_extensions import Self
+    from typing_extensions import Self
 
 
 # Patch: Remove deprecation warning from vendored pkg_resources.

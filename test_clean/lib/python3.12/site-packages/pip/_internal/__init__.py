@@ -1,4 +1,4 @@
-from typing import List, Optional
+from __future__ import annotations
 
 from pip._internal.utils import _log
 
@@ -7,7 +7,7 @@ from pip._internal.utils import _log
 _log.init_logging()
 
 
-def main(args: Optional[List[str]] = None) -> int:
+def main(args: list[str] | None = None) -> int:
     """This is preserved for old console scripts that may still be referencing
     it.
 

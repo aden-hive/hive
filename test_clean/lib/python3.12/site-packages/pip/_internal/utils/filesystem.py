@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 import fnmatch
 import os
 import os.path
 import random
 import sys
+from collections.abc import Generator
 from contextlib import contextmanager
 from tempfile import NamedTemporaryFile
-from typing import Any, BinaryIO, Generator, List, Union, cast
+from typing import Any, BinaryIO, cast
 
 from pip._internal.utils.compat import get_path_uid
 from pip._internal.utils.misc import format_size
@@ -115,17 +118,17 @@ def _test_writable_dir_win(path: str) -> bool:
     raise OSError("Unexpected condition testing for writable directory")
 
 
-def find_files(path: str, pattern: str) -> List[str]:
+def find_files(path: str, pattern: str) -> list[str]:
     """Returns a list of absolute paths of files beneath path, recursively,
     with filenames which match the UNIX-style shell glob pattern."""
-    result: List[str] = []
+    result: list[str] = []
     for root, _, files in os.walk(path):
         matches = fnmatch.filter(files, pattern)
         result.extend(os.path.join(root, f) for f in matches)
     return result
 
 
-def file_size(path: str) -> Union[int, float]:
+def file_size(path: str) -> int | float:
     # If it's a symlink, return 0.
     if os.path.islink(path):
         return 0
@@ -136,7 +139,7 @@ def format_file_size(path: str) -> str:
     return format_size(file_size(path))
 
 
-def directory_size(path: str) -> Union[int, float]:
+def directory_size(path: str) -> int | float:
     size = 0.0
     for root, _dirs, files in os.walk(path):
         for filename in files:
@@ -147,3 +150,15 @@ def directory_size(path: str) -> Union[int, float]:
 
 def format_directory_size(path: str) -> str:
     return format_size(directory_size(path))
+
+
+def copy_directory_permissions(directory: str, target_file: BinaryIO) -> None:
+    mode = (
+        os.stat(directory).st_mode & 0o666  # select read/write permissions of directory
+        | 0o600  # set owner read/write permissions
+    )
+    # Change permissions only if there is no risk of following a symlink.
+    if os.chmod in os.supports_fd:
+        os.chmod(target_file.fileno(), mode)
+    elif os.chmod in os.supports_follow_symlinks:
+        os.chmod(target_file.name, mode, follow_symlinks=False)

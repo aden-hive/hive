@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import logging
 import os
 import re
 import site
 import sys
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 _INCLUDE_SYSTEM_SITE_PACKAGES_REGEX = re.compile(
@@ -33,7 +34,7 @@ def running_under_virtualenv() -> bool:
     return _running_under_venv() or _running_under_legacy_virtualenv()
 
 
-def _get_pyvenv_cfg_lines() -> Optional[List[str]]:
+def _get_pyvenv_cfg_lines() -> list[str] | None:
     """Reads {sys.prefix}/pyvenv.cfg and returns its contents as list of lines
 
     Returns None, if it could not read/access the file.

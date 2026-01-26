@@ -1,21 +1,18 @@
-"""Filetype information.
-"""
-
-from typing import Tuple
+"""Filetype information."""
 
 from pip._internal.utils.misc import splitext
 
 WHEEL_EXTENSION = ".whl"
-BZ2_EXTENSIONS: Tuple[str, ...] = (".tar.bz2", ".tbz")
-XZ_EXTENSIONS: Tuple[str, ...] = (
+BZ2_EXTENSIONS: tuple[str, ...] = (".tar.bz2", ".tbz")
+XZ_EXTENSIONS: tuple[str, ...] = (
     ".tar.xz",
     ".txz",
     ".tlz",
     ".tar.lz",
     ".tar.lzma",
 )
-ZIP_EXTENSIONS: Tuple[str, ...] = (".zip", WHEEL_EXTENSION)
-TAR_EXTENSIONS: Tuple[str, ...] = (".tar.gz", ".tgz", ".tar")
+ZIP_EXTENSIONS: tuple[str, ...] = (".zip", WHEEL_EXTENSION)
+TAR_EXTENSIONS: tuple[str, ...] = (".tar.gz", ".tgz", ".tar")
 ARCHIVE_EXTENSIONS = ZIP_EXTENSIONS + BZ2_EXTENSIONS + TAR_EXTENSIONS + XZ_EXTENSIONS
 
 

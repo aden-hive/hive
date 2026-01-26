@@ -1,4 +1,5 @@
-from typing import Any, Dict, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from pip._vendor.packaging.markers import default_environment
 
@@ -11,7 +12,7 @@ class InstallationReport:
         self._install_requirements = install_requirements
 
     @classmethod
-    def _install_req_to_dict(cls, ireq: InstallRequirement) -> Dict[str, Any]:
+    def _install_req_to_dict(cls, ireq: InstallRequirement) -> dict[str, Any]:
         assert ireq.download_info, f"No download_info for {ireq}"
         res = {
             # PEP 610 json for the download URL. download_info.archive_info.hashes may
@@ -39,7 +40,7 @@ class InstallationReport:
             res["requested_extras"] = sorted(ireq.extras)
         return res
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "version": "1",
             "pip_version": __version__,

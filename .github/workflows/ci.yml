@@ -35,15 +35,20 @@ jobs:
           ruff check .
 
   test:
-    name: Test Python Framework
-    runs-on: ubuntu-latest
+    name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
       - name: Install dependencies
@@ -51,6 +56,9 @@ jobs:
           cd core
           pip install -e .
           pip install -r requirements-dev.txt
+
+      - name: Verify openai and litellm compatibility
+        run: python -c "import litellm; import openai; print(f'openai: {openai.__version__}'); print('OK')"
 
       - name: Run tests
         run: |

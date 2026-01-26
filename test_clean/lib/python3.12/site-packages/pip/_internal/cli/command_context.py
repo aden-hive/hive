@@ -1,5 +1,6 @@
-from contextlib import ExitStack, contextmanager
-from typing import ContextManager, Generator, TypeVar
+from collections.abc import Generator
+from contextlib import AbstractContextManager, ExitStack, contextmanager
+from typing import TypeVar
 
 _T = TypeVar("_T", covariant=True)
 
@@ -21,7 +22,7 @@ class CommandContextMixIn:
         finally:
             self._in_main_context = False
 
-    def enter_context(self, context_provider: ContextManager[_T]) -> _T:
+    def enter_context(self, context_provider: AbstractContextManager[_T]) -> _T:
         assert self._in_main_context
 
         return self._main_context.enter_context(context_provider)

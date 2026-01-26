@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 import logging
+import string
+from collections.abc import Generator, Iterable, Iterator
 from optparse import Values
-from typing import Generator, Iterable, Iterator, List, NamedTuple, Optional
+from typing import NamedTuple
 
 from pip._vendor.packaging.requirements import InvalidRequirement
 from pip._vendor.packaging.utils import canonicalize_name
@@ -11,6 +15,13 @@ from pip._internal.metadata import BaseDistribution, get_default_environment
 from pip._internal.utils.misc import write_output
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_project_url_label(label: str) -> str:
+    # This logic is from PEP 753 (Well-known Project URLs in Metadata).
+    chars_to_remove = string.punctuation + string.whitespace
+    removal_map = str.maketrans("", "", chars_to_remove)
+    return label.translate(removal_map).lower()
 
 
 class ShowCommand(Command):
@@ -36,7 +47,7 @@ class ShowCommand(Command):
 
         self.parser.insert_option_group(0, self.cmd_opts)
 
-    def run(self, options: Values, args: List[str]) -> int:
+    def run(self, options: Values, args: list[str]) -> int:
         if not args:
             logger.warning("ERROR: Please provide a package name or names.")
             return ERROR
@@ -54,23 +65,24 @@ class _PackageInfo(NamedTuple):
     name: str
     version: str
     location: str
-    editable_project_location: Optional[str]
-    requires: List[str]
-    required_by: List[str]
+    editable_project_location: str | None
+    requires: list[str]
+    required_by: list[str]
     installer: str
     metadata_version: str
-    classifiers: List[str]
+    classifiers: list[str]
     summary: str
     homepage: str
-    project_urls: List[str]
+    project_urls: list[str]
     author: str
     author_email: str
     license: str
-    entry_points: List[str]
-    files: Optional[List[str]]
+    license_expression: str
+    entry_points: list[str]
+    files: list[str] | None
 
 
-def search_packages_info(query: List[str]) -> Generator[_PackageInfo, None, None]:
+def search_packages_info(query: list[str]) -> Generator[_PackageInfo, None, None]:
     """
     Gather details from installed distributions. Print distribution name,
     version, location, and installed files. Installed files requires a
@@ -123,7 +135,7 @@ def search_packages_info(query: List[str]) -> Generator[_PackageInfo, None, None
 
         files_iter = dist.iter_declared_entries()
         if files_iter is None:
-            files: Optional[List[str]] = None
+            files: list[str] | None = None
         else:
             files = sorted(files_iter)
 
@@ -134,13 +146,9 @@ def search_packages_info(query: List[str]) -> Generator[_PackageInfo, None, None
         if not homepage:
             # It's common that there is a "homepage" Project-URL, but Home-page
             # remains unset (especially as PEP 621 doesn't surface the field).
-            #
-            # This logic was taken from PyPI's codebase.
             for url in project_urls:
                 url_label, url = url.split(",", maxsplit=1)
-                normalized_label = (
-                    url_label.casefold().replace("-", "").replace("_", "").strip()
-                )
+                normalized_label = normalize_project_url_label(url_label)
                 if normalized_label == "homepage":
                     homepage = url.strip()
                     break
@@ -161,6 +169,7 @@ def search_packages_info(query: List[str]) -> Generator[_PackageInfo, None, None
             author=metadata.get("Author", ""),
             author_email=metadata.get("Author-email", ""),
             license=metadata.get("License", ""),
+            license_expression=metadata.get("License-Expression", ""),
             entry_points=entry_points,
             files=files,
         )
@@ -180,13 +189,18 @@ def print_results(
         if i > 0:
             write_output("---")
 
+        metadata_version_tuple = tuple(map(int, dist.metadata_version.split(".")))
+
         write_output("Name: %s", dist.name)
         write_output("Version: %s", dist.version)
         write_output("Summary: %s", dist.summary)
         write_output("Home-page: %s", dist.homepage)
         write_output("Author: %s", dist.author)
         write_output("Author-email: %s", dist.author_email)
-        write_output("License: %s", dist.license)
+        if metadata_version_tuple >= (2, 4) and dist.license_expression:
+            write_output("License-Expression: %s", dist.license_expression)
+        else:
+            write_output("License: %s", dist.license)
         write_output("Location: %s", dist.location)
         if dist.editable_project_location is not None:
             write_output(

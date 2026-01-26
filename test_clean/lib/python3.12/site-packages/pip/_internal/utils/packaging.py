@@ -1,18 +1,17 @@
+from __future__ import annotations
+
 import functools
 import logging
-import re
-from typing import NewType, Optional, Tuple, cast
 
 from pip._vendor.packaging import specifiers, version
 from pip._vendor.packaging.requirements import Requirement
 
-NormalizedExtra = NewType("NormalizedExtra", str)
-
 logger = logging.getLogger(__name__)
 
 
+@functools.lru_cache(maxsize=32)
 def check_requires_python(
-    requires_python: Optional[str], version_info: Tuple[int, ...]
+    requires_python: str | None, version_info: tuple[int, ...]
 ) -> bool:
     """
     Check if the given Python version matches a "Requires-Python" specifier.
@@ -34,7 +33,7 @@ def check_requires_python(
     return python_version in requires_python_specifier
 
 
-@functools.lru_cache(maxsize=2048)
+@functools.lru_cache(maxsize=10000)
 def get_requirement(req_string: str) -> Requirement:
     """Construct a packaging.Requirement object with caching"""
     # Parsing requirement strings is expensive, and is also expected to happen
@@ -43,15 +42,3 @@ def get_requirement(req_string: str) -> Requirement:
     # minimize repeated parsing of the same string to construct equivalent
     # Requirement objects.
     return Requirement(req_string)
-
-
-def safe_extra(extra: str) -> NormalizedExtra:
-    """Convert an arbitrary string to a standard 'extra' name
-
-    Any runs of non-alphanumeric characters are replaced with a single '_',
-    and the result is always lowercased.
-
-    This function is duplicated from ``pkg_resources``. Note that this is not
-    the same to either ``canonicalize_name`` or ``_egg_link_name``.
-    """
-    return cast(NormalizedExtra, re.sub("[^A-Za-z0-9.-]+", "_", extra).lower())

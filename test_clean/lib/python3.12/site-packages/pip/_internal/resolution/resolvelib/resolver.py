@@ -1,15 +1,18 @@
+from __future__ import annotations
+
 import contextlib
 import functools
 import logging
 import os
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, cast
 
 from pip._vendor.packaging.utils import canonicalize_name
-from pip._vendor.resolvelib import BaseReporter, ResolutionImpossible
+from pip._vendor.resolvelib import BaseReporter, ResolutionImpossible, ResolutionTooDeep
 from pip._vendor.resolvelib import Resolver as RLResolver
 from pip._vendor.resolvelib.structs import DirectedGraph
 
 from pip._internal.cache import WheelCache
+from pip._internal.exceptions import ResolutionTooDeepError
 from pip._internal.index.package_finder import PackageFinder
 from pip._internal.operations.prepare import RequirementPreparer
 from pip._internal.req.constructors import install_req_extend_extras
@@ -42,7 +45,7 @@ class Resolver(BaseResolver):
         self,
         preparer: RequirementPreparer,
         finder: PackageFinder,
-        wheel_cache: Optional[WheelCache],
+        wheel_cache: WheelCache | None,
         make_install_req: InstallRequirementProvider,
         use_user_site: bool,
         ignore_dependencies: bool,
@@ -50,7 +53,7 @@ class Resolver(BaseResolver):
         ignore_requires_python: bool,
         force_reinstall: bool,
         upgrade_strategy: str,
-        py_version_info: Optional[Tuple[int, ...]] = None,
+        py_version_info: tuple[int, ...] | None = None,
     ):
         super().__init__()
         assert upgrade_strategy in self._allowed_strategies
@@ -68,10 +71,10 @@ class Resolver(BaseResolver):
         )
         self.ignore_dependencies = ignore_dependencies
         self.upgrade_strategy = upgrade_strategy
-        self._result: Optional[Result] = None
+        self._result: Result | None = None
 
     def resolve(
-        self, root_reqs: List[InstallRequirement], check_supported_wheels: bool
+        self, root_reqs: list[InstallRequirement], check_supported_wheels: bool
     ) -> RequirementSet:
         collected = self.factory.collect_root_requirements(root_reqs)
         provider = PipProvider(
@@ -82,9 +85,10 @@ class Resolver(BaseResolver):
             user_requested=collected.user_requested,
         )
         if "PIP_RESOLVER_DEBUG" in os.environ:
-            reporter: BaseReporter = PipDebuggingReporter()
+            reporter: BaseReporter[Requirement, Candidate, str] = PipDebuggingReporter()
         else:
-            reporter = PipReporter()
+            reporter = PipReporter(constraints=provider.constraints)
+
         resolver: RLResolver[Requirement, Candidate, str] = RLResolver(
             provider,
             reporter,
@@ -102,6 +106,8 @@ class Resolver(BaseResolver):
                 collected.constraints,
             )
             raise error from e
+        except ResolutionTooDeep:
+            raise ResolutionTooDeepError from None
 
         req_set = RequirementSet(check_supported_wheels=check_supported_wheels)
         # process candidates with extras last to ensure their base equivalent is
@@ -175,16 +181,11 @@ class Resolver(BaseResolver):
 
             req_set.add_named_requirement(ireq)
 
-        reqs = req_set.all_requirements
-        self.factory.preparer.prepare_linked_requirements_more(reqs)
-        for req in reqs:
-            req.prepared = True
-            req.needs_more_preparation = False
         return req_set
 
     def get_installation_order(
         self, req_set: RequirementSet
-    ) -> List[InstallRequirement]:
+    ) -> list[InstallRequirement]:
         """Get order for installation of requirements in RequirementSet.
 
         The returned list contains a requirement before another that depends on
@@ -215,8 +216,8 @@ class Resolver(BaseResolver):
 
 
 def get_topological_weights(
-    graph: "DirectedGraph[Optional[str]]", requirement_keys: Set[str]
-) -> Dict[Optional[str], int]:
+    graph: DirectedGraph[str | None], requirement_keys: set[str]
+) -> dict[str | None, int]:
     """Assign weights to each node based on how "deep" they are.
 
     This implementation may change at any point in the future without prior
@@ -242,12 +243,23 @@ def get_topological_weights(
     We are only interested in the weights of packages that are in the
     requirement_keys.
     """
-    path: Set[Optional[str]] = set()
-    weights: Dict[Optional[str], int] = {}
+    path: set[str | None] = set()
+    weights: dict[str | None, list[int]] = {}
 
-    def visit(node: Optional[str]) -> None:
+    def visit(node: str | None) -> None:
         if node in path:
             # We hit a cycle, so we'll break it here.
+            return
+
+        # The walk is exponential and for pathologically connected graphs (which
+        # are the ones most likely to contain cycles in the first place) it can
+        # take until the heat-death of the universe. To counter this we limit
+        # the number of attempts to visit (i.e. traverse through) any given
+        # node. We choose a value here which gives decent enough coverage for
+        # fairly well behaved graphs, and still limits the walk complexity to be
+        # linear in nature.
+        cur_weights = weights.get(node, [])
+        if len(cur_weights) >= 5:
             return
 
         # Time to visit the children!
@@ -259,14 +271,14 @@ def get_topological_weights(
         if node not in requirement_keys:
             return
 
-        last_known_parent_count = weights.get(node, 0)
-        weights[node] = max(last_known_parent_count, len(path))
+        cur_weights.append(len(path))
+        weights[node] = cur_weights
 
-    # Simplify the graph, pruning leaves that have no dependencies.
-    # This is needed for large graphs (say over 200 packages) because the
-    # `visit` function is exponentially slower then, taking minutes.
+    # Simplify the graph, pruning leaves that have no dependencies. This is
+    # needed for large graphs (say over 200 packages) because the `visit`
+    # function is slower for large/densely connected graphs, taking minutes.
     # See https://github.com/pypa/pip/issues/10557
-    # We will loop until we explicitly break the loop.
+    # We repeat the pruning step until we have no more leaves to remove.
     while True:
         leaves = set()
         for key in graph:
@@ -286,12 +298,13 @@ def get_topological_weights(
         for leaf in leaves:
             if leaf not in requirement_keys:
                 continue
-            weights[leaf] = weight
+            weights[leaf] = [weight]
         # Remove the leaves from the graph, making it simpler.
         for leaf in leaves:
             graph.remove(leaf)
 
-    # Visit the remaining graph.
+    # Visit the remaining graph, this will only have nodes to handle if the
+    # graph had a cycle in it, which the pruning step above could not handle.
     # `None` is guaranteed to be the root node by resolvelib.
     visit(None)
 
@@ -300,13 +313,15 @@ def get_topological_weights(
     difference = set(weights.keys()).difference(requirement_keys)
     assert not difference, difference
 
-    return weights
+    # Now give back all the weights, choosing the largest ones from what we
+    # accumulated.
+    return {node: max(wgts) for (node, wgts) in weights.items()}
 
 
 def _req_set_item_sorter(
-    item: Tuple[str, InstallRequirement],
-    weights: Dict[Optional[str], int],
-) -> Tuple[int, str]:
+    item: tuple[str, InstallRequirement],
+    weights: dict[str | None, int],
+) -> tuple[int, str]:
     """Key function used to sort install requirements for installation.
 
     Based on the "weight" mapping calculated in ``get_installation_order()``.

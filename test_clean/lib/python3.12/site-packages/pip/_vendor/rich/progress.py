@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 import io
-import sys
 import typing
 import warnings
 from abc import ABC, abstractmethod
@@ -14,6 +15,7 @@ from os import PathLike, stat
 from threading import Event, RLock, Thread
 from types import TracebackType
 from typing import (
+    TYPE_CHECKING,
     Any,
     BinaryIO,
     Callable,
@@ -23,10 +25,10 @@ from typing import (
     Generic,
     Iterable,
     List,
+    Literal,
     NamedTuple,
     NewType,
     Optional,
-    Sequence,
     TextIO,
     Tuple,
     Type,
@@ -34,10 +36,9 @@ from typing import (
     Union,
 )
 
-if sys.version_info >= (3, 8):
-    from typing import Literal
-else:
-    from pip._vendor.typing_extensions import Literal  # pragma: no cover
+if TYPE_CHECKING:
+    # Can be replaced with `from typing import Self` in Python 3.11+
+    from typing_extensions import Self  # pragma: no cover
 
 from . import filesize, get_console
 from .console import Console, Group, JustifyMethod, RenderableType
@@ -70,7 +71,7 @@ class _TrackThread(Thread):
         self.done = Event()
 
         self.completed = 0
-        super().__init__()
+        super().__init__(daemon=True)
 
     def run(self) -> None:
         task_id = self.task_id
@@ -78,7 +79,7 @@ class _TrackThread(Thread):
         update_period = self.update_period
         last_completed = 0
         wait = self.done.wait
-        while not wait(update_period):
+        while not wait(update_period) and self.progress.live.is_started:
             completed = self.completed
             if last_completed != completed:
                 advance(task_id, completed - last_completed)
@@ -101,9 +102,10 @@ class _TrackThread(Thread):
 
 
 def track(
-    sequence: Union[Sequence[ProgressType], Iterable[ProgressType]],
+    sequence: Iterable[ProgressType],
     description: str = "Working...",
     total: Optional[float] = None,
+    completed: int = 0,
     auto_refresh: bool = True,
     console: Optional[Console] = None,
     transient: bool = False,
@@ -119,10 +121,13 @@ def track(
 ) -> Iterable[ProgressType]:
     """Track progress by iterating over a sequence.
 
+    You can also track progress of an iterable, which might require that you additionally specify ``total``.
+
     Args:
-        sequence (Iterable[ProgressType]): A sequence (must support "len") you wish to iterate over.
+        sequence (Iterable[ProgressType]): Values you wish to iterate over and track progress.
         description (str, optional): Description of task show next to progress bar. Defaults to "Working".
         total: (float, optional): Total number of steps. Default is len(sequence).
+        completed (int, optional): Number of steps completed so far. Defaults to 0.
         auto_refresh (bool, optional): Automatic refresh, disable to force a refresh after each iteration. Default is True.
         transient: (bool, optional): Clear the progress on exit. Defaults to False.
         console (Console, optional): Console to write to. Default creates internal Console instance.
@@ -166,7 +171,11 @@ def track(
 
     with progress:
         yield from progress.track(
-            sequence, total=total, description=description, update_period=update_period
+            sequence,
+            total=total,
+            completed=completed,
+            description=description,
+            update_period=update_period,
         )
 
 
@@ -268,6 +277,9 @@ class _Reader(RawIOBase, BinaryIO):
 
     def write(self, s: Any) -> int:
         raise UnsupportedOperation("write")
+
+    def writelines(self, lines: Iterable[Any]) -> None:
+        raise UnsupportedOperation("writelines")
 
 
 class _ReadContext(ContextManager[_I], Generic[_I]):
@@ -1050,7 +1062,7 @@ class Progress(JupyterMixin):
     """Renders an auto-updating progress bar(s).
 
     Args:
-        console (Console, optional): Optional Console instance. Default will an internal Console instance writing to stdout.
+        console (Console, optional): Optional Console instance. Defaults to an internal Console instance writing to stdout.
         auto_refresh (bool, optional): Enable auto refresh. If disabled, you will need to call `refresh()`.
         refresh_per_second (Optional[float], optional): Number of times per second to refresh the progress information or None to use default (10). Defaults to None.
         speed_estimate_period: (float, optional): Period (in seconds) used to calculate the speed estimate. Defaults to 30.
@@ -1161,10 +1173,10 @@ class Progress(JupyterMixin):
     def stop(self) -> None:
         """Stop the progress display."""
         self.live.stop()
-        if not self.console.is_interactive:
+        if not self.console.is_interactive and not self.console.is_jupyter:
             self.console.print()
 
-    def __enter__(self) -> "Progress":
+    def __enter__(self) -> Self:
         self.start()
         return self
 
@@ -1178,17 +1190,21 @@ class Progress(JupyterMixin):
 
     def track(
         self,
-        sequence: Union[Iterable[ProgressType], Sequence[ProgressType]],
+        sequence: Iterable[ProgressType],
         total: Optional[float] = None,
+        completed: int = 0,
         task_id: Optional[TaskID] = None,
         description: str = "Working...",
         update_period: float = 0.1,
     ) -> Iterable[ProgressType]:
         """Track progress by iterating over a sequence.
 
+        You can also track progress of an iterable, which might require that you additionally specify ``total``.
+
         Args:
-            sequence (Sequence[ProgressType]): A sequence of values you want to iterate over and track progress.
+            sequence (Iterable[ProgressType]): Values you want to iterate over and track progress.
             total: (float, optional): Total number of steps. Default is len(sequence).
+            completed (int, optional): Number of steps completed so far. Defaults to 0.
             task_id: (TaskID): Task to track. Default is new task.
             description: (str, optional): Description of task, if new task is created.
             update_period (float, optional): Minimum time (in seconds) between calls to update(). Defaults to 0.1.
@@ -1200,9 +1216,9 @@ class Progress(JupyterMixin):
             total = float(length_hint(sequence)) or None
 
         if task_id is None:
-            task_id = self.add_task(description, total=total)
+            task_id = self.add_task(description, total=total, completed=completed)
         else:
-            self.update(task_id, total=total)
+            self.update(task_id, total=total, completed=completed)
 
         if self.live.auto_refresh:
             with _TrackThread(self, task_id, update_period) as track_thread:
@@ -1326,7 +1342,7 @@ class Progress(JupyterMixin):
         # normalize the mode (always rb, rt)
         _mode = "".join(sorted(mode, reverse=False))
         if _mode not in ("br", "rt", "r"):
-            raise ValueError("invalid mode {!r}".format(mode))
+            raise ValueError(f"invalid mode {mode!r}")
 
         # patch buffering to provide the same behaviour as the builtin `open`
         line_buffering = buffering == 1

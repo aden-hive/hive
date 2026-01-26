@@ -1,6 +1,5 @@
 import inspect
 import os
-import platform
 import sys
 import threading
 import zlib
@@ -23,26 +22,20 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     NamedTuple,
     Optional,
+    Protocol,
     TextIO,
     Tuple,
     Type,
     Union,
     cast,
+    runtime_checkable,
 )
 
 from pip._vendor.rich._null_file import NULL_FILE
-
-if sys.version_info >= (3, 8):
-    from typing import Literal, Protocol, runtime_checkable
-else:
-    from pip._vendor.typing_extensions import (
-        Literal,
-        Protocol,
-        runtime_checkable,
-    )  # pragma: no cover
 
 from . import errors, themes
 from ._emoji_replace import _emoji_replace
@@ -76,7 +69,7 @@ if TYPE_CHECKING:
 
 JUPYTER_DEFAULT_COLUMNS = 115
 JUPYTER_DEFAULT_LINES = 100
-WINDOWS = platform.system() == "Windows"
+WINDOWS = sys.platform == "win32"
 
 HighlighterType = Callable[[Union[str, "Text"]], "Text"]
 JustifyMethod = Literal["default", "left", "center", "right", "full"]
@@ -90,15 +83,15 @@ class NoChange:
 NO_CHANGE = NoChange()
 
 try:
-    _STDIN_FILENO = sys.__stdin__.fileno()
+    _STDIN_FILENO = sys.__stdin__.fileno()  # type: ignore[union-attr]
 except Exception:
     _STDIN_FILENO = 0
 try:
-    _STDOUT_FILENO = sys.__stdout__.fileno()
+    _STDOUT_FILENO = sys.__stdout__.fileno()  # type: ignore[union-attr]
 except Exception:
     _STDOUT_FILENO = 1
 try:
-    _STDERR_FILENO = sys.__stderr__.fileno()
+    _STDERR_FILENO = sys.__stderr__.fileno()  # type: ignore[union-attr]
 except Exception:
     _STDERR_FILENO = 2
 
@@ -501,7 +494,7 @@ def group(fit: bool = True) -> Callable[..., Callable[..., Group]]:
     """
 
     def decorator(
-        method: Callable[..., Iterable[RenderableType]]
+        method: Callable[..., Iterable[RenderableType]],
     ) -> Callable[..., Group]:
         """Convert a method that returns an iterable of renderables in to a Group."""
 
@@ -736,8 +729,18 @@ class Console:
         self.get_time = get_time or monotonic
         self.style = style
         self.no_color = (
-            no_color if no_color is not None else "NO_COLOR" in self._environ
+            no_color
+            if no_color is not None
+            else self._environ.get("NO_COLOR", "") != ""
         )
+        if force_interactive is None:
+            tty_interactive = self._environ.get("TTY_INTERACTIVE", None)
+            if tty_interactive is not None:
+                if tty_interactive == "0":
+                    force_interactive = False
+                elif tty_interactive == "1":
+                    force_interactive = True
+
         self.is_interactive = (
             (self.is_terminal and not self.is_dumb_terminal)
             if force_interactive is None
@@ -750,7 +753,7 @@ class Console:
         )
         self._record_buffer: List[Segment] = []
         self._render_hooks: List[RenderHook] = []
-        self._live: Optional["Live"] = None
+        self._live_stack: List[Live] = []
         self._is_alt_screen = False
 
     def __repr__(self) -> str:
@@ -822,24 +825,26 @@ class Console:
         self._buffer_index -= 1
         self._check_buffer()
 
-    def set_live(self, live: "Live") -> None:
-        """Set Live instance. Used by Live context manager.
+    def set_live(self, live: "Live") -> bool:
+        """Set Live instance. Used by Live context manager (no need to call directly).
 
         Args:
             live (Live): Live instance using this Console.
+
+        Returns:
+            Boolean that indicates if the live is the topmost of the stack.
 
         Raises:
             errors.LiveError: If this Console has a Live context currently active.
         """
         with self._lock:
-            if self._live is not None:
-                raise errors.LiveError("Only one live display may be active at once")
-            self._live = live
+            self._live_stack.append(live)
+            return len(self._live_stack) == 1
 
     def clear_live(self) -> None:
-        """Clear the Live instance."""
+        """Clear the Live instance. Used by the Live context manager (no need to call directly)."""
         with self._lock:
-            self._live = None
+            self._live_stack.pop()
 
     def push_render_hook(self, hook: RenderHook) -> None:
         """Add a new render hook to the stack.
@@ -934,11 +939,13 @@ class Console:
 
         Returns:
             bool: True if the console writing to a device capable of
-            understanding terminal codes, otherwise False.
+                understanding escape sequences, otherwise False.
         """
+        # If dev has explicitly set this value, return it
         if self._force_terminal is not None:
             return self._force_terminal
 
+        # Fudge for Idle
         if hasattr(sys.stdin, "__module__") and sys.stdin.__module__.startswith(
             "idlelib"
         ):
@@ -949,12 +956,22 @@ class Console:
             # return False for Jupyter, which may have FORCE_COLOR set
             return False
 
-        # If FORCE_COLOR env var has any value at all, we assume a terminal.
-        force_color = self._environ.get("FORCE_COLOR")
-        if force_color is not None:
-            self._force_terminal = True
+        environ = self._environ
+
+        tty_compatible = environ.get("TTY_COMPATIBLE", "")
+        # 0 indicates device is not tty compatible
+        if tty_compatible == "0":
+            return False
+        # 1 indicates device is tty compatible
+        if tty_compatible == "1":
             return True
 
+        # https://force-color.org/
+        force_color = environ.get("FORCE_COLOR")
+        if force_color is not None:
+            return force_color != ""
+
+        # Any other value defaults to auto detect
         isatty: Optional[Callable[[], bool]] = getattr(self.file, "isatty", None)
         try:
             return False if isatty is None else isatty()
@@ -979,12 +996,13 @@ class Console:
     @property
     def options(self) -> ConsoleOptions:
         """Get default console options."""
+        size = self.size
         return ConsoleOptions(
-            max_height=self.size.height,
-            size=self.size,
+            max_height=size.height,
+            size=size,
             legacy_windows=self.legacy_windows,
             min_width=1,
-            max_width=self.width,
+            max_width=size.width,
             encoding=self.encoding,
             is_terminal=self.is_terminal,
         )
@@ -1006,19 +1024,14 @@ class Console:
         width: Optional[int] = None
         height: Optional[int] = None
 
-        if WINDOWS:  # pragma: no cover
+        streams = _STD_STREAMS_OUTPUT if WINDOWS else _STD_STREAMS
+        for file_descriptor in streams:
             try:
-                width, height = os.get_terminal_size()
+                width, height = os.get_terminal_size(file_descriptor)
             except (AttributeError, ValueError, OSError):  # Probably not a terminal
                 pass
-        else:
-            for file_descriptor in _STD_STREAMS:
-                try:
-                    width, height = os.get_terminal_size(file_descriptor)
-                except (AttributeError, ValueError, OSError):
-                    pass
-                else:
-                    break
+            else:
+                break
 
         columns = self._environ.get("COLUMNS")
         if columns is not None and columns.isdigit():
@@ -1309,7 +1322,7 @@ class Console:
 
         renderable = rich_cast(renderable)
         if hasattr(renderable, "__rich_console__") and not isclass(renderable):
-            render_iterable = renderable.__rich_console__(self, _options)  # type: ignore[union-attr]
+            render_iterable = renderable.__rich_console__(self, _options)
         elif isinstance(renderable, str):
             text_renderable = self.render_str(
                 renderable, highlight=_options.highlight, markup=_options.markup
@@ -1386,9 +1399,14 @@ class Console:
                 extra_lines = render_options.height - len(lines)
                 if extra_lines > 0:
                     pad_line = [
-                        [Segment(" " * render_options.max_width, style), Segment("\n")]
-                        if new_lines
-                        else [Segment(" " * render_options.max_width, style)]
+                        (
+                            [
+                                Segment(" " * render_options.max_width, style),
+                                Segment("\n"),
+                            ]
+                            if new_lines
+                            else [Segment(" " * render_options.max_width, style)]
+                        )
                     ]
                     lines.extend(pad_line * extra_lines)
 
@@ -1437,9 +1455,11 @@ class Console:
             rich_text.overflow = overflow
         else:
             rich_text = Text(
-                _emoji_replace(text, default_variant=self._emoji_variant)
-                if emoji_enabled
-                else text,
+                (
+                    _emoji_replace(text, default_variant=self._emoji_variant)
+                    if emoji_enabled
+                    else text
+                ),
                 justify=justify,
                 overflow=overflow,
                 style=style,
@@ -1536,7 +1556,11 @@ class Console:
             if isinstance(renderable, str):
                 append_text(
                     self.render_str(
-                        renderable, emoji=emoji, markup=markup, highlighter=_highlighter
+                        renderable,
+                        emoji=emoji,
+                        markup=markup,
+                        highlight=highlight,
+                        highlighter=_highlighter,
                     )
                 )
             elif isinstance(renderable, Text):
@@ -1986,6 +2010,20 @@ class Console:
             ):
                 buffer_extend(line)
 
+    def on_broken_pipe(self) -> None:
+        """This function is called when a `BrokenPipeError` is raised.
+
+        This can occur when piping Textual output in Linux and macOS.
+        The default implementation is to exit the app, but you could implement
+        this method in a subclass to change the behavior.
+
+        See https://docs.python.org/3/library/signal.html#note-on-sigpipe for details.
+        """
+        self.quiet = True
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        raise SystemExit(1)
+
     def _check_buffer(self) -> None:
         """Check if the buffer may be rendered. Render it if it can (e.g. Console.quiet is False)
         Rendering is supported on Windows, Unix and Jupyter environments. For
@@ -1995,8 +2033,17 @@ class Console:
         if self.quiet:
             del self._buffer[:]
             return
+
+        try:
+            self._write_buffer()
+        except BrokenPipeError:
+            self.on_broken_pipe()
+
+    def _write_buffer(self) -> None:
+        """Write the buffer to the output file."""
+
         with self._lock:
-            if self.record:
+            if self.record and not self._buffer_index:
                 with self._record_buffer_lock:
                     self._record_buffer.extend(self._buffer[:])
 
@@ -2166,7 +2213,7 @@ class Console:
 
         """
         text = self.export_text(clear=clear, styles=styles)
-        with open(path, "wt", encoding="utf-8") as write_file:
+        with open(path, "w", encoding="utf-8") as write_file:
             write_file.write(text)
 
     def export_html(
@@ -2272,7 +2319,7 @@ class Console:
             code_format=code_format,
             inline_styles=inline_styles,
         )
-        with open(path, "wt", encoding="utf-8") as write_file:
+        with open(path, "w", encoding="utf-8") as write_file:
             write_file.write(html)
 
     def export_svg(
@@ -2561,7 +2608,7 @@ class Console:
             font_aspect_ratio=font_aspect_ratio,
             unique_id=unique_id,
         )
-        with open(path, "wt", encoding="utf-8") as write_file:
+        with open(path, "w", encoding="utf-8") as write_file:
             write_file.write(svg)
 
 

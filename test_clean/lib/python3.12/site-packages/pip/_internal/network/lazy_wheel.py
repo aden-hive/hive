@@ -1,14 +1,17 @@
 """Lazy ZIP over HTTP"""
 
+from __future__ import annotations
+
 __all__ = ["HTTPRangeRequestUnsupported", "dist_from_wheel_url"]
 
 from bisect import bisect_left, bisect_right
+from collections.abc import Generator
 from contextlib import contextmanager
 from tempfile import NamedTemporaryFile
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any
 from zipfile import BadZipFile, ZipFile
 
-from pip._vendor.packaging.utils import canonicalize_name
+from pip._vendor.packaging.utils import NormalizedName
 from pip._vendor.requests.models import CONTENT_CHUNK_SIZE, Response
 
 from pip._internal.metadata import BaseDistribution, MemoryWheel, get_wheel_distribution
@@ -20,7 +23,9 @@ class HTTPRangeRequestUnsupported(Exception):
     pass
 
 
-def dist_from_wheel_url(name: str, url: str, session: PipSession) -> BaseDistribution:
+def dist_from_wheel_url(
+    name: NormalizedName, url: str, session: PipSession
+) -> BaseDistribution:
     """Return a distribution object from the given wheel URL.
 
     This uses HTTP range requests to only fetch the portion of the wheel
@@ -34,7 +39,7 @@ def dist_from_wheel_url(name: str, url: str, session: PipSession) -> BaseDistrib
         wheel = MemoryWheel(zf.name, zf)  # type: ignore
         # After context manager exit, wheel.name
         # is an invalid file by intention.
-        return get_wheel_distribution(wheel, canonicalize_name(name))
+        return get_wheel_distribution(wheel, name)
 
 
 class LazyZipOverHTTP:
@@ -56,8 +61,8 @@ class LazyZipOverHTTP:
         self._length = int(head.headers["Content-Length"])
         self._file = NamedTemporaryFile()
         self.truncate(self._length)
-        self._left: List[int] = []
-        self._right: List[int] = []
+        self._left: list[int] = []
+        self._right: list[int] = []
         if "bytes" not in head.headers.get("Accept-Ranges", "none"):
             raise HTTPRangeRequestUnsupported("range request is not supported")
         self._check_zip()
@@ -117,7 +122,7 @@ class LazyZipOverHTTP:
         """Return the current position."""
         return self._file.tell()
 
-    def truncate(self, size: Optional[int] = None) -> int:
+    def truncate(self, size: int | None = None) -> int:
         """Resize the stream to the given size in bytes.
 
         If size is unspecified resize to the current position.
@@ -131,7 +136,7 @@ class LazyZipOverHTTP:
         """Return False."""
         return False
 
-    def __enter__(self) -> "LazyZipOverHTTP":
+    def __enter__(self) -> LazyZipOverHTTP:
         self._file.__enter__()
         return self
 
@@ -159,14 +164,14 @@ class LazyZipOverHTTP:
                 try:
                     # For read-only ZIP files, ZipFile only needs
                     # methods read, seek, seekable and tell.
-                    ZipFile(self)  # type: ignore
+                    ZipFile(self)
                 except BadZipFile:
                     pass
                 else:
                     break
 
     def _stream_response(
-        self, start: int, end: int, base_headers: Dict[str, str] = HEADERS
+        self, start: int, end: int, base_headers: dict[str, str] = HEADERS
     ) -> Response:
         """Return HTTP response to a range request from start to end."""
         headers = base_headers.copy()
@@ -177,7 +182,7 @@ class LazyZipOverHTTP:
 
     def _merge(
         self, start: int, end: int, left: int, right: int
-    ) -> Generator[Tuple[int, int], None, None]:
+    ) -> Generator[tuple[int, int], None, None]:
         """Return a generator of intervals to be fetched.
 
         Args:

@@ -1,4 +1,4 @@
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 from pip._internal.req.req_install import InstallRequirement
 from pip._internal.req.req_set import RequirementSet
@@ -10,11 +10,11 @@ InstallRequirementProvider = Callable[
 
 class BaseResolver:
     def resolve(
-        self, root_reqs: List[InstallRequirement], check_supported_wheels: bool
+        self, root_reqs: list[InstallRequirement], check_supported_wheels: bool
     ) -> RequirementSet:
         raise NotImplementedError()
 
     def get_installation_order(
         self, req_set: RequirementSet
-    ) -> List[InstallRequirement]:
+    ) -> list[InstallRequirement]:
         raise NotImplementedError()

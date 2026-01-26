@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 import inspect
 from inspect import cleandoc, getdoc, getfile, isclass, ismodule, signature
 from typing import Any, Collection, Iterable, Optional, Tuple, Type, Union
@@ -216,7 +214,7 @@ class Inspect(JupyterMixin):
     def _get_formatted_doc(self, object_: Any) -> Optional[str]:
         """
         Extract the docstring of an object, process it and returns it.
-        The processing consists in cleaning up the doctring's indentation,
+        The processing consists in cleaning up the docstring's indentation,
         taking only its 1st paragraph if `self.help` is not True,
         and escape its control codes.
 

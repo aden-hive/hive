@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import logging
 import mimetypes
 import os
 from collections import defaultdict
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Callable
 
 from pip._vendor.packaging.utils import (
     InvalidSdistFilename,
-    InvalidVersion,
     InvalidWheelFilename,
     canonicalize_name,
     parse_sdist_filename,
@@ -28,7 +30,7 @@ PageValidator = Callable[[Link], bool]
 
 class LinkSource:
     @property
-    def link(self) -> Optional[Link]:
+    def link(self) -> Link | None:
         """Returns the underlying link, if there's one."""
         raise NotImplementedError()
 
@@ -50,8 +52,8 @@ class _FlatDirectoryToUrls:
 
     def __init__(self, path: str) -> None:
         self._path = path
-        self._page_candidates: List[str] = []
-        self._project_name_to_urls: Dict[str, List[str]] = defaultdict(list)
+        self._page_candidates: list[str] = []
+        self._project_name_to_urls: dict[str, list[str]] = defaultdict(list)
         self._scanned_directory = False
 
     def _scan_directory(self) -> None:
@@ -68,24 +70,24 @@ class _FlatDirectoryToUrls:
             # otherwise not worth considering as a package
             try:
                 project_filename = parse_wheel_filename(entry.name)[0]
-            except (InvalidWheelFilename, InvalidVersion):
+            except InvalidWheelFilename:
                 try:
                     project_filename = parse_sdist_filename(entry.name)[0]
-                except (InvalidSdistFilename, InvalidVersion):
+                except InvalidSdistFilename:
                     continue
 
             self._project_name_to_urls[project_filename].append(url)
         self._scanned_directory = True
 
     @property
-    def page_candidates(self) -> List[str]:
+    def page_candidates(self) -> list[str]:
         if not self._scanned_directory:
             self._scan_directory()
 
         return self._page_candidates
 
     @property
-    def project_name_to_urls(self) -> Dict[str, List[str]]:
+    def project_name_to_urls(self) -> dict[str, list[str]]:
         if not self._scanned_directory:
             self._scan_directory()
 
@@ -101,7 +103,7 @@ class _FlatDirectorySource(LinkSource):
     * ``file_candidates``: Archives in the directory.
     """
 
-    _paths_to_urls: Dict[str, _FlatDirectoryToUrls] = {}
+    _paths_to_urls: dict[str, _FlatDirectoryToUrls] = {}
 
     def __init__(
         self,
@@ -120,7 +122,7 @@ class _FlatDirectorySource(LinkSource):
             self._paths_to_urls[path] = self._path_to_urls
 
     @property
-    def link(self) -> Optional[Link]:
+    def link(self) -> Link | None:
         return None
 
     def page_candidates(self) -> FoundCandidates:
@@ -151,7 +153,7 @@ class _LocalFileSource(LinkSource):
         self._link = link
 
     @property
-    def link(self) -> Optional[Link]:
+    def link(self) -> Link | None:
         return self._link
 
     def page_candidates(self) -> FoundCandidates:
@@ -185,7 +187,7 @@ class _RemoteFileSource(LinkSource):
         self._link = link
 
     @property
-    def link(self) -> Optional[Link]:
+    def link(self) -> Link | None:
         return self._link
 
     def page_candidates(self) -> FoundCandidates:
@@ -213,7 +215,7 @@ class _IndexDirectorySource(LinkSource):
         self._link = link
 
     @property
-    def link(self) -> Optional[Link]:
+    def link(self) -> Link | None:
         return self._link
 
     def page_candidates(self) -> FoundCandidates:
@@ -231,9 +233,9 @@ def build_source(
     expand_dir: bool,
     cache_link_parsing: bool,
     project_name: str,
-) -> Tuple[Optional[str], Optional[LinkSource]]:
-    path: Optional[str] = None
-    url: Optional[str] = None
+) -> tuple[str | None, LinkSource | None]:
+    path: str | None = None
+    url: str | None = None
     if os.path.exists(location):  # Is a local path.
         url = path_to_url(location)
         path = location

@@ -12,7 +12,7 @@ def path_to_url(path: str) -> str:
     quoted path parts.
     """
     path = os.path.normpath(os.path.abspath(path))
-    url = urllib.parse.urljoin("file:", urllib.request.pathname2url(path))
+    url = urllib.parse.urljoin("file://", urllib.request.pathname2url(path))
     return url
 
 

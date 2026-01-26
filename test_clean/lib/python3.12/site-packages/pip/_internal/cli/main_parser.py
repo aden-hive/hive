@@ -1,10 +1,10 @@
-"""A single place for constructing and exposing the main parser
-"""
+"""A single place for constructing and exposing the main parser"""
+
+from __future__ import annotations
 
 import os
 import subprocess
 import sys
-from typing import List, Optional, Tuple
 
 from pip._internal.build_env import get_runnable_pip
 from pip._internal.cli import cmdoptions
@@ -47,7 +47,7 @@ def create_main_parser() -> ConfigOptionParser:
     return parser
 
 
-def identify_python_interpreter(python: str) -> Optional[str]:
+def identify_python_interpreter(python: str) -> str | None:
     # If the named file exists, use it.
     # If it's a directory, assume it's a virtual environment and
     # look for the environment's Python executable.
@@ -66,7 +66,7 @@ def identify_python_interpreter(python: str) -> Optional[str]:
     return None
 
 
-def parse_command(args: List[str]) -> Tuple[str, List[str]]:
+def parse_command(args: list[str]) -> tuple[str, list[str]]:
     parser = create_main_parser()
 
     # Note: parser calls disable_interspersed_args(), so the result of this

@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import functools
 import os
 import sys
 import sysconfig
+from collections.abc import Generator, Iterable
 from importlib.util import cache_from_source
-from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable
 
 from pip._internal.exceptions import LegacyDistutilsInstall, UninstallMissingRecord
 from pip._internal.locations import get_bin_prefix, get_bin_user
@@ -38,11 +41,11 @@ def _script_names(
 
 
 def _unique(
-    fn: Callable[..., Generator[Any, None, None]]
+    fn: Callable[..., Generator[Any, None, None]],
 ) -> Callable[..., Generator[Any, None, None]]:
     @functools.wraps(fn)
     def unique(*args: Any, **kw: Any) -> Generator[Any, None, None]:
-        seen: Set[Any] = set()
+        seen: set[Any] = set()
         for item in fn(*args, **kw):
             if item not in seen:
                 seen.add(item)
@@ -85,14 +88,14 @@ def uninstallation_paths(dist: BaseDistribution) -> Generator[str, None, None]:
             yield path
 
 
-def compact(paths: Iterable[str]) -> Set[str]:
+def compact(paths: Iterable[str]) -> set[str]:
     """Compact a path set to contain the minimal number of paths
     necessary to contain all paths in the set. If /a/path/ and
     /a/path/to/a/file.txt are both in the set, leave only the
     shorter path."""
 
     sep = os.path.sep
-    short_paths: Set[str] = set()
+    short_paths: set[str] = set()
     for path in sorted(paths, key=len):
         should_skip = any(
             path.startswith(shortpath.rstrip("*"))
@@ -104,7 +107,7 @@ def compact(paths: Iterable[str]) -> Set[str]:
     return short_paths
 
 
-def compress_for_rename(paths: Iterable[str]) -> Set[str]:
+def compress_for_rename(paths: Iterable[str]) -> set[str]:
     """Returns a set containing the paths that need to be renamed.
 
     This set may include directories when the original sequence of paths
@@ -113,7 +116,7 @@ def compress_for_rename(paths: Iterable[str]) -> Set[str]:
     case_map = {os.path.normcase(p): p for p in paths}
     remaining = set(case_map)
     unchecked = sorted({os.path.split(p)[0] for p in case_map.values()}, key=len)
-    wildcards: Set[str] = set()
+    wildcards: set[str] = set()
 
     def norm_join(*a: str) -> str:
         return os.path.normcase(os.path.join(*a))
@@ -123,8 +126,8 @@ def compress_for_rename(paths: Iterable[str]) -> Set[str]:
             # This directory has already been handled.
             continue
 
-        all_files: Set[str] = set()
-        all_subdirs: Set[str] = set()
+        all_files: set[str] = set()
+        all_subdirs: set[str] = set()
         for dirname, subdirs, files in os.walk(root):
             all_subdirs.update(norm_join(root, dirname, d) for d in subdirs)
             all_files.update(norm_join(root, dirname, f) for f in files)
@@ -138,7 +141,7 @@ def compress_for_rename(paths: Iterable[str]) -> Set[str]:
     return set(map(case_map.__getitem__, remaining)) | wildcards
 
 
-def compress_for_output_listing(paths: Iterable[str]) -> Tuple[Set[str], Set[str]]:
+def compress_for_output_listing(paths: Iterable[str]) -> tuple[set[str], set[str]]:
     """Returns a tuple of 2 sets of which paths to display to user
 
     The first set contains paths that would be deleted. Files of a package
@@ -194,10 +197,10 @@ class StashedUninstallPathSet:
     def __init__(self) -> None:
         # Mapping from source file root to [Adjacent]TempDirectory
         # for files under that directory.
-        self._save_dirs: Dict[str, TempDirectory] = {}
+        self._save_dirs: dict[str, TempDirectory] = {}
         # (old path, new path) tuples for each move that may need
         # to be undone.
-        self._moves: List[Tuple[str, str]] = []
+        self._moves: list[tuple[str, str]] = []
 
     def _get_directory_stash(self, path: str) -> str:
         """Stashes a directory.
@@ -297,9 +300,9 @@ class UninstallPathSet:
     requirement."""
 
     def __init__(self, dist: BaseDistribution) -> None:
-        self._paths: Set[str] = set()
-        self._refuse: Set[str] = set()
-        self._pth: Dict[str, UninstallPthEntries] = {}
+        self._paths: set[str] = set()
+        self._refuse: set[str] = set()
+        self._pth: dict[str, UninstallPthEntries] = {}
         self._dist = dist
         self._moved_paths = StashedUninstallPathSet()
         # Create local cache of normalize_path results. Creating an UninstallPathSet
@@ -421,7 +424,7 @@ class UninstallPathSet:
         self._moved_paths.commit()
 
     @classmethod
-    def from_dist(cls, dist: BaseDistribution) -> "UninstallPathSet":
+    def from_dist(cls, dist: BaseDistribution) -> UninstallPathSet:
         dist_location = dist.location
         info_location = dist.info_location
         if dist_location is None:
@@ -505,10 +508,13 @@ class UninstallPathSet:
             # package installed by easy_install
             # We cannot match on dist.egg_name because it can slightly vary
             # i.e. setuptools-0.6c11-py2.6.egg vs setuptools-0.6rc11-py2.6.egg
-            paths_to_remove.add(dist_location)
-            easy_install_egg = os.path.split(dist_location)[1]
+            # XXX We use normalized_dist_location because dist_location my contain
+            # a trailing / if the distribution is a zipped egg
+            # (which is not a directory).
+            paths_to_remove.add(normalized_dist_location)
+            easy_install_egg = os.path.split(normalized_dist_location)[1]
             easy_install_pth = os.path.join(
-                os.path.dirname(dist_location),
+                os.path.dirname(normalized_dist_location),
                 "easy-install.pth",
             )
             paths_to_remove.add_pth(easy_install_pth, "./" + easy_install_egg)
@@ -578,8 +584,8 @@ class UninstallPathSet:
 class UninstallPthEntries:
     def __init__(self, pth_file: str) -> None:
         self.file = pth_file
-        self.entries: Set[str] = set()
-        self._saved_lines: Optional[List[bytes]] = None
+        self.entries: set[str] = set()
+        self._saved_lines: list[bytes] | None = None
 
     def add(self, entry: str) -> None:
         entry = os.path.normcase(entry)
