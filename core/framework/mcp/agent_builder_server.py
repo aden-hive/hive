@@ -155,7 +155,11 @@ def _load_active_session() -> BuildSession | None:
 
         if session_id:
             return _load_session(session_id)
-    except Exception:
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to load active session: {e}")
         pass
 
     return None
@@ -212,7 +216,9 @@ def list_sessions() -> str:
                         "edge_count": len(data.get("edges", [])),
                         "has_goal": data.get("goal") is not None,
                     })
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Skipping corrupted session file {session_file}: {e}")
                 pass  # Skip corrupted files
 
     # Check which session is currently active
