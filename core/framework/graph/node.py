@@ -318,7 +318,6 @@ class NodeResult:
             return "✓ Completed (no output)"
 
         # Use Haiku to generate intelligent summary
-        import os
         api_key = os.environ.get("ANTHROPIC_API_KEY")
 
         if not api_key:
@@ -333,9 +332,6 @@ class NodeResult:
 
         # Use Haiku to generate intelligent summary
         try:
-            import anthropic
-            import json
-
             node_context = ""
             if node_spec:
                 node_context = f"\nNode: {node_spec.name}\nPurpose: {node_spec.description}"
@@ -447,11 +443,6 @@ class LLMNode(NodeProtocol):
 
     def _strip_code_blocks(self, content: str) -> str:
         """Strip markdown code block wrappers from content.
-
-        LLMs often wrap JSON output in ```json...``` blocks.
-        This method removes those wrappers to get clean content.
-        """
-        import re
         content = content.strip()
         # Match ```json or ``` at start and ``` at end (greedy to handle nested)
         match = re.match(r'^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$', content, re.DOTALL)
@@ -811,9 +802,6 @@ Output ONLY the JSON object, nothing else."""
                     parts.append(f"{key}: {value}")
             return "\n".join(parts)
 
-        # Build prompt for Haiku to extract clean values
-        import json
-
         # Smart truncation: truncate individual values rather than corrupting JSON structure
         def truncate_value(v, max_len=500):
             s = str(v)
@@ -836,7 +824,6 @@ Extract ONLY the clean values for the required fields. Ignore nested structures,
 Output as JSON with the exact field names requested."""
 
         try:
-            import anthropic
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
                 model="claude-3-5-haiku-20241022",
