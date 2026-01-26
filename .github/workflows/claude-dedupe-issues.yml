@@ -1,17 +1,11 @@
-name: Claude Issue Dedupe
-description: Automatically dedupe GitHub issues using Claude Code
+name: Issue Deduplication
+
 on:
   issues:
     types: [opened]
-  workflow_dispatch:
-    inputs:
-      issue_number:
-        description: "Issue number to process for duplicate detection"
-        required: true
-        type: string
 
 jobs:
-  claude-dedupe-issues:
+  deduplicate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -22,63 +16,50 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Run Claude Code slash command
-        uses: anthropics/claude-code-action@v1
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          fetch-depth: 1
+
+      - name: Check for duplicate issues
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_non_write_users: "*"
-          prompt: "/dedupe ${{ github.repository }}/issues/${{ github.event.issue.number || inputs.issue_number }}"
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: "--model claude-haiku-4-5-20251001"
+          prompt: |
+            Analyze this new issue and check if it's a duplicate of existing issues in the repository.
 
-      - name: Log duplicate comment event to Statsig
-        if: always()
-        env:
-          STATSIG_API_KEY: ${{ secrets.STATSIG_API_KEY }}
-        run: |
-          ISSUE_NUMBER=${{ github.event.issue.number || inputs.issue_number }}
-          REPO=${{ github.repository }}
+            Issue: #${{ github.event.issue.number }}
+            Repository: ${{ github.repository }}
 
-          if [ -z "$STATSIG_API_KEY" ]; then
-            echo "STATSIG_API_KEY not found, skipping Statsig logging"
-            exit 0
-          fi
+            Your task:
+            1. Use mcp__github__get_issue to get details of the current issue (#${{ github.event.issue.number }})
+            2. Search for similar existing issues using mcp__github__search_issues with relevant keywords from the issue title and body
+            3. Compare the new issue with existing ones to identify potential duplicates
 
-          # Prepare the event payload
-          EVENT_PAYLOAD=$(jq -n \
-            --arg issue_number "$ISSUE_NUMBER" \
-            --arg repo "$REPO" \
-            --arg triggered_by "${{ github.event_name }}" \
-            '{
-              events: [{
-                eventName: "github_duplicate_comment_added",
-                value: 1,
-                metadata: {
-                  repository: $repo,
-                  issue_number: ($issue_number | tonumber),
-                  triggered_by: $triggered_by,
-                  workflow_run_id: "${{ github.run_id }}"
-                },
-                time: (now | floor | tostring)
-              }]
-            }')
+            Criteria for duplicates:
+            - Same bug or error being reported
+            - Same feature request (even if worded differently)
+            - Same question being asked
+            - Issues describing the same root problem
 
-          # Send to Statsig API
-          echo "Logging duplicate comment event to Statsig for issue #${ISSUE_NUMBER}"
+            If you find duplicates:
+            - Add a comment on the new issue using EXACTLY this format (required for auto-close to work):
+              "Found a possible duplicate of #<issue_number>: <brief explanation of why it's a duplicate>"
+            - Do NOT apply any labels yet (the auto-close script will add the "duplicate" label after 12 hours if no objections)
+            - Suggest the user react with a thumbs-down if they disagree
 
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST https://events.statsigapi.net/v1/log_event \
-            -H "Content-Type: application/json" \
-            -H "STATSIG-API-KEY: ${STATSIG_API_KEY}" \
-            -d "$EVENT_PAYLOAD")
+            If it's NOT a duplicate:
+            - Don't add any comments
+            - You may apply appropriate topic labels based on the issue content
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | head -n-1)
+            Use these tools:
+            - mcp__github__get_issue: Get issue details
+            - mcp__github__search_issues: Search for similar issues
+            - mcp__github__list_issues: List recent issues if needed
+            - mcp__github__create_issue_comment: Add a comment if duplicate found
+            - mcp__github__update_issue: Add labels
 
-          if [ "$HTTP_CODE" -eq 200 ] || [ "$HTTP_CODE" -eq 202 ]; then
-            echo "Successfully logged duplicate comment event for issue #${ISSUE_NUMBER}"
-          else
-            echo "Failed to log duplicate comment event for issue #${ISSUE_NUMBER}. HTTP ${HTTP_CODE}: ${BODY}"
-          fi
+            Be thorough but efficient. Focus on finding true duplicates, not just similar issues.
+
+          claude_args: |
+            --allowedTools "mcp__github__get_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__create_issue_comment,mcp__github__update_issue,mcp__github__get_issue_comments"
