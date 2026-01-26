@@ -31,7 +31,7 @@ class TestGetSecurePath:
         """Session directory is created if it doesn't exist."""
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
-        result = get_secure_path("file.txt", **ids)
+        get_secure_path("file.txt", **ids)  # Called for side effect (creates directory)
 
         session_dir = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         assert session_dir.exists()

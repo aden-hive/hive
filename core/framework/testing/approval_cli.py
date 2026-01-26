@@ -6,19 +6,19 @@ This CLI provides the interactive approval workflow.
 """
 
 import json
-import tempfile
-import subprocess
 import os
-from typing import Callable
+import subprocess
+import tempfile
+from collections.abc import Callable
 
-from framework.testing.test_case import Test
-from framework.testing.test_storage import TestStorage
 from framework.testing.approval_types import (
     ApprovalAction,
     ApprovalRequest,
     ApprovalResult,
     BatchApprovalResult,
 )
+from framework.testing.test_case import Test
+from framework.testing.test_storage import TestStorage
 
 
 def interactive_approval(
@@ -96,18 +96,20 @@ def batch_approval(
         # Validate request
         valid, error = req.validate_action()
         if not valid:
-            results.append(ApprovalResult.error_result(
-                req.test_id, req.action, error or "Invalid request"
-            ))
+            results.append(
+                ApprovalResult.error_result(req.test_id, req.action, error or "Invalid request")
+            )
             counts["errors"] += 1
             continue
 
         # Load test
         test = storage.load_test(goal_id, req.test_id)
         if not test:
-            results.append(ApprovalResult.error_result(
-                req.test_id, req.action, f"Test {req.test_id} not found"
-            ))
+            results.append(
+                ApprovalResult.error_result(
+                    req.test_id, req.action, f"Test {req.test_id} not found"
+                )
+            )
             counts["errors"] += 1
             continue
 
@@ -129,14 +131,14 @@ def batch_approval(
             if req.action != ApprovalAction.SKIP:
                 storage.update_test(test)
 
-            results.append(ApprovalResult.success_result(
-                req.test_id, req.action, f"Test {req.action.value}d successfully"
-            ))
+            results.append(
+                ApprovalResult.success_result(
+                    req.test_id, req.action, f"Test {req.action.value}d successfully"
+                )
+            )
 
         except Exception as e:
-            results.append(ApprovalResult.error_result(
-                req.test_id, req.action, str(e)
-            ))
+            results.append(ApprovalResult.error_result(req.test_id, req.action, str(e)))
             counts["errors"] += 1
 
     return BatchApprovalResult(
@@ -231,7 +233,9 @@ def _process_action(
                 test.approve()
                 storage.update_test(test)
                 print("✓ Approved (no modifications)")
-                return ApprovalResult.success_result(test.id, ApprovalAction.APPROVE, "No modifications made")
+                return ApprovalResult.success_result(
+                    test.id, ApprovalAction.APPROVE, "No modifications made"
+                )
 
         elif action == ApprovalAction.SKIP:
             print("⏭ Skipped (remains pending)")
@@ -260,11 +264,7 @@ def _edit_test_code(code: str) -> str:
                 break
 
     # Create temp file with code
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".py",
-        delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(code)
         temp_path = f.name
 
@@ -292,4 +292,5 @@ def _edit_test_code(code: str) -> str:
 def _command_exists(cmd: str) -> bool:
     """Check if a command exists in PATH."""
     from shutil import which
+
     return which(cmd) is not None
