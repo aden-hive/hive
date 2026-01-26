@@ -23,7 +23,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          allowed_non_write_users: '*'
+          allowed_non_write_users: "*"
           prompt: |
             REPO: ${{ github.repository }}
             ISSUE NUMBER: ${{ github.event.issue.number }}
@@ -64,5 +64,5 @@ jobs:
             5. **Add a brief comment** summarizing your triage decision to help maintainers.
 
           claude_args: |
-            --model claude-3-5-haiku-20241022
+            --model claude-haiku-4-5-20251001
             --allowedTools "Bash(gh issue:*),Bash(gh search:*)"
