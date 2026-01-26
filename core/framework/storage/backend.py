@@ -67,8 +67,8 @@ class FileStorage:
         if key.startswith("."):
             raise ValueError(f"Invalid key format: path traversal detected in '{key}'")
 
-        # Block absolute paths
-        if key.startswith("/") or (len(key) > 1 and key[1] == ":"):
+        # Block absolute paths (Unix-style and Windows drive letters)
+        if key.startswith("/") or key[1:2] == ":":
             raise ValueError(f"Invalid key format: absolute paths not allowed in '{key}'")
 
         # Block null bytes (Unix path injection)
