@@ -86,6 +86,20 @@ echo "=================================================="
 echo ""
 cd "$PROJECT_ROOT/core"
 
+# Install requirements first
+if [ -f "requirements.txt" ]; then
+    echo "Installing core requirements..."
+    if $PYTHON_CMD -m pip install -r requirements.txt; then
+        echo -e "${GREEN}✓${NC} Core requirements installed"
+    else
+        echo -e "${RED}✗${NC} Failed to install core requirements"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} No requirements.txt found in core/"
+fi
+echo ""
+
 if [ -f "pyproject.toml" ]; then
     echo "Installing framework from core/ (editable mode)..."
     $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
