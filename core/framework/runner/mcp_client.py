@@ -420,6 +420,13 @@ class MCPClient:
                 
                 # Now stop the event loop
                 self._loop.call_soon_threadsafe(self._loop.stop)
+            else:
+                # Fallback: loop exists but not running (e.g., due to error or external stop)
+                # Use asyncio.run() to execute cleanup in a new event loop
+                try:
+                    asyncio.run(self._cleanup_stdio_async())
+                except Exception as e:
+                    logger.warning(f"Error during fallback async cleanup: {e}")
 
             # Wait for thread to finish
             if self._loop_thread and self._loop_thread.is_alive():
