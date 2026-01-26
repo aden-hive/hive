@@ -390,18 +390,33 @@ class MCPClient:
             raise RuntimeError(f"Failed to call tool via HTTP: {e}")
 
     async def _cleanup_stdio_async(self) -> None:
-        """Async cleanup for STDIO session and context managers."""
+        """Async cleanup for STDIO session and context managers.
+        
+        Cleanup order is critical:
+        - The session must be closed BEFORE the stdio_context because the session
+          depends on the streams provided by stdio_context.
+        - This mirrors the initialization order in _connect_stdio(), where
+          stdio_context is entered first (providing streams), then the session is
+          created with those streams and entered.
+        - Do not change this ordering without carefully considering these dependencies.
+        """
+        # First: close session (depends on stdio_context streams)
         try:
             if self._session:
                 await self._session.__aexit__(None, None, None)
+                self._session = None  # Clear reference immediately after cleanup
         except Exception as e:
             logger.warning(f"Error closing MCP session: {e}")
+            self._session = None  # Clear even on error to prevent reuse
         
+        # Second: close stdio_context (provides the underlying streams)
         try:
             if self._stdio_context:
                 await self._stdio_context.__aexit__(None, None, None)
+                self._stdio_context = None  # Clear reference immediately after cleanup
         except Exception as e:
             logger.warning(f"Error closing STDIO context: {e}")
+            self._stdio_context = None  # Clear even on error to prevent reuse
 
     def disconnect(self) -> None:
         """Disconnect from the MCP server."""
@@ -422,9 +437,28 @@ class MCPClient:
                 self._loop.call_soon_threadsafe(self._loop.stop)
             else:
                 # Fallback: loop exists but not running (e.g., due to error or external stop)
-                # Use asyncio.run() to execute cleanup in a new event loop
+                # Cannot use asyncio.run() directly as it may fail if there's already
+                # an event loop associated with current thread (even if stopped).
+                # Use a temporary event loop pattern that preserves any existing loop.
                 try:
-                    asyncio.run(self._cleanup_stdio_async())
+                    # Check if there's an existing event loop in this thread
+                    original_loop = None
+                    try:
+                        original_loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        # No existing event loop in this thread
+                        original_loop = None
+                    
+                    # Create and use a temporary event loop for cleanup
+                    temp_loop = asyncio.new_event_loop()
+                    try:
+                        asyncio.set_event_loop(temp_loop)
+                        temp_loop.run_until_complete(self._cleanup_stdio_async())
+                    finally:
+                        temp_loop.close()
+                        # Restore original loop if there was one
+                        if original_loop is not None:
+                            asyncio.set_event_loop(original_loop)
                 except Exception as e:
                     logger.warning(f"Error during fallback async cleanup: {e}")
 
@@ -432,7 +466,7 @@ class MCPClient:
             if self._loop_thread and self._loop_thread.is_alive():
                 self._loop_thread.join(timeout=2)
 
-            # Clear references
+            # Clear remaining references (some may already be None from _cleanup_stdio_async)
             self._session = None
             self._stdio_context = None
             self._read_stream = None
