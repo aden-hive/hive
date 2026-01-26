@@ -5,10 +5,9 @@ Tests the new output_model feature in NodeSpec that allows
 validating LLM responses against Pydantic models.
 """
 
-import pytest
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
-from framework.graph.node import NodeSpec, NodeResult
+from framework.graph.node import NodeResult, NodeSpec
 from framework.graph.validator import OutputValidator, ValidationResult
 
 
@@ -47,7 +46,7 @@ class TestNodeSpecOutputModel:
             node_type="llm_generate",
             output_model=SimpleOutput,
         )
-        
+
         assert node.output_model == SimpleOutput
         assert node.max_validation_retries == 2  # default
 
@@ -58,7 +57,7 @@ class TestNodeSpecOutputModel:
             name="Test Node",
             description="A test node",
         )
-        
+
         assert node.output_model is None
 
     def test_nodespec_custom_validation_retries(self):
@@ -70,7 +69,7 @@ class TestNodeSpecOutputModel:
             output_model=SimpleOutput,
             max_validation_retries=5,
         )
-        
+
         assert node.max_validation_retries == 5
 
 
@@ -81,9 +80,9 @@ class TestOutputValidatorPydantic:
         """Should pass for valid output matching model."""
         validator = OutputValidator()
         output = {"message": "Hello", "count": 5}
-        
+
         result, validated = validator.validate_with_pydantic(output, SimpleOutput)
-        
+
         assert result.success is True
         assert len(result.errors) == 0
         assert validated is not None
@@ -94,9 +93,9 @@ class TestOutputValidatorPydantic:
         """Should fail when required field is missing."""
         validator = OutputValidator()
         output = {"message": "Hello"}  # missing 'count'
-        
+
         result, validated = validator.validate_with_pydantic(output, SimpleOutput)
-        
+
         assert result.success is False
         assert len(result.errors) > 0
         assert "count" in result.errors[0]
@@ -106,9 +105,9 @@ class TestOutputValidatorPydantic:
         """Should fail when field has wrong type."""
         validator = OutputValidator()
         output = {"message": "Hello", "count": "five"}  # count should be int
-        
+
         result, validated = validator.validate_with_pydantic(output, SimpleOutput)
-        
+
         assert result.success is False
         assert len(result.errors) > 0
         assert validated is None
@@ -122,9 +121,9 @@ class TestOutputValidatorPydantic:
             "confidence": 0.85,
             "metadata": {"source": "test"},
         }
-        
+
         result, validated = validator.validate_with_pydantic(output, ComplexOutput)
-        
+
         assert result.success is True
         assert validated is not None
         assert validated.query == "test query"
@@ -134,48 +133,48 @@ class TestOutputValidatorPydantic:
     def test_validate_field_constraints(self):
         """Should validate field constraints (min_length, ge, le, etc.)."""
         validator = OutputValidator()
-        
+
         # Empty results list (violates min_length=1)
         output = {
             "query": "test",
             "results": [],  # should have at least 1 item
             "confidence": 0.5,
         }
-        
+
         result, validated = validator.validate_with_pydantic(output, ComplexOutput)
-        
+
         assert result.success is False
         assert "results" in result.error
 
     def test_validate_range_constraints(self):
         """Should validate range constraints (ge, le)."""
         validator = OutputValidator()
-        
+
         # Confidence out of range
         output = {
             "query": "test",
             "results": ["r1"],
             "confidence": 1.5,  # should be <= 1
         }
-        
+
         result, validated = validator.validate_with_pydantic(output, ComplexOutput)
-        
+
         assert result.success is False
         assert "confidence" in result.error
 
     def test_validate_realistic_model(self):
         """Should work with realistic use case models."""
         validator = OutputValidator()
-        
+
         output = {
             "category": "Technical Support",
             "priority": 3,
             "summary": "User is experiencing login issues with error 401",
             "suggested_action": "Reset password and verify account status",
         }
-        
+
         result, validated = validator.validate_with_pydantic(output, TicketAnalysis)
-        
+
         assert result.success is True
         assert validated is not None
         assert validated.category == "Technical Support"
@@ -189,10 +188,10 @@ class TestValidationFeedback:
         """Feedback should include validation errors."""
         validator = OutputValidator()
         output = {"message": "Hello"}  # missing count
-        
+
         result, _ = validator.validate_with_pydantic(output, SimpleOutput)
         feedback = validator.format_validation_feedback(result, SimpleOutput)
-        
+
         assert "validation errors" in feedback.lower()
         assert "count" in feedback
         assert "SimpleOutput" in feedback
@@ -201,9 +200,9 @@ class TestValidationFeedback:
         """Feedback should include expected schema information."""
         validator = OutputValidator()
         result = ValidationResult(success=False, errors=["test error"])
-        
+
         feedback = validator.format_validation_feedback(result, SimpleOutput)
-        
+
         assert "message" in feedback
         assert "count" in feedback
         assert "required" in feedback.lower()
@@ -219,14 +218,14 @@ class TestNodeResultValidationErrors:
             error="Pydantic validation failed",
             validation_errors=["count: field required", "priority: must be >= 1"],
         )
-        
+
         assert len(result.validation_errors) == 2
         assert "count" in result.validation_errors[0]
 
     def test_noderesult_empty_validation_errors_by_default(self):
         """validation_errors should be empty list by default."""
         result = NodeResult(success=True, output={"key": "value"})
-        
+
         assert result.validation_errors == []
 
 
@@ -242,7 +241,7 @@ class TestPydanticValidationIntegration:
             description="Test node",
             output_model=SimpleOutput,
         )
-        
+
         # model_dump should work (Pydantic serialization)
         dumped = node.model_dump()
         assert "output_model" in dumped
@@ -257,7 +256,7 @@ class TestJSONSchemaGeneration:
     def test_simple_model_schema_generation(self):
         """Should generate correct JSON schema for simple model."""
         schema = SimpleOutput.model_json_schema()
-        
+
         assert "properties" in schema
         assert "message" in schema["properties"]
         assert "count" in schema["properties"]
@@ -267,18 +266,19 @@ class TestJSONSchemaGeneration:
     def test_complex_model_schema_generation(self):
         """Should generate correct JSON schema for complex model."""
         schema = ComplexOutput.model_json_schema()
-        
+
         assert "properties" in schema
         assert "query" in schema["properties"]
         assert "results" in schema["properties"]
         assert "confidence" in schema["properties"]
         # Check constraints are in schema
-        assert "minimum" in schema["properties"]["confidence"] or "exclusiveMinimum" in schema["properties"]["confidence"]
+        conf_props = schema["properties"]["confidence"]
+        assert "minimum" in conf_props or "exclusiveMinimum" in conf_props
 
     def test_schema_includes_required_fields(self):
         """JSON schema should include required fields."""
         schema = SimpleOutput.model_json_schema()
-        
+
         assert "required" in schema
         assert "message" in schema["required"]
         assert "count" in schema["required"]
@@ -286,7 +286,7 @@ class TestJSONSchemaGeneration:
     def test_schema_can_be_used_in_response_format(self):
         """Schema should be usable in LLM response_format parameter."""
         schema = TicketAnalysis.model_json_schema()
-        
+
         response_format = {
             "type": "json_schema",
             "json_schema": {
@@ -295,7 +295,7 @@ class TestJSONSchemaGeneration:
                 "strict": True,
             }
         }
-        
+
         # Should be valid structure
         assert response_format["type"] == "json_schema"
         assert response_format["json_schema"]["name"] == "TicketAnalysis"
@@ -310,10 +310,10 @@ class TestRetryWithFeedback:
         """Feedback should be properly formatted for LLM retry."""
         validator = OutputValidator()
         output = {"priority": 10}  # Invalid: missing fields and priority > 5
-        
+
         result, _ = validator.validate_with_pydantic(output, TicketAnalysis)
         feedback = validator.format_validation_feedback(result, TicketAnalysis)
-        
+
         # Should include error details
         assert "ERRORS:" in feedback
         assert "EXPECTED SCHEMA:" in feedback
@@ -325,9 +325,9 @@ class TestRetryWithFeedback:
         """Feedback should include instruction to fix errors."""
         validator = OutputValidator()
         result = ValidationResult(success=False, errors=["test error"])
-        
+
         feedback = validator.format_validation_feedback(result, SimpleOutput)
-        
+
         assert "fix" in feedback.lower() or "valid JSON" in feedback
 
     def test_max_validation_retries_default(self):
@@ -338,7 +338,7 @@ class TestRetryWithFeedback:
             description="Test node",
             output_model=SimpleOutput,
         )
-        
+
         assert node.max_validation_retries == 2
 
     def test_max_validation_retries_customizable(self):
@@ -350,7 +350,7 @@ class TestRetryWithFeedback:
             output_model=SimpleOutput,
             max_validation_retries=5,
         )
-        
+
         assert node.max_validation_retries == 5
 
     def test_zero_retries_allowed(self):
@@ -362,13 +362,13 @@ class TestRetryWithFeedback:
             output_model=SimpleOutput,
             max_validation_retries=0,
         )
-        
+
         assert node.max_validation_retries == 0
 
     def test_feedback_includes_all_error_types(self):
         """Feedback should include various error types."""
         validator = OutputValidator()
-        
+
         # Create output with multiple errors
         output = {
             "category": "X",  # too short if there was min_length
@@ -376,10 +376,10 @@ class TestRetryWithFeedback:
             "summary": "short",  # too short (min_length=10)
             # missing suggested_action
         }
-        
+
         result, _ = validator.validate_with_pydantic(output, TicketAnalysis)
         feedback = validator.format_validation_feedback(result, TicketAnalysis)
-        
+
         # Should contain error details
         assert "ERRORS:" in feedback
         # Should list multiple errors
@@ -402,7 +402,7 @@ class TestPydanticValidationIntegrationExtended:
             output_model=TicketAnalysis,
             max_validation_retries=3,
         )
-        
+
         assert node.output_model == TicketAnalysis
         assert node.max_validation_retries == 3
         assert len(node.output_keys) == 4
@@ -410,7 +410,7 @@ class TestPydanticValidationIntegrationExtended:
     def test_validator_preserves_model_defaults(self):
         """Validated model should preserve default values."""
         validator = OutputValidator()
-        
+
         # metadata has a default (default_factory=dict)
         output = {
             "query": "test",
@@ -418,9 +418,9 @@ class TestPydanticValidationIntegrationExtended:
             "confidence": 0.5,
             # metadata not provided, should use default
         }
-        
+
         result, validated = validator.validate_with_pydantic(output, ComplexOutput)
-        
+
         assert result.success is True
         assert validated.metadata == {}  # default value
 
@@ -430,9 +430,9 @@ class TestPydanticValidationIntegrationExtended:
             success=False,
             errors=["error1", "error2", "error3"]
         )
-        
+
         error_str = result.error
-        
+
         assert "error1" in error_str
         assert "error2" in error_str
         assert "error3" in error_str
