@@ -714,6 +714,16 @@ class LLMNode(NodeProtocol):
             except json.JSONDecodeError:
                 pass
 
+        # Try to extract JSON using balanced brace matching (first JSON object in text)
+        json_str = find_json_object(content)
+        if json_str:
+            try:
+                parsed = json.loads(json_str)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
         # All local extraction methods failed - use LLM as last resort
         # Prefer Cerebras (faster/cheaper), fallback to Anthropic Haiku
         api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
