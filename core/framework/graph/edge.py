@@ -21,8 +21,8 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
-from typing import Any
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -235,7 +235,7 @@ Respond with ONLY a JSON object:
 
             # Parse response
             import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 proceed = data.get("proceed", False)
@@ -580,7 +580,7 @@ class GraphSpec(BaseModel):
         """
         import re
         # Replace non-alphanumeric characters (except underscore) with underscore
-        sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', node_id)
+        sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", node_id)
         # Ensure it doesn't start with a number
         if sanitized and sanitized[0].isdigit():
             sanitized = f"n_{sanitized}"
@@ -597,16 +597,16 @@ class GraphSpec(BaseModel):
         if for_format == "mermaid":
             # Order matters: escape angle brackets first, then quotes, then newlines
             # This prevents <br/> from being escaped
-            text = text.replace('<', '&lt;')
-            text = text.replace('>', '&gt;')
-            text = text.replace('"', '&quot;')
+            text = text.replace("<", "&lt;")
+            text = text.replace(">", "&gt;")
+            text = text.replace('"', "&quot;")
             # Replace newlines AFTER escaping, so <br/> stays intact
-            text = text.replace('\n', '<br/>')
+            text = text.replace("\n", "<br/>")
         else:  # dot
             # Escape quotes and backslashes
-            text = text.replace('\\', '\\\\')
+            text = text.replace("\\", "\\\\")
             text = text.replace('"', '\\"')
-            text = text.replace('\n', '\\n')
+            text = text.replace("\n", "\\n")
         return text
 
     def _get_node_color(self, node_id: str) -> tuple[str, str]:
@@ -690,8 +690,8 @@ class GraphSpec(BaseModel):
             name = self._escape_label(node.name, "mermaid")
 
             if include_node_type:
-                node_type = getattr(node, 'node_type', 'unknown')
-                label = f'{name}<br/><i>{node_type}</i>'
+                node_type = getattr(node, "node_type", "unknown")
+                label = f"{name}<br/><i>{node_type}</i>"
             else:
                 label = name
 
@@ -709,9 +709,9 @@ class GraphSpec(BaseModel):
             if include_conditions:
                 label = self._get_edge_label(edge)
                 label = self._escape_label(label, "mermaid")
-                lines.append(f'    {source_id} -->|{label}| {target_id}')
+                lines.append(f"    {source_id} -->|{label}| {target_id}")
             else:
-                lines.append(f'    {source_id} --> {target_id}')
+                lines.append(f"    {source_id} --> {target_id}")
 
         # Add blank line before styles
         if self.nodes:
@@ -721,7 +721,7 @@ class GraphSpec(BaseModel):
         for node in self.nodes:
             safe_id = self._sanitize_id(node.id)
             fill, stroke = self._get_node_color(node.id)
-            lines.append(f'    style {safe_id} fill:{fill},stroke:{stroke}')
+            lines.append(f"    style {safe_id} fill:{fill},stroke:{stroke}")
 
         return "\n".join(lines)
 
@@ -755,11 +755,11 @@ class GraphSpec(BaseModel):
         graph_id = self._escape_label(self.id, "dot")
         lines = [
             f'digraph "{graph_id}" {{',
-            '    rankdir=TD;',
+            "    rankdir=TD;",
             '    node [shape=box, style="rounded,filled", fontname="Arial"];',
             '    edge [fontname="Arial", fontsize=10];',
-            '',
-            '    // Nodes',
+            "",
+            "    // Nodes",
         ]
 
         # Generate node definitions
@@ -769,16 +769,16 @@ class GraphSpec(BaseModel):
             fill, _ = self._get_node_color(node.id)
 
             if include_node_type:
-                node_type = getattr(node, 'node_type', 'unknown')
-                label = f'{name}\\n({node_type})'
+                node_type = getattr(node, "node_type", "unknown")
+                label = f"{name}\\n({node_type})"
             else:
                 label = name
 
             lines.append(f'    {safe_id} [label="{label}", fillcolor="{fill}"];')
 
         # Add blank line before edges
-        lines.append('')
-        lines.append('    // Edges')
+        lines.append("")
+        lines.append("    // Edges")
 
         # Generate edge definitions
         for edge in self.edges:
@@ -790,8 +790,8 @@ class GraphSpec(BaseModel):
                 label = self._escape_label(label, "dot")
                 lines.append(f'    {source_id} -> {target_id} [label="{label}"];')
             else:
-                lines.append(f'    {source_id} -> {target_id};')
+                lines.append(f"    {source_id} -> {target_id};")
 
-        lines.append('}')
+        lines.append("}")
 
         return "\n".join(lines)

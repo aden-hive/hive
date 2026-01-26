@@ -4,8 +4,7 @@ Tests for graph visualization export (Mermaid and DOT formats).
 Tests the to_mermaid() and to_dot() methods added to GraphSpec.
 """
 
-import pytest
-from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition, AsyncEntryPointSpec
+from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.node import NodeSpec
 
 
@@ -20,13 +19,28 @@ class TestGraphVisualizationMermaid:
             entry_node="node_a",
             terminal_nodes=["node_c"],
             nodes=[
-                NodeSpec(id="node_a", name="Node A", description="First node", node_type="llm_generate"),
-                NodeSpec(id="node_b", name="Node B", description="Second node", node_type="llm_tool_use"),
-                NodeSpec(id="node_c", name="Node C", description="Third node", node_type="function"),
+                NodeSpec(
+                    id="node_a", name="Node A",
+                    description="First node", node_type="llm_generate"
+                ),
+                NodeSpec(
+                    id="node_b", name="Node B",
+                    description="Second node", node_type="llm_tool_use"
+                ),
+                NodeSpec(
+                    id="node_c", name="Node C",
+                    description="Third node", node_type="function"
+                ),
             ],
             edges=[
-                EdgeSpec(id="e1", source="node_a", target="node_b", condition=EdgeCondition.ALWAYS),
-                EdgeSpec(id="e2", source="node_b", target="node_c", condition=EdgeCondition.ON_SUCCESS),
+                EdgeSpec(
+                    id="e1", source="node_a", target="node_b",
+                    condition=EdgeCondition.ALWAYS
+                ),
+                EdgeSpec(
+                    id="e2", source="node_b", target="node_c",
+                    condition=EdgeCondition.ON_SUCCESS
+                ),
             ],
         )
 
@@ -146,13 +160,26 @@ class TestGraphVisualizationMermaid:
                 ),
             ],
             nodes=[
-                NodeSpec(id="main", name="Main", description="", node_type="llm_generate"),
-                NodeSpec(id="webhook_entry", name="Webhook Entry", description="", node_type="function"),
-                NodeSpec(id="end", name="End", description="", node_type="function"),
+                NodeSpec(
+                    id="main", name="Main", description="", node_type="llm_generate"
+                ),
+                NodeSpec(
+                    id="webhook_entry", name="Webhook Entry",
+                    description="", node_type="function"
+                ),
+                NodeSpec(
+                    id="end", name="End", description="", node_type="function"
+                ),
             ],
             edges=[
-                EdgeSpec(id="e1", source="main", target="end", condition=EdgeCondition.ALWAYS),
-                EdgeSpec(id="e2", source="webhook_entry", target="end", condition=EdgeCondition.ALWAYS),
+                EdgeSpec(
+                    id="e1", source="main", target="end",
+                    condition=EdgeCondition.ALWAYS
+                ),
+                EdgeSpec(
+                    id="e2", source="webhook_entry", target="end",
+                    condition=EdgeCondition.ALWAYS
+                ),
             ],
         )
         output = graph.to_mermaid()
@@ -297,13 +324,28 @@ class TestGraphVisualizationDot:
             entry_node="node_a",
             terminal_nodes=["node_c"],
             nodes=[
-                NodeSpec(id="node_a", name="Node A", description="First node", node_type="llm_generate"),
-                NodeSpec(id="node_b", name="Node B", description="Second node", node_type="llm_tool_use"),
-                NodeSpec(id="node_c", name="Node C", description="Third node", node_type="function"),
+                NodeSpec(
+                    id="node_a", name="Node A",
+                    description="First node", node_type="llm_generate"
+                ),
+                NodeSpec(
+                    id="node_b", name="Node B",
+                    description="Second node", node_type="llm_tool_use"
+                ),
+                NodeSpec(
+                    id="node_c", name="Node C",
+                    description="Third node", node_type="function"
+                ),
             ],
             edges=[
-                EdgeSpec(id="e1", source="node_a", target="node_b", condition=EdgeCondition.ALWAYS),
-                EdgeSpec(id="e2", source="node_b", target="node_c", condition=EdgeCondition.ON_SUCCESS),
+                EdgeSpec(
+                    id="e1", source="node_a", target="node_b",
+                    condition=EdgeCondition.ALWAYS
+                ),
+                EdgeSpec(
+                    id="e2", source="node_b", target="node_c",
+                    condition=EdgeCondition.ON_SUCCESS
+                ),
             ],
         )
 
