@@ -222,8 +222,14 @@ class LiteLLMProvider(LLMProvider):
                 # Parse arguments
                 try:
                     args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
+                except json.JSONDecodeError as e:
+                    # Send error back to the LLM instead of executing the tool
+                    current_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": f"Invalid JSON arguments for tool '{tool_call.function.name}': {e}",
+                    })
+                    continue
 
                 tool_use = ToolUse(
                     id=tool_call.id,

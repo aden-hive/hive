@@ -16,6 +16,37 @@ from framework.llm.litellm import LiteLLMProvider
 from framework.llm.anthropic import AnthropicProvider
 from framework.llm.provider import LLMProvider, Tool, ToolUse, ToolResult
 
+class FakeFunction:
+    def __init__(self, name, arguments):
+        self.name = name
+        self.arguments = arguments
+
+
+class FakeToolCall:
+    def __init__(self, id, name, arguments):
+        self.id = id
+        self.function = FakeFunction(name, arguments)
+
+
+class FakeMessage:
+    def __init__(self, tool_calls):
+        self.content = None
+        self.tool_calls = tool_calls
+
+
+class FakeChoice:
+    def __init__(self, message):
+        self.message = message
+        self.finish_reason = "tool_calls"
+
+
+class FakeResponse:
+    def __init__(self, tool_calls):
+        self.choices = [FakeChoice(FakeMessage(tool_calls))]
+        self.usage = None
+        self.model = "test-model"
+
+
 
 class TestLiteLLMProviderInit:
     """Test LiteLLMProvider initialization."""
@@ -461,3 +492,41 @@ class TestJsonMode:
         messages = call_kwargs["messages"]
         assert messages[0]["role"] == "system"
         assert "Please respond with a valid JSON object" in messages[0]["content"]
+
+
+        def test_complete_with_tools_invalid_json_arguments_are_handled():
+            provider = LiteLLMProvider(model="test-model")
+
+            tool = Tool(
+                name="test_tool",
+                description="Test tool",
+                parameters={
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                },
+            )
+
+            called = {"value": False}
+
+            def tool_executor(tool_use):
+                called["value"] = True
+
+            malformed_tool_call = FakeToolCall(
+                id="tool-1",
+                name="test_tool",
+                arguments="{this is not valid json"
+            )
+
+            def fake_completion(**kwargs):
+                return FakeResponse([malformed_tool_call])
+
+            with patch("framework.llm.litellm.litellm.completion", fake_completion):
+                provider.complete_with_tools(
+                    messages=[{"role": "user", "content": "hi"}],
+                    system="",
+                    tools=[tool],
+                    tool_executor=tool_executor,
+                )
+
+            assert called["value"] is False
+
