@@ -48,7 +48,7 @@ Explore the backend code and document:
 3. What authentication method is used for API requests?
 
 ### Task 2.2: MCP Tools Deep Dive 🔧
-The MCP server provides 19 tools. Categorize them and answer:
+The MCP server provides 12 tools. Categorize them and answer:
 
 1. List all **Budget tools** (tools with "budget" in the name)
 2. List all **Analytics tools**

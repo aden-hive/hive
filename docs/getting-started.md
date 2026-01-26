@@ -87,7 +87,7 @@ hive/
 │   └── pyproject.toml      # Package metadata
 │
 ├── tools/                  # MCP Tools Package
-│   └── src/aden_tools/     # 19 tools for agent capabilities
+│   └── src/aden_tools/     # 12 tools for agent capabilities
 │       ├── tools/          # Individual tool implementations
 │       │   ├── web_search_tool/
 │       │   ├── web_scrape_tool/

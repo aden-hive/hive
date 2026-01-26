@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-12_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## 概述
@@ -81,7 +81,7 @@ cd hive
 
 这将安装：
 - **framework** - 核心智能体运行时和图执行器
-- **aden_tools** - 19 个 MCP 工具提供智能体能力
+- **aden_tools** - 12 个 MCP 工具提供智能体能力
 - 所有必需的依赖项
 
 ### 构建您的第一个智能体
@@ -210,7 +210,7 @@ Aden 在智能体开发方面采取了根本不同的方法。虽然大多数框
 ```
 hive/
 ├── core/                   # 核心框架 - 智能体运行时、图执行器、协议
-├── tools/                  # MCP 工具包 - 19 个工具提供智能体能力
+├── tools/                  # MCP 工具包 - 12 个工具提供智能体能力
 ├── exports/                # 智能体包 - 预构建的智能体和示例
 ├── docs/                   # 文档和指南
 ├── scripts/                # 构建和实用脚本
@@ -233,7 +233,7 @@ hive/
 
 # 这将安装：
 # - framework 包（核心运行时）
-# - aden_tools 包（19 个 MCP 工具）
+# - aden_tools 包（12 个 MCP 工具）
 # - 所有依赖项
 
 # 使用 Claude Code 技能构建新智能体

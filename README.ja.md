@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-12_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## 概要
@@ -81,7 +81,7 @@ cd hive
 
 これにより以下がインストールされます：
 - **framework** - コアエージェントランタイムとグラフエグゼキュータ
-- **aden_tools** - エージェント機能のための19個のMCPツール
+- **aden_tools** - エージェント機能のための12個のMCPツール
 - すべての必要な依存関係
 
 ### 最初のエージェントを構築
@@ -210,7 +210,7 @@ Adenを選択する場合：
 ```
 hive/
 ├── core/                   # コアフレームワーク - エージェントランタイム、グラフエグゼキュータ、プロトコル
-├── tools/                  # MCPツールパッケージ - エージェント機能のための19個のツール
+├── tools/                  # MCPツールパッケージ - エージェント機能のための12個のツール
 ├── exports/                # エージェントパッケージ - 事前構築されたエージェントと例
 ├── docs/                   # ドキュメントとガイド
 ├── scripts/                # ビルドとユーティリティスクリプト
@@ -233,7 +233,7 @@ hive/
 
 # これにより以下がインストールされます：
 # - frameworkパッケージ（コアランタイム）
-# - aden_toolsパッケージ（19個のMCPツール）
+# - aden_toolsパッケージ（12個のMCPツール）
 # - すべての依存関係
 
 # Claude Codeスキルを使用して新しいエージェントを構築

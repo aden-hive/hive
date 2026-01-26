@@ -23,7 +23,7 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 | Package       | Directory  | Description                             | Tech Stack   |
 | ------------- | ---------- | --------------------------------------- | ------------ |
 | **framework** | `/core`    | Core runtime, graph executor, protocols | Python 3.11+ |
-| **tools**     | `/tools`   | 19 MCP tools for agent capabilities     | Python 3.11+ |
+| **tools**     | `/tools`   | 12 MCP tools for agent capabilities     | Python 3.11+ |
 | **exports**   | `/exports` | Agent packages and examples             | Python 3.11+ |
 | **skills**    | `.claude`  | Claude Code skills for building/testing | Markdown     |
 
@@ -157,14 +157,14 @@ hive/                                    # Repository root
 │   ├── MCP_INTEGRATION_GUIDE.md         # MCP server integration guide
 │   └── docs/                            # Protocol documentation
 │
-├── tools/                               # TOOLS PACKAGE (19 MCP tools)
+├── tools/                               # TOOLS PACKAGE (12 MCP tools)
 │   ├── src/
 │   │   └── aden_tools/
 │   │       ├── tools/                   # Individual tool implementations
 │   │       │   ├── web_search_tool/
 │   │       │   ├── web_scrape_tool/
 │   │       │   ├── file_system_toolkits/
-│   │       │   └── ...                  # 19 tools total
+│   │       │   └── ...                  # 12 tools total
 │   │       ├── mcp_server.py            # HTTP MCP server
 │   │       └── __init__.py
 │   ├── pyproject.toml                   # Package metadata

@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-12_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## Overview
@@ -81,7 +81,7 @@ cd hive
 
 This installs:
 - **framework** - Core agent runtime and graph executor
-- **aden_tools** - 19 MCP tools for agent capabilities
+- **aden_tools** - 12 MCP tools for agent capabilities
 - All required dependencies
 
 ### Build Your First Agent
@@ -221,7 +221,7 @@ Choose other frameworks when you need:
 ```
 hive/
 ├── core/                   # Core framework - Agent runtime, graph executor, protocols
-├── tools/                  # MCP Tools Package - 19 tools for agent capabilities
+├── tools/                  # MCP Tools Package - 12 tools for agent capabilities
 ├── exports/                # Agent packages - Pre-built agents and examples
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
@@ -244,7 +244,7 @@ For building and running goal-driven agents with the framework:
 
 # This installs:
 # - framework package (core runtime)
-# - aden_tools package (19 MCP tools)
+# - aden_tools package (12 MCP tools)
 # - All dependencies
 
 # Build new agents using Claude Code skills
@@ -363,7 +363,7 @@ Yes, Aden fully supports human-in-the-loop workflows through intervention nodes 
 
 **Q: What monitoring and debugging tools does Aden provide?**
 
-Aden includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and 19 MCP tools for budget management, agent status, and policy control.
+Aden includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and 12 MCP tools for budget management, agent status, and policy control.
 
 **Q: What programming languages does Aden support?**
 

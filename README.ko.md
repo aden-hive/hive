@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-12_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## 개요
@@ -81,7 +81,7 @@ cd hive
 
 다음 요소들이 설치됩니다:
 - **framework** - 핵심 에이전트 런타임 및 그래프 실행기
-- **aden_tools** - 에이전트 기능을 위한 19개의 MCP 도구
+- **aden_tools** - 에이전트 기능을 위한 12개의 MCP 도구
 - 필요한 모든 의존성
 
 ### 첫 번째 에이전트 만들기
@@ -221,7 +221,7 @@ Aden은 에이전트 개발에 대해 근본적으로 다른 접근 방식을 �
 ```
 hive/
 ├── core/                   # 핵심 프레임워크 – 에이전트 런타임, 그래프 실행기, 프로토콜
-├── tools/                  # MCP 도구 패키지 – 에이전트 기능을 위한 19개 도구
+├── tools/                  # MCP 도구 패키지 – 에이전트 기능을 위한 12개 도구
 ├── exports/                # 에이전트 패키지 – 사전 제작된 에이전트 및 예제
 ├── docs/                   # 문서 및 가이드
 ├── scripts/                # 빌드 및 유틸리티 스크립트
@@ -244,7 +244,7 @@ hive/
 
 # 다음 항목들이 설치됨:
 # - framework 패키지 (핵심 런타임)
-# - aden_tools 패키지 (19개의 MCP 도구)
+# - aden_tools 패키지 (12개의 MCP 도구)
 # - 모든 의존성
 
 # Claude Code 스킬을 사용해 새 에이전트 생성
@@ -364,7 +364,7 @@ Aden은 기본적으로 Docker Compose 배포를 지원하며, 프로덕션 및 
 
 **Q: Aden은 어떤 모니터링 및 디버깅 도구를 제공하나요?**
 
-Aden은 다음과 같은 포괄적인 관측성 기능을 제공합니다. 실시간 에이전트 실행 모니터링을 위한 WebSocket 스트리밍, TimescaleDB 기반의 비용 및 성능 메트릭 분석, Kubernetes 연동을 위한 헬스 체크 엔드포인트, 예산 관리, 에이전트 상태, 정책 제어를 위한 19개의 MCP 도구
+Aden은 다음과 같은 포괄적인 관측성 기능을 제공합니다. 실시간 에이전트 실행 모니터링을 위한 WebSocket 스트리밍, TimescaleDB 기반의 비용 및 성능 메트릭 분석, Kubernetes 연동을 위한 헬스 체크 엔드포인트, 예산 관리, 에이전트 상태, 정책 제어를 위한 12개의 MCP 도구
 
 **Q: Aden은 어떤 프로그래밍 언어를 지원하나요?**
 

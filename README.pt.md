@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-12_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## Visão Geral
@@ -81,7 +81,7 @@ cd hive
 
 Isto instala:
 - **framework** - Runtime do agente principal e executor de grafos
-- **aden_tools** - 19 ferramentas MCP para capacidades de agentes
+- **aden_tools** - 12 ferramentas MCP para capacidades de agentes
 - Todas as dependências necessárias
 
 ### Construa Seu Primeiro Agente
@@ -210,7 +210,7 @@ Escolha outros frameworks quando você precisar de:
 ```
 hive/
 ├── core/                   # Framework principal - Runtime de agentes, executor de grafos, protocolos
-├── tools/                  # Pacote de Ferramentas MCP - 19 ferramentas para capacidades de agentes
+├── tools/                  # Pacote de Ferramentas MCP - 12 ferramentas para capacidades de agentes
 ├── exports/                # Pacotes de Agentes - Agentes pré-construídos e exemplos
 ├── docs/                   # Documentação e guias
 ├── scripts/                # Scripts de build e utilitários
@@ -233,7 +233,7 @@ Para construir e executar agentes orientados a objetivos com o framework:
 
 # Isto instala:
 # - pacote framework (runtime principal)
-# - pacote aden_tools (19 ferramentas MCP)
+# - pacote aden_tools (12 ferramentas MCP)
 # - Todas as dependências
 
 # Construir novos agentes usando habilidades Claude Code

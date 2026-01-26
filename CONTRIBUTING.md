@@ -102,7 +102,7 @@ feat(component): add new feature description
 ## Project Structure
 
 - `core/` - Core framework (agent runtime, graph executor, protocols)
-- `tools/` - MCP Tools Package (19 tools for agent capabilities)
+- `tools/` - MCP Tools Package (12 tools for agent capabilities)
 - `exports/` - Agent packages and examples
 - `docs/` - Documentation
 - `scripts/` - Build and utility scripts

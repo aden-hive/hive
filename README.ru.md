@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-12_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## Обзор
@@ -81,7 +81,7 @@ cd hive
 
 Это установит:
 - **framework** - Основная среда выполнения агентов и исполнитель графов
-- **aden_tools** - 19 инструментов MCP для возможностей агентов
+- **aden_tools** - 12 инструментов MCP для возможностей агентов
 - Все необходимые зависимости
 
 ### Создайте своего первого агента
@@ -210,7 +210,7 @@ Aden использует принципиально иной подход к р
 ```
 hive/
 ├── core/                   # Основной фреймворк - Среда выполнения агентов, исполнитель графов, протоколы
-├── tools/                  # Пакет инструментов MCP - 19 инструментов для возможностей агентов
+├── tools/                  # Пакет инструментов MCP - 12 инструментов для возможностей агентов
 ├── exports/                # Пакеты агентов - Предварительно созданные агенты и примеры
 ├── docs/                   # Документация и руководства
 ├── scripts/                # Скрипты сборки и утилиты
@@ -233,7 +233,7 @@ hive/
 
 # Это установит:
 # - пакет framework (основная среда выполнения)
-# - пакет aden_tools (19 инструментов MCP)
+# - пакет aden_tools (12 инструментов MCP)
 # - Все зависимости
 
 # Создать новых агентов с помощью навыков Claude Code
