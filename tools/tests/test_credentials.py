@@ -318,25 +318,22 @@ class TestCredentialSpecs:
         assert spec.tools == []
         assert "llm_generate" in spec.node_types
         assert "llm_tool_use" in spec.node_types
-        assert spec.required is True
-        assert spec.startup_required is True
+        assert spec.required is False
+        assert spec.startup_required is False
         assert "anthropic.com" in spec.help_url
 
 
 class TestNodeTypeValidation:
     """Tests for node type credential validation."""
 
-    def test_get_missing_for_node_types_returns_missing(self, monkeypatch, tmp_path):
-        """get_missing_for_node_types() returns missing credentials."""
+    def test_get_missing_for_node_types_returns_empty_when_optional(self, monkeypatch, tmp_path):
+        """Anthropic is optional under LiteLLM, so missing credentials should be empty."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
         missing = creds.get_missing_for_node_types(["llm_generate", "llm_tool_use"])
+        assert missing == []
 
-        assert len(missing) == 1
-        cred_name, spec = missing[0]
-        assert cred_name == "anthropic"
-        assert spec.env_var == "ANTHROPIC_API_KEY"
 
     def test_get_missing_for_node_types_returns_empty_when_present(self, monkeypatch):
         """get_missing_for_node_types() returns empty when credentials present."""
@@ -356,18 +353,15 @@ class TestNodeTypeValidation:
 
         assert missing == []
 
-    def test_validate_for_node_types_raises_for_missing(self, monkeypatch, tmp_path):
-        """validate_for_node_types() raises CredentialError when missing."""
+    def test_validate_for_node_types_does_not_raise_when_optional(self, monkeypatch, tmp_path):
+        """validate_for_node_types() should not fail since LLM provider keys are optional under LiteLLM."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
 
-        with pytest.raises(CredentialError) as exc_info:
-            creds.validate_for_node_types(["llm_generate"])
+         # Should NOT raise CredentialError anymore
+        creds.validate_for_node_types(["llm_generate"])
 
-        error_msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in error_msg
-        assert "llm_generate" in error_msg
 
     def test_validate_for_node_types_passes_when_present(self, monkeypatch):
         """validate_for_node_types() passes when credentials present."""
@@ -377,23 +371,28 @@ class TestNodeTypeValidation:
 
         # Should not raise
         creds.validate_for_node_types(["llm_generate", "llm_tool_use"])
+    def test_validate_for_tools_still_raises_for_required_credentials(self, monkeypatch, tmp_path):
+        """Non-LLM credentials like Brave should still raise when missing."""
+        monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+
+        creds = CredentialManager(dotenv_path=tmp_path / ".env")
+
+        with pytest.raises(CredentialError):
+            creds.validate_for_tools(["web_search"])
 
 
 class TestStartupValidation:
     """Tests for startup credential validation."""
 
-    def test_validate_startup_raises_for_missing(self, monkeypatch, tmp_path):
-        """validate_startup() raises CredentialError when startup creds missing."""
+    def test_validate_startup_does_not_raise_when_llm_optional(self, monkeypatch, tmp_path):
+        """validate_startup() should not fail because LLM provider keys are optional under LiteLLM."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
 
-        with pytest.raises(CredentialError) as exc_info:
-            creds.validate_startup()
+        # Should NOT raise anymore
+        creds.validate_startup()
 
-        error_msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in error_msg
-        assert "Server startup failed" in error_msg
 
     def test_validate_startup_passes_when_present(self, monkeypatch):
         """validate_startup() passes when all startup creds are set."""
