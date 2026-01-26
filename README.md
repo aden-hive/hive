@@ -67,6 +67,7 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 - [Python 3.11+](https://www.python.org/downloads/) for agent development
 - [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
+- [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://docs.anthropic.com/claude/docs/claude-code) - Optional, for using building skills
 
 ### Installation
 
@@ -87,15 +88,23 @@ This installs:
 ### Build Your First Agent
 
 ```bash
-# Install Claude Code skills (one-time)
+# Install coding agent skills (one-time)
 ./quickstart.sh
+```
 
-# Build an agent using Claude Code
+```text
 claude> /building-agents
-
-# Test your agent
 claude> /testing-agent
+```
 
+Codex CLI (run from the repo root so it can read `.mcp.json`):
+
+```text
+codex> Use the building-agents skill
+codex> Use the testing-agent skill
+```
+
+```bash
 # Run your agent
 PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 ```
@@ -225,7 +234,7 @@ hive/
 ├── exports/                # Agent packages - Pre-built agents and examples
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
-├── .claude/                # Claude Code skills for building agents
+├── .claude/                # Claude Code skills for building agents (also used by Codex CLI)
 ├── ENVIRONMENT_SETUP.md    # Python setup guide for agent development
 ├── DEVELOPER.md            # Developer guide
 ├── CONTRIBUTING.md         # Contribution guidelines
@@ -247,11 +256,15 @@ For building and running goal-driven agents with the framework:
 # - aden_tools package (19 MCP tools)
 # - All dependencies
 
-# Build new agents using Claude Code skills
+# Build new agents using Claude Code or Codex CLI skills
 claude> /building-agents
 
 # Test agents
 claude> /testing-agent
+
+# Or use Codex CLI skills
+codex> Use the building-agents skill
+codex> Use the testing-agent skill
 
 # Run agents
 PYTHONPATH=core:exports python -m agent_name run --input '{...}'

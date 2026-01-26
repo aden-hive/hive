@@ -4,7 +4,7 @@
 #
 # This script:
 # 1. Installs Python dependencies (framework, aden_tools, MCP)
-# 2. Installs Claude Code skills for building and testing agents
+# 2. Installs coding CLI skills (Claude Code + Codex CLI) for building and testing agents
 # 3. Verifies the setup is ready to use
 #
 
@@ -20,8 +20,9 @@ NC='\033[0m' # No Color
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Claude Code skills directory
+# Claude Code and Codex CLI skills directories
 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
+CODEX_SKILLS_DIR="${CODEX_HOME:-$HOME/.codex}/skills"
 
 echo ""
 echo "=================================================="
@@ -197,10 +198,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Install Claude Code Skills
+# Step 4: Install Coding CLI Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Installing Claude Code skills...${NC}"
+echo -e "${BLUE}Step 4: Installing coding CLI skills...${NC}"
 echo ""
 
 # Check if .claude/skills exists in this repo
@@ -209,17 +210,13 @@ if [ ! -d "$SCRIPT_DIR/.claude/skills" ]; then
     exit 1
 fi
 
-# Create Claude skills directory if it doesn't exist
-if [ ! -d "$CLAUDE_SKILLS_DIR" ]; then
-    echo "  Creating Claude skills directory: $CLAUDE_SKILLS_DIR"
-    mkdir -p "$CLAUDE_SKILLS_DIR"
-fi
-
 # Function to install a skill
 install_skill() {
     local skill_name=$1
     local source_dir="$SCRIPT_DIR/.claude/skills/$skill_name"
-    local target_dir="$CLAUDE_SKILLS_DIR/$skill_name"
+    local target_base=$2
+    local label=$3
+    local target_dir="$target_base/$skill_name"
 
     if [ ! -d "$source_dir" ]; then
         echo -e "${RED}  ✗ Skill not found: $skill_name${NC}"
@@ -233,15 +230,33 @@ install_skill() {
 
     # Copy the skill
     cp -r "$source_dir" "$target_dir"
-    echo -e "${GREEN}  ✓ Installed: $skill_name${NC}"
+    echo -e "${GREEN}  ✓ Installed: $skill_name ($label)${NC}"
 }
 
-# Install all 5 agent-related skills
-install_skill "building-agents-core"
-install_skill "building-agents-construction"
-install_skill "building-agents-patterns"
-install_skill "testing-agent"
-install_skill "agent-workflow"
+# Install skills to a target directory
+install_skills_to_dir() {
+    local target_base=$1
+    local label=$2
+    if [ ! -d "$target_base" ]; then
+        echo "  Creating $label skills directory: $target_base"
+        mkdir -p "$target_base"
+    fi
+
+    for skill in "${SKILLS[@]}"; do
+        install_skill "$skill" "$target_base" "$label"
+    done
+}
+
+SKILLS=(
+    "building-agents-core"
+    "building-agents-construction"
+    "building-agents-patterns"
+    "testing-agent"
+    "agent-workflow"
+)
+
+install_skills_to_dir "$CLAUDE_SKILLS_DIR" "Claude Code"
+install_skills_to_dir "$CODEX_SKILLS_DIR" "Codex CLI"
 
 echo ""
 
@@ -265,7 +280,7 @@ for name in config.get('mcpServers', {}):
 " 2>/dev/null || echo "    (could not parse config)"
 else
     echo -e "${YELLOW}  ⚠ No .mcp.json found at project root${NC}"
-    echo "    Claude Code will not have access to MCP tools"
+    echo "    Claude Code and Codex CLI will not have access to MCP tools"
 fi
 
 echo ""
@@ -312,25 +327,33 @@ echo "  • framework (core agent runtime)"
 echo "  • aden_tools (tools and MCP servers)"
 echo "  • MCP dependencies (mcp, fastmcp)"
 echo ""
-echo "Installed Claude Code skills:"
+echo "Installed coding CLI skills:"
 echo "  • /building-agents-core        - Fundamental concepts"
 echo "  • /building-agents-construction - Step-by-step build guide"
 echo "  • /building-agents-patterns    - Best practices"
 echo "  • /testing-agent               - Test and validate agents"
 echo "  • /agent-workflow              - Complete workflow"
 echo ""
+echo "Skill directories:"
+echo "  • Claude Code: $CLAUDE_SKILLS_DIR"
+echo "  • Codex CLI:   $CODEX_SKILLS_DIR"
+echo ""
 echo "Usage:"
-echo "  1. Open Claude Code in this directory:"
+echo "  1. Open Claude Code or Codex CLI in this directory:"
 echo "     ${BLUE}cd $SCRIPT_DIR && claude${NC}"
+echo "     ${BLUE}cd $SCRIPT_DIR && codex${NC}"
 echo ""
 echo "  2. Build a new agent:"
 echo "     ${BLUE}/building-agents-construction${NC}"
+echo "     ${BLUE}Use the building-agents-construction skill${NC}"
 echo ""
 echo "  3. Test an existing agent:"
 echo "     ${BLUE}/testing-agent${NC}"
+echo "     ${BLUE}Use the testing-agent skill${NC}"
 echo ""
 echo "  4. Or use the complete workflow:"
 echo "     ${BLUE}/agent-workflow${NC}"
+echo "     ${BLUE}Use the agent-workflow skill${NC}"
 echo ""
 echo "MCP Tools available (when running from this directory):"
 echo "  • mcp__agent-builder__create_session"

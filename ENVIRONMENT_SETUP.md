@@ -116,20 +116,22 @@ PYTHONPATH=core:exports python -m personal_assistant_agent run --input '{...}'
 
 ## Building New Agents
 
-Use Claude Code CLI with the agent building skills:
+Use a coding CLI with the agent building skills:
 
-### 1. Install Skills (One-time)
+### Option A: Claude Code CLI
+
+#### 1. Install Skills (One-time)
 
 ```bash
 ./quickstart.sh
 ```
 
-This installs:
+This installs coding agent skills for Claude Code and Codex CLI:
 
 - `/building-agents` - Build new agents
 - `/testing-agent` - Test agents
 
-### 2. Build an Agent
+#### 2. Build an Agent
 
 ```
 claude> /building-agents
@@ -142,13 +144,49 @@ Follow the prompts to:
 3. Connect edges
 4. Generate the agent package
 
-### 3. Test Your Agent
+#### 3. Test Your Agent
 
 ```
 claude> /testing-agent
 ```
 
 Creates comprehensive test suites for your agent.
+
+### Option B: Codex CLI
+
+#### 1. Install Codex CLI
+
+Follow the Codex CLI install guide: https://github.com/openai/codex
+
+#### 2. Install Skills (One-time)
+
+If you already ran `./quickstart.sh`, the Codex CLI skills are installed.
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R .claude/skills/* "${CODEX_HOME:-$HOME/.codex}/skills/"
+```
+
+Run Codex from the repo root so it can read `.mcp.json`.
+
+If Codex CLI warns that config folders are disabled, add this project to your trusted list:
+
+```toml
+[projects."/path/to/hive"]
+trust_level = "trusted"
+```
+
+#### 3. Build an Agent
+
+```
+codex> Use the building-agents skill
+```
+
+#### 4. Test Your Agent
+
+```
+codex> Use the testing-agent skill
+```
 
 ## Troubleshooting
 
@@ -278,11 +316,17 @@ This design allows agents in `exports/` to be:
 ./scripts/setup-python.sh
 ```
 
-### 2. Build Agent (Claude Code)
+### 2. Build Agent (Claude Code or Codex CLI)
 
 ```
 claude> /building-agents
 Enter goal: "Build an agent that processes customer support tickets"
+```
+
+Or in Codex CLI:
+
+```
+codex> Use the building-agents skill
 ```
 
 ### 3. Validate Agent
@@ -295,6 +339,12 @@ PYTHONPATH=core:exports python -m support_ticket_agent validate
 
 ```
 claude> /testing-agent
+```
+
+Or in Codex CLI:
+
+```
+codex> Use the testing-agent skill
 ```
 
 ### 5. Run Agent

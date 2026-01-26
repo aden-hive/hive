@@ -25,7 +25,7 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 | **framework** | `/core`    | Core runtime, graph executor, protocols | Python 3.11+ |
 | **tools**     | `/tools`   | 19 MCP tools for agent capabilities     | Python 3.11+ |
 | **exports**   | `/exports` | Agent packages and examples             | Python 3.11+ |
-| **skills**    | `.claude`  | Claude Code skills for building/testing | Markdown     |
+| **skills**    | `.claude`  | Claude Code skills for building/testing (also used by Codex CLI) | Markdown     |
 
 ### Key Principles
 
@@ -46,6 +46,7 @@ Ensure you have installed:
 - **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.12 or 3.13 recommended)
 - **pip** - Package installer for Python (comes with Python)
 - **git** - Version control
+- **Codex CLI** - [Install](https://github.com/openai/codex) (optional, for using building skills)
 - **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional, for using building skills)
 
 Verify installation:
@@ -92,17 +93,33 @@ Get API keys:
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
 
-### Install Claude Code Skills
+### Install Coding CLI Skills
 
 ```bash
 # Install building-agents and testing-agent skills
 ./quickstart.sh
 ```
 
-This installs:
+This installs coding agent skills for Claude Code and Codex CLI:
 
 - `/building-agents` - Build new goal-driven agents
 - `/testing-agent` - Test agents with evaluation framework
+
+If you skipped `./quickstart.sh`, install Codex CLI skills manually:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R .claude/skills/* "${CODEX_HOME:-$HOME/.codex}/skills/"
+```
+
+Run Codex from the repo root so it can read `.mcp.json`.
+
+If Codex CLI warns that config folders are disabled, add this project to your trusted list:
+
+```toml
+[projects."/path/to/hive"]
+trust_level = "trusted"
+```
 
 ### Verify Setup
 
@@ -131,7 +148,7 @@ hive/                                    # Repository root
 │   ├── PULL_REQUEST_TEMPLATE.md         # PR description template
 │   └── CODEOWNERS                       # Auto-assign reviewers
 │
-├── .claude/                             # Claude Code Skills
+├── .claude/                             # Claude Code Skills (also used by Codex CLI)
 │   └── skills/
 │       ├── building-agents/             # Skills for building agents
 │       │   ├── SKILL.md                 # Main skill definition
@@ -188,7 +205,7 @@ hive/                                    # Repository root
 │   ├── setup-python.sh                  # Python environment setup
 │   └── setup.sh                         # Legacy setup script
 │
-├── quickstart.sh                        # Install Claude Code skills
+├── quickstart.sh                        # Install coding CLI skills (Claude Code + Codex CLI)
 ├── ENVIRONMENT_SETUP.md                 # Complete Python setup guide
 ├── README.md                            # Project overview
 ├── DEVELOPER.md                         # This file
@@ -204,12 +221,12 @@ hive/                                    # Repository root
 
 ## Building Agents
 
-### Using Claude Code Skills
+### Using Claude Code or Codex CLI Skills
 
-The fastest way to build agents is using the Claude Code skills:
+The fastest way to build agents is using the agent-building skills in Claude Code or Codex CLI:
 
 ```bash
-# Install skills (one-time)
+# Claude Code: install skills (one-time)
 ./quickstart.sh
 
 # Build a new agent
@@ -217,6 +234,14 @@ claude> /building-agents
 
 # Test the agent
 claude> /testing-agent
+
+# Codex CLI: install skills (one-time)
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R .claude/skills/* "${CODEX_HOME:-$HOME/.codex}/skills/"
+
+# Build and test using the same skill names
+codex> Use the building-agents skill
+codex> Use the testing-agent skill
 ```
 
 ### Agent Development Workflow
@@ -593,8 +618,9 @@ pip install -e .
 ### Creating a New Agent
 
 ```bash
-# Option 1: Use Claude Code skill (recommended)
+# Option 1: Use Claude Code or Codex CLI skill (recommended)
 claude> /building-agents
+codex> Use the building-agents skill
 
 # Option 2: Create manually
 # Note: exports/ is initially empty (gitignored). Create your agent directory:

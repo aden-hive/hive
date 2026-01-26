@@ -35,7 +35,7 @@ hive/
 ├── docs/                    # Documentation (architecture, getting started, etc.)
 ├── scripts/                 # Setup scripts
 ├── exports/                 # User-generated agents (usually gitignored)
-└── quickstart.sh            # Installs Claude Code skills
+└── quickstart.sh            # Installs coding CLI skills (Claude Code + Codex CLI)
 ```
 
 Reference docs:
@@ -134,7 +134,7 @@ This is documented in the architecture materials. Review:
 
 ## 7. Build or inspect an agent
 
-### Option A: Use Claude Code skills (recommended)
+### Option A: Use Claude Code or Codex CLI skills (recommended)
 
 Install skills:
 
@@ -149,6 +149,16 @@ claude> /building-agents
 ```
 
 This will guide you through goal definition, node design, graph generation, and testing.
+
+Codex CLI alternative (if you skipped `./quickstart.sh`):
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R .claude/skills/* "${CODEX_HOME:-$HOME/.codex}/skills/"
+codex> Use the building-agents skill
+```
+
+Run Codex from the repo root so it can read `.mcp.json`.
 
 ### Option B: Inspect a minimal manual agent
 
@@ -198,7 +208,7 @@ Reference:
 1. **Read**: `README.md` → `DEVELOPER.md` → `docs/getting-started.md`
 2. **Explore**: `core/framework/runner/` and `core/framework/executor/`
 3. **Run**: `core/examples/manual_agent.py`
-4. **Build**: Use `/building-agents` (Claude Code)
+4. **Build**: Use `/building-agents` (Claude Code or Codex CLI)
 5. **Test**: Use framework test commands
 
 ---

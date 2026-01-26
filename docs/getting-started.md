@@ -7,6 +7,7 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 - **Python 3.11+** ([Download](https://www.python.org/downloads/)) - Python 3.12 or 3.13 recommended
 - **pip** - Package installer for Python (comes with Python)
 - **git** - Version control
+- **Codex CLI** ([Install](https://github.com/openai/codex)) - Optional, for using building skills
 - **Claude Code** ([Install](https://docs.anthropic.com/claude/docs/claude-code)) - Optional, for using building skills
 
 ## Quick Start
@@ -30,7 +31,7 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ### Option 1: Using Claude Code Skills (Recommended)
 
 ```bash
-# Install Claude Code skills (one-time)
+# Install coding agent skills (one-time)
 ./quickstart.sh
 
 # Start Claude Code and build an agent
@@ -43,9 +44,31 @@ Follow the interactive prompts to:
 3. Generate the agent package
 4. Test the agent
 
-### Option 2: Create Agent Manually
+### Option 2: Using Codex CLI Skills
 
-> **Note:** The `exports/` directory is where your agents are created. It is not included in the repository (gitignored) because agents are user-generated via Claude Code skills or created manually.
+If you already ran `./quickstart.sh`, the Codex CLI skills are installed.
+
+```bash
+# Install Codex CLI skills (one-time) if you skipped quickstart
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R .claude/skills/* "${CODEX_HOME:-$HOME/.codex}/skills/"
+
+# Start Codex CLI and build an agent
+codex> Use the building-agents skill
+```
+
+Run Codex from the repo root so it can read `.mcp.json`.
+
+If Codex CLI warns that config folders are disabled, add this project to your trusted list:
+
+```toml
+[projects."/path/to/hive"]
+trust_level = "trusted"
+```
+
+### Option 3: Create Agent Manually
+
+> **Note:** The `exports/` directory is where your agents are created. It is not included in the repository (gitignored) because agents are user-generated via Claude Code or Codex CLI skills, or created manually.
 
 ```bash
 # Create exports directory if it doesn't exist
@@ -59,7 +82,7 @@ cd exports/my_agent
 PYTHONPATH=core:exports python -m my_agent validate
 ```
 
-### Option 3: Manual Code-First (Minimal Example)
+### Option 4: Manual Code-First (Minimal Example)
 
 If you prefer to start with code rather than CLI wizards, check out the manual agent example:
 
@@ -97,7 +120,7 @@ hive/
 ├── exports/                # Agent Packages (user-generated, not in repo)
 │   └── your_agent/         # Your agents created via /building-agents
 │
-├── .claude/                # Claude Code Skills
+├── .claude/                # Claude Code Skills (also used by Codex CLI)
 │   └── skills/
 │       ├── agent-workflow/
 │       ├── building-agents-construction/
@@ -148,6 +171,9 @@ Get your API keys:
 # Using Claude Code
 claude> /testing-agent
 
+# Using Codex CLI
+codex> Use the testing-agent skill
+
 # Or manually
 PYTHONPATH=core:exports python -m my_agent test
 
@@ -160,7 +186,7 @@ PYTHONPATH=core:exports python -m my_agent test --type success
 
 1. **Detailed Setup**: See [ENVIRONMENT_SETUP.md](../ENVIRONMENT_SETUP.md)
 2. **Developer Guide**: See [DEVELOPER.md](../DEVELOPER.md)
-3. **Build Agents**: Use `/building-agents` skill in Claude Code
+3. **Build Agents**: Use `/building-agents` skill in Claude Code or Codex CLI
 4. **Custom Tools**: Learn to integrate MCP servers
 5. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
@@ -205,4 +231,4 @@ pip uninstall -y framework tools
 - **Documentation**: Check the `/docs` folder
 - **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
-- **Build Agents**: Use `/building-agents` skill to create agents
+- **Build Agents**: Use `/building-agents` skill in Claude Code or Codex CLI
