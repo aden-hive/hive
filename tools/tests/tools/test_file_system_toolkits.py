@@ -117,6 +117,49 @@ class TestViewFileTool:
         assert result["success"] is True
         assert result["content"] == "nested content"
 
+    def test_view_file_with_max_size_truncation(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Viewing a file with max_size truncates content when exceeding limit."""
+        test_file = tmp_path / "large.txt"
+        content = "x" * 1000
+        test_file.write_text(content)
+
+        result = view_file_fn(path="large.txt", max_size=100, **mock_workspace)
+
+        assert result["success"] is True
+        assert len(result["content"]) <= 100 + len("\n\n[... Content truncated due to size limit ...]")
+        assert "[... Content truncated due to size limit ...]" in result["content"]
+
+    def test_view_file_with_negative_max_size(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Viewing a file with negative max_size returns error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+
+        result = view_file_fn(path="test.txt", max_size=-1, **mock_workspace)
+
+        assert "error" in result
+        assert "max_size must be non-negative" in result["error"]
+
+    def test_view_file_with_custom_encoding(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Viewing a file with custom encoding works correctly."""
+        test_file = tmp_path / "encoded.txt"
+        content = "Hello 世界"
+        test_file.write_text(content, encoding="utf-8")
+
+        result = view_file_fn(path="encoded.txt", encoding="utf-8", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["content"] == content
+
+    def test_view_file_with_invalid_encoding(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Viewing a file with invalid encoding returns error."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+
+        result = view_file_fn(path="test.txt", encoding="invalid-encoding", **mock_workspace)
+
+        assert "error" in result
+        assert "Failed to read file" in result["error"]
+
 
 class TestWriteToFileTool:
     """Tests for write_to_file tool."""

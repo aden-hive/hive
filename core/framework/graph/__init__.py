@@ -42,6 +42,7 @@ __all__ = [
     # Edge
     "EdgeSpec",
     "EdgeCondition",
+    "GraphSpec",
     # Executor (fixed graph)
     "GraphExecutor",
     # Plan (flexible execution)
