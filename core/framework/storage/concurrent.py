@@ -16,6 +16,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from framework.constants import (
+    DEFAULT_CACHE_TTL_SEC,
+    DEFAULT_BATCH_INTERVAL_SEC,
+    DEFAULT_MAX_BATCH_SIZE
+)
+
 from framework.schemas.run import Run, RunSummary, RunStatus
 from framework.storage.backend import FileStorage
 
@@ -58,9 +64,9 @@ class ConcurrentStorage:
     def __init__(
         self,
         base_path: str | Path,
-        cache_ttl: float = 60.0,
-        batch_interval: float = 0.1,
-        max_batch_size: int = 100,
+        cache_ttl: float = DEFAULT_CACHE_TTL_SEC,
+        batch_interval: float = DEFAULT_BATCH_INTERVAL_SEC,
+        max_batch_size: int = DEFAULT_MAX_BATCH_SIZE,
     ):
         """
         Initialize concurrent storage.

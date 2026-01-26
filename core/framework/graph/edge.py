@@ -27,7 +27,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from framework.graph.safe_eval import safe_eval
+
+from framework.constants import DEFAULT_ROUTING_MODEL
 
 
 class EdgeCondition(str, Enum):
@@ -413,7 +414,7 @@ class GraphSpec(BaseModel):
     )
 
     # Default LLM settings
-    default_model: str = "claude-haiku-4-5-20251001"
+    default_model: str = DEFAULT_ROUTING_MODEL
     max_tokens: int = 1024
 
     # Execution limits

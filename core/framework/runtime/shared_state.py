@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+from framework.constants import MAX_STATE_HISTORY
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class SharedStateManager:
         value = await memory.read("customer_id")
     """
 
+
+
     def __init__(self):
         # State storage at each level
         self._global_state: dict[str, Any] = {}
@@ -85,7 +88,7 @@ class SharedStateManager:
 
         # Change history for debugging/auditing
         self._change_history: list[StateChange] = []
-        self._max_history = 1000
+        self._max_history = MAX_STATE_HISTORY
 
         # Version tracking
         self._version = 0

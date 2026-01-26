@@ -7,6 +7,7 @@ string content, not just the first 500 characters.
 
 import pytest
 from framework.graph.node import SharedMemory, MemoryWriteError
+from framework.constants import CODE_DETECTION_CHAR_LIMIT
 from framework.graph.validator import OutputValidator, ValidationResult
 
 
@@ -26,10 +27,10 @@ class TestSharedMemoryHallucinationDetection:
     def test_detects_code_in_middle(self):
         """Code in the middle of the string should be detected (was previously missed)."""
         memory = SharedMemory()
-        # 600 chars of padding, then code, then more padding to exceed 5000 chars
+        # 600 chars of padding, then code, then more padding to exceed CODE_DETECTION_CHAR_LIMIT chars
         padding_start = "A" * 600
         code = "\n```python\nimport os\ndef malicious(): pass\n```\n"
-        padding_end = "B" * 5000
+        padding_end = "B" * CODE_DETECTION_CHAR_LIMIT
         content = padding_start + code + padding_end
 
         with pytest.raises(MemoryWriteError) as exc_info:
@@ -54,7 +55,7 @@ class TestSharedMemoryHallucinationDetection:
         memory = SharedMemory()
         padding = "A" * 600
         code = "\nfunction malicious() { require('child_process'); }\n"
-        padding_end = "B" * 5000
+        padding_end = "B" * CODE_DETECTION_CHAR_LIMIT
         content = padding + code + padding_end
 
         with pytest.raises(MemoryWriteError) as exc_info:
@@ -67,7 +68,7 @@ class TestSharedMemoryHallucinationDetection:
         memory = SharedMemory()
         padding = "A" * 600
         code = "\nDROP TABLE users; SELECT * FROM passwords;\n"
-        padding_end = "B" * 5000
+        padding_end = "B" * CODE_DETECTION_CHAR_LIMIT
         content = padding + code + padding_end
 
         with pytest.raises(MemoryWriteError) as exc_info:
@@ -80,7 +81,7 @@ class TestSharedMemoryHallucinationDetection:
         memory = SharedMemory()
         padding = "A" * 600
         code = "\n<script>alert('xss')</script>\n"
-        padding_end = "B" * 5000
+        padding_end = "B" * CODE_DETECTION_CHAR_LIMIT
         content = padding + code + padding_end
 
         with pytest.raises(MemoryWriteError) as exc_info:
@@ -89,7 +90,7 @@ class TestSharedMemoryHallucinationDetection:
         assert "hallucinated code" in str(exc_info.value)
 
     def test_allows_short_strings_without_validation(self):
-        """Strings under 5000 chars should not trigger validation."""
+        """Strings under CODE_DETECTION_CHAR_LIMIT chars should not trigger validation."""
         memory = SharedMemory()
         content = "def hello(): pass"  # Contains code indicator but short
 
@@ -100,7 +101,7 @@ class TestSharedMemoryHallucinationDetection:
     def test_allows_long_strings_without_code(self):
         """Long strings without code indicators should be allowed."""
         memory = SharedMemory()
-        content = "This is a long text document. " * 500  # ~15000 chars, no code
+        content = "This is a long text document. " * 500  # ~1CODE_DETECTION_CHAR_LIMIT chars, no code
 
         memory.write("output", content)
         assert memory.read("output") == content
@@ -118,7 +119,7 @@ class TestSharedMemoryHallucinationDetection:
         """Very long strings (>10KB) should be sampled at multiple positions."""
         memory = SharedMemory()
         # Create a 50KB string with code at the 75% mark
-        size = 50000
+        size = CODE_DETECTION_CHAR_LIMIT * 10
         code_position = int(size * 0.75)
         content = "A" * code_position + "def hidden_code(): pass" + "B" * (size - code_position - 25)
 
@@ -159,7 +160,7 @@ class TestOutputValidatorHallucinationDetection:
         validator = OutputValidator()
 
         # 50KB string with code at 75% position
-        size = 50000
+        size = CODE_DETECTION_CHAR_LIMIT * 10
         code_position = int(size * 0.75)
         content = "A" * code_position + "class HiddenClass:" + "B" * (size - code_position - 18)
 
@@ -213,14 +214,14 @@ class TestEdgeCases:
         assert memory.read("number") == 12345
         assert memory.read("list") == [1, 2, 3]
 
-    def test_exactly_5000_chars(self):
-        """String of exactly 5000 chars should not trigger validation."""
+    def test_exactly_CODE_DETECTION_CHAR_LIMIT_chars(self):
+        """String of exactly CODE_DETECTION_CHAR_LIMIT chars should not trigger validation."""
         memory = SharedMemory()
-        content = "def code(): pass" + "A" * (5000 - 16)  # Exactly 5000 chars
+        content = "def code(): pass" + "A" * (CODE_DETECTION_CHAR_LIMIT - 16)  # Exactly CODE_DETECTION_CHAR_LIMIT chars
 
         # Should not raise - exactly at threshold, not over
         memory.write("output", content)
-        assert len(memory.read("output")) == 5000
+        assert len(memory.read("output")) == CODE_DETECTION_CHAR_LIMIT
 
     def test_5001_chars_triggers_validation(self):
         """String of 5001 chars with code should trigger validation."""

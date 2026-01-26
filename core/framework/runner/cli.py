@@ -201,7 +201,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         runner = AgentRunner.load(
             args.agent_path,
             mock_mode=args.mock,
-            model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+            model=getattr(args, "model", DEFAULT_ROUTING_MODEL),
         )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -635,7 +635,7 @@ Output ONLY valid JSON, no explanation:"""
 
     try:
         message = client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Fast and cheap
+            model=DEFAULT_ROUTING_MODEL,  # Fast and cheap
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}]
         )

@@ -5,6 +5,8 @@ This module defines the formal structure for pause/resume interactions
 where agents need to gather input from humans.
 """
 
+from framework.graph.node import NodeSpec, NodeResult
+from framework.constants import DEFAULT_ROUTING_MODEL
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -193,7 +195,7 @@ Example format:
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=DEFAULT_ROUTING_MODEL,
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}]
             )

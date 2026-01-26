@@ -22,6 +22,13 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
+
+from framework.constants import (
+    DEFAULT_ROUTING_MODEL,
+    DEFAULT_CLEANUP_MODEL,
+    DEFAULT_SUMMARY_MODEL,
+    CODE_DETECTION_CHAR_LIMIT
+)
 from framework.runtime.core import Runtime
 from framework.llm.provider import LLMProvider, Tool
 
@@ -65,6 +72,10 @@ def find_json_object(text: str) -> str | None:
                 return text[start:i + 1]
 
     return None
+
+
+
+
 
 
 class NodeSpec(BaseModel):
@@ -194,7 +205,7 @@ class SharedMemory:
 
         if validate and isinstance(value, str):
             # Check for obviously hallucinated content
-            if len(value) > 5000:
+            if len(value) > CODE_DETECTION_CHAR_LIMIT:
                 # Long strings that look like code are suspicious
                 if self._contains_code_indicators(value):
                     logger.warning(

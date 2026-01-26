@@ -19,6 +19,7 @@ from typing import Any, Callable, TYPE_CHECKING
 from framework.graph.executor import GraphExecutor, ExecutionResult
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
 from framework.runtime.shared_state import SharedStateManager, IsolationLevel, StreamMemory
+from framework.constants import MAX_EXECUTION_HISTORY
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -107,7 +108,7 @@ class ExecutionStream:
         llm: "LLMProvider | None" = None,
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
-        result_retention_max: int | None = 1000,
+        result_retention_max: int | None = MAX_EXECUTION_HISTORY,
         result_retention_ttl_seconds: float | None = None,
     ):
         """

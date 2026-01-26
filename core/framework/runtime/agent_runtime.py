@@ -11,6 +11,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
+from framework.constants import (
+    DEFAULT_CACHE_TTL_SEC,
+    DEFAULT_BATCH_INTERVAL_SEC,
+    MAX_EVENT_HISTORY,
+    MAX_EXECUTION_HISTORY
+)
+
 from framework.graph.executor import ExecutionResult
 from framework.runtime.shared_state import SharedStateManager
 from framework.runtime.outcome_aggregator import OutcomeAggregator
@@ -30,10 +37,10 @@ logger = logging.getLogger(__name__)
 class AgentRuntimeConfig:
     """Configuration for AgentRuntime."""
     max_concurrent_executions: int = 100
-    cache_ttl: float = 60.0
-    batch_interval: float = 0.1
-    max_history: int = 1000
-    execution_result_max: int = 1000
+    cache_ttl: float = DEFAULT_CACHE_TTL_SEC
+    batch_interval: float = DEFAULT_BATCH_INTERVAL_SEC
+    max_history: int = MAX_EVENT_HISTORY
+    execution_result_max: int = MAX_EXECUTION_HISTORY
     execution_result_ttl_seconds: float | None = None
 
 

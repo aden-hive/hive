@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from framework.llm.provider import LLMProvider
+from framework.llm.provider import LLMProvider, Tool
+from framework.constants import DEFAULT_ROUTING_MODEL
 from framework.runner.protocol import (
     AgentMessage,
     CapabilityLevel,
@@ -55,7 +56,7 @@ class AgentOrchestrator:
     def __init__(
         self,
         llm: LLMProvider | None = None,
-        model: str = "claude-haiku-4-5-20251001",
+        model: str = DEFAULT_ROUTING_MODEL,
     ):
         """
         Initialize the orchestrator.

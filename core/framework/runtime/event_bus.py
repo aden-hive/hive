@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Awaitable, Callable
+from framework.constants import MAX_EVENT_HISTORY
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ class EventBus:
         """
         self._subscriptions: dict[str, Subscription] = {}
         self._event_history: list[AgentEvent] = []
-        self._max_history = max_history
+        self._max_history = max_history or MAX_EVENT_HISTORY
         self._semaphore = asyncio.Semaphore(max_concurrent_handlers)
         self._subscription_counter = 0
         self._lock = asyncio.Lock()
