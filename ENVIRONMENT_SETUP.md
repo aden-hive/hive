@@ -72,6 +72,14 @@ For running agents with real LLMs:
 export ANTHROPIC_API_KEY="your-key-here"
 ```
 
+Some MCP tools read credentials from `tools/.env`. Create it from the template and add your keys:
+
+```bash
+cp tools/.env.example tools/.env
+```
+
+Then open `tools/.env` and set values like `ANTHROPIC_API_KEY` and `BRAVE_SEARCH_API_KEY`.
+
 ## Running Agents
 
 All agent commands must be run from the project root with `PYTHONPATH` set:

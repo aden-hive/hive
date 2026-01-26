@@ -77,6 +77,11 @@ cd hive
 
 # Run Python environment setup
 ./scripts/setup-python.sh
+
+# Copy tool environment template
+cp tools/.env.example tools/.env
+
+# Edit tools/.env with your API keys
 ```
 
 This installs:

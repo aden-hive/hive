@@ -137,6 +137,12 @@ export OPENAI_API_KEY="your-key-here"        # Optional
 export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search
 ```
 
+Some MCP tools read from `tools/.env`. Create it from the template and add your keys:
+
+```bash
+cp tools/.env.example tools/.env
+```
+
 Get your API keys:
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
