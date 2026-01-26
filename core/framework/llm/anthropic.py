@@ -1,9 +1,9 @@
 """Anthropic Claude LLM provider - backward compatible wrapper around LiteLLM."""
 
 import os
-from typing import Any
+from typing import Any, Callable
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse, ToolResult
 from framework.llm.litellm import LiteLLMProvider
 
 
@@ -85,7 +85,7 @@ class AnthropicProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """Run a tool-use loop until Claude produces a final response (via LiteLLM)."""
