@@ -160,16 +160,33 @@ class EdgeSpec(BaseModel):
         if not self.condition_expr:
             return True
 
-        # Build evaluation context
-        # Include memory keys directly for easier access in conditions
-        context = {
+        # Reserved keys that cannot be overridden by memory
+        RESERVED_KEYS = {"output", "memory", "result", "true", "false"}
+
+        # Build base evaluation context with protected framework variables
+        base_context = {
             "output": output,
             "memory": memory,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **memory,  # Unpack memory keys directly into context
         }
+
+        # Filter out reserved keys from memory to prevent shadowing
+        safe_memory = {k: v for k, v in memory.items() if k not in RESERVED_KEYS}
+
+        # Warn about conflicts
+        conflicts = set(memory.keys()) - set(safe_memory.keys())
+        if conflicts:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"      ⚠ Memory keys {conflicts} conflict with reserved context variables. "
+                f"Access them via memory['{list(conflicts)[0]}'] instead."
+            )
+
+        # Build final context with safe memory keys unpacked
+        context = {**base_context, **safe_memory}
 
         try:
             # Safe evaluation using AST-based whitelist

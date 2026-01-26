@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - tools: Fixed web_scrape tool attempting to parse non-HTML content (PDF, JSON) as HTML (#487)
+- Prevent memory keys from shadowing reserved context in edge evaluation (Issue #595)
 
 ### Security
 - N/A
