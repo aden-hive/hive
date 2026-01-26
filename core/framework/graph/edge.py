@@ -566,7 +566,7 @@ class GraphSpec(BaseModel):
                 continue
             reachable.add(current)
             for edge in self.get_outgoing_edges(current):
-                to_visit.append(edge.target)
+                to_visit.append(edge.target)  # noqa: PERF401 (queue operation, not building final list)
 
         # Build set of async entry point nodes for quick lookup
         async_entry_nodes = {ep.entry_node for ep in self.async_entry_points}
