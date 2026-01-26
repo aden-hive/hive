@@ -11,20 +11,20 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class IsolationLevel(str, Enum):
+class IsolationLevel(StrEnum):
     """State isolation level for concurrent executions."""
     ISOLATED = "isolated"           # Private state per execution
     SHARED = "shared"               # Shared state (eventual consistency)
     SYNCHRONIZED = "synchronized"   # Shared with write locks (strong consistency)
 
 
-class StateScope(str, Enum):
+class StateScope(StrEnum):
     """Scope for state operations."""
     EXECUTION = "execution"   # Local to a single execution
     STREAM = "stream"         # Shared within a stream
