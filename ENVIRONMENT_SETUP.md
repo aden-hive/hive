@@ -81,25 +81,15 @@ All agent commands must be run from the project root with `PYTHONPATH` set:
 PYTHONPATH=core:exports python -m agent_name COMMAND
 ```
 
-### Example: Support Ticket Agent
+### Example: Manual Agent
+
+Since the `support_ticket_agent` example is currently under maintenance, you can verify your installation by running the manual agent included in the core examples.
 
 ```bash
-# Validate agent structure
-PYTHONPATH=core:exports python -m support_ticket_agent validate
-
-# Show agent information
-PYTHONPATH=core:exports python -m support_ticket_agent info
-
-# Run agent with input
-PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
-  "ticket_content": "My login is broken. Error 401.",
-  "customer_id": "CUST-123",
-  "ticket_id": "TKT-456"
-}'
-
-# Run in mock mode (no LLM calls)
-PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{...}'
+# Run the manual agent example
+python core/examples/manual_agent.py
 ```
+> Note for Windows Users: If running from PowerShell, you may need to use python core\examples\manual_agent.py. We recommend using Git Bash for the best experience.
 
 ### Example: Other Agents
 
