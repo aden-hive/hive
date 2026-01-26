@@ -2,8 +2,6 @@ import { useCallback, useState } from 'react';
 import {
   ReactFlow,
   Background,
-  Controls,
-  MiniMap,
   BackgroundVariant,
   ReactFlowProvider,
   Handle,
@@ -14,9 +12,10 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getSmoothStepPath,
+  useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Brain, Wrench, GitBranch, Code, Download, Trash2, X, Copy, Check, Play, Plus, Loader2, Search, MessageSquare, ArrowRight, HelpCircle, Info, ChevronRight, ChevronDown, Layers, BookOpen, Zap, FileCode, Edit3, Flag, CircleDot, Eye, EyeOff, Key, Cpu, AlertTriangle } from 'lucide-react';
+import { Brain, Wrench, GitBranch, Code, Download, Trash2, X, Copy, Check, Play, Plus, Loader2, Search, MessageSquare, ArrowRight, HelpCircle, Info, ChevronRight, ChevronDown, Layers, BookOpen, Zap, FileCode, Edit3, Flag, CircleDot, Eye, EyeOff, Key, Cpu, AlertTriangle, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-python';
 import 'prismjs/themes/prism-tomorrow.css';
@@ -268,6 +267,68 @@ function DataFlowEdge({
 
 const nodeTypes = { agentNode: AgentNode };
 const edgeTypes = { dataFlow: DataFlowEdge };
+
+// Custom zoom controls component
+function CustomControls() {
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+
+  const btnStyle: React.CSSProperties = {
+    width: 36,
+    height: 36,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#fff',
+    border: 'none',
+    cursor: 'pointer',
+    color: '#64748b',
+    transition: 'all 0.15s',
+  };
+
+  return (
+    <div style={{
+      position: 'absolute',
+      bottom: 20,
+      left: 20,
+      display: 'flex',
+      flexDirection: 'column',
+      background: '#fff',
+      borderRadius: 10,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+      border: '1px solid #e2e8f0',
+      overflow: 'hidden',
+      zIndex: 10,
+    }}>
+      <button
+        onClick={() => zoomIn()}
+        style={{ ...btnStyle, borderBottom: '1px solid #e2e8f0' }}
+        onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#0f172a'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#64748b'; }}
+        title="Zoom in"
+      >
+        <ZoomIn size={18} />
+      </button>
+      <button
+        onClick={() => zoomOut()}
+        style={{ ...btnStyle, borderBottom: '1px solid #e2e8f0' }}
+        onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#0f172a'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#64748b'; }}
+        title="Zoom out"
+      >
+        <ZoomOut size={18} />
+      </button>
+      <button
+        onClick={() => fitView({ padding: 0.2 })}
+        style={btnStyle}
+        onMouseEnter={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#0f172a'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.color = '#64748b'; }}
+        title="Fit to view"
+      >
+        <Maximize2 size={18} />
+      </button>
+    </div>
+  );
+}
 
 const TEMPLATES = {
   research: {
@@ -636,7 +697,7 @@ export default function App() {
     setDesc('');
     setNodes([]);
     setEdges([]);
-    setSelectedNode(null);
+    setSelected(null);
     setModal(null);
   };
 
@@ -915,11 +976,6 @@ export default function App() {
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'system-ui, -apple-system, sans-serif', background: '#f1f5f9' }}>
       <style>{`
-        .react-flow__controls { background: #fff !important; border: 1px solid #d1d5db !important; border-radius: 8px !important; }
-        .react-flow__controls-button { background: #fff !important; border-bottom: 1px solid #e2e8f0 !important; }
-        .react-flow__controls-button:hover { background: #f1f5f9 !important; }
-        .react-flow__controls-button svg { fill: #475569 !important; }
-        .react-flow__minimap { background: #fff !important; border: 1px solid #d1d5db !important; border-radius: 8px !important; }
         input:focus, textarea:focus { border-color: #2563eb !important; box-shadow: 0 0 0 3px rgba(37,99,235,0.15) !important; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
@@ -1294,8 +1350,7 @@ export default function App() {
             style={{ background: '#f1f5f9' }}
           >
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#cbd5e1" />
-            <Controls />
-            <MiniMap nodeColor={() => '#94a3b8'} maskColor="rgba(241,245,249,0.9)" />
+            <CustomControls />
           </ReactFlow>
         </ReactFlowProvider>
 
@@ -1418,21 +1473,55 @@ export default function App() {
             <div style={{ width: 72, height: 72, borderRadius: 20, background: '#fff', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
               <Layers size={36} color="#7c3aed" />
             </div>
-            <h2 style={{ fontSize: 24, fontWeight: 700, color: '#0f172a', margin: '0 0 12px 0' }}>Build Your AI Agent</h2>
-            <p style={{ fontSize: 15, color: '#64748b', margin: '0 0 8px 0', lineHeight: 1.6 }}>
-              Create agents that automate tasks by chaining AI nodes together.
+            <h2 style={{ fontSize: 24, fontWeight: 700, color: '#0f172a', margin: '0 0 12px 0' }}>Start Building</h2>
+            <p style={{ fontSize: 15, color: '#64748b', margin: '0 0 24px 0', lineHeight: 1.6 }}>
+              Add your first node or pick a template to get started.
             </p>
-            <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 28px 0' }}>
-              Each node processes data and passes results to the next node.
-            </p>
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-              <button onClick={() => setModal('template')} style={btnPrimary}>
-                <Layers size={16} /> Start with Template
-              </button>
-              <button onClick={() => setModal('help')} style={btnSecondary}>
-                <BookOpen size={16} /> Learn How It Works
-              </button>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 20 }}>
+              {Object.entries(nodeConfig).map(([type, config]) => (
+                <button
+                  key={type}
+                  onClick={() => addNode(type as NodeType)}
+                  style={{
+                    padding: '10px 16px',
+                    background: '#fff',
+                    border: `1px solid ${config.color}30`,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: config.color,
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = `${config.color}10`; e.currentTarget.style.borderColor = config.color; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = `${config.color}30`; }}
+                >
+                  <config.icon size={16} /> {config.label}
+                </button>
+              ))}
             </div>
+            <button
+              onClick={() => setModal('template')}
+              style={{
+                padding: '10px 20px',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 500,
+                color: '#64748b',
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f1f5f9'; e.currentTarget.style.color = '#475569'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#64748b'; }}
+            >
+              <Layers size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }} />
+              Browse Templates
+            </button>
           </div>
         )}
       </div>
