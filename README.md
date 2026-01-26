@@ -65,6 +65,32 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ### Prerequisites
 
+### Windows Notes for Claude Code
+
+On Windows, Claude Code is not installed by default and must be installed explicitly.
+
+1. Install Claude Code using the official installer:
+   https://docs.anthropic.com/en/docs/claude-code/getting-started
+2. 2. Restart your terminal and verify the CLI is on PATH:
+   ```bash
+   claude --help
+   ```
+
+⚠️ If you see:
+   bash: claude: command not found
+then Claude Code is either not installed or not discoverable on PATH.
+Ensure the install directory is added to PATH and restart Git Bash.
+---
+⚠️ Verification note
+Running `claude` without arguments may fail with:
+   Credit balance too low
+even if Claude Code is installed correctly.
+Use:
+   claude --help
+to verify installation without requiring API credits.
+
+
+
 - [Python 3.11+](https://www.python.org/downloads/) for agent development
 - [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
 
