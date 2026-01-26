@@ -6,8 +6,29 @@ from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
+from framework.llm.provider import LLMResponse
 
 from .config import default_config, metadata
+
+class MockLLMProvider:
+    """A mock LLM provider that follows the core framework interface."""
+    def __init__(self):
+        self.model = "mock-model"
+
+    def complete(self, messages, system="", tools=None, **kwargs):
+        
+        mock_content = '{"category": "general", "priority": "medium", "queries": ["mock query"], "topic": "AI Agents", "subtopics": ["Agents"], "reasoning": "This is a mock response."}'
+        
+        return LLMResponse(
+            content=mock_content,
+            model="mock-model"
+        )
+
+    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs):
+        return self.complete(messages, system)
+
+    async def generate(self, messages, **kwargs):
+        return '{"action": "mock_response"}'
 
 # Goal definition
 goal = Goal(
@@ -230,7 +251,7 @@ class OnlineResearchAgent:
                     server_config["cwd"] = str(agent_dir / server_config["cwd"])
                 tool_registry.register_mcp_server(server_config)
 
-        llm = None
+        # Fix: Use MockLLMProvider in mock mode instead of None
         if not mock_mode:
             # LiteLLMProvider uses environment variables for API keys
             llm = LiteLLMProvider(
@@ -238,6 +259,8 @@ class OnlineResearchAgent:
                 api_key=self.config.api_key,
                 api_base=self.config.api_base,
             )
+        else:
+            llm = MockLLMProvider()
 
         self._graph = GraphSpec(
             id="online-research-agent-graph",
