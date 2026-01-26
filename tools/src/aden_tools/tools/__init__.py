@@ -55,6 +55,9 @@ def register_all_tools(
     register_pdf_read(mcp)
 
     # Tools that need credentials (pass credentials if provided)
+    # web_search handles both credential sources internally:
+    # - If credentials provided: uses credentials.get("brave_search")
+    # - If credentials is None: falls back to os.getenv("BRAVE_SEARCH_API_KEY")
     register_web_search(mcp, credentials=credentials)
 
     # Register file system toolkits
