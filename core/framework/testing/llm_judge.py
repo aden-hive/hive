@@ -42,7 +42,7 @@ class LLMJudge:
 
                 self._client = anthropic.Anthropic()
             except ImportError:
-                raise RuntimeError("anthropic package required for LLM judge")
+                raise RuntimeError("anthropic package required for LLM judge") from None
         return self._client
 
     def evaluate(

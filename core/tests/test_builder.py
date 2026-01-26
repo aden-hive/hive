@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from framework import Runtime, BuilderQuery
+from framework import BuilderQuery, Runtime
 from framework.schemas.run import RunStatus
 
 

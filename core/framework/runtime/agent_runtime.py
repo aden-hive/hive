@@ -7,15 +7,16 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from framework.graph.executor import ExecutionResult
-from framework.runtime.shared_state import SharedStateManager
-from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import ExecutionStream, EntryPointSpec
+from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
+from framework.runtime.outcome_aggregator import OutcomeAggregator
+from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentRuntimeConfig:
     """Configuration for AgentRuntime."""
+
     max_concurrent_executions: int = 100
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
@@ -416,6 +418,7 @@ class AgentRuntime:
 
 
 # === CONVENIENCE FACTORY ===
+
 
 def create_agent_runtime(
     graph: "GraphSpec",
