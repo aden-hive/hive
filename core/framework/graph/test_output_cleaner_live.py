@@ -6,8 +6,9 @@ Demonstrates how OutputCleaner fixes the JSON parsing trap using llama-3.3-70b.
 
 import json
 import os
-from framework.graph.output_cleaner import OutputCleaner, CleansingConfig
+
 from framework.graph.node import NodeSpec
+from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.llm.litellm import LiteLLMProvider
 
 
@@ -42,7 +43,10 @@ def test_cleaning_with_cerebras():
     # Scenario 1: JSON parsing trap (entire response in one key)
     print("\n--- Scenario 1: JSON Parsing Trap ---")
     malformed_output = {
-        "recommendation": '{\n  "approval_decision": "APPROVED",\n  "risk_score": 3.5,\n  "reason": "Standard terms, low risk"\n}',
+        "recommendation": (
+            '{\n  "approval_decision": "APPROVED",\n  "risk_score": 3.5,\n  '
+            '"reason": "Standard terms, low risk"\n}'
+        ),
     }
 
     target_spec = NodeSpec(
@@ -84,14 +88,17 @@ def test_cleaning_with_cerebras():
     print(json.dumps(cleaned, indent=2))
 
     assert isinstance(cleaned, dict), "Should return dict"
-    assert "approval_decision" in str(cleaned) or isinstance(
-        cleaned.get("recommendation"), dict
-    ), "Should have recommendation structure"
+    assert "approval_decision" in str(cleaned) or isinstance(cleaned.get("recommendation"), dict), (
+        "Should have recommendation structure"
+    )
 
     # Scenario 2: Multiple keys with JSON string
     print("\n\n--- Scenario 2: Multiple Keys, JSON String ---")
     malformed_output2 = {
-        "analysis": '{"high_risk_clauses": ["unlimited liability"], "compliance_issues": [], "category": "high-risk"}',
+        "analysis": (
+            '{"high_risk_clauses": ["unlimited liability"], '
+            '"compliance_issues": [], "category": "high-risk"}'
+        ),
         "risk_score": "7.5",  # String instead of number
     }
 
@@ -131,9 +138,7 @@ def test_cleaning_with_cerebras():
 
         assert isinstance(cleaned2, dict), "Should return dict"
         assert isinstance(cleaned2.get("analysis"), dict), "analysis should be dict"
-        assert isinstance(
-            cleaned2.get("risk_score"), (int, float)
-        ), "risk_score should be number"
+        assert isinstance(cleaned2.get("risk_score"), (int, float)), "risk_score should be number"
 
     # Stats
     stats = cleaner.get_stats()

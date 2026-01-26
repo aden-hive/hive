@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ValidationResult:
     """Result of validating an output."""
+
     success: bool
     errors: list[str]
 
@@ -29,6 +30,70 @@ class OutputValidator:
 
     Used by the executor to catch bad outputs before they pollute memory.
     """
+
+    def _contains_code_indicators(self, value: str) -> bool:
+        """
+        Check for code patterns in a string using sampling for efficiency.
+
+        For strings under 10KB, checks the entire content.
+        For longer strings, samples at strategic positions to balance
+        performance with detection accuracy.
+
+        Args:
+            value: The string to check for code indicators
+
+        Returns:
+            True if code indicators are found, False otherwise
+        """
+        code_indicators = [
+            # Python
+            "def ",
+            "class ",
+            "import ",
+            "from ",
+            "if __name__",
+            "async def ",
+            "await ",
+            "try:",
+            "except:",
+            # JavaScript/TypeScript
+            "function ",
+            "const ",
+            "let ",
+            "=> {",
+            "require(",
+            "export ",
+            # SQL
+            "SELECT ",
+            "INSERT ",
+            "UPDATE ",
+            "DELETE ",
+            "DROP ",
+            # HTML/Script injection
+            "<script",
+            "<?php",
+            "<%",
+        ]
+
+        # For strings under 10KB, check the entire content
+        if len(value) < 10000:
+            return any(indicator in value for indicator in code_indicators)
+
+        # For longer strings, sample at strategic positions
+        sample_positions = [
+            0,  # Start
+            len(value) // 4,  # 25%
+            len(value) // 2,  # 50%
+            3 * len(value) // 4,  # 75%
+            max(0, len(value) - 2000),  # Near end
+        ]
+
+        for pos in sample_positions:
+            chunk = value[pos : pos + 2000]
+            if any(indicator in chunk for indicator in code_indicators):
+                return True
+
+        return False
 
     def validate_output_keys(
         self,
@@ -51,8 +116,7 @@ class OutputValidator:
 
         if not isinstance(output, dict):
             return ValidationResult(
-                success=False,
-                errors=[f"Output is not a dict, got {type(output).__name__}"]
+                success=False, errors=[f"Output is not a dict, got {type(output).__name__}"]
             )
 
         for key in expected_keys:
@@ -93,16 +157,10 @@ class OutputValidator:
             if not isinstance(value, str):
                 continue
 
-            # Check for Python-like code
-            code_indicators = [
-                "def ", "class ", "import ", "from ", "if __name__",
-                "async def ", "await ", "try:", "except:"
-            ]
-            if any(indicator in value[:500] for indicator in code_indicators):
+            # Check for code patterns in the entire string, not just first 500 chars
+            if self._contains_code_indicators(value):
                 # Could be legitimate, but warn
-                logger.warning(
-                    f"Output key '{key}' may contain code - verify this is expected"
-                )
+                logger.warning(f"Output key '{key}' may contain code - verify this is expected")
 
             # Check for overly long values
             if len(value) > max_length:

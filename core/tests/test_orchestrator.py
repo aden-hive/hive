@@ -7,8 +7,8 @@ Run with:
 
 from unittest.mock import Mock, patch
 
-from framework.llm.provider import LLMProvider
 from framework.llm.litellm import LiteLLMProvider
+from framework.llm.provider import LLMProvider
 from framework.runner.orchestrator import AgentOrchestrator
 
 
@@ -17,7 +17,7 @@ class TestOrchestratorLLMInitialization:
 
     def test_auto_creates_litellm_provider_when_no_llm_passed(self):
         """Test that LiteLLMProvider is auto-created when no llm is passed."""
-        with patch.object(LiteLLMProvider, '__init__', return_value=None) as mock_init:
+        with patch.object(LiteLLMProvider, "__init__", return_value=None) as mock_init:
             orchestrator = AgentOrchestrator()
 
             mock_init.assert_called_once_with(model="claude-haiku-4-5-20251001")
@@ -25,14 +25,14 @@ class TestOrchestratorLLMInitialization:
 
     def test_uses_custom_model_parameter(self):
         """Test that custom model parameter is passed to LiteLLMProvider."""
-        with patch.object(LiteLLMProvider, '__init__', return_value=None) as mock_init:
+        with patch.object(LiteLLMProvider, "__init__", return_value=None) as mock_init:
             AgentOrchestrator(model="gpt-4o")
 
             mock_init.assert_called_once_with(model="gpt-4o")
 
     def test_supports_openai_model_names(self):
         """Test that OpenAI model names are supported."""
-        with patch.object(LiteLLMProvider, '__init__', return_value=None) as mock_init:
+        with patch.object(LiteLLMProvider, "__init__", return_value=None) as mock_init:
             orchestrator = AgentOrchestrator(model="gpt-4o-mini")
 
             mock_init.assert_called_once_with(model="gpt-4o-mini")
@@ -40,7 +40,7 @@ class TestOrchestratorLLMInitialization:
 
     def test_supports_anthropic_model_names(self):
         """Test that Anthropic model names are supported."""
-        with patch.object(LiteLLMProvider, '__init__', return_value=None) as mock_init:
+        with patch.object(LiteLLMProvider, "__init__", return_value=None) as mock_init:
             orchestrator = AgentOrchestrator(model="claude-3-haiku-20240307")
 
             mock_init.assert_called_once_with(model="claude-3-haiku-20240307")
@@ -50,7 +50,7 @@ class TestOrchestratorLLMInitialization:
         """Test that auto-creation is skipped when llm is explicitly passed."""
         mock_llm = Mock(spec=LLMProvider)
 
-        with patch.object(LiteLLMProvider, '__init__', return_value=None) as mock_init:
+        with patch.object(LiteLLMProvider, "__init__", return_value=None) as mock_init:
             orchestrator = AgentOrchestrator(llm=mock_llm)
 
             mock_init.assert_not_called()
@@ -58,7 +58,7 @@ class TestOrchestratorLLMInitialization:
 
     def test_model_attribute_stored_correctly(self):
         """Test that _model attribute is stored correctly."""
-        with patch.object(LiteLLMProvider, '__init__', return_value=None):
+        with patch.object(LiteLLMProvider, "__init__", return_value=None):
             orchestrator = AgentOrchestrator(model="gemini/gemini-1.5-flash")
 
             assert orchestrator._model == "gemini/gemini-1.5-flash"
@@ -78,5 +78,5 @@ class TestOrchestratorLLMProviderType:
         orchestrator = AgentOrchestrator()
 
         assert isinstance(orchestrator._llm, LLMProvider)
-        assert hasattr(orchestrator._llm, 'complete')
-        assert hasattr(orchestrator._llm, 'complete_with_tools')
+        assert hasattr(orchestrator._llm, "complete")
+        assert hasattr(orchestrator._llm, "complete_with_tools")

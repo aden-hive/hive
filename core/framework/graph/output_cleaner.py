@@ -88,8 +88,9 @@ class OutputCleaner:
         elif config.enabled:
             # Create dedicated fast LLM provider for cleaning
             try:
-                from framework.llm.litellm import LiteLLMProvider
                 import os
+
+                from framework.llm.litellm import LiteLLMProvider
 
                 api_key = os.environ.get("CEREBRAS_API_KEY")
                 if api_key:
@@ -98,13 +99,9 @@ class OutputCleaner:
                         model=config.fast_model,
                         temperature=0.0,  # Deterministic cleaning
                     )
-                    logger.info(
-                        f"✓ Initialized OutputCleaner with {config.fast_model}"
-                    )
+                    logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
                 else:
-                    logger.warning(
-                        "⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled"
-                    )
+                    logger.warning("⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled")
                     self.llm = None
             except ImportError:
                 logger.warning("⚠ LiteLLMProvider not available, output cleaning disabled")
@@ -253,7 +250,10 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
             response = self.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                system="You clean malformed agent outputs. Return only valid JSON matching the schema.",
+                system=(
+                    "You clean malformed agent outputs. "
+                    "Return only valid JSON matching the schema."
+                ),
                 max_tokens=2048,  # Sufficient for cleaning most outputs
             )
 
@@ -262,9 +262,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
             # Remove markdown if present
             if cleaned_text.startswith("```"):
-                match = re.search(
-                    r"```(?:json)?\s*\n?(.*?)\n?```", cleaned_text, re.DOTALL
-                )
+                match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned_text, re.DOTALL)
                 if match:
                     cleaned_text = match.group(1).strip()
 
@@ -278,15 +276,11 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     )
                 return cleaned
             else:
-                logger.warning(
-                    f"⚠ Cleaned output is not a dict: {type(cleaned)}"
-                )
+                logger.warning(f"⚠ Cleaned output is not a dict: {type(cleaned)}")
                 if self.config.fallback_to_raw:
                     return output
                 else:
-                    raise ValueError(
-                        f"Cleaning produced {type(cleaned)}, expected dict"
-                    )
+                    raise ValueError(f"Cleaning produced {type(cleaned)}, expected dict")
 
         except json.JSONDecodeError as e:
             logger.error(f"✗ Failed to parse cleaned JSON: {e}")
@@ -318,7 +312,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
                 line = f'  "{key}": {type_hint}'
                 if description:
-                    line += f'  // {description}'
+                    line += f"  // {description}"
                 if required:
                     line += " (required)"
                 lines.append(line + ",")
