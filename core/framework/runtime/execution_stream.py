@@ -10,21 +10,22 @@ Each stream has:
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from framework.graph.executor import GraphExecutor, ExecutionResult
+from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
-from framework.runtime.shared_state import SharedStateManager, IsolationLevel, StreamMemory
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
-    from framework.storage.concurrent import ConcurrentStorage
-    from framework.runtime.outcome_aggregator import OutcomeAggregator
-    from framework.runtime.event_bus import EventBus
     from framework.llm.provider import LLMProvider, Tool
+    from framework.runtime.event_bus import EventBus
+    from framework.runtime.outcome_aggregator import OutcomeAggregator
+    from framework.storage.concurrent import ConcurrentStorage
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EntryPointSpec:
     """Specification for an entry point."""
+
     id: str
     name: str
     entry_node: str  # Node ID to start from
@@ -49,6 +51,7 @@ class EntryPointSpec:
 @dataclass
 class ExecutionContext:
     """Context for a single execution."""
+
     id: str
     correlation_id: str
     stream_id: str
@@ -164,12 +167,15 @@ class ExecutionStream:
 
         # Emit stream started event
         if self._event_bus:
-            from framework.runtime.event_bus import EventType, AgentEvent
-            await self._event_bus.publish(AgentEvent(
-                type=EventType.STREAM_STARTED,
-                stream_id=self.stream_id,
-                data={"entry_point": self.entry_spec.id},
-            ))
+            from framework.runtime.event_bus import AgentEvent, EventType
+
+            await self._event_bus.publish(
+                AgentEvent(
+                    type=EventType.STREAM_STARTED,
+                    stream_id=self.stream_id,
+                    data={"entry_point": self.entry_spec.id},
+                )
+            )
 
     async def stop(self) -> None:
         """Stop the execution stream and cancel active executions."""
@@ -179,7 +185,7 @@ class ExecutionStream:
         self._running = False
 
         # Cancel all active executions
-        for exec_id, task in self._execution_tasks.items():
+        for _, task in self._execution_tasks.items():
             if not task.done():
                 task.cancel()
                 try:
@@ -194,11 +200,14 @@ class ExecutionStream:
 
         # Emit stream stopped event
         if self._event_bus:
-            from framework.runtime.event_bus import EventType, AgentEvent
-            await self._event_bus.publish(AgentEvent(
-                type=EventType.STREAM_STOPPED,
-                stream_id=self.stream_id,
-            ))
+            from framework.runtime.event_bus import AgentEvent, EventType
+
+            await self._event_bus.publish(
+                AgentEvent(
+                    type=EventType.STREAM_STOPPED,
+                    stream_id=self.stream_id,
+                )
+            )
 
     async def execute(
         self,
@@ -268,7 +277,7 @@ class ExecutionStream:
                     )
 
                 # Create execution-scoped memory
-                memory = self._state_manager.create_memory(
+                self._state_manager.create_memory(
                     execution_id=execution_id,
                     stream_id=self.stream_id,
                     isolation=ctx.isolation_level,
@@ -408,7 +417,7 @@ class ExecutionStream:
 
             return self._execution_results.get(execution_id)
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     def get_result(self, execution_id: str) -> ExecutionResult | None:
@@ -443,10 +452,7 @@ class ExecutionStream:
 
     def get_active_count(self) -> int:
         """Get count of active executions."""
-        return len([
-            ctx for ctx in self._active_executions.values()
-            if ctx.status == "running"
-        ])
+        return len([ctx for ctx in self._active_executions.values() if ctx.status == "running"])
 
     def get_stats(self) -> dict:
         """Get stream statistics."""
