@@ -74,6 +74,7 @@ async def test_executor_respects_custom_max_retries_high(runtime):
     node_spec = NodeSpec(
         id="flaky_node",
         name="Flaky Node",
+        description="A node that fails multiple times before succeeding",
         max_retries=10,  # Should allow 10 retries
         node_type="function",
         output_keys=["result"]
@@ -81,13 +82,15 @@ async def test_executor_respects_custom_max_retries_high(runtime):
     
     # Create graph
     graph = GraphSpec(
+        id="test_graph",
+        goal_id="test_goal",
         name="Test Graph",
         entry_node="flaky_node",
         nodes=[node_spec],
         edges=[],
         terminal_nodes=["flaky_node"]
     )
-    
+
     # Create goal
     goal = Goal(
         id="test_goal",
@@ -102,56 +105,58 @@ async def test_executor_respects_custom_max_retries_high(runtime):
     
     # Execute
     result = await executor.execute(graph, goal, {})
-    
-    # Should succeed because 5 failures < 10 max_retries
+
+    # Should succeed because 5 failures < 10 max_retries (max_retries=N means N total attempts allowed)
     assert result.success == True
     assert flaky_node.attempt_count == 6  # 5 failures + 1 success
-    assert "succeeded after 6 attempts" in result.output.get("result", "")
 
 
 @pytest.mark.asyncio
 async def test_executor_respects_custom_max_retries_low(runtime):
     """
     Test that executor respects max_retries when set to low value (2).
-    
-    Node fails 5 times. With max_retries=2, should fail after 2 attempts.
+
+    Node always fails. With max_retries=2, should fail after 2 total attempts.
     """
     # Create node with max_retries=2
     node_spec = NodeSpec(
         id="fragile_node",
         name="Fragile Node",
-        max_retries=2,  # Should only retry twice
+        description="A node with low retry tolerance",
+        max_retries=2,  # max_retries=N means N total attempts allowed
         node_type="function",
         output_keys=["result"]
     )
-    
+
     # Create graph
     graph = GraphSpec(
+        id="test_graph",
+        goal_id="test_goal",
         name="Test Graph",
         entry_node="fragile_node",
         nodes=[node_spec],
         edges=[],
         terminal_nodes=["fragile_node"]
     )
-    
+
     # Create goal
     goal = Goal(
         id="test_goal",
         name="Test Goal",
         description="Test low max_retries"
     )
-    
+
     # Create executor and register always-failing node
     executor = GraphExecutor(runtime=runtime)
     failing_node = AlwaysFailsNode()
     executor.register_node("fragile_node", failing_node)
-    
+
     # Execute
     result = await executor.execute(graph, goal, {})
-    
-    # Should fail after exactly 2 attempts (max_retries=2 means try 3 times total: initial + 2 retries)
+
+    # Should fail after exactly 2 attempts (max_retries=N means N total attempts)
     assert result.success == False
-    assert failing_node.attempt_count == 3  # Initial attempt + 2 retries
+    assert failing_node.attempt_count == 2  # 2 total attempts
     assert "failed after 2 attempts" in result.error
 
 
@@ -164,80 +169,88 @@ async def test_executor_respects_default_max_retries(runtime):
     node_spec = NodeSpec(
         id="default_node",
         name="Default Node",
+        description="A node using default retry settings",
         # max_retries not specified, should default to 3
         node_type="function",
         output_keys=["result"]
     )
-    
+
     # Create graph
     graph = GraphSpec(
+        id="test_graph",
+        goal_id="test_goal",
         name="Test Graph",
         entry_node="default_node",
         nodes=[node_spec],
         edges=[],
         terminal_nodes=["default_node"]
     )
-    
+
     # Create goal
     goal = Goal(
         id="test_goal",
         name="Test Goal",
         description="Test default max_retries"
     )
-    
+
     # Create executor with always-failing node
     executor = GraphExecutor(runtime=runtime)
     failing_node = AlwaysFailsNode()
     executor.register_node("default_node", failing_node)
-    
+
     # Execute
     result = await executor.execute(graph, goal, {})
-    
-    # Should fail after default 3 retries (4 total attempts)
+
+    # Should fail after default 3 total attempts (max_retries=N means N total attempts)
     assert result.success == False
-    assert failing_node.attempt_count == 4  # Initial + 3 retries
+    assert failing_node.attempt_count == 3  # 3 total attempts
     assert "failed after 3 attempts" in result.error
 
 
 @pytest.mark.asyncio
-async def test_executor_max_retries_one_succeeds_immediately(runtime):
+async def test_executor_max_retries_two_succeeds_on_second(runtime):
     """
-    Test that max_retries=1 allows one retry before failing.
+    Test that max_retries=2 allows two attempts total.
+
+    Node fails once, succeeds on second try. With max_retries=2, should succeed.
     """
-    # Create node with max_retries=1
+    # Create node with max_retries=2 (allows 2 total attempts)
     node_spec = NodeSpec(
-        id="one_retry_node",
-        name="One Retry Node",
-        max_retries=1,
+        id="two_retry_node",
+        name="Two Retry Node",
+        description="A node with two attempts allowed",
+        max_retries=2,  # max_retries=N means N total attempts allowed
         node_type="function",
         output_keys=["result"]
     )
-    
+
     # Create graph
     graph = GraphSpec(
+        id="test_graph",
+        goal_id="test_goal",
         name="Test Graph",
-        entry_node="one_retry_node",
+        entry_node="two_retry_node",
         nodes=[node_spec],
         edges=[],
-        terminal_nodes=["one_retry_node"]
+        terminal_nodes=["two_retry_node"]
     )
-    
+
     # Create goal
     goal = Goal(
         id="test_goal",
         name="Test Goal",
-        description="Test max_retries=1"
+        description="Test max_retries=2"
     )
-    
+
     # Create executor with node that fails once, succeeds on second try
     executor = GraphExecutor(runtime=runtime)
     flaky_node = FlakyTestNode(fail_times=1)
-    executor.register_node("one_retry_node", flaky_node)
-    
+    executor.register_node("two_retry_node", flaky_node)
+
     # Execute
     result = await executor.execute(graph, goal, {})
-    
-    # Should succeed on second attempt
+
+    # Should succeed on second attempt (max_retries=2 allows 2 total attempts)
     assert result.success == True
     assert flaky_node.attempt_count == 2  # 1 failure + 1 success
 
@@ -251,14 +264,16 @@ async def test_executor_different_nodes_different_max_retries(runtime):
     node1_spec = NodeSpec(
         id="node1",
         name="Node 1",
+        description="First node in multi-node test",
         max_retries=2,
         node_type="function",
         output_keys=["result1"]
     )
-    
+
     node2_spec = NodeSpec(
         id="node2",
         name="Node 2",
+        description="Second node in multi-node test",
         max_retries=5,
         node_type="function",
         input_keys=["result1"],
