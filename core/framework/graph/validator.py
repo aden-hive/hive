@@ -184,11 +184,45 @@ class OutputValidator:
 
         return ValidationResult(success=len(errors) == 0, errors=errors)
 
+    def validate_pydantic(
+        self,
+        output: dict[str, Any],
+        model_class: Any,
+    ) -> ValidationResult:
+        """
+        Validate output against a Pydantic model.
+
+        Args:
+            output: The output dict to validate
+            model_class: Pydantic model class (BaseModel subclass)
+
+        Returns:
+            ValidationResult with success status and any errors
+        """
+        from pydantic import ValidationError
+        from framework.graph.node import get_model
+
+        actual_model = get_model(model_class)
+        if not actual_model:
+            return ValidationResult(success=True, errors=[])
+
+        try:
+            actual_model.model_validate(output)
+            return ValidationResult(success=True, errors=[])
+        except ValidationError as e:
+            errors = []
+            for error in e.errors():
+                loc = ".".join(str(l) for l in error["loc"])
+                msg = error["msg"]
+                errors.append(f"{loc}: {msg}")
+            return ValidationResult(success=False, errors=errors)
+
     def validate_all(
         self,
         output: dict[str, Any],
         expected_keys: list[str] | None = None,
         schema: dict[str, Any] | None = None,
+        model_class: Any | None = None,
         check_hallucination: bool = True,
     ) -> ValidationResult:
         """
@@ -198,6 +232,7 @@ class OutputValidator:
             output: The output dict to validate
             expected_keys: Optional list of required keys
             schema: Optional JSON schema
+            model_class: Optional Pydantic model class
             check_hallucination: Whether to check for hallucination patterns
 
         Returns:
@@ -213,6 +248,11 @@ class OutputValidator:
         # Validate schema if provided
         if schema:
             result = self.validate_schema(output, schema)
+            all_errors.extend(result.errors)
+
+        # Validate Pydantic model if provided
+        if model_class:
+            result = self.validate_pydantic(output, model_class)
             all_errors.extend(result.errors)
 
         # Check for hallucination

@@ -75,7 +75,7 @@ timeline
 - [ ] User-driven log analysis (OSS approach)
 
 ### Data Validation
-- [ ] Natively Support data validation of LLMs output with Pydantic
+- [x] Natively Support data validation of LLMs output with Pydantic
 
 ### Developer Experience
 - [ ] **Debugging mode**

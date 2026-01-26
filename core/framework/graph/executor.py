@@ -259,10 +259,11 @@ class GraphExecutor:
 
                 if result.success:
                     # Validate output before accepting it
-                    if result.output and node_spec.output_keys:
+                    if result.output and (node_spec.output_keys or hasattr(node_spec, "output_model")):
                         validation = self.validator.validate_all(
                             output=result.output,
                             expected_keys=node_spec.output_keys,
+                            model_class=getattr(node_spec, "output_model", None),
                             check_hallucination=True,
                         )
                         if not validation.success:

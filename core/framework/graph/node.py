@@ -28,6 +28,26 @@ from framework.llm.provider import LLMProvider, Tool
 logger = logging.getLogger(__name__)
 
 
+# Registry for Pydantic models used in NodeSpecs
+_MODEL_REGISTRY: dict[str, type[BaseModel]] = {}
+
+
+def register_model(name: str, model: type[BaseModel]) -> None:
+    """Register a Pydantic model for use in NodeSpecs by name."""
+    _MODEL_REGISTRY[name] = model
+
+
+def get_model(name_or_class: Any) -> type[BaseModel] | None:
+    """Get a Pydantic model class from a name or the class itself."""
+    if name_or_class is None:
+        return None
+    if isinstance(name_or_class, type) and issubclass(name_or_class, BaseModel):
+        return name_or_class
+    if isinstance(name_or_class, str):
+        return _MODEL_REGISTRY.get(name_or_class)
+    return None
+
+
 def find_json_object(text: str) -> str | None:
     """Find the first valid JSON object in text using balanced brace matching.
 
@@ -115,6 +135,10 @@ class NodeSpec(BaseModel):
     output_schema: dict[str, dict] = Field(
         default_factory=dict,
         description="Optional schema for output validation. Format: {key: {type: 'dict', required: True, description: '...'}}"
+    )
+    output_model: Any = Field(
+        default=None,
+        description="Optional Pydantic model class or name for output validation"
     )
 
     # For LLM nodes
@@ -533,12 +557,14 @@ class LLMNode(NodeProtocol):
             logger.info("      🤖 LLM Call:")
             logger.info(f"         System: {system[:150]}..." if len(system) > 150 else f"         System: {system}")
             logger.info(f"         User message: {messages[-1]['content'][:150]}..." if len(messages[-1]['content']) > 150 else f"         User message: {messages[-1]['content']}")
-            if ctx.available_tools:
-                logger.info(f"         Tools available: {[t.name for t in ctx.available_tools]}")
 
             # Call LLM
+            model_class = get_model(ctx.node_spec.output_model)
             if ctx.available_tools and self.tool_executor:
                 from framework.llm.provider import ToolUse, ToolResult
+
+                if ctx.available_tools:
+                    logger.info(f"         Tools available: {[t.name for t in ctx.available_tools]}")
 
                 def executor(tool_use: ToolUse) -> ToolResult:
                     logger.info(f"         🔧 Tool call: {tool_use.name}({', '.join(f'{k}={v}' for k, v in tool_use.input.items())})")
@@ -557,20 +583,27 @@ class LLMNode(NodeProtocol):
                     tool_executor=executor,
                 )
             else:
-                # Use JSON mode for llm_generate nodes with output_keys
+                # Use JSON mode for llm_generate nodes with output_keys or output_model
                 # Skip strict schema validation - just validate keys after parsing
                 use_json_mode = (
                     ctx.node_spec.node_type == "llm_generate"
-                    and ctx.node_spec.output_keys
-                    and len(ctx.node_spec.output_keys) >= 1
+                    and (
+                        (ctx.node_spec.output_keys and len(ctx.node_spec.output_keys) >= 1)
+                        or model_class is not None
+                    )
                 )
-                if use_json_mode:
+
+                response_format = None
+                if model_class:
+                    logger.info(f"         📋 Expecting JSON output matching Pydantic model: {model_class.__name__}")
+                elif use_json_mode:
                     logger.info(f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}")
 
                 response = ctx.llm.complete(
                     messages=messages,
                     system=system,
                     json_mode=use_json_mode,
+                    response_format=response_format,
                 )
 
             # Log the response
@@ -593,16 +626,43 @@ class LLMNode(NodeProtocol):
             output = self._parse_output(response.content, ctx.node_spec)
 
             # For llm_generate and llm_tool_use nodes, try to parse JSON and extract fields
-            if ctx.node_spec.node_type in ("llm_generate", "llm_tool_use") and len(ctx.node_spec.output_keys) >= 1:
+            if ctx.node_spec.node_type in ("llm_generate", "llm_tool_use") and (
+                len(ctx.node_spec.output_keys) >= 1 or model_class is not None
+            ):
                 try:
                     import json
 
                     # Try to extract JSON from response
-                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
+                    expected_keys = ctx.node_spec.output_keys
+                    if not expected_keys and model_class:
+                        expected_keys = list(model_class.model_fields.keys())
+
+                    parsed = self._extract_json(response.content, expected_keys)
+
+                    # If we have a Pydantic model, validate against it
+                    if model_class and isinstance(parsed, dict):
+                        try:
+                            # Validate and create model instance
+                            validated_model = model_class.model_validate(parsed)
+                            # Update parsed with validated data (converts types if needed)
+                            parsed = validated_model.model_dump()
+                            logger.info(f"      ✓ Pydantic validation successful for {model_class.__name__}")
+                        except Exception as e:
+                            logger.error(f"      ✗ Pydantic validation failed for {model_class.__name__}: {e}")
+                            return NodeResult(
+                                success=False,
+                                error=f"Pydantic validation failed: {e}",
+                                output={},
+                                tokens_used=response.input_tokens + response.output_tokens,
+                                latency_ms=latency_ms,
+                            )
 
                     # If parsed successfully, write each field to its corresponding output key
                     if isinstance(parsed, dict):
-                        for key in ctx.node_spec.output_keys:
+                        # Use output_keys if provided, otherwise use all keys from parsed JSON
+                        keys_to_write = ctx.node_spec.output_keys if ctx.node_spec.output_keys else list(parsed.keys())
+
+                        for key in keys_to_write:
                             if key in parsed:
                                 value = parsed[key]
                                 # Strip code block wrappers from string values
@@ -914,6 +974,16 @@ Output as JSON with the exact field names requested."""
                     pass
 
             parts.append(prompt)
+
+        # Add Pydantic model schema if provided
+        model_class = get_model(ctx.node_spec.output_model)
+        if model_class:
+            import json
+            schema = model_class.model_json_schema()
+            parts.append("\n# Output Format")
+            parts.append("Your response MUST be a valid JSON object matching this schema:")
+            parts.append(f"```json\n{json.dumps(schema, indent=2)}\n```")
+            parts.append("Respond with ONLY the JSON object.")
 
         if ctx.goal_context:
             parts.append("\n# Goal Context")
