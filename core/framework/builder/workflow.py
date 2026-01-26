@@ -744,7 +744,9 @@ class GraphBuilder:
             "tests": len(self.session.test_cases),
             "tests_passed": sum(1 for t in self.session.test_results if t.passed),
             "approvals": len(self.session.approvals),
-            "pending_validation": self._pending_validation.model_dump() if self._pending_validation else None,
+            "pending_validation": (
+                self._pending_validation.model_dump() if self._pending_validation else None
+            ),
         }
 
     def show(self) -> str:
