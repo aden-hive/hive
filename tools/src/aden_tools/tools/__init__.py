@@ -10,6 +10,7 @@ Usage:
     credentials = CredentialManager()
     register_all_tools(mcp, credentials=credentials)
 """
+
 from typing import List, Optional, TYPE_CHECKING
 
 from fastmcp import FastMCP
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .example_tool import register_tools as register_example
 from .web_search_tool import register_tools as register_web_search
+from .google_search_tool import register_tools as register_google_search
 from .web_scrape_tool import register_tools as register_web_scrape
 from .pdf_read_tool import register_tools as register_pdf_read
 
@@ -27,11 +29,15 @@ from .pdf_read_tool import register_tools as register_pdf_read
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .file_system_toolkits.list_dir import register_tools as register_list_dir
-from .file_system_toolkits.replace_file_content import register_tools as register_replace_file_content
+from .file_system_toolkits.replace_file_content import (
+    register_tools as register_replace_file_content,
+)
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.grep_search import register_tools as register_grep_search
-from .file_system_toolkits.execute_command_tool import register_tools as register_execute_command
+from .file_system_toolkits.execute_command_tool import (
+    register_tools as register_execute_command,
+)
 
 
 def register_all_tools(
@@ -60,6 +66,11 @@ def register_all_tools(
     # - If credentials is None: falls back to os.getenv("BRAVE_SEARCH_API_KEY")
     register_web_search(mcp, credentials=credentials)
 
+    # google_search handles both credential sources internally:
+    # - If credentials provided: uses credentials.get("google_search") and credentials.get("google_cse")
+    # - If credentials is None: falls back to os.getenv("GOOGLE_API_KEY") and os.getenv("GOOGLE_CSE_ID")
+    register_google_search(mcp, credentials=credentials)
+
     # Register file system toolkits
     register_view_file(mcp)
     register_write_to_file(mcp)
@@ -73,6 +84,7 @@ def register_all_tools(
     return [
         "example_tool",
         "web_search",
+        "google_search",
         "web_scrape",
         "pdf_read",
         "view_file",
