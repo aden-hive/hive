@@ -331,7 +331,7 @@ No. Aden is built from the ground up with no dependencies on LangChain, CrewAI, 
 
 **Q: What LLM providers does Aden support?**
 
-Aden supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
+Aden supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
 
 **Q: Can I use Aden with local AI models like Ollama?**
 

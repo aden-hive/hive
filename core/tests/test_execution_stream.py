@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from framework.graph import NodeSpec, Goal, SuccessCriterion
+from framework.graph import Goal, NodeSpec, SuccessCriterion
 from framework.graph.edge import GraphSpec
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import ExecutionStream, EntryPointSpec
+from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
