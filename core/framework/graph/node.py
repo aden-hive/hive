@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from framework.runtime.core import Runtime
 from framework.llm.provider import LLMProvider, Tool
 from framework.utils import find_json_object
+from framework.config import DEFAULT_ROUTING_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -342,7 +343,7 @@ Provide a concise, clear summary that a human can quickly understand. Focus on t
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=DEFAULT_ROUTING_MODEL,
                 max_tokens=200,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -721,7 +722,7 @@ class LLMNode(NodeProtocol):
             # Fallback to Anthropic Haiku via LiteLLM for consistency
             cleaner_llm = LiteLLMProvider(
                 api_key=api_key,
-                model="claude-3-5-haiku-20241022",
+                model=DEFAULT_ROUTING_MODEL,
                 temperature=0.0
             )
 
