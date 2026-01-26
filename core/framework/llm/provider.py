@@ -58,6 +58,8 @@ class LLMProvider(ABC):
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """
         Generate a completion from the LLM.
@@ -67,6 +69,11 @@ class LLMProvider(ABC):
             system: System prompt
             tools: Available tools for the LLM to use
             max_tokens: Maximum tokens to generate
+            response_format: Optional structured output format. Use:
+                - {"type": "json_object"} for basic JSON mode
+                - {"type": "json_schema", "json_schema": {"name": "...", "schema": {...}}}
+                  for strict JSON schema enforcement
+            json_mode: If True, request structured JSON output from the LLM
 
         Returns:
             LLMResponse with content and metadata

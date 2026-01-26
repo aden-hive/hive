@@ -126,7 +126,7 @@ timeline
 - [ ] Docker container standardization
 - [ ] Headless backend execution
 - [ ] Exposed API for frontend attachment
-- [ ] Local monitoring & observability (from hive repo)
+- [ ] Local monitoring & observability
 - [ ] Basic lifecycle APIs (Start, Stop, Pause, Resume)
 
 ### Deployment (Cloud)

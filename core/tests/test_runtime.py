@@ -1,10 +1,9 @@
 """Tests for the Runtime class - the agent's interface to record decisions."""
 
 import pytest
-import tempfile
 from pathlib import Path
 
-from framework import Runtime, Decision, Run
+from framework import Runtime
 from framework.schemas.decision import DecisionType
 
 
@@ -29,12 +28,13 @@ class TestRuntimeBasics:
 
         assert runtime.current_run is None
 
-    def test_cannot_end_without_start(self, tmp_path: Path):
-        """Cannot end a run that wasn't started."""
+    def test_end_without_start_is_graceful(self, tmp_path: Path):
+        """Ending a run that wasn't started logs warning but doesn't raise."""
         runtime = Runtime(tmp_path)
 
-        with pytest.raises(RuntimeError, match="No run in progress"):
-            runtime.end_run(success=True)
+        # Should not raise, but log a warning instead
+        runtime.end_run(success=True)
+        assert runtime.current_run is None
 
     def test_run_saved_on_end(self, tmp_path: Path):
         """Run is saved to storage when ended."""
@@ -76,17 +76,18 @@ class TestDecisionRecording:
 
         runtime.end_run(success=True)
 
-    def test_decision_requires_run(self, tmp_path: Path):
-        """Cannot record decisions without a run."""
+    def test_decision_without_run_is_graceful(self, tmp_path: Path):
+        """Recording decisions without a run logs warning and returns empty string."""
         runtime = Runtime(tmp_path)
 
-        with pytest.raises(RuntimeError, match="No run in progress"):
-            runtime.decide(
-                intent="Test",
-                options=[{"id": "a", "description": "A"}],
-                chosen="a",
-                reasoning="Test",
-            )
+        # Should not raise, but log a warning and return empty string
+        decision_id = runtime.decide(
+            intent="Test",
+            options=[{"id": "a", "description": "A"}],
+            chosen="a",
+            reasoning="Test",
+        )
+        assert decision_id == ""
 
     def test_decision_with_node_context(self, tmp_path: Path):
         """Test decision with node ID context."""
@@ -96,7 +97,7 @@ class TestDecisionRecording:
         # Set node context
         runtime.set_node("search-node")
 
-        decision_id = runtime.decide(
+        runtime.decide(
             intent="Search query",
             options=[{"id": "web", "description": "Web search"}],
             chosen="web",
@@ -276,7 +277,7 @@ class TestConvenienceMethods:
         runtime = Runtime(tmp_path)
         runtime.start_run("test_goal", "Test")
 
-        decision_id = runtime.quick_decision(
+        runtime.quick_decision(
             intent="Log message",
             action="Write to stdout",
             reasoning="Standard logging",

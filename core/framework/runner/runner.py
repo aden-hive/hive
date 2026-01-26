@@ -2,19 +2,24 @@
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Callable, Any
 
 from framework.graph import Goal
-from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition
+from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition, AsyncEntryPointSpec
 from framework.graph.node import NodeSpec
 from framework.graph.executor import GraphExecutor, ExecutionResult
-from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
-from framework.llm.litellm import LiteLLMProvider
+from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.core import Runtime
+
+# Multi-entry-point runtime imports
+from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
+from framework.runtime.execution_stream import EntryPointSpec
+
+if TYPE_CHECKING:
+    from framework.runner.protocol import CapabilityResponse, AgentMessage
 
 
 @dataclass
@@ -35,6 +40,9 @@ class AgentInfo:
     constraints: list[dict]
     required_tools: list[str]
     has_tools_module: bool
+    # Multi-entry-point support
+    async_entry_points: list[dict] = field(default_factory=list)
+    is_multi_entry_point: bool = False
 
 
 @dataclass
@@ -45,6 +53,7 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     missing_tools: list[str] = field(default_factory=list)
+    missing_credentials: list[str] = field(default_factory=list)
 
 
 def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
@@ -90,6 +99,20 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         )
         edges.append(edge)
 
+    # Build AsyncEntryPointSpec objects for multi-entry-point support
+    async_entry_points = []
+    for aep_data in graph_data.get("async_entry_points", []):
+        async_entry_points.append(AsyncEntryPointSpec(
+            id=aep_data["id"],
+            name=aep_data.get("name", aep_data["id"]),
+            entry_node=aep_data["entry_node"],
+            trigger_type=aep_data.get("trigger_type", "manual"),
+            trigger_config=aep_data.get("trigger_config", {}),
+            isolation_level=aep_data.get("isolation_level", "shared"),
+            priority=aep_data.get("priority", 0),
+            max_concurrent=aep_data.get("max_concurrent", 10),
+        ))
+
     # Build GraphSpec
     graph = GraphSpec(
         id=graph_data.get("id", "agent-graph"),
@@ -97,6 +120,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         version=graph_data.get("version", "1.0.0"),
         entry_node=graph_data.get("entry_node", ""),
         entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
+        async_entry_points=async_entry_points,  # Support multi-entry-point agents
         terminal_nodes=graph_data.get("terminal_nodes", []),
         pause_nodes=graph_data.get("pause_nodes", []),  # Support pause/resume architecture
         nodes=nodes,
@@ -172,7 +196,7 @@ class AgentRunner:
         goal: Goal,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "cerebras/zai-glm-4.7",
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -197,8 +221,12 @@ class AgentRunner:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            self._temp_dir = tempfile.TemporaryDirectory()
-            self._storage_path = Path(self._temp_dir.name) / "runtime"
+            # Use persistent storage in ~/.hive by default
+            home = Path.home()
+            default_storage = home / ".hive" / "storage" / agent_path.name
+            default_storage.mkdir(parents=True, exist_ok=True)
+            self._storage_path = default_storage
+            self._temp_dir = None
 
         # Initialize components
         self._tool_registry = ToolRegistry()
@@ -206,6 +234,10 @@ class AgentRunner:
         self._llm: LLMProvider | None = None
         self._executor: GraphExecutor | None = None
         self._approval_callback: Callable | None = None
+
+        # Multi-entry-point support (AgentRuntime)
+        self._agent_runtime: AgentRuntime | None = None
+        self._uses_async_entry_points = self.graph.has_async_entry_points()
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
@@ -223,7 +255,7 @@ class AgentRunner:
         agent_path: str | Path,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "cerebras/zai-glm-4.7",
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -232,7 +264,7 @@ class AgentRunner:
             agent_path: Path to agent folder (containing agent.json)
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to temp)
-            model: Anthropic model to use
+            model: LLM model to use (any LiteLLM-compatible model name)
 
         Returns:
             AgentRunner instance ready to run
@@ -310,16 +342,16 @@ class AgentRunner:
         Example:
             # Register STDIO MCP server
             runner.register_mcp_server(
-                name="aden-tools",
+                name="tools",
                 transport="stdio",
                 command="python",
                 args=["-m", "aden_tools.mcp_server", "--stdio"],
-                cwd="/path/to/aden-tools"
+                cwd="/path/to/tools"
             )
 
             # Register HTTP MCP server
             runner.register_mcp_server(
-                name="aden-tools",
+                name="tools",
                 transport="http",
                 url="http://localhost:4001"
             )
@@ -365,44 +397,311 @@ class AgentRunner:
 
     def _setup(self) -> None:
         """Set up runtime, LLM, and executor."""
+        # Set up session context for tools (workspace_id, agent_id, session_id)
+        workspace_id = "default"  # Could be derived from storage path
+        agent_id = self.graph.id or "unknown"
+        # Use "current" as a stable session_id for persistent memory
+        session_id = "current"
+
+        self._tool_registry.set_session_context(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+
+        # Create LLM provider (if not mock mode and API key available)
+        # Uses LiteLLM which auto-detects the provider from model name
+        if not self.mock_mode:
+            # Detect required API key from model name
+            api_key_env = self._get_api_key_env_var(self.model)
+            if api_key_env and os.environ.get(api_key_env):
+                from framework.llm.litellm import LiteLLMProvider
+                self._llm = LiteLLMProvider(model=self.model)
+            elif api_key_env:
+                print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                print(f"Set it with: export {api_key_env}=your-api-key")
+
+        # Get tools for executor/runtime
+        tools = list(self._tool_registry.get_tools().values())
+        tool_executor = self._tool_registry.get_executor()
+
+        if self._uses_async_entry_points:
+            # Multi-entry-point mode: use AgentRuntime
+            self._setup_agent_runtime(tools, tool_executor)
+        else:
+            # Single-entry-point mode: use legacy GraphExecutor
+            self._setup_legacy_executor(tools, tool_executor)
+
+    def _get_api_key_env_var(self, model: str) -> str | None:
+        """Get the environment variable name for the API key based on model name."""
+        model_lower = model.lower()
+
+        # Map model prefixes to API key environment variables
+        # LiteLLM uses these conventions
+        if model_lower.startswith("cerebras/"):
+            return "CEREBRAS_API_KEY"
+        elif model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
+            return "OPENAI_API_KEY"
+        elif model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
+            return "ANTHROPIC_API_KEY"
+        elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
+            return "GOOGLE_API_KEY"
+        elif model_lower.startswith("mistral/"):
+            return "MISTRAL_API_KEY"
+        elif model_lower.startswith("groq/"):
+            return "GROQ_API_KEY"
+        elif model_lower.startswith("ollama/"):
+            return None  # Ollama doesn't need an API key (local)
+        elif model_lower.startswith("azure/"):
+            return "AZURE_API_KEY"
+        elif model_lower.startswith("cohere/"):
+            return "COHERE_API_KEY"
+        elif model_lower.startswith("replicate/"):
+            return "REPLICATE_API_KEY"
+        elif model_lower.startswith("together/"):
+            return "TOGETHER_API_KEY"
+        else:
+            # Default: assume OpenAI-compatible
+            return "OPENAI_API_KEY"
+
+    def _setup_legacy_executor(self, tools: list, tool_executor: Callable | None) -> None:
+        """Set up legacy single-entry-point execution using GraphExecutor."""
         # Create runtime
         self._runtime = Runtime(storage_path=self._storage_path)
-
-        # Create LLM provider (if not mock mode)
-        # Use LiteLLM as the unified backend for all providers
-        if not self.mock_mode:
-            # LiteLLM auto-detects the provider from model name and finds the right API key
-            self._llm = LiteLLMProvider(model=self.model)
 
         # Create executor
         self._executor = GraphExecutor(
             runtime=self._runtime,
             llm=self._llm,
-            tools=list(self._tool_registry.get_tools().values()),
-            tool_executor=self._tool_registry.get_executor(),
+            tools=tools,
+            tool_executor=tool_executor,
             approval_callback=self._approval_callback,
         )
 
-    async def run(self, input_data: dict | None = None, session_state: dict | None = None) -> ExecutionResult:
+    def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
+        """Set up multi-entry-point execution using AgentRuntime."""
+        # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
+        entry_points = []
+        for async_ep in self.graph.async_entry_points:
+            ep = EntryPointSpec(
+                id=async_ep.id,
+                name=async_ep.name,
+                entry_node=async_ep.entry_node,
+                trigger_type=async_ep.trigger_type,
+                trigger_config=async_ep.trigger_config,
+                isolation_level=async_ep.isolation_level,
+                priority=async_ep.priority,
+                max_concurrent=async_ep.max_concurrent,
+            )
+            entry_points.append(ep)
+
+        # Create AgentRuntime with all entry points
+        self._agent_runtime = create_agent_runtime(
+            graph=self.graph,
+            goal=self.goal,
+            storage_path=self._storage_path,
+            entry_points=entry_points,
+            llm=self._llm,
+            tools=tools,
+            tool_executor=tool_executor,
+        )
+
+    async def run(
+        self,
+        input_data: dict | None = None,
+        session_state: dict | None = None,
+        entry_point_id: str | None = None,
+    ) -> ExecutionResult:
         """
         Execute the agent with given input data.
+
+        For single-entry-point agents, this is the standard execution path.
+        For multi-entry-point agents, you can optionally specify which entry point to use.
 
         Args:
             input_data: Input data for the agent (e.g., {"lead_id": "123"})
             session_state: Optional session state to resume from
+            entry_point_id: For multi-entry-point agents, which entry point to trigger
+                           (defaults to first entry point or "default")
 
         Returns:
             ExecutionResult with output, path, and metrics
         """
+        if self._uses_async_entry_points:
+            # Multi-entry-point mode: use AgentRuntime
+            return await self._run_with_agent_runtime(
+                input_data=input_data or {},
+                entry_point_id=entry_point_id,
+            )
+        else:
+            # Legacy single-entry-point mode
+            return await self._run_with_executor(
+                input_data=input_data or {},
+                session_state=session_state,
+            )
+
+    async def _run_with_executor(
+        self,
+        input_data: dict,
+        session_state: dict | None = None,
+    ) -> ExecutionResult:
+        """Run using legacy GraphExecutor (single entry point)."""
         if self._executor is None:
             self._setup()
 
         return await self._executor.execute(
             graph=self.graph,
             goal=self.goal,
-            input_data=input_data or {},
+            input_data=input_data,
             session_state=session_state,
         )
+
+    async def _run_with_agent_runtime(
+        self,
+        input_data: dict,
+        entry_point_id: str | None = None,
+    ) -> ExecutionResult:
+        """Run using AgentRuntime (multi-entry-point)."""
+        if self._agent_runtime is None:
+            self._setup()
+
+        # Start runtime if not running
+        if not self._agent_runtime.is_running:
+            await self._agent_runtime.start()
+
+        # Determine entry point
+        if entry_point_id is None:
+            # Use first entry point or "default" if no entry points defined
+            entry_points = self._agent_runtime.get_entry_points()
+            if entry_points:
+                entry_point_id = entry_points[0].id
+            else:
+                entry_point_id = "default"
+
+        # Trigger and wait for result
+        result = await self._agent_runtime.trigger_and_wait(
+            entry_point_id=entry_point_id,
+            input_data=input_data,
+        )
+
+        # Return result or create error result
+        if result is not None:
+            return result
+        else:
+            return ExecutionResult(
+                success=False,
+                error="Execution timed out or failed to complete",
+            )
+
+    # === Multi-Entry-Point API (for agents with async_entry_points) ===
+
+    async def start(self) -> None:
+        """
+        Start the agent runtime (for multi-entry-point agents).
+
+        This starts all registered entry points and allows concurrent execution.
+        For single-entry-point agents, this is a no-op.
+        """
+        if not self._uses_async_entry_points:
+            return
+
+        if self._agent_runtime is None:
+            self._setup()
+
+        await self._agent_runtime.start()
+
+    async def stop(self) -> None:
+        """
+        Stop the agent runtime (for multi-entry-point agents).
+
+        For single-entry-point agents, this is a no-op.
+        """
+        if self._agent_runtime is not None:
+            await self._agent_runtime.stop()
+
+    async def trigger(
+        self,
+        entry_point_id: str,
+        input_data: dict[str, Any],
+        correlation_id: str | None = None,
+    ) -> str:
+        """
+        Trigger execution at a specific entry point (non-blocking).
+
+        For multi-entry-point agents only. Returns execution ID for tracking.
+
+        Args:
+            entry_point_id: Which entry point to trigger
+            input_data: Input data for the execution
+            correlation_id: Optional ID to correlate related executions
+
+        Returns:
+            Execution ID for tracking
+
+        Raises:
+            RuntimeError: If agent doesn't use async entry points
+        """
+        if not self._uses_async_entry_points:
+            raise RuntimeError(
+                "trigger() is only available for multi-entry-point agents. "
+                "Use run() for single-entry-point agents."
+            )
+
+        if self._agent_runtime is None:
+            self._setup()
+
+        if not self._agent_runtime.is_running:
+            await self._agent_runtime.start()
+
+        return await self._agent_runtime.trigger(
+            entry_point_id=entry_point_id,
+            input_data=input_data,
+            correlation_id=correlation_id,
+        )
+
+    async def get_goal_progress(self) -> dict[str, Any]:
+        """
+        Get goal progress across all execution streams.
+
+        For multi-entry-point agents only.
+
+        Returns:
+            Dict with overall_progress, criteria_status, constraint_violations, etc.
+
+        Raises:
+            RuntimeError: If agent doesn't use async entry points
+        """
+        if not self._uses_async_entry_points:
+            raise RuntimeError(
+                "get_goal_progress() is only available for multi-entry-point agents."
+            )
+
+        if self._agent_runtime is None:
+            self._setup()
+
+        return await self._agent_runtime.get_goal_progress()
+
+    def get_entry_points(self) -> list[EntryPointSpec]:
+        """
+        Get all registered entry points (for multi-entry-point agents).
+
+        Returns:
+            List of EntryPointSpec objects
+        """
+        if not self._uses_async_entry_points:
+            return []
+
+        if self._agent_runtime is None:
+            self._setup()
+
+        return self._agent_runtime.get_entry_points()
+
+    @property
+    def is_running(self) -> bool:
+        """Check if the agent runtime is running (for multi-entry-point agents)."""
+        if self._agent_runtime is None:
+            return False
+        return self._agent_runtime.is_running
 
     def info(self) -> AgentInfo:
         """Return agent metadata (nodes, edges, goal, required tools)."""
@@ -436,6 +735,19 @@ class AgentRunner:
             for edge in self.graph.edges
         ]
 
+        # Build async entry points info
+        async_entry_points_info = [
+            {
+                "id": ep.id,
+                "name": ep.name,
+                "entry_node": ep.entry_node,
+                "trigger_type": ep.trigger_type,
+                "isolation_level": ep.isolation_level,
+                "max_concurrent": ep.max_concurrent,
+            }
+            for ep in self.graph.async_entry_points
+        ]
+
         return AgentInfo(
             name=self.graph.id,
             description=self.graph.description,
@@ -457,6 +769,8 @@ class AgentRunner:
             ],
             required_tools=sorted(required_tools),
             has_tools_module=(self.agent_path / "tools.py").exists(),
+            async_entry_points=async_entry_points_info,
+            is_multi_entry_point=self._uses_async_entry_points,
         )
 
     def validate(self) -> ValidationResult:
@@ -487,19 +801,57 @@ class AgentRunner:
         if missing_tools:
             warnings.append(f"Missing tool implementations: {', '.join(missing_tools)}")
 
-        # Check for LLM nodes without LLM
-        has_llm_nodes = any(
-            node.node_type in ("llm_generate", "llm_tool_use")
-            for node in self.graph.nodes
-        )
-        if has_llm_nodes and not os.environ.get("ANTHROPIC_API_KEY"):
-            warnings.append("Agent has LLM nodes but ANTHROPIC_API_KEY not set")
+        # Check credentials for required tools and node types
+        missing_credentials = []
+        try:
+            from aden_tools.credentials import CredentialManager
+
+            cred_manager = CredentialManager()
+
+            # Check tool credentials (Tier 2)
+            missing_creds = cred_manager.get_missing_for_tools(info.required_tools)
+            for cred_name, spec in missing_creds:
+                missing_credentials.append(spec.env_var)
+                affected_tools = [t for t in info.required_tools if t in spec.tools]
+                tools_str = ", ".join(affected_tools)
+                warning_msg = f"Missing {spec.env_var} for {tools_str}"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
+
+            # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
+            node_types = list(set(node.node_type for node in self.graph.nodes))
+            missing_node_creds = cred_manager.get_missing_for_node_types(node_types)
+            for cred_name, spec in missing_node_creds:
+                if spec.env_var not in missing_credentials:  # Avoid duplicates
+                    missing_credentials.append(spec.env_var)
+                    affected_types = [t for t in node_types if t in spec.node_types]
+                    types_str = ", ".join(affected_types)
+                    warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
+                    if spec.help_url:
+                        warning_msg += f"\n  Get it at: {spec.help_url}"
+                    warnings.append(warning_msg)
+        except ImportError:
+            # aden_tools not installed - fall back to direct check
+            has_llm_nodes = any(
+                node.node_type in ("llm_generate", "llm_tool_use")
+                for node in self.graph.nodes
+            )
+            if has_llm_nodes:
+                api_key_env = self._get_api_key_env_var(self.model)
+                if api_key_env and not os.environ.get(api_key_env):
+                    if api_key_env not in missing_credentials:
+                        missing_credentials.append(api_key_env)
+                    warnings.append(
+                        f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
+                    )
 
         return ValidationResult(
             valid=len(errors) == 0,
             errors=errors,
             warnings=warnings,
             missing_tools=missing_tools,
+            missing_credentials=missing_credentials,
         )
 
     async def can_handle(self, request: dict, llm: LLMProvider | None = None) -> "CapabilityResponse":
@@ -588,7 +940,7 @@ Respond with JSON only:
                     reasoning=data.get("reasoning", ""),
                     estimated_steps=data.get("estimated_steps"),
                 )
-        except Exception as e:
+        except Exception:
             # Fall back to keyword matching on error
             pass
 
@@ -641,7 +993,7 @@ Respond with JSON only:
         Returns:
             Response message
         """
-        from framework.runner.protocol import AgentMessage, MessageType
+        from framework.runner.protocol import MessageType
 
         info = self.info()
 
@@ -698,7 +1050,7 @@ Respond with JSON only:
         )
 
     def cleanup(self) -> None:
-        """Clean up resources."""
+        """Clean up resources (synchronous)."""
         # Clean up MCP client connections
         self._tool_registry.cleanup()
 
@@ -706,14 +1058,26 @@ Respond with JSON only:
             self._temp_dir.cleanup()
             self._temp_dir = None
 
+    async def cleanup_async(self) -> None:
+        """Clean up resources (asynchronous - for multi-entry-point agents)."""
+        # Stop agent runtime if running
+        if self._agent_runtime is not None and self._agent_runtime.is_running:
+            await self._agent_runtime.stop()
+
+        # Run synchronous cleanup
+        self.cleanup()
+
     async def __aenter__(self) -> "AgentRunner":
         """Context manager entry."""
         self._setup()
+        # Start runtime for multi-entry-point agents
+        if self._uses_async_entry_points and self._agent_runtime is not None:
+            await self._agent_runtime.start()
         return self
 
     async def __aexit__(self, *args) -> None:
         """Context manager exit."""
-        self.cleanup()
+        await self.cleanup_async()
 
     def __del__(self) -> None:
         """Destructor - cleanup temp dir."""

@@ -6,8 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-from framework.graph import ExecutionStatus
-
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
@@ -47,6 +45,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "--quiet", "-q",
         action="store_true",
         help="Only output the final result JSON",
+    )
+    run_parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show detailed execution logs (steps, LLM calls, etc.)",
     )
     run_parser.set_defaults(func=cmd_run)
 
@@ -166,7 +169,16 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
+    import logging
     from framework.runner import AgentRunner
+
+    # Set logging level (quiet by default for cleaner output)
+    if args.quiet:
+        logging.basicConfig(level=logging.ERROR, format='%(message)s')
+    elif getattr(args, 'verbose', False):
+        logging.basicConfig(level=logging.INFO, format='%(message)s')
+    else:
+        logging.basicConfig(level=logging.WARNING, format='%(message)s')
 
     # Load input context
     context = {}
@@ -189,11 +201,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         runner = AgentRunner.load(
             args.agent_path,
             mock_mode=args.mock,
-            model=getattr(args, "model", "claude-sonnet-4-20250514"),
+            model=getattr(args, "model", "claude-haiku-4-5-20251001"),
         )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+    # Auto-inject user_id if the agent expects it but it's not provided
+    entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
+    if "user_id" in entry_input_keys and context.get("user_id") is None:
+        import os
+        context["user_id"] = os.environ.get("USER", "default_user")
 
     if not args.quiet:
         info = runner.info()
@@ -212,12 +230,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Format output
     output = {
-        "status": result.status.value if hasattr(result.status, "value") else str(result.status),
-        "completed_steps": result.completed_steps,
-        "results": result.results,
+        "success": result.success,
+        "steps_executed": result.steps_executed,
+        "output": result.output,
     }
-    if result.feedback:
-        output["feedback"] = result.feedback
+    if result.error:
+        output["error"] = result.error
+    if result.paused_at:
+        output["paused_at"] = result.paused_at
 
     # Output results
     if args.output:
@@ -231,27 +251,51 @@ def cmd_run(args: argparse.Namespace) -> int:
         else:
             print()
             print("=" * 60)
-            status_str = result.status.value if hasattr(result.status, "value") else str(result.status)
+            status_str = "SUCCESS" if result.success else "FAILED"
             print(f"Status: {status_str}")
-            print(f"Completed steps: {len(result.completed_steps)}")
+            print(f"Steps executed: {result.steps_executed}")
+            print(f"Path: {' → '.join(result.path)}")
             print("=" * 60)
 
-            if result.status == ExecutionStatus.COMPLETED:
+            if result.success:
                 print("\n--- Results ---")
-                for key, value in result.results.items():
-                    if isinstance(value, (dict, list)):
-                        print(f"\n{key}:")
-                        value_str = json.dumps(value, indent=2, default=str)
-                        if len(value_str) > 500:
-                            value_str = value_str[:500] + "..."
-                        print(value_str)
-                    else:
-                        print(f"{key}: {str(value)[:200]}")
-            elif result.feedback:
-                print(f"\nFeedback: {result.feedback}")
+                # Show only meaningful output keys (skip internal/intermediate values)
+                meaningful_keys = ["final_response", "response", "result", "answer", "output"]
+
+                # Try to find the most relevant output
+                shown = False
+                for key in meaningful_keys:
+                    if key in result.output:
+                        value = result.output[key]
+                        if isinstance(value, str) and len(value) > 10:
+                            print(value)
+                            shown = True
+                            break
+                        elif isinstance(value, (dict, list)):
+                            print(json.dumps(value, indent=2, default=str))
+                            shown = True
+                            break
+
+                # If no meaningful key found, show all non-internal keys
+                if not shown:
+                    for key, value in result.output.items():
+                        if not key.startswith("_") and key not in ["user_id", "request", "memory_loaded", "user_profile", "recent_context"]:
+                            if isinstance(value, (dict, list)):
+                                print(f"\n{key}:")
+                                value_str = json.dumps(value, indent=2, default=str)
+                                if len(value_str) > 300:
+                                    value_str = value_str[:300] + "..."
+                                print(value_str)
+                            else:
+                                val_str = str(value)
+                                if len(val_str) > 200:
+                                    val_str = val_str[:200] + "..."
+                                print(f"{key}: {val_str}")
+            elif result.error:
+                print(f"\nError: {result.error}")
 
     runner.cleanup()
-    return 0 if result.status == ExecutionStatus.COMPLETED else 1
+    return 0 if result.success else 1
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -605,7 +649,7 @@ Output ONLY valid JSON, no explanation:"""
         json_str = json_str.strip()
 
         return json.loads(json_str)
-    except Exception as e:
+    except Exception:
         # Fallback: try to infer the main field
         if len(input_keys) == 1:
             return {input_keys[0]: user_input}
@@ -722,19 +766,19 @@ def cmd_shell(args: argparse.Namespace) -> int:
         # Try to parse as JSON first
         try:
             context = json.loads(user_input)
-            print(f"✓ Parsed as JSON")
+            print("✓ Parsed as JSON")
         except json.JSONDecodeError:
             # Not JSON - check for key=value format
-            if "=" in user_input and not " " in user_input.split("=")[0]:
+            if "=" in user_input and " " not in user_input.split("=")[0]:
                 context = {}
                 for part in user_input.split():
                     if "=" in part:
                         key, value = part.split("=", 1)
                         context[key] = value
-                print(f"✓ Parsed as key=value")
+                print("✓ Parsed as key=value")
             else:
                 # Natural language - use Haiku to format
-                print(f"🤖 Formatting with Haiku...")
+                print("🤖 Formatting with Haiku...")
                 try:
                     context = _format_natural_language_to_json(
                         user_input,
@@ -760,6 +804,11 @@ def cmd_shell(args: argparse.Namespace) -> int:
             # STARTING FRESH: Merge new input with accumulated session memory
             run_context = {**session_memory, **context}
 
+            # Auto-inject user_id if missing (for personal assistant agents)
+            if "user_id" in entry_input_keys and run_context.get("user_id") is None:
+                import os
+                run_context["user_id"] = os.environ.get("USER", "default_user")
+
             # Add conversation history to context if agent expects it
             if conversation_history:
                 run_context["_conversation_history"] = conversation_history.copy()
@@ -778,16 +827,25 @@ def cmd_shell(args: argparse.Namespace) -> int:
         print(f"Steps executed: {result.steps_executed}")
         print(f"Path: {' → '.join(result.path)}")
 
+        # Show clean output - prioritize meaningful keys
         if result.output:
-            print("\nOutput:")
-            for key, value in result.output.items():
-                if isinstance(value, (dict, list)):
-                    value_str = json.dumps(value, indent=2, default=str)
-                    if len(value_str) > 300:
-                        value_str = value_str[:300] + "..."
-                    print(f"  {key}: {value_str}")
-                else:
-                    print(f"  {key}: {str(value)[:200]}")
+            meaningful_keys = ["final_response", "response", "result", "answer", "output"]
+            shown = False
+
+            for key in meaningful_keys:
+                if key in result.output:
+                    value = result.output[key]
+                    if isinstance(value, str) and len(value) > 10:
+                        print(f"\n{value}\n")
+                        shown = True
+                        break
+
+            if not shown:
+                print("\nOutput:")
+                for key, value in result.output.items():
+                    if not key.startswith("_"):
+                        val_str = str(value)[:200]
+                        print(f"  {key}: {val_str}")
 
         if result.error:
             print(f"\nError: {result.error}")
@@ -800,7 +858,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
         if result.paused_at:
             agent_session_state = result.session_state
             print(f"⏸ Agent paused at: {result.paused_at}")
-            print(f"   Next input will resume from this point")
+            print("   Next input will resume from this point")
         else:
             # Execution completed (not paused), clear session state
             agent_session_state = None
@@ -892,7 +950,7 @@ def _interactive_multi(agents_dir: Path) -> int:
         return 1
 
     print(f"\n{'=' * 60}")
-    print(f"Multi-Agent Interactive Mode")
+    print("Multi-Agent Interactive Mode")
     print(f"Registered {agent_count} agents")
     print(f"{'=' * 60}")
     print("\nCommands:")

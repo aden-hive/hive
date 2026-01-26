@@ -8,7 +8,8 @@
   <a href="README.es.md">Español</a> |
   <a href="README.pt.md">Português</a> |
   <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a>
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -52,7 +53,6 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
 - **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
 
-
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
@@ -65,8 +65,8 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ### Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+)
-- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0+)
+- [Python 3.11+](https://www.python.org/downloads/) for agent development
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
 
 ### Installation
 
@@ -75,19 +75,32 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# Copy and configure
-cp config.yaml.example config.yaml
-
-# Run setup and start services
-npm run setup
-docker compose up
+# Run Python environment setup
+./scripts/setup-python.sh
 ```
 
-**Access the application:**
+This installs:
+- **framework** - Core agent runtime and graph executor
+- **aden_tools** - 19 MCP tools for agent capabilities
+- All required dependencies
 
-- Dashboard: http://localhost:3000
-- API: http://localhost:4000
-- Health: http://localhost:4000/health
+### Build Your First Agent
+
+```bash
+# Install Claude Code skills (one-time)
+./quickstart.sh
+
+# Build an agent using Claude Code
+claude> /building-agents
+
+# Test your agent
+claude> /testing-agent
+
+# Run your agent
+PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+```
+
+**[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
 
 ## Features
 
@@ -151,14 +164,14 @@ flowchart LR
 
 ### The Aden Advantage
 
-| Traditional Frameworks | Aden |
-|------------------------|------|
-| Hardcode agent workflows | Describe goals in natural language |
-| Manual graph definition | Auto-generated agent graphs |
-| Reactive error handling | Proactive self-evolution |
-| Static tool configurations | Dynamic SDK-wrapped nodes |
-| Separate monitoring setup | Built-in real-time observability |
-| DIY budget management | Integrated cost controls & degradation |
+| Traditional Frameworks     | Aden                                   |
+| -------------------------- | -------------------------------------- |
+| Hardcode agent workflows   | Describe goals in natural language     |
+| Manual graph definition    | Auto-generated agent graphs            |
+| Reactive error handling    | Proactive self-evolution               |
+| Static tool configurations | Dynamic SDK-wrapped nodes              |
+| Separate monitoring setup  | Built-in real-time observability       |
+| DIY budget management      | Integrated cost controls & degradation |
 
 ### How It Works
 
@@ -174,20 +187,21 @@ Aden takes a fundamentally different approach to agent development. While most f
 
 ### Comparison Table
 
-| Framework | Category | Approach | Aden Difference |
-|-----------|----------|----------|-----------------|
-| **LangChain, LlamaIndex, Haystack** | Component Libraries | Predefined components for RAG/LLM apps; manual connection logic | Generates entire graph and connection code upfront |
-| **CrewAI, AutoGen, Swarm** | Multi-Agent Orchestration | Role-based agents with predefined collaboration patterns | Dynamically creates agents/connections; adapts on failure |
-| **PydanticAI, Mastra, Agno** | Type-Safe Frameworks | Structured outputs and validation for known workflows | Evolving workflows; structure emerges through iteration |
-| **Agent Zero, Letta** | Personal AI Assistants | Memory and learning; OS-as-tool or stateful memory focus | Production multi-agent systems with self-healing |
-| **CAMEL** | Research Framework | Emergent behavior in large-scale simulations (up to 1M agents) | Production-oriented with reliable execution and recovery |
-| **TEN Framework, Genkit** | Infrastructure Frameworks | Real-time multimodal (TEN) or full-stack AI (Genkit) | Higher abstraction—generates and evolves agent logic |
-| **GPT Engineer, Motia** | Code Generation | Code from specs (GPT Engineer) or "Step" primitive (Motia) | Self-adapting graphs with automatic failure recovery |
-| **Trading Agents** | Domain-Specific | Hardcoded trading firm roles on LangGraph | Domain-agnostic; generates structures for any use case |
+| Framework                           | Category                  | Approach                                                        | Aden Difference                                           |
+| ----------------------------------- | ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------- |
+| **LangChain, LlamaIndex, Haystack** | Component Libraries       | Predefined components for RAG/LLM apps; manual connection logic | Generates entire graph and connection code upfront        |
+| **CrewAI, AutoGen, Swarm**          | Multi-Agent Orchestration | Role-based agents with predefined collaboration patterns        | Dynamically creates agents/connections; adapts on failure |
+| **PydanticAI, Mastra, Agno**        | Type-Safe Frameworks      | Structured outputs and validation for known workflows           | Evolving workflows; structure emerges through iteration   |
+| **Agent Zero, Letta**               | Personal AI Assistants    | Memory and learning; OS-as-tool or stateful memory focus        | Production multi-agent systems with self-healing          |
+| **CAMEL**                           | Research Framework        | Emergent behavior in large-scale simulations (up to 1M agents)  | Production-oriented with reliable execution and recovery  |
+| **TEN Framework, Genkit**           | Infrastructure Frameworks | Real-time multimodal (TEN) or full-stack AI (Genkit)            | Higher abstraction—generates and evolves agent logic      |
+| **GPT Engineer, Motia**             | Code Generation           | Code from specs (GPT Engineer) or "Step" primitive (Motia)      | Self-adapting graphs with automatic failure recovery      |
+| **Trading Agents**                  | Domain-Specific           | Hardcoded trading firm roles on LangGraph                       | Domain-agnostic; generates structures for any use case    |
 
 ### When to Choose Aden
 
 Choose Aden when you need:
+
 - Agents that **self-improve from failures** without manual intervention
 - **Goal-driven development** where you describe outcomes, not workflows
 - **Production reliability** with automatic recovery and redeployment
@@ -195,6 +209,7 @@ Choose Aden when you need:
 - **Full observability** with real-time monitoring and human oversight
 
 Choose other frameworks when you need:
+
 - **Type-safe, predictable workflows** (PydanticAI, Mastra)
 - **RAG and document processing** (LlamaIndex, Haystack)
 - **Research on agent emergence** (CAMEL)
@@ -205,13 +220,13 @@ Choose other frameworks when you need:
 
 ```
 hive/
-├── honeycomb/              # Frontend Dashboard 
-├── hive/                   # Backend API Server 
-├── aden-tools/             # MCP Tools Package - 19 tools for agent capabilities
+├── core/                   # Core framework - Agent runtime, graph executor, protocols
+├── tools/                  # MCP Tools Package - 19 tools for agent capabilities
+├── exports/                # Agent packages - Pre-built agents and examples
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
-├── config.yaml.example     # Configuration template
-├── docker-compose.yml      # Container orchestration
+├── .claude/                # Claude Code skills for building agents
+├── ENVIRONMENT_SETUP.md    # Python setup guide for agent development
 ├── DEVELOPER.md            # Developer guide
 ├── CONTRIBUTING.md         # Contribution guidelines
 └── ROADMAP.md              # Product roadmap
@@ -219,31 +234,30 @@ hive/
 
 ## Development
 
-### Local Development with Hot Reload
+### Python Agent Development
+
+For building and running goal-driven agents with the framework:
 
 ```bash
-# Copy development overrides
-cp docker-compose.override.yml.example docker-compose.override.yml
+# One-time setup
+./scripts/setup-python.sh
 
-# Start with hot reload enabled
-docker compose up
+# This installs:
+# - framework package (core runtime)
+# - aden_tools package (19 MCP tools)
+# - All dependencies
+
+# Build new agents using Claude Code skills
+claude> /building-agents
+
+# Test agents
+claude> /testing-agent
+
+# Run agents
+PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 ```
 
-### Running Without Docker
-
-```bash
-# Install dependencies
-npm install
-
-# Generate environment files
-npm run generate:env
-
-# Start frontend (in honeycomb/)
-cd honeycomb && npm run dev
-
-# Start backend (in hive/)
-cd hive && npm run dev
-```
+See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.
 
 ## Documentation
 
@@ -286,11 +300,14 @@ We use [Discord](https://discord.com/invite/MXE49hrKDk) for support, feature req
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+**Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you within 24 hours. This helps prevent duplicate work.
+
+1. Find or create an issue and get assigned
+2. Fork the repository
+3. Create your feature branch (`git checkout -b feature/amazing-feature`)
+4. Commit your changes (`git commit -m 'Add amazing feature'`)
+5. Push to the branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
 
 ## Join Our Team
 
