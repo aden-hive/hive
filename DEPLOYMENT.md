@@ -1,4 +1,4 @@
-﻿# 🚀 Hive AWS Deployment
+﻿# Hive AWS Deployment
 This repository now contains a modular Terraform setup for AWS.
 
 ## Structure
