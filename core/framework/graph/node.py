@@ -15,6 +15,7 @@ Protocol:
     The framework provides NodeContext with everything the node needs.
 """
 
+import copy
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Callable
@@ -165,16 +166,50 @@ class SharedMemory:
 
     Nodes read and write to shared memory using typed keys.
     The memory is scoped to a single run.
+    
+    IMPORTANT: Read operations return DEEP COPIES to ensure data isolation.
+    This means read-only nodes cannot accidentally mutate shared state.
     """
     _data: dict[str, Any] = field(default_factory=dict)
     _allowed_read: set[str] = field(default_factory=set)
     _allowed_write: set[str] = field(default_factory=set)
 
-    def read(self, key: str) -> Any:
-        """Read a value from shared memory."""
+    def read(self, key: str, shallow: bool = False) -> Any:
+        """
+        Read a value from shared memory.
+        
+        Args:
+            key: The memory key to read from
+            shallow: If True, return shallow copy for performance (default False).
+                    WARNING: Use only if you guarantee no mutation of mutable values.
+        
+        Returns:
+            A deep copy of the value (or shallow copy if shallow=True).
+            Modifications to the returned value will NOT affect shared memory.
+        
+        Raises:
+            PermissionError: If node doesn't have read permission for this key
+        """
         if self._allowed_read and key not in self._allowed_read:
             raise PermissionError(f"Node not allowed to read key: {key}")
-        return self._data.get(key)
+        
+        value = self._data.get(key)
+        
+        # Return isolated copy to prevent accidental mutations
+        if value is None:
+            return None
+        
+        if shallow:
+            # Shallow copy - for performance-critical use cases only
+            if isinstance(value, dict):
+                return dict(value)
+            elif isinstance(value, list):
+                return value.copy()
+            else:
+                return value
+        else:
+            # Deep copy - ensures complete isolation (recommended)
+            return copy.deepcopy(value)
 
     def write(self, key: str, value: Any, validate: bool = True) -> None:
         """
@@ -254,11 +289,30 @@ class SharedMemory:
 
         return False
 
-    def read_all(self) -> dict[str, Any]:
-        """Read all accessible data."""
+    def read_all(self, shallow: bool = False) -> dict[str, Any]:
+        """
+        Read all accessible data from shared memory.
+        
+        Args:
+            shallow: If True, return shallow copy for performance (default False).
+                    WARNING: Use only if you guarantee no mutation of mutable values.
+        
+        Returns:
+            A deep copy of all accessible data (or shallow if shallow=True).
+            Modifications to returned values will NOT affect shared memory.
+        """
         if self._allowed_read:
-            return {k: v for k, v in self._data.items() if k in self._allowed_read}
-        return dict(self._data)
+            # Only include keys the node has permission to read
+            filtered_data = {k: v for k, v in self._data.items() if k in self._allowed_read}
+        else:
+            filtered_data = self._data
+        
+        if shallow:
+            # Shallow copy - for performance-critical use cases only
+            return dict(filtered_data)
+        else:
+            # Deep copy - ensures complete isolation (recommended)
+            return copy.deepcopy(filtered_data)
 
     def with_permissions(
         self,
