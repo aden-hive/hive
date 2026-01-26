@@ -1,37 +1,79 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import ast
 from typing import Any, Iterable
 
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.node import NodeSpec
-from validation.errors import ValidationError, GraphValidationError
-from validation.validation_result import ValidationResult
+from framework.validation.errors import ValidationError, GraphValidationError
+class _ConditionSafetyVisitor(ast.NodeVisitor):
+    allowed_nodes = {
+        ast.Expression,
+        ast.BoolOp,
+        ast.UnaryOp,
+        ast.BinOp,
+        ast.Compare,
+        ast.Name,
+        ast.Load,
+        ast.Constant,
+        ast.Subscript,
+        ast.Attribute,
+        ast.And,
+        ast.Or,
+        ast.Not,
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Is,
+        ast.IsNot,
+        ast.In,
+        ast.NotIn,
+    }
 
+    def __init__(self, allowed_names: set[str]) -> None:
+        self.allowed_names = allowed_names
+        self.invalid_reason: str | None = None
 
-@dataclass(frozen=True)
-class _Unknown:
-    def __getitem__(self, _key: Any) -> "_Unknown":
-        return self
+    def visit(self, node: ast.AST) -> Any:
+        if type(node) not in self.allowed_nodes:
+            self.invalid_reason = f"Unsupported syntax: {type(node).__name__}"
+            return None
+        return super().visit(node)
 
-    def __getattr__(self, _name: str) -> "_Unknown":
-        return self
+    def visit_Name(self, node: ast.Name) -> Any:
+        if node.id not in self.allowed_names:
+            self.invalid_reason = f"Unknown symbol '{node.id}'"
+            return None
+        return None
 
-    def __bool__(self) -> bool:
-        return True
+    def visit_Attribute(self, node: ast.Attribute) -> Any:
+        self.visit(node.value)
+        return None
 
-    def __eq__(self, _other: Any) -> bool:
-        return True
+    def visit_Subscript(self, node: ast.Subscript) -> Any:
+        self.visit(node.value)
+        self.visit(node.slice)
+        return None
 
-    def __ne__(self, _other: Any) -> bool:
-        return False
+    def visit_Constant(self, node: ast.Constant) -> Any:
+        return None
 
 
 class WorkflowGraphValidator:
+    """
+    Deterministic pre-execution validator for workflow graphs.
+
+    This utility validates graph structure and data flow before execution.
+    It does not execute any workflow code.
+    """
+
     def __init__(self, allow_cycles: bool | None = None) -> None:
         self.allow_cycles = allow_cycles
 
-    def validate(self, graph: GraphSpec) -> ValidationResult:
+    def validate_or_raise(self, graph: GraphSpec) -> None:
         errors: list[ValidationError] = []
 
         node_map = {node.id: node for node in graph.nodes}
@@ -41,7 +83,7 @@ class WorkflowGraphValidator:
                 ValidationError(
                     error_type="missing_entry",
                     nodes=(graph.entry_node,),
-                    message=f"Entry node '{graph.entry_node}' does not exist in graph",
+                    message=f"Entry node '{graph.entry_node}' does not exist in graph.",
                 )
             )
             raise GraphValidationError(errors)
@@ -55,8 +97,6 @@ class WorkflowGraphValidator:
         if errors:
             raise GraphValidationError(errors)
 
-        return ValidationResult(valid=True, errors=[])
-
     def _validate_edges(self, graph: GraphSpec, node_map: dict[str, NodeSpec]) -> list[ValidationError]:
         errors: list[ValidationError] = []
 
@@ -66,7 +106,10 @@ class WorkflowGraphValidator:
                     ValidationError(
                         error_type="invalid_edge",
                         nodes=(edge.source, edge.target),
-                        message=f"Edge '{edge.id}' references missing source '{edge.source}'",
+                        message=(
+                            f"Edge '{edge.id}' references missing source '{edge.source}'. "
+                            "Fix the edge source or add the missing node."
+                        ),
                     )
                 )
             if edge.target not in node_map:
@@ -74,7 +117,10 @@ class WorkflowGraphValidator:
                     ValidationError(
                         error_type="invalid_edge",
                         nodes=(edge.source, edge.target),
-                        message=f"Edge '{edge.id}' references missing target '{edge.target}'",
+                        message=(
+                            f"Edge '{edge.id}' references missing target '{edge.target}'. "
+                            "Fix the edge target or add the missing node."
+                        ),
                     )
                 )
 
@@ -85,7 +131,10 @@ class WorkflowGraphValidator:
                         ValidationError(
                             error_type="invalid_edge",
                             nodes=(node.id, route_target),
-                            message=f"Router '{node.id}' routes to missing target '{route_target}'",
+                            message=(
+                                f"Router '{node.id}' routes to missing target '{route_target}'. "
+                                "Update routes or add the target node."
+                            ),
                         )
                     )
 
@@ -101,7 +150,10 @@ class WorkflowGraphValidator:
                     ValidationError(
                         error_type="unreachable_node",
                         nodes=(node_id,),
-                        message=f"Node '{node_id}' is unreachable from entry '{graph.entry_node}'",
+                        message=(
+                            f"Node '{node_id}' is unreachable from entry '{graph.entry_node}'. "
+                            "Add an edge from a reachable node or remove this node."
+                        ),
                     )
                 )
 
@@ -118,19 +170,23 @@ class WorkflowGraphValidator:
                         ValidationError(
                             error_type="broken_conditional",
                             nodes=(edge.source, edge.target),
-                            message=f"Conditional edge '{edge.id}' is missing condition_expr",
+                            message=(
+                                f"Conditional edge '{edge.id}' is missing condition_expr. "
+                                "Provide a boolean expression like output['status'] == true."
+                            ),
                         )
                     )
                     continue
 
-                if not self._can_evaluate_condition(edge.condition_expr, node_map.get(edge.source)):
+                safe, reason = self._is_condition_safe(edge.condition_expr, graph, node_map.get(edge.source))
+                if not safe:
                     errors.append(
                         ValidationError(
                             error_type="broken_conditional",
                             nodes=(edge.source, edge.target),
                             message=(
                                 f"Conditional edge '{edge.id}' has an invalid expression: "
-                                f"{edge.condition_expr}"
+                                f"{edge.condition_expr}. {reason}"
                             ),
                         )
                     )
@@ -141,7 +197,8 @@ class WorkflowGraphValidator:
 
             if all(edge.condition == EdgeCondition.CONDITIONAL for edge in edges):
                 resolvable = any(
-                    edge.condition_expr and self._can_evaluate_condition(edge.condition_expr, node_map.get(node_id))
+                    edge.condition_expr
+                    and self._is_condition_safe(edge.condition_expr, graph, node_map.get(node_id))[0]
                     for edge in edges
                 )
                 if not resolvable:
@@ -150,7 +207,8 @@ class WorkflowGraphValidator:
                             error_type="no_resolvable_path",
                             nodes=(node_id,),
                             message=(
-                                f"Node '{node_id}' has only conditional edges with no resolvable path"
+                                f"Node '{node_id}' only has conditional edges and none are valid. "
+                                "Fix the condition syntax or add an always/on_success edge."
                             ),
                         )
                     )
@@ -158,7 +216,7 @@ class WorkflowGraphValidator:
         return errors
 
     def _validate_cycles(self, graph: GraphSpec, node_map: dict[str, NodeSpec]) -> list[ValidationError]:
-        if self.allow_cycles is True or getattr(graph, "allow_cycles", False):
+        if self._cycles_globally_allowed(graph):
             return []
 
         adjacency = self._build_adjacency(graph, node_map)
@@ -184,8 +242,9 @@ class WorkflowGraphValidator:
                                 error_type="infinite_cycle",
                                 nodes=cycle_nodes,
                                 message=(
-                                    "Execution cycle detected without allow_cycle or allow_loop metadata: "
-                                    f"{' -> '.join(cycle_nodes)}"
+                                    "Execution cycle detected without allow_cycles or per-node/edge loop allowance: "
+                                    f"{' -> '.join(cycle_nodes)}. "
+                                    "Set allow_cycles on the validator or graph, or add allow_loop/allow_cycle metadata."
                                 ),
                             )
                         )
@@ -206,10 +265,17 @@ class WorkflowGraphValidator:
         available_before: dict[str, set[str]] = {node_id: set() for node_id in node_map}
         available_before[entry_node.id] = set(entry_node.input_keys)
 
+        all_possible_keys = set(graph.memory_keys)
+        for node in node_map.values():
+            all_possible_keys.update(node.input_keys)
+            all_possible_keys.update(node.output_keys)
+
+        max_iterations = max(len(node_map) * 2, len(node_map) * max(len(all_possible_keys), 1))
+
         changed = True
         iterations = 0
 
-        while changed and iterations < len(node_map) * 2:
+        while changed and iterations < max_iterations:
             iterations += 1
             changed = False
 
@@ -253,7 +319,8 @@ class WorkflowGraphValidator:
                         nodes=(node_id,),
                         message=(
                             f"Node '{node_id}' requires inputs that cannot be satisfied: "
-                            f"{sorted(missing)}"
+                            f"{sorted(missing)}. "
+                            "Ensure upstream nodes output these keys or add input mappings."
                         ),
                     )
                 )
@@ -320,7 +387,7 @@ class WorkflowGraphValidator:
         node_map: dict[str, NodeSpec],
         cycle_nodes: Iterable[str],
     ) -> bool:
-        if getattr(graph, "allow_cycles", False):
+        if self._cycles_globally_allowed(graph):
             return True
 
         cycle_set = set(cycle_nodes)
@@ -336,23 +403,34 @@ class WorkflowGraphValidator:
 
         return False
 
-    def _can_evaluate_condition(self, expr: str, source_node: NodeSpec | None) -> bool:
-        unknown = _Unknown()
-        output_keys = source_node.output_keys if source_node else []
+    def _cycles_globally_allowed(self, graph: GraphSpec) -> bool:
+        if self.allow_cycles is True:
+            return True
+        if self.allow_cycles is None and getattr(graph, "allow_cycles", False):
+            return True
+        return False
 
-        output_placeholder = {key: unknown for key in output_keys}
-        memory_placeholder = {key: unknown for key in output_keys}
+    def _is_condition_safe(
+        self,
+        expr: str,
+        graph: GraphSpec,
+        source_node: NodeSpec | None,
+    ) -> tuple[bool, str]:
+        allowed_names = {"output", "memory", "result", "true", "false"}
+        allowed_names.update(graph.memory_keys)
 
-        context = {
-            "output": output_placeholder,
-            "memory": memory_placeholder,
-            "result": unknown,
-            "true": True,
-            "false": False,
-        }
+        if source_node:
+            allowed_names.update(source_node.output_keys)
+            allowed_names.update(source_node.input_keys)
 
         try:
-            eval(expr, {"__builtins__": {}}, context)
-            return True
-        except Exception:
-            return False
+            tree = ast.parse(expr, mode="eval")
+        except SyntaxError as exc:
+            return False, f"Syntax error: {exc.msg}"
+
+        visitor = _ConditionSafetyVisitor(allowed_names)
+        visitor.visit(tree)
+        if visitor.invalid_reason:
+            return False, visitor.invalid_reason
+
+        return True, ""

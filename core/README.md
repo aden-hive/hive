@@ -196,6 +196,18 @@ for s in suggestions:
 - **Runtime**: Interface agents use to record their behavior.
 - **BuilderQuery**: Interface Builder uses to analyze agent behavior.
 
+## Execution Safety Validation
+
+Workflow graphs can be validated before execution using the deterministic validation utility. The validator enforces:
+
+- All nodes are reachable from the entry point
+- Conditional edges resolve to at least one valid path
+- No infinite execution cycles unless explicitly allowed
+- Required inputs for each node are satisfiable
+- Graph references are closed (no missing sources/targets)
+
+If validation fails, raise a structured error that names the nodes involved and explains the violation. To fix invalid workflows, adjust node inputs/outputs, edge conditions, or explicitly allow cycles on specific edges or nodes.
+
 ## Requirements
 
 - Python 3.11+

@@ -2,8 +2,8 @@ import pytest
 
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.node import NodeSpec
-from validation.errors import GraphValidationError
-from validation.graph_validator import WorkflowGraphValidator
+from framework.validation.errors import GraphValidationError
+from framework.validation.graph_validator import WorkflowGraphValidator
 
 
 def _graph(nodes, edges, entry_node):
@@ -28,7 +28,7 @@ def test_unreachable_node():
     graph = _graph(nodes, edges, entry_node="start")
 
     with pytest.raises(GraphValidationError) as exc:
-        WorkflowGraphValidator().validate(graph)
+        WorkflowGraphValidator().validate_or_raise(graph)
 
     error_types = {err.error_type for err in exc.value.errors}
     assert "unreachable_node" in error_types
@@ -51,7 +51,7 @@ def test_broken_conditional_edge():
     graph = _graph(nodes, edges, entry_node="start")
 
     with pytest.raises(GraphValidationError) as exc:
-        WorkflowGraphValidator().validate(graph)
+        WorkflowGraphValidator().validate_or_raise(graph)
 
     error_types = {err.error_type for err in exc.value.errors}
     assert "broken_conditional" in error_types
@@ -69,7 +69,7 @@ def test_infinite_cycle_without_allowance():
     graph = _graph(nodes, edges, entry_node="a")
 
     with pytest.raises(GraphValidationError) as exc:
-        WorkflowGraphValidator().validate(graph)
+        WorkflowGraphValidator().validate_or_raise(graph)
 
     error_types = {err.error_type for err in exc.value.errors}
     assert "infinite_cycle" in error_types
@@ -98,7 +98,7 @@ def test_missing_required_input():
     graph = _graph(nodes, edges, entry_node="start")
 
     with pytest.raises(GraphValidationError) as exc:
-        WorkflowGraphValidator().validate(graph)
+        WorkflowGraphValidator().validate_or_raise(graph)
 
     error_types = {err.error_type for err in exc.value.errors}
     assert "unsatisfied_input" in error_types
