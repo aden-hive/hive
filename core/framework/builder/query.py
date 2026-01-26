@@ -15,6 +15,7 @@ from pathlib import Path
 from framework.schemas.decision import Decision
 from framework.schemas.run import Run, RunSummary, RunStatus
 from framework.storage.backend import FileStorage
+from framework.llm.provider import LLMProvider
 
 
 class FailureAnalysis:
@@ -28,6 +29,8 @@ class FailureAnalysis:
         decision_chain: list[str],
         problems: list[str],
         suggestions: list[str],
+        llm_explanation: str = "",
+        llm_suggestions: list[str] = None,
     ):
         self.run_id = run_id
         self.failure_point = failure_point
@@ -35,6 +38,8 @@ class FailureAnalysis:
         self.decision_chain = decision_chain
         self.problems = problems
         self.suggestions = suggestions
+        self.llm_explanation = llm_explanation
+        self.llm_suggestions = llm_suggestions or []
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +49,8 @@ class FailureAnalysis:
             "decision_chain": self.decision_chain,
             "problems": self.problems,
             "suggestions": self.suggestions,
+            "llm_explanation": self.llm_explanation,
+            "llm_suggestions": self.llm_suggestions,
         }
 
     def __str__(self) -> str:
@@ -84,6 +91,7 @@ class PatternAnalysis:
         common_failures: list[tuple[str, int]],
         problematic_nodes: list[tuple[str, float]],
         decision_patterns: dict[str, Any],
+        llm_summary: str = "", 
     ):
         self.goal_id = goal_id
         self.run_count = run_count
@@ -91,6 +99,7 @@ class PatternAnalysis:
         self.common_failures = common_failures
         self.problematic_nodes = problematic_nodes
         self.decision_patterns = decision_patterns
+        self.llm_summary = llm_summary 
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -100,6 +109,7 @@ class PatternAnalysis:
             "common_failures": self.common_failures,
             "problematic_nodes": self.problematic_nodes,
             "decision_patterns": self.decision_patterns,
+            "llm_summary": self.llm_summary,
         }
 
     def __str__(self) -> str:
@@ -135,6 +145,8 @@ class BuilderQuery:
 
     def __init__(self, storage_path: str | Path):
         self.storage = FileStorage(storage_path)
+        self.llm = LLMProvider.get_default()
+
 
     # === WHAT HAPPENED? ===
 
@@ -204,6 +216,19 @@ class BuilderQuery:
         # Generate suggestions based on the failure
         suggestions = self._generate_suggestions(run, failed_decisions)
 
+        llm_explanation = self.llm.complete(
+            messages=[{"role": "user", "content":
+                f"Analyze why this agent run failed:\n\n{decision_chain}\n\nRoot cause: {root_cause}"
+            }]
+        ).content
+
+        llm_suggestions = self.llm.complete(
+            messages=[{"role": "user", "content":
+                f"Suggest improvements for the failed decisions:\n\n{decision_chain}\n\n"
+            }]
+        ).content.split("\n")
+
+
         return FailureAnalysis(
             run_id=run_id,
             failure_point=failure_point,
@@ -211,6 +236,8 @@ class BuilderQuery:
             decision_chain=decision_chain,
             problems=problems,
             suggestions=suggestions,
+            llm_explanation=llm_explanation,
+            llm_suggestions=llm_suggestions,
         )
 
     def get_decision_trace(self, run_id: str) -> list[str]:
@@ -279,6 +306,12 @@ class BuilderQuery:
         # Decision patterns
         decision_patterns = self._analyze_decision_patterns(runs)
 
+        llm_summary = self.llm.complete(
+            messages=[{"role": "user", "content":
+                f"Summarize systemic patterns found across these runs:\n\nCommon failures: {common_failures}\nProblematic nodes: {problematic_nodes}"
+            }]
+        ).content
+
         return PatternAnalysis(
             goal_id=goal_id,
             run_count=len(runs),
@@ -286,6 +319,7 @@ class BuilderQuery:
             common_failures=common_failures,
             problematic_nodes=problematic_nodes,
             decision_patterns=decision_patterns,
+            llm_summary=llm_summary,
         )
 
     def compare_runs(self, run_id_1: str, run_id_2: str) -> dict[str, Any]:
@@ -295,6 +329,10 @@ class BuilderQuery:
 
         if run1 is None or run2 is None:
             return {"error": "One or both runs not found"}
+        
+        semantic_diff = self.llm.complete(
+            messages=[{"role": "user", "content": "..."}]
+        ).content
 
         return {
             "run_1": {
@@ -308,6 +346,7 @@ class BuilderQuery:
                 "status": run2.status.value,
                 "decisions": len(run2.decisions),
                 "success_rate": run2.metrics.success_rate,
+                "semantic_diff": semantic_diff,
             },
             "differences": self._find_differences(run1, run2),
         }
@@ -357,6 +396,20 @@ class BuilderQuery:
                 "priority": "high",
             })
 
+        extra = self.llm.complete(
+            messages=[{"role": "user", "content":
+                f"Suggest additional improvements for an agent with these problems: {patterns.common_failures} and nodes {patterns.problematic_nodes}"
+            }]
+        ).content
+
+
+        suggestions.append({
+            "type": "llm_recommendation",
+            "target": goal_id,
+            "reason": "LLM analysis",
+            "recommendation": extra,
+            "priority": "medium",
+        })
         return suggestions
 
     def get_node_performance(self, node_id: str) -> dict[str, Any]:

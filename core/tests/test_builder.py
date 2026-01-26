@@ -5,6 +5,33 @@ from pathlib import Path
 from framework import Runtime, BuilderQuery
 from framework.schemas.run import RunStatus
 
+import pytest
+from unittest.mock import MagicMock
+
+@pytest.fixture(autouse=True)
+def mock_llm(monkeypatch):
+    """Mock LiteLLMProvider so tests do not call external LLM APIs."""
+    fake = MagicMock()
+
+    # mock `.complete()`
+    class FakeResponse:
+        content = "mocked"
+        model = "mock-model"
+        input_tokens = 0
+        output_tokens = 0
+        stop_reason = "stop"
+        raw_response = None
+
+    fake.complete.return_value = FakeResponse()
+
+    # mock `.simple_text_sync()` for backward compatibility
+    fake.simple_text_sync = lambda content: "mocked"
+
+    # Patch the provider
+    monkeypatch.setattr(
+        "framework.llm.litellm.LiteLLMProvider",
+        lambda *args, **kwargs: fake
+    )
 
 def create_successful_run(runtime: Runtime, goal_id: str = "test_goal") -> str:
     """Helper to create a successful run with decisions."""

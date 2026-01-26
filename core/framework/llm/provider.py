@@ -103,3 +103,12 @@ class LLMProvider(ABC):
             Final LLMResponse after tool use completes
         """
         pass
+
+    @staticmethod
+    def get_default():
+        from framework.llm.litellm import LiteLLMProvider
+        import os
+        return LiteLLMProvider(
+            model=os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini"),
+            api_key=os.getenv("OPENAI_API_KEY")
+        )

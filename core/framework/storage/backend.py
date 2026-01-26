@@ -6,6 +6,7 @@ Uses Pydantic's built-in serialization.
 """
 
 import json
+from os import path
 from pathlib import Path
 
 from framework.schemas.run import Run, RunSummary, RunStatus
@@ -58,7 +59,7 @@ class FileStorage:
         # Save summary
         summary = RunSummary.from_run(run)
         summary_path = self.base_path / "summaries" / f"{run.id}.json"
-        with open(summary_path, "w") as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             f.write(summary.model_dump_json(indent=2))
 
         # Update indexes
