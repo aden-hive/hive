@@ -8,6 +8,7 @@ from typing import Any
 @dataclass
 class LLMResponse:
     """Response from an LLM call."""
+
     content: str
     model: str
     input_tokens: int = 0
@@ -19,6 +20,7 @@ class LLMResponse:
 @dataclass
 class Tool:
     """A tool the LLM can use."""
+
     name: str
     description: str
     parameters: dict[str, Any] = field(default_factory=dict)
@@ -27,6 +29,7 @@ class Tool:
 @dataclass
 class ToolUse:
     """A tool call requested by the LLM."""
+
     id: str
     name: str
     input: dict[str, Any]
@@ -35,6 +38,7 @@ class ToolUse:
 @dataclass
 class ToolResult:
     """Result of executing a tool."""
+
     tool_use_id: str
     content: str
     is_error: bool = False

@@ -4,11 +4,18 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from ..security import get_secure_path, WORKSPACES_DIR
 
+
 def register_tools(mcp: FastMCP) -> None:
     """Register command execution tools with the MCP server."""
 
     @mcp.tool()
-    def execute_command_tool(command: str, workspace_id: str, agent_id: str, session_id: str, cwd: Optional[str] = None) -> dict:
+    def execute_command_tool(
+        command: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+        cwd: Optional[str] = None,
+    ) -> dict:
         """
         Purpose
             Execute a shell command within the session sandbox.
@@ -35,7 +42,9 @@ def register_tools(mcp: FastMCP) -> None:
         """
         try:
             # Default cwd is the session root
-            session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
+            session_root = os.path.join(
+                WORKSPACES_DIR, workspace_id, agent_id, session_id
+            )
             os.makedirs(session_root, exist_ok=True)
 
             if cwd:
@@ -49,7 +58,7 @@ def register_tools(mcp: FastMCP) -> None:
                 cwd=secure_cwd,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=60,
             )
 
             return {
@@ -58,7 +67,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "return_code": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
-                "cwd": cwd or "."
+                "cwd": cwd or ".",
             }
         except subprocess.TimeoutExpired:
             return {"error": "Command timed out after 60 seconds"}

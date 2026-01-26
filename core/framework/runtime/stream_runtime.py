@@ -10,9 +10,9 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from framework.schemas.decision import Decision, Option, Outcome, DecisionType
+from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.concurrent import ConcurrentStorage
 
@@ -130,7 +130,9 @@ class StreamRuntime:
         self._run_locks[execution_id] = asyncio.Lock()
         self._current_nodes[execution_id] = "unknown"
 
-        logger.debug(f"Started run {run_id} for execution {execution_id} in stream {self.stream_id}")
+        logger.debug(
+            f"Started run {run_id} for execution {execution_id} in stream {self.stream_id}"
+        )
         return run_id
 
     def end_run(
@@ -224,15 +226,17 @@ class StreamRuntime:
         # Build Option objects
         option_objects = []
         for opt in options:
-            option_objects.append(Option(
-                id=opt["id"],
-                description=opt.get("description", ""),
-                action_type=opt.get("action_type", "unknown"),
-                action_params=opt.get("action_params", {}),
-                pros=opt.get("pros", []),
-                cons=opt.get("cons", []),
-                confidence=opt.get("confidence", 0.5),
-            ))
+            option_objects.append(
+                Option(
+                    id=opt["id"],
+                    description=opt.get("description", ""),
+                    action_type=opt.get("action_type", "unknown"),
+                    action_params=opt.get("action_params", {}),
+                    pros=opt.get("pros", []),
+                    cons=opt.get("cons", []),
+                    confidence=opt.get("confidence", 0.5),
+                )
+            )
 
         # Create decision
         decision_id = f"dec_{len(run.decisions)}"
@@ -341,7 +345,9 @@ class StreamRuntime:
         """
         run = self._runs.get(execution_id)
         if run is None:
-            logger.warning(f"report_problem called but no run for execution {execution_id}: [{severity}] {description}")
+            logger.warning(
+                f"report_problem called but no run for execution {execution_id}: [{severity}] {description}"
+            )
             return ""
 
         return run.add_problem(
@@ -377,11 +383,13 @@ class StreamRuntime:
         return self.decide(
             execution_id=execution_id,
             intent=intent,
-            options=[{
-                "id": "action",
-                "description": action,
-                "action_type": "execute",
-            }],
+            options=[
+                {
+                    "id": "action",
+                    "description": action,
+                    "action_type": "execute",
+                }
+            ],
             chosen="action",
             reasoning=reasoning,
             node_id=node_id,

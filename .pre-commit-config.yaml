@@ -1,0 +1,52 @@
+# Pre-commit hooks for code quality and consistency
+# Install: pip install pre-commit
+# Setup: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+      - id: end-of-file-fixer
+        name: Fix end of files
+      - id: check-yaml
+        name: Check YAML syntax
+      - id: check-added-large-files
+        name: Check for large files
+        args: ['--maxkb=1000']
+      - id: check-json
+        name: Check JSON syntax
+      - id: check-toml
+        name: Check TOML syntax
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: mixed-line-ending
+        name: Fix mixed line endings
+        args: ['--fix=lf']
+
+  # Python formatting and linting with Ruff
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      # Run the linter (auto-fix safe issues, allow unfixable to pass)
+      - id: ruff
+        name: Ruff linter
+        args: [--fix, --ignore=E402,--ignore=F841]
+        types_or: [python, pyi, jupyter]
+      # Run the formatter
+      - id: ruff-format
+        name: Ruff formatter
+        types_or: [python, pyi, jupyter]
+
+  # Python type checking (optional, can be commented out if too strict)
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v1.11.2
+  #   hooks:
+  #     - id: mypy
+  #       name: MyPy type checker
+  #       additional_dependencies:
+  #         - types-all
+  #       args: [--ignore-missing-imports, --no-strict-optional]

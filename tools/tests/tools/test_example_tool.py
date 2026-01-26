@@ -1,4 +1,5 @@
 """Tests for example_tool - A simple text processing tool."""
+
 import pytest
 
 from fastmcp import FastMCP

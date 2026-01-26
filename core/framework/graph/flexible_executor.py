@@ -15,28 +15,29 @@ using a Worker-Judge loop:
 This keeps planning external while execution/evaluation is internal.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from framework.runtime.core import Runtime
+from framework.graph.code_sandbox import CodeSandbox
 from framework.graph.goal import Goal
+from framework.graph.judge import HybridJudge, create_default_judge
 from framework.graph.plan import (
-    Plan,
-    PlanStep,
-    PlanExecutionResult,
-    ExecutionStatus,
-    StepStatus,
-    Judgment,
-    JudgmentAction,
+    ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
-    ApprovalDecision,
+    ExecutionStatus,
+    Judgment,
+    JudgmentAction,
+    Plan,
+    PlanExecutionResult,
+    PlanStep,
+    StepStatus,
 )
-from framework.graph.judge import HybridJudge, create_default_judge
-from framework.graph.worker_node import WorkerNode, StepExecutionResult
-from framework.graph.code_sandbox import CodeSandbox
+from framework.graph.worker_node import StepExecutionResult, WorkerNode
 from framework.llm.provider import LLMProvider, Tool
+from framework.runtime.core import Runtime
 
 # Type alias for approval callback
 ApprovalCallback = Callable[[ApprovalRequest], ApprovalResult]
@@ -45,6 +46,7 @@ ApprovalCallback = Callable[[ApprovalRequest], ApprovalResult]
 @dataclass
 class ExecutorConfig:
     """Configuration for FlexibleGraphExecutor."""
+
     max_retries_per_step: int = 3
     max_total_steps: int = 100
     timeout_seconds: int = 300
@@ -450,12 +452,17 @@ class FlexibleGraphExecutor:
             preview_parts.append(f"Tool: {step.action.tool_name}")
             if step.action.tool_args:
                 import json
+
                 args_preview = json.dumps(step.action.tool_args, indent=2, default=str)
                 if len(args_preview) > 500:
                     args_preview = args_preview[:500] + "..."
                 preview_parts.append(f"Args: {args_preview}")
         elif step.action.prompt:
-            prompt_preview = step.action.prompt[:300] + "..." if len(step.action.prompt) > 300 else step.action.prompt
+            prompt_preview = (
+                step.action.prompt[:300] + "..."
+                if len(step.action.prompt) > 300
+                else step.action.prompt
+            )
             preview_parts.append(f"Prompt: {prompt_preview}")
 
         # Include step inputs resolved from context (what will be sent/used)

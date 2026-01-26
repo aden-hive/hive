@@ -1,4 +1,5 @@
 """Tests for web_scrape tool (FastMCP)."""
+
 import pytest
 
 from fastmcp import FastMCP

@@ -4,6 +4,7 @@ PDF Read Tool - Parse and extract text from PDF files.
 Uses pypdf to read PDF documents and extract text content
 along with metadata.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -33,7 +34,9 @@ def register_tools(mcp: FastMCP) -> None:
             if pages.isdigit():
                 page_num = int(pages)
                 if page_num < 1 or page_num > total_pages:
-                    return {"error": f"Page {page_num} out of range. PDF has {total_pages} pages."}
+                    return {
+                        "error": f"Page {page_num} out of range. PDF has {total_pages} pages."
+                    }
                 return [page_num - 1]
 
             # Range: "1-10"
@@ -41,11 +44,15 @@ def register_tools(mcp: FastMCP) -> None:
                 start_str, end_str = pages.split("-", 1)
                 start, end = int(start_str), int(end_str)
                 if start > end:
-                    return {"error": f"Invalid page range: {pages}. Start must be less than end."}
+                    return {
+                        "error": f"Invalid page range: {pages}. Start must be less than end."
+                    }
                 if start < 1:
                     return {"error": f"Page numbers start at 1, got {start}."}
                 if end > total_pages:
-                    return {"error": f"Page {end} out of range. PDF has {total_pages} pages."}
+                    return {
+                        "error": f"Page {end} out of range. PDF has {total_pages} pages."
+                    }
                 indices = list(range(start - 1, min(end, start - 1 + max_pages)))
                 return indices
 
@@ -54,11 +61,15 @@ def register_tools(mcp: FastMCP) -> None:
                 page_nums = [int(p.strip()) for p in pages.split(",")]
                 for p in page_nums:
                     if p < 1 or p > total_pages:
-                        return {"error": f"Page {p} out of range. PDF has {total_pages} pages."}
+                        return {
+                            "error": f"Page {p} out of range. PDF has {total_pages} pages."
+                        }
                 indices = [p - 1 for p in page_nums[:max_pages]]
                 return indices
 
-            return {"error": f"Invalid page format: '{pages}'. Use 'all', '5', '1-10', or '1,3,5'."}
+            return {
+                "error": f"Invalid page format: '{pages}'. Use 'all', '5', '1-10', or '1,3,5'."
+            }
 
         except ValueError as e:
             return {"error": f"Invalid page format: '{pages}'. {str(e)}"}
@@ -145,8 +156,12 @@ def register_tools(mcp: FastMCP) -> None:
                     "subject": meta.get("/Subject"),
                     "creator": meta.get("/Creator"),
                     "producer": meta.get("/Producer"),
-                    "created": str(meta.get("/CreationDate")) if meta.get("/CreationDate") else None,
-                    "modified": str(meta.get("/ModDate")) if meta.get("/ModDate") else None,
+                    "created": str(meta.get("/CreationDate"))
+                    if meta.get("/CreationDate")
+                    else None,
+                    "modified": str(meta.get("/ModDate"))
+                    if meta.get("/ModDate")
+                    else None,
                 }
 
             return result

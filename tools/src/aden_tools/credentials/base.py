@@ -4,6 +4,7 @@ Base classes for credential management.
 Contains the core infrastructure: CredentialSpec, CredentialManager, and CredentialError.
 Credential specs are defined in separate category files (llm.py, search.py, etc.).
 """
+
 from __future__ import annotations
 
 import os

@@ -20,6 +20,7 @@ dependencies = [
 dev = [
     "ruff>=0.1.0",
     "mypy>=1.0",
+    "pre-commit>=3.0.0",
 ]
 
 [build-system]
@@ -43,6 +44,19 @@ lint.select = [
   "Q",   # flake8-quotes errors
   "UP",  # py-upgrade
   "W",   # pycodestyle warnings
+]
+
+# Ignore specific rules during initial rollout
+lint.ignore = [
+  "E501",   # Line too long (will be fixed progressively)
+  "UP038",  # Use X | Y instead of (X, Y) in isinstance
+  "B904",   # Exception handling without from err/from None
+  "F401",   # Unused imports in __init__.py (intentional re-exports)
+  "F841",   # Unused local variables (will be cleaned up)
+  "C401",   # Generator to set comprehension (minor optimization)
+  "B007",   # Unused loop variable (will be fixed progressively)
+  "E402",   # Module level import not at top (some valid cases)
+  "E712",   # Comparison to True/False (will be fixed progressively)
 ]
 
 lint.isort.combine-as-imports = true

@@ -5,6 +5,7 @@ Uses httpx for requests and BeautifulSoup for HTML parsing.
 Returns clean text content from web pages.
 Respect robots.txt by default for ethical scraping.
 """
+
 from __future__ import annotations
 
 from typing import Any, List
@@ -28,20 +29,20 @@ BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.
 def _get_robots_parser(base_url: str, timeout: float = 10.0) -> RobotFileParser | None:
     """
     Fetch and parse robots.txt for a domain.
-    
+
     Args:
         base_url: Base URL of the domain (e.g., 'https://example.com')
         timeout: Timeout for fetching robots.txt
-        
+
     Returns:
         RobotFileParser if robots.txt exists and was parsed, None otherwise
     """
     if base_url in _robots_cache:
         return _robots_cache[base_url]
-    
+
     robots_url = f"{base_url}/robots.txt"
     parser = RobotFileParser()
-    
+
     try:
         response = httpx.get(
             robots_url,
@@ -65,23 +66,23 @@ def _get_robots_parser(base_url: str, timeout: float = 10.0) -> RobotFileParser 
 def _is_allowed_by_robots(url: str) -> tuple[bool, str]:
     """
     Check if URL is allowed by robots.txt.
-    
+
     Args:
         url: Full URL to check
-        
+
     Returns:
         Tuple of (allowed: bool, reason: str)
     """
     parsed = urlparse(url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
     path = parsed.path or "/"
-    
+
     parser = _get_robots_parser(base_url)
-    
+
     if parser is None:
         # No robots.txt found or couldn't fetch - all paths allowed
         return True, "No robots.txt found or not accessible"
-    
+
     # Check both our bot user-agent and wildcard
     if parser.can_fetch(USER_AGENT, path) and parser.can_fetch("*", path):
         return True, "Allowed by robots.txt"
@@ -156,7 +157,18 @@ def register_tools(mcp: FastMCP) -> None:
             soup = BeautifulSoup(response.text, "html.parser")
 
             # Remove noise elements
-            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]):
+            for tag in soup(
+                [
+                    "script",
+                    "style",
+                    "nav",
+                    "footer",
+                    "header",
+                    "aside",
+                    "noscript",
+                    "iframe",
+                ]
+            ):
                 tag.decompose()
 
             # Get title and description
@@ -185,7 +197,11 @@ def register_tools(mcp: FastMCP) -> None:
                     or soup.find(class_=["content", "post", "entry", "article-body"])
                     or soup.find("body")
                 )
-                text = main_content.get_text(separator=" ", strip=True) if main_content else ""
+                text = (
+                    main_content.get_text(separator=" ", strip=True)
+                    if main_content
+                    else ""
+                )
 
             # Clean up whitespace
             text = " ".join(text.split())

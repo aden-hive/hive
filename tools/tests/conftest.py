@@ -1,4 +1,5 @@
 """Shared fixtures for tools tests."""
+
 import pytest
 from pathlib import Path
 
@@ -16,11 +17,13 @@ def mcp() -> FastMCP:
 @pytest.fixture
 def mock_credentials() -> CredentialManager:
     """Create a CredentialManager with mock test credentials."""
-    return CredentialManager.for_testing({
-        "anthropic": "test-anthropic-api-key",
-        "brave_search": "test-brave-api-key",
-        # Add other mock credentials as needed
-    })
+    return CredentialManager.for_testing(
+        {
+            "anthropic": "test-anthropic-api-key",
+            "brave_search": "test-brave-api-key",
+            # Add other mock credentials as needed
+        }
+    )
 
 
 @pytest.fixture
@@ -43,7 +46,9 @@ def sample_csv(tmp_path: Path) -> Path:
 def sample_json(tmp_path: Path) -> Path:
     """Create a simple JSON file for testing."""
     json_file = tmp_path / "test.json"
-    json_file.write_text('{"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}')
+    json_file.write_text(
+        '{"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}'
+    )
     return json_file
 
 

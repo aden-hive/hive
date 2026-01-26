@@ -6,8 +6,9 @@ Demonstrates how OutputCleaner fixes the JSON parsing trap using llama-3.3-70b.
 
 import json
 import os
-from framework.graph.output_cleaner import OutputCleaner, CleansingConfig
+
 from framework.graph.node import NodeSpec
+from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.llm.litellm import LiteLLMProvider
 
 
@@ -131,9 +132,7 @@ def test_cleaning_with_cerebras():
 
         assert isinstance(cleaned2, dict), "Should return dict"
         assert isinstance(cleaned2.get("analysis"), dict), "analysis should be dict"
-        assert isinstance(
-            cleaned2.get("risk_score"), (int, float)
-        ), "risk_score should be number"
+        assert isinstance(cleaned2.get("risk_score"), (int, float)), "risk_score should be number"
 
     # Stats
     stats = cleaner.get_stats()
