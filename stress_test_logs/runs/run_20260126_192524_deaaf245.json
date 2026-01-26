@@ -1,0 +1,76 @@
+{
+  "id": "run_20260126_192524_deaaf245",
+  "goal_id": "rapid-test",
+  "started_at": "2026-01-26T19:25:24.963081",
+  "status": "completed",
+  "completed_at": "2026-01-26T19:25:24.963081",
+  "decisions": [
+    {
+      "id": "dec_0",
+      "timestamp": "2026-01-26T19:25:24.963081",
+      "node_id": "quick",
+      "intent": "Execute function quick",
+      "decision_type": "custom",
+      "options": [
+        {
+          "id": "execute",
+          "description": "Run function with inputs: ['n']",
+          "action_type": "unknown",
+          "action_params": {},
+          "pros": [],
+          "cons": [],
+          "confidence": 0.5
+        }
+      ],
+      "chosen_option_id": "execute",
+      "reasoning": "Deterministic function execution",
+      "active_constraints": [],
+      "input_context": {},
+      "outcome": {
+        "success": true,
+        "result": 56,
+        "error": null,
+        "state_changes": {},
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "summary": "",
+        "timestamp": "2026-01-26T19:25:24.963081"
+      },
+      "evaluation": null,
+      "chosen_option": {
+        "id": "execute",
+        "description": "Run function with inputs: ['n']",
+        "action_type": "unknown",
+        "action_params": {},
+        "pros": [],
+        "cons": [],
+        "confidence": 0.5
+      },
+      "was_successful": true,
+      "was_good_decision": true
+    }
+  ],
+  "problems": [],
+  "metrics": {
+    "total_decisions": 1,
+    "successful_decisions": 1,
+    "failed_decisions": 0,
+    "total_tokens": 0,
+    "total_latency_ms": 0,
+    "nodes_executed": [
+      "quick"
+    ],
+    "edges_traversed": [],
+    "success_rate": 1.0
+  },
+  "narrative": "Executed 1 steps through path: quick",
+  "goal_description": "Quick execution",
+  "input_data": {
+    "n": 28
+  },
+  "output_data": {
+    "n": 28,
+    "result": 56
+  },
+  "duration_ms": 0
+}

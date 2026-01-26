@@ -1,0 +1,122 @@
+{
+  "id": "run_20260126_192602_a07c9674",
+  "goal_id": "test",
+  "started_at": "2026-01-26T19:26:02.676293",
+  "status": "completed",
+  "completed_at": "2026-01-26T19:26:02.676293",
+  "decisions": [
+    {
+      "id": "dec_0",
+      "timestamp": "2026-01-26T19:26:02.676293",
+      "node_id": "n1",
+      "intent": "Execute function n1",
+      "decision_type": "custom",
+      "options": [
+        {
+          "id": "execute",
+          "description": "Run function with inputs: ['x']",
+          "action_type": "unknown",
+          "action_params": {},
+          "pros": [],
+          "cons": [],
+          "confidence": 0.5
+        }
+      ],
+      "chosen_option_id": "execute",
+      "reasoning": "Deterministic function execution",
+      "active_constraints": [],
+      "input_context": {},
+      "outcome": {
+        "success": true,
+        "result": "hello_processed",
+        "error": null,
+        "state_changes": {},
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "summary": "",
+        "timestamp": "2026-01-26T19:26:02.676293"
+      },
+      "evaluation": null,
+      "chosen_option": {
+        "id": "execute",
+        "description": "Run function with inputs: ['x']",
+        "action_type": "unknown",
+        "action_params": {},
+        "pros": [],
+        "cons": [],
+        "confidence": 0.5
+      },
+      "was_successful": true,
+      "was_good_decision": true
+    },
+    {
+      "id": "dec_1",
+      "timestamp": "2026-01-26T19:26:02.676293",
+      "node_id": "n2",
+      "intent": "Execute function n2",
+      "decision_type": "custom",
+      "options": [
+        {
+          "id": "execute",
+          "description": "Run function with inputs: ['y']",
+          "action_type": "unknown",
+          "action_params": {},
+          "pros": [],
+          "cons": [],
+          "confidence": 0.5
+        }
+      ],
+      "chosen_option_id": "execute",
+      "reasoning": "Deterministic function execution",
+      "active_constraints": [],
+      "input_context": {},
+      "outcome": {
+        "success": true,
+        "result": "HELLO_PROCESSED",
+        "error": null,
+        "state_changes": {},
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "summary": "",
+        "timestamp": "2026-01-26T19:26:02.676293"
+      },
+      "evaluation": null,
+      "chosen_option": {
+        "id": "execute",
+        "description": "Run function with inputs: ['y']",
+        "action_type": "unknown",
+        "action_params": {},
+        "pros": [],
+        "cons": [],
+        "confidence": 0.5
+      },
+      "was_successful": true,
+      "was_good_decision": true
+    }
+  ],
+  "problems": [],
+  "metrics": {
+    "total_decisions": 2,
+    "successful_decisions": 2,
+    "failed_decisions": 0,
+    "total_tokens": 0,
+    "total_latency_ms": 0,
+    "nodes_executed": [
+      "n1",
+      "n2"
+    ],
+    "edges_traversed": [],
+    "success_rate": 1.0
+  },
+  "narrative": "Executed 2 steps through path: n1 -> n2",
+  "goal_description": "Test",
+  "input_data": {
+    "x": "hello"
+  },
+  "output_data": {
+    "x": "hello",
+    "y": "hello_processed",
+    "z": "HELLO_PROCESSED"
+  },
+  "duration_ms": 0
+}

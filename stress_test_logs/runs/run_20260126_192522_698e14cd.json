@@ -1,0 +1,180 @@
+{
+  "id": "run_20260126_192522_698e14cd",
+  "goal_id": "chain-test",
+  "started_at": "2026-01-26T19:25:22.458633",
+  "status": "failed",
+  "completed_at": "2026-01-26T19:25:22.468636",
+  "decisions": [
+    {
+      "id": "dec_0",
+      "timestamp": "2026-01-26T19:25:22.458633",
+      "node_id": "node_0",
+      "intent": "Execute function node_0",
+      "decision_type": "custom",
+      "options": [
+        {
+          "id": "execute",
+          "description": "Run function with inputs: ['input']",
+          "action_type": "unknown",
+          "action_params": {},
+          "pros": [],
+          "cons": [],
+          "confidence": 0.5
+        }
+      ],
+      "chosen_option_id": "execute",
+      "reasoning": "Deterministic function execution",
+      "active_constraints": [],
+      "input_context": {},
+      "outcome": {
+        "success": false,
+        "result": null,
+        "error": "passthrough() got an unexpected keyword argument 'input'",
+        "state_changes": {},
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "summary": "",
+        "timestamp": "2026-01-26T19:25:22.458633"
+      },
+      "evaluation": null,
+      "chosen_option": {
+        "id": "execute",
+        "description": "Run function with inputs: ['input']",
+        "action_type": "unknown",
+        "action_params": {},
+        "pros": [],
+        "cons": [],
+        "confidence": 0.5
+      },
+      "was_successful": false,
+      "was_good_decision": false
+    },
+    {
+      "id": "dec_1",
+      "timestamp": "2026-01-26T19:25:22.459631",
+      "node_id": "node_0",
+      "intent": "Execute function node_0",
+      "decision_type": "custom",
+      "options": [
+        {
+          "id": "execute",
+          "description": "Run function with inputs: ['input']",
+          "action_type": "unknown",
+          "action_params": {},
+          "pros": [],
+          "cons": [],
+          "confidence": 0.5
+        }
+      ],
+      "chosen_option_id": "execute",
+      "reasoning": "Deterministic function execution",
+      "active_constraints": [],
+      "input_context": {},
+      "outcome": {
+        "success": false,
+        "result": null,
+        "error": "passthrough() got an unexpected keyword argument 'input'",
+        "state_changes": {},
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "summary": "",
+        "timestamp": "2026-01-26T19:25:22.459631"
+      },
+      "evaluation": null,
+      "chosen_option": {
+        "id": "execute",
+        "description": "Run function with inputs: ['input']",
+        "action_type": "unknown",
+        "action_params": {},
+        "pros": [],
+        "cons": [],
+        "confidence": 0.5
+      },
+      "was_successful": false,
+      "was_good_decision": false
+    },
+    {
+      "id": "dec_2",
+      "timestamp": "2026-01-26T19:25:22.459631",
+      "node_id": "node_0",
+      "intent": "Execute function node_0",
+      "decision_type": "custom",
+      "options": [
+        {
+          "id": "execute",
+          "description": "Run function with inputs: ['input']",
+          "action_type": "unknown",
+          "action_params": {},
+          "pros": [],
+          "cons": [],
+          "confidence": 0.5
+        }
+      ],
+      "chosen_option_id": "execute",
+      "reasoning": "Deterministic function execution",
+      "active_constraints": [],
+      "input_context": {},
+      "outcome": {
+        "success": false,
+        "result": null,
+        "error": "passthrough() got an unexpected keyword argument 'input'",
+        "state_changes": {},
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "summary": "",
+        "timestamp": "2026-01-26T19:25:22.459631"
+      },
+      "evaluation": null,
+      "chosen_option": {
+        "id": "execute",
+        "description": "Run function with inputs: ['input']",
+        "action_type": "unknown",
+        "action_params": {},
+        "pros": [],
+        "cons": [],
+        "confidence": 0.5
+      },
+      "was_successful": false,
+      "was_good_decision": false
+    }
+  ],
+  "problems": [
+    {
+      "id": "prob_0",
+      "severity": "critical",
+      "description": "Node node_0 failed after 3 attempts: passthrough() got an unexpected keyword argument 'input'",
+      "root_cause": null,
+      "decision_id": null,
+      "timestamp": "2026-01-26T19:25:22.460628",
+      "suggested_fix": null
+    },
+    {
+      "id": "prob_1",
+      "severity": "critical",
+      "description": "'charmap' codec can't encode character '\\u2717' in position 328: character maps to <undefined>",
+      "root_cause": null,
+      "decision_id": null,
+      "timestamp": "2026-01-26T19:25:22.468636",
+      "suggested_fix": null
+    }
+  ],
+  "metrics": {
+    "total_decisions": 3,
+    "successful_decisions": 0,
+    "failed_decisions": 3,
+    "total_tokens": 0,
+    "total_latency_ms": 0,
+    "nodes_executed": [
+      "node_0"
+    ],
+    "edges_traversed": [],
+    "success_rate": 0.0
+  },
+  "narrative": "Failed at step 1: 'charmap' codec can't encode character '\\u2717' in position 328: character maps to <undefined>",
+  "goal_description": "Execute 50 nodes in sequence",
+  "input_data": {
+    "input": "test_data"
+  },
+  "output_data": {},
+  "duration_ms": 10
+}

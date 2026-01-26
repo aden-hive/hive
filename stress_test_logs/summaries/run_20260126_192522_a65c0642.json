@@ -1,0 +1,16 @@
+{
+  "run_id": "run_20260126_192522_a65c0642",
+  "goal_id": "memory-test",
+  "status": "failed",
+  "duration_ms": 10,
+  "decision_count": 3,
+  "success_rate": 1.0,
+  "problem_count": 1,
+  "narrative": "Failed at Generate after 3 retries: Output validation failed: Output key 'data' exceeds max length (1048576 > 10000)",
+  "key_decisions": [],
+  "critical_problems": [
+    "Node generate failed after 3 attempts: Output validation failed: Output key 'data' exceeds max length (1048576 > 10000)"
+  ],
+  "warnings": [],
+  "successes": []
+}

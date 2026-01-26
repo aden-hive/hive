@@ -326,7 +326,9 @@ class ExecutionStream:
                 logger.debug(f"Execution {execution_id} completed: success={result.success}")
 
             except asyncio.CancelledError:
-                ctx.status = "cancelled"
+                # If we were paused, keep that status
+                if ctx.status != "paused":
+                    ctx.status = "cancelled"
                 raise
 
             except Exception as e:
@@ -378,6 +380,96 @@ class ExecutionStream:
             default_model=self.graph.default_model,
             max_tokens=self.graph.max_tokens,
             max_steps=self.graph.max_steps,
+        )
+
+    async def pause(self, execution_id: str) -> bool:
+        """
+        Pause a running execution.
+
+        Snapshots the state and cancels the running task.
+
+        Args:
+            execution_id: Execution to pause
+
+        Returns:
+            True if paused, False if not found or not running
+        """
+        ctx = self._active_executions.get(execution_id)
+        task = self._execution_tasks.get(execution_id)
+
+        if not ctx or not task or ctx.status != "running":
+            return False
+
+        logger.info(f"Pausing execution {execution_id}...")
+
+        try:
+            # 1. Snapshot state before cancellation (as cancellation wipes concurrent state)
+            current_state = await self._state_manager.read_all(
+                execution_id=execution_id,
+                stream_id=self.stream_id,
+                isolation=ctx.isolation_level,
+            )
+            
+            ctx.session_state = {
+                "memory": current_state,
+                "paused_at": datetime.now(),
+            }
+            ctx.status = "paused"
+
+            # 2. Cancel the task
+            task.cancel()
+            
+            # Check if we are running inside the task we are cancelling (e.g. via event handler)
+            try:
+                current_task = asyncio.current_task()
+            except RuntimeError:
+                current_task = None
+                
+            if current_task != task:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    # Expected since we cancelled it
+                    pass
+            else:
+                logger.info(f"Self-cancelling execution {execution_id} from inside task")
+
+            logger.info(f"Execution {execution_id} paused successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to pause execution {execution_id}: {e}")
+            return False
+
+    async def resume(
+        self,
+        execution_id: str,
+        input_data: dict[str, Any],
+    ) -> str | None:
+        """
+        Resume a paused execution.
+
+        Starts a new execution with the state from the paused one.
+
+        Args:
+            execution_id: ID of the paused execution
+            input_data: New input data to merge
+
+        Returns:
+            New execution ID or None if failed
+        """
+        ctx = self._active_executions.get(execution_id)
+        if not ctx or ctx.status != "paused":
+            logger.warning(f"Cannot resume execution {execution_id}: status is {ctx.status if ctx else 'not found'}")
+            return None
+
+        logger.info(f"Resuming execution {execution_id}...")
+
+        # Start new execution with preserved state
+        return await self.execute(
+            input_data=input_data,
+            correlation_id=ctx.correlation_id,
+            session_state=ctx.session_state,
         )
 
     async def wait_for_completion(

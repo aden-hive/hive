@@ -318,6 +318,48 @@ class AgentRuntime:
             return False
         return await stream.cancel_execution(execution_id)
 
+    async def pause_execution(
+        self,
+        entry_point_id: str,
+        execution_id: str,
+    ) -> bool:
+        """
+        Pause a running execution.
+
+        Args:
+            entry_point_id: Stream containing the execution
+            execution_id: Execution to pause
+
+        Returns:
+            True if paused, False if not found
+        """
+        stream = self._streams.get(entry_point_id)
+        if stream is None:
+            return False
+        return await stream.pause(execution_id)
+
+    async def resume_execution(
+        self,
+        entry_point_id: str,
+        execution_id: str,
+        input_data: dict[str, Any],
+    ) -> str | None:
+        """
+        Resume a paused execution.
+
+        Args:
+            entry_point_id: Stream containing the execution
+            execution_id: Execution to resume
+            input_data: New input data (e.g. user approval)
+
+        Returns:
+            New execution ID or None if failed
+        """
+        stream = self._streams.get(entry_point_id)
+        if stream is None:
+            return None
+        return await stream.resume(execution_id, input_data)
+
     # === QUERY OPERATIONS ===
 
     def get_entry_points(self) -> list[EntryPointSpec]:

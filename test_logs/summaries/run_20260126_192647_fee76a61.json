@@ -1,0 +1,14 @@
+{
+  "run_id": "run_20260126_192647_fee76a61",
+  "goal_id": "chain-test",
+  "status": "completed",
+  "duration_ms": 1,
+  "decision_count": 10,
+  "success_rate": 1.0,
+  "problem_count": 0,
+  "narrative": "Executed 10 steps through path: node_0 -> node_1 -> node_2 -> node_3 -> node_4 -> node_5 -> node_6 -> node_7 -> node_8 -> node_9",
+  "key_decisions": [],
+  "critical_problems": [],
+  "warnings": [],
+  "successes": []
+}
