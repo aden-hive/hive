@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
 - Initial project structure
 - React frontend (honeycomb) with Vite and TypeScript
 - Node.js backend (hive) with Express and TypeScript
@@ -17,23 +18,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 
 ### Changed
+
 - N/A
 
 ### Deprecated
+
 - N/A
 
 ### Removed
+
 - N/A
 
 ### Fixed
-- N/A
+
+- UnicodeEncodeError on Windows when saving test results with Unicode characters (added UTF-8 encoding to storage backend)
 
 ### Security
+
 - N/A
 
 ## [0.1.0] - 2025-01-13
 
 ### Added
+
 - Initial release
 
 [Unreleased]: https://github.com/adenhq/hive/compare/v0.1.0...HEAD
