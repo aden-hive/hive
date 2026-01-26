@@ -88,8 +88,9 @@ class OutputCleaner:
         elif config.enabled:
             # Create dedicated fast LLM provider for cleaning
             try:
-                from framework.llm.litellm import LiteLLMProvider
                 import os
+
+                from framework.llm.litellm import LiteLLMProvider
 
                 api_key = os.environ.get("CEREBRAS_API_KEY")
                 if api_key:
