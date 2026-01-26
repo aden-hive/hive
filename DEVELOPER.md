@@ -204,6 +204,34 @@ hive/                                    # Repository root
 
 ## Building Agents
 
+### Learning the Runtime (No API Keys)
+
+Before building with Claude Code, understand how the agent runtime works:
+```bash
+# View the example code
+cat core/examples/manual_agent.py
+
+# Run it (Unix/Mac/Git Bash)
+PYTHONPATH=core python core/examples/manual_agent.py
+
+# Run it (Windows PowerShell)
+$env:PYTHONPATH="core"
+python core/examples/manual_agent.py
+
+# Run it (Windows CMD)
+set PYTHONPATH=core
+python core\examples\manual_agent.py
+```
+
+This manual agent example shows:
+- How to define goals, nodes, and edges programmatically
+- The core execution loop without external dependencies
+- Using function nodes with pure Python logic
+- How the graph executor processes your workflow
+
+**Perfect for:** Understanding internals before using the CLI-based builder workflow.
+
+
 ### Using Claude Code Skills
 
 The fastest way to build agents is using the Claude Code skills:

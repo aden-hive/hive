@@ -114,6 +114,30 @@ PYTHONPATH=core:exports python -m outbound_sales_agent validate
 PYTHONPATH=core:exports python -m personal_assistant_agent run --input '{...}'
 ```
 
+### Example: Manual Agent (No API Keys Required)
+
+To understand the framework without Claude Code or API keys:
+```bash
+# Unix/Mac/Git Bash
+PYTHONPATH=core python core/examples/manual_agent.py
+
+# Windows PowerShell
+$env:PYTHONPATH="core"
+python core/examples/manual_agent.py
+
+# Windows CMD
+set PYTHONPATH=core
+python core\examples\manual_agent.py
+```
+
+This example demonstrates:
+- Core agent runtime loop
+- Function nodes with pure Python
+- Graph execution without external LLM APIs
+- Perfect for learning framework basics
+
+The agent performs a simple greeting workflow to illustrate fundamental concepts.
+
 ## Building New Agents
 
 Use Claude Code CLI with the agent building skills:

@@ -102,6 +102,41 @@ PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
 
+## Examples
+
+The framework includes examples to help you understand how agents work:
+
+### Manual Agent Example (No API Keys Required)
+
+Learn the core agent runtime using pure Python - perfect for understanding the framework without external dependencies:
+```bash
+# Unix/Mac/Git Bash
+PYTHONPATH=core python core/examples/manual_agent.py
+
+# Windows PowerShell
+$env:PYTHONPATH="core"
+python core/examples/manual_agent.py
+
+# Windows CMD
+set PYTHONPATH=core
+python core\examples\manual_agent.py
+```
+
+**What you'll learn:**
+- Building agents programmatically without Claude Code CLI
+- Using function nodes with pure Python logic
+- Understanding the graph execution flow
+- Running agents without LLM API calls
+
+### MCP Integration Example
+
+See how to integrate MCP servers with agents:
+```bash
+python core/examples/mcp_integration_example.py
+```
+
+This demonstrates MCP server setup and tool integration patterns.
+
 ## Features
 
 - **Goal-Driven Development** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
