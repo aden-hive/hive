@@ -8,6 +8,12 @@ Usage:
     python -m core list exports/
     python -m core dispatch exports/ --input '{"key": "value"}'
     python -m core shell exports/my-agent
+
+Testing commands:
+    python -m core test-run <agent_path> --goal <goal_id>
+    python -m core test-debug <goal_id> <test_id>
+    python -m core test-list <goal_id>
+    python -m core test-stats <goal_id>
 """
 
 import argparse
@@ -20,7 +26,7 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="claude-sonnet-4-20250514",
+        default="claude-haiku-4-5-20251001",
         help="Anthropic model to use",
     )
 
@@ -29,6 +35,10 @@ def main():
     # Register runner commands (run, info, validate, list, dispatch, shell)
     from framework.runner.cli import register_commands
     register_commands(subparsers)
+
+    # Register testing commands (test-run, test-debug, test-list, test-stats)
+    from framework.testing.cli import register_testing_commands
+    register_testing_commands(subparsers)
 
     args = parser.parse_args()
 

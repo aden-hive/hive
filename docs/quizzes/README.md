@@ -6,7 +6,7 @@ Welcome to the Aden Engineering Challenges! These quizzes are designed for stude
 
 ## 💼 We're Hiring!
 
-**[Software Development Engineer](./job-post.md)** - Full-stack TypeScript, React, Node.js, AI agents
+**[Software Development Engineer](./00-job-post.md)** - Full-stack TypeScript, React, Node.js, AI agents
 
 ---
 

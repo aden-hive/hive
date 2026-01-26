@@ -1,6 +1,7 @@
 #!/bin/bash
-# Hive Setup Script
-# This script sets up the project for first-time use
+# Legacy Web Application Setup Script
+# NOTE: This script is for the archived honeycomb/hive web application.
+# For agent development, use: ./scripts/setup-python.sh
 
 set -e
 
@@ -8,8 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 echo "==================================="
-echo "  Hive Setup"
+echo "  Legacy Web App Setup (Archived)"
 echo "==================================="
+echo ""
+echo "⚠️  This script is for the archived web application."
+echo "    For agent development, use: ./scripts/setup-python.sh"
 echo ""
 
 # Check for Node.js
@@ -69,17 +73,13 @@ fi
 
 echo ""
 echo "==================================="
-echo "  Setup Complete!"
+echo "  Setup Complete (Legacy)"
 echo "==================================="
 echo ""
-echo "Next steps:"
-echo "  1. Review config.yaml and update settings as needed"
-echo "  2. Run 'npm run generate:env' if you modify config.yaml"
-echo "  3. Start the application:"
+echo "⚠️  NOTE: The honeycomb/hive web application has been archived."
 echo ""
-echo "     With Docker:    docker compose up"
-echo "     Without Docker: npm run dev (in each package)"
+echo "For agent development, please use:"
+echo "  ./scripts/setup-python.sh"
 echo ""
-echo "  Frontend: http://localhost:3000"
-echo "  Backend:  http://localhost:4000"
+echo "See ENVIRONMENT_SETUP.md for complete agent development guide."
 echo ""

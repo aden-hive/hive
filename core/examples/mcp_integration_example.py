@@ -21,16 +21,16 @@ async def example_1_programmatic_registration():
     # Load an existing agent
     runner = AgentRunner.load("exports/task-planner")
 
-    # Register aden-tools MCP server via STDIO
+    # Register tools MCP server via STDIO
     num_tools = runner.register_mcp_server(
-        name="aden-tools",
+        name="tools",
         transport="stdio",
         command="python",
         args=["-m", "aden_tools.mcp_server", "--stdio"],
-        cwd="../aden-tools",
+        cwd="../tools",
     )
 
-    print(f"Registered {num_tools} tools from aden-tools MCP server")
+    print(f"Registered {num_tools} tools from tools MCP server")
 
     # List all available tools
     tools = runner._tool_registry.get_tools()
@@ -51,14 +51,14 @@ async def example_2_http_transport():
     """Example 2: Connect to MCP server via HTTP"""
     print("\n=== Example 2: HTTP MCP Server Connection ===\n")
 
-    # First, start the aden-tools MCP server in HTTP mode:
-    # cd aden-tools && python mcp_server.py --port 4001
+    # First, start the tools MCP server in HTTP mode:
+    # cd tools && python mcp_server.py --port 4001
 
     runner = AgentRunner.load("exports/task-planner")
 
-    # Register aden-tools via HTTP
+    # Register tools via HTTP
     num_tools = runner.register_mcp_server(
-        name="aden-tools-http",
+        name="tools-http",
         transport="http",
         url="http://localhost:4001",
     )
@@ -130,7 +130,7 @@ async def example_4_custom_agent_with_mcp_tools():
         description="Search the web for information",
         node_type="llm_tool_use",
         system_prompt="Search for {query} and return the top results. Use the web_search tool.",
-        tools=["web_search"],  # This tool comes from aden-tools MCP server
+        tools=["web_search"],  # This tool comes from tools MCP server
         input_keys=["query"],
         output_keys=["search_results"],
     )
@@ -160,11 +160,11 @@ async def example_4_custom_agent_with_mcp_tools():
     # Load and register MCP server
     runner = AgentRunner.load(export_path)
     runner.register_mcp_server(
-        name="aden-tools",
+        name="tools",
         transport="stdio",
         command="python",
         args=["-m", "aden_tools.mcp_server", "--stdio"],
-        cwd="../aden-tools",
+        cwd="../tools",
     )
 
     # Run the agent

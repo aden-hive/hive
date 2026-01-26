@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +55,7 @@ class AgentOrchestrator:
     def __init__(
         self,
         llm: LLMProvider | None = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-haiku-4-5-20251001",
     ):
         """
         Initialize the orchestrator.
@@ -71,10 +69,10 @@ class AgentOrchestrator:
         self._model = model
         self._message_log: list[AgentMessage] = []
 
-        # Auto-create LLM if API key available
-        if self._llm is None and os.environ.get("ANTHROPIC_API_KEY"):
-            from framework.llm.anthropic import AnthropicProvider
-            self._llm = AnthropicProvider(model=model)
+        # Auto-create LLM - LiteLLM auto-detects provider and API key from model name
+        if self._llm is None:
+            from framework.llm.litellm import LiteLLMProvider
+            self._llm = LiteLLMProvider(model=self._model)
 
     def register(
         self,

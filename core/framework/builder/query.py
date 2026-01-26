@@ -12,7 +12,7 @@ from typing import Any
 from collections import defaultdict
 from pathlib import Path
 
-from framework.schemas.decision import Decision, DecisionType
+from framework.schemas.decision import Decision
 from framework.schemas.run import Run, RunSummary, RunStatus
 from framework.storage.backend import FileStorage
 
@@ -49,11 +49,11 @@ class FailureAnalysis:
     def __str__(self) -> str:
         lines = [
             f"=== Failure Analysis for {self.run_id} ===",
-            f"",
+            "",
             f"Failure Point: {self.failure_point}",
             f"Root Cause: {self.root_cause}",
-            f"",
-            f"Decision Chain Leading to Failure:",
+            "",
+            "Decision Chain Leading to Failure:",
         ]
         for i, dec in enumerate(self.decision_chain, 1):
             lines.append(f"  {i}. {dec}")
@@ -105,7 +105,7 @@ class PatternAnalysis:
     def __str__(self) -> str:
         lines = [
             f"=== Pattern Analysis for Goal {self.goal_id} ===",
-            f"",
+            "",
             f"Runs Analyzed: {self.run_count}",
             f"Success Rate: {self.success_rate:.1%}",
         ]
