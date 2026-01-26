@@ -12,6 +12,8 @@ jobs:
     permissions:
       pull-requests: write
       issues: write
+      checks: write
+      statuses: write
 
     steps:
       - name: Check PR requirements
@@ -31,6 +33,17 @@ jobs:
             const prBody = pr.body || '';
             const prTitle = pr.title || '';
             const prAuthor = pr.user.login;
+            const headSha = pr.head.sha;
+
+            // Create a check run in progress
+            const { data: checkRun } = await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'check-requirements',
+              head_sha: headSha,
+              status: 'in_progress',
+              started_at: new Date().toISOString(),
+            });
 
             // Extract issue numbers
             const issuePattern = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)?\s*#(\d+)/gi;
@@ -68,6 +81,20 @@ jobs:
                 repo: context.repo.repo,
                 pull_number: prNumber,
                 state: 'closed',
+              });
+
+              // Update check run to failure
+              await github.rest.checks.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: checkRun.id,
+                status: 'completed',
+                conclusion: 'failure',
+                completed_at: new Date().toISOString(),
+                output: {
+                  title: 'Missing linked issue',
+                  summary: 'PR must reference an issue (e.g., `Fixes #123`)',
+                },
               });
 
               core.setFailed('PR must reference an issue');
@@ -136,6 +163,20 @@ jobs:
                 state: 'closed',
               });
 
+              // Update check run to failure
+              await github.rest.checks.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: checkRun.id,
+                status: 'completed',
+                conclusion: 'failure',
+                completed_at: new Date().toISOString(),
+                output: {
+                  title: 'PR author not assigned to issue',
+                  summary: `PR author @${prAuthor} must be assigned to one of the linked issues: ${issueList}`,
+                },
+              });
+
               core.setFailed('PR author must be assigned to the linked issue');
             } else {
               await github.rest.issues.createComment({
@@ -144,5 +185,20 @@ jobs:
                 issue_number: prNumber,
                 body: `✅ PR requirements met! Issue #${issueWithAuthorAssigned} has @${prAuthor} as assignee.`,
               });
+
+              // Update check run to success
+              await github.rest.checks.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                check_run_id: checkRun.id,
+                status: 'completed',
+                conclusion: 'success',
+                completed_at: new Date().toISOString(),
+                output: {
+                  title: 'Requirements met',
+                  summary: `Issue #${issueWithAuthorAssigned} has @${prAuthor} as assignee.`,
+                },
+              });
+
               console.log(`PR requirements met!`);
             }
