@@ -17,6 +17,7 @@ from framework.runtime.core import Runtime
 # Multi-entry-point runtime imports
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
+from framework.config import DEFAULT_RUNNER_MODEL
 
 if TYPE_CHECKING:
     from framework.runner.protocol import CapabilityResponse, AgentMessage
@@ -196,7 +197,7 @@ class AgentRunner:
         goal: Goal,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "cerebras/zai-glm-4.7",
+        model: str = DEFAULT_RUNNER_MODEL,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -255,7 +256,7 @@ class AgentRunner:
         agent_path: str | Path,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "cerebras/zai-glm-4.7",
+        model: str = DEFAULT_RUNNER_MODEL,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.

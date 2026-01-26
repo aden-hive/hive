@@ -20,6 +20,7 @@ Usage in tests:
 
 import json
 from typing import Any
+from framework.config import DEFAULT_ROUTING_MODEL
 
 
 class LLMJudge:
@@ -86,7 +87,7 @@ Only output the JSON, nothing else."""
 
         try:
             response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=DEFAULT_ROUTING_MODEL,
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}],
             )

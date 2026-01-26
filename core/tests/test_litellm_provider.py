@@ -15,6 +15,7 @@ from unittest.mock import patch, MagicMock
 from framework.llm.litellm import LiteLLMProvider
 from framework.llm.anthropic import AnthropicProvider
 from framework.llm.provider import LLMProvider, Tool, ToolUse, ToolResult
+from framework.config import DEFAULT_ROUTING_MODEL
 
 
 class TestLiteLLMProviderInit:
@@ -249,7 +250,7 @@ class TestAnthropicProviderBackwardCompatibility:
     def test_anthropic_provider_init_defaults(self):
         """Test AnthropicProvider initialization with defaults."""
         provider = AnthropicProvider(api_key="test-key")
-        assert provider.model == "claude-haiku-4-5-20251001"
+        assert provider.model == DEFAULT_ROUTING_MODEL
         assert provider.api_key == "test-key"
 
     def test_anthropic_provider_init_custom_model(self):
@@ -467,7 +468,7 @@ class TestJsonMode:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = '{"result": "ok"}'
         mock_response.choices[0].finish_reason = "stop"
-        mock_response.model = "claude-haiku-4-5-20251001"
+        mock_response.model = DEFAULT_ROUTING_MODEL
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.completion_tokens = 5
         mock_completion.return_value = mock_response

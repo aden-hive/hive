@@ -9,6 +9,7 @@ Usage:
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -131,18 +132,30 @@ def _save_session(session: BuildSession):
     with open(ACTIVE_SESSION_FILE, "w") as f:
         f.write(session.id)
 
+SAFE_SESSION_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 def _load_session(session_id: str) -> BuildSession:
-    """Load session from disk."""
-    session_file = SESSIONS_DIR / f"{session_id}.json"
+    """Load session from disk securely."""
+
+    if not SAFE_SESSION_ID.match(session_id):
+        raise ValueError(f"Invalid session ID format: {session_id}")
+
+    sessions_dir = SESSIONS_DIR.resolve()
+
+    # Build and resolve final path
+    session_file = (sessions_dir / f"{session_id}.json").resolve()
+
+    # Enforce directory containment
+    if not session_file.is_relative_to(sessions_dir):
+        raise ValueError("Access denied: invalid session path")
+
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file, "r") as f:
+    with open(session_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
-
 
 def _load_active_session() -> BuildSession | None:
     """Load the active session if one exists."""
