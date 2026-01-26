@@ -233,7 +233,11 @@ class OnlineResearchAgent:
         llm = None
         if not mock_mode:
             # LiteLLMProvider uses environment variables for API keys
-            llm = LiteLLMProvider(model=self.config.model)
+            llm = LiteLLMProvider(
+                model=self.config.model,
+                api_key=self.config.api_key,
+                api_base=self.config.api_base,
+            )
 
         self._graph = GraphSpec(
             id="online-research-agent-graph",

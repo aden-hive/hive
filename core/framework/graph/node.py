@@ -196,8 +196,7 @@ class SharedMemory:
             # Check for obviously hallucinated content
             if len(value) > 5000:
                 # Long strings that look like code are suspicious
-                code_indicators = ["```python", "def ", "class ", "import ", "async def "]
-                if any(indicator in value[:500] for indicator in code_indicators):
+                if self._contains_code_indicators(value):
                     logger.warning(
                         f"⚠ Suspicious write to key '{key}': appears to be code "
                         f"({len(value)} chars). Consider using validate=False if intended."
@@ -209,6 +208,51 @@ class SharedMemory:
                     )
 
         self._data[key] = value
+
+    def _contains_code_indicators(self, value: str) -> bool:
+        """
+        Check for code patterns in a string using sampling for efficiency.
+
+        For strings under 10KB, checks the entire content.
+        For longer strings, samples at strategic positions to balance
+        performance with detection accuracy.
+
+        Args:
+            value: The string to check for code indicators
+
+        Returns:
+            True if code indicators are found, False otherwise
+        """
+        code_indicators = [
+            # Python
+            "```python", "def ", "class ", "import ", "async def ", "from ",
+            # JavaScript/TypeScript
+            "function ", "const ", "let ", "=> {", "require(", "export ",
+            # SQL
+            "SELECT ", "INSERT ", "UPDATE ", "DELETE ", "DROP ",
+            # HTML/Script injection
+            "<script", "<?php", "<%",
+        ]
+
+        # For strings under 10KB, check the entire content
+        if len(value) < 10000:
+            return any(indicator in value for indicator in code_indicators)
+
+        # For longer strings, sample at strategic positions
+        sample_positions = [
+            0,                          # Start
+            len(value) // 4,            # 25%
+            len(value) // 2,            # 50%
+            3 * len(value) // 4,        # 75%
+            max(0, len(value) - 2000),  # Near end
+        ]
+
+        for pos in sample_positions:
+            chunk = value[pos:pos + 2000]
+            if any(indicator in chunk for indicator in code_indicators):
+                return True
+
+        return False
 
     def read_all(self) -> dict[str, Any]:
         """Read all accessible data."""
@@ -709,9 +753,12 @@ class LLMNode(NodeProtocol):
                 temperature=0.0
             )
         else:
-            # Fallback to Anthropic Haiku
-            from framework.llm.anthropic import AnthropicProvider
-            cleaner_llm = AnthropicProvider(model="claude-3-5-haiku-20241022")
+            # Fallback to Anthropic Haiku via LiteLLM for consistency
+            cleaner_llm = LiteLLMProvider(
+                api_key=api_key,
+                model="claude-3-5-haiku-20241022",
+                temperature=0.0
+            )
 
         prompt = f"""Extract the JSON object from this LLM response.
 
@@ -1076,9 +1123,13 @@ class FunctionNode(NodeProtocol):
             )
 
             # Write to output keys
-            output = {"result": result}
+            output = {}
             if ctx.node_spec.output_keys:
-                ctx.memory.write(ctx.node_spec.output_keys[0], result)
+                key = ctx.node_spec.output_keys[0]
+                output[key] = result
+                ctx.memory.write(key, result)
+            else:
+                output = {"result": result}
 
             return NodeResult(success=True, output=output, latency_ms=latency_ms)
 

@@ -6,6 +6,32 @@ Thank you for your interest in contributing to the Aden Agent Framework! This do
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Issue Assignment Policy
+
+To prevent duplicate work and respect contributors' time, we require issue assignment before submitting PRs.
+
+### How to Claim an Issue
+
+1. **Find an Issue:** Browse existing issues or create a new one
+2. **Claim It:** Leave a comment (e.g., *"I'd like to work on this!"*)
+3. **Wait for Assignment:** A maintainer will assign you within 24 hours
+4. **Submit Your PR:** Once assigned, you're ready to contribute
+
+> **Note:** PRs for unassigned issues may be delayed or closed if someone else was already assigned.
+
+### The 5-Day Momentum Rule
+
+To keep the project moving, issues with **no activity for 5 days** (no PR or status update) will be unassigned. If you need more time, just drop a quick comment!
+
+### Exceptions (No Assignment Needed)
+
+You may submit PRs without prior assignment for:
+- **Documentation:** Fixing typos or clarifying instructions
+- **Micro-fixes:** Minor tweaks or obvious linting errors
+- **Small Refactors:** Tiny improvements that don't change core logic
+
+If a high-quality PR is submitted for a "stale" assigned issue (no activity for 7+ days), we may proceed with the submitted code.
+
 ## Getting Started
 
 1. Fork the repository
@@ -59,11 +85,12 @@ docs(readme): update installation instructions
 
 ## Pull Request Process
 
-1. Update documentation if needed
-2. Add tests for new functionality
-3. Ensure all tests pass
-4. Update the CHANGELOG.md if applicable
-5. Request review from maintainers
+1. **Get assigned to the issue first** (see [Issue Assignment Policy](#issue-assignment-policy))
+2. Update documentation if needed
+3. Add tests for new functionality
+4. Ensure all tests pass
+5. Update the CHANGELOG.md if applicable
+6. Request review from maintainers
 
 ### PR Title Format
 
