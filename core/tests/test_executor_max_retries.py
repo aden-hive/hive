@@ -5,8 +5,9 @@ This test verifies the fix for Issue #363 where GraphExecutor was ignoring
 the max_retries field in NodeSpec and using a hardcoded value of 3.
 """
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import GraphExecutor

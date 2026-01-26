@@ -225,7 +225,7 @@ class TestRunSummary:
             root_cause="Network issue",
             suggested_fix="Add retry logic",
         )
-        
+
         run.add_problem(
             severity="warning",
             description="High latency",
@@ -233,7 +233,7 @@ class TestRunSummary:
             root_cause="Large payload",
             suggested_fix="Optimize data size",
         )
-        
+
         run.complete(RunStatus.COMPLETED, "Test narrative")
 
         summary = RunSummary.from_run(run)

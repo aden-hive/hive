@@ -14,8 +14,14 @@ Run with:
 
 import asyncio
 
-from framework.graph import EdgeCondition, EdgeSpec, Goal, GraphSpec, NodeSpec
-from framework.graph.executor import GraphExecutor
+from framework.graph import (
+    EdgeCondition,
+    EdgeSpec,
+    Goal,
+    GraphExecutor,
+    GraphSpec,
+    NodeSpec,
+)
 from framework.runtime.core import Runtime
 
 # 1. Define Node Logic (Pure Python Functions)
