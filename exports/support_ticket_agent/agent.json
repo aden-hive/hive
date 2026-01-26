@@ -1,0 +1,31 @@
+{
+    "goal": {
+        "goal_id": "support_ticket",
+        "name": "Support Ticket Handler",
+        "description": "Process customer support tickets",
+        "success_criteria": "Ticket is categorized, prioritized, and routed correctly"
+    },
+    "nodes": [
+        {
+            "node_id": "analyze",
+            "name": "Analyze Ticket",
+            "node_type": "llm_generate",
+            "system_prompt": "You are a support agent. Analyze this ticket and extract: category (billing/tech/account), priority (high/medium/low).",
+            "input_keys": [
+                "ticket_content"
+            ],
+            "output_keys": [
+                "category",
+                "priority"
+            ]
+        }
+    ],
+    "edges": [
+        {
+            "edge_id": "start_to_analyze",
+            "source": "START",
+            "target": "analyze",
+            "condition": "on_success"
+        }
+    ]
+}
