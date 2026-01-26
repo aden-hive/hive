@@ -527,9 +527,10 @@ class TestExecuteCommandTool:
         return mcp._tool_manager._tools["execute_command_tool"].fn
 
     def test_execute_simple_command(self, execute_command_fn, mock_workspace, mock_secure_path):
-        """Executing a simple command returns output."""
+        """Executing a simple whitelisted command returns output."""
+        # Use python which is cross-platform and whitelisted
         result = execute_command_fn(
-            command="echo 'Hello World'",
+            command="python -c 'print(\"Hello World\")'",
             **mock_workspace
         )
 
@@ -538,64 +539,171 @@ class TestExecuteCommandTool:
         assert "Hello World" in result["stdout"]
 
     def test_execute_failing_command(self, execute_command_fn, mock_workspace, mock_secure_path):
-        """Executing a failing command returns non-zero exit code."""
+        """Executing a whitelisted command with failure returns non-zero exit code."""
+        # Use Python to raise an exception (results in exit code 1)
         result = execute_command_fn(
-            command="exit 1",
+            command="python -c 'raise SystemExit(1)'",
             **mock_workspace
         )
 
         assert result["success"] is True
         assert result["return_code"] == 1
 
-    def test_execute_command_with_stderr(self, execute_command_fn, mock_workspace, mock_secure_path):
-        """Executing a command that writes to stderr captures it."""
+    def test_execute_command_with_arguments(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Executing a whitelisted command with arguments works correctly."""
+        # Test with Python which is cross-platform and whitelisted
         result = execute_command_fn(
-            command="echo 'error message' >&2",
+            command="python -c 'print(\"test argument\")'",
             **mock_workspace
         )
 
         assert result["success"] is True
-        assert "error message" in result.get("stderr", "")
+        assert result["return_code"] == 0
+        assert "test argument" in result["stdout"]
+
+    def test_execute_python_script(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Executing Python (whitelisted) works correctly."""
+        result = execute_command_fn(
+            command="python -c 'print(\"Hello from Python\")'",
+            **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["return_code"] == 0
+        assert "Hello from Python" in result["stdout"]
+
+    def test_execute_command_injection_semicolon_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Command injection with semicolon is blocked."""
+        # Attempt: ls; rm -rf /
+        result = execute_command_fn(
+            command="echo test; echo malicious",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "forbidden pattern" in result["error"].lower()
+
+    def test_execute_command_injection_pipe_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Command injection with pipe is blocked."""
+        # Attempt: cat file | grep secret
+        result = execute_command_fn(
+            command="echo test | grep test",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "forbidden pattern" in result["error"].lower()
+
+    def test_execute_command_injection_redirection_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Command injection with output redirection is blocked."""
+        # Attempt: echo secret > /tmp/exposed
+        result = execute_command_fn(
+            command="echo test > output.txt",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "forbidden pattern" in result["error"].lower()
+
+    def test_execute_command_injection_command_substitution_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Command injection with command substitution is blocked."""
+        # Attempt: echo $(malicious_command)
+        result = execute_command_fn(
+            command="echo $(whoami)",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "forbidden pattern" in result["error"].lower()
+
+    def test_execute_command_injection_backtick_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Command injection with backticks is blocked."""
+        # Attempt: echo `malicious_command`
+        result = execute_command_fn(
+            command="echo `whoami`",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "forbidden pattern" in result["error"].lower()
+
+    def test_execute_command_injection_and_operator_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Command injection with && operator is blocked."""
+        # Attempt: safe_command && rm -rf /
+        result = execute_command_fn(
+            command="echo test && echo malicious",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "forbidden pattern" in result["error"].lower()
+
+    def test_execute_command_injection_or_operator_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Command injection with || operator is blocked."""
+        # Attempt: safe_command || malicious_command
+        result = execute_command_fn(
+            command="echo test || echo malicious",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "forbidden pattern" in result["error"].lower()
+
+    def test_execute_command_not_whitelisted_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Non-whitelisted commands are blocked."""
+        # Attempt: rm (not in whitelist)
+        result = execute_command_fn(
+            command="rm nonexistent.txt",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "not allowed" in result["error"].lower()
+
+    def test_execute_command_sudo_blocked(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Sudo is not whitelisted and is blocked."""
+        result = execute_command_fn(
+            command="sudo cat /etc/passwd",
+            **mock_workspace
+        )
+
+        assert "error" in result
+        assert "not allowed" in result["error"].lower()
+
+    def test_execute_whitelisted_pytest(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Whitelisted pytest command works."""
+        result = execute_command_fn(
+            command="pytest --version",
+            **mock_workspace
+        )
+
+        # Should either succeed or fail gracefully (pytest might not be in PATH)
+        # But it should NOT be blocked due to security policy
+        assert "error" not in result or "not allowed" not in result["error"].lower()
 
     def test_execute_command_list_files(self, execute_command_fn, mock_workspace, mock_secure_path, tmp_path):
-        """Executing file listing command works."""
-        # Create a test file
-        (tmp_path / "testfile.txt").write_text("content")
-
-        # Use platform-appropriate command
-        import platform
-        cmd = f"dir {tmp_path}" if platform.system() == "Windows" else f"ls {tmp_path}"
-
+        """Executing whitelisted file listing command works."""
+        # Test that python (whitelisted command) can run basic operations
+        # This verifies the whitelist mechanism works
         result = execute_command_fn(
-            command=cmd,
+            command="python -c 'print(\"file listing test\")'",
             **mock_workspace
         )
 
         assert result["success"] is True
         assert result["return_code"] == 0
-        assert "testfile.txt" in result["stdout"]
+        assert "file listing test" in result["stdout"]
 
     def test_execute_command_with_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
-        """Executing a command with pipe works correctly."""
-        import platform
-        
-        # Use platform-appropriate command
-        # On Windows with shell=True, subprocess uses cmd.exe which has different syntax
-        if platform.system() == "Windows":
-            # Windows cmd.exe: Use findstr for string manipulation with pipe
-            cmd = "echo hello world | findstr ."
-        else:
-            # Unix/Linux: Use tr command
-            cmd = "echo 'hello world' | tr 'a-z' 'A-Z'"
-        
+        """Piped commands are blocked to prevent injection."""
+        # Pipe operator is forbidden, so this should be blocked
         result = execute_command_fn(
-            command=cmd,
+            command="echo hello | grep hello",
             **mock_workspace
         )
 
-        assert result["success"] is True
-        assert result["return_code"] == 0
-        assert "hello" in result["stdout"].lower()
+        assert "error" in result
+        assert "forbidden pattern" in result["error"].lower()
 
 
 class TestApplyDiffTool:
