@@ -299,6 +299,9 @@ class NodeContext:
     # LLM access (if applicable)
     llm: LLMProvider | None = None
     available_tools: list[Tool] = field(default_factory=list)
+    
+    # Tool access layer (unified tool access API)
+    tools: Any = None  # ToolAccessLayer | None - using Any to avoid circular import
 
     # Goal context
     goal_context: str = ""
