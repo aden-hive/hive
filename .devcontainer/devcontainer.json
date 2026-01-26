@@ -1,0 +1,29 @@
+{
+  "name": "Hive Agent Framework",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-docker",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.analysis.extraPaths": [
+          "${workspaceFolder}/core",
+          "${workspaceFolder}/exports"
+        ]
+      }
+    }
+  },
+  "remoteEnv": {
+    "PYTHONPATH": "${containerWorkspaceFolder}/core:${containerWorkspaceFolder}/exports"
+  },
+  "postCreateCommand": "bash scripts/setup-python.sh"
+}
