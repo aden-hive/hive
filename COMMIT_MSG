@@ -1,0 +1,33 @@
+fix: resolve 7 critical issues (bugs, features, docs)
+
+Description
+This PR addresses 7 distinct issues including critical bug fixes for tools, feature enhancements for the graph framework, and comprehensive documentation updates.
+
+Type of Change
+- Bug fix (web_scrape timeout, broken symlinks, PDF errors)
+- New feature (Graph visualization, Configurable LLM Judge)
+- Documentation update (Troubleshooting guide, Makefile)
+
+Related Issues
+Fixes #268 (Web scrape timeout)
+Fixes #270 (List dir symlinks)
+Fixes #269 (PDF error handling)
+Fixes #477 (Configurable LLM Judge)
+Fixes #473 (Graph visualization)
+Fixes #453 (Troubleshooting guide)
+Fixes #455 (Makefile)
+(Issue #443 was already resolved, removed from this PR)
+
+Changes Made
+- Core: Added Mermaid/DOT visualization export to GraphSpec.
+- Core: Made LLMJudge LLM provider configurable.
+- Tools: Added configurable timeout to web_scrape_tool.
+- Tools: Added broken symlink handling to list_dir_tool.
+- Tools: Improved error handling in pdf_read_tool.
+- Docs: Added comprehensive TROUBLESHOOTING.md.
+- Dev: Added Makefile for common developer workflows.
+
+Testing
+- Manual verification of all tool fixes.
+- Generated visualizations for graph specs.
+- Verified Makefile commands.

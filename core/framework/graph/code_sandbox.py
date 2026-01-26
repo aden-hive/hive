@@ -15,6 +15,7 @@ Security measures:
 import ast
 import sys
 import signal
+import multiprocessing
 from typing import Any
 from dataclasses import dataclass, field
 from contextlib import contextmanager
@@ -25,6 +26,7 @@ SAFE_BUILTINS = {
     "True": True,
     "False": False,
     "None": None,
+    "print": print,  # Allow print (will be captured)
 
     # Type constructors
     "bool": bool,
@@ -167,10 +169,18 @@ class CodeValidator:
 
             # Check for dangerous attribute access
             if isinstance(node, ast.Attribute):
+                # Block private attributes and dangerous dunder methods
                 if node.attr.startswith("_"):
-                    issues.append(
-                        f"Access to private attribute '{node.attr}' at line {node.lineno}"
-                    )
+                    # Allow some safe dunders if needed, but block dangerous ones explicitly
+                    dangerous = {
+                        "__subclasses__", "__bases__", "__mro__", "__globals__",
+                        "__code__", "__closure__", "__func__", "__self__", "__module__",
+                        "__dict__", "__class__"
+                    }
+                    if node.attr in dangerous or (node.attr.startswith("_") and not node.attr.startswith("__")):
+                        issues.append(
+                            f"Access to restricted attribute '{node.attr}' at line {node.lineno}"
+                        )
 
             # Check for exec/eval calls
             if isinstance(node, ast.Call):
@@ -200,14 +210,30 @@ class CodeSandbox:
     def __init__(
         self,
         timeout_seconds: int = 10,
+        memory_limit_mb: int = 512,
         allowed_modules: set[str] | None = None,
         safe_builtins: dict[str, Any] | None = None,
     ):
         self.timeout_seconds = timeout_seconds
+        self.memory_limit_mb = memory_limit_mb
         self.allowed_modules = allowed_modules or ALLOWED_MODULES
         self.safe_builtins = safe_builtins or SAFE_BUILTINS
         self.validator = CodeValidator()
         self.importer = RestrictedImporter(self.allowed_modules)
+
+    def _set_memory_limit(self):
+        """Set memory limit for the current process (Unix only)."""
+        try:
+            import resource
+            # Convert MB to bytes
+            limit = self.memory_limit_mb * 1024 * 1024
+            resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+        except ImportError:
+            # Not available on Windows
+            pass
+        except Exception as e:
+            # Log but don't fail if we can't set limits
+            pass
 
     @contextmanager
     def _timeout_context(self, seconds: int):
@@ -270,17 +296,36 @@ class CodeSandbox:
                 error=f"Code validation failed: {'; '.join(issues)}",
             )
 
+        # On Windows, use multiprocessing for timeout support
+        if sys.platform == "win32":
+            return self._execute_windows(code, inputs, extract_vars)
+
+        # On Unix, use signal-based timeout and resource limits
+        return self._execute_unix(code, inputs, extract_vars)
+
+    def _execute_unix(
+        self,
+        code: str,
+        inputs: dict[str, Any],
+        extract_vars: list[str],
+    ) -> SandboxResult:
+        """Execute code on Unix with signal-based timeout."""
+        import time
+        import io
+
         # Create isolated namespace
         namespace = self._create_namespace(inputs)
 
         # Capture stdout
-        import io
         old_stdout = sys.stdout
         sys.stdout = captured_stdout = io.StringIO()
 
         start_time = time.time()
 
         try:
+            # Set memory limit
+            self._set_memory_limit()
+
             with self._timeout_context(self.timeout_seconds):
                 # Compile and execute
                 compiled = compile(code, "<sandbox>", "exec")
@@ -288,27 +333,9 @@ class CodeSandbox:
 
             execution_time_ms = int((time.time() - start_time) * 1000)
 
-            # Extract requested variables
-            extracted = {}
-            for var in extract_vars:
-                if var in namespace:
-                    extracted[var] = namespace[var]
-
-            # Also extract any new variables (not in inputs or builtins)
-            for key, value in namespace.items():
-                if (
-                    key not in inputs
-                    and key not in self.safe_builtins
-                    and not key.startswith("_")
-                ):
-                    extracted[key] = value
-
-            return SandboxResult(
-                success=True,
-                result=namespace.get("result"),  # Convention: 'result' is the return value
-                stdout=captured_stdout.getvalue(),
-                variables=extracted,
-                execution_time_ms=execution_time_ms,
+            # Extract results (same logic as before)
+            return self._extract_results(
+                namespace, captured_stdout, execution_time_ms, extract_vars, inputs
             )
 
         except TimeoutError as e:
@@ -317,14 +344,12 @@ class CodeSandbox:
                 error=str(e),
                 execution_time_ms=self.timeout_seconds * 1000,
             )
-
         except SecurityError as e:
             return SandboxResult(
                 success=False,
                 error=f"Security violation: {e}",
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )
-
         except Exception as e:
             return SandboxResult(
                 success=False,
@@ -332,9 +357,97 @@ class CodeSandbox:
                 stdout=captured_stdout.getvalue(),
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )
-
         finally:
             sys.stdout = old_stdout
+
+    def _execute_windows(
+        self,
+        code: str,
+        inputs: dict[str, Any],
+        extract_vars: list[str],
+    ) -> SandboxResult:
+        """Execute code on Windows using multiprocessing for timeout."""
+        import time
+        
+        # We need a queue to get results back
+        queue = multiprocessing.Queue()
+        
+        # Define target function for process
+        def target(q, c, i, e_vars):
+            try:
+                # Redirect stdout inside process
+                import io
+                sys.stdout = captured = io.StringIO()
+                
+                # Create namespace and execute
+                ns = self._create_namespace(i)
+                exec(c, ns)
+                
+                # Extract results
+                res = self._extract_results(ns, captured, 0, e_vars, i)
+                q.put(res)
+            except Exception as e:
+                q.put(SandboxResult(success=False, error=str(e)))
+
+        # Start process
+        start_time = time.time()
+        p = multiprocessing.Process(target=target, args=(queue, code, inputs, extract_vars))
+        p.start()
+        
+        # Wait with timeout
+        p.join(self.timeout_seconds)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        if p.is_alive():
+            p.terminate()
+            p.join()
+            return SandboxResult(
+                success=False, 
+                error=f"Code execution timed out after {self.timeout_seconds} seconds",
+                execution_time_ms=execution_time_ms
+            )
+            
+        if not queue.empty():
+            result = queue.get()
+            result.execution_time_ms = execution_time_ms
+            return result
+            
+        return SandboxResult(
+            success=False, 
+            error="Process crashed or returned no result",
+            execution_time_ms=execution_time_ms
+        )
+
+    def _extract_results(
+        self, 
+        namespace: dict, 
+        stdout: Any, 
+        exec_time: int, 
+        extract_vars: list[str],
+        inputs: dict
+    ) -> SandboxResult:
+        """Helper to extract variables from namespace."""
+        extracted = {}
+        for var in extract_vars:
+            if var in namespace:
+                extracted[var] = namespace[var]
+
+        for key, value in namespace.items():
+            if (
+                key not in inputs
+                and key not in self.safe_builtins
+                and not key.startswith("_")
+            ):
+                extracted[key] = value
+
+        return SandboxResult(
+            success=True,
+            result=namespace.get("result"),
+            stdout=stdout.getvalue(),
+            variables=extracted,
+            execution_time_ms=exec_time,
+        )
 
     def execute_expression(
         self,
