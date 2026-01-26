@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from framework.graph.node import extract_text_from_response
+
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
@@ -640,7 +642,10 @@ Output ONLY valid JSON, no explanation:"""
             messages=[{"role": "user", "content": prompt}]
         )
 
-        json_str = message.content[0].text.strip()
+        text = extract_text_from_response(message)
+        if text is None:
+            raise ValueError("No text content in API response")
+        json_str = text.strip()
         # Remove markdown code blocks if present
         if json_str.startswith("```"):
             json_str = json_str.split("```")[1]

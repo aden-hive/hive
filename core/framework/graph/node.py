@@ -67,6 +67,31 @@ def find_json_object(text: str) -> str | None:
     return None
 
 
+def extract_text_from_response(message) -> str | None:
+    """Safely extract text from Anthropic API response.
+
+    The Anthropic API returns messages with a `content` list that can contain
+    TextBlock or ToolUseBlock items. This function safely extracts text content,
+    handling cases where:
+    - content is empty or None
+    - first content block is not a TextBlock (e.g., ToolUseBlock)
+
+    Args:
+        message: Anthropic API Message response object
+
+    Returns:
+        The text content string, or None if not available
+    """
+    if not message.content:
+        return None
+    if len(message.content) == 0:
+        return None
+    content_block = message.content[0]
+    if not hasattr(content_block, 'text'):
+        return None
+    return content_block.text
+
+
 class NodeSpec(BaseModel):
     """
     Specification for a node in the graph.
@@ -382,8 +407,10 @@ Provide a concise, clear summary that a human can quickly understand. Focus on t
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            summary = message.content[0].text.strip()
-            return f"✓ {summary}"
+            text = extract_text_from_response(message)
+            if text is None:
+                raise ValueError("No text content in API response")
+            return f"✓ {text.strip()}"
 
         except Exception:
             # Fallback on error
@@ -868,7 +895,10 @@ Output as JSON with the exact field names requested."""
             )
 
             # Parse Haiku's response
-            response_text = message.content[0].text.strip()
+            text = extract_text_from_response(message)
+            if text is None:
+                raise ValueError("No text content in API response")
+            response_text = text.strip()
 
             # Try to extract JSON using balanced brace matching
             json_str = find_json_object(response_text)

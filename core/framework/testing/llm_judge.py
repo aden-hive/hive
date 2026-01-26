@@ -21,6 +21,8 @@ Usage in tests:
 import json
 from typing import Any
 
+from framework.graph.node import extract_text_from_response
+
 
 class LLMJudge:
     """
@@ -92,7 +94,10 @@ Only output the JSON, nothing else."""
             )
 
             # Parse the response
-            text = response.content[0].text.strip()
+            raw_text = extract_text_from_response(response)
+            if raw_text is None:
+                raise ValueError("No text content in API response")
+            text = raw_text.strip()
             # Handle potential markdown code blocks
             if text.startswith("```"):
                 text = text.split("```")[1]

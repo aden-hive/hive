@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from framework.graph.node import extract_text_from_response
+
 
 class HITLInputType(str, Enum):
     """Type of input expected from human."""
@@ -200,7 +202,10 @@ Example format:
 
             # Parse Haiku's response
             import re
-            response_text = message.content[0].text.strip()
+            text = extract_text_from_response(message)
+            if text is None:
+                raise ValueError("No text content in API response")
+            response_text = text.strip()
             json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
 
             if json_match:
