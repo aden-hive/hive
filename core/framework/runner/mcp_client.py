@@ -391,7 +391,7 @@ class MCPClient:
 
     # Cleanup timeout should match or exceed connection timeout (10 seconds in _connect_stdio)
     _CLEANUP_TIMEOUT = 10  # seconds
-    _THREAD_JOIN_TIMEOUT = 5  # seconds - should be proportional to cleanup timeout
+    _THREAD_JOIN_TIMEOUT = 12  # seconds - must be >= cleanup timeout to allow full cleanup plus buffer
 
     async def _cleanup_stdio_async(self) -> None:
         """Async cleanup for STDIO session and context managers.
@@ -479,8 +479,12 @@ class MCPClient:
                 self._loop_thread.join(timeout=self._THREAD_JOIN_TIMEOUT)
 
             # Clear remaining references
-            # Note: _session and _stdio_context are cleared in _cleanup_stdio_async() 
-            # if cleanup was successful, but we clear all references here for safety
+            # Note: _session and _stdio_context may already be None if _cleanup_stdio_async()
+            # succeeded. This redundant assignment is intentional for safety in cases where:
+            # 1. Cleanup timed out or failed
+            # 2. Cleanup was skipped (loop not running)
+            # 3. CancelledError interrupted cleanup
+            # Setting None to None is safe and ensures clean state.
             self._session = None
             self._stdio_context = None
             self._read_stream = None
