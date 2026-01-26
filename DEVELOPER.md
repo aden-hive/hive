@@ -781,6 +781,31 @@ can cause virtual environments to be created incorrectly.
 ```powershell
 & "C:\Users\<user>\AppData\Local\Programs\Python\Python311\python.exe" -m venv .venv
 .\.venv\Scripts\Activate.ps1
+
+## Common Agent Errors & Fixes
+
+### `TypeError: AgentRunner.run() got an unexpected keyword argument`
+
+This error usually happens when calling `AgentRunner.run()` with outdated or incorrect arguments.
+
+**Correct usage:**
+```python
+runner.run(input_data)
+
+### Minimal Agent Structure
+
+A minimal agent export looks like:
+
+exports/my_agent/
+├── agent.json
+├── __main__.py
+
+The `agent.json` defines the goal, nodes, and edges.
+The `__main__.py` provides a CLI entrypoint so the agent can be run with:
+
+```bash
+python -m my_agent validate
+
 ---
 
 ## Getting Help
