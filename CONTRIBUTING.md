@@ -6,6 +6,10 @@ Thank you for your interest in contributing to the Aden Agent Framework! This do
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Contributor License Agreement
+
+By submitting a Pull Request, you agree that your contributions will be licensed under the Aden Agent Framework license.
+
 ## Issue Assignment Policy
 
 To prevent duplicate work and respect contributors' time, we require issue assignment before submitting PRs.
@@ -54,6 +58,12 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 # Install Claude Code skills (optional)
 ./quickstart.sh
 ```
+
+> **Windows Users:**  
+> If you are on native Windows, it is recommended to use **WSL (Windows Subsystem for Linux)**.  
+> Alternatively, make sure to run PowerShell or Git Bash with Python 3.11+ installed, and disable "App Execution Aliases" in Windows settings.
+
+> **Tip:** Installing Claude Code skills is optional for running existing agents, but required if you plan to **build new agents**.
 
 ## Commit Convention
 
@@ -118,6 +128,12 @@ feat(component): add new feature description
 - Keep functions focused and small
 
 ## Testing
+
+> **Note:** When testing agents in `exports/`, always set PYTHONPATH:
+>
+> ```bash
+> PYTHONPATH=core:exports python -m agent_name test
+> ```
 
 ```bash
 # Run all tests for the framework
