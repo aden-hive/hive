@@ -4,7 +4,9 @@ from ..security import get_secure_path
 
 def register_tools(mcp: FastMCP) -> None:
     """Register file view tools with the MCP server."""
-
+    if getattr(mcp, "_file_tools_registered", False):
+        return
+    mcp._file_tools_registered = True
     @mcp.tool()
     def view_file(path: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
         """
