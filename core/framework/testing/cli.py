@@ -110,7 +110,10 @@ def cmd_test_run(args: argparse.Namespace) -> int:
 
     if not tests_dir.exists():
         print(f"Error: Tests directory not found: {tests_dir}")
-        print("Hint: Use generate_constraint_tests/generate_success_tests MCP tools, then write tests with Write tool")
+        print(
+            "Hint: Use generate_constraint_tests/generate_success_tests MCP tools, "
+            "then write tests with Write tool"
+        )
         return 1
 
     # Build pytest command
@@ -276,7 +279,10 @@ def cmd_test_list(args: argparse.Namespace) -> int:
 
     if not tests_dir.exists():
         print(f"No tests directory found at: {tests_dir}")
-        print("Hint: Generate tests using the MCP generate_constraint_tests or generate_success_tests tools")
+        print(
+            "Hint: Generate tests using the MCP generate_constraint_tests or "
+            "generate_success_tests tools"
+        )
         return 0
 
     tests = _scan_test_files(tests_dir)

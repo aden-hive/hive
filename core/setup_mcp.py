@@ -14,11 +14,11 @@ from pathlib import Path
 
 class Colors:
     """ANSI color codes for terminal output."""
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    RED = '\033[0;31m'
-    BLUE = '\033[0;34m'
-    NC = '\033[0m'  # No Color
+    GREEN = "\033[0;32m"
+    YELLOW = "\033[1;33m"
+    RED = "\033[0;31m"
+    BLUE = "\033[0;34m"
+    NC = "\033[0m"  # No Color
 
 
 def print_step(message: str, color: str = Colors.YELLOW):
@@ -100,7 +100,7 @@ def main():
             }
         }
 
-        with open(mcp_config_path, 'w') as f:
+        with open(mcp_config_path, "w") as f:
             json.dump(config, f, indent=2)
 
         print_success("Created .mcp.json")

@@ -32,23 +32,7 @@ python -m framework test-list <agent_path> --goal <goal_id>
 ```
 """
 
-# Schemas
-from framework.testing.test_case import (
-    ApprovalStatus,
-    TestType,
-    Test,
-)
-from framework.testing.test_result import (
-    ErrorCategory,
-    TestResult,
-    TestSuiteResult,
-)
-
-# Storage
-from framework.testing.test_storage import TestStorage
-
-
-# Approval
+from framework.testing.approval_cli import batch_approval, interactive_approval
 from framework.testing.approval_types import (
     ApprovalAction,
     ApprovalRequest,
@@ -56,19 +40,13 @@ from framework.testing.approval_types import (
     BatchApprovalRequest,
     BatchApprovalResult,
 )
-from framework.testing.approval_cli import interactive_approval, batch_approval
-
-# Error categorization
 from framework.testing.categorizer import ErrorCategorizer
-
-# LLM Judge for semantic evaluation
-from framework.testing.llm_judge import LLMJudge
-
-# Debug
-from framework.testing.debug_tool import DebugTool, DebugInfo
-
-# CLI
 from framework.testing.cli import register_testing_commands
+from framework.testing.debug_tool import DebugInfo, DebugTool
+from framework.testing.llm_judge import LLMJudge
+from framework.testing.test_case import ApprovalStatus, Test, TestType
+from framework.testing.test_result import ErrorCategory, TestResult, TestSuiteResult
+from framework.testing.test_storage import TestStorage
 
 __all__ = [
     # Schemas

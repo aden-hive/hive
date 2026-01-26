@@ -882,7 +882,7 @@ class AgentRunner:
         Returns:
             CapabilityResponse with level, confidence, and reasoning
         """
-        from framework.runner.protocol import CapabilityResponse, CapabilityLevel
+        from framework.runner.protocol import CapabilityLevel, CapabilityResponse
 
         # Use provided LLM or set up our own
         eval_llm = llm
@@ -963,7 +963,7 @@ Respond with JSON only:
 
     def _keyword_capability_check(self, request: dict) -> "CapabilityResponse":
         """Simple keyword-based capability check (fallback when no LLM)."""
-        from framework.runner.protocol import CapabilityResponse, CapabilityLevel
+        from framework.runner.protocol import CapabilityLevel, CapabilityResponse
 
         info = self.info()
         request_str = json.dumps(request).lower()

@@ -299,7 +299,7 @@ class OutcomeAggregator:
             # Publish progress event
             if self._event_bus:
                 # Get any stream ID for the event
-                stream_ids = set(d.stream_id for d in self._decisions)
+                stream_ids = {d.stream_id for d in self._decisions}
                 if stream_ids:
                     await self._event_bus.emit_goal_progress(
                         stream_id=list(stream_ids)[0],

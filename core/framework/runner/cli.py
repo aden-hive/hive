@@ -646,7 +646,7 @@ def _format_natural_language_to_json(
         existing_value = session_context.get(main_field, "")
 
         session_info = (
-            f"\n\nExisting {main_field}: \"{existing_value}\"\n\n"
+            f'\n\nExisting {main_field}: "{existing_value}"\n\n'
             "The user is providing ADDITIONAL information. "
             f"Append this new information to the existing {main_field} "
             "to create an enriched, more detailed version."
@@ -785,8 +785,16 @@ def cmd_shell(args: argparse.Namespace) -> int:
         if user_input == "/nodes":
             print("\nAgent nodes:")
             for node in info.nodes:
-                inputs = f" [in: {', '.join(node['input_keys'])}]" if node.get('input_keys') else ""
-                outputs = f" [out: {', '.join(node['output_keys'])}]" if node.get('output_keys') else ""
+                inputs = (
+                    f" [in: {', '.join(node['input_keys'])}]"
+                    if node.get("input_keys")
+                    else ""
+                )
+                outputs = (
+                    f" [out: {', '.join(node['output_keys'])}]"
+                    if node.get("output_keys")
+                    else ""
+                )
                 print(f"  {node['id']}: {node['name']}{inputs}{outputs}")
                 print(f"    {node['description']}")
             print()
