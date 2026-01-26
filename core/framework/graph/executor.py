@@ -167,10 +167,14 @@ class GraphExecutor:
 
         # Restore session state if provided
         if session_state and "memory" in session_state:
-            # Restore memory from previous session
-            for key, value in session_state["memory"].items():
-                memory.write(key, value)
-            self.logger.info(f"📥 Restored session state with {len(session_state['memory'])} memory keys")
+            memory_data = session_state["memory"]
+            if isinstance(memory_data, dict):
+                # Restore memory from previous session
+                for key, value in memory_data.items():
+                    memory.write(key, value)
+                self.logger.info(f"📥 Restored session state with {len(memory_data)} memory keys")
+            else:
+                self.logger.warning(f"⚠️ Invalid memory data type in session state: {type(memory_data).__name__}, expected dict")
 
         # Write new input data to memory (each key individually)
         if input_data:
