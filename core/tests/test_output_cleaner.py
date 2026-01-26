@@ -147,13 +147,13 @@ class TestOutputCleanerInitialization:
         """Test graceful handling when no provider available."""
         config = CleansingConfig(enabled=True)
         with patch.dict(os.environ, {}, clear=True):
-            # Mock the import to avoid actual LiteLLM dependency
-            with patch("framework.graph.output_cleaner.LiteLLMProvider", create=True):
-                cleaner = OutputCleaner(config=config)
-                # Should not raise, just log warning and set llm to None
-                assert cleaner.llm is None
+            # No API keys in environment, so _detect_provider returns None
+            # This means LiteLLMProvider is never called
+            cleaner = OutputCleaner(config=config)
+            # Should not raise, just log warning and set llm to None
+            assert cleaner.llm is None
 
-    @patch("framework.graph.output_cleaner.LiteLLMProvider")
+    @patch("framework.llm.litellm.LiteLLMProvider")
     def test_output_cleaner_auto_detect_openai(self, mock_litellm_class):
         """Test auto-detection with OpenAI."""
         mock_llm_instance = MagicMock()
@@ -173,7 +173,7 @@ class TestOutputCleanerInitialization:
             )
             assert cleaner.llm == mock_llm_instance
 
-    @patch("framework.graph.output_cleaner.LiteLLMProvider")
+    @patch("framework.llm.litellm.LiteLLMProvider")
     def test_output_cleaner_explicit_config(self, mock_litellm_class):
         """Test explicit configuration takes precedence."""
         mock_llm_instance = MagicMock()
@@ -197,7 +197,7 @@ class TestOutputCleanerInitialization:
                 temperature=0.0,
             )
 
-    @patch("framework.graph.output_cleaner.LiteLLMProvider")
+    @patch("framework.llm.litellm.LiteLLMProvider")
     def test_output_cleaner_model_override_with_auto_detect(self, mock_litellm_class):
         """Test model override with auto-detected provider."""
         mock_llm_instance = MagicMock()
@@ -247,7 +247,7 @@ class TestValidationResult:
 class TestBackwardCompatibility:
     """Tests to ensure backward compatibility."""
 
-    @patch("framework.graph.output_cleaner.LiteLLMProvider")
+    @patch("framework.llm.litellm.LiteLLMProvider")
     def test_cerebras_still_works(self, mock_litellm_class):
         """Test that existing Cerebras users are not affected."""
         mock_llm_instance = MagicMock()
