@@ -7,8 +7,29 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ```bash
 # Run the automated setup script
 ./scripts/setup-python.sh
-```
+Windows (Git Bash) Users — Important Fix
+If you are using Git Bash on Windows, python3 may point to the
+Microsoft Store alias instead of your actual Python installation.
+This can cause ./scripts/setup-python.sh to fail.
 
+Fix:
+Open Settings → Apps → Advanced app settings → App execution aliases
+
+Turn OFF:
+
+python.exe
+
+python3.exe
+
+Restart Git Bash.
+
+Verify:
+
+which python
+python --version
+After this, run:
+
+./scripts/setup-python.sh
 This will:
 
 - Check Python version (requires 3.11+)

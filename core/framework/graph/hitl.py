@@ -8,6 +8,7 @@ where agents need to gather input from humans.
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+from urllib import request, response
 
 
 class HITLInputType(str, Enum):
@@ -161,7 +162,7 @@ class HITLProtocol:
             return response
 
         # Try to use Haiku for intelligent parsing
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        #api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not use_haiku or not api_key:
             # Simple fallback: treat as answer to first question
             if request.questions:
@@ -169,16 +170,17 @@ class HITLProtocol:
             return response
 
         # Use Haiku to extract answers
-        try:
-            import anthropic
-            import json
+        from framework.llm.litellm import LiteLLMProvider
+import json
+import re
 
-            questions_str = "\n".join([
-                f"{i+1}. {q.question} (id: {q.id})"
-                for i, q in enumerate(request.questions)
-            ])
+try:
+    questions_str = "\n".join([
+        f"{i+1}. {q.question} (id: {q.id})"
+        for i, q in enumerate(request.questions)
+    ])
 
-            prompt = f"""Parse the user's response and extract answers for each question.
+    prompt = f"""Parse the user's response and extract answers for each question.
 
 Questions asked:
 {questions_str}
@@ -191,28 +193,24 @@ Extract the answer for each question. Output JSON with question IDs as keys.
 Example format:
 {{"question-1": "answer here", "question-2": "answer here"}}"""
 
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
-            )
+    llm = LiteLLMProvider(model="gpt-4o-mini")
+    message = llm.chat(prompt)
 
-            # Parse Haiku's response
-            import re
-            response_text = message.content[0].text.strip()
-            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+    # Parse LLM response
+    response_text = message.content[0].text.strip()
+    json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
 
-            if json_match:
-                parsed = json.loads(json_match.group())
-                response.answers = parsed
+    if json_match:
+        parsed = json.loads(json_match.group())
+        response.answers = parsed
 
-        except Exception:
-            # Fallback: use raw input for first question
-            if request.questions:
-                response.answers[request.questions[0].id] = raw_input
+except Exception:
+    # Fallback: use raw input for first question
+    if request.questions:
+        response.answers[request.questions[0].id] = raw_input
 
         return response
+
 
     @staticmethod
     def format_for_display(request: HITLRequest) -> str:
@@ -248,3 +246,4 @@ Example format:
                 parts.append(f"  • {example}")
 
         return "\n".join(parts)
+    
