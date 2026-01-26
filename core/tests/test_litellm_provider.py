@@ -34,6 +34,12 @@ class TestLiteLLMProviderInit:
             provider = LiteLLMProvider(model="claude-3-haiku-20240307")
             assert provider.model == "claude-3-haiku-20240307"
 
+    def test_init_deepseek_model(self):
+        """Test initialization with DeepSeek model."""
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}):
+            provider = LiteLLMProvider(model="deepseek/deepseek-chat")
+            assert provider.model == "deepseek/deepseek-chat"
+
     def test_init_with_api_key(self):
         """Test initialization with explicit API key."""
         provider = LiteLLMProvider(model="gpt-4o-mini", api_key="my-api-key")
