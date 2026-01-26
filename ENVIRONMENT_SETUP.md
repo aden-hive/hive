@@ -4,14 +4,24 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 
 ## Quick Setup
 
+### macOS / Linux / WSL
+
 ```bash
 # Run the automated setup script
 ./scripts/setup-python.sh
 ```
 
+### Windows (Native PowerShell)
+
+```powershell
+# Run the PowerShell setup script
+.\scripts\setup-python.ps1
+```
+
 > **Note for Windows Users:**  
-> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.  
-> It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for a smoother setup experience.
+> - For best results, use the native PowerShell script above.
+> - Alternatively, use **WSL (Windows Subsystem for Linux)** with the bash script.
+> - If you encounter issues, disable **Python App Execution Aliases** in Windows Settings → Apps → App Execution Aliases.
 
 This will:
 
@@ -84,12 +94,23 @@ export ANTHROPIC_API_KEY="your-key-here"
 
 All agent commands must be run from the project root with `PYTHONPATH` set:
 
+### macOS / Linux / WSL
+
 ```bash
 # From /hive/ directory
 PYTHONPATH=core:exports python -m agent_name COMMAND
 ```
 
+### Windows (PowerShell)
+
+```powershell
+# From /hive/ directory
+$env:PYTHONPATH="core;exports"; python -m agent_name COMMAND
+```
+
 ### Example: Support Ticket Agent
+
+**macOS / Linux / WSL:**
 
 ```bash
 # Validate agent structure
@@ -107,6 +128,19 @@ PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
 
 # Run in mock mode (no LLM calls)
 PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{...}'
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# Validate agent structure
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent validate
+
+# Show agent information
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent info
+
+# Run agent with input
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent run --input '{\"ticket_content\":\"My login is broken. Error 401.\",\"customer_id\":\"CUST-123\",\"ticket_id\":\"TKT-456\"}'
 ```
 
 ### Example: Other Agents
