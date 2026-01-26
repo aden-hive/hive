@@ -8,7 +8,7 @@ Respect robots.txt by default for ethical scraping.
 from __future__ import annotations
 
 from typing import Any, List
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -206,11 +206,14 @@ def register_tools(mcp: FastMCP) -> None:
             # Extract links if requested
             if include_links:
                 links: List[dict[str, str]] = []
+                base_url = str(response.url)  # Use final URL after redirects
                 for a in soup.find_all("a", href=True)[:50]:
                     href = a["href"]
+                    # Convert relative URLs to absolute URLs
+                    absolute_href = urljoin(base_url, href)
                     link_text = a.get_text(strip=True)
                     if link_text and href:
-                        links.append({"text": link_text, "href": href})
+                        links.append({"text": link_text, "href": absolute_href})
                 result["links"] = links
 
             return result
