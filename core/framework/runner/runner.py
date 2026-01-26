@@ -923,23 +923,22 @@ Respond with JSON only:
             )
 
             # Parse response
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                level_map = {
-                    "best_fit": CapabilityLevel.BEST_FIT,
-                    "can_handle": CapabilityLevel.CAN_HANDLE,
-                    "uncertain": CapabilityLevel.UNCERTAIN,
-                    "cannot_handle": CapabilityLevel.CANNOT_HANDLE,
-                }
-                return CapabilityResponse(
-                    agent_name=info.name,
-                    level=level_map.get(data.get("level", "uncertain"), CapabilityLevel.UNCERTAIN),
-                    confidence=float(data.get("confidence", 0.5)),
-                    reasoning=data.get("reasoning", ""),
-                    estimated_steps=data.get("estimated_steps"),
-                )
+            from framework.llm.json_utils import extract_json_object
+            
+            data = extract_json_object(response.content)
+            level_map = {
+                "best_fit": CapabilityLevel.BEST_FIT,
+                "can_handle": CapabilityLevel.CAN_HANDLE,
+                "uncertain": CapabilityLevel.UNCERTAIN,
+                "cannot_handle": CapabilityLevel.CANNOT_HANDLE,
+            }
+            return CapabilityResponse(
+                agent_name=info.name,
+                level=level_map.get(data.get("level", "uncertain"), CapabilityLevel.UNCERTAIN),
+                confidence=float(data.get("confidence", 0.5)),
+                reasoning=data.get("reasoning", ""),
+                estimated_steps=data.get("estimated_steps"),
+            )
         except Exception:
             # Fall back to keyword matching on error
             pass

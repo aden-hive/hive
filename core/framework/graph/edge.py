@@ -237,20 +237,18 @@ Respond with ONLY a JSON object:
             )
 
             # Parse response
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                proceed = data.get("proceed", False)
-                reasoning = data.get("reasoning", "")
+            from framework.llm.json_utils import extract_json_object
+            data = extract_json_object(response.content)
+            proceed = data.get("proceed", False)
+            reasoning = data.get("reasoning", "")
 
                 # Log the decision (using basic print for now)
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"      🤔 LLM routing decision: {'PROCEED' if proceed else 'SKIP'}")
-                logger.info(f"         Reason: {reasoning}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"      🤔 LLM routing decision: {'PROCEED' if proceed else 'SKIP'}")
+            logger.info(f"         Reason: {reasoning}")
 
-                return proceed
+            return proceed
 
         except Exception as e:
             # Fallback: proceed on success

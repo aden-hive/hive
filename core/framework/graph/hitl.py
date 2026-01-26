@@ -199,13 +199,13 @@ Example format:
             )
 
             # Parse Haiku's response
-            import re
-            response_text = message.content[0].text.strip()
-            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+            from framework.llm.json_utils import extract_json_object
 
-            if json_match:
-                parsed = json.loads(json_match.group())
-                response.answers = parsed
+            response_text = message.content[0].text.strip()
+            parsed = extract_json_object(response_text)
+
+            response.answers = parsed
+
 
         except Exception:
             # Fallback: use raw input for first question

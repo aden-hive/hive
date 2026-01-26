@@ -462,20 +462,19 @@ Respond with JSON only:
                 max_tokens=256,
             )
 
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                selected = data.get("selected", [])
-                # Validate selected agents exist
-                selected = [s for s in selected if s in self._agents]
-                if selected:
-                    return RoutingDecision(
-                        selected_agents=selected,
-                        reasoning=data.get("reasoning", ""),
-                        confidence=0.8,
-                        should_parallelize=data.get("parallel", False),
-                    )
+            from framework.llm.json_utils import extract_json_object
+            
+            data = extract_json_object(response.content)
+            selected = data.get("selected", [])
+            # Validate selected agents exist
+            selected = [s for s in selected if s in self._agents]
+            if selected:
+                return RoutingDecision(
+                    selected_agents=selected,
+                    reasoning=data.get("reasoning", ""),
+                    confidence=0.8,
+                    should_parallelize=data.get("parallel", False),
+                )
         except Exception:
             pass
 
