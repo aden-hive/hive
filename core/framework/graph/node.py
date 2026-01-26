@@ -17,10 +17,10 @@ Protocol:
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any, Callable, Type
 from dataclasses import dataclass, field
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from framework.runtime.core import Runtime
 from framework.llm.provider import LLMProvider, Tool
@@ -513,20 +513,31 @@ class LLMNode(NodeProtocol):
                     tool_executor=executor,
                 )
             else:
-                # Use JSON mode for llm_generate nodes with output_keys
-                # Skip strict schema validation - just validate keys after parsing
-                use_json_mode = (
+                # Check if we should use structured outputs
+                use_structured = (
                     ctx.node_spec.node_type == "llm_generate"
                     and ctx.node_spec.output_keys
                     and len(ctx.node_spec.output_keys) >= 1
                 )
-                if use_json_mode:
-                    logger.info(f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}")
+                
+                response_format = None
+                if use_structured:
+                    # Dynamically create Pydantic model for strict schema enforcement
+                    try:
+                        response_format = self._create_output_model(
+                            name=f"{ctx.node_spec.name}_Output",
+                            keys=ctx.node_spec.output_keys
+                        )
+                        logger.info(f"         📋 Enforcing strict schema for keys: {ctx.node_spec.output_keys}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create output model: {e}. Falling back to basic JSON mode.")
+                        use_structured = False
 
                 response = ctx.llm.complete(
                     messages=messages,
                     system=system,
-                    json_mode=use_json_mode,
+                    json_mode=use_structured if not response_format else False,
+                    response_format=response_format
                 )
 
             # Log the response
@@ -548,13 +559,18 @@ class LLMNode(NodeProtocol):
             # Write to output keys
             output = self._parse_output(response.content, ctx.node_spec)
 
-            # For llm_generate and llm_tool_use nodes, try to parse JSON and extract fields
+            # Handle structured output parsing
             if ctx.node_spec.node_type in ("llm_generate", "llm_tool_use") and len(ctx.node_spec.output_keys) >= 1:
                 try:
                     import json
-
-                    # Try to extract JSON from response
-                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
+                    parsed = None
+                    
+                    # 1. If we used native structured output, response.content might already be valid JSON
+                    try:
+                        parsed = json.loads(response.content)
+                    except json.JSONDecodeError:
+                        # 2. Fallback to extraction if native parsing failed
+                        parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
 
                     # If parsed successfully, write each field to its corresponding output key
                     if isinstance(parsed, dict):
@@ -625,6 +641,21 @@ class LLMNode(NodeProtocol):
             )
             return NodeResult(success=False, error=str(e), latency_ms=latency_ms)
 
+    def _create_output_model(self, name: str, keys: list[str]) -> Type[BaseModel]:
+        """Dynamically create a Pydantic model for output validation."""
+        # Clean name to be a valid class identifier
+        clean_name = ''.join(c for c in name if c.isalnum() or c == '_')
+        if not clean_name:
+            clean_name = "DynamicOutput"
+            
+        # All outputs are treated as strings by default for maximum flexibility
+        # unless we extend NodeSpec to support typing.
+        fields = {
+            key: (str, Field(..., description=f"Output for {key}")) 
+            for key in keys
+        }
+        return create_model(clean_name, **fields)
+    
     def _parse_output(self, content: str, node_spec: NodeSpec) -> dict[str, Any]:
         """
         Parse LLM output based on node type.

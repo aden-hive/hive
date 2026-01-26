@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
+from pydantic import BaseModel
 
 
 @dataclass
@@ -58,7 +59,7 @@ class LLMProvider(ABC):
         system: str = "",
         tools: list[Tool] | None = None,
         max_tokens: int = 1024,
-        response_format: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | type["BaseModel"] | None = None,
         json_mode: bool = False,
     ) -> LLMResponse:
         """
