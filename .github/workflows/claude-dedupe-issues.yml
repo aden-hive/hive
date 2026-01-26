@@ -56,10 +56,10 @@ jobs:
             - mcp__github__get_issue: Get issue details
             - mcp__github__search_issues: Search for similar issues
             - mcp__github__list_issues: List recent issues if needed
-            - mcp__github__create_issue_comment: Add a comment if duplicate found
+            - mcp__github__add_issue_comment: Add a comment if duplicate found
             - mcp__github__update_issue: Add labels
 
             Be thorough but efficient. Focus on finding true duplicates, not just similar issues.
 
           claude_args: |
-            --allowedTools "mcp__github__get_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__create_issue_comment,mcp__github__update_issue,mcp__github__get_issue_comments"
+            --allowedTools "mcp__github__get_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__add_issue_comment,mcp__github__update_issue,mcp__github__get_issue_comments"
