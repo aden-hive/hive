@@ -2,6 +2,21 @@
 
 Complete setup guide for building and running goal-driven agents with the Aden Agent Framework.
 
+## Windows (Git Bash)
+
+If you are running Hive on Windows using Git Bash:
+
+- First, activate your Python virtual environment before running `quickstart.sh`:
+
+```bash
+source venv/Scripts/activate
+```
+- Ensure Python is accessible as python (not only python3).
+
+- If quickstart.sh reports Python is missing, verify your PATH or that your venv is activated.
+
+- These notes are based on local Windows setup experience.
+
 ## Quick Setup
 
 ```bash
