@@ -7,15 +7,17 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, Field
 
 from framework.graph.executor import ExecutionResult
-from framework.runtime.shared_state import SharedStateManager
-from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import ExecutionStream, EntryPointSpec
+from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
+from framework.runtime.outcome_aggregator import OutcomeAggregator
+from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
 
 if TYPE_CHECKING:
@@ -26,13 +28,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class AgentRuntimeConfig:
+class AgentRuntimeConfig(BaseModel):
     """Configuration for AgentRuntime."""
-    max_concurrent_executions: int = 100
-    cache_ttl: float = 60.0
-    batch_interval: float = 0.1
-    max_history: int = 1000
+    max_concurrent_executions: int = Field(default=100, gt=0, description="Max concurrent streams")
+    cache_ttl: float = Field(default=60.0, gt=0, description="Cache TTL in seconds")
+    batch_interval: float = Field(default=0.1, gt=0, description="Batch interval in seconds")
+    max_history: int = Field(default=1000, gt=0, description="Max event history")
+
+    model_config = {"extra": "forbid"}
 
 
 class AgentRuntime:
@@ -343,8 +346,8 @@ class AgentRuntime:
 
     def subscribe_to_events(
         self,
-        event_types: list,
-        handler: Callable,
+        event_types: list[str],
+        handler: Callable[[Any], Any],
         filter_stream: str | None = None,
     ) -> str:
         """
