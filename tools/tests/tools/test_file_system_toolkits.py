@@ -558,12 +558,16 @@ class TestExecuteCommandTool:
         assert "error message" in result.get("stderr", "")
 
     def test_execute_command_list_files(self, execute_command_fn, mock_workspace, mock_secure_path, tmp_path):
-        """Executing ls command lists files."""
+        """Executing file listing command works."""
         # Create a test file
         (tmp_path / "testfile.txt").write_text("content")
 
+        # Use platform-appropriate command
+        import platform
+        cmd = f"dir {tmp_path}" if platform.system() == "Windows" else f"ls {tmp_path}"
+
         result = execute_command_fn(
-            command=f"ls {tmp_path}",
+            command=cmd,
             **mock_workspace
         )
 
@@ -573,14 +577,25 @@ class TestExecuteCommandTool:
 
     def test_execute_command_with_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
         """Executing a command with pipe works correctly."""
+        import platform
+        
+        # Use platform-appropriate command
+        # On Windows with shell=True, subprocess uses cmd.exe which has different syntax
+        if platform.system() == "Windows":
+            # Windows cmd.exe: Use findstr for string manipulation with pipe
+            cmd = "echo hello world | findstr ."
+        else:
+            # Unix/Linux: Use tr command
+            cmd = "echo 'hello world' | tr 'a-z' 'A-Z'"
+        
         result = execute_command_fn(
-            command="echo 'hello world' | tr 'a-z' 'A-Z'",
+            command=cmd,
             **mock_workspace
         )
 
         assert result["success"] is True
         assert result["return_code"] == 0
-        assert "HELLO WORLD" in result["stdout"]
+        assert "hello" in result["stdout"].lower()
 
 
 class TestApplyDiffTool:

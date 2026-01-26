@@ -10,8 +10,8 @@ LLM_CREDENTIALS = {
         env_var="ANTHROPIC_API_KEY",
         tools=[],
         node_types=["llm_generate", "llm_tool_use"],
-        required=False,  # Not required - agents can use other providers via LiteLLM
-        startup_required=False,  # MCP server doesn't need LLM credentials
+        required=True,  # Required for llm_generate and llm_tool_use node types
+        startup_required=True,  # Validate at startup to catch missing keys early
         help_url="https://console.anthropic.com/settings/keys",
         description="API key for Anthropic Claude models",
     ),
