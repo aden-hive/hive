@@ -15,3 +15,9 @@ try:
     __all__.append("LiteLLMProvider")
 except ImportError:
     pass
+
+try:
+    from framework.llm.mock import MockLLMProvider
+    __all__.append("MockLLMProvider")
+except ImportError:
+    pass
