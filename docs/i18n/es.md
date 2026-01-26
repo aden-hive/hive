@@ -51,7 +51,7 @@ Aden es una plataforma para construir, desplegar, operar y adaptar agentes de IA
 - **Desplegar** - Despliegue headless con integración CI/CD y gestión completa del ciclo de vida de API
 - **Operar** - Monitoreo en tiempo real, observabilidad y guardarraíles de ejecución mantienen los agentes confiables
 - **Adaptar** - Evaluación continua, supervisión y adaptación aseguran que los agentes mejoren con el tiempo
-- **Infraestructura** - Memoria compartida, integraciones LLM, herramientas y habilidades impulsan cada agente
+- **Infraestructura** - Memoria compartida, integraciones LLM, herramientas y habilidades impulsan cada agen
 
 ## Enlaces Rápidos
 
