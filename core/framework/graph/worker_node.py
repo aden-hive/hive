@@ -10,20 +10,21 @@ appropriate executor based on action type:
 - Code execution (sandboxed)
 """
 
-from typing import Any, Callable
-from dataclasses import dataclass, field
-import time
 import json
 import re
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
+from framework.graph.code_sandbox import CodeSandbox
 from framework.graph.plan import (
-    PlanStep,
     ActionSpec,
     ActionType,
+    PlanStep,
 )
-from framework.graph.code_sandbox import CodeSandbox
-from framework.runtime.core import Runtime
 from framework.llm.provider import LLMProvider, Tool
+from framework.runtime.core import Runtime
 
 
 def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
@@ -50,7 +51,7 @@ def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
 
     # Try to extract JSON from markdown code blocks
     # Pattern: ```json ... ``` or ``` ... ```
-    code_block_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
+    code_block_pattern = r"```(?:json)?\s*([\s\S]*?)\s*```"
     matches = re.findall(code_block_pattern, cleaned)
 
     if matches:
@@ -70,7 +71,7 @@ def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
         pass
 
     # Try to find JSON-like content (starts with { or [)
-    json_start_pattern = r'(\{[\s\S]*\}|\[[\s\S]*\])'
+    json_start_pattern = r"(\{[\s\S]*\}|\[[\s\S]*\])"
     json_matches = re.findall(json_start_pattern, cleaned)
 
     for match in json_matches:
@@ -87,6 +88,7 @@ def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
 @dataclass
 class StepExecutionResult:
     """Result of executing a plan step."""
+
     success: bool
     outputs: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
@@ -160,11 +162,13 @@ class WorkerNode:
         # Record decision
         decision_id = self.runtime.decide(
             intent=f"Execute plan step: {step.description}",
-            options=[{
-                "id": step.action.action_type.value,
-                "description": f"Execute {step.action.action_type.value} action",
-                "action_type": step.action.action_type.value,
-            }],
+            options=[
+                {
+                    "id": step.action.action_type.value,
+                    "description": f"Execute {step.action.action_type.value} action",
+                    "action_type": step.action.action_type.value,
+                }
+            ],
             chosen=step.action.action_type.value,
             reasoning=f"Step requires {step.action.action_type.value}",
             context={"step_id": step.id, "inputs": step.inputs},
@@ -414,6 +418,7 @@ class WorkerNode:
         try:
             # Execute tool via formal executor
             from framework.llm.provider import ToolUse
+
             tool_use = ToolUse(
                 id=f"step_{tool_name}",
                 name=tool_name,
