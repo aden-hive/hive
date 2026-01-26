@@ -454,6 +454,12 @@ class ExecutionStream:
         for ctx in self._active_executions.values():
             statuses[ctx.status] = statuses.get(ctx.status, 0) + 1
 
+        running_count = statuses.get("running", 0)
+        available_slots = max(
+            0,
+            self.entry_spec.max_concurrent - running_count,
+        )
+
         return {
             "stream_id": self.stream_id,
             "entry_point": self.entry_spec.id,
@@ -462,5 +468,5 @@ class ExecutionStream:
             "completed_executions": len(self._execution_results),
             "status_counts": statuses,
             "max_concurrent": self.entry_spec.max_concurrent,
-            "available_slots": self._semaphore._value,
+            "available_slots": available_slots,
         }
