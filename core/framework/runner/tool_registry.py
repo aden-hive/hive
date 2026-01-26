@@ -293,7 +293,8 @@ class ToolRegistry:
                     def executor(inputs: dict) -> Any:
                         try:
                             # Inject session context for tools that need it
-                            merged_inputs = {**registry_ref._session_context, **inputs}
+                            # Session context takes precedence over LLM-provided values
+                            merged_inputs = {**inputs, **registry_ref._session_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:

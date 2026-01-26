@@ -953,6 +953,16 @@ class {agent_class_name}:
 
         tool_registry = ToolRegistry()
 
+        # Set session context for consistent sandbox paths across all tool calls
+        # This ensures all tools use the same workspace_id/agent_id/session_id
+        # so files created by one tool can be found by other tools
+        import uuid
+        tool_registry.set_session_context(
+            workspace_id="{agent_name}",
+            agent_id=self.goal.id.replace("-", "_"),
+            session_id=str(uuid.uuid4())[:8],
+        )
+
         # Load MCP servers if not in mock mode
         if not mock_mode:
             agent_dir = Path(__file__).parent
@@ -1508,6 +1518,35 @@ response = AskUserQuestion(
 ```
 
 ## Framework Features
+
+### Session Context - Consistent File Paths Across Tools
+
+**IMPORTANT**: Tools that access files (csv_read, csv_write, execute_command_tool, etc.) use sandbox paths based on `workspace_id`, `agent_id`, and `session_id`. Without consistent values, files created by one tool cannot be found by other tools.
+
+**How it works**:
+
+```python
+tool_registry = ToolRegistry()
+
+# Set session context ONCE - all tools will use these values
+tool_registry.set_session_context(
+    workspace_id="my_agent",           # Usually agent name
+    agent_id=self.goal.id,             # Usually goal ID
+    session_id=str(uuid.uuid4())[:8],  # Unique per run
+)
+
+# Files are stored at:
+# ~/.hive/workdir/workspaces/{workspace_id}/{agent_id}/{session_id}/{filename}
+```
+
+**Why this matters**:
+
+- LLMs may pass different IDs to different tool calls
+- Session context **overrides** LLM-provided values
+- Ensures all files end up in the same folder
+- No need to specify IDs in node prompts
+
+**Node prompts should NOT specify workspace_id/agent_id/session_id** - the framework handles this automatically.
 
 ### OutputCleaner - Automatic I/O Validation and Cleaning
 

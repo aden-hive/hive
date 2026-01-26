@@ -1,4 +1,6 @@
 """Agent graph construction for Online Research Agent."""
+import uuid
+
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult
@@ -214,6 +216,13 @@ class OnlineResearchAgent:
         storage_path.mkdir(parents=True, exist_ok=True)
 
         tool_registry = ToolRegistry()
+
+        # Set session context for consistent sandbox paths across all tool calls
+        tool_registry.set_session_context(
+            workspace_id="online_research",
+            agent_id=self.goal.id.replace("-", "_"),
+            session_id=str(uuid.uuid4())[:8],
+        )
 
         # Load MCP servers (always load, needed for tool validation)
         agent_dir = Path(__file__).parent
