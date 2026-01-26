@@ -16,6 +16,13 @@ from framework.schemas.decision import Decision
 from framework.schemas.run import Run, RunStatus, RunSummary
 from framework.storage.backend import FileStorage
 
+# Threshold constants for pattern analysis
+PROBLEMATIC_NODE_FAILURE_THRESHOLD = 0.1  # 10% failure rate
+HIGH_PRIORITY_FAILURE_RATE = 0.3  # 30% failure rate
+HIGH_PRIORITY_ERROR_COUNT = 5  # 5 occurrences
+MIN_ERROR_COUNT_FOR_SUGGESTION = 2  # 2 occurrences
+LOW_SUCCESS_RATE_THRESHOLD = 0.8  # 80% success rate
+
 
 class FailureAnalysis:
     """Structured analysis of why a run failed."""
@@ -269,7 +276,7 @@ class BuilderQuery:
         for node_id, stats in node_stats.items():
             if stats["total"] > 0:
                 failure_rate = stats["failed"] / stats["total"]
-                if failure_rate > 0.1:  # More than 10% failure rate
+                if failure_rate > PROBLEMATIC_NODE_FAILURE_THRESHOLD:
                     problematic_nodes.append((node_id, failure_rate))
 
         problematic_nodes.sort(key=lambda x: x[1], reverse=True)
@@ -334,22 +341,22 @@ class BuilderQuery:
                     f"Review and improve node '{node_id}' - "
                     "high failure rate suggests prompt or tool issues"
                 ),
-                "priority": "high" if failure_rate > 0.3 else "medium",
+                "priority": "high" if failure_rate > HIGH_PRIORITY_FAILURE_RATE else "medium",
             })
 
         # Suggestion: Address common failures
         for failure, count in patterns.common_failures:
-            if count >= 2:
+            if count >= MIN_ERROR_COUNT_FOR_SUGGESTION:
                 suggestions.append({
                     "type": "error_handling",
                     "target": failure,
                     "reason": f"Error occurred {count} times",
                     "recommendation": f"Add handling for: {failure}",
-                    "priority": "high" if count >= 5 else "medium",
+                    "priority": "high" if count >= HIGH_PRIORITY_ERROR_COUNT else "medium",
                 })
 
         # Suggestion: Overall success rate
-        if patterns.success_rate < 0.8:
+        if patterns.success_rate < LOW_SUCCESS_RATE_THRESHOLD:
             suggestions.append({
                 "type": "architecture",
                 "target": goal_id,
