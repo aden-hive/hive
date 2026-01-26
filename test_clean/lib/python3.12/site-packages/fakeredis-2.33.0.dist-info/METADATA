@@ -1,0 +1,97 @@
+Metadata-Version: 2.4
+Name: fakeredis
+Version: 2.33.0
+Summary: Python implementation of redis API, can be used for testing purposes.
+Project-URL: Homepage, https://github.com/cunla/fakeredis-py
+Project-URL: Repository, https://github.com/cunla/fakeredis-py
+Project-URL: Documentation, https://fakeredis.moransoftware.ca/
+Project-URL: Bug Tracker, https://github.com/cunla/fakeredis-py/issues
+Project-URL: Funding, https://github.com/sponsors/cunla
+Author-email: Daniel Moran <daniel@moransoftware.ca>, Bruce Merry <bmerry@ska.ac.za>, James Saryerwinnie <js@jamesls.com>
+Maintainer-email: Daniel Moran <daniel@moransoftware.ca>
+License-Expression: BSD-3-Clause
+License-File: LICENSE
+Keywords: RedisBloom,RedisJson,RedisTimeSeries,dragonfly,redis,redis-stack,testing,valkey
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Development Status :: 6 - Mature
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Python: >=3.7
+Requires-Dist: redis<7.1.0; python_version < '3.10'
+Requires-Dist: redis>=4.3; python_version > '3.8'
+Requires-Dist: redis>=4; python_version < '3.8'
+Requires-Dist: sortedcontainers>=2
+Requires-Dist: typing-extensions~=4.7; python_version < '3.11'
+Provides-Extra: bf
+Requires-Dist: pyprobables>=0.6; extra == 'bf'
+Provides-Extra: cf
+Requires-Dist: pyprobables>=0.6; extra == 'cf'
+Provides-Extra: json
+Requires-Dist: jsonpath-ng>=1.6; extra == 'json'
+Provides-Extra: lua
+Requires-Dist: lupa>=2.1; extra == 'lua'
+Provides-Extra: probabilistic
+Requires-Dist: pyprobables>=0.6; extra == 'probabilistic'
+Provides-Extra: valkey
+Requires-Dist: valkey>=6; (python_version >= '3.8') and extra == 'valkey'
+Description-Content-Type: text/markdown
+
+fakeredis: A python implementation of Redis Protocol API
+========================================================
+
+[![badge](https://img.shields.io/pypi/v/fakeredis)](https://pypi.org/project/fakeredis/)
+[![CI](https://github.com/cunla/fakeredis-py/actions/workflows/test.yml/badge.svg)](https://github.com/cunla/fakeredis-py/actions/workflows/test.yml)
+[![badge](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/cunla/b756396efb895f0e34558c980f1ca0c7/raw/fakeredis-py.json)](https://github.com/cunla/fakeredis-py/actions/workflows/test.yml)
+[![badge](https://img.shields.io/pypi/dm/fakeredis)](https://pypi.org/project/fakeredis/)
+[![badge](https://img.shields.io/pypi/l/fakeredis)](./LICENSE)
+[![Open Source Helpers](https://www.codetriage.com/cunla/fakeredis-py/badges/users.svg)](https://www.codetriage.com/cunla/fakeredis-py)
+--------------------
+
+
+
+Documentation is hosted in https://fakeredis.readthedocs.io/
+
+# Intro
+
+FakeRedis is a pure-Python implementation of the Redis Protocol API. It provides enhanced versions of
+the [redis-py][redis-py]/[valkey-py][valkey-py] Python bindings for Redis.
+
+It enables running tests requiring [Redis][redis]/[ValKey][valkey]/[DragonflyDB][dragonflydb]/[KeyDB][keydb] server
+without an actual server.
+
+It also enables testing compatibility of different key-value datastores.
+
+That provides the following added functionality: A built-in Redis server that is automatically installed, configured and
+managed when the Redis bindings are used. A single server shared by multiple programs or multiple independent servers.
+All the servers provided by FakeRedis support all Redis functionality including advanced features such as RedisJson,
+RedisBloom, GeoCommands.
+
+See [official documentation][readthedocs] for list of supported commands.
+
+# Sponsor
+
+fakeredis-py is developed for free.
+
+You can support this project by becoming a sponsor using [this link](https://github.com/sponsors/cunla).
+
+[readthedocs]: https://fakeredis.readthedocs.io/
+
+[redis-py]: https://github.com/redis/redis-py
+
+[valkey]: https://github.com/valkey-io/valkey
+
+[redis]: https://redis.io/
+
+[dragonflydb]: https://dragonflydb.io/
+
+[keydb]: https://docs.keydb.dev/
+
+[valkey-py]: https://github.com/valkey-io/valkey-py

@@ -1,0 +1,20 @@
+Metadata-Version: 2.3
+Name: py-key-value-shared
+Version: 0.3.0
+Summary: Shared Key-Value
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Dist: typing-extensions>=4.15.0
+Requires-Dist: beartype>=0.20.0
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
+# py-key-value-shared
+
+Shared code between key-value-aio and key-value-sync

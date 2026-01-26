@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - N/A
 
 ### Fixed
-- N/A
+- Fixed dependency conflict between `openai` and `litellm` packages by explicitly declaring `openai>=1.0.0` in requirements.txt and pyproject.toml. This eliminates the need for manual post-installation upgrade steps and ensures clean installation
 
 ### Security
 - N/A

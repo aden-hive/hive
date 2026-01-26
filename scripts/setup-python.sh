@@ -121,9 +121,11 @@ else
 fi
 echo ""
 
-# Fix openai version compatibility with litellm
+# Verify openai version compatibility with litellm
+# NOTE: openai>=1.0.0 is now properly declared in requirements.txt and pyproject.toml
+# This check is kept for backwards compatibility with existing environments
 echo "=================================================="
-echo "Fixing Package Compatibility"
+echo "Verifying Package Compatibility"
 echo "=================================================="
 echo ""
 
@@ -131,6 +133,7 @@ echo ""
 OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
 
 if [ "$OPENAI_VERSION" = "not_installed" ]; then
+    echo -e "${YELLOW}Warning: openai package not found (should be installed via requirements.txt)${NC}"
     echo "Installing openai package..."
     $PYTHON_CMD -m pip install "openai>=1.0.0" > /dev/null 2>&1
     echo -e "${GREEN}✓${NC} openai package installed"
