@@ -26,8 +26,28 @@ Note:
     See aden_tools.credentials for details.
 """
 import argparse
+import logging
 import os
 import sys
+
+# Configure logger
+logger = logging.getLogger(__name__)
+
+
+def setup_logger():
+    """Configure logger for MCP server."""
+    if not logger.handlers:
+        # For STDIO mode, log to stderr; for HTTP mode, log to stdout
+        stream = sys.stderr if "--stdio" in sys.argv else sys.stdout
+        handler = logging.StreamHandler(stream)
+        formatter = logging.Formatter('[MCP] %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+
+# Initialize logger
+setup_logger()
 
 # Suppress FastMCP banner in STDIO mode
 if "--stdio" in sys.argv:
@@ -54,10 +74,10 @@ credentials = CredentialManager()
 # Tier 1: Validate startup-required credentials (if any)
 try:
     credentials.validate_startup()
-    print("[MCP] Startup credentials validated")
+    logger.info("Startup credentials validated")
 except CredentialError as e:
     # Non-fatal - tools will validate their own credentials when called
-    print(f"[MCP] Warning: {e}", file=sys.stderr)
+    logger.warning(str(e))
 
 mcp = FastMCP("tools")
 
@@ -65,7 +85,7 @@ mcp = FastMCP("tools")
 tools = register_all_tools(mcp, credentials=credentials)
 # Only print to stdout in HTTP mode (STDIO mode requires clean stdout for JSON-RPC)
 if "--stdio" not in sys.argv:
-    print(f"[MCP] Registered {len(tools)} tools: {tools}")
+    logger.info(f"Registered {len(tools)} tools: {tools}")
 
 
 @mcp.custom_route("/health", methods=["GET"])
@@ -105,7 +125,7 @@ def main() -> None:
         # STDIO mode: only JSON-RPC messages go to stdout
         mcp.run(transport="stdio")
     else:
-        print(f"[MCP] Starting HTTP server on {args.host}:{args.port}")
+        logger.info(f"Starting HTTP server on {args.host}:{args.port}")
         mcp.run(transport="http", host=args.host, port=args.port)
 
 
