@@ -237,10 +237,12 @@ Respond with ONLY a JSON object:
             )
 
             # Parse response
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
+            # Use robust JSON extraction that handles nested objects
+            from framework.utils import find_json_object
+            json_str = find_json_object(response.content)
+
+            if json_str:
+                data = json.loads(json_str)
                 proceed = data.get("proceed", False)
                 reasoning = data.get("reasoning", "")
 

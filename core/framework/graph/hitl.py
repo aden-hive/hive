@@ -199,12 +199,13 @@ Example format:
             )
 
             # Parse Haiku's response
-            import re
             response_text = message.content[0].text.strip()
-            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+            
+            from framework.utils import find_json_object
+            json_str = find_json_object(response_text)
 
-            if json_match:
-                parsed = json.loads(json_match.group())
+            if json_str:
+                parsed = json.loads(json_str)
                 response.answers = parsed
 
         except Exception:

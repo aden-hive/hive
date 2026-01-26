@@ -923,10 +923,11 @@ Respond with JSON only:
             )
 
             # Parse response
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
+            from framework.utils import find_json_object
+            json_str = find_json_object(response.content)
+            
+            if json_str:
+                data = json.loads(json_str)
                 level_map = {
                     "best_fit": CapabilityLevel.BEST_FIT,
                     "can_handle": CapabilityLevel.CAN_HANDLE,

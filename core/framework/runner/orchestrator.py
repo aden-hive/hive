@@ -462,10 +462,11 @@ Respond with JSON only:
                 max_tokens=256,
             )
 
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
+            from framework.utils import find_json_object
+            json_str = find_json_object(response.content)
+            
+            if json_str:
+                data = json.loads(json_str)
                 selected = data.get("selected", [])
                 # Validate selected agents exist
                 selected = [s for s in selected if s in self._agents]
