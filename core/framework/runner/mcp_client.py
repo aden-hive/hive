@@ -409,9 +409,8 @@ class MCPClient:
             if self._session:
                 await self._session.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            # Coroutine was cancelled (e.g., during event loop teardown)
-            logger.warning("MCP session cleanup was cancelled")
-            raise  # Re-raise CancelledError as per asyncio best practices
+            # Coroutine was cancelled (e.g., during event loop teardown); best-effort cleanup
+            logger.warning("MCP session cleanup was cancelled; proceeding with best-effort shutdown")
         except Exception as e:
             logger.warning(f"Error closing MCP session: {e}")
         finally:
@@ -422,9 +421,8 @@ class MCPClient:
             if self._stdio_context:
                 await self._stdio_context.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            # Coroutine was cancelled (e.g., during event loop teardown)
-            logger.warning("STDIO context cleanup was cancelled")
-            raise  # Re-raise CancelledError as per asyncio best practices
+            # Coroutine was cancelled (e.g., during event loop teardown); best-effort cleanup
+            logger.warning("STDIO context cleanup was cancelled; proceeding with best-effort shutdown")
         except Exception as e:
             logger.warning(f"Error closing STDIO context: {e}")
         finally:
@@ -450,10 +448,15 @@ class MCPClient:
                     cleanup_attempted = True
                 except TimeoutError:
                     # Cleanup took too long - may indicate stuck resources or slow MCP server
+                    cleanup_attempted = True
                     logger.warning(f"Async cleanup timed out after {self._CLEANUP_TIMEOUT} seconds")
+                except RuntimeError as e:
+                    # Likely: loop stopped between is_running() check and run_coroutine_threadsafe()
+                    cleanup_attempted = True
+                    logger.debug(f"Event loop stopped during async cleanup: {e}")
                 except Exception as e:
-                    # This can happen if loop stopped between is_running() check and 
-                    # run_coroutine_threadsafe(), or if cleanup itself failed
+                    # Cleanup was attempted but failed (e.g., error in _cleanup_stdio_async())
+                    cleanup_attempted = True
                     logger.warning(f"Error during async cleanup: {e}")
                 
                 # Now stop the event loop
@@ -477,6 +480,11 @@ class MCPClient:
             # Wait for thread to finish (timeout proportional to cleanup timeout)
             if self._loop_thread and self._loop_thread.is_alive():
                 self._loop_thread.join(timeout=self._THREAD_JOIN_TIMEOUT)
+                if self._loop_thread.is_alive():
+                    logger.warning(
+                        "Event loop thread for STDIO MCP connection did not terminate within "
+                        f"{self._THREAD_JOIN_TIMEOUT} seconds; background thread may still be running."
+                    )
 
             # Clear remaining references
             # Note: _session and _stdio_context may already be None if _cleanup_stdio_async()
