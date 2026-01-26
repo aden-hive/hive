@@ -389,6 +389,10 @@ class MCPClient:
         except Exception as e:
             raise RuntimeError(f"Failed to call tool via HTTP: {e}")
 
+    # Cleanup timeout should match or exceed connection timeout (10 seconds in _connect_stdio)
+    _CLEANUP_TIMEOUT = 10  # seconds
+    _THREAD_JOIN_TIMEOUT = 5  # seconds - should be proportional to cleanup timeout
+
     async def _cleanup_stdio_async(self) -> None:
         """Async cleanup for STDIO session and context managers.
         
@@ -404,6 +408,10 @@ class MCPClient:
         try:
             if self._session:
                 await self._session.__aexit__(None, None, None)
+        except asyncio.CancelledError:
+            # Coroutine was cancelled (e.g., during event loop teardown)
+            logger.warning("MCP session cleanup was cancelled")
+            raise  # Re-raise CancelledError as per asyncio best practices
         except Exception as e:
             logger.warning(f"Error closing MCP session: {e}")
         finally:
@@ -413,6 +421,10 @@ class MCPClient:
         try:
             if self._stdio_context:
                 await self._stdio_context.__aexit__(None, None, None)
+        except asyncio.CancelledError:
+            # Coroutine was cancelled (e.g., during event loop teardown)
+            logger.warning("STDIO context cleanup was cancelled")
+            raise  # Re-raise CancelledError as per asyncio best practices
         except Exception as e:
             logger.warning(f"Error closing STDIO context: {e}")
         finally:
@@ -434,11 +446,11 @@ class MCPClient:
                         self._cleanup_stdio_async(),
                         self._loop
                     )
-                    cleanup_future.result(timeout=5)  # Wait for cleanup with timeout
+                    cleanup_future.result(timeout=self._CLEANUP_TIMEOUT)
                     cleanup_attempted = True
                 except TimeoutError:
-                    # Cleanup took too long - may indicate stuck resources
-                    logger.warning("Async cleanup timed out after 5 seconds")
+                    # Cleanup took too long - may indicate stuck resources or slow MCP server
+                    logger.warning(f"Async cleanup timed out after {self._CLEANUP_TIMEOUT} seconds")
                 except Exception as e:
                     # This can happen if loop stopped between is_running() check and 
                     # run_coroutine_threadsafe(), or if cleanup itself failed
@@ -462,9 +474,9 @@ class MCPClient:
                     "skipping async cleanup. Resources may not be fully released."
                 )
 
-            # Wait for thread to finish
+            # Wait for thread to finish (timeout proportional to cleanup timeout)
             if self._loop_thread and self._loop_thread.is_alive():
-                self._loop_thread.join(timeout=2)
+                self._loop_thread.join(timeout=self._THREAD_JOIN_TIMEOUT)
 
             # Clear remaining references
             # Note: _session and _stdio_context are cleared in _cleanup_stdio_async() 
