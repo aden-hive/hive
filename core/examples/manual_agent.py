@@ -11,7 +11,6 @@ Setup -> Graph definition -> Execution -> Result
 Run with:
     PYTHONPATH=core python core/examples/manual_agent.py
 """
-
 import asyncio
 
 from framework.graph import (
@@ -23,6 +22,7 @@ from framework.graph import (
     NodeSpec,
 )
 from framework.runtime.core import Runtime
+
 
 # 1. Define Node Logic (Pure Python Functions)
 def greet(name: str) -> str:

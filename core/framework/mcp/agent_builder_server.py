@@ -6,7 +6,6 @@ Exposes tools for building goal-driven agents via the Model Context Protocol.
 Usage:
     python -m framework.mcp.agent_builder_server
 """
-
 import json
 import os
 from datetime import datetime
@@ -25,7 +24,6 @@ from framework.graph import (
 )
 from framework.graph.plan import Plan
 from framework.testing.prompts import PYTEST_TEST_FILE_HEADER
-
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")

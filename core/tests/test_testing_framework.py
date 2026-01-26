@@ -6,7 +6,6 @@ Tests cover:
 - Storage CRUD operations
 - Error categorization heuristics
 """
-
 import pytest
 
 from framework.testing.categorizer import ErrorCategorizer
@@ -14,7 +13,6 @@ from framework.testing.debug_tool import DebugTool
 from framework.testing.test_case import ApprovalStatus, Test, TestType
 from framework.testing.test_result import ErrorCategory, TestResult, TestSuiteResult
 from framework.testing.test_storage import TestStorage
-
 
 # ============================================================================
 # Test Schema Tests
