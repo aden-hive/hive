@@ -107,10 +107,10 @@ Look through the codebase to find:
 ### Task 4.1: Agent Idea 💡
 Aden can build self-improving agents for any use case. Propose ONE creative agent idea:
 
-1. **Name:** Give your agent a catchy name. 
-2. **Goal:** What problem does it solve? (2-3 sentences)
-3. **Self-Improvement:** How would it get better over time when things fail?
-4. **Human-in-the-Loop:** When would it need human input?
+1. **Name:** Give your agent a catchy name. PAT (Performance Agent Tracking)
+2. **Goal:** What problem does it solve? (2-3 sentences) This agent would be designed to track the performance of your products in a retail setting. It would analyze the profitability and popularity of these items, and if they are performing below a certain threshold, the agent will notify and produce graphs to support these claims. It could provide insights on how to improve products based on customer reviews, or help with pricing.
+3. **Self-Improvement:** How would it get better over time when things fail? Failure in this scenario is flagging a product for review and then performing worse after adjustments. For example, if the agent suggested a price change and when the price on the product is changed to the given suggestion, sales and profits decrease.
+4. **Human-in-the-Loop:** When would it need human input? It would need human input to verify change recommendations before deployment.
 
 Example format:
 ```
