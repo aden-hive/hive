@@ -1172,9 +1172,13 @@ class FunctionNode(NodeProtocol):
             )
 
             # Write to output keys
-            output = {"result": result}
+            output = {}
             if ctx.node_spec.output_keys:
-                ctx.memory.write(ctx.node_spec.output_keys[0], result)
+                key = ctx.node_spec.output_keys[0]
+                output[key] = result
+                ctx.memory.write(key, result)
+            else:
+                output = {"result": result}
 
             return NodeResult(success=True, output=output, latency_ms=latency_ms)
 

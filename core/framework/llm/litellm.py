@@ -8,11 +8,15 @@ See: https://docs.litellm.ai/docs/providers
 """
 
 import json
+from collections.abc import Callable
 from typing import Any
 
-import litellm
+try:
+    import litellm
+except ImportError:
+    litellm = None
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
 
 class LiteLLMProvider(LLMProvider):
@@ -71,6 +75,11 @@ class LiteLLMProvider(LLMProvider):
         self.api_key = api_key
         self.api_base = api_base
         self.extra_kwargs = kwargs
+
+        if litellm is None:
+            raise ImportError(
+                "LiteLLM is not installed. Please install it with: pip install litellm"
+            )
 
     def complete(
         self,
@@ -144,7 +153,7 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """Run a tool-use loop until the LLM produces a final response."""

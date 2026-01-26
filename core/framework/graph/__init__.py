@@ -1,7 +1,7 @@
 """Graph structures: Goals, Nodes, Edges, and Flexible Execution."""
 
 from framework.graph.code_sandbox import CodeSandbox, safe_eval, safe_exec
-from framework.graph.edge import EdgeCondition, EdgeSpec
+from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.flexible_executor import ExecutorConfig, FlexibleGraphExecutor
 from framework.graph.goal import Constraint, Goal, GoalStatus, SuccessCriterion
@@ -42,6 +42,7 @@ __all__ = [
     # Edge
     "EdgeSpec",
     "EdgeCondition",
+    "GraphSpec",
     # Executor (fixed graph)
     "GraphExecutor",
     # Plan (flexible execution)
