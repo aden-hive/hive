@@ -8,6 +8,7 @@ See: https://docs.litellm.ai/docs/providers
 """
 
 import json
+import time
 from typing import Any
 
 try:
@@ -56,6 +57,7 @@ class LiteLLMProvider(LLMProvider):
         model: str = "gpt-4o-mini",
         api_key: str | None = None,
         api_base: str | None = None,
+        metrics_collector = None,
         **kwargs: Any,
     ):
         """
@@ -74,6 +76,13 @@ class LiteLLMProvider(LLMProvider):
         self.api_key = api_key
         self.api_base = api_base
         self.extra_kwargs = kwargs
+        
+        # Initialize metrics collector
+        if metrics_collector is None:
+            from framework.observability.metrics import MetricsCollector
+            self.metrics = MetricsCollector()
+        else:
+            self.metrics = metrics_collector
 
         if litellm is None:
             raise ImportError(
@@ -129,8 +138,35 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        # Make the call
-        response = litellm.completion(**kwargs)
+        # Make the call with metrics tracking
+        start_time = time.time()
+        try:
+            response = litellm.completion(**kwargs)
+            latency_ms = (time.time() - start_time) * 1000
+            
+            # Track metrics
+            usage = response.usage
+            if usage:
+                self.metrics.record_call(
+                    node_id="llm_call",
+                    model=self.model,
+                    input_tokens=usage.prompt_tokens,
+                    output_tokens=usage.completion_tokens,
+                    latency_ms=latency_ms,
+                    success=True
+                )
+        except Exception as e:
+            latency_ms = (time.time() - start_time) * 1000
+            self.metrics.record_call(
+                node_id="llm_call",
+                model=self.model,
+                input_tokens=0,
+                output_tokens=0,
+                latency_ms=latency_ms,
+                success=False,
+                error=str(e)
+            )
+            raise
 
         # Extract content
         content = response.choices[0].message.content or ""
