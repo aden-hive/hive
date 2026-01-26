@@ -9,7 +9,9 @@ Each stream has:
 
 import asyncio
 import logging
+import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, TYPE_CHECKING
@@ -105,6 +107,8 @@ class ExecutionStream:
         llm: "LLMProvider | None" = None,
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
+        result_retention_max: int | None = 1000,
+        result_retention_ttl_seconds: float | None = None,
     ):
         """
         Initialize execution stream.
@@ -133,6 +137,8 @@ class ExecutionStream:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
+        self._result_retention_max = result_retention_max
+        self._result_retention_ttl_seconds = result_retention_ttl_seconds
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -144,7 +150,8 @@ class ExecutionStream:
         # Execution tracking
         self._active_executions: dict[str, ExecutionContext] = {}
         self._execution_tasks: dict[str, asyncio.Task] = {}
-        self._execution_results: dict[str, ExecutionResult] = {}
+        self._execution_results: OrderedDict[str, ExecutionResult] = OrderedDict()
+        self._execution_result_times: dict[str, float] = {}
         self._completion_events: dict[str, asyncio.Event] = {}
 
         # Concurrency control
@@ -170,6 +177,27 @@ class ExecutionStream:
                 stream_id=self.stream_id,
                 data={"entry_point": self.entry_spec.id},
             ))
+
+    def _record_execution_result(self, execution_id: str, result: ExecutionResult) -> None:
+        """Record a completed execution result with retention pruning."""
+        self._execution_results[execution_id] = result
+        self._execution_results.move_to_end(execution_id)
+        self._execution_result_times[execution_id] = time.time()
+        self._prune_execution_results()
+
+    def _prune_execution_results(self) -> None:
+        """Prune completed results based on TTL and max retention."""
+        if self._result_retention_ttl_seconds is not None:
+            cutoff = time.time() - self._result_retention_ttl_seconds
+            for exec_id, recorded_at in list(self._execution_result_times.items()):
+                if recorded_at < cutoff:
+                    self._execution_result_times.pop(exec_id, None)
+                    self._execution_results.pop(exec_id, None)
+
+        if self._result_retention_max is not None:
+            while len(self._execution_results) > self._result_retention_max:
+                old_exec_id, _ = self._execution_results.popitem(last=False)
+                self._execution_result_times.pop(old_exec_id, None)
 
     async def stop(self) -> None:
         """Stop the execution stream and cancel active executions."""
@@ -297,8 +325,8 @@ class ExecutionStream:
                     session_state=ctx.session_state,
                 )
 
-                # Store result
-                self._execution_results[execution_id] = result
+                # Store result with retention
+                self._record_execution_result(execution_id, result)
 
                 # Update context
                 ctx.completed_at = datetime.now()
@@ -333,11 +361,11 @@ class ExecutionStream:
                 ctx.status = "failed"
                 logger.error(f"Execution {execution_id} failed: {e}")
 
-                # Store error result
-                self._execution_results[execution_id] = ExecutionResult(
+                # Store error result with retention
+                self._record_execution_result(execution_id, ExecutionResult(
                     success=False,
                     error=str(e),
-                )
+                ))
 
                 # Emit failure event
                 if self._event_bus:
@@ -355,6 +383,12 @@ class ExecutionStream:
                 # Signal completion
                 if execution_id in self._completion_events:
                     self._completion_events[execution_id].set()
+
+                # Remove in-flight bookkeeping
+                async with self._lock:
+                    self._active_executions.pop(execution_id, None)
+                    self._completion_events.pop(execution_id, None)
+                    self._execution_tasks.pop(execution_id, None)
 
     def _create_modified_graph(self) -> "GraphSpec":
         """Create a graph with the entry point overridden."""
@@ -398,6 +432,7 @@ class ExecutionStream:
         event = self._completion_events.get(execution_id)
         if event is None:
             # Execution not found or already cleaned up
+            self._prune_execution_results()
             return self._execution_results.get(execution_id)
 
         try:
@@ -406,6 +441,7 @@ class ExecutionStream:
             else:
                 await event.wait()
 
+            self._prune_execution_results()
             return self._execution_results.get(execution_id)
 
         except asyncio.TimeoutError:
@@ -413,6 +449,7 @@ class ExecutionStream:
 
     def get_result(self, execution_id: str) -> ExecutionResult | None:
         """Get result of a completed execution."""
+        self._prune_execution_results()
         return self._execution_results.get(execution_id)
 
     def get_context(self, execution_id: str) -> ExecutionContext | None:
