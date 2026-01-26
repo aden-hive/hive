@@ -33,6 +33,14 @@ SESSIONS_DIR = Path(".agent-builder-sessions")
 ACTIVE_SESSION_FILE = SESSIONS_DIR / ".active"
 
 
+def atomic_write_text(path: Path, write_fn) -> None:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        write_fn(f)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp_path.replace(path)
+
 # Session storage
 class BuildSession:
     """Build session with persistence support."""
@@ -1368,26 +1376,39 @@ def export_graph() -> str:
 
     # Write agent.json
     agent_json_path = exports_dir / "agent.json"
-    with open(agent_json_path, "w") as f:
-        json.dump(export_data, f, indent=2, default=str)
+
+    atomic_write_text(
+    agent_json_path,
+    lambda f: json.dump(export_data, f, indent=2, default=str)
+)
 
     # Generate README.md
     readme_content = _generate_readme(session, export_data, all_tools)
     readme_path = exports_dir / "README.md"
-    with open(readme_path, "w") as f:
-        f.write(readme_content)
+
+    atomic_write_text(
+    readme_path,
+    lambda f: f.write(readme_content),
+)
+  
 
     # Write mcp_servers.json if MCP servers are configured
     mcp_servers_path = None
     mcp_servers_size = 0
+
     if session.mcp_servers:
-        mcp_config = {
-            "servers": session.mcp_servers
-        }
-        mcp_servers_path = exports_dir / "mcp_servers.json"
-        with open(mcp_servers_path, "w") as f:
-            json.dump(mcp_config, f, indent=2)
-        mcp_servers_size = mcp_servers_path.stat().st_size
+       mcp_config = {
+        "servers": session.mcp_servers
+    }
+    mcp_servers_path = exports_dir / "mcp_servers.json"
+
+    atomic_write_text(
+        mcp_servers_path,
+        lambda f: json.dump(mcp_config, f, indent=2),
+    )
+
+    mcp_servers_size = mcp_servers_path.stat().st_size
+
 
     # Get file sizes
     agent_json_size = agent_json_path.stat().st_size
