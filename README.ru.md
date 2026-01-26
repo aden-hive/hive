@@ -289,11 +289,14 @@ timeline
 
 Мы приветствуем вклад! Пожалуйста, ознакомьтесь с [CONTRIBUTING.md](CONTRIBUTING.md) для руководств.
 
-1. Сделайте форк репозитория
-2. Создайте ветку функции (`git checkout -b feature/amazing-feature`)
-3. Зафиксируйте изменения (`git commit -m 'Add amazing feature'`)
-4. Отправьте в ветку (`git push origin feature/amazing-feature`)
-5. Откройте Pull Request
+**Важно:** Пожалуйста, получите назначение на issue перед отправкой PR. Оставьте комментарий в issue, чтобы заявить о своём желании работать над ним, и мейнтейнер назначит вас в течение 24 часов. Это помогает избежать дублирования работы.
+
+1. Найдите или создайте issue и получите назначение
+2. Сделайте форк репозитория
+3. Создайте ветку функции (`git checkout -b feature/amazing-feature`)
+4. Зафиксируйте изменения (`git commit -m 'Add amazing feature'`)
+5. Отправьте в ветку (`git push origin feature/amazing-feature`)
+6. Откройте Pull Request
 
 ## Присоединяйтесь к команде
 

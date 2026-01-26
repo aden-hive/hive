@@ -301,11 +301,14 @@ Aden은 지원, 기능 요청, 커뮤니티 토론을 위해 [Discord](https://d
 
 기여를 환영합니다. 기여 가이드라인은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고해 주세요.
 
-1. 저장소를 포크합니다
-2. 기능 브랜치를 생성합니다 (`git checkout -b feature/amazing-feature`)
-3. 변경 사항을 커밋합니다 (`git commit -m 'Add amazing feature'`)
-4. 브랜치에 푸시합니다 (`git push origin feature/amazing-feature`)
-5. Pull Request를 생성합니다
+**중요:** PR을 제출하기 전에 먼저 Issue에 할당받으세요. Issue에 댓글을 달아 담당을 요청하면 유지관리자가 24시간 내에 할당해 드립니다. 이는 중복 작업을 방지하는 데 도움이 됩니다.
+
+1. Issue를 찾거나 생성하고 할당받습니다
+2. 저장소를 포크합니다
+3. 기능 브랜치를 생성합니다 (`git checkout -b feature/amazing-feature`)
+4. 변경 사항을 커밋합니다 (`git commit -m 'Add amazing feature'`)
+5. 브랜치에 푸시합니다 (`git push origin feature/amazing-feature`)
+6. Pull Request를 생성합니다
 
 ## 팀에 합류하세요
 

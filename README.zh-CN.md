@@ -289,11 +289,14 @@ timeline
 
 我们欢迎贡献！请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 了解指南。
 
-1. Fork 仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
+**重要提示：** 请在提交 PR 之前先认领 Issue。在 Issue 下评论认领，维护者将在 24 小时内分配给您。我们致力于避免重复工作，让大家的努力不被浪费。
+
+1. 找到或创建 Issue 并获得分配
+2. Fork 仓库
+3. 创建功能分支 (`git checkout -b feature/amazing-feature`)
+4. 提交更改 (`git commit -m 'Add amazing feature'`)
+5. 推送到分支 (`git push origin feature/amazing-feature`)
+6. 创建 Pull Request
 
 ## 加入我们的团队
 
