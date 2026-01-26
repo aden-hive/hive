@@ -1,0 +1,119 @@
+name: Duplicate Detector Bot
+
+on:
+  issues:
+    types: [opened, edited]
+  pull_request:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  check-duplicates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for Duplicate Issues/PRs
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { repo, owner } = context.repo;
+            const isIssue = !!context.payload.issue;
+            const currentNumber = context.payload.number;
+            const currentTitle = isIssue ? context.payload.issue.title : context.payload.pull_request.title;
+            const currentBody = isIssue ? context.payload.issue.body : context.payload.pull_request.body;
+            
+            // Configuration: Sensitivity for similarity (0.0 to 1.0, higher is stricter)
+            const SIMILARITY_THRESHOLD = 0.8; 
+
+            console.log(`Checking duplicates for: "${currentTitle}" (#${currentNumber})`);
+
+            // Helper function to calculate similarity (simple word overlap)
+            function calculateSimilarity(str1, str2) {
+              if (!str1 || !str2) return 0;
+              const words1 = str1.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
+              const words2 = str2.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
+              const intersection = words1.filter(word => words2.includes(word));
+              return (2.0 * intersection.length) / (words1.length + words2.length);
+            }
+
+            // 1. Handle Issues
+            if (isIssue) {
+              // Search for open issues with similar words
+              const issues = await github.rest.search.issuesAndPullRequests({
+                q: `repo:${owner}/${repo} is:issue is:open -number:${currentNumber}`,
+                per_page: 100
+              });
+
+              for (const issue of issues.data.items) {
+                const similarity = calculateSimilarity(currentTitle, issue.title);
+                if (similarity >= SIMILARITY_THRESHOLD) {
+                  const commentBody = `Hey @${context.actor}! 👋 \n\nThis issue looks very similar to an existing issue: #${issue.number} ("${issue.title}"). \n\nI'm marking this as a duplicate and closing it to keep things organized. If you believe this is a mistake, please reopen it!`;
+                  
+                  // Comment on the new issue
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: currentNumber,
+                    body: commentBody
+                  });
+
+                  // Add 'duplicate' label
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number: currentNumber,
+                    labels: ['duplicate']
+                  });
+
+                  // Close the issue
+                  await github.rest.issues.update({
+                    owner,
+                    repo,
+                    issue_number: currentNumber,
+                    state: 'closed'
+                  });
+                  
+                  console.log(`Closed #${currentNumber} as duplicate of #${issue.number}`);
+                  return; // Stop after finding one duplicate
+                }
+              }
+            } 
+            
+            // 2. Handle Pull Requests
+            else {
+              // Search for open PRs
+              const prs = await github.rest.pulls.list({
+                owner,
+                repo,
+                state: 'open',
+                per_page: 100
+              });
+
+              for (const pr of prs.data) {
+                if (pr.number === currentNumber) continue;
+
+                // Check for duplicate branch name or similar title
+                const sameBranch = pr.head.ref === context.payload.pull_request.head.ref;
+                const similarity = calculateSimilarity(currentTitle, pr.title);
+
+                if (sameBranch || similarity >= SIMILARITY_THRESHOLD) {
+                  const reason = sameBranch ? "a PR for this branch" : "a similar PR";
+                  const commentBody = `Hey @${context.actor}! 👋 \n\nIt looks like ${reason} already exists: #${pr.number} ("${pr.title}"). \n\nPlease check if you can combine your changes there.`;
+
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: currentNumber,
+                    body: commentBody
+                  });
+                  
+                  // We usually don't auto-close PRs as aggressively as issues, 
+                  // but we notify the user.
+                  console.log(`Flagged #${currentNumber} as potential duplicate of #${pr.number}`);
+                  return;
+                }
+              }
+            }
