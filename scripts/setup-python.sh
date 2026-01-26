@@ -60,6 +60,21 @@ fi
 echo -e "${GREEN}✓${NC} Python version check passed"
 echo ""
 
+# Create virtual environment (PEP 668 safe)
+VENV_DIR="$PROJECT_ROOT/.venv"
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating virtual environment..."
+    $PYTHON_CMD -m venv "$VENV_DIR"
+fi
+
+# Activate virtual environment
+source "$VENV_DIR/bin/activate"
+
+# Use venv python from now on
+PYTHON_CMD="python"
+
+
 # Check for pip
 if ! $PYTHON_CMD -m pip --version &> /dev/null; then
     echo -e "${RED}Error: pip is not installed${NC}"
@@ -72,7 +87,7 @@ echo ""
 
 # Upgrade pip, setuptools, and wheel
 echo "Upgrading pip, setuptools, and wheel..."
-if ! $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
+if ! $PYTHON_CMD -m pip install --upgrade --no-cache-dir pip setuptools wheel; then
   echo "Error: Failed to upgrade pip. Please check your python/venv configuration."
   exit 1
 fi
@@ -195,10 +210,9 @@ echo "  PYTHONPATH=core:exports python -m agent_name validate"
 echo "  PYTHONPATH=core:exports python -m agent_name info"
 echo "  PYTHONPATH=core:exports python -m agent_name run --input '{...}'"
 echo ""
-echo "Available commands for your new agent:"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent validate"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent info"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent run --input '{\"ticket_content\":\"...\",\"customer_id\":\"...\",\"ticket_id\":\"...\"}'"
+echo "Note:"
+echo "  Replace 'agent_name' with the module name of your exported agent."
+echo "  See README.md for examples and agent structure."
 echo ""
 echo "To build new agents, use Claude Code skills:"
 echo "  • /building-agents - Build a new agent"
