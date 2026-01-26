@@ -32,10 +32,14 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Use python3 if available, otherwise python
-PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
+# Prefer active virtualenv Python if present
+if [ -n "$VIRTUAL_ENV" ]; then
     PYTHON_CMD="python"
+else
+    PYTHON_CMD="python3"
+    if ! command -v python3 &> /dev/null; then
+        PYTHON_CMD="python"
+    fi
 fi
 
 # Check Python version
