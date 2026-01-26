@@ -61,20 +61,23 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
 ## Quick Start
-## ☁️ Cloud Development
+
+### ☁️ Cloud Development
 Don't want to setup locally? Use cloud development environments:
 
-### GitHub Codespaces (Recommended)
+#### GitHub Codespaces (Recommended)
 Click the green "Code" button → "Codespaces" → Create new codespace. Pre-configured with Python 3.11, Node.js, and all dependencies.
 
-### Gitpod
+#### Gitpod
 Visit `https://gitpod.io/#https://github.com/adenhq/hive` for one-click development environment.
 
-### Other Options
+#### Other Options
 - **GitHub.dev**: Press `.` (dot) while viewing this repo
 - **Replit**: Import repository for quick testing
 
 [Full Cloud Development Guide](./docs/CLOUD_DEVELOPMENT.md)
+
+---
 
 ### Prerequisites
 
