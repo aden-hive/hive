@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - N/A
 
 ### Fixed
-- N/A
+- Fixed crash in `LiteLLMProvider.complete_with_tools()` when tool execution raises exceptions. Tool failures are now gracefully handled and returned as structured error results, allowing the LLM to retry or use alternative tools instead of crashing the entire agent session.
 
 ### Security
 - N/A

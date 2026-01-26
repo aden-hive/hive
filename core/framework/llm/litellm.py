@@ -8,14 +8,18 @@ See: https://docs.litellm.ai/docs/providers
 """
 
 import json
+import logging
+from collections.abc import Callable
 from typing import Any
 
 try:
-    import litellm
+    import litellm  # type: ignore[import-not-found]
 except ImportError:
     litellm = None
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+
+logger = logging.getLogger(__name__)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -154,12 +158,12 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """Run a tool-use loop until the LLM produces a final response."""
         # Prepare messages with system prompt
-        current_messages = []
+        current_messages: list[dict[str, Any]] = []
         if system:
             current_messages.append({"role": "system", "content": system})
         current_messages.extend(messages)
@@ -239,7 +243,48 @@ class LiteLLMProvider(LLMProvider):
                     input=args,
                 )
 
-                result = tool_executor(tool_use)
+                # Execute the tool safely. Tool failures should not crash the LLM loop.
+                try:
+                    result = tool_executor(tool_use)
+                except Exception as e:
+                    logger.error(
+                        "Tool execution failed: %s (%s): %s",
+                        tool_use.name,
+                        type(e).__name__,
+                        str(e),
+                    )
+                    result = ToolResult(
+                        tool_use_id=tool_use.id,
+                        content=json.dumps(
+                            {
+                                "tool_name": tool_use.name,
+                                "tool_use_id": tool_use.id,
+                                "error_type": type(e).__name__,
+                                "error_message": str(e),
+                                "status": "failed",
+                            }
+                        ),
+                        is_error=True,
+                    )
+
+                # Normalize unexpected return types from custom executors.
+                if not isinstance(result, ToolResult):
+                    try:
+                        content = (
+                            result
+                            if isinstance(result, str)
+                            else json.dumps(result)
+                        )
+                    except Exception:
+                        content = str(result)
+                    result = ToolResult(
+                        tool_use_id=tool_use.id,
+                        content=content,
+                        is_error=False,
+                    )
+
+                if not result.tool_use_id:
+                    result.tool_use_id = tool_use.id
 
                 # Add tool result message
                 current_messages.append({

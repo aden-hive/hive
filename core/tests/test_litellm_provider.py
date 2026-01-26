@@ -10,6 +10,7 @@ For live tests (requires API keys):
 """
 
 import os
+import json
 from unittest.mock import patch, MagicMock
 
 from framework.llm.litellm import LiteLLMProvider
@@ -209,6 +210,70 @@ class TestLiteLLMProviderToolUse:
         assert result.input_tokens == 50  # 20 + 30
         assert result.output_tokens == 25  # 15 + 10
         assert mock_completion.call_count == 2
+
+    @patch("litellm.completion")
+    def test_complete_with_tools_tool_exception_is_captured(self, mock_completion):
+        """Tool exceptions should not crash the loop; they should be returned as tool errors."""
+        # First response: tool call
+        tool_call_response = MagicMock()
+        tool_call_response.choices = [MagicMock()]
+        tool_call_response.choices[0].message.content = None
+        tool_call_response.choices[0].message.tool_calls = [MagicMock()]
+        tool_call_response.choices[0].message.tool_calls[0].id = "call_123"
+        tool_call_response.choices[0].message.tool_calls[0].function.name = "explode"
+        tool_call_response.choices[0].message.tool_calls[0].function.arguments = '{"x": 1}'
+        tool_call_response.choices[0].finish_reason = "tool_calls"
+        tool_call_response.model = "gpt-4o-mini"
+        tool_call_response.usage.prompt_tokens = 10
+        tool_call_response.usage.completion_tokens = 5
+
+        # Second response: final answer
+        final_response = MagicMock()
+        final_response.choices = [MagicMock()]
+        final_response.choices[0].message.content = "I saw the tool fail; here is my fallback answer."
+        final_response.choices[0].message.tool_calls = None
+        final_response.choices[0].finish_reason = "stop"
+        final_response.model = "gpt-4o-mini"
+        final_response.usage.prompt_tokens = 20
+        final_response.usage.completion_tokens = 10
+
+        mock_completion.side_effect = [tool_call_response, final_response]
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+
+        tools = [
+            Tool(
+                name="explode",
+                description="Raises an exception",
+                parameters={"properties": {"x": {"type": "integer"}}, "required": ["x"]},
+            )
+        ]
+
+        def tool_executor(_: ToolUse) -> ToolResult:
+            raise ValueError("boom")
+
+        result = provider.complete_with_tools(
+            messages=[{"role": "user", "content": "Call the explode tool"}],
+            system="You are a helpful assistant.",
+            tools=tools,
+            tool_executor=tool_executor,
+        )
+
+        assert result.content == "I saw the tool fail; here is my fallback answer."
+        assert mock_completion.call_count == 2
+
+        # Ensure the second LLM call included a tool error message rather than crashing.
+        second_call_kwargs = mock_completion.call_args_list[1][1]
+        second_messages = second_call_kwargs["messages"]
+        tool_msg = next(m for m in reversed(second_messages) if m.get("role") == "tool")
+        assert tool_msg["tool_call_id"] == "call_123"
+
+        payload = json.loads(tool_msg["content"])
+        assert payload["tool_name"] == "explode"
+        assert payload["tool_use_id"] == "call_123"
+        assert payload["error_type"] == "ValueError"
+        assert payload["error_message"] == "boom"
+        assert payload["status"] == "failed"
 
 
 class TestToolConversion:
