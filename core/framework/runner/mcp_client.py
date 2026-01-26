@@ -436,6 +436,9 @@ class MCPClient:
                     )
                     cleanup_future.result(timeout=5)  # Wait for cleanup with timeout
                     cleanup_attempted = True
+                except TimeoutError:
+                    # Cleanup took too long - may indicate stuck resources
+                    logger.warning("Async cleanup timed out after 5 seconds")
                 except Exception as e:
                     # This can happen if loop stopped between is_running() check and 
                     # run_coroutine_threadsafe(), or if cleanup itself failed
