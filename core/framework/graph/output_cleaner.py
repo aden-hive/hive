@@ -252,9 +252,13 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     f"🧹 Cleaning output from '{source_node_id}' using {self.config.fast_model}"
                 )
 
+            system_msg = (
+                "You clean malformed agent outputs. "
+                "Return only valid JSON matching the schema."
+            )
             response = self.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                system="You clean malformed agent outputs. Return only valid JSON matching the schema.",
+                system=system_msg,
                 max_tokens=2048,  # Sufficient for cleaning most outputs
             )
 
@@ -319,7 +323,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
                 line = f'  "{key}": {type_hint}'
                 if description:
-                    line += f'  // {description}'
+                    line += f"  // {description}"
                 if required:
                     line += " (required)"
                 lines.append(line + ",")
