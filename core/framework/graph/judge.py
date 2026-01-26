@@ -8,7 +8,7 @@ The HybridJudge evaluates step execution results using:
 Escalation path: rules → LLM → human
 """
 
-from typing import Any, Callable
+from typing import Any
 from dataclasses import dataclass, field
 
 from framework.graph.plan import (
@@ -18,7 +18,7 @@ from framework.graph.plan import (
     EvaluationRule,
 )
 from framework.graph.goal import Goal
-from framework.graph.code_sandbox import safe_eval, SandboxResult
+from framework.graph.code_sandbox import safe_eval
 from framework.llm.provider import LLMProvider
 
 

@@ -16,7 +16,7 @@ This keeps planning external while execution/evaluation is internal.
 """
 
 from typing import Any, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 from framework.runtime.core import Runtime
@@ -33,13 +33,13 @@ from framework.graph.plan import (
     ApprovalResult,
     ApprovalDecision,
 )
-
-# Type alias for approval callback
-ApprovalCallback = Callable[[ApprovalRequest], ApprovalResult]
 from framework.graph.judge import HybridJudge, create_default_judge
 from framework.graph.worker_node import WorkerNode, StepExecutionResult
 from framework.graph.code_sandbox import CodeSandbox
 from framework.llm.provider import LLMProvider, Tool
+
+# Type alias for approval callback
+ApprovalCallback = Callable[[ApprovalRequest], ApprovalResult]
 
 
 @dataclass
@@ -140,7 +140,7 @@ class FlexibleGraphExecutor:
         context.update(plan.context)  # Merge plan's accumulated context
 
         # Start run
-        run_id = self.runtime.start_run(
+        _run_id = self.runtime.start_run(
             goal_id=goal.id,
             goal_description=goal.description,
             input_data={"plan_id": plan.id, "revision": plan.revision},

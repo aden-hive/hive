@@ -24,8 +24,8 @@ Fixes #(issue number)
 
 Describe the tests you ran to verify your changes:
 
-- [ ] Unit tests pass (`npm run test`)
-- [ ] Lint passes (`npm run lint`)
+- [ ] Unit tests pass (`cd core && pytest tests/`)
+- [ ] Lint passes (`cd core && ruff check .`)
 - [ ] Manual testing performed
 
 ## Checklist

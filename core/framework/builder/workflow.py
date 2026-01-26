@@ -13,16 +13,14 @@ Each step requires validation and human approval before proceeding.
 You cannot skip steps or bypass validation.
 """
 
-import json
 from enum import Enum
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Callable
-from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
-from framework.graph.goal import Goal, SuccessCriterion, Constraint
+from framework.graph.goal import Goal
 from framework.graph.node import NodeSpec
 from framework.graph.edge import EdgeSpec, EdgeCondition, GraphSpec
 
@@ -649,7 +647,7 @@ class GraphBuilder:
 
         if self.session.goal:
             goal_json = self.session.goal.model_dump_json(indent=4)
-            lines.append(f'GOAL = Goal.model_validate_json(\'\'\'')
+            lines.append('GOAL = Goal.model_validate_json(\'\'\'')
             lines.append(goal_json)
             lines.append("''')")
         else:
@@ -664,7 +662,7 @@ class GraphBuilder:
 
         for node in self.session.nodes:
             node_json = node.model_dump_json(indent=4)
-            lines.append(f'    NodeSpec.model_validate_json(\'\'\'')
+            lines.append('    NodeSpec.model_validate_json(\'\'\'')
             lines.append(node_json)
             lines.append("    '''),")
 
@@ -678,7 +676,7 @@ class GraphBuilder:
 
         for edge in self.session.edges:
             edge_json = edge.model_dump_json(indent=4)
-            lines.append(f'    EdgeSpec.model_validate_json(\'\'\'')
+            lines.append('    EdgeSpec.model_validate_json(\'\'\'')
             lines.append(edge_json)
             lines.append("    '''),")
 
@@ -690,7 +688,7 @@ class GraphBuilder:
         ])
 
         graph_json = graph.model_dump_json(indent=4)
-        lines.append(f'GRAPH = GraphSpec.model_validate_json(\'\'\'')
+        lines.append('GRAPH = GraphSpec.model_validate_json(\'\'\'')
         lines.append(graph_json)
         lines.append("''')")
 
