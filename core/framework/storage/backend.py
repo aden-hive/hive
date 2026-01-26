@@ -52,13 +52,13 @@ class FileStorage:
         """Save a run to storage."""
         # Save full run using Pydantic's model_dump_json
         run_path = self.base_path / "runs" / f"{run.id}.json"
-        with open(run_path, "w") as f:
+        with open(run_path, "w", encoding="utf-8") as f:
             f.write(run.model_dump_json(indent=2))
 
         # Save summary
         summary = RunSummary.from_run(run)
         summary_path = self.base_path / "summaries" / f"{run.id}.json"
-        with open(summary_path, "w") as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             f.write(summary.model_dump_json(indent=2))
 
         # Update indexes
@@ -72,7 +72,7 @@ class FileStorage:
         run_path = self.base_path / "runs" / f"{run_id}.json"
         if not run_path.exists():
             return None
-        with open(run_path) as f:
+        with open(run_path, "r", encoding="utf-8") as f:
             return Run.model_validate_json(f.read())
 
     def load_summary(self, run_id: str) -> RunSummary | None:
@@ -85,7 +85,7 @@ class FileStorage:
                 return RunSummary.from_run(run)
             return None
 
-        with open(summary_path) as f:
+        with open(summary_path, "r", encoding="utf-8") as f:
             return RunSummary.model_validate_json(f.read())
 
     def delete_run(self, run_id: str) -> bool:
