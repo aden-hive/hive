@@ -173,8 +173,12 @@ class FileStorage:
     # === INDEX OPERATIONS ===
 
     def _get_index(self, index_type: str, key: str) -> list[str]:
-        """Get values from an index."""
+        """Get values from an index. Validates key for security."""
         self._validate_key(key)  # Prevent path traversal
+        return self._get_index_unsafe(index_type, key)
+
+    def _get_index_unsafe(self, index_type: str, key: str) -> list[str]:
+        """Internal method to get index without validation. Use only after _validate_key()."""
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
         if not index_path.exists():
             return []
@@ -183,9 +187,10 @@ class FileStorage:
 
     def _add_to_index(self, index_type: str, key: str, value: str) -> None:
         """Add a value to an index."""
-        self._validate_key(key)  # Prevent path traversal
+        self._validate_key(key)  # Prevent path traversal (once)
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
-        values = self._get_index(index_type, key)  # Already validated in _get_index
+        # Use unsafe method since we just validated above (avoids double validation)
+        values = self._get_index_unsafe(index_type, key)
         if value not in values:
             values.append(value)
             with open(index_path, "w") as f:
@@ -193,9 +198,10 @@ class FileStorage:
 
     def _remove_from_index(self, index_type: str, key: str, value: str) -> None:
         """Remove a value from an index."""
-        self._validate_key(key)  # Prevent path traversal
+        self._validate_key(key)  # Prevent path traversal (once)
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
-        values = self._get_index(index_type, key)  # Already validated in _get_index
+        # Use unsafe method since we just validated above (avoids double validation)
+        values = self._get_index_unsafe(index_type, key)
         if value in values:
             values.remove(value)
             with open(index_path, "w") as f:
