@@ -2398,20 +2398,41 @@ def generate_constraint_tests(
 - category: string (optional, default: "general")
 - check: string (optional, how to validate: "llm_judge", expression, or function name)"""],
     agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    use_llm: Annotated[bool, "Use LLM for test generation (default: False, returns guidelines instead)"] = False,
 ) -> str:
     """
     Get constraint test guidelines for a goal.
 
-    Returns formatted guidelines and goal data. The calling LLM should use these
-    to write tests directly using the Write tool.
+    Args:
+        goal_id: ID of the goal to generate tests for
+        goal_json: JSON string of the Goal object
+        agent_path: Path to agent export folder (e.g., 'exports/my_agent')
+        use_llm: Optional parameter to enable LLM-based test generation.
+                 When False (default), returns test guidelines and templates.
+                 When True, would use LLM to generate tests (requires valid API key).
+                 Default False ensures the tool works without an Anthropic API key.
 
-    NOTE: This tool no longer generates tests via LLM. Instead, it returns
+    Returns:
+        JSON string with test guidelines, templates, and agent context.
+        If use_llm=False: Returns templates for calling agent to write tests directly.
+        If use_llm=True: Would generate tests via LLM (future capability).
+
+    NOTE: By default, this tool no longer requires an LLM provider. It returns
     guidelines and templates for the calling agent (Claude) to write tests directly.
+    This makes the MCP server provider-agnostic and eliminates dependency on API keys.
     """
     try:
         goal = Goal.model_validate_json(goal_json)
     except Exception as e:
         return json.dumps({"error": f"Invalid goal JSON: {e}"})
+
+    # If use_llm is requested but not available, return error
+    if use_llm:
+        return json.dumps({
+            "message": "LLM-based test generation not yet implemented",
+            "note": "Currently, constraint tests are generated as guidelines for the calling agent to write directly.",
+            "recommendation": "Use generate_constraint_tests(use_llm=False) to get test guidelines instead."
+        })
 
     # Derive agent_path from session if not provided
     if not agent_path and _session:
@@ -2433,7 +2454,7 @@ def generate_constraint_tests(
         agent_module=agent_module,
     )
 
-    # Return guidelines + data for Claude to write tests directly
+    # Return guidelines + data for Claude to write tests directly (no LLM required)
     return json.dumps({
         "goal_id": goal_id,
         "agent_path": agent_path,
@@ -2474,20 +2495,43 @@ def generate_success_tests(
     node_names: Annotated[str, "Comma-separated list of agent node names"] = "",
     tool_names: Annotated[str, "Comma-separated list of available tool names"] = "",
     agent_path: Annotated[str, "Path to agent export folder (e.g., 'exports/my_agent')"] = "",
+    use_llm: Annotated[bool, "Use LLM for test generation (default: False, returns guidelines instead)"] = False,
 ) -> str:
     """
     Get success criteria test guidelines for a goal.
 
-    Returns formatted guidelines and goal data. The calling LLM should use these
-    to write tests directly using the Write tool.
+    Args:
+        goal_id: ID of the goal to generate tests for
+        goal_json: JSON string of the Goal object
+        node_names: Comma-separated list of agent node names
+        tool_names: Comma-separated list of available tool names
+        agent_path: Path to agent export folder (e.g., 'exports/my_agent')
+        use_llm: Optional parameter to enable LLM-based test generation.
+                 When False (default), returns test guidelines and templates.
+                 When True, would use LLM to generate tests (requires valid API key).
+                 Default False ensures the tool works without an Anthropic API key.
 
-    NOTE: This tool no longer generates tests via LLM. Instead, it returns
+    Returns:
+        JSON string with test guidelines, templates, and agent context.
+        If use_llm=False: Returns templates for calling agent to write tests directly.
+        If use_llm=True: Would generate tests via LLM (future capability).
+
+    NOTE: By default, this tool no longer requires an LLM provider. It returns
     guidelines and templates for the calling agent (Claude) to write tests directly.
+    This makes the MCP server provider-agnostic and eliminates dependency on API keys.
     """
     try:
         goal = Goal.model_validate_json(goal_json)
     except Exception as e:
         return json.dumps({"error": f"Invalid goal JSON: {e}"})
+
+    # If use_llm is requested but not available, return error
+    if use_llm:
+        return json.dumps({
+            "message": "LLM-based test generation not yet implemented",
+            "note": "Currently, success criteria tests are generated as guidelines for the calling agent to write directly.",
+            "recommendation": "Use generate_success_tests(use_llm=False) to get test guidelines instead."
+        })
 
     # Derive agent_path from session if not provided
     if not agent_path and _session:
