@@ -166,6 +166,30 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     shell_parser.set_defaults(func=cmd_shell)
 
+    # health command
+    health_parser = subparsers.add_parser(
+        "health",
+        help="Check agent health and metrics",
+        description="Analyze run history and monitor agent health metrics.",
+    )
+    health_parser.add_argument(
+        "agent_name",
+        type=str,
+        help="Name of the agent to monitor",
+    )
+    health_parser.add_argument(
+        "--watch", "-w",
+        action="store_true",
+        help="Enable real-time monitoring mode",
+    )
+    health_parser.add_argument(
+        "--limit", "-l",
+        type=int,
+        default=50,
+        help="Number of past runs to analyze (default: 50)",
+    )
+    health_parser.set_defaults(func=cmd_health)
+
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
@@ -1023,4 +1047,37 @@ def _interactive_multi(agents_dir: Path) -> int:
         print()
 
     orchestrator.cleanup()
+    return 0
+
+def cmd_health(args: argparse.Namespace) -> int:
+    """Check agent health."""
+    from framework.runner.health import HealthMonitor
+    import os
+    
+    agent_name = args.agent_name
+    # Handle paths (e.g. exports/my_agent -> my_agent)
+    if os.path.sep in agent_name:
+        agent_name = os.path.basename(agent_name)
+        
+    monitor = HealthMonitor(agent_name)
+    
+    # Verify runs exist or warn
+    if not monitor.runs_dir.exists():
+        print(f"No run history found for agent '{agent_name}'")
+        print(f"Expected storage: {monitor.runs_dir}")
+        return 1
+
+    try:
+        if args.watch:
+            monitor.watch()
+        else:
+            runs = monitor.get_runs(limit=args.limit)
+            metrics = monitor.analyze_metrics(runs)
+            monitor.print_dashboard(metrics)
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"Error running health check: {e}")
+        return 1
+        
     return 0
