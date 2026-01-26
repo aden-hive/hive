@@ -202,6 +202,88 @@ class TestWriteToFileTool:
         assert created_file.exists()
         assert created_file.read_text() == ""
 
+    def test_concurrent_writes_no_corruption(self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Concurrent writes to the same file should not corrupt data (atomic writes)."""
+        import concurrent.futures
+        import threading
+
+        results = []
+        errors = []
+        num_writers = 10
+        content_per_writer = "X" * 100  # Each writer writes 100 characters
+
+        def writer_task(writer_id):
+            try:
+                result = write_to_file_fn(
+                    path="concurrent_test.txt",
+                    content=f"[{writer_id}]{content_per_writer}\n",
+                    **mock_workspace
+                )
+                results.append((writer_id, result))
+            except Exception as e:
+                errors.append((writer_id, str(e)))
+
+        # Run concurrent writes
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_writers) as executor:
+            futures = [executor.submit(writer_task, i) for i in range(num_writers)]
+            concurrent.futures.wait(futures)
+
+        # All writes should succeed
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+        failed_results = [(r[0], r[1]) for r in results if not r[1].get("success")]
+        assert all(r[1].get("success") for r in results), f"Not all writes succeeded. Failed: {failed_results}"
+
+        # File should exist and contain valid content (last write wins for overwrite mode)
+        created_file = tmp_path / "concurrent_test.txt"
+        assert created_file.exists()
+        content = created_file.read_text()
+        # Content should be a complete write, not corrupted/interleaved
+        assert content.startswith("[")
+        assert content.endswith("\n")
+        assert len(content) > 100  # Should have the full content
+
+    def test_concurrent_appends_no_interleaving(self, write_to_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Concurrent appends should not interleave content (file locking)."""
+        import concurrent.futures
+
+        # Create initial file
+        test_file = tmp_path / "append_concurrent.txt"
+        test_file.write_text("")
+
+        results = []
+        num_writers = 10
+        content_per_writer = "Y" * 50
+
+        def appender_task(writer_id):
+            result = write_to_file_fn(
+                path="append_concurrent.txt",
+                content=f"[{writer_id}]{content_per_writer}\n",
+                append=True,
+                **mock_workspace
+            )
+            results.append((writer_id, result))
+
+        # Run concurrent appends
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_writers) as executor:
+            futures = [executor.submit(appender_task, i) for i in range(num_writers)]
+            concurrent.futures.wait(futures)
+
+        # All appends should succeed
+        assert all(r[1].get("success") for r in results), "Not all appends succeeded"
+
+        # File should contain all writes without interleaving
+        content = test_file.read_text()
+        lines = content.strip().split("\n")
+        
+        # Should have exactly num_writers lines
+        assert len(lines) == num_writers, f"Expected {num_writers} lines, got {len(lines)}"
+        
+        # Each line should be complete (not interleaved)
+        for line in lines:
+            assert line.startswith("[")
+            assert "]" in line
+            assert "Y" * 50 in line
+
 
 class TestListDirTool:
     """Tests for list_dir tool."""
