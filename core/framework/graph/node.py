@@ -452,7 +452,6 @@ class LLMNode(NodeProtocol):
             logger.warning(f"      ⚠ Running Node '{ctx.node_spec.name}' in MOCK MODE (No LLM)")
             
             output = {}
-            mock_content = f"[MOCK] Response for {ctx.node_spec.name}"
             
             # Generate mock data for output keys
             if ctx.node_spec.output_keys:
@@ -460,10 +459,11 @@ class LLMNode(NodeProtocol):
                     output[key] = f"[MOCK] Value for {key}"
                     try:
                         ctx.memory.write(key, output[key])
-                    except Exception:
-                        pass # Ignore write errors in mock mode
+                    except Exception as e:
+                         # Log invalid writes but don't crash the mock run
+                        logger.warning(f"      ⚠ Ignored mock memory write error for '{key}': {e}")
             else:
-                output["result"] = mock_content
+                output["result"] = f"[MOCK] Response for {ctx.node_spec.name}"
             
             return NodeResult(
                 success=True,
