@@ -1,7 +1,9 @@
 """Agent Runner - loads and runs exported agents."""
 
 import json
+import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Any
@@ -20,6 +22,8 @@ from framework.runtime.execution_stream import EntryPointSpec
 
 if TYPE_CHECKING:
     from framework.runner.protocol import CapabilityResponse, AgentMessage
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -369,19 +373,59 @@ class AgentRunner:
 
         Args:
             config_path: Path to mcp_servers.json file
+
+        Note:
+            Errors during loading are logged as warnings, not raised,
+            to allow partial functionality when some servers fail.
         """
         try:
             with open(config_path) as f:
                 config = json.load(f)
+        except FileNotFoundError:
+            logger.debug("MCP servers config not found at %s, skipping", config_path)
+            return
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Invalid JSON in MCP servers config at %s: %s",
+                config_path,
+                str(e),
+            )
+            return
+        except OSError as e:
+            logger.warning(
+                "Failed to read MCP servers config from %s: %s",
+                config_path,
+                str(e),
+            )
+            return
 
-            servers = config.get("servers", [])
-            for server_config in servers:
-                try:
-                    self._tool_registry.register_mcp_server(server_config)
-                except Exception as e:
-                    print(f"Warning: Failed to register MCP server '{server_config.get('name', 'unknown')}': {e}")
-        except Exception as e:
-            print(f"Warning: Failed to load MCP servers config from {config_path}: {e}")
+        servers = config.get("servers", [])
+        if not servers:
+            logger.debug("No MCP servers defined in %s", config_path)
+            return
+
+        registered_count = 0
+        for server_config in servers:
+            server_name = server_config.get("name", "unknown")
+            try:
+                self._tool_registry.register_mcp_server(server_config)
+                registered_count += 1
+                logger.debug("Registered MCP server: %s", server_name)
+            except Exception as e:
+                logger.warning(
+                    "Failed to register MCP server '%s': %s",
+                    server_name,
+                    str(e),
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
+
+        if registered_count > 0:
+            logger.info(
+                "Registered %d/%d MCP servers from %s",
+                registered_count,
+                len(servers),
+                config_path,
+            )
 
     def set_approval_callback(self, callback: Callable) -> None:
         """
@@ -917,7 +961,6 @@ Respond with JSON only:
             )
 
             # Parse response
-            import re
             json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
@@ -934,9 +977,24 @@ Respond with JSON only:
                     reasoning=data.get("reasoning", ""),
                     estimated_steps=data.get("estimated_steps"),
                 )
-        except Exception:
-            # Fall back to keyword matching on error
-            pass
+            else:
+                logger.warning(
+                    "Capability check LLM response did not contain valid JSON for agent '%s'",
+                    info.name,
+                )
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "Failed to parse capability check response for agent '%s': %s",
+                info.name,
+                str(e),
+            )
+        except Exception as e:
+            logger.warning(
+                "Capability check failed for agent '%s', falling back to keyword matching: %s",
+                info.name,
+                str(e),
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
 
         return self._keyword_capability_check(request)
 
