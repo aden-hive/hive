@@ -198,10 +198,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Load and run agent
     try:
+        from framework.config import DEFAULT_ROUTING_MODEL
         runner = AgentRunner.load(
             args.agent_path,
             mock_mode=args.mock,
-            model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+            model=getattr(args, "model", DEFAULT_ROUTING_MODEL),
         )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)

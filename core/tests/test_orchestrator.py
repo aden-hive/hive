@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from framework.llm.provider import LLMProvider
 from framework.llm.litellm import LiteLLMProvider
 from framework.runner.orchestrator import AgentOrchestrator
+from framework.config import DEFAULT_ROUTING_MODEL
 
 
 class TestOrchestratorLLMInitialization:
@@ -20,7 +21,7 @@ class TestOrchestratorLLMInitialization:
         with patch.object(LiteLLMProvider, '__init__', return_value=None) as mock_init:
             orchestrator = AgentOrchestrator()
 
-            mock_init.assert_called_once_with(model="claude-haiku-4-5-20251001")
+            mock_init.assert_called_once_with(model=DEFAULT_ROUTING_MODEL)
             assert orchestrator._llm is not None
 
     def test_uses_custom_model_parameter(self):
