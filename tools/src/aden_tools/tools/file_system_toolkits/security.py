@@ -15,13 +15,19 @@ def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str
     # Resolve absolute path
     if os.path.isabs(path):
         # Treat absolute paths as relative to the session root if they start with /
-        rel_path = path.lstrip(os.sep)
+        # FIX: Strip both native separator AND forward slash to handle Unix-style paths on Windows
+        rel_path = path.lstrip(os.sep + '/')
         final_path = os.path.abspath(os.path.join(session_dir, rel_path))
     else:
         final_path = os.path.abspath(os.path.join(session_dir, path))
     
     # Verify path is within session_dir
-    common_prefix = os.path.commonpath([final_path, session_dir])
+    try:
+        common_prefix = os.path.commonpath([final_path, session_dir])
+    except ValueError:
+        # Fails on Windows if paths are on different drives
+        raise ValueError(f"Access denied: Path '{path}' is outside the session sandbox.")
+
     if common_prefix != session_dir:
         raise ValueError(f"Access denied: Path '{path}' is outside the session sandbox.")
         
