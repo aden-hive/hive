@@ -116,7 +116,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
         for op, comparator in zip(node.ops, node.comparators):
             op_func = SAFE_OPERATORS.get(type(op))
             if op_func is None:
-                 raise ValueError(f"Operator {type(op).__name__} is not allowed")
+                raise ValueError(f"Operator {type(op).__name__} is not allowed")
             right = self.visit(comparator)
             if not op_func(left, right):
                 return False
@@ -154,9 +154,9 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         # value.attr
-        # STIRCT CHECK: No access to private attributes (starting with _)
+        # STRICT CHECK: No access to private attributes (starting with _)
         if node.attr.startswith("_"):
-             raise ValueError(f"Access to private attribute '{node.attr}' is not allowed")
+            raise ValueError(f"Access to private attribute '{node.attr}' is not allowed")
         
         val = self.visit(node.value)
         
