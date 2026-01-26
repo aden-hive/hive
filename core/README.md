@@ -141,8 +141,8 @@ python -m framework test-run <agent_path> --goal <goal_id> --parallel 4
 # Debug failed tests
 python -m framework test-debug <agent_path> <test_name>
 
-# List tests for a goal
-python -m framework test-list <goal_id>
+# List tests for an agent (optionally filter by type)
+python -m framework test-list <agent_path> [--type constraint|success|edge_case|all]
 ```
 
 For detailed testing workflows, see the [testing-agent skill](.claude/skills/testing-agent/SKILL.md).
