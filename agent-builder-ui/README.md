@@ -11,9 +11,9 @@ A visual drag-and-drop interface for building AI agents without code. Design com
 
 ## Demo
 
-https://github.com/user-attachments/assets/demo-video
+[![Demo Video](https://img.youtube.com/vi/DxSHngClQUA/maxresdefault.jpg)](https://www.youtube.com/watch?v=DxSHngClQUA)
 
-> **Note:** If the video doesn't play above, [download it here](./docs/demo.mp4)
+▶️ **[Watch the full demo on YouTube](https://www.youtube.com/watch?v=DxSHngClQUA)**
 
 ---
 
