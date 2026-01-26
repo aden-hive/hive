@@ -7,6 +7,8 @@ Respect robots.txt by default for ethical scraping.
 """
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import Any, List
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
@@ -60,6 +62,55 @@ def _get_robots_parser(base_url: str, timeout: float = 10.0) -> RobotFileParser 
     except (httpx.TimeoutException, httpx.RequestError):
         # Can't fetch robots.txt - allow but don't cache (might be temporary)
         return None
+
+
+def _is_private_url(url: str) -> tuple[bool, str]:
+    """
+    Check if URL points to internal/private network resources (SSRF protection).
+    
+    Args:
+        url: Full URL to check
+        
+    Returns:
+        Tuple of (is_private: bool, reason: str)
+        - is_private=True means the URL should be blocked
+        - reason explains why it's blocked (or "Allowed" if not blocked)
+    """
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    
+    if not hostname:
+        return True, "Invalid URL: no hostname"
+    
+    # Resolve hostname to IP address(es)
+    try:
+        # Get all address families (IPv4 and IPv6)
+        addr_infos = socket.getaddrinfo(hostname, None, 0, socket.SOCK_STREAM)
+    except (socket.gaierror, OSError):
+        # If DNS resolution fails, we can't verify - be conservative and block
+        return True, f"DNS resolution failed for hostname: {hostname}"
+    
+    # Check all resolved IP addresses
+    for addr_info in addr_infos:
+        ip_str = addr_info[4][0]  # Extract IP address from tuple
+        
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            
+            # Block private, loopback, link-local, and reserved addresses
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+            ):
+                return True, f"Blocked: {hostname} resolves to internal IP {ip_str}"
+        except ValueError:
+            # Invalid IP address format - should not happen, but be safe
+            return True, f"Invalid IP address format: {ip_str}"
+    
+    # All resolved IPs are public - allow
+    return False, "Allowed"
 
 
 def _is_allowed_by_robots(url: str) -> tuple[bool, str]:
@@ -120,6 +171,15 @@ def register_tools(mcp: FastMCP) -> None:
             # Validate URL
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
+
+            # Check for SSRF vulnerability (block internal/private IPs)
+            is_private, reason = _is_private_url(url)
+            if is_private:
+                return {
+                    "error": f"SSRF protection: {reason}",
+                    "blocked_ssrf": True,
+                    "url": url,
+                }
 
             # Check robots.txt if enabled
             if respect_robots_txt:

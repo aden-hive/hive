@@ -50,3 +50,82 @@ class TestWebScrapeTool:
         """selector parameter is accepted."""
         result = web_scrape_fn(url="https://example.com", selector=".content")
         assert isinstance(result, dict)
+
+    def test_blocks_localhost(self, web_scrape_fn):
+        """Verify localhost and 127.0.0.1 are blocked."""
+        # Test localhost hostname
+        result = web_scrape_fn(url="http://localhost")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+        # Test 127.0.0.1 IP
+        result = web_scrape_fn(url="http://127.0.0.1")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+        # Test localhost with port
+        result = web_scrape_fn(url="http://localhost:8080")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+    def test_blocks_private_ip_ranges(self, web_scrape_fn):
+        """Verify private IP ranges (10.x, 172.16.x, 192.168.x) are blocked."""
+        # Test Class A private (10.0.0.0/8)
+        result = web_scrape_fn(url="http://10.0.0.1")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+        result = web_scrape_fn(url="http://10.255.255.255")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+        # Test Class B private (172.16.0.0/12)
+        result = web_scrape_fn(url="http://172.16.0.1")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+        result = web_scrape_fn(url="http://172.31.255.255")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+        # Test Class C private (192.168.0.0/16)
+        result = web_scrape_fn(url="http://192.168.0.1")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+        result = web_scrape_fn(url="http://192.168.255.255")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+    def test_blocks_metadata_endpoint(self, web_scrape_fn):
+        """Verify cloud metadata endpoint (169.254.169.254) is blocked."""
+        # AWS/GCP metadata endpoint
+        result = web_scrape_fn(url="http://169.254.169.254")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+        result = web_scrape_fn(url="http://169.254.169.254/latest/meta-data/")
+        assert "error" in result
+        assert "SSRF protection" in result["error"]
+        assert result.get("blocked_ssrf") is True
+
+    def test_allows_public_ip(self, web_scrape_fn):
+        """Verify legitimate public URLs still work."""
+        # Public domain should not be blocked by SSRF check
+        # (may fail for other reasons like network, but not SSRF)
+        result = web_scrape_fn(url="https://example.com")
+        # Should not have SSRF error
+        assert "blocked_ssrf" not in result or result.get("blocked_ssrf") is not True
+        # If there's an error, it should not be SSRF-related
+        if "error" in result:
+            assert "SSRF protection" not in result["error"]
