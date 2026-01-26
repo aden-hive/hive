@@ -4,6 +4,46 @@ import pytest
 from unittest.mock import patch
 
 
+class TestWorkspacesDirConfiguration:
+    """Tests for WORKSPACES_DIR configuration via environment variable."""
+
+    def test_default_workspaces_dir(self):
+        """WORKSPACES_DIR uses default when env var not set."""
+        # Clear env var if set
+        env_without_hive = {k: v for k, v in os.environ.items() if k != "HIVE_WORKSPACES_DIR"}
+        
+        with patch.dict(os.environ, env_without_hive, clear=True):
+            # Re-import to get fresh module with cleared env
+            import importlib
+            import aden_tools.tools.file_system_toolkits.security as security_module
+            importlib.reload(security_module)
+            
+            expected_default = os.path.expanduser("~/.hive/workdir/workspaces")
+            assert security_module.WORKSPACES_DIR == expected_default
+
+    def test_custom_workspaces_dir_from_env(self, tmp_path):
+        """WORKSPACES_DIR respects HIVE_WORKSPACES_DIR environment variable."""
+        custom_dir = str(tmp_path / "custom_workspaces")
+        
+        with patch.dict(os.environ, {"HIVE_WORKSPACES_DIR": custom_dir}):
+            # Re-import to get fresh module with new env var
+            import importlib
+            import aden_tools.tools.file_system_toolkits.security as security_module
+            importlib.reload(security_module)
+            
+            assert security_module.WORKSPACES_DIR == custom_dir
+
+    def test_empty_env_var_uses_empty_string(self, tmp_path):
+        """Empty HIVE_WORKSPACES_DIR env var is respected (uses empty string)."""
+        with patch.dict(os.environ, {"HIVE_WORKSPACES_DIR": ""}):
+            import importlib
+            import aden_tools.tools.file_system_toolkits.security as security_module
+            importlib.reload(security_module)
+            
+            # Empty string is valid - user explicitly set it
+            assert security_module.WORKSPACES_DIR == ""
+
+
 class TestGetSecurePath:
     """Tests for get_secure_path() function."""
 

@@ -1,7 +1,10 @@
 import os
 
-# Use user home directory for workspaces
-WORKSPACES_DIR = os.path.expanduser("~/.hive/workdir/workspaces")
+# Allow users to configure workspace directory via environment variable
+# Falls back to default ~/.hive/workdir/workspaces if not set
+# Useful for CI/CD pipelines and users with partitioned drives
+_DEFAULT_WORKSPACES_DIR = os.path.expanduser("~/.hive/workdir/workspaces")
+WORKSPACES_DIR = os.environ.get("HIVE_WORKSPACES_DIR", _DEFAULT_WORKSPACES_DIR)
 
 def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str) -> str:
     """Resolve and verify a path within a 3-layer sandbox (workspace/agent/session)."""
