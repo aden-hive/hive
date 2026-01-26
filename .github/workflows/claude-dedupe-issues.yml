@@ -15,13 +15,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Check for duplicate issues
         uses: anthropics/claude-code-action@v1
         with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_non_write_users: "*"
           prompt: |
             Analyze this new issue and check if it's a duplicate of existing issues in the repository.
 
@@ -40,10 +43,10 @@ jobs:
             - Issues describing the same root problem
 
             If you find duplicates:
-            - Add a comment on the new issue linking to the original issue(s)
-            - Apply a "duplicate" label to the new issue
-            - Be polite and explain why it's a duplicate
-            - Suggest the user follow the original issue for updates
+            - Add a comment on the new issue using EXACTLY this format (required for auto-close to work):
+              "Found a possible duplicate of #<issue_number>: <brief explanation of why it's a duplicate>"
+            - Do NOT apply any labels yet (the auto-close script will add the "duplicate" label after 12 hours if no objections)
+            - Suggest the user react with a thumbs-down if they disagree
 
             If it's NOT a duplicate:
             - Don't add any comments
@@ -58,6 +61,5 @@ jobs:
 
             Be thorough but efficient. Focus on finding true duplicates, not just similar issues.
 
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: |
             --allowedTools "mcp__github__get_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__create_issue_comment,mcp__github__update_issue,mcp__github__get_issue_comments"
