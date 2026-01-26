@@ -32,13 +32,14 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Use python3 if available, otherwise python
-if command -v py >/dev/null; then
-    PYTHON_CMD="py -3"
+# Select Python interpreter, preferring the active virtualenv.
+# Fallback to system Python, then Windows py launcher as a last resort.
+if command -v python >/dev/null; then
+    PYTHON_CMD="python"
 elif command -v python3 >/dev/null; then
     PYTHON_CMD="python3"
-elif command -v python >/dev/null; then
-    PYTHON_CMD="python"
+elif command -v py >/dev/null; then
+    PYTHON_CMD="py -3"
 else
     echo "Error: Python not found"
     exit 1
