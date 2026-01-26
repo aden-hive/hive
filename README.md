@@ -61,29 +61,34 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 <!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
+
+## Quick Start
+
+### Prerequisites
+
 > ⚠️ **Windows Users**
->
+> 
 > This project assumes a Unix-like shell and a working `python` executable on PATH.
->
+> 
 > On Windows:
 > - Use **Git Bash** or **WSL** (not Command Prompt or PowerShell).
 > - Install **Python 3.11+** from https://www.python.org/downloads/
 > - During install, check **“Add Python to PATH”**.
 > - Disable the Microsoft Store Python alias:
 >   Settings → Apps → Advanced app settings → App execution aliases → turn off `python.exe`.
->
-> The setup and quickstart scripts will fail in CMD/PowerShell.
+> 
+> The setup and quickstart scripts are not supported in CMD/PowerShell and are expected to fail.
 
-## Quick Start
 
-### Prerequisites
 
 - [Python 3.11+](https://www.python.org/downloads/) for agent development
 - [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
 
 ### Installation
 
-> ⚠️ Requires a Unix-like shell (macOS, Linux, Git Bash, or WSL)
+> ⚠️ Requires a Unix-like shell (macOS, Linux, Git Bash, or WSL).  
+  See the Windows Users note above for setup details.
+
 
 ```bash
 # Clone the repository
