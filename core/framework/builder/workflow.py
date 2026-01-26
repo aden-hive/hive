@@ -181,9 +181,11 @@ class GraphBuilder:
         if not goal.success_criteria:
             errors.append("Goal must have at least one success criterion")
         else:
-            for sc in goal.success_criteria:
-                if not sc.description:
-                    errors.append(f"Success criterion '{sc.id}' needs a description")
+            errors.extend(
+                f"Success criterion '{sc.id}' needs a description"
+                for sc in goal.success_criteria
+                if not sc.description
+            )
 
         if not goal.constraints:
             warnings.append("Consider adding constraints to define boundaries")
@@ -375,11 +377,11 @@ class GraphBuilder:
             errors.append("No nodes defined")
 
         # Check for entry node
-        entry_candidates = []
-        for node in self.session.nodes:
-            # A node is an entry candidate if no edges point to it
-            if not any(e.target == node.id for e in self.session.edges):
-                entry_candidates.append(node.id)
+        entry_candidates = [
+            node.id
+            for node in self.session.nodes
+            if not any(e.target == node.id for e in self.session.edges)
+        ]
 
         if len(entry_candidates) == 0 and self.session.nodes:
             errors.append("No entry node found (all nodes have incoming edges)")
@@ -387,10 +389,11 @@ class GraphBuilder:
             warnings.append(f"Multiple entry candidates: {entry_candidates}. Specify one.")
 
         # Check for terminal nodes
-        terminal_candidates = []
-        for node in self.session.nodes:
-            if not any(e.source == node.id for e in self.session.edges):
-                terminal_candidates.append(node.id)
+        terminal_candidates = [
+            node.id
+            for node in self.session.nodes
+            if not any(e.source == node.id for e in self.session.edges)
+        ]
 
         if not terminal_candidates and self.session.nodes:
             warnings.append("No terminal nodes found (all nodes have outgoing edges)")
@@ -423,7 +426,7 @@ class GraphBuilder:
 
             for edge in self.session.edges:
                 if edge.source == current:
-                    to_visit.append(edge.target)
+                    to_visit.append(edge.target)  # noqa: PERF401 (queue operation, not building final list)
 
             # Also follow router routes
             for node in self.session.nodes:
@@ -593,10 +596,11 @@ class GraphBuilder:
                 break
 
         # Determine terminal nodes
-        terminal_nodes = []
-        for node in self.session.nodes:
-            if not any(e.source == node.id for e in self.session.edges):
-                terminal_nodes.append(node.id)
+        terminal_nodes = [
+            node.id
+            for node in self.session.nodes
+            if not any(e.source == node.id for e in self.session.edges)
+        ]
 
         # Collect all memory keys
         memory_keys = set()
@@ -766,22 +770,24 @@ class GraphBuilder:
 
         if self.session.nodes:
             lines.append("Nodes:")
-            for node in self.session.nodes:
-                lines.append(f"  [{node.id}] {node.name} ({node.node_type})")
+            lines.extend(
+                f"  [{node.id}] {node.name} ({node.node_type})"
+                for node in self.session.nodes
+            )
             lines.append("")
 
         if self.session.edges:
             lines.append("Edges:")
-            for edge in self.session.edges:
-                lines.append(f"  {edge.source} --{edge.condition.value}--> {edge.target}")
+            lines.extend(
+                f"  {edge.source} --{edge.condition.value}--> {edge.target}"
+                for edge in self.session.edges
+            )
             lines.append("")
 
         if self._pending_validation:
             lines.append("Pending Validation:")
             lines.append(f"  Valid: {self._pending_validation.valid}")
-            for err in self._pending_validation.errors:
-                lines.append(f"  ERROR: {err}")
-            for warn in self._pending_validation.warnings:
-                lines.append(f"  WARN: {warn}")
+            lines.extend(f"  ERROR: {err}" for err in self._pending_validation.errors)
+            lines.extend(f"  WARN: {warn}" for warn in self._pending_validation.warnings)
 
         return "\n".join(lines)

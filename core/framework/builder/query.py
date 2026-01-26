@@ -61,14 +61,12 @@ class FailureAnalysis:
         if self.problems:
             lines.append("")
             lines.append("Reported Problems:")
-            for prob in self.problems:
-                lines.append(f"  - {prob}")
+            lines.extend(f"  - {prob}" for prob in self.problems)
 
         if self.suggestions:
             lines.append("")
             lines.append("Suggestions:")
-            for sug in self.suggestions:
-                lines.append(f"  → {sug}")
+            lines.extend(f"  → {sug}" for sug in self.suggestions)
 
         return "\n".join(lines)
 
@@ -434,9 +432,11 @@ class BuilderQuery:
                 )
 
         # Check for reported problems with suggestions
-        for problem in run.problems:
-            if problem.suggested_fix:
-                suggestions.append(problem.suggested_fix)
+        suggestions.extend(
+            problem.suggested_fix
+            for problem in run.problems
+            if problem.suggested_fix
+        )
 
         return suggestions
 
