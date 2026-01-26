@@ -204,7 +204,7 @@ async def test_executor_respects_default_max_retries(runtime):
     result = await executor.execute(graph, goal, {})
 
     # Should fail after default 3 total attempts (max_retries=N means N total attempts)
-    assert result.success == False
+    assert not result.success
     assert failing_node.attempt_count == 3  # 3 total attempts
     assert "failed after 3 attempts" in result.error
 

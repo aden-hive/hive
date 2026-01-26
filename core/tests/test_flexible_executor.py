@@ -421,8 +421,8 @@ class TestFlexibleExecutorIntegration:
 
     def test_executor_with_custom_judge(self, tmp_path):
         """Test executor with custom judge."""
-        from framework.runtime.core import Runtime
         from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.runtime.core import Runtime
 
         runtime = Runtime(storage_path=tmp_path / "runtime")
         custom_judge = HybridJudge()

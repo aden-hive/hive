@@ -58,7 +58,7 @@ class TestOrchestratorLLMInitialization:
 
     def test_model_attribute_stored_correctly(self):
         """Test that _model attribute is stored correctly."""
-        with patch.object(LiteLLMProvider, '__init__', return_value=None):
+        with patch.object(LiteLLMProvider, "__init__", return_value=None):
             orchestrator = AgentOrchestrator(model="gemini/gemini-1.5-flash")
 
             assert orchestrator._model == "gemini/gemini-1.5-flash"
