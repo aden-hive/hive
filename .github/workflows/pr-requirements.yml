@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+      issues: write
 
     steps:
       - name: Check PR has linked issue with assignee
@@ -74,9 +75,10 @@ jobs:
               return;
             }
 
-            // Check if any linked issue has an assignee
-            let issueWithAssignee = null;
-            let issuesWithoutAssignee = [];
+            // Check if any linked issue has the PR author as assignee
+            const prAuthor = pr.user.login;
+            let issueWithAuthorAssigned = null;
+            let issuesWithoutAuthor = [];
 
             for (const issueNum of issueNumbers) {
               try {
@@ -86,29 +88,38 @@ jobs:
                   issue_number: issueNum,
                 });
 
-                if (issue.assignees && issue.assignees.length > 0) {
-                  issueWithAssignee = issueNum;
-                  console.log(`  Issue #${issueNum} has assignee(s): ${issue.assignees.map(a => a.login).join(', ')}`);
+                const assigneeLogins = (issue.assignees || []).map(a => a.login);
+                if (assigneeLogins.includes(prAuthor)) {
+                  issueWithAuthorAssigned = issueNum;
+                  console.log(`  Issue #${issueNum} has PR author ${prAuthor} as assignee`);
                   break;
                 } else {
-                  issuesWithoutAssignee.push(issueNum);
-                  console.log(`  Issue #${issueNum} has no assignee`);
+                  issuesWithoutAuthor.push({
+                    number: issueNum,
+                    assignees: assigneeLogins
+                  });
+                  console.log(`  Issue #${issueNum} assignees: ${assigneeLogins.length > 0 ? assigneeLogins.join(', ') : 'none'} (PR author: ${prAuthor})`);
                 }
               } catch (error) {
                 console.log(`  Issue #${issueNum} not found or inaccessible`);
               }
             }
 
-            if (!issueWithAssignee) {
+            if (!issueWithAuthorAssigned) {
+              const issueList = issuesWithoutAuthor.map(i =>
+                `#${i.number} (assignees: ${i.assignees.length > 0 ? i.assignees.join(', ') : 'none'})`
+              ).join(', ');
+
               const message = `## PR Closed - Requirements Not Met
 
             This PR has been automatically closed because it doesn't meet the requirements.
 
-            **Found issues:** ${issuesWithoutAssignee.map(n => `#${n}`).join(', ')}
-            **Problem:** None of the linked issues have an assignee.
+            **PR Author:** @${prAuthor}
+            **Found issues:** ${issueList}
+            **Problem:** The PR author must be assigned to the linked issue.
 
             **To fix:**
-            1. Assign someone to one of the linked issues
+            1. Assign yourself (@${prAuthor}) to one of the linked issues
             2. Re-open this PR`;
 
               const comments = await github.rest.issues.listComments({
@@ -138,7 +149,7 @@ jobs:
                 state: 'closed',
               });
 
-              core.setFailed('Linked issue must have an assignee');
+              core.setFailed('PR author must be assigned to the linked issue');
             } else {
-              console.log(`PR requirements met! Issue #${issueWithAssignee} has an assignee.`);
+              console.log(`PR requirements met! Issue #${issueWithAuthorAssigned} has ${prAuthor} as assignee.`);
             }
