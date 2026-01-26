@@ -49,7 +49,16 @@ class FileStorage:
     # === RUN OPERATIONS ===
 
     def save_run(self, run: Run) -> None:
-        """Save a run to storage."""
+        """
+        Save a run to storage.
+        
+        This updates both the run file and the indexes.
+        """
+        self.save_run_file(run)
+        self.update_run_indexes(run)
+
+    def save_run_file(self, run: Run) -> None:
+        """Save just the run file and summary."""
         # Save full run using Pydantic's model_dump_json
         run_path = self.base_path / "runs" / f"{run.id}.json"
         with open(run_path, "w") as f:
@@ -61,7 +70,8 @@ class FileStorage:
         with open(summary_path, "w") as f:
             f.write(summary.model_dump_json(indent=2))
 
-        # Update indexes
+    def update_run_indexes(self, run: Run) -> None:
+        """Update indexes for a run."""
         self._add_to_index("by_goal", run.goal_id, run.id)
         self._add_to_index("by_status", run.status.value, run.id)
         for node_id in run.metrics.nodes_executed:
