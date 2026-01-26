@@ -39,6 +39,29 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## For New Contributors
+
+If you are new to this project and want to contribute, start here.
+
+### Who is this project for?
+Hive (Aden Agent Framework) is for developers who want to:
+- Learn about AI agent frameworks
+- Build projects using Python or JavaScript
+- Contribute to open-source AI infrastructure
+
+You do **not** need to be an expert to contribute.  
+Documentation improvements, small fixes, and beginner contributions are welcome.
+
+---
+
+## Contributor Quick Start
+
+### 1. Fork and clone the repository
+```bash
+git clone https://github.com/adenhq/hive.git
+cd hive
+
+
 ## What is Aden
 
 <p align="center">
