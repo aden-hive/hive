@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +19,8 @@ from framework.runner.protocol import (
     RegisteredAgent,
 )
 from framework.runner.runner import AgentRunner
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -476,7 +479,9 @@ Respond with JSON only:
                         confidence=0.8,
                         should_parallelize=data.get("parallel", False),
                     )
-        except Exception:
+        except Exception as e:
+            logger.warning(f"      ⚠ LLM routing failed: {e}")
+            # Fall through to fallback
             pass
 
         # Fallback: use highest confidence
