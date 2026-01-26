@@ -20,9 +20,14 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable
 from dataclasses import dataclass, field
 
+from click import prompt
+from flask import ctx, json
+from flask import json
+from framework.llm.litellm import LiteLLMProvider
 from pydantic import BaseModel, Field
 
 from framework.runtime.core import Runtime
+from typer import prompt
 from framework.llm.provider import LLMProvider, Tool
 
 logger = logging.getLogger(__name__)
@@ -811,40 +816,47 @@ Extract ONLY the clean values for the required fields. Ignore nested structures,
 
 Output as JSON with the exact field names requested."""
 
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}]
-            )
+from framework.llm.litellm import LiteLLMProvider
 
-            # Parse Haiku's response
-            response_text = message.content[0].text.strip()
+def format_input(ctx, prompt):
+    try:
+        llm = LiteLLMProvider(model="gpt-4o-mini")
+        message = llm.chat(prompt)
 
-            # Try to extract JSON using balanced brace matching
-            json_str = find_json_object(response_text)
-            if json_str:
-                extracted = json.loads(json_str)
-                # Format as key: value pairs
-                parts = [f"{k}: {v}" for k, v in extracted.items() if k in ctx.node_spec.input_keys]
-                if parts:
-                    return "\n".join(parts)
+        response_text = message.content[0].text.strip()
 
-        except Exception as e:
-            # Fallback to simple formatting on error
-            logger.warning(f"Haiku formatting failed: {e}, falling back to simple format")
+        json_str = find_json_object(response_text)
+        if json_str:
+            extracted = json.loads(json_str)
+            parts = [f"{k}: {v}" for k, v in extracted.items() if k in ctx.node_spec.input_keys]
+            if parts:
+                return "\n".join(parts)
 
-        # Fallback: simple key-value formatting
-        parts = []
-        for key in ctx.node_spec.input_keys:
-            value = ctx.memory.read(key)
-            if value is not None:
-                parts.append(f"{key}: {value}")
-        return "\n".join(parts) if parts else str(ctx.input_data)
+    except Exception as e:
+        logger.warning(f"Haiku formatting failed: {e}, falling back to simple format")
 
-    def _build_system_prompt(self, ctx: NodeContext) -> str:
+    parts = []
+    for key in ctx.node_spec.input_keys:
+        value = ctx.memory.read(key)
+        if value is not None:
+            parts.append(f"{key}: {value}")
+
+    return "\n".join(parts) if parts else str(ctx.input_data)
+
+
+# Fallback: simple key-value formatting
+def format_input(ctx):
+    parts = []
+    for key in ctx.node_spec.input_keys:
+        value = ctx.memory.read(key)
+        if value is not None:
+            parts.append(f"{key}: {value}")
+
+    return "\n".join(parts) if parts else str(ctx.input_data)
+
+
+
+def _build_system_prompt(self, ctx: NodeContext) -> str:
         """Build the system prompt."""
         parts = []
 
