@@ -298,7 +298,7 @@ class AgentRuntime:
         """
         return await self._outcome_aggregator.evaluate_goal_progress()
 
-    async def cancel_execution(
+async def cancel_execution(
         self,
         entry_point_id: str,
         execution_id: str,
@@ -317,7 +317,30 @@ class AgentRuntime:
         if stream is None:
             return False
         return await stream.cancel_execution(execution_id)
+async def global_reflect_and_retry(self, entry_point_id: str, error: Exception, context: dict):
+        """
+        Global reflection hook: when an execution stream fails, 
+        this method analyzes the error and injects a recovery strategy
+        back into the stream's shared state.
+        """
+        logger.warning(f"Initiating self-evolution for stream {entry_point_id} due to: {error}")
+        
+        # Analyze error type to suggest evolution
+        evolution_strategy = "General retry with error context"
+        if "rate_limit" in str(error).lower():
+            evolution_strategy = "Increase backoff and reduce token usage"
+        elif "context_length" in str(error).lower():
+            evolution_strategy = "Summarize historical context before next turn"
 
+        reflection_event = {
+            "type": "evolution_reflection",
+            "error": str(error),
+            "suggested_strategy": evolution_strategy,
+            "stream_id": entry_point_id
+        }
+        
+        # Push the reflection to the event bus so the agent 'hears' its own failure
+        await self._event_bus.publish(reflection_event)
     # === QUERY OPERATIONS ===
 
     def get_entry_points(self) -> list[EntryPointSpec]:
