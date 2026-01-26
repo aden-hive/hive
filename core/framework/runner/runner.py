@@ -432,37 +432,43 @@ class AgentRunner:
             # Single-entry-point mode: use legacy GraphExecutor
             self._setup_legacy_executor(tools, tool_executor)
 
-    def _get_api_key_env_var(self, model: str) -> str | None:
-        """Get the environment variable name for the API key based on model name."""
+    def _get_api_key_env_var(self, model: str) -> str:
+        """
+        Determines the API key environment variable for a given model.
+        Implements dynamic provider extraction to support all LiteLLM providers.
+        """
         model_lower = model.lower()
-
-        # Map model prefixes to API key environment variables
-        # LiteLLM uses these conventions
-        if model_lower.startswith("cerebras/"):
-            return "CEREBRAS_API_KEY"
-        elif model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
-            return "OPENAI_API_KEY"
-        elif model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
-            return "ANTHROPIC_API_KEY"
-        elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
-            return "GOOGLE_API_KEY"
-        elif model_lower.startswith("mistral/"):
-            return "MISTRAL_API_KEY"
-        elif model_lower.startswith("groq/"):
-            return "GROQ_API_KEY"
-        elif model_lower.startswith("ollama/"):
-            return None  # Ollama doesn't need an API key (local)
-        elif model_lower.startswith("azure/"):
-            return "AZURE_API_KEY"
-        elif model_lower.startswith("cohere/"):
-            return "COHERE_API_KEY"
-        elif model_lower.startswith("replicate/"):
-            return "REPLICATE_API_KEY"
-        elif model_lower.startswith("together/"):
-            return "TOGETHER_API_KEY"
+        
+        # 1. Extract Provider & 2. Use LiteLLM Convention
+        if "/" in model_lower:
+            # Extract 'anthropic' from 'anthropic/claude-3'
+            provider = model_lower.split("/")[0]
+            # Convention: ANTHROPIC_API_KEY
+            env_var_name = f"{provider.upper()}_API_KEY"
         else:
-            # Default: assume OpenAI-compatible
-            return "OPENAI_API_KEY"
+            # Fallback for legacy/shorthand models (e.g. 'gpt-4')
+            # You can add other shorthands here if needed (e.g. 'claude' -> ANTHROPIC)
+            env_var_name = "OPENAI_API_KEY"
+
+        # Handle special cases (e.g. Gemini uses GOOGLE_API_KEY, not GEMINI_API_KEY)
+        special_mappings = {
+            "GEMINI_API_KEY": "GOOGLE_API_KEY",
+            "OLLAMA_API_KEY": None  # Ollama is local, no key needed
+        }
+        env_var_name = special_mappings.get(env_var_name, env_var_name)
+
+        # 3. Validate Key Exists & 4. Provide Clear Error
+        if env_var_name:
+            import os
+            if env_var_name not in os.environ:
+                # This ensures the Agent fails fast with a clear message
+                # instead of crashing deep inside LiteLLM or using the wrong key.
+                raise ValueError(
+                    f"Missing API Key for model '{model}'. "
+                    f"Expected environment variable '{env_var_name}' to be set."
+                )
+
+        return env_var_name
 
     def _setup_legacy_executor(self, tools: list, tool_executor: Callable | None) -> None:
         """Set up legacy single-entry-point execution using GraphExecutor."""
