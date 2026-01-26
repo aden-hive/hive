@@ -8,6 +8,7 @@ Usage:
 """
 
 import json
+import logging
 import os
 import sys
 from datetime import datetime
@@ -178,8 +179,8 @@ def _load_active_session() -> BuildSession | None:
 
         if session_id:
             return _load_session(session_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning("Failed to load active session: %s", e)
 
     return None
 
