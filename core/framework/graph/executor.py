@@ -10,6 +10,7 @@ The executor:
 """
 
 import logging
+import time
 from typing import Any, Callable
 from dataclasses import dataclass, field
 
@@ -130,6 +131,7 @@ class GraphExecutor:
         goal: Goal,
         input_data: dict[str, Any] | None = None,
         session_state: dict[str, Any] | None = None,
+        timeout_seconds: int | None = None,
     ) -> ExecutionResult:
         """
         Execute a graph for a goal.
@@ -199,10 +201,21 @@ class GraphExecutor:
 
         self.logger.info(f"🚀 Starting execution: {goal.name}")
         self.logger.info(f"   Goal: {goal.description}")
+        self.logger.info(f"   Goal: {goal.description}")
         self.logger.info(f"   Entry node: {graph.entry_node}")
+
+        # Ensure states directory exists
+        states_dir = self.runtime.storage.base_path / "states"
+        states_dir.mkdir(parents=True, exist_ok=True)
+
+        start_time = time.time()
 
         try:
             while steps < graph.max_steps:
+                # Check global timeout
+                if timeout_seconds and (time.time() - start_time > timeout_seconds):
+                    raise TimeoutError(f"Graph execution timed out after {timeout_seconds} seconds")
+
                 steps += 1
 
                 # Get current node
@@ -291,6 +304,22 @@ class GraphExecutor:
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
                             self.logger.info(f"      {key}: {value_str}")
+
+                    # Persist state
+                    if self.runtime.current_run:
+                        try:
+                            import json
+                            run_id = self.runtime.current_run.id
+                            state_file = states_dir / f"{run_id}_step_{steps}.json"
+                            with open(state_file, "w") as f:
+                                json.dump({
+                                    "step": steps,
+                                    "node_id": current_node_id,
+                                    "memory": memory.read_all(),
+                                    "timestamp": time.time()
+                                }, f, indent=2, default=str)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to save state: {e}")
                 else:
                     self.logger.error(f"   ✗ Failed: {result.error}")
 

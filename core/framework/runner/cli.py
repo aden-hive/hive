@@ -4,7 +4,22 @@ import argparse
 import asyncio
 import json
 import sys
+import logging
 from pathlib import Path
+
+
+class JSONFormatter(logging.Formatter):
+    """Format logs as JSON objects."""
+    def format(self, record):
+        log_record = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+        }
+        if record.exc_info:
+            log_record["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_record)
 
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -50,6 +65,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "--verbose", "-v",
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
+    )
+    run_parser.add_argument(
+        "--json-logs",
+        action="store_true",
+        help="Output logs as JSON objects",
     )
     run_parser.set_defaults(func=cmd_run)
 
@@ -164,6 +184,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Disable human-in-the-loop approval (auto-approve all steps)",
     )
+    shell_parser.add_argument(
+        "--json-logs",
+        action="store_true",
+        help="Output logs as JSON objects",
+    )
     shell_parser.set_defaults(func=cmd_shell)
 
 
@@ -173,12 +198,19 @@ def cmd_run(args: argparse.Namespace) -> int:
     from framework.runner import AgentRunner
 
     # Set logging level (quiet by default for cleaner output)
+    # Set logging level (quiet by default for cleaner output)
+    log_level = logging.WARNING
     if args.quiet:
-        logging.basicConfig(level=logging.ERROR, format='%(message)s')
+        log_level = logging.ERROR
     elif getattr(args, 'verbose', False):
-        logging.basicConfig(level=logging.INFO, format='%(message)s')
+        log_level = logging.INFO
+
+    if args.json_logs:
+        handler = logging.StreamHandler()
+        handler.setFormatter(JSONFormatter())
+        logging.basicConfig(level=log_level, handlers=[handler], force=True)
     else:
-        logging.basicConfig(level=logging.WARNING, format='%(message)s')
+        logging.basicConfig(level=log_level, format='%(message)s', force=True)
 
     # Load input context
     context = {}
@@ -664,10 +696,17 @@ def cmd_shell(args: argparse.Namespace) -> int:
     from framework.runner import AgentRunner
 
     # Configure logging to show runtime visibility
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(message)s',  # Simple format for clean output
-    )
+    # Configure logging to show runtime visibility
+    if args.json_logs:
+        handler = logging.StreamHandler()
+        handler.setFormatter(JSONFormatter())
+        logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    else:
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(message)s',  # Simple format for clean output
+            force=True
+        )
 
     agents_dir = Path(args.agents_dir)
 

@@ -511,6 +511,7 @@ class AgentRunner:
         input_data: dict | None = None,
         session_state: dict | None = None,
         entry_point_id: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> ExecutionResult:
         """
         Execute the agent with given input data.
@@ -532,18 +533,21 @@ class AgentRunner:
             return await self._run_with_agent_runtime(
                 input_data=input_data or {},
                 entry_point_id=entry_point_id,
+                timeout_seconds=timeout_seconds,
             )
         else:
             # Legacy single-entry-point mode
             return await self._run_with_executor(
                 input_data=input_data or {},
                 session_state=session_state,
+                timeout_seconds=timeout_seconds,
             )
 
     async def _run_with_executor(
         self,
         input_data: dict,
         session_state: dict | None = None,
+        timeout_seconds: int | None = None,
     ) -> ExecutionResult:
         """Run using legacy GraphExecutor (single entry point)."""
         if self._executor is None:
@@ -554,12 +558,14 @@ class AgentRunner:
             goal=self.goal,
             input_data=input_data,
             session_state=session_state,
+            timeout_seconds=timeout_seconds,
         )
 
     async def _run_with_agent_runtime(
         self,
         input_data: dict,
         entry_point_id: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> ExecutionResult:
         """Run using AgentRuntime (multi-entry-point)."""
         if self._agent_runtime is None:
@@ -579,10 +585,27 @@ class AgentRunner:
                 entry_point_id = "default"
 
         # Trigger and wait for result
-        result = await self._agent_runtime.trigger_and_wait(
-            entry_point_id=entry_point_id,
-            input_data=input_data,
-        )
+        import asyncio
+        
+        try:
+            if timeout_seconds:
+                result = await asyncio.wait_for(
+                    self._agent_runtime.trigger_and_wait(
+                        entry_point_id=entry_point_id,
+                        input_data=input_data,
+                    ),
+                    timeout=timeout_seconds
+                )
+            else:
+                result = await self._agent_runtime.trigger_and_wait(
+                    entry_point_id=entry_point_id,
+                    input_data=input_data,
+                )
+        except asyncio.TimeoutError:
+            return ExecutionResult(
+                success=False,
+                error=f"Execution timed out after {timeout_seconds} seconds",
+            )
 
         # Return result or create error result
         if result is not None:
