@@ -33,9 +33,15 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
 fi
 
 # Use python3 if available, otherwise python
-PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
+if command -v py >/dev/null; then
+    PYTHON_CMD="py -3"
+elif command -v python3 >/dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python >/dev/null; then
     PYTHON_CMD="python"
+else
+    echo "Error: Python not found"
+    exit 1
 fi
 
 # Check Python version
