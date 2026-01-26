@@ -50,6 +50,156 @@ python -c "import aden_tools; print('✓ aden_tools OK')"
 python -c "import litellm; print('✓ litellm OK')"
 ```
 
+## Windows Setup
+
+Complete setup guide for Windows users (PowerShell/Command Prompt).
+
+### Prerequisites
+
+- **Python 3.11+**: Download from [python.org](https://python.org/downloads/) and install
+- **PowerShell** or **Command Prompt** (recommended over WSL for native Windows experience)
+- **Git**: For cloning repositories
+- Ensure Python and pip are added to your PATH during installation
+
+### Quick Setup (Windows)
+
+```powershell
+# Run the automated setup script
+.\scripts\setup-python.sh
+```
+
+If the script doesn't work, follow the manual steps below.
+
+### Manual Setup (Windows)
+
+#### 1. Create Virtual Environment
+
+```powershell
+# Create virtual environment
+python -m venv .venv
+
+# Activate virtual environment
+.venv\Scripts\activate
+```
+
+**Note:** If you get execution policy errors, run PowerShell as Administrator and execute:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+#### 2. Install Core Framework
+
+```powershell
+cd core
+pip install -e .
+```
+
+#### 3. Install Tools Package
+
+```powershell
+cd ..\tools
+pip install -e .
+```
+
+#### 4. Upgrade OpenAI Package
+
+```powershell
+# litellm requires openai >= 1.0.0
+pip install --upgrade "openai>=1.0.0"
+```
+
+#### 5. Verify Installation
+
+```powershell
+python -c "import framework; print('✓ framework OK')"
+python -c "import aden_tools; print('✓ aden_tools OK')"
+python -c "import litellm; print('✓ litellm OK')"
+```
+
+### Environment Variables (Windows)
+
+#### Temporary (Current Session)
+
+```powershell
+# In PowerShell
+$env:ANTHROPIC_API_KEY = "your-anthropic-key-here"
+$env:PYTHONPATH = "core;exports"
+```
+
+#### Permanent Setup
+
+1. **Via System Properties:**
+   - Right-click "This PC" → Properties → Advanced system settings
+   - Click "Environment Variables"
+   - Add new variables under "User variables"
+
+2. **Via PowerShell Profile:**
+   - Open PowerShell and run: `notepad $PROFILE`
+   - Add these lines:
+   ```powershell
+   $env:ANTHROPIC_API_KEY = "your-anthropic-key-here"
+   ```
+
+### Running Agents (Windows)
+
+All commands must be run from the project root (`hive/` directory):
+
+```powershell
+# Activate virtual environment first
+.venv\Scripts\activate
+
+# Set PYTHONPATH (add to your PowerShell profile for persistence)
+$env:PYTHONPATH = "core;exports"
+
+# Validate agent structure
+python -m support_ticket_agent validate
+
+# Show agent information
+python -m support_ticket_agent info
+
+# Run agent with input
+python -m support_ticket_agent run --input '{
+  "ticket_content": "My login is broken. Error 401.",
+  "customer_id": "CUST-123",
+  "ticket_id": "TKT-456"
+}'
+
+# Run in mock mode (no LLM calls)
+python -m support_ticket_agent run --mock --input '{...}'
+```
+
+### Common Windows Issues
+
+#### "execution of scripts is disabled"
+
+**Solution:** Run PowerShell as Administrator and execute:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+#### "python : The term 'python' is not recognized"
+
+**Solution:** Ensure Python is in your PATH. Reinstall Python and check "Add Python to PATH" during installation.
+
+#### Permission Errors
+
+**Solution:** Run Command Prompt/PowerShell as Administrator, or check antivirus exclusions for the hive directory.
+
+#### Path Length Limits
+
+**Solution:** Enable long paths in Windows:
+- Run `gpedit.msc` (Group Policy Editor)
+- Navigate to: Computer Configuration → Administrative Templates → System → Filesystem
+- Enable "Enable NTFS long paths"
+
+#### Virtual Environment Issues
+
+**Solution:** If `.venv\Scripts\activate` fails:
+```powershell
+# Try using the full path
+C:\path\to\hive\.venv\Scripts\activate.ps1
+```
+
 ## Requirements
 
 ### Python Version
