@@ -79,6 +79,17 @@ fi
 echo -e "${GREEN}  ✓ pip detected${NC}"
 echo ""
 
+# Check for uv
+if ! command -v uv &> /dev/null; then
+    echo -e "${RED}Error: uv is not installed${NC}"
+    echo "Please install uv from https://astral.sh/uv/"
+    exit 1
+fi
+
+UV_VERSION=$(uv --version)
+echo -e "${GREEN}  ✓ uv detected: $UV_VERSION${NC}"
+echo ""
+
 # ============================================================
 # Step 2: Install Python Packages
 # ============================================================
@@ -86,16 +97,12 @@ echo ""
 echo -e "${BLUE}Step 2: Installing Python packages...${NC}"
 echo ""
 
-# Upgrade pip, setuptools, and wheel
-echo "  Upgrading pip, setuptools, wheel..."
-$PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
-echo -e "${GREEN}  ✓ Core tools upgraded${NC}"
-
 # Install framework package from core/
 echo "  Installing framework package from core/..."
 cd "$SCRIPT_DIR/core"
+
 if [ -f "pyproject.toml" ]; then
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
+    uv sync > /dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✓ framework package installed${NC}"
     else
@@ -109,8 +116,9 @@ fi
 # Install aden_tools package from tools/
 echo "  Installing aden_tools package from tools/..."
 cd "$SCRIPT_DIR/tools"
+
 if [ -f "pyproject.toml" ]; then
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
+    uv sync > /dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✓ aden_tools package installed${NC}"
     else
@@ -122,27 +130,30 @@ else
     exit 1
 fi
 
-# Install MCP dependencies
+# Install MCP dependencies (in tools venv)
 echo "  Installing MCP dependencies..."
-$PYTHON_CMD -m pip install mcp fastmcp > /dev/null 2>&1
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+uv pip install --python "$TOOLS_PYTHON" mcp fastmcp > /dev/null 2>&1
 echo -e "${GREEN}  ✓ MCP dependencies installed${NC}"
 
-# Fix openai version compatibility
-OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
+# Fix openai version compatibility (in tools venv)
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+OPENAI_VERSION=$($TOOLS_PYTHON -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
 if [ "$OPENAI_VERSION" = "not_installed" ]; then
     echo "  Installing openai package..."
-    $PYTHON_CMD -m pip install "openai>=1.0.0" > /dev/null 2>&1
+    uv pip install --python "$TOOLS_PYTHON" "openai>=1.0.0" > /dev/null 2>&1
     echo -e "${GREEN}  ✓ openai installed${NC}"
 elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
     echo "  Upgrading openai to 1.x+ for litellm compatibility..."
-    $PYTHON_CMD -m pip install --upgrade "openai>=1.0.0" > /dev/null 2>&1
+    uv pip install --python "$TOOLS_PYTHON" --upgrade "openai>=1.0.0" > /dev/null 2>&1
     echo -e "${GREEN}  ✓ openai upgraded${NC}"
 else
     echo -e "${GREEN}  ✓ openai $OPENAI_VERSION is compatible${NC}"
 fi
 
-# Install click for CLI
-$PYTHON_CMD -m pip install click > /dev/null 2>&1
+# Install click for CLI (in tools venv)
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+uv pip install --python "$TOOLS_PYTHON" click > /dev/null 2>&1
 echo -e "${GREEN}  ✓ click installed${NC}"
 
 cd "$SCRIPT_DIR"
@@ -157,31 +168,35 @@ echo ""
 
 IMPORT_ERRORS=0
 
-# Test framework import
-if $PYTHON_CMD -c "import framework" > /dev/null 2>&1; then
+# Test imports using their respective venvs
+CORE_PYTHON="$SCRIPT_DIR/core/.venv/bin/python"
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+
+# Test framework import (from core venv)
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ framework imports OK${NC}"
 else
     echo -e "${RED}  ✗ framework import failed${NC}"
     IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
 fi
 
-# Test aden_tools import
-if $PYTHON_CMD -c "import aden_tools" > /dev/null 2>&1; then
+# Test aden_tools import (from tools venv)
+if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ aden_tools imports OK${NC}"
 else
     echo -e "${RED}  ✗ aden_tools import failed${NC}"
     IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
 fi
 
-# Test litellm import
-if $PYTHON_CMD -c "import litellm" > /dev/null 2>&1; then
+# Test litellm import (from tools venv)
+if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ litellm imports OK${NC}"
 else
     echo -e "${YELLOW}  ⚠ litellm import issues (may be OK)${NC}"
 fi
 
-# Test MCP server module
-if $PYTHON_CMD -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
+# Test MCP server module (from core venv)
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ MCP server module OK${NC}"
 else
     echo -e "${RED}  ✗ MCP server module failed${NC}"
@@ -197,10 +212,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Install Claude Code Skills
+# Step 4: Verify Claude Code Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Installing Claude Code skills...${NC}"
+echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
 echo ""
 
 # Check if .claude/skills exists in this repo
@@ -209,39 +224,16 @@ if [ ! -d "$SCRIPT_DIR/.claude/skills" ]; then
     exit 1
 fi
 
-# Create Claude skills directory if it doesn't exist
-if [ ! -d "$CLAUDE_SKILLS_DIR" ]; then
-    echo "  Creating Claude skills directory: $CLAUDE_SKILLS_DIR"
-    mkdir -p "$CLAUDE_SKILLS_DIR"
-fi
-
-# Function to install a skill
-install_skill() {
-    local skill_name=$1
-    local source_dir="$SCRIPT_DIR/.claude/skills/$skill_name"
-    local target_dir="$CLAUDE_SKILLS_DIR/$skill_name"
-
-    if [ ! -d "$source_dir" ]; then
-        echo -e "${RED}  ✗ Skill not found: $skill_name${NC}"
-        return 1
+# Verify all 5 agent-related skills exist locally
+SKILLS=("building-agents-core" "building-agents-construction" "building-agents-patterns" "testing-agent" "agent-workflow")
+for skill in "${SKILLS[@]}"; do
+    if [ -d "$SCRIPT_DIR/.claude/skills/$skill" ]; then
+        echo -e "${GREEN}  ✓ Found: $skill${NC}"
+    else
+        echo -e "${RED}  ✗ Not found: $skill${NC}"
+        exit 1
     fi
-
-    # Check if skill already exists
-    if [ -d "$target_dir" ]; then
-        rm -rf "$target_dir"
-    fi
-
-    # Copy the skill
-    cp -r "$source_dir" "$target_dir"
-    echo -e "${GREEN}  ✓ Installed: $skill_name${NC}"
-}
-
-# Install all 5 agent-related skills
-install_skill "building-agents-core"
-install_skill "building-agents-construction"
-install_skill "building-agents-patterns"
-install_skill "testing-agent"
-install_skill "agent-workflow"
+done
 
 echo ""
 
@@ -312,7 +304,7 @@ echo "  • framework (core agent runtime)"
 echo "  • aden_tools (tools and MCP servers)"
 echo "  • MCP dependencies (mcp, fastmcp)"
 echo ""
-echo "Installed Claude Code skills:"
+echo "Available Claude Code skills (in project directory):"
 echo "  • /building-agents-core        - Fundamental concepts"
 echo "  • /building-agents-construction - Step-by-step build guide"
 echo "  • /building-agents-patterns    - Best practices"
@@ -321,16 +313,16 @@ echo "  • /agent-workflow              - Complete workflow"
 echo ""
 echo "Usage:"
 echo "  1. Open Claude Code in this directory:"
-echo "     ${BLUE}cd $SCRIPT_DIR && claude${NC}"
+echo "     cd $SCRIPT_DIR && claude"
 echo ""
 echo "  2. Build a new agent:"
-echo "     ${BLUE}/building-agents-construction${NC}"
+echo "     /building-agents-construction"
 echo ""
 echo "  3. Test an existing agent:"
-echo "     ${BLUE}/testing-agent${NC}"
+echo "     /testing-agent"
 echo ""
 echo "  4. Or use the complete workflow:"
-echo "     ${BLUE}/agent-workflow${NC}"
+echo "     /agent-workflow"
 echo ""
 echo "MCP Tools available (when running from this directory):"
 echo "  • mcp__agent-builder__create_session"
@@ -340,6 +332,6 @@ echo "  • mcp__agent-builder__run_tests"
 echo "  • ... and more"
 echo ""
 echo "Documentation:"
-echo "  • Skills: $CLAUDE_SKILLS_DIR/"
+echo "  • Skills: $SCRIPT_DIR/.claude/skills/"
 echo "  • Examples: $SCRIPT_DIR/exports/"
 echo ""
