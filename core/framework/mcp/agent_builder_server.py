@@ -345,62 +345,25 @@ def set_goal(
         warnings.append("Consider adding constraints")
 
     # Validate required fields in criteria and constraints
-    for i, sc in enumerate(criteria_list):
-        if not isinstance(sc, dict):
-            errors.append(f"success_criteria[{i}] must be an object")
-        else:
-            if "id" not in sc:
-                errors.append(f"success_criteria[{i}] missing required field 'id'")
-            if "description" not in sc:
-                errors.append(f"success_criteria[{i}] missing required field 'description'")
-
-    for i, c in enumerate(constraint_list):
-        if not isinstance(c, dict):
-            errors.append(f"constraints[{i}] must be an object")
-        else:
-            if "id" not in c:
-                errors.append(f"constraints[{i}] missing required field 'id'")
-            if "description" not in c:
-                errors.append(f"constraints[{i}] missing required field 'description'")
-
-    # Return early if validation failed
-    if errors:
+    # Validate and Create Objects using Pydantic
+    try:
+        criteria = [SuccessCriterion(**sc) for sc in criteria_list]
+        constraint_objs = [Constraint(**c) for c in constraint_list]
+        
+        # Create Goal object (validates structure)
+        session.goal = Goal(
+            id=goal_id,
+            name=name,
+            description=description,
+            success_criteria=criteria,
+            constraints=constraint_objs,
+        )
+    except Exception as e:
         return json.dumps({
             "valid": False,
-            "errors": errors,
+            "errors": [f"Validation Error: {str(e)}"],
             "warnings": warnings,
         })
-
-    # Convert to proper objects (now safe - we validated required fields)
-    criteria = [
-        SuccessCriterion(
-            id=sc["id"],
-            description=sc["description"],
-            metric=sc.get("metric", ""),
-            target=sc.get("target", ""),
-            weight=sc.get("weight", 1.0),
-        )
-        for sc in criteria_list
-    ]
-
-    constraint_objs = [
-        Constraint(
-            id=c["id"],
-            description=c["description"],
-            constraint_type=c.get("constraint_type", "hard"),
-            category=c.get("category", "safety"),
-            check=c.get("check", ""),
-        )
-        for c in constraint_list
-    ]
-
-    session.goal = Goal(
-        id=goal_id,
-        name=name,
-        description=description,
-        success_criteria=criteria,
-        constraints=constraint_objs,
-    )
 
     _save_session(session)  # Auto-save
 
