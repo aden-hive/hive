@@ -242,7 +242,7 @@ claude> /testing-agent
 4. **Validate the Agent**
 
    ```bash
-   PYTHONPATH=core:exports python -m your_agent_name validate
+   PYTHONPATH=core:exports python -m support_ticket_agent validate
    ```
 
 5. **Test the Agent**
@@ -288,19 +288,19 @@ If you prefer to build agents manually:
 
 ```bash
 # Validate agent structure
-PYTHONPATH=core:exports python -m agent_name validate
+PYTHONPATH=core:exports python -m support_ticket_agent validate
 
 # Show agent information
-PYTHONPATH=core:exports python -m agent_name info
+PYTHONPATH=core:exports python -m support_ticket_agent info
 
 # Run agent with input
-PYTHONPATH=core:exports python -m agent_name run --input '{
+PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
   "ticket_content": "My login is broken",
   "customer_id": "CUST-123"
 }'
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=core:exports python -m agent_name run --mock --input '{...}'
+PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{"ticket_content":"My login is broken","customer_id":"CUST-123"}'
 ```
 
 ---
@@ -324,17 +324,17 @@ This generates and runs:
 
 ```bash
 # Run all tests for an agent
-PYTHONPATH=core:exports python -m agent_name test
+PYTHONPATH=core:exports python -m support_ticket_agent test
 
 # Run specific test type
-PYTHONPATH=core:exports python -m agent_name test --type constraint
-PYTHONPATH=core:exports python -m agent_name test --type success
+PYTHONPATH=core:exports python -m support_ticket_agent test --type constraint
+PYTHONPATH=core:exports python -m support_ticket_agent test --type success
 
 # Run with parallel execution
-PYTHONPATH=core:exports python -m agent_name test --parallel 4
+PYTHONPATH=core:exports python -m support_ticket_agent test --parallel 4
 
 # Fail fast (stop on first failure)
-PYTHONPATH=core:exports python -m agent_name test --fail-fast
+PYTHONPATH=core:exports python -m support_ticket_agent test --fail-fast
 ```
 
 ### Writing Custom Tests
@@ -499,77 +499,26 @@ chore(deps): update React to 18.2.0
 
 1. Create a feature branch from `main`
 2. Make your changes with clear commits
-3. Run tests locally: `npm run test`
-4. Run linting: `npm run lint`
-5. Push and create a PR
-6. Fill out the PR template
-7. Request review from CODEOWNERS
-8. Address feedback
-9. Squash and merge when approved
+3. Run basic checks locally:
+   - `python -m compileall core tools`
+   - (Optional) run project linters/tests if configured (e.g., ruff/black/pytest)
+4. Push and create a PR
+5. Fill out the PR template
+6. Request review from CODEOWNERS
+7. Address feedback
+8. Squash and merge when approved
 
 ---
 
 ## Debugging
 
-### Frontend Debugging
+### Debugging Agent Execution
 
-**React Developer Tools:**
+Use verbose output to inspect agent execution and tool calls:
 
-1. Install the [React DevTools browser extension](https://react.dev/learn/react-developer-tools)
-2. Open browser DevTools → React tab
-3. Inspect component tree, props, state, and hooks
-
-**VS Code Debugging:**
-
-1. Add Chrome debug configuration to `.vscode/launch.json`:
-
-```json
-{
-  "type": "chrome",
-  "request": "launch",
-  "name": "Debug Frontend",
-  "url": "http://localhost:3000",
-  "webRoot": "${workspaceFolder}/honeycomb/src"
-}
+```bash
+PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{"ticket_content":"My login is broken","customer_id":"CUST-123"}'
 ```
-
-2. Start the dev server: `npm run dev -w honeycomb`
-3. Press F5 in VS Code
-
-### Backend Debugging
-
-**VS Code Debugging:**
-
-1. Add Node debug configuration:
-
-```json
-{
-  "type": "node",
-  "request": "launch",
-  "name": "Debug Backend",
-  "runtimeExecutable": "npm",
-  "runtimeArgs": ["run", "dev"],
-  "cwd": "${workspaceFolder}/hive",
-  "console": "integratedTerminal"
-}
-```
-
-2. Set breakpoints in your code
-3. Press F5 to start debugging
-
-**Logging:**
-
-```typescript
-import { logger } from "../utils/logger";
-
-// Add debug logs
-logger.debug("Processing request", {
-  userId: req.user.id,
-  body: req.body,
-});
-```
-
----
 
 ## Common Tasks
 
@@ -678,20 +627,6 @@ export BRAVE_SEARCH_API_KEY="your-key-here"
 echo 'ANTHROPIC_API_KEY=your-key-here' >> .env
 ```
 
-### Debugging Agent Execution
-
-```python
-# Add debug logging to your agent
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
-# Run with verbose output
-PYTHONPATH=core:exports python -m agent_name run --input '{...}' --verbose
-
-# Use mock mode to test without LLM calls
-PYTHONPATH=core:exports python -m agent_name run --mock --input '{...}'
-```
-
 ---
 
 ## Troubleshooting
@@ -709,15 +644,6 @@ kill -9 <PID>
 # Or change ports in config.yaml and regenerate
 ```
 
-### Node Modules Issues
-
-```bash
-# Clean everything and reinstall
-npm run clean
-rm -rf node_modules package-lock.json
-npm install
-```
-
 ### Docker Issues
 
 ```bash
@@ -728,42 +654,16 @@ docker compose build --no-cache
 docker compose up
 ```
 
-### TypeScript Errors After Pull
-
-```bash
-# Rebuild TypeScript
-npm run build
-
-# Or restart TS server in VS Code
-# Cmd/Ctrl + Shift + P → "TypeScript: Restart TS Server"
-```
 
 ### Environment Variables Not Loading
 
-```bash
-# Regenerate from config.yaml
-npm run generate:env
-
-# Verify files exist
-cat .env
-cat honeycomb/.env
-cat hive/.env
-
-# Restart dev servers after changing env
-```
-
-### Tests Failing
+Confirm environment variables are available in your shell:
 
 ```bash
-# Run with verbose output
-npm run test -w honeycomb -- --reporter=verbose
-
-# Run single test file
-npm run test -w honeycomb -- src/components/Button.test.tsx
-
-# Clear test cache
-npm run test -w honeycomb -- --clearCache
+echo $ANTHROPIC_API_KEY
+echo $OPENAI_API_KEY
 ```
+If using a `.env` file locally, ensure it is loaded by your shell and not committed to git.
 
 ---
 
