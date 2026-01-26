@@ -344,3 +344,28 @@ When contributing agent packages:
 - **Issues:** https://github.com/adenhq/hive/issues
 - **Discord:** https://discord.com/invite/MXE49hrKDk
 - **Documentation:** https://docs.adenhq.com/
+
+
+## Windows Setup (Git Bash)
+
+On Windows, we recommend using Python 3.11–3.12.
+
+Common pitfalls:
+- Microsoft Store Python can override the real `python` binary.
+- Running `setup-python.sh` in PowerShell may trigger WSL-related errors.
+
+Steps:
+1. Uninstall Microsoft Store Python (or disable App Execution Aliases for `python.exe` and `python3.exe`).
+2. Install Python 3.11 with “Add Python to PATH” enabled.
+3. Use **Git Bash** as your terminal (not PowerShell).
+4. Verify:
+   ```bash
+   python --version
+Should print Python 3.11.x.
+5. Run: ./scripts/setup-python.sh
+
+6. After setup, verify:
+
+python -c "import framework; print('framework ok')"
+python -c "import aden_tools; print('aden_tools ok')"
+
