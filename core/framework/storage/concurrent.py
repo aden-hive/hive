@@ -107,10 +107,7 @@ class ConcurrentStorage:
 
         self._running = False
 
-        # Flush remaining items
-        await self._flush_pending()
-
-        # Cancel batch task
+        # Cancel batch task first to prevent queue competition
         if self._batch_task:
             self._batch_task.cancel()
             try:
@@ -118,6 +115,9 @@ class ConcurrentStorage:
             except asyncio.CancelledError:
                 pass
             self._batch_task = None
+
+        # Now flush remaining items (batch task is stopped)
+        await self._flush_pending()
 
         logger.info("ConcurrentStorage stopped")
 
