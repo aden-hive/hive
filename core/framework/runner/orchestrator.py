@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,10 @@ from framework.runner.protocol import (
     RegisteredAgent,
 )
 from framework.runner.runner import AgentRunner
+
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -476,8 +481,18 @@ Respond with JSON only:
                         confidence=0.8,
                         should_parallelize=data.get("parallel", False),
                     )
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            # LLM returned invalid JSON response
+            logger.warning(f"LLM routing response is not valid JSON: {e}. Response: {routing_response}")
+        except KeyError as e:
+            # Missing expected field in LLM response
+            logger.warning(f"LLM routing response missing expected field {e}")
+        except TypeError as e:
+            # Type mismatch in LLM response (e.g., selected is not iterable)
+            logger.warning(f"LLM routing response has incorrect types: {e}")
+        except Exception as e:
+            # Unexpected error
+            logger.error(f"Unexpected error during LLM routing: {e}", exc_info=True)
 
         # Fallback: use highest confidence
         return RoutingDecision(

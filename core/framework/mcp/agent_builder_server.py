@@ -8,6 +8,7 @@ Usage:
 """
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,10 @@ from framework.graph.plan import Plan
 from framework.testing.prompts import (
     PYTEST_TEST_FILE_HEADER,
 )
+
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 # Initialize MCP server
@@ -145,7 +150,15 @@ def _load_session(session_id: str) -> BuildSession:
 
 
 def _load_active_session() -> BuildSession | None:
-    """Load the active session if one exists."""
+    """Load the active session if one exists.
+    
+    Returns:
+        The active BuildSession if found and valid, None otherwise.
+        
+    Note:
+        File not found is expected. JSON decode errors or read errors are logged
+        as they may indicate file corruption or permission issues.
+    """
     if not ACTIVE_SESSION_FILE.exists():
         return None
 
@@ -155,8 +168,22 @@ def _load_active_session() -> BuildSession | None:
 
         if session_id:
             return _load_session(session_id)
-    except Exception:
-        pass
+    except FileNotFoundError:
+        # Expected: file may have been removed
+        logger.debug(f"Active session file not found: {ACTIVE_SESSION_FILE}")
+        return None
+    except ValueError as e:
+        # ValueError from _load_session if session_id is invalid or session file missing
+        logger.debug(f"Invalid or missing session: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        # File exists but is corrupted
+        logger.warning(f"Active session file is corrupted: {ACTIVE_SESSION_FILE}. Error: {e}")
+        return None
+    except Exception as e:
+        # Unexpected errors should be logged
+        logger.error(f"Failed to load active session: {e}", exc_info=True)
+        return None
 
     return None
 
@@ -194,7 +221,12 @@ def create_session(name: Annotated[str, "Name for the agent being built"]) -> st
 
 @mcp.tool()
 def list_sessions() -> str:
-    """List all saved agent building sessions."""
+    """List all saved agent building sessions.
+    
+    Returns:
+        JSON string with list of sessions, total count, and active session ID.
+        Corrupted session files are logged and skipped but do not affect listing.
+    """
     _ensure_sessions_dir()
 
     sessions = []
@@ -212,8 +244,18 @@ def list_sessions() -> str:
                         "edge_count": len(data.get("edges", [])),
                         "has_goal": data.get("goal") is not None,
                     })
-            except Exception:
-                pass  # Skip corrupted files
+            except json.JSONDecodeError as e:
+                # File is not valid JSON
+                logger.warning(f"Skipping corrupted session file {session_file}: {e}")
+            except KeyError as e:
+                # Missing required field
+                logger.warning(f"Skipping session file {session_file}: missing required field {e}")
+            except OSError as e:
+                # Permission or file system error
+                logger.warning(f"Cannot read session file {session_file}: {e}")
+            except Exception as e:
+                # Unexpected error
+                logger.error(f"Unexpected error reading session file {session_file}: {e}", exc_info=True)
 
     # Check which session is currently active
     active_id = None
@@ -221,8 +263,15 @@ def list_sessions() -> str:
         try:
             with open(ACTIVE_SESSION_FILE, "r") as f:
                 active_id = f.read().strip()
-        except Exception:
-            pass
+        except FileNotFoundError:
+            # File was deleted between exists() check and open()
+            logger.debug(f"Active session file was deleted: {ACTIVE_SESSION_FILE}")
+        except OSError as e:
+            # Permission or file system error
+            logger.warning(f"Cannot read active session file: {e}")
+        except Exception as e:
+            # Unexpected error
+            logger.error(f"Unexpected error reading active session file: {e}", exc_info=True)
 
     return json.dumps({
         "sessions": sorted(sessions, key=lambda s: s["last_modified"], reverse=True),
