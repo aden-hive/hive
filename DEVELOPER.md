@@ -596,10 +596,11 @@ pip install -e .
 # Option 1: Use Claude Code skill (recommended)
 claude> /building-agents
 
-# Option 2: Copy from example
-cp -r exports/support_ticket_agent exports/my_new_agent
+# Option 2: Create manually
+# Note: exports/ is initially empty (gitignored). Create your agent directory:
+mkdir -p exports/my_new_agent
 cd exports/my_new_agent
-# Edit agent.json, tools.py, README.md
+# Create agent.json, tools.py, README.md (see Agent Package Structure below)
 
 # Option 3: Use the agent builder MCP tools (advanced)
 # See core/MCP_BUILDER_TOOLS_GUIDE.md
