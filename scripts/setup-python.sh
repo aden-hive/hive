@@ -70,13 +70,54 @@ fi
 echo -e "${GREEN}✓${NC} pip detected"
 echo ""
 
+# Check if we're in a virtualenv
+IN_VENV=$($PYTHON_CMD -c "import sys; print('1' if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix) else '0')" 2>/dev/null || echo "0")
+
 # Upgrade pip, setuptools, and wheel
 echo "Upgrading pip, setuptools, and wheel..."
-if ! $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
-  echo "Error: Failed to upgrade pip. Please check your python/venv configuration."
-  exit 1
+if [ "$IN_VENV" = "1" ]; then
+  # In virtualenv, don't use --user
+  if $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
+    echo -e "${GREEN}✓${NC} Core packages upgraded (virtualenv)"
+  else
+    echo -e "${YELLOW}⚠${NC} pip upgrade had issues (may be network/SSL related)"
+    echo -e "${BLUE}  Trying with trusted hosts...${NC}"
+    if $PYTHON_CMD -m pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org --upgrade pip setuptools wheel; then
+      echo -e "${GREEN}✓${NC} Core packages upgraded (with trusted hosts)"
+    else
+      echo -e "${RED}Error: Failed to upgrade pip.${NC}"
+      echo ""
+      echo "This may be due to SSL/network issues. Try:"
+      echo "  1. Check your internet connection"
+      echo "  2. Update certificates: $PYTHON_CMD -m pip install --upgrade certifi"
+      echo "  3. Use trusted hosts: $PYTHON_CMD -m pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org --upgrade pip"
+      exit 1
+    fi
+  fi
+else
+  # Not in virtualenv, try --user first (safer for externally-managed environments)
+  if $PYTHON_CMD -m pip install --user --upgrade pip setuptools wheel 2>/dev/null; then
+    echo -e "${GREEN}✓${NC} Core packages upgraded (user install)"
+  elif $PYTHON_CMD -m pip install --break-system-packages --upgrade pip setuptools wheel 2>/dev/null; then
+    echo -e "${YELLOW}⚠${NC} Core packages upgraded (system install - may require --break-system-packages)"
+  else
+    echo -e "${YELLOW}⚠${NC} Standard install failed, trying with trusted hosts...${NC}"
+    if $PYTHON_CMD -m pip install --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org --upgrade pip setuptools wheel 2>/dev/null; then
+      echo -e "${GREEN}✓${NC} Core packages upgraded (user install with trusted hosts)"
+    elif $PYTHON_CMD -m pip install --break-system-packages --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org --upgrade pip setuptools wheel 2>/dev/null; then
+      echo -e "${YELLOW}⚠${NC} Core packages upgraded (system install with trusted hosts)"
+    else
+      echo -e "${RED}Error: Failed to upgrade pip.${NC}"
+      echo ""
+      echo "Your Python environment is externally managed (PEP 668) or has SSL issues. Options:"
+      echo "  1. Use --user flag: $PYTHON_CMD -m pip install --user --upgrade pip setuptools wheel"
+      echo "  2. Use virtual environment: $PYTHON_CMD -m venv venv && source venv/bin/activate"
+      echo "  3. Use --break-system-packages (not recommended): $PYTHON_CMD -m pip install --break-system-packages --upgrade pip setuptools wheel"
+      echo "  4. SSL issue? Try: $PYTHON_CMD -m pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org --upgrade pip"
+      exit 1
+    fi
+  fi
 fi
-echo -e "${GREEN}✓${NC} Core packages upgraded"
 echo ""
 
 # Install core framework package
@@ -88,11 +129,39 @@ cd "$PROJECT_ROOT/core"
 
 if [ -f "pyproject.toml" ]; then
     echo "Installing framework from core/ (editable mode)..."
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓${NC} Framework package installed"
+    echo -e "${BLUE}(This may take a moment - downloading dependencies...)${NC}"
+    # In virtualenv, don't use --user; otherwise try --user first
+    if [ "$IN_VENV" = "1" ]; then
+        if $PYTHON_CMD -m pip install -e .; then
+            echo -e "${GREEN}✓${NC} Framework package installed (virtualenv)"
+        else
+            echo -e "${YELLOW}⚠${NC} Installation had issues, trying with trusted hosts...${NC}"
+            if $PYTHON_CMD -m pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -e .; then
+                echo -e "${GREEN}✓${NC} Framework package installed (with trusted hosts)"
+            elif $PYTHON_CMD -c "import framework" 2>/dev/null; then
+                echo -e "${GREEN}✓${NC} Framework package already installed"
+            else
+                echo -e "${YELLOW}⚠${NC} Framework installation encountered issues (may be OK if already installed)"
+            fi
+        fi
     else
-        echo -e "${YELLOW}⚠${NC} Framework installation encountered issues (may be OK if already installed)"
+        # Try --user first, then --break-system-packages
+        if $PYTHON_CMD -m pip install --user -e .; then
+            echo -e "${GREEN}✓${NC} Framework package installed (user install)"
+        elif $PYTHON_CMD -m pip install --break-system-packages -e .; then
+            echo -e "${GREEN}✓${NC} Framework package installed (system install)"
+        else
+            echo -e "${YELLOW}⚠${NC} Standard install failed, trying with trusted hosts...${NC}"
+            if $PYTHON_CMD -m pip install --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -e .; then
+                echo -e "${GREEN}✓${NC} Framework package installed (user install with trusted hosts)"
+            elif $PYTHON_CMD -m pip install --break-system-packages --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -e .; then
+                echo -e "${GREEN}✓${NC} Framework package installed (system install with trusted hosts)"
+            elif $PYTHON_CMD -c "import framework" 2>/dev/null; then
+                echo -e "${GREEN}✓${NC} Framework package already installed"
+            else
+                echo -e "${YELLOW}⚠${NC} Framework installation encountered issues (may be OK if already installed)"
+            fi
+        fi
     fi
 else
     echo -e "${YELLOW}⚠${NC} No pyproject.toml found in core/, skipping framework installation"
@@ -108,12 +177,39 @@ cd "$PROJECT_ROOT/tools"
 
 if [ -f "pyproject.toml" ]; then
     echo "Installing aden_tools from tools/ (editable mode)..."
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓${NC} Tools package installed"
+    echo -e "${BLUE}(This may take a moment - downloading dependencies...)${NC}"
+    # In virtualenv, don't use --user; otherwise try --user first
+    if [ "$IN_VENV" = "1" ]; then
+        if $PYTHON_CMD -m pip install -e .; then
+            echo -e "${GREEN}✓${NC} Tools package installed (virtualenv)"
+        else
+            echo -e "${YELLOW}⚠${NC} Installation had issues, trying with trusted hosts...${NC}"
+            if $PYTHON_CMD -m pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -e .; then
+                echo -e "${GREEN}✓${NC} Tools package installed (with trusted hosts)"
+            else
+                echo -e "${RED}✗${NC} Tools installation failed"
+                echo "Try manually: $PYTHON_CMD -m pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -e ."
+                exit 1
+            fi
+        fi
     else
-        echo -e "${RED}✗${NC} Tools installation failed"
-        exit 1
+        # Try --user first, then --break-system-packages
+        if $PYTHON_CMD -m pip install --user -e .; then
+            echo -e "${GREEN}✓${NC} Tools package installed (user install)"
+        elif $PYTHON_CMD -m pip install --break-system-packages -e .; then
+            echo -e "${GREEN}✓${NC} Tools package installed (system install)"
+        else
+            echo -e "${YELLOW}⚠${NC} Standard install failed, trying with trusted hosts...${NC}"
+            if $PYTHON_CMD -m pip install --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -e .; then
+                echo -e "${GREEN}✓${NC} Tools package installed (user install with trusted hosts)"
+            elif $PYTHON_CMD -m pip install --break-system-packages --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -e .; then
+                echo -e "${GREEN}✓${NC} Tools package installed (system install with trusted hosts)"
+            else
+                echo -e "${RED}✗${NC} Tools installation failed"
+                echo "Try manually: $PYTHON_CMD -m pip install --user --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -e ."
+                exit 1
+            fi
+        fi
     fi
 else
     echo -e "${RED}Error: No pyproject.toml found in tools/${NC}"
@@ -132,14 +228,46 @@ OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/de
 
 if [ "$OPENAI_VERSION" = "not_installed" ]; then
     echo "Installing openai package..."
-    $PYTHON_CMD -m pip install "openai>=1.0.0" > /dev/null 2>&1
-    echo -e "${GREEN}✓${NC} openai package installed"
+    # In virtualenv, don't use --user; otherwise try --user first
+    if [ "$IN_VENV" = "1" ]; then
+        if $PYTHON_CMD -m pip install "openai>=1.0.0"; then
+            echo -e "${GREEN}✓${NC} openai package installed (virtualenv)"
+        else
+            echo -e "${YELLOW}⚠${NC} openai installation failed (may already be installed)"
+        fi
+    else
+        # Try --user first, then --break-system-packages
+        if $PYTHON_CMD -m pip install --user "openai>=1.0.0"; then
+            echo -e "${GREEN}✓${NC} openai package installed (user install)"
+        elif $PYTHON_CMD -m pip install --break-system-packages "openai>=1.0.0"; then
+            echo -e "${GREEN}✓${NC} openai package installed (system install)"
+        else
+            echo -e "${YELLOW}⚠${NC} openai installation failed (may already be installed)"
+        fi
+    fi
 elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
     echo -e "${YELLOW}Found old openai version: $OPENAI_VERSION${NC}"
     echo "Upgrading to openai 1.x+ for litellm compatibility..."
-    $PYTHON_CMD -m pip install --upgrade "openai>=1.0.0" > /dev/null 2>&1
-    OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null)
-    echo -e "${GREEN}✓${NC} openai upgraded to $OPENAI_VERSION"
+    # In virtualenv, don't use --user; otherwise try --user first
+    if [ "$IN_VENV" = "1" ]; then
+        if $PYTHON_CMD -m pip install --upgrade "openai>=1.0.0"; then
+            OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null)
+            echo -e "${GREEN}✓${NC} openai upgraded to $OPENAI_VERSION (virtualenv)"
+        else
+            echo -e "${YELLOW}⚠${NC} openai upgrade failed (may need manual upgrade)"
+        fi
+    else
+        # Try --user first, then --break-system-packages
+        if $PYTHON_CMD -m pip install --user --upgrade "openai>=1.0.0"; then
+            OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null)
+            echo -e "${GREEN}✓${NC} openai upgraded to $OPENAI_VERSION (user install)"
+        elif $PYTHON_CMD -m pip install --break-system-packages --upgrade "openai>=1.0.0"; then
+            OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null)
+            echo -e "${GREEN}✓${NC} openai upgraded to $OPENAI_VERSION (system install)"
+        else
+            echo -e "${YELLOW}⚠${NC} openai upgrade failed (may need manual upgrade)"
+        fi
+    fi
 else
     echo -e "${GREEN}✓${NC} openai $OPENAI_VERSION is compatible"
 fi
@@ -191,14 +319,14 @@ echo ""
 echo "To run agents, use:"
 echo ""
 echo "  ${BLUE}# From project root:${NC}"
-echo "  PYTHONPATH=core:exports python -m agent_name validate"
-echo "  PYTHONPATH=core:exports python -m agent_name info"
-echo "  PYTHONPATH=core:exports python -m agent_name run --input '{...}'"
+echo "  PYTHONPATH=core:exports python3 -m agent_name validate"
+echo "  PYTHONPATH=core:exports python3 -m agent_name info"
+echo "  PYTHONPATH=core:exports python3 -m agent_name run --input '{...}'"
 echo ""
 echo "Available commands for your new agent:"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent validate"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent info"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent run --input '{\"ticket_content\":\"...\",\"customer_id\":\"...\",\"ticket_id\":\"...\"}'"
+echo "  PYTHONPATH=core:exports python3 -m support_ticket_agent validate"
+echo "  PYTHONPATH=core:exports python3 -m support_ticket_agent info"
+echo "  PYTHONPATH=core:exports python3 -m support_ticket_agent run --input '{\"ticket_content\":\"...\",\"customer_id\":\"...\",\"ticket_id\":\"...\"}'"
 echo ""
 echo "To build new agents, use Claude Code skills:"
 echo "  • /building-agents - Build a new agent"

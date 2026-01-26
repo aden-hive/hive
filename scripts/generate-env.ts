@@ -8,7 +8,7 @@
  * Usage: npx tsx scripts/generate-env.ts
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { parse } from 'yaml';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -31,15 +31,10 @@ interface Config {
       host: string;
     };
   };
-  timescaledb: {
+  postgresql: {
     url: string;
     port: number;
-  };
-  mongodb: {
-    url: string;
     database: string;
-    erp_database: string;
-    port: number;
   };
   redis: {
     url: string;
@@ -89,16 +84,14 @@ LOG_LEVEL=${config.app.log_level}
 # Ports
 FRONTEND_PORT=${config.server.frontend.port}
 BACKEND_PORT=${config.server.backend.port}
-TSDB_PORT=${config.timescaledb.port}
-MONGODB_PORT=${config.mongodb.port}
+POSTGRES_PORT=${config.postgresql.port}
 REDIS_PORT=${config.redis.port}
 
 # API URL for frontend
 VITE_API_URL=http://localhost:${config.server.backend.port}
 
-# MongoDB
-MONGODB_DBNAME=${config.mongodb.database}
-MONGODB_ERP_DBNAME=${config.mongodb.erp_database}
+# PostgreSQL
+POSTGRES_DBNAME=${config.postgresql.database}
 
 # Authentication
 JWT_SECRET=${config.auth.jwt_secret}
@@ -133,13 +126,9 @@ PORT=${config.server.backend.port}
 # Application
 LOG_LEVEL=${config.app.log_level}
 
-# TimescaleDB (PostgreSQL)
-TSDB_PG_URL=${config.timescaledb.url}
-
-# MongoDB
-MONGODB_URL=${config.mongodb.url}
-MONGODB_DBNAME=${config.mongodb.database}
-MONGODB_ERP_DBNAME=${config.mongodb.erp_database}
+# PostgreSQL
+POSTGRES_URL=${config.postgresql.url}
+POSTGRES_DBNAME=${config.postgresql.database}
 
 # Redis
 REDIS_URL=${config.redis.url}
@@ -151,6 +140,13 @@ PASSPHRASE=${config.auth.passphrase}
 # Features
 FEATURE_MCP_SERVER=${config.features.mcp_server}
 `;
+}
+
+function ensureDirectoryExists(filePath: string): void {
+  const dirPath = dirname(filePath);
+  if (!existsSync(dirPath)) {
+    mkdirSync(dirPath, { recursive: true });
+  }
 }
 
 function main() {
@@ -165,11 +161,13 @@ function main() {
 
   // Generate frontend .env
   const frontendEnvPath = join(PROJECT_ROOT, 'honeycomb', '.env');
+  ensureDirectoryExists(frontendEnvPath);
   writeFileSync(frontendEnvPath, generateFrontendEnv(config));
   console.log(`✓ Generated ${frontendEnvPath}`);
 
   // Generate backend .env
   const backendEnvPath = join(PROJECT_ROOT, 'hive', '.env');
+  ensureDirectoryExists(backendEnvPath);
   writeFileSync(backendEnvPath, generateBackendEnv(config));
   console.log(`✓ Generated ${backendEnvPath}`);
 

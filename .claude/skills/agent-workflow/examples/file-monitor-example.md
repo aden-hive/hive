@@ -90,18 +90,16 @@ Edges: 8
 
 ```
 exports/file_monitor_agent/
-├── __init__.py          ✅ (exports)
-├── __main__.py          ✅ (CLI)
-├── agent.py             ✅ (goal, graph, agent class)
+├── __init__.py          ✅ (package exports)
+├── __main__.py          ✅ (CLI: run, info, validate, shell)
+├── agent.py             ✅ (goal, graph, AgentRuntime class)
 ├── nodes/__init__.py    ✅ (7 nodes)
-├── config.py            ✅ (configuration)
-├── implementations.py   ✅ (Python functions)
-├── README.md            ✅ (documentation)
-├── IMPLEMENTATION_GUIDE.md ✅ (next steps)
-└── STATUS.md            ✅ (current state)
+├── config.py            ✅ (RuntimeConfig, AgentMetadata)
+├── mcp_servers.json     ✅ (MCP server configuration)
+└── README.md            ✅ (documentation)
 ```
 
-**Note**: Implementation gap exists - data flow needs connection (covered in STATUS.md)
+**Note**: Agent uses `AgentRuntime` for multi-entrypoint support with pause/resume capabilities. MCP servers are configured via `mcp_servers.json`.
 
 ## Phase 2: Testing (25 minutes)
 
@@ -158,11 +156,33 @@ test_edge_cases.py::test_large_files              PASSED
 **Production-Ready Agent:**
 
 ```bash
-# Run the agent
-./RUN_AGENT.sh
+# Show agent info
+PYTHONPATH=core:exports python -m file_monitor_agent info
 
-# Or manually
-PYTHONPATH=core:exports:tools/src python -m file_monitor_agent run
+# Validate structure
+PYTHONPATH=core:exports python -m file_monitor_agent validate
+
+# Run the agent
+PYTHONPATH=core:exports python -m file_monitor_agent run --input '{"source_dir": "~/Downloads", "dest_dir": "~/Documents"}'
+
+# Interactive shell
+PYTHONPATH=core:exports python -m file_monitor_agent shell
+```
+
+**Python API:**
+
+```python
+from exports.file_monitor_agent import default_agent
+
+# Simple usage
+result = await default_agent.run({
+    "source_dir": "~/Downloads",
+    "dest_dir": "~/Documents"
+})
+
+# Check output
+if result.success:
+    print(f"Files processed: {result.output['files_copied']}")
 ```
 
 **Capabilities:**
@@ -180,8 +200,9 @@ PYTHONPATH=core:exports:tools/src python -m file_monitor_agent run
 1. **Incremental building** - Files written immediately, visible throughout
 2. **Validation early** - Structure validated before moving to implementation
 3. **Test-driven** - Tests reveal real behavior
-4. **Documentation included** - README, STATUS, and guides auto-generated
-5. **Repeatable process** - Same workflow for any agent type
+4. **Modern runtime** - Uses `AgentRuntime` with multi-entrypoint support
+5. **MCP integration** - Tools configured via `mcp_servers.json`
+6. **Repeatable process** - Same workflow for any agent type
 
 ## Variations
 
@@ -192,8 +213,9 @@ PYTHONPATH=core:exports:tools/src python -m file_monitor_agent run
 
 **For complex agents:**
 - More nodes (10-15+)
-- Multiple subgraphs
-- Pause/resume points for human-in-the-loop
+- Multiple entry points via `entry_points` dict
+- Pause/resume nodes for human-in-the-loop
+- MCP server integration for external tools
 - Longer build time (45-60 minutes)
 
 The workflow scales to your needs!

@@ -8,12 +8,12 @@ This is designed around the questions I need to answer:
 4. What should we change? (suggestions)
 """
 
-from typing import Any
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 from framework.schemas.decision import Decision
-from framework.schemas.run import Run, RunSummary, RunStatus
+from framework.schemas.run import Run, RunStatus, RunSummary
 from framework.storage.backend import FileStorage
 
 
@@ -332,7 +332,10 @@ class BuilderQuery:
                 "type": "node_improvement",
                 "target": node_id,
                 "reason": f"Node has {failure_rate:.1%} failure rate",
-                "recommendation": f"Review and improve node '{node_id}' - high failure rate suggests prompt or tool issues",
+                "recommendation": (
+                    f"Review and improve node '{node_id}' - "
+                    "high failure rate suggests prompt or tool issues"
+                ),
                 "priority": "high" if failure_rate > 0.3 else "medium",
             })
 
@@ -353,7 +356,10 @@ class BuilderQuery:
                 "type": "architecture",
                 "target": goal_id,
                 "reason": f"Goal success rate is only {patterns.success_rate:.1%}",
-                "recommendation": "Consider restructuring the agent graph or improving goal definition",
+                "recommendation": (
+                    "Consider restructuring the agent graph or "
+                    "improving goal definition"
+                ),
                 "priority": "high",
             })
 
@@ -408,20 +414,23 @@ class BuilderQuery:
                 alternatives = [o for o in decision.options if o.id != decision.chosen_option_id]
                 if alternatives:
                     alt_desc = alternatives[0].description
+                    chosen_desc = chosen.description if chosen else "unknown"
                     suggestions.append(
-                        f"Consider alternative: '{alt_desc}' instead of '{chosen.description if chosen else 'unknown'}'"
+                        f"Consider alternative: '{alt_desc}' instead of '{chosen_desc}'"
                     )
 
             # Check for missing context
             if not decision.input_context:
                 suggestions.append(
-                    f"Decision '{decision.intent}' had no input context - ensure relevant data is passed"
+                    f"Decision '{decision.intent}' had no input context - "
+                    "ensure relevant data is passed"
                 )
 
             # Check for constraint issues
             if decision.active_constraints:
+                constraints_str = ", ".join(decision.active_constraints)
                 suggestions.append(
-                    f"Review constraints: {', '.join(decision.active_constraints)} - may be too restrictive"
+                    f"Review constraints: {constraints_str} - may be too restrictive"
                 )
 
         # Check for reported problems with suggestions
@@ -476,10 +485,12 @@ class BuilderQuery:
             )
 
         # Find first divergence point
-        for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions)):
+        for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions, strict=False)):
             if d1.chosen_option_id != d2.chosen_option_id:
+                opt1 = d1.chosen_option_id
+                opt2 = d2.chosen_option_id
                 differences.append(
-                    f"Diverged at decision {i}: chose '{d1.chosen_option_id}' vs '{d2.chosen_option_id}'"
+                    f"Diverged at decision {i}: chose '{opt1}' vs '{opt2}'"
                 )
                 break
 
