@@ -1,0 +1,5 @@
+[console_scripts]
+cyclopts = cyclopts.cli:app
+
+[mkdocs.plugins]
+cyclopts = cyclopts.ext.mkdocs:CycloptsPlugin
