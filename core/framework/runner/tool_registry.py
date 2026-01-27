@@ -5,7 +5,8 @@ import inspect
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +15,22 @@ from framework.llm.provider import Tool, ToolResult, ToolUse
 logger = logging.getLogger(__name__)
 
 
+class ToolSource(Enum):
+    """Source of a tool registration."""
+    AGENT = "agent"  # From tools.py or agent builder
+    MCP = "mcp"  # From MCP server
+    MANUAL = "manual"  # Manually registered
+    BUILTIN = "builtin"  # Built-in tools
+
+
 @dataclass
 class RegisteredTool:
-    """A tool with its executor function."""
+    """A tool with its executor function and source tracking."""
 
     tool: Tool
     executor: Callable[[dict], Any]
+    source: ToolSource = field(default=ToolSource.MANUAL)
+    source_details: str = field(default="")  # Additional context (e.g., MCP server name)
 
 
 class ToolRegistry:
@@ -43,16 +54,50 @@ class ToolRegistry:
         name: str,
         tool: Tool,
         executor: Callable[[dict], Any],
+        source: ToolSource = ToolSource.MANUAL,
+        source_details: str = "",
     ) -> None:
         """
         Register a single tool with its executor.
 
+        Tools are automatically namespaced to avoid conflicts:
+        - Agent tools: "agent.{name}"
+        - MCP tools: "{server_name}.{name}"
+        - Manual/Builtin: "{name}" (no prefix)
+
         Args:
-            name: Tool name (must match tool.name)
+            name: Tool name (original name, will be namespaced internally)
             tool: Tool definition
             executor: Function that takes tool input dict and returns result
+            source: Source of the tool (agent, MCP, manual, builtin)
+            source_details: Additional context (e.g., MCP server name)
         """
-        self._tools[name] = RegisteredTool(tool=tool, executor=executor)
+        # Auto-namespace based on source to ensure unique names
+        if source == ToolSource.AGENT:
+            internal_name = f"agent.{name}"
+        elif source == ToolSource.MCP:
+            # Extract server name from source_details (format: "MCP server: {name}")
+            if ":" in source_details:
+                server_name = source_details.split(":")[-1].strip()
+            else:
+                server_name = "mcp"
+            internal_name = f"{server_name}.{name}"
+        else:
+            # Manual or builtin tools keep original name
+            internal_name = name
+        
+        # Update tool.name so LLM sees the namespaced version
+        tool.name = internal_name
+        
+        # Register with internal name (no conflicts possible!)
+        self._tools[internal_name] = RegisteredTool(
+            tool=tool,
+            executor=executor,
+            source=source,
+            source_details=source_details,
+        )
+        
+        logger.debug(f"Registered tool '{internal_name}' (source: {source.value})")
 
     def register_function(
         self,
@@ -111,7 +156,7 @@ class ToolRegistry:
         def executor(inputs: dict) -> Any:
             return func(**inputs)
 
-        self.register(tool_name, tool, executor)
+        self.register(tool_name, tool, executor, source=ToolSource.AGENT)
 
     def discover_from_module(self, module_path: Path) -> int:
         """
@@ -163,10 +208,22 @@ class ToolRegistry:
 
                         return executor
 
-                    self.register(name, tool, make_executor(name))
+                    self.register(
+                        name,
+                        tool,
+                        make_executor(name),
+                        source=ToolSource.AGENT,
+                        source_details=f"tools.py:{module_path}",
+                    )
                 else:
                     # Register tool without executor (will use mock)
-                    self.register(name, tool, lambda inputs: {"mock": True, "inputs": inputs})
+                    self.register(
+                        name,
+                        tool,
+                        lambda inputs: {"mock": True, "inputs": inputs},
+                        source=ToolSource.AGENT,
+                        source_details=f"tools.py:{module_path}",
+                    )
                 count += 1
 
         # Check for @tool decorated functions
@@ -174,6 +231,7 @@ class ToolRegistry:
             obj = getattr(module, name)
             if callable(obj) and hasattr(obj, "_tool_metadata"):
                 metadata = obj._tool_metadata
+                # register_function will set source=ToolSource.AGENT automatically
                 self.register_function(
                     obj,
                     name=metadata.get("name", name),
@@ -288,14 +346,19 @@ class ToolRegistry:
             for mcp_tool in client.list_tools():
                 # Convert MCP tool to framework Tool
                 tool = self._convert_mcp_tool_to_framework_tool(mcp_tool)
+                
+                # Store original MCP tool name (needed for executor)
+                original_mcp_name = mcp_tool.name
 
                 # Create executor that calls the MCP server
-                def make_mcp_executor(client_ref: MCPClient, tool_name: str, registry_ref):
+                # Note: executor uses original MCP tool name, not namespaced name
+                def make_mcp_executor(client_ref: MCPClient, original_name: str, registry_ref):
                     def executor(inputs: dict) -> Any:
                         try:
                             # Inject session context for tools that need it
                             merged_inputs = {**registry_ref._session_context, **inputs}
-                            result = client_ref.call_tool(tool_name, merged_inputs)
+                            # Call MCP server with original tool name (not namespaced)
+                            result = client_ref.call_tool(original_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:
                                 if isinstance(result[0], dict) and "text" in result[0]:
@@ -303,15 +366,17 @@ class ToolRegistry:
                                 return result[0]
                             return result
                         except Exception as e:
-                            logger.error(f"MCP tool '{tool_name}' execution failed: {e}")
+                            logger.error(f"MCP tool '{original_name}' execution failed: {e}")
                             return {"error": str(e)}
 
                     return executor
 
                 self.register(
-                    mcp_tool.name,
+                    original_mcp_name,  # Original name (will be namespaced in register())
                     tool,
-                    make_mcp_executor(client, mcp_tool.name, self),
+                    make_mcp_executor(client, original_mcp_name, self),
+                    source=ToolSource.MCP,
+                    source_details=f"MCP server: {config.name}",
                 )
                 count += 1
 
