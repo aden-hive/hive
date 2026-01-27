@@ -97,7 +97,14 @@ claude> /building-agents
 claude> /testing-agent
 
 # Run your agent
+# Unix/Linux/Mac (bash/zsh):
 PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+
+# Windows PowerShell:
+# $env:PYTHONPATH="core;exports"; python -m your_agent_name run --input '{...}'
+
+# Windows CMD:
+# set PYTHONPATH=core;exports && python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development

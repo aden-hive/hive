@@ -84,13 +84,27 @@ export ANTHROPIC_API_KEY="your-key-here"
 
 All agent commands must be run from the project root with `PYTHONPATH` set:
 
+**Unix/Linux/Mac (bash/zsh):**
 ```bash
 # From /hive/ directory
 PYTHONPATH=core:exports python -m agent_name COMMAND
 ```
 
+**Windows PowerShell:**
+```powershell
+# From /hive/ directory
+$env:PYTHONPATH="core;exports"; python -m agent_name COMMAND
+```
+
+**Windows CMD:**
+```cmd
+# From /hive/ directory
+set PYTHONPATH=core;exports && python -m agent_name COMMAND
+```
+
 ### Example: Support Ticket Agent
 
+**Unix/Linux/Mac:**
 ```bash
 # Validate agent structure
 PYTHONPATH=core:exports python -m support_ticket_agent validate
@@ -109,8 +123,24 @@ PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
 PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{...}'
 ```
 
+**Windows PowerShell:**
+```powershell
+# Validate agent structure
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent validate
+
+# Show agent information
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent info
+
+# Run agent with input
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent run --input '{"ticket_content": "My login is broken. Error 401.", "customer_id": "CUST-123", "ticket_id": "TKT-456"}'
+
+# Run in mock mode (no LLM calls)
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent run --mock --input '{...}'
+```
+
 ### Example: Other Agents
 
+**Unix/Linux/Mac:**
 ```bash
 # Market Research Agent
 PYTHONPATH=core:exports python -m market_research_agent info
@@ -120,6 +150,18 @@ PYTHONPATH=core:exports python -m outbound_sales_agent validate
 
 # Personal Assistant Agent
 PYTHONPATH=core:exports python -m personal_assistant_agent run --input '{...}'
+```
+
+**Windows PowerShell:**
+```powershell
+# Market Research Agent
+$env:PYTHONPATH="core;exports"; python -m market_research_agent info
+
+# Outbound Sales Agent
+$env:PYTHONPATH="core;exports"; python -m outbound_sales_agent validate
+
+# Personal Assistant Agent
+$env:PYTHONPATH="core;exports"; python -m personal_assistant_agent run --input '{...}'
 ```
 
 ## Building New Agents
@@ -180,9 +222,22 @@ source .venv/bin/activate  # macOS/Linux
 
 Always activate the venv before running agents:
 
+**Unix/Linux/Mac:**
 ```bash
 source .venv/bin/activate
 PYTHONPATH=core:exports python -m your_agent_name demo
+```
+
+**Windows PowerShell:**
+```powershell
+.venv\Scripts\Activate.ps1
+$env:PYTHONPATH="core;exports"; python -m your_agent_name demo
+```
+
+**Windows CMD:**
+```cmd
+.venv\Scripts\activate.bat
+set PYTHONPATH=core;exports && python -m your_agent_name demo
 ```
 
 ### "ModuleNotFoundError: No module named 'framework'"
@@ -223,8 +278,14 @@ pip install --upgrade "openai>=1.0.0"
 
 **Solution:** Ensure you're in the project root directory and use:
 
+**Unix/Linux/Mac:**
 ```bash
 PYTHONPATH=core:exports python -m support_ticket_agent validate
+```
+
+**Windows PowerShell:**
+```powershell
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent validate
 ```
 
 ### Agent imports fail with "broken installation"
@@ -295,8 +356,14 @@ Enter goal: "Build an agent that processes customer support tickets"
 
 ### 3. Validate Agent
 
+**Unix/Linux/Mac:**
 ```bash
 PYTHONPATH=core:exports python -m support_ticket_agent validate
+```
+
+**Windows PowerShell:**
+```powershell
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent validate
 ```
 
 ### 4. Test Agent
@@ -307,8 +374,14 @@ claude> /testing-agent
 
 ### 5. Run Agent
 
+**Unix/Linux/Mac:**
 ```bash
 PYTHONPATH=core:exports python -m support_ticket_agent run --input '{...}'
+```
+
+**Windows PowerShell:**
+```powershell
+$env:PYTHONPATH="core;exports"; python -m support_ticket_agent run --input '{...}'
 ```
 
 ## IDE Setup
