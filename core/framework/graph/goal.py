@@ -163,11 +163,34 @@ class Goal(BaseModel):
         return met_weight >= total_weight * 0.9  # 90% threshold
 
     def check_constraint(self, constraint_id: str, value: Any) -> bool:
-        """Check if a specific constraint is satisfied."""
+        """
+        Check if a specific constraint is satisfied.
+        
+        Evaluates the constraint's 'check' expression against the provided value.
+        Supports simple Python expressions where the variable is named 'value'.
+        """
         for c in self.constraints:
             if c.id == constraint_id:
-                # This would be expanded with actual evaluation logic
-                return True
+                # If no check logic is defined, assume it passes (or requires manual review)
+                if not c.check:
+                    return True
+                
+                try:
+                    # 1. Prepare the evaluation context
+                    # We make 'value' available to the expression so "value < 100" works
+                    eval_context = {"value": value, "len": len}
+                    
+                    # 2. Evaluate the expression
+                    # We use an empty __builtins__ for basic safety to prevent import loops
+                    result = eval(c.check, {"__builtins__": {}}, eval_context)
+                    
+                    return bool(result)
+                    
+                except Exception as e:
+                    # If evaluation fails (e.g., syntax error), log it and fail safe
+                    print(f"Error evaluating constraint '{c.id}': {e}")
+                    return False
+                    
         return True
 
     def to_prompt_context(self) -> str:
