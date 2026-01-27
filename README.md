@@ -39,6 +39,13 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+### Agent lifecycle and retries
+
+Agents in Hive operate in iterative cycles toward a defined outcome.
+State or memory persistence across retries depends on the agent and tooling configuration.
+By default, context may be reconstructed unless explicit memory or persistence mechanisms are enabled.
+This allows flexibility for both stateless and long-running agent workflows.
+
 ## What is Aden
 
 <p align="center">
