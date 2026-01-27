@@ -7,6 +7,29 @@ import sys
 from pathlib import Path
 
 
+def _parse_json_input(json_str: str, source: str = "input") -> tuple[dict, str | None]:
+    """
+    Parse JSON input with helpful error messages for Windows users.
+    
+    Args:
+        json_str: JSON string to parse
+        source: Source description for error messages
+    
+    Returns:
+        Tuple of (parsed_dict, error_message). error_message is None if successful.
+    """
+    try:
+        return json.loads(json_str), None
+    except json.JSONDecodeError as e:
+        error_msg = f"\nError parsing {source} JSON: {e}\n"
+        error_msg += "\nWindows/PowerShell Tips:\n"
+        error_msg += '  1. Use double quotes with escapes: python -m core run ... --input "{\\"key\\": \\"value\\"}"\n'
+        error_msg += "  2. Use environment variable: $env:MY_JSON = '{json_str}'; python -m core run ... --input-env MY_JSON\n"
+        error_msg += "  3. Use stdin: @'{json_str}'@ | python -m core run ... --input-stdin\n"
+        error_msg += "  4. Use file: python -m core run ... --input-file input.json\n"
+        return {}, error_msg
+
+
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
 
@@ -32,6 +55,16 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "-f",
         type=str,
         help="Input context from JSON file",
+    )
+    run_parser.add_argument(
+        "--input-env",
+        type=str,
+        help="Environment variable name containing JSON input (Windows-friendly)",
+    )
+    run_parser.add_argument(
+        "--input-stdin",
+        action="store_true",
+        help="Read JSON input from stdin (useful for piping)",
     )
     run_parser.add_argument(
         "--mock",
@@ -189,20 +222,56 @@ def cmd_run(args: argparse.Namespace) -> int:
     else:
         logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
-    # Load input context
+    # Load input context (support multiple input methods for Windows compatibility)
     context = {}
+    input_count = sum([
+        bool(args.input),
+        bool(args.input_file),
+        bool(getattr(args, "input_env", None)),
+        bool(getattr(args, "input_stdin", False))
+    ])
+    
+    if input_count > 1:
+        print("Error: Only one of --input, --input-file, --input-env, or --input-stdin allowed", file=sys.stderr)
+        return 1
+    
     if args.input:
-        try:
-            context = json.loads(args.input)
-        except json.JSONDecodeError as e:
-            print(f"Error parsing --input JSON: {e}", file=sys.stderr)
+        context, error = _parse_json_input(args.input, "--input")
+        if error:
+            print(error, file=sys.stderr)
             return 1
     elif args.input_file:
         try:
             with open(args.input_file) as f:
                 context = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Error reading input file: {e}", file=sys.stderr)
+        except FileNotFoundError as e:
+            print(f"Error: Input file not found: {args.input_file}", file=sys.stderr)
+            return 1
+        except json.JSONDecodeError as e:
+            print(f"Error parsing input file JSON: {e}", file=sys.stderr)
+            return 1
+    elif getattr(args, "input_env", None):
+        import os
+        env_value = os.environ.get(args.input_env)
+        if env_value is None:
+            print(f"Error: Environment variable '{args.input_env}' not set", file=sys.stderr)
+            return 1
+        context, error = _parse_json_input(env_value, f"--input-env {args.input_env}")
+        if error:
+            print(error, file=sys.stderr)
+            return 1
+    elif getattr(args, "input_stdin", False):
+        try:
+            stdin_data = sys.stdin.read().strip()
+            if not stdin_data:
+                print("Error: No input received from stdin", file=sys.stderr)
+                return 1
+            context, error = _parse_json_input(stdin_data, "stdin")
+            if error:
+                print(error, file=sys.stderr)
+                return 1
+        except KeyboardInterrupt:
+            print("\nCancelled.", file=sys.stderr)
             return 1
 
     # Load and run agent
