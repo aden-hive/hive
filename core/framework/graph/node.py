@@ -362,12 +362,59 @@ class NodeResult:
     # Pydantic validation errors (if any)
     validation_errors: list[str] = field(default_factory=list)
 
-    def to_summary(self, node_spec: Any = None) -> str:
+    def _is_output_complex(self) -> bool:
+        """
+        Heuristic to determine if output is complex enough to warrant LLM summarization.
+
+        Returns True if output is:
+        - Has more than 5 keys
+        - Has values longer than 500 characters
+        - Has nested structures (dicts/lists) deeper than 2 levels
+        - Total serialized size > 1000 characters
+        """
+        if not self.output:
+            return False
+
+        # Check number of keys
+        if len(self.output) > 5:
+            return True
+
+        # Check value sizes and structure complexity
+        import json
+
+        total_size = 0
+        for key, value in self.output.items():
+            value_str = str(value)
+            total_size += len(value_str)
+
+            # Large individual values
+            if len(value_str) > 500:
+                return True
+
+            # Check for nested structures
+            if isinstance(value, (dict, list)):
+                nested_str = json.dumps(value, default=str)
+                if len(nested_str) > 1000:
+                    return True
+
+        # Total size check
+        if total_size > 1000:
+            return True
+
+        return False
+
+    def to_summary(self, node_spec: Any = None, use_llm: bool = False) -> str:
         """
         Generate a human-readable summary of this node's execution and output.
 
         This is like toString() - it describes what the node produced in its current state.
-        Uses Haiku to intelligently summarize complex outputs.
+        By default, uses a fast inline summary. LLM summarization is opt-in via use_llm=True
+        or automatically enabled for complex outputs when API key is available.
+
+        Args:
+            node_spec: Optional node specification for context
+            use_llm: If True, force LLM summarization (default: False)
+                     If False, uses inline summary unless output is complex
         """
         if not self.success:
             return f"❌ Failed: {self.error}"
@@ -375,13 +422,9 @@ class NodeResult:
         if not self.output:
             return "✓ Completed (no output)"
 
-        # Use Haiku to generate intelligent summary
-        import os
-
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-
-        if not api_key:
-            # Fallback: simple key-value listing
+        # Default: Use fast inline summary (no LLM call)
+        def _inline_summary() -> str:
+            """Generate inline summary without LLM call."""
             parts = [f"✓ Completed with {len(self.output)} outputs:"]
             for key, value in list(self.output.items())[:5]:  # Limit to 5 keys
                 value_str = str(value)[:100]
@@ -390,7 +433,20 @@ class NodeResult:
                 parts.append(f"  • {key}: {value_str}")
             return "\n".join(parts)
 
-        # Use Haiku to generate intelligent summary
+        # Check if we should use LLM
+        import os
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        should_use_llm = use_llm or (api_key and self._is_output_complex())
+
+        if not should_use_llm:
+            # Fast path: use inline summary (no API call)
+            return _inline_summary()
+
+        # LLM path: only if explicitly requested or output is complex
+        if not api_key:
+            return _inline_summary()
+
         try:
             import json
 
@@ -421,13 +477,7 @@ class NodeResult:
 
         except Exception:
             # Fallback on error
-            parts = [f"✓ Completed with {len(self.output)} outputs:"]
-            for key, value in list(self.output.items())[:3]:
-                value_str = str(value)[:80]
-                if len(str(value)) > 80:
-                    value_str += "..."
-                parts.append(f"  • {key}: {value_str}")
-            return "\n".join(parts)
+            return _inline_summary()
 
 
 class NodeProtocol(ABC):
