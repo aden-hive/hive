@@ -19,9 +19,9 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Type
+from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
@@ -145,9 +145,12 @@ class NodeSpec(BaseModel):
     retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
 
     # Pydantic model for output validation
-    output_model: Type[BaseModel] | None = Field(
+    output_model: type[BaseModel] | None = Field(
         default=None,
-        description="Optional Pydantic model class for validating and parsing LLM output. When set, the LLM response will be validated against this model."
+        description=(
+            "Optional Pydantic model class for validating and parsing LLM output. "
+            "When set, the LLM response will be validated against this model."
+        ),
     )
     max_validation_retries: int = Field(
         default=2,
@@ -355,7 +358,7 @@ class NodeResult:
     # Metadata
     tokens_used: int = 0
     latency_ms: int = 0
-    
+
     # Pydantic validation errors (if any)
     validation_errors: list[str] = field(default_factory=list)
 
@@ -622,10 +625,12 @@ class LLMNode(NodeProtocol):
                             "strict": True,
                         }
                     }
-                    logger.info(f"         📐 Using JSON schema from Pydantic model: {ctx.node_spec.output_model.__name__}")
+                    model_name = ctx.node_spec.output_model.__name__
+                    logger.info(f"         📐 Using JSON schema from Pydantic model: {model_name}")
 
                 # Phase 2: Retry loop for Pydantic validation
-                max_validation_retries = ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
+                max_retries = ctx.node_spec.max_validation_retries
+                max_validation_retries = max_retries if ctx.node_spec.output_model else 0
                 validation_attempt = 0
                 total_input_tokens = 0
                 total_output_tokens = 0
@@ -668,7 +673,8 @@ class LLMNode(NodeProtocol):
 
                             if validation_result.success:
                                 # Validation passed, break out of retry loop
-                                logger.info(f"      ✓ Pydantic validation passed for {ctx.node_spec.output_model.__name__}")
+                                model_name = ctx.node_spec.output_model.__name__
+                                logger.info(f"      ✓ Pydantic validation passed for {model_name}")
                                 break
                             else:
                                 # Validation failed
@@ -680,10 +686,11 @@ class LLMNode(NodeProtocol):
                                         validation_result, ctx.node_spec.output_model
                                     )
                                     logger.warning(
-                                        f"      ⚠ Pydantic validation failed (attempt {validation_attempt}/{max_validation_retries}): "
+                                        f"      ⚠ Pydantic validation failed "
+                                        f"(attempt {validation_attempt}/{max_validation_retries}): "
                                         f"{validation_result.error}"
                                     )
-                                    logger.info(f"      🔄 Retrying with validation feedback...")
+                                    logger.info("      🔄 Retrying with validation feedback...")
 
                                     # Add the assistant's failed response and feedback
                                     current_messages.append({
@@ -698,9 +705,10 @@ class LLMNode(NodeProtocol):
                                 else:
                                     # Max retries exceeded
                                     latency_ms = int((time.time() - start) * 1000)
+                                    err = validation_result.error
                                     logger.error(
-                                        f"      ✗ Pydantic validation failed after {max_validation_retries} retries: "
-                                        f"{validation_result.error}"
+                                        f"      ✗ Pydantic validation failed after "
+                                        f"{max_validation_retries} retries: {err}"
                                     )
                                     ctx.runtime.record_outcome(
                                         decision_id=decision_id,
@@ -709,9 +717,13 @@ class LLMNode(NodeProtocol):
                                         tokens_used=total_input_tokens + total_output_tokens,
                                         latency_ms=latency_ms,
                                     )
+                                    error_msg = (
+                                        f"Pydantic validation failed after "
+                                        f"{max_validation_retries} retries: {err}"
+                                    )
                                     return NodeResult(
                                         success=False,
-                                        error=f"Pydantic validation failed after {max_validation_retries} retries: {validation_result.error}",
+                                        error=error_msg,
                                         output=parsed,
                                         tokens_used=total_input_tokens + total_output_tokens,
                                         latency_ms=latency_ms,
@@ -760,7 +772,7 @@ class LLMNode(NodeProtocol):
                             # Use validated model's dict representation
                             if validated_model:
                                 parsed = validated_model.model_dump()
-                        
+
                         for key in ctx.node_spec.output_keys:
                             if key in parsed:
                                 value = parsed[key]

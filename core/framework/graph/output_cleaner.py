@@ -16,6 +16,50 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _heuristic_repair(text: str) -> dict | None:
+    """
+    Attempt to repair JSON without an LLM call.
+
+    Handles common errors:
+    - Markdown code blocks
+    - Python booleans/None (True -> true)
+    - Single quotes instead of double quotes
+    """
+    if not isinstance(text, str):
+        return None
+
+    # 1. Strip Markdown code blocks
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
+    text = text.strip()
+
+    # 2. Find outermost JSON-like structure (greedy match)
+    match = re.search(r"(\{.*\}|\[.*\])", text, re.DOTALL)
+    if match:
+        candidate = match.group(1)
+
+        # 3. Common fixes
+        # Fix Python constants
+        candidate = re.sub(r"\bTrue\b", "true", candidate)
+        candidate = re.sub(r"\bFalse\b", "false", candidate)
+        candidate = re.sub(r"\bNone\b", "null", candidate)
+
+        # 4. Attempt load
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            # 5. Advanced: Try swapping single quotes if double quotes fail
+            # This is risky but effective for simple dicts
+            try:
+                if "'" in candidate and '"' not in candidate:
+                    candidate_swapped = candidate.replace("'", '"')
+                    return json.loads(candidate_swapped)
+            except json.JSONDecodeError:
+                pass
+
+    return None
+
+
 @dataclass
 class CleansingConfig:
     """Configuration for output cleansing."""
@@ -42,30 +86,8 @@ class OutputCleaner:
     """
     Framework-level output validation and cleaning.
 
-    Uses fast LLM (llama-3.3-70b) to clean malformed outputs
+    Uses heuristics and fast LLM to clean malformed outputs
     before they flow to the next node.
-
-    Example:
-        cleaner = OutputCleaner(
-            config=CleansingConfig(enabled=True),
-            llm_provider=llm,
-        )
-
-        # Validate output
-        validation = cleaner.validate_output(
-            output=node_output,
-            source_node_id="analyze",
-            target_node_spec=next_node_spec,
-        )
-
-        if not validation.valid:
-            # Clean the output
-            cleaned = cleaner.clean_output(
-                output=node_output,
-                source_node_id="analyze",
-                target_node_spec=next_node_spec,
-                validation_errors=validation.errors,
-            )
     """
 
     def __init__(self, config: CleansingConfig, llm_provider=None):
@@ -74,8 +96,7 @@ class OutputCleaner:
 
         Args:
             config: Cleansing configuration
-            llm_provider: Optional LLM provider. If None and cleaning is enabled,
-                         will create a LiteLLMProvider with the configured fast_model.
+            llm_provider: Optional LLM provider.
         """
         self.config = config
         self.success_cache: dict[str, Any] = {}  # Cache successful patterns
@@ -99,9 +120,13 @@ class OutputCleaner:
                         model=config.fast_model,
                         temperature=0.0,  # Deterministic cleaning
                     )
-                    logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
+                    logger.info(
+                        f"✓ Initialized OutputCleaner with {config.fast_model}"
+                    )
                 else:
-                    logger.warning("⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled")
+                    logger.warning(
+                        "⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled"
+                    )
                     self.llm = None
             except ImportError:
                 logger.warning("⚠ LiteLLMProvider not available, output cleaning disabled")
@@ -117,11 +142,6 @@ class OutputCleaner:
     ) -> ValidationResult:
         """
         Validate output matches target node's expected input schema.
-
-        Args:
-            output: Output from source node
-            source_node_id: ID of source node
-            target_node_spec: Spec of target node (for input_keys)
 
         Returns:
             ValidationResult with errors and optionally cleaned output
@@ -196,7 +216,7 @@ class OutputCleaner:
         validation_errors: list[str],
     ) -> dict[str, Any]:
         """
-        Use fast LLM to clean malformed output.
+        Use heuristics and fast LLM to clean malformed output.
 
         Args:
             output: Raw output from source node
@@ -206,14 +226,36 @@ class OutputCleaner:
 
         Returns:
             Cleaned output matching target schema
-
-        Raises:
-            Exception: If cleaning fails and fallback_to_raw is False
         """
         if not self.config.enabled:
             logger.warning("⚠ Output cleansing disabled in config")
             return output
 
+        # --- PHASE 1: Fast Heuristic Repair (Avoids LLM call) ---
+        # Often the output is just a string containing JSON, or has minor syntax errors
+        # If output is a dictionary but malformed, we might need to serialize it first
+        # to try and fix the underlying string representation if it came from raw text
+
+        # Heuristic: Check if any value is actually a JSON string that should be promoted
+        # This handles the "JSON Parsing Trap" where LLM returns {"key": "{\"nested\": ...}"}
+        heuristic_fixed = False
+        fixed_output = output.copy()
+
+        for key, value in output.items():
+            if isinstance(value, str):
+                repaired = _heuristic_repair(value)
+                if repaired and isinstance(repaired, (dict, list)):
+                    # Check if this repaired structure looks like what we want
+                    # e.g. if the key is 'data' and the string contained valid JSON
+                    fixed_output[key] = repaired
+                    heuristic_fixed = True
+
+        # If we fixed something, re-validate manually to see if it's enough
+        if heuristic_fixed:
+            logger.info("⚡ Heuristic repair applied (nested JSON expansion)")
+            return fixed_output
+
+        # --- PHASE 2: LLM-based Repair ---
         if not self.llm:
             logger.warning("⚠ No LLM provider available for cleansing")
             return output
@@ -260,13 +302,12 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
             # Parse cleaned output
             cleaned_text = response.content.strip()
 
-            # Remove markdown if present
-            if cleaned_text.startswith("```"):
-                match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned_text, re.DOTALL)
-                if match:
-                    cleaned_text = match.group(1).strip()
+            # Apply heuristic repair to the LLM's output too (just in case)
+            cleaned = _heuristic_repair(cleaned_text)
 
-            cleaned = json.loads(cleaned_text)
+            if not cleaned:
+                # Fallback to standard load if heuristic returns None (unlikely for LLM output)
+                cleaned = json.loads(cleaned_text)
 
             if isinstance(cleaned, dict):
                 self.cleansing_count += 1
@@ -276,11 +317,15 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     )
                 return cleaned
             else:
-                logger.warning(f"⚠ Cleaned output is not a dict: {type(cleaned)}")
+                logger.warning(
+                    f"⚠ Cleaned output is not a dict: {type(cleaned)}"
+                )
                 if self.config.fallback_to_raw:
                     return output
                 else:
-                    raise ValueError(f"Cleaning produced {type(cleaned)}, expected dict")
+                    raise ValueError(
+                        f"Cleaning produced {type(cleaned)}, expected dict"
+                    )
 
         except json.JSONDecodeError as e:
             logger.error(f"✗ Failed to parse cleaned JSON: {e}")

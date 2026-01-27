@@ -6,7 +6,7 @@ garbage from propagating through the graph.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Type
+from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
@@ -136,7 +136,7 @@ class OutputValidator:
     def validate_with_pydantic(
         self,
         output: dict[str, Any],
-        model: Type[BaseModel],
+        model: type[BaseModel],
     ) -> tuple[ValidationResult, BaseModel | None]:
         """
         Validate output against a Pydantic model.
@@ -163,7 +163,7 @@ class OutputValidator:
     def format_validation_feedback(
         self,
         validation_result: ValidationResult,
-        model: Type[BaseModel],
+        model: type[BaseModel],
     ) -> str:
         """
         Format validation errors as feedback for LLM retry.
@@ -177,15 +177,15 @@ class OutputValidator:
         """
         # Get the model's JSON schema for reference
         schema = model.model_json_schema()
-        
+
         feedback = "Your previous response had validation errors:\n\n"
         feedback += "ERRORS:\n"
         for error in validation_result.errors:
             feedback += f"  - {error}\n"
-        
+
         feedback += "\nEXPECTED SCHEMA:\n"
         feedback += f"  Model: {model.__name__}\n"
-        
+
         if "properties" in schema:
             feedback += "  Required fields:\n"
             required = schema.get("required", [])
@@ -193,9 +193,9 @@ class OutputValidator:
                 req_marker = " (required)" if prop_name in required else ""
                 prop_type = prop_info.get("type", "any")
                 feedback += f"    - {prop_name}: {prop_type}{req_marker}\n"
-        
+
         feedback += "\nPlease fix the errors and respond with valid JSON matching the schema."
-        
+
         return feedback
 
     def validate_no_hallucination(
