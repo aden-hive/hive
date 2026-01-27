@@ -72,20 +72,27 @@ For running agents with real LLMs:
 export ANTHROPIC_API_KEY="your-key-here"
 ```
 
-## Running Agents
+## Important Note About Running Agents
 
-All agent commands must be run from the project root with `PYTHONPATH` set:
-
-```bash
-# From /hive/ directory
-PYTHONPATH=core:exports python -m support_ticket_agent validate
-```
-
-### Example: Support Ticket Agent
+ **Agents are NOT included by default.**  
+You must generate an agent (or manually create one under `exports/`) **before running any command like**:
 
 ```bash
-# Validate agent structure
+python -m agent_name
+
+
+The `exports/` folder is only created when:
+- You build a new agent using **Claude Code**, or
+- You manually add an agent package under `exports/`
+
+Because of this, **agent commands will fail on a fresh clone**.
+
+For example, the following commands will fail unless an agent exists:
+
+```bash
 PYTHONPATH=core:exports python -m support_ticket_agent validate
+
+
 
 # Show agent information
 PYTHONPATH=core:exports python -m support_ticket_agent info
@@ -344,3 +351,17 @@ When contributing agent packages:
 - **Issues:** https://github.com/adenhq/hive/issues
 - **Discord:** https://discord.com/invite/MXE49hrKDk
 - **Documentation:** https://docs.adenhq.com/
+
+
+---
+
+## Windows (PowerShell) Setup Guide
+
+### Recommended Python Version
+Hive requires **Python 3.11 or newer**.  
+On Windows, multiple Python versions may be installed. Always use **Python 3.11**.
+
+Check available versions:
+```powershell
+py -0
+
