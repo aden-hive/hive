@@ -1,0 +1,1 @@
+{"graph": {"id": "dummy", "goal_id": "test", "entry_node": "start", "nodes": [{"id": "start", "name": "Start", "node_type": "llm_generate", "input_keys": [], "output_keys": []}], "edges": [], "terminal_nodes": ["start"]}, "goal": {"id": "test", "name": "Test", "description": "Test", "success_criteria": [], "constraints": []}}

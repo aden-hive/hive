@@ -195,6 +195,7 @@ class AgentRunner:
         graph: GraphSpec,
         goal: Goal,
         mock_mode: bool = False,
+        debug_mode: bool = False,
         storage_path: Path | None = None,
         model: str = "cerebras/zai-glm-4.7",
     ):
@@ -214,6 +215,7 @@ class AgentRunner:
         self.graph = graph
         self.goal = goal
         self.mock_mode = mock_mode
+        self.debug_mode = debug_mode
         self.model = model
 
         # Set up storage
@@ -254,6 +256,7 @@ class AgentRunner:
         cls,
         agent_path: str | Path,
         mock_mode: bool = False,
+        debug_mode: bool = False,
         storage_path: Path | None = None,
         model: str = "cerebras/zai-glm-4.7",
     ) -> "AgentRunner":
@@ -284,6 +287,7 @@ class AgentRunner:
             graph=graph,
             goal=goal,
             mock_mode=mock_mode,
+            debug_mode=debug_mode,
             storage_path=storage_path,
             model=model,
         )
@@ -470,12 +474,20 @@ class AgentRunner:
         self._runtime = Runtime(storage_path=self._storage_path)
 
         # Create executor
+        step_callback = None
+        if self.debug_mode:
+            from framework.runner.debugger import ConsoleDebugger
+            debugger = ConsoleDebugger()
+            step_callback = debugger.on_step
+            print("🐞 Debug mode enabled")
+
         self._executor = GraphExecutor(
             runtime=self._runtime,
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
             approval_callback=self._approval_callback,
+            step_callback=step_callback,
         )
 
     def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:

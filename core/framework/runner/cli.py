@@ -37,6 +37,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Run in mock mode (no real LLM calls)",
     )
     run_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable interactive debug mode (step-by-step)",
+    )
+    run_parser.add_argument(
         "--output", "-o",
         type=str,
         help="Write results to file instead of stdout",
@@ -201,6 +206,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         runner = AgentRunner.load(
             args.agent_path,
             mock_mode=args.mock,
+            debug_mode=args.debug,
             model=getattr(args, "model", "claude-haiku-4-5-20251001"),
         )
     except FileNotFoundError as e:

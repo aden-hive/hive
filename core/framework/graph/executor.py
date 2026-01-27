@@ -72,6 +72,7 @@ class GraphExecutor:
         tool_executor: Callable | None = None,
         node_registry: dict[str, NodeProtocol] | None = None,
         approval_callback: Callable | None = None,
+        step_callback: Callable | None = None,
         cleansing_config: CleansingConfig | None = None,
     ):
         """
@@ -92,6 +93,7 @@ class GraphExecutor:
         self.tool_executor = tool_executor
         self.node_registry = node_registry or {}
         self.approval_callback = approval_callback
+        self.step_callback = step_callback
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
 
@@ -221,6 +223,10 @@ class GraphExecutor:
                 self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
+
+                # Debug hook: Call step_callback if present
+                if self.step_callback:
+                    await self.step_callback(steps, node_spec, memory)
 
                 # Build context for node
                 ctx = self._build_context(
