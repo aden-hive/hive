@@ -5,10 +5,13 @@ Unlike the original Runtime which has a single _current_run,
 StreamRuntime tracks runs by execution_id, allowing concurrent
 executions within the same stream without collision.
 """
+from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +23,17 @@ if TYPE_CHECKING:
     from framework.runtime.outcome_aggregator import OutcomeAggregator
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class FailedSave:
+    """Tracking info for a failed run save."""
+
+    run: Run
+    attempts: int = 0
+    last_error: str = ""
+    next_retry_at: float = 0.0
+    max_attempts_logged: bool = False
 
 
 class StreamRuntime:
@@ -75,6 +89,7 @@ class StreamRuntime:
         stream_id: str,
         storage: ConcurrentStorage,
         outcome_aggregator: "OutcomeAggregator | None" = None,
+        base_delay: float = 1.0,
     ):
         """
         Initialize stream runtime.
@@ -87,6 +102,7 @@ class StreamRuntime:
         self.stream_id = stream_id
         self._storage = storage
         self._outcome_aggregator = outcome_aggregator
+        self._base_delay = base_delay
 
         # Track runs by execution_id (thread-safe via lock)
         self._runs: dict[str, Run] = {}
@@ -95,6 +111,7 @@ class StreamRuntime:
 
         # Track current node per execution (for decision context)
         self._current_nodes: dict[str, str] = {}
+        self._failed_saves: dict[str, FailedSave] = {}
 
     # === RUN LIFECYCLE ===
 
@@ -167,16 +184,105 @@ class StreamRuntime:
         logger.debug(f"Ended run {run.id} for execution {execution_id}: {status.value}")
 
     async def _save_run(self, execution_id: str, run: Run) -> None:
-        """Save run to storage and clean up."""
+        """Save run to storage and clean up on success."""
         try:
             await self._storage.save_run(run)
         except Exception as e:
-            logger.error(f"Failed to save run {run.id}: {e}")
-        finally:
-            # Clean up
-            self._runs.pop(execution_id, None)
-            self._run_locks.pop(execution_id, None)
-            self._current_nodes.pop(execution_id, None)
+            error = str(e)
+            logger.error(f"Failed to save run {run.id}: {error}")
+            self._record_failed_save(execution_id, run, error)
+            return
+
+        self._failed_saves.pop(execution_id, None)
+        self._cleanup_execution(execution_id)
+
+    def _cleanup_execution(self, execution_id: str) -> None:
+        """Clean up execution state after a successful save."""
+        self._runs.pop(execution_id, None)
+        self._run_locks.pop(execution_id, None)
+        self._current_nodes.pop(execution_id, None)
+
+    def _record_failed_save(self, execution_id: str, run: Run, error: str) -> None:
+        """Record a failed save with retry scheduling metadata."""
+        failed = self._failed_saves.get(execution_id)
+        attempts = failed.attempts if failed else 0
+        attempts += 1
+        next_retry_at = time.time() + self._calculate_backoff(attempts, self._base_delay)
+        self._failed_saves[execution_id] = FailedSave(
+            run=run,
+            attempts=attempts,
+            last_error=error,
+            next_retry_at=next_retry_at,
+        )
+
+    @staticmethod
+    def _calculate_backoff(attempt: int, base_delay: float = 1.0) -> float:
+        """Exponential backoff delay in seconds."""
+        if attempt <= 0:
+            return 0.0
+        return base_delay * (2 ** (attempt - 1))
+
+    async def retry_failed_saves(
+        self,
+        max_attempts: int = 3,
+        base_delay: float | None = None,
+    ) -> dict[str, int]:
+        """
+        Retry failed saves with bounded attempts and backoff.
+
+        Returns:
+            Dict with counts for attempted, saved, and skipped entries.
+        """
+        attempted = 0
+        saved = 0
+        skipped = 0
+        now = time.time()
+        effective_base_delay = self._base_delay if base_delay is None else base_delay
+
+        for execution_id, failed in list(self._failed_saves.items()):
+            if failed.attempts >= max_attempts:
+                if not failed.max_attempts_logged:
+                    logger.error(
+                        "Failed to save run %s after %s attempts; no more retries.",
+                        failed.run.id,
+                        max_attempts,
+                    )
+                    failed.max_attempts_logged = True
+                skipped += 1
+                continue
+            if failed.next_retry_at > now:
+                skipped += 1
+                continue
+
+            attempted += 1
+            try:
+                await self._storage.save_run(failed.run)
+            except Exception as e:
+                error = str(e)
+                attempts = failed.attempts + 1
+                next_retry_at = time.time() + self._calculate_backoff(attempts, effective_base_delay)
+                failed.attempts = attempts
+                failed.last_error = error
+                failed.next_retry_at = next_retry_at
+                continue
+
+            self._failed_saves.pop(execution_id, None)
+            self._cleanup_execution(execution_id)
+            saved += 1
+
+        return {"attempted": attempted, "saved": saved, "skipped": skipped}
+
+    def get_failed_saves(self) -> dict[str, dict[str, Any]]:
+        """Return a snapshot of failed save state."""
+        snapshot: dict[str, dict[str, Any]] = {}
+        for execution_id, failed in self._failed_saves.items():
+            snapshot[execution_id] = {
+                "run_id": failed.run.id,
+                "attempts": failed.attempts,
+                "last_error": failed.last_error,
+                "next_retry_at": failed.next_retry_at,
+            }
+        return snapshot
 
     def set_node(self, execution_id: str, node_id: str) -> None:
         """Set the current node context for an execution."""
