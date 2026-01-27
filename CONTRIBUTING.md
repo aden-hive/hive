@@ -25,6 +25,30 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 # Verify installation
 python -c "import framework; import aden_tools; print('✓ Setup complete')"
 
+### Troubleshooting (Windows)
+
+If you encounter:
+
+ModuleNotFoundError: No module named 'aden_tools'
+
+
+This is expected on native Windows unless `PYTHONPATH` is set.
+
+`aden_tools` is not a pip-installable package. It lives inside
+the `exports/` directory.
+
+Run the following in PowerShell:
+
+```powershell
+$env:PYTHONPATH="$PWD\core;$PWD\exports"
+
+Then retry:
+python -c "import framework; import aden_tools"
+
+Note: Some components may still require WSL. Documentation and
+refactor contributions do not require full agent execution.
+
+
 # Install Claude Code skills (optional)
 ./quickstart.sh
 ```
