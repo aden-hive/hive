@@ -36,17 +36,41 @@ echo ""
 echo -e "${BLUE}Step 1: Checking Python prerequisites...${NC}"
 echo ""
 
-# Check for Python
-if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
+# Check for Python presence (allow specific python3.x binaries)
+if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null && ! command -v python3.13 &> /dev/null && ! command -v python3.12 &> /dev/null && ! command -v python3.11 &> /dev/null; then
     echo -e "${RED}Error: Python is not installed.${NC}"
     echo "Please install Python 3.11+ from https://python.org"
     exit 1
 fi
 
-# Use python3 if available, otherwise python
-PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
-    PYTHON_CMD="python"
+# Choose interpreter:
+# 1) Prefer `python3` if it's >= 3.11
+# 2) Otherwise try specific binaries in order: python3.13, python3.12, python3.11
+# 3) Finally fall back to `python` if it's >= 3.11
+
+PYTHON_CMD=""
+
+if command -v python3 &> /dev/null; then
+    if python3 -c 'import sys; sys.exit(0) if (sys.version_info.major>3 or (sys.version_info.major==3 and sys.version_info.minor>=11)) else sys.exit(1)'; then
+        PYTHON_CMD="python3"
+    fi
+fi
+
+if [ -z "$PYTHON_CMD" ]; then
+    for candidate in python3.13 python3.12 python3.11 python; do
+        if command -v "$candidate" &> /dev/null; then
+            if "$candidate" -c 'import sys; sys.exit(0) if (sys.version_info.major>3 or (sys.version_info.major==3 and sys.version_info.minor>=11)) else sys.exit(1)'; then
+                PYTHON_CMD="$candidate"
+                break
+            fi
+        fi
+    done
+fi
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo -e "${RED}Error: No suitable Python 3.11+ interpreter found.${NC}"
+    echo "Please install Python 3.11+ or create an appropriate symlink (e.g. python3.11)."
+    exit 1
 fi
 
 # Check Python version
