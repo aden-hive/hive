@@ -21,10 +21,6 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
-### Alpine Linux Setup
-
-If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
-
 ## Alpine Linux Setup
 
 If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
