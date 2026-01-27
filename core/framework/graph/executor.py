@@ -176,12 +176,20 @@ class GraphExecutor:
 
         # Restore session state if provided
         if session_state and "memory" in session_state:
-            # Restore memory from previous session
-            for key, value in session_state["memory"].items():
-                memory.write(key, value)
-            self.logger.info(
-                f"📥 Restored session state with {len(session_state['memory'])} memory keys"
-            )
+            memory_data = session_state["memory"]
+            # [RESTORED] Type safety check
+            if not isinstance(memory_data, dict):
+                self.logger.warning(
+                    f"⚠️ Invalid memory data type in session state: "
+                    f"{type(memory_data).__name__}, expected dict"
+                )
+            else:
+                # Restore memory from previous session
+                for key, value in memory_data.items():
+                    memory.write(key, value)
+                self.logger.info(
+                    f"📥 Restored session state with {len(memory_data)} memory keys"
+                )
 
         # Write new input data to memory (each key individually)
         if input_data:
@@ -192,7 +200,6 @@ class GraphExecutor:
         total_tokens = 0
         total_latency = 0
         node_retry_counts: dict[str, int] = {}  # Track retries per node
-        max_retries_per_node = 3
 
         # Determine entry point (may differ if resuming)
         current_node_id = graph.get_entry_point(session_state)
@@ -318,11 +325,14 @@ class GraphExecutor:
                         node_retry_counts.get(current_node_id, 0) + 1
                     )
 
-                    if node_retry_counts[current_node_id] < max_retries_per_node:
+                    # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
+                    max_retries = getattr(node_spec, "max_retries", 3)
+
+                    if node_retry_counts[current_node_id] < max_retries:
                         # Retry - don't increment steps for retries
                         steps -= 1
 
-                        # --- ADDED EXPONENTIAL BACKOFF HERE ---
+                        # --- EXPONENTIAL BACKOFF ---
                         retry_count = node_retry_counts[current_node_id]
                         # Backoff formula: 1.0 * (2^(retry - 1)) -> 1s, 2s, 4s...
                         delay = 1.0 * (2 ** (retry_count - 1))
@@ -332,20 +342,20 @@ class GraphExecutor:
 
                         self.logger.info(
                             f"   ↻ Retrying ({node_retry_counts[current_node_id]}/"
-                            f"{max_retries_per_node})..."
+                            f"{max_retries})..."
                         )
                         continue
                     else:
                         # Max retries exceeded - fail the execution
                         self.logger.error(
-                            f"   ✗ Max retries ({max_retries_per_node}) "
+                            f"   ✗ Max retries ({max_retries}) "
                             f"exceeded for node {current_node_id}"
                         )
                         self.runtime.report_problem(
                             severity="critical",
                             description=(
                                 f"Node {current_node_id} failed after "
-                                f"{max_retries_per_node} attempts: {result.error}"
+                                f"{max_retries} attempts: {result.error}"
                             ),
                         )
                         self.runtime.end_run(
@@ -353,14 +363,14 @@ class GraphExecutor:
                             output_data=memory.read_all(),
                             narrative=(
                                 f"Failed at {node_spec.name} after "
-                                f"{max_retries_per_node} retries: {result.error}"
+                                f"{max_retries} retries: {result.error}"
                             ),
                         )
                         return ExecutionResult(
                             success=False,
                             error=(
                                 f"Node '{node_spec.name}' failed after "
-                                f"{max_retries_per_node} attempts: {result.error}"
+                                f"{max_retries} attempts: {result.error}"
                             ),
                             output=memory.read_all(),
                             steps_executed=steps,
@@ -572,7 +582,7 @@ class GraphExecutor:
                 if target_node_spec
                 else edge.target,
             ):
-                # Validate and clean output before mapping inputss
+                # Validate and clean output before mapping inputs
                 if self.cleansing_config.enabled and target_node_spec:
                     output_to_validate = result.output
 
@@ -619,7 +629,7 @@ class GraphExecutor:
                             )
                             # Continue anyway if fallback_to_raw is True
 
-                # Map inputs
+                # Map inputss
                 mapped = edge.map_inputs(result.output, memory.read_all())
                 for key, value in mapped.items():
                     memory.write(key, value)
