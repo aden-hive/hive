@@ -23,7 +23,14 @@ cd hive
 
 # 3. Verify installation
 python -c "import framework; import aden_tools; print('✓ Setup complete')"
+
 ```
+## Run on a clean clone (no exports/ or API keys)
+
+You can verify your setup without building agents or configuring LLM keys:
+
+```bash
+PYTHONPATH=core python core/examples/manual_agent.py
 
 ## Building Your First Agent
 
@@ -78,9 +85,7 @@ hive/
 │       │   └── file_system_toolkits/
 │       └── mcp_server.py   # HTTP MCP server
 │
-├── exports/                # Agent Packages
-│   ├── support_ticket_agent/
-│   ├── market_research_agent/
+├── exports/                # User-generated agent packages (created when you build agents; may not exist on a clean clone)
 │   └── ...                 # Your agents go here
 │
 ├── .claude/                # Claude Code Skills
