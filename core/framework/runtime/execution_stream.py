@@ -105,6 +105,7 @@ class ExecutionStream:
         llm: "LLMProvider | None" = None,
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
+        workspace_id: str = "default",  # New parameter
     ):
         """
         Initialize execution stream.
@@ -121,6 +122,7 @@ class ExecutionStream:
             llm: LLM provider for nodes
             tools: Available tools
             tool_executor: Function to execute tools
+            workspace_id: ID of the workspace for sandboxing
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -133,6 +135,7 @@ class ExecutionStream:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
+        self.workspace_id = workspace_id
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -277,12 +280,29 @@ class ExecutionStream:
                 # Create runtime adapter for this execution
                 runtime_adapter = StreamRuntimeAdapter(self._runtime, execution_id)
 
+                # Wrap tool executor to inject session context
+                wrapped_tool_executor = None
+                if self._tool_executor:
+                    def _wrapped_executor(tool_use):
+                        # Auto-inject session context into tool inputs
+                        # This ensures consistency even if LLM generates different IDs
+                        if tool_use.input is None:
+                            tool_use.input = {}
+                        
+                        tool_use.input["workspace_id"] = self.workspace_id
+                        tool_use.input["agent_id"] = self.stream_id
+                        tool_use.input["session_id"] = execution_id
+                        
+                        return self._tool_executor(tool_use)
+                    
+                    wrapped_tool_executor = _wrapped_executor
+
                 # Create executor for this execution
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
                     llm=self._llm,
                     tools=self._tools,
-                    tool_executor=self._tool_executor,
+                    tool_executor=wrapped_tool_executor,
                 )
 
                 # Create modified graph with entry point

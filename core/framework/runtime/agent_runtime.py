@@ -108,11 +108,16 @@ class AgentRuntime:
             tools: Available tools
             tool_executor: Function to execute tools
             config: Optional runtime configuration
+            workspace_id: ID of the workspace (defaults to 'default')
         """
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
-
+        self.workspace_id = getattr(config, "workspace_id", "default")
+        
+        # If storage_path is relative, it might be relative to workspace
+        # But we'll trust the caller provided a resolved path for storage
+        
         # Initialize storage
         self._storage = ConcurrentStorage(
             base_path=storage_path,
@@ -206,6 +211,7 @@ class AgentRuntime:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    workspace_id=self.workspace_id,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -420,6 +426,7 @@ def create_agent_runtime(
     tools: list["Tool"] | None = None,
     tool_executor: Callable | None = None,
     config: AgentRuntimeConfig | None = None,
+    workspace_id: str = "default",
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -435,10 +442,19 @@ def create_agent_runtime(
         tools: Available tools
         tool_executor: Tool executor function
         config: Runtime configuration
+        workspace_id: Workspace ID
 
     Returns:
         Configured AgentRuntime (not yet started)
     """
+    # Create config if not provided, and ensure workspace_id is set
+    if config is None:
+        config = AgentRuntimeConfig()
+    
+    # Store workspace_id in config for now so it's passed to init
+    # (Or relying on the init modification above which checks config)
+    setattr(config, "workspace_id", workspace_id)
+
     runtime = AgentRuntime(
         graph=graph,
         goal=goal,

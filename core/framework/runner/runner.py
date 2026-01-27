@@ -504,6 +504,7 @@ class AgentRunner:
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
+            workspace_id=self._tool_registry._session_context.get("workspace_id", "default"),
         )
 
     async def run(
