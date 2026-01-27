@@ -1,27 +1,62 @@
 """
-Command-line interface for Goal Agent.
+Command-line interface for Aden Hive.
 
 Usage:
-    python -m core run exports/my-agent --input '{"key": "value"}'
-    python -m core info exports/my-agent
-    python -m core validate exports/my-agent
-    python -m core list exports/
-    python -m core dispatch exports/ --input '{"key": "value"}'
-    python -m core shell exports/my-agent
+    hive run exports/my-agent --input '{"key": "value"}'
+    hive info exports/my-agent
+    hive validate exports/my-agent
+    hive list exports/
+    hive dispatch exports/ --input '{"key": "value"}'
+    hive shell exports/my-agent
 
 Testing commands:
-    python -m core test-run <agent_path> --goal <goal_id>
-    python -m core test-debug <goal_id> <test_id>
-    python -m core test-list <goal_id>
-    python -m core test-stats <goal_id>
+    hive test-run <agent_path> --goal <goal_id>
+    hive test-debug <goal_id> <test_id>
+    hive test-list <goal_id>
+    hive test-stats <goal_id>
 """
 
 import argparse
 import sys
+from pathlib import Path
+
+
+def _configure_paths():
+    """Auto-configure sys.path so agents in exports/ are discoverable.
+
+    Resolves the project root by walking up from this file (framework/cli.py lives
+    inside core/framework/) or from CWD, then adds the exports/ directory to sys.path
+    if it exists. This eliminates the need for manual PYTHONPATH configuration.
+    """
+    # Strategy 1: resolve relative to this file (works when installed via pip install -e core/)
+    framework_dir = Path(__file__).resolve().parent        # core/framework/
+    core_dir = framework_dir.parent                         # core/
+    project_root = core_dir.parent                          # project root
+
+    # Strategy 2: if project_root doesn't look right, fall back to CWD
+    if not (project_root / "exports").is_dir() and not (project_root / "core").is_dir():
+        project_root = Path.cwd()
+
+    # Add exports/ to sys.path so agents are importable as top-level packages
+    exports_dir = project_root / "exports"
+    if exports_dir.is_dir():
+        exports_str = str(exports_dir)
+        if exports_str not in sys.path:
+            sys.path.insert(0, exports_str)
+
+    # Ensure core/ is also in sys.path (for non-editable-install scenarios)
+    core_str = str(project_root / "core")
+    if (project_root / "core").is_dir() and core_str not in sys.path:
+        sys.path.insert(0, core_str)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Goal Agent - Build and run goal-driven agents")
+    _configure_paths()
+
+    parser = argparse.ArgumentParser(
+        prog="hive",
+        description="Aden Hive - Build and run goal-driven agents",
+    )
     parser.add_argument(
         "--model",
         default="claude-haiku-4-5-20251001",
