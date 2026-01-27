@@ -8,6 +8,7 @@ Usage:
 """
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,9 @@ from framework.testing.prompts import (
     PYTEST_TEST_FILE_HEADER,
 )
 
+
+# Initialize logging
+logger = logging.getLogger(__name__)
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
@@ -155,8 +159,8 @@ def _load_active_session() -> BuildSession | None:
 
         if session_id:
             return _load_session(session_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to load active session: {e}")
 
     return None
 
@@ -212,8 +216,8 @@ def list_sessions() -> str:
                         "edge_count": len(data.get("edges", [])),
                         "has_goal": data.get("goal") is not None,
                     })
-            except Exception:
-                pass  # Skip corrupted files
+            except Exception as e:
+                logger.warning(f"Skipping corrupted session file {session_file}: {e}")
 
     # Check which session is currently active
     active_id = None
@@ -221,8 +225,8 @@ def list_sessions() -> str:
         try:
             with open(ACTIVE_SESSION_FILE, "r") as f:
                 active_id = f.read().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to read active session file: {e}")
 
     return json.dumps({
         "sessions": sorted(sessions, key=lambda s: s["last_modified"], reverse=True),
