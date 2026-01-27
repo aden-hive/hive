@@ -5,8 +5,8 @@ These types are used for both interactive CLI approval and
 programmatic/MCP-based approval.
 """
 
-from enum import Enum
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -14,10 +14,11 @@ from pydantic import BaseModel, Field
 
 class ApprovalAction(str, Enum):
     """Actions a user can take on a generated test."""
-    APPROVE = "approve"   # Accept as-is
-    MODIFY = "modify"     # Accept with modifications
-    REJECT = "reject"     # Decline
-    SKIP = "skip"         # Leave pending (decide later)
+
+    APPROVE = "approve"  # Accept as-is
+    MODIFY = "modify"  # Accept with modifications
+    REJECT = "reject"  # Decline
+    SKIP = "skip"  # Leave pending (decide later)
 
 
 class ApprovalRequest(BaseModel):
@@ -26,16 +27,11 @@ class ApprovalRequest(BaseModel):
 
     Used by both CLI and MCP interfaces.
     """
+
     test_id: str
     action: ApprovalAction
-    modified_code: str | None = Field(
-        default=None,
-        description="New code if action is MODIFY"
-    )
-    reason: str | None = Field(
-        default=None,
-        description="Rejection reason if action is REJECT"
-    )
+    modified_code: str | None = Field(default=None, description="New code if action is MODIFY")
+    reason: str | None = Field(default=None, description="Rejection reason if action is REJECT")
     approved_by: str = "user"
 
     def validate_action(self) -> tuple[bool, str | None]:
@@ -56,6 +52,7 @@ class ApprovalResult(BaseModel):
     """
     Result of processing an approval request.
     """
+
     test_id: str
     action: ApprovalAction
     success: bool
@@ -76,9 +73,7 @@ class ApprovalResult(BaseModel):
         )
 
     @classmethod
-    def error_result(
-        cls, test_id: str, action: ApprovalAction, error: str
-    ) -> "ApprovalResult":
+    def error_result(cls, test_id: str, action: ApprovalAction, error: str) -> "ApprovalResult":
         """Create an error result."""
         return cls(
             test_id=test_id,
@@ -94,6 +89,7 @@ class BatchApprovalRequest(BaseModel):
 
     Useful for MCP interface where user reviews all tests and submits decisions.
     """
+
     goal_id: str
     approvals: list[ApprovalRequest]
 
@@ -109,6 +105,7 @@ class BatchApprovalResult(BaseModel):
     """
     Result of processing a batch approval request.
     """
+
     goal_id: str
     total: int
     approved: int

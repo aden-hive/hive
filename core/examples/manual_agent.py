@@ -13,10 +13,11 @@ Run with:
 """
 
 import asyncio
-import logging
-from framework.graph import Goal, NodeSpec, EdgeSpec, GraphSpec, EdgeCondition
+
+from framework.graph import EdgeCondition, EdgeSpec, Goal, GraphSpec, NodeSpec
 from framework.graph.executor import GraphExecutor
 from framework.runtime.core import Runtime
+
 
 # 1. Define Node Logic (Pure Python Functions)
 def greet(name: str) -> str:
@@ -38,7 +39,7 @@ async def main():
         description="Generate a friendly uppercase greeting",
         success_criteria=[
             {
-                "id": "greeting_generated", 
+                "id": "greeting_generated",
                 "description": "Greeting produced",
                 "metric": "custom",
                 "target": "any"
@@ -63,7 +64,7 @@ async def main():
         name="Uppercaser",
         description="Converts greeting to uppercase",
         node_type="function",
-        function="uppercase", 
+        function="uppercase",
         input_keys=["greeting"],
         output_keys=["final_greeting"]
     )
@@ -100,8 +101,8 @@ async def main():
     executor.register_function("uppercaser", uppercase)
 
     # 8. Execute Agent
-    print(f"▶ Executing agent with input: name='Alice'...")
-    
+    print("▶ Executing agent with input: name='Alice'...")
+
     result = await executor.execute(
         graph=graph,
         goal=goal,
