@@ -58,8 +58,11 @@ def register_tools(mcp: FastMCP) -> None:
             with open(secure_path, "r", encoding=encoding) as f:
                 content = f.read()
 
-            if len(content.encode(encoding)) > max_size:
-                content = content[:max_size]
+            encoded = content.encode(encoding)
+            if len(encoded) > max_size:
+                # Truncate by bytes, not characters, to respect the byte limit
+                # Use errors='ignore' to handle partial multi-byte sequences at cut point
+                content = encoded[:max_size].decode(encoding, errors="ignore")
                 content += "\n\n[... Content truncated due to size limit ...]"
 
             return {

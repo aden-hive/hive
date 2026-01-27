@@ -129,6 +129,21 @@ class TestViewFileTool:
         assert len(result["content"]) <= 100 + len("\n\n[... Content truncated due to size limit ...]")
         assert "[... Content truncated due to size limit ...]" in result["content"]
 
+    def test_view_file_with_max_size_truncation_multibyte(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
+        """Viewing a file with multi-byte characters truncates by bytes, not characters."""
+        test_file = tmp_path / "emoji.txt"
+        # Each emoji is 4 bytes in UTF-8
+        content = "🔥" * 100  # 400 bytes total
+        test_file.write_text(content, encoding="utf-8")
+
+        result = view_file_fn(path="emoji.txt", max_size=20, **mock_workspace)
+
+        assert result["success"] is True
+        assert "[... Content truncated due to size limit ...]" in result["content"]
+        # The truncated content (excluding the suffix) should be <= max_size bytes
+        truncated_content = result["content"].replace("\n\n[... Content truncated due to size limit ...]", "")
+        assert len(truncated_content.encode("utf-8")) <= 20
+
     def test_view_file_with_negative_max_size(self, view_file_fn, mock_workspace, mock_secure_path, tmp_path):
         """Viewing a file with negative max_size returns error."""
         test_file = tmp_path / "test.txt"
