@@ -62,6 +62,26 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
 ## Quick Start
+### Contributor First Steps (Python Only)
+
+If you are a first-time contributor, you can get started with a Python-only workflow. You do not need Node.js, Docker, or Claude Code to make your first contribution.
+
+#### Setup
+
+```bash
+# Clone and setup (macOS / Linux / WSL)
+git clone https://github.com/adenhq/hive.git
+cd hive
+./scripts/setup-python.sh
+```
+#### Verify Installation
+
+```bash
+# Confirm core packages are ready
+python -c "import framework; import aden_tools; print('Setup OK')"
+```
+> **Note on Agents:** The `exports/` directory may be empty on a fresh clone. Example agents are generated later when building agents.
+
 
 ### Prerequisites
 
