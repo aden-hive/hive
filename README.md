@@ -98,6 +98,9 @@ claude> /testing-agent
 
 # Run your agent
 PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+
+## Run your agent in Mock Mode (No API Key required)
+PYTHONPATH=core:exports python -m your_agent_name run --input '{...}' --mock
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
