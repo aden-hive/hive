@@ -623,7 +623,7 @@ class GraphExecutor:
                 f"Use 'llm_tool_use' for nodes that call tools, 'llm_generate' for text generation."
             )
 
-        # Create based on type
+        # Create based on types
         if node_spec.node_type == "llm_tool_use":
             if not node_spec.tools:
                 raise RuntimeError(

@@ -700,7 +700,7 @@ class LLMNode(NodeProtocol):
 
         content = raw_response.strip()
 
-        # Try direct JSON parse first (fast paths)
+        # Try direct JSON parse first (fast path)
         try:
             content = raw_response.strip()
 
