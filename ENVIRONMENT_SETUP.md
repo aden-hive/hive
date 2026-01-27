@@ -77,8 +77,6 @@ export ANTHROPIC_API_KEY="your-key-here"
  **Agents are NOT included by default.**  
 You must generate an agent (or manually create one under `exports/`) **before running any command like**:
 
-```bash
-python -m agent_name
 
 
 The `exports/` folder is only created when:
