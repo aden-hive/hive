@@ -19,7 +19,7 @@ async def example_1_programmatic_registration():
     print("\n=== Example 1: Programmatic MCP Server Registration ===\n")
 
     # Load an existing agent
-    runner = AgentRunner.load("exports/task-planner")
+    runner = AgentRunner.load(Path("exports/task-planner"))
 
     # Register tools MCP server via STDIO
     num_tools = runner.register_mcp_server(
@@ -27,7 +27,7 @@ async def example_1_programmatic_registration():
         transport="stdio",
         command="python",
         args=["-m", "aden_tools.mcp_server", "--stdio"],
-        cwd="../tools",
+        cwd=Path("../tools"),  # FIXED: Added Path()
     )
 
     print(f"Registered {num_tools} tools from tools MCP server")
@@ -37,9 +37,9 @@ async def example_1_programmatic_registration():
     print(f"\nAvailable tools: {list(tools.keys())}")
 
     # Run the agent with MCP tools available
-    result = await runner.run(
-        {"objective": "Search for 'Claude AI' and summarize the top 3 results"}
-    )
+    result = await runner.run({
+        "objective": "Search for 'Claude AI' and summarize the top 3 results"
+    })
 
     print(f"\nAgent result: {result}")
 
@@ -54,7 +54,7 @@ async def example_2_http_transport():
     # First, start the tools MCP server in HTTP mode:
     # cd tools && python mcp_server.py --port 4001
 
-    runner = AgentRunner.load("exports/task-planner")
+    runner = AgentRunner.load(Path("exports/task-planner"))
 
     # Register tools via HTTP
     num_tools = runner.register_mcp_server(
@@ -78,8 +78,10 @@ async def example_3_config_file():
 
     # Copy example config (in practice, you'd place this in your agent folder)
     import shutil
-
-    shutil.copy("examples/mcp_servers.json", test_agent_path / "mcp_servers.json")
+    shutil.copy(
+        Path("examples/mcp_servers.json"),  # FIXED: Added Path()
+        test_agent_path / "mcp_servers.json"
+    )
 
     # Load agent - MCP servers will be auto-discovered
     runner = AgentRunner.load(test_agent_path)
@@ -108,14 +110,18 @@ async def example_4_custom_agent_with_mcp_tools():
     builder.set_goal(
         goal_id="web-researcher",
         name="Web Research Agent",
-        description="Search the web and summarize findings",
+        description="Search the web and summarize findings"
     )
 
     # Add success criteria
     builder.add_success_criterion(
-        "search-results", "Successfully retrieve at least 3 web search results"
+        "search-results",
+        "Successfully retrieve at least 3 web search results"
     )
-    builder.add_success_criterion("summary", "Provide a clear, concise summary of the findings")
+    builder.add_success_criterion(
+        "summary",
+        "Provide a clear, concise summary of the findings"
+    )
 
     # Add nodes that will use MCP tools
     builder.add_node(
@@ -158,7 +164,7 @@ async def example_4_custom_agent_with_mcp_tools():
         transport="stdio",
         command="python",
         args=["-m", "aden_tools.mcp_server", "--stdio"],
-        cwd="../tools",
+        cwd=Path("../tools"),  # FIXED: Added Path()
     )
 
     # Run the agent
@@ -186,7 +192,6 @@ async def main():
     except Exception as e:
         print(f"\nError running example: {e}")
         import traceback
-
         traceback.print_exc()
 
 
