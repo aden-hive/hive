@@ -76,6 +76,18 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Run Python environment setup
+
+⚠️ **Important for Windows Users**
+
+This project uses `.sh` setup scripts which **will not run** in
+Command Prompt or PowerShell.
+
+If you are on Windows:
+- Use **WSL (recommended)**, or
+- Follow the **Manual Setup** in ENVIRONMENT_SETUP.md
+
+Linux / macOS / WSL users can run:
+
 ./scripts/setup-python.sh
 ```
 
