@@ -409,9 +409,13 @@ class AgentRunner:
             session_id=session_id,
         )
 
-        # Create LLM provider (if not mock mode and API key available)
-        # Uses LiteLLM which auto-detects the provider from model name
-        if not self.mock_mode:
+        # Create LLM provider
+        if self.mock_mode:
+            # Use mock LLM provider for testing without API calls
+            from framework.llm.mock import MockLLMProvider
+            self._llm = MockLLMProvider(model="mock-model")
+        else:
+            # Uses LiteLLM which auto-detects the provider from model name
             # Detect required API key from model name
             api_key_env = self._get_api_key_env_var(self.model)
             if api_key_env and os.environ.get(api_key_env):

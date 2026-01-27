@@ -1,0 +1,29 @@
+{
+  "id": "test-agent-mock",
+  "name": "Test Agent for Mock Mode",
+  "goal": {
+    "id": "test-goal",
+    "name": "Test Goal",
+    "description": "A simple test goal for verifying mock mode"
+  },
+  "graph": {
+    "id": "test-graph",
+    "goal_id": "test-goal",
+    "name": "Test Graph",
+    "entry_node": "llm_step",
+    "terminal_nodes": ["llm_step"],
+    "nodes": [
+      {
+        "id": "llm_step",
+        "name": "LLM Processing",
+        "description": "Process the user input with LLM",
+        "node_type": "llm_generate",
+        "input_keys": ["user_input"],
+        "output_keys": ["response"],
+        "system_prompt": "You are a helpful assistant. Respond to the user greeting with a warm greeting.",
+        "json_mode": false
+      }
+    ],
+    "edges": []
+  }
+}

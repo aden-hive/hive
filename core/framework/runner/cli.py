@@ -34,7 +34,7 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     run_parser.add_argument(
         "--mock",
         action="store_true",
-        help="Run in mock mode (no real LLM calls)",
+        help="Run in mock mode - uses mock LLM provider without real API calls for testing",
     )
     run_parser.add_argument(
         "--output", "-o",
@@ -218,6 +218,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"Agent: {info.name}")
         print(f"Goal: {info.goal_name}")
         print(f"Steps: {info.node_count}")
+        if args.mock:
+            print("Mode: MOCK (no real API calls)")
         print(f"Input: {json.dumps(context)}")
         print()
         print("=" * 60)
