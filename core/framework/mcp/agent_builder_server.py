@@ -1836,9 +1836,7 @@ def test_node(
 
     # Show memory state after (simulated)
     result["expected_memory_state"] = {
-        "inputs_available": {
-            k: input_data.get(k, "<not provided>") for k in node_spec.input_keys
-        },
+        "inputs_available": {k: input_data.get(k, "<not provided>") for k in node_spec.input_keys},
         "outputs_to_write": node_spec.output_keys,
     }
 
@@ -3090,7 +3088,7 @@ def list_tests(
 
             # Find all async function definitions that start with "test_"
             for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                     if node.name.startswith("test_"):
                         # Determine test type from filename
                         if "constraint" in test_file.name:

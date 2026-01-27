@@ -156,9 +156,7 @@ class GraphExecutor:
             if node.tools:
                 missing = set(node.tools) - available_tool_names
                 if missing:
-                    available = (
-                        sorted(available_tool_names) if available_tool_names else "none"
-                    )
+                    available = sorted(available_tool_names) if available_tool_names else "none"
                     errors.append(
                         f"Node '{node.name}' (id={node.id}) requires tools "
                         f"{sorted(missing)} but they are not registered. "
@@ -224,9 +222,7 @@ class GraphExecutor:
                 # Restore memory from previous session
                 for key, value in memory_data.items():
                     memory.write(key, value)
-                self.logger.info(
-                    f"📥 Restored session state with {len(memory_data)} memory keys"
-                )
+                self.logger.info(f"📥 Restored session state with {len(memory_data)} memory keys")
 
         # Write new input data to memory (each key individually)
         if input_data:
@@ -379,15 +375,13 @@ class GraphExecutor:
                         # --------------------------------------
 
                         self.logger.info(
-                            f"   ↻ Retrying ({node_retry_counts[current_node_id]}/"
-                            f"{max_retries})..."
+                            f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
                         )
                         continue
                     else:
                         # Max retries exceeded - fail the execution
                         self.logger.error(
-                            f"   ✗ Max retries ({max_retries}) "
-                            f"exceeded for node {current_node_id}"
+                            f"   ✗ Max retries ({max_retries}) exceeded for node {current_node_id}"
                         )
                         self.runtime.report_problem(
                             severity="critical",
@@ -478,7 +472,11 @@ class GraphExecutor:
                         fan_in_node = self._find_convergence_node(graph, targets)
 
                         # Execute branches in parallel
-                        _branch_results, branch_tokens, branch_latency = await self._execute_parallel_branches(
+                        (
+                            _branch_results,
+                            branch_tokens,
+                            branch_latency,
+                        ) = await self._execute_parallel_branches(
                             graph=graph,
                             goal=goal,
                             edges=traversable_edges,
@@ -672,12 +670,8 @@ class GraphExecutor:
                 memory=memory.read_all(),
                 llm=self.llm,
                 goal=goal,
-                source_node_name=current_node_spec.name
-                if current_node_spec
-                else current_node_id,
-                target_node_name=target_node_spec.name
-                if target_node_spec
-                else edge.target,
+                source_node_name=current_node_spec.name if current_node_spec else current_node_id,
+                target_node_name=target_node_spec.name if target_node_spec else edge.target,
             ):
                 # Validate and clean output before mapping inputs
                 if self.cleansing_config.enabled and target_node_spec:
@@ -690,9 +684,7 @@ class GraphExecutor:
                     )
 
                     if not validation.valid:
-                        self.logger.warning(
-                            f"⚠ Output validation failed: {validation.errors}"
-                        )
+                        self.logger.warning(f"⚠ Output validation failed: {validation.errors}")
 
                         # Clean the output
                         cleaned_output = self.output_cleaner.clean_output(
@@ -717,9 +709,7 @@ class GraphExecutor:
                         )
 
                         if revalidation.valid:
-                            self.logger.info(
-                                "✓ Output cleaned and validated successfully"
-                            )
+                            self.logger.info("✓ Output cleaned and validated successfully")
                         else:
                             self.logger.error(
                                 f"✗ Cleaning failed, errors remain: {revalidation.errors}"
@@ -843,9 +833,15 @@ class GraphExecutor:
             target_spec = graph.get_node(branch.node_id)
             self.logger.info(f"      • {target_spec.name if target_spec else branch.node_id}")
 
-        async def execute_single_branch(branch: ParallelBranch) -> tuple[ParallelBranch, NodeResult | Exception]:
+        async def execute_single_branch(
+            branch: ParallelBranch,
+        ) -> tuple[ParallelBranch, NodeResult | Exception]:
             """Execute a single branch with retry logic."""
             node_spec = graph.get_node(branch.node_id)
+            if node_spec is None:
+                branch.status = "failed"
+                branch.error = f"Node {branch.node_id} not found in graph"
+                return branch, RuntimeError(branch.error)
             branch.status = "running"
 
             try:
@@ -859,7 +855,8 @@ class GraphExecutor:
 
                     if not validation.valid:
                         self.logger.warning(
-                            f"⚠ Output validation failed for branch {branch.node_id}: {validation.errors}"
+                            f"⚠ Output validation failed for branch "
+                            f"{branch.node_id}: {validation.errors}"
                         )
                         cleaned_output = self.output_cleaner.clean_output(
                             output=source_result.output,
@@ -885,7 +882,9 @@ class GraphExecutor:
                     ctx = self._build_context(node_spec, memory, goal, mapped, graph.max_tokens)
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
-                    self.logger.info(f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})")
+                    self.logger.info(
+                        f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
+                    )
                     result = await node_impl.execute(ctx)
                     last_result = result
 
@@ -903,14 +902,18 @@ class GraphExecutor:
                         return branch, result
 
                     self.logger.warning(
-                        f"      ↻ Branch {node_spec.name}: retry {attempt + 1}/{node_spec.max_retries}"
+                        f"      ↻ Branch {node_spec.name}: "
+                        f"retry {attempt + 1}/{node_spec.max_retries}"
                     )
 
                 # All retries exhausted
                 branch.status = "failed"
                 branch.error = last_result.error if last_result else "Unknown error"
                 branch.result = last_result
-                self.logger.error(f"      ✗ Branch {node_spec.name}: failed after {node_spec.max_retries} attempts")
+                self.logger.error(
+                    f"      ✗ Branch {node_spec.name}: "
+                    f"failed after {node_spec.max_retries} attempts"
+                )
                 return branch, last_result
 
             except Exception as e:
@@ -945,13 +948,15 @@ class GraphExecutor:
         if failed_branches:
             failed_names = [graph.get_node(b.node_id).name for b in failed_branches]
             if self._parallel_config.on_branch_failure == "fail_all":
-                raise RuntimeError(
-                    f"Parallel execution failed: branches {failed_names} failed"
-                )
+                raise RuntimeError(f"Parallel execution failed: branches {failed_names} failed")
             elif self._parallel_config.on_branch_failure == "continue_others":
-                self.logger.warning(f"⚠ Some branches failed ({failed_names}), continuing with successful ones")
+                self.logger.warning(
+                    f"⚠ Some branches failed ({failed_names}), continuing with successful ones"
+                )
 
-        self.logger.info(f"   ⑃ Fan-out complete: {len(branch_results)}/{len(branches)} branches succeeded")
+        self.logger.info(
+            f"   ⑃ Fan-out complete: {len(branch_results)}/{len(branches)} branches succeeded"
+        )
         return branch_results, total_tokens, total_latency
 
     def register_node(self, node_id: str, implementation: NodeProtocol) -> None:

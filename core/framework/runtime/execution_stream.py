@@ -371,10 +371,13 @@ class ExecutionStream:
                 logger.error(f"Execution {execution_id} failed: {e}")
 
                 # Store error result with retention
-                self._record_execution_result(execution_id, ExecutionResult(
-                    success=False,
-                    error=str(e),
-                ))
+                self._record_execution_result(
+                    execution_id,
+                    ExecutionResult(
+                        success=False,
+                        error=str(e),
+                    ),
+                )
 
                 # Emit failure event
                 if self._event_bus:

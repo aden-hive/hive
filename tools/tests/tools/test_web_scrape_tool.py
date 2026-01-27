@@ -1,8 +1,8 @@
 """Tests for web_scrape tool (FastMCP)."""
-import pytest
 
-from fastmcp import FastMCP
+import pytest
 from aden_tools.tools.web_scrape_tool import register_tools
+from fastmcp import FastMCP
 
 
 @pytest.fixture
@@ -55,7 +55,7 @@ class TestWebScrapeTool:
         """Ensure non-HTML content types (like JSON) are rejected."""
         # GitHub's Zen API returns text/plain, not html
         result = web_scrape_fn(url="https://api.github.com/zen")
-        
+
         # We expect an error about skipping non-HTML
         assert "error" in result
         assert "Skipping non-HTML content" in result["error"]

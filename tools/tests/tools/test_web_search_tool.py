@@ -1,9 +1,8 @@
 """Tests for web_search tool with multi-provider support (FastMCP)."""
 
 import pytest
-
-from fastmcp import FastMCP
 from aden_tools.tools.web_search_tool import register_tools
+from fastmcp import FastMCP
 
 
 @pytest.fixture
@@ -35,9 +34,7 @@ class TestWebSearchTool:
         result = web_search_fn(query="")
 
         assert "error" in result
-        assert (
-            "1-500" in result["error"].lower() or "character" in result["error"].lower()
-        )
+        assert "1-500" in result["error"].lower() or "character" in result["error"].lower()
 
     def test_long_query_returns_error(self, web_search_fn, monkeypatch):
         """Query exceeding 500 chars returns error."""
@@ -105,9 +102,7 @@ class TestGoogleProvider:
 class TestAutoProvider:
     """Tests for auto provider selection."""
 
-    def test_auto_prefers_brave_for_backward_compatibility(
-        self, web_search_fn, monkeypatch
-    ):
+    def test_auto_prefers_brave_for_backward_compatibility(self, web_search_fn, monkeypatch):
         """Auto mode uses Brave first for backward compatibility."""
         monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
         monkeypatch.setenv("GOOGLE_CSE_ID", "test-cse-id")

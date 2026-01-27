@@ -14,7 +14,7 @@ from typing import Any
 try:
     import litellm
 except ImportError:
-    litellm = None
+    litellm = None  # type: ignore[assignment]
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
@@ -133,7 +133,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["response_format"] = response_format
 
         # Make the call
-        response = litellm.completion(**kwargs)
+        response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
         # Extract content
         content = response.choices[0].message.content or ""
@@ -189,7 +189,7 @@ class LiteLLMProvider(LLMProvider):
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
-            response = litellm.completion(**kwargs)
+            response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
             # Track tokens
             usage = response.usage

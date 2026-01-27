@@ -1,9 +1,10 @@
 """Tests for pdf_read tool (FastMCP)."""
-import pytest
+
 from pathlib import Path
 
-from fastmcp import FastMCP
+import pytest
 from aden_tools.tools.pdf_read_tool import register_tools
+from fastmcp import FastMCP
 
 
 @pytest.fixture

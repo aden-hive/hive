@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruff check --fix --config=core/pyproject.toml \"$CLAUDE_FILE_PATH\" 2>/dev/null; ruff format --config=core/pyproject.toml \"$CLAUDE_FILE_PATH\" 2>/dev/null; true"
+          }
+        ]
+      }
+    ]
+  }
+}
