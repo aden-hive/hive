@@ -14,11 +14,19 @@ from fastmcp import FastMCP
 from pypdf import PdfReader
 
 
-def validate_path_security(resolved_path: Path) -> None:
-    """Validate that the path is within the workspace directory for security."""
-    workspace_dir = Path(os.getcwd())
+def validate_path_security(resolved_path: Path) -> dict | None:
+    """Validate that the path is within the workspace directory for security.
+    
+    Args:
+        resolved_path: The resolved path to validate
+        
+    Returns:
+        Error dict if validation fails, None if validation passes
+    """
+    workspace_dir = Path(os.environ.get("WORKSPACE_DIR", os.getcwd())).resolve()
     if not resolved_path.is_relative_to(workspace_dir):
-        raise ValueError(f"Access denied: Path '{resolved_path}' is outside the workspace.")
+        return {"error": f"Access denied: Path '{resolved_path}' is outside the workspace."}
+    return None
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -96,7 +104,9 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             path = Path(file_path).resolve()
 
-            validate_path_security(path)
+            security_error = validate_path_security(path)
+            if security_error:
+                return security_error
 
             # Validate file exists
             if not path.exists():
