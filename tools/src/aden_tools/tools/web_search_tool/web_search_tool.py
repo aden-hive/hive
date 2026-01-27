@@ -4,6 +4,7 @@ Web Search Tool - Search the web using Brave Search API.
 Requires BRAVE_SEARCH_API_KEY environment variable.
 Returns search results with titles, URLs, and snippets.
 """
+
 from __future__ import annotations
 
 import os
@@ -93,11 +94,13 @@ def register_tools(
             web_results = data.get("web", {}).get("results", [])
 
             for item in web_results[:num_results]:
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("description", ""),
-                })
+                results.append(
+                    {
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "snippet": item.get("description", ""),
+                    }
+                )
 
             return {
                 "query": query,

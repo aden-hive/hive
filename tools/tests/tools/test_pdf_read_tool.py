@@ -1,4 +1,5 @@
 """Tests for pdf_read tool (FastMCP)."""
+
 import pytest
 from pathlib import Path
 

@@ -1,4 +1,5 @@
 """Tests for web_search tool (FastMCP)."""
+
 import pytest
 
 from fastmcp import FastMCP
@@ -32,7 +33,9 @@ class TestWebSearchTool:
         result = web_search_fn(query="")
 
         assert "error" in result
-        assert "1-500" in result["error"].lower() or "character" in result["error"].lower()
+        assert (
+            "1-500" in result["error"].lower() or "character" in result["error"].lower()
+        )
 
     def test_long_query_returns_error(self, web_search_fn, monkeypatch):
         """Query exceeding 500 chars returns error."""

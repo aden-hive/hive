@@ -3,6 +3,7 @@ Search tool credentials.
 
 Contains credentials for search providers like Brave Search, Google, Bing, etc.
 """
+
 from .base import CredentialSpec
 
 SEARCH_CREDENTIALS = {

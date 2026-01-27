@@ -4,6 +4,7 @@ Base classes for credential management.
 Contains the core infrastructure: CredentialSpec, CredentialManager, and CredentialError.
 Credential specs are defined in separate category files (llm.py, search.py, etc.).
 """
+
 from __future__ import annotations
 
 import os
@@ -183,8 +184,7 @@ class CredentialManager:
         """
         if name not in self._specs:
             raise KeyError(
-                f"Unknown credential '{name}'. "
-                f"Available: {list(self._specs.keys())}"
+                f"Unknown credential '{name}'. Available: {list(self._specs.keys())}"
             )
 
         # No caching - read fresh each time for hot-reload support

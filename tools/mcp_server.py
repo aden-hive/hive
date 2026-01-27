@@ -25,6 +25,7 @@ Note:
     - Tier 2 (agent load): Tool credentials validated when agent is loaded
     See aden_tools.credentials for details.
 """
+
 import argparse
 import os
 import sys
@@ -33,10 +34,11 @@ import sys
 if "--stdio" in sys.argv:
     # Monkey-patch rich Console to redirect to stderr
     import rich.console
+
     _original_console_init = rich.console.Console.__init__
 
     def _patched_console_init(self, *args, **kwargs):
-        kwargs['file'] = sys.stderr  # Force all rich output to stderr
+        kwargs["file"] = sys.stderr  # Force all rich output to stderr
         _original_console_init(self, *args, **kwargs)
 
     rich.console.Console.__init__ = _patched_console_init

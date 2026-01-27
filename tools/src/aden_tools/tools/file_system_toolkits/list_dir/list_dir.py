@@ -2,6 +2,7 @@ import os
 from mcp.server.fastmcp import FastMCP
 from ..security import get_secure_path
 
+
 def register_tools(mcp: FastMCP) -> None:
     """Register directory listing tools with the MCP server."""
 
@@ -43,7 +44,7 @@ def register_tools(mcp: FastMCP) -> None:
                 entry = {
                     "name": item,
                     "type": "directory" if is_dir else "file",
-                    "size_bytes": os.path.getsize(full_path) if not is_dir else None
+                    "size_bytes": os.path.getsize(full_path) if not is_dir else None,
                 }
                 entries.append(entry)
 
@@ -51,7 +52,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": True,
                 "path": path,
                 "entries": entries,
-                "total_count": len(entries)
+                "total_count": len(entries),
             }
         except Exception as e:
             return {"error": f"Failed to list directory: {str(e)}"}

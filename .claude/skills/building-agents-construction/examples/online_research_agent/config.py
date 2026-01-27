@@ -1,4 +1,5 @@
 """Runtime configuration."""
+
 from dataclasses import dataclass
 
 
@@ -10,6 +11,7 @@ class RuntimeConfig:
 
 
 default_config = RuntimeConfig()
+
 
 # Agent metadata
 @dataclass

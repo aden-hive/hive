@@ -2,6 +2,7 @@ import os
 from mcp.server.fastmcp import FastMCP
 from ..security import get_secure_path
 
+
 def register_tools(mcp: FastMCP) -> None:
     """Register file view tools with the MCP server."""
 
@@ -43,7 +44,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "path": path,
                 "content": content,
                 "size_bytes": len(content.encode("utf-8")),
-                "lines": len(content.splitlines())
+                "lines": len(content.splitlines()),
             }
         except Exception as e:
             return {"error": f"Failed to read file: {str(e)}"}
