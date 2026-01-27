@@ -6,9 +6,22 @@ This script checks if the MCP server is properly installed and configured.
 """
 
 import json
+import logging
 import subprocess
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def setup_logger():
+    """Configure logger for CLI usage."""
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter("%(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
 
 class Colors:
@@ -21,29 +34,31 @@ class Colors:
 
 def check(description: str) -> bool:
     """Print check description and return a context manager for result."""
-    print(f"Checking {description}...", end=" ")
+    logger.info(f"Checking {description}... ", extra={"end": ""})
+    sys.stdout.flush()
     return True
 
 
 def success(msg: str = "OK"):
-    """Print success message."""
-    print(f"{Colors.GREEN}✓ {msg}{Colors.NC}")
+    """Log success message."""
+    logger.info(f"{Colors.GREEN}✓ {msg}{Colors.NC}")
 
 
 def warning(msg: str):
-    """Print warning message."""
-    print(f"{Colors.YELLOW}⚠ {msg}{Colors.NC}")
+    """Log warning message."""
+    logger.warning(f"{Colors.YELLOW}⚠ {msg}{Colors.NC}")
 
 
 def error(msg: str):
-    """Print error message."""
-    print(f"{Colors.RED}✗ {msg}{Colors.NC}")
+    """Log error message."""
+    logger.error(f"{Colors.RED}✗ {msg}{Colors.NC}")
 
 
 def main():
     """Run verification checks."""
-    print("=== MCP Server Verification ===")
-    print()
+    setup_logger()
+    logger.info("=== MCP Server Verification ===")
+    logger.info("")
 
     script_dir = Path(__file__).parent.absolute()
     all_checks_passed = True
@@ -61,7 +76,7 @@ def main():
         success(f"installed at {framework_path}")
     except subprocess.CalledProcessError:
         error("framework package not found")
-        print(f"  Run: pip install -e {script_dir}")
+        logger.info(f"  Run: pip install -e {script_dir}")
         all_checks_passed = False
 
     # Check 2: MCP dependencies
@@ -75,7 +90,7 @@ def main():
 
     if missing_deps:
         error(f"missing: {', '.join(missing_deps)}")
-        print(f"  Run: pip install {' '.join(missing_deps)}")
+        logger.info(f"  Run: pip install {' '.join(missing_deps)}")
         all_checks_passed = False
     else:
         success("all installed")
@@ -92,7 +107,7 @@ def main():
         success("loads successfully")
     except subprocess.CalledProcessError as e:
         error("failed to import")
-        print(f"  Error: {e.stderr}")
+        logger.error(f"  Error: {e.stderr}")
         all_checks_passed = False
 
     # Check 4: MCP configuration file
@@ -106,9 +121,9 @@ def main():
             if "mcpServers" in config and "agent-builder" in config["mcpServers"]:
                 server_config = config["mcpServers"]["agent-builder"]
                 success("found and valid")
-                print(f"  Command: {server_config.get('command')}")
-                print(f"  Args: {' '.join(server_config.get('args', []))}")
-                print(f"  CWD: {server_config.get('cwd')}")
+                logger.info(f"  Command: {server_config.get('command')}")
+                logger.info(f"  Args: {' '.join(server_config.get('args', []))}")
+                logger.info(f"  CWD: {server_config.get('cwd')}")
             else:
                 warning("exists but missing agent-builder config")
                 all_checks_passed = False
@@ -117,8 +132,8 @@ def main():
             all_checks_passed = False
     else:
         warning("not found (optional)")
-        print(f"  Location would be: {mcp_config}")
-        print("  Run setup_mcp.py to create it")
+        logger.info(f"  Location would be: {mcp_config}")
+        logger.info("  Run setup_mcp.py to create it")
 
     # Check 5: Framework modules
     check("core framework modules")
@@ -168,28 +183,28 @@ def main():
         warning("server startup slow (might be OK)")
     except subprocess.CalledProcessError as e:
         error("server failed to start")
-        print(f"  Error: {e.stderr}")
+        logger.error(f"  Error: {e.stderr}")
         all_checks_passed = False
 
-    print()
-    print("=" * 40)
+    logger.info("")
+    logger.info("=" * 40)
     if all_checks_passed:
-        print(f"{Colors.GREEN}✓ All checks passed!{Colors.NC}")
-        print()
-        print("Your MCP server is ready to use.")
-        print()
-        print(f"{Colors.BLUE}To start the server:{Colors.NC}")
-        print("  python -m framework.mcp.agent_builder_server")
-        print()
-        print(f"{Colors.BLUE}To use with Claude Desktop:{Colors.NC}")
-        print("  Add the configuration from .mcp.json to your")
-        print("  Claude Desktop MCP settings")
+        logger.info(f"{Colors.GREEN}✓ All checks passed!{Colors.NC}")
+        logger.info("")
+        logger.info("Your MCP server is ready to use.")
+        logger.info("")
+        logger.info(f"{Colors.BLUE}To start the server:{Colors.NC}")
+        logger.info("  python -m framework.mcp.agent_builder_server")
+        logger.info("")
+        logger.info(f"{Colors.BLUE}To use with Claude Desktop:{Colors.NC}")
+        logger.info("  Add the configuration from .mcp.json to your")
+        logger.info("  Claude Desktop MCP settings")
     else:
-        print(f"{Colors.RED}✗ Some checks failed{Colors.NC}")
-        print()
-        print("To fix issues, run:")
-        print(f"  python {script_dir / 'setup_mcp.py'}")
-    print()
+        logger.info(f"{Colors.RED}✗ Some checks failed{Colors.NC}")
+        logger.info("")
+        logger.info("To fix issues, run:")
+        logger.info(f"  python {script_dir / 'setup_mcp.py'}")
+    logger.info("")
 
 
 if __name__ == "__main__":
