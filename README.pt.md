@@ -8,7 +8,8 @@
   <a href="README.es.md">Español</a> |
   <a href="README.pt.md">Português</a> |
   <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a>
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -288,11 +289,14 @@ Usamos [Discord](https://discord.com/invite/MXE49hrKDk) para suporte, solicitaç
 
 Aceitamos contribuições! Por favor, consulte [CONTRIBUTING.md](CONTRIBUTING.md) para diretrizes.
 
-1. Faça fork do repositório
-2. Crie sua branch de funcionalidade (`git checkout -b feature/amazing-feature`)
-3. Faça commit das suas alterações (`git commit -m 'Add amazing feature'`)
-4. Faça push para a branch (`git push origin feature/amazing-feature`)
-5. Abra um Pull Request
+**Importante:** Por favor, seja atribuído a uma issue antes de enviar um PR. Comente na issue para reivindicá-la e um mantenedor irá atribuí-la a você em 24 horas. Isso ajuda a evitar trabalho duplicado.
+
+1. Encontre ou crie uma issue e seja atribuído
+2. Faça fork do repositório
+3. Crie sua branch de funcionalidade (`git checkout -b feature/amazing-feature`)
+4. Faça commit das suas alterações (`git commit -m 'Add amazing feature'`)
+5. Faça push para a branch (`git push origin feature/amazing-feature`)
+6. Abra um Pull Request
 
 ## Junte-se ao Nosso Time
 

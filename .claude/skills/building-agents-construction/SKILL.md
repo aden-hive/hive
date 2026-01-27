@@ -520,6 +520,8 @@ class RuntimeConfig:
     model: str = "cerebras/zai-glm-4.7"
     temperature: float = 0.7
     max_tokens: int = 4096
+    api_key: str | None = None
+    api_base: str | None = None
 
 default_config = RuntimeConfig()
 
@@ -972,7 +974,11 @@ class {agent_class_name}:
         llm = None
         if not mock_mode:
             # LiteLLMProvider uses environment variables for API keys
-            llm = LiteLLMProvider(model=self.config.model)
+            llm = LiteLLMProvider(
+                model=self.config.model,
+                api_key=self.config.api_key,
+                api_base=self.config.api_base,
+            )
 
         self._graph = GraphSpec(
             id="{agent_name}-graph",
