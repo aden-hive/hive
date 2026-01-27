@@ -29,10 +29,10 @@ def _get_api_key():
             return creds.get("anthropic")
     except (ImportError, KeyError):
         pass
-        
+
     # 2. Fallback to standard environment variables for OpenAI and others
     return (
-        os.environ.get("OPENAI_API_KEY") or 
+        os.environ.get("OPENAI_API_KEY") or
         os.environ.get("ANTHROPIC_API_KEY") or
         os.environ.get("CEREBRAS_API_KEY") or
         os.environ.get("GROQ_API_KEY")
@@ -62,9 +62,9 @@ def _get_api_key():
             return creds.get("anthropic")
     except (ImportError, KeyError):
         pass
-        
+
     return (
-        os.environ.get("OPENAI_API_KEY") or 
+        os.environ.get("OPENAI_API_KEY") or
         os.environ.get("ANTHROPIC_API_KEY") or
         os.environ.get("CEREBRAS_API_KEY") or
         os.environ.get("GROQ_API_KEY")
