@@ -25,6 +25,7 @@ Note:
     - Tier 2 (agent load): Tool credentials validated when agent is loaded
     See aden_tools.credentials for details.
 """
+
 import argparse
 import logging
 import os
@@ -60,12 +61,11 @@ if "--stdio" in sys.argv:
 
     rich.console.Console.__init__ = _patched_console_init
 
+from aden_tools.credentials import CredentialError, CredentialManager  # noqa: E402
+from aden_tools.tools import register_all_tools  # noqa: E402
 from fastmcp import FastMCP  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import PlainTextResponse  # noqa: E402
-
-from aden_tools.credentials import CredentialError, CredentialManager  # noqa: E402
-from aden_tools.tools import register_all_tools  # noqa: E402
 
 # Create credential manager
 credentials = CredentialManager()

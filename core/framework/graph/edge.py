@@ -386,8 +386,7 @@ class GraphSpec(BaseModel):
     async_entry_points: list[AsyncEntryPointSpec] = Field(
         default_factory=list,
         description=(
-            "Asynchronous entry points for concurrent execution streams "
-            "(used with AgentRuntime)"
+            "Asynchronous entry points for concurrent execution streams (used with AgentRuntime)"
         ),
     )
     terminal_nodes: list[str] = Field(
@@ -468,9 +467,7 @@ class GraphSpec(BaseModel):
         for node in self.nodes:
             outgoing = self.get_outgoing_edges(node.id)
             # Fan-out: multiple edges with ON_SUCCESS condition
-            success_edges = [
-                e for e in outgoing if e.condition == EdgeCondition.ON_SUCCESS
-            ]
+            success_edges = [e for e in outgoing if e.condition == EdgeCondition.ON_SUCCESS]
             if len(success_edges) > 1:
                 fan_outs[node.id] = [e.target for e in success_edges]
         return fan_outs

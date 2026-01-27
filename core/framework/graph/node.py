@@ -211,7 +211,7 @@ class NodeSpec(BaseModel):
     )
     max_validation_retries: int = Field(
         default=2,
-        description="Maximum retries when Pydantic validation fails (with feedback to LLM)"
+        description="Maximum retries when Pydantic validation fails (with feedback to LLM)",
     )
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
@@ -772,7 +772,11 @@ Keep the same JSON structure but with shorter content values.
             )
 
             compaction_attempt = 0
-            while self._is_truncated(response) and expects_json and compaction_attempt < self.max_compaction_retries:
+            while (
+                self._is_truncated(response)
+                and expects_json
+                and compaction_attempt < self.max_compaction_retries
+            ):
                 compaction_attempt += 1
                 logger.warning(
                     f"      ⚠ Response truncated (stop_reason: {response.stop_reason}), "
@@ -804,11 +808,14 @@ Keep the same JSON structure but with shorter content values.
 
             if self._is_truncated(response) and expects_json:
                 logger.warning(
-                    f"      ⚠ Response still truncated after {compaction_attempt} compaction attempts"
+                    f"      ⚠ Response still truncated after "
+                    f"{compaction_attempt} compaction attempts"
                 )
 
             # Phase 2: Validation retry loop for Pydantic models
-            max_validation_retries = ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
+            max_validation_retries = (
+                ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
+            )
             validation_attempt = 0
             total_input_tokens = 0
             total_output_tokens = 0
@@ -833,10 +840,12 @@ Keep the same JSON structure but with shorter content values.
                 # Try to parse and validate the response
                 try:
                     import json
+
                     parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
 
                     if isinstance(parsed, dict):
                         from framework.graph.validator import OutputValidator
+
                         validator = OutputValidator()
                         validation_result, validated_model = validator.validate_with_pydantic(
                             parsed, ctx.node_spec.output_model
@@ -864,14 +873,10 @@ Keep the same JSON structure but with shorter content values.
                                 logger.info("      🔄 Retrying with validation feedback...")
 
                                 # Add the assistant's failed response and feedback
-                                current_messages.append({
-                                    "role": "assistant",
-                                    "content": response.content
-                                })
-                                current_messages.append({
-                                    "role": "user",
-                                    "content": feedback
-                                })
+                                current_messages.append(
+                                    {"role": "assistant", "content": response.content}
+                                )
+                                current_messages.append({"role": "user", "content": feedback})
 
                                 # Re-call LLM with feedback
                                 if ctx.available_tools and self.tool_executor:
@@ -957,6 +962,7 @@ Keep the same JSON structure but with shorter content values.
                         # If we have output_model, the validation already happened in the retry loop
                         if ctx.node_spec.output_model is not None:
                             from framework.graph.validator import OutputValidator
+
                             validator = OutputValidator()
                             validation_result, validated_model = validator.validate_with_pydantic(
                                 parsed, ctx.node_spec.output_model
@@ -1158,13 +1164,16 @@ Keep the same JSON structure but with shorter content values.
                         except json.JSONDecodeError:
                             parsed = json.loads(_fix_unescaped_newlines_in_json(json_str))
                         if isinstance(parsed, dict):
-                            logger.info("      ✓ Extracted JSON via brace matching after markdown strip")
+                            logger.info(
+                                "      ✓ Extracted JSON via brace matching after markdown strip"
+                            )
                             return parsed
                     except json.JSONDecodeError:
                         pass
 
         # All local extraction failed - use LLM as last resort
         import os
+
         from framework.llm.litellm import LiteLLMProvider
 
         logger.info(f"      cleanup_llm_model param: {cleanup_llm_model}")
@@ -1259,9 +1268,8 @@ Output ONLY the JSON object, nothing else."""
         except json.JSONDecodeError as e:
             logger.warning(f"      ⚠ LLM cleanup response not valid JSON: {e}")
             raise ValueError(
-                f"LLM cleanup response not valid JSON: {e}. "
-                f"Expected keys: {output_keys}"
-            )
+                f"LLM cleanup response not valid JSON: {e}. Expected keys: {output_keys}"
+            ) from e
         except ValueError:
             raise  # Re-raise our descriptive error
         except Exception as e:
