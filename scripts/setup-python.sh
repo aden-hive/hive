@@ -19,49 +19,56 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Python Version
+PYTHON_VERSION="3.11"
+
+# Python version split into Major and Minor
+IFS='.' read -r PYTHON_MAJOR_VERSION PYTHON_MINOR_VERSION <<< "$PYTHON_VERSION"
+
+# Available python interpreter (follows sequence)
+POSSIBLE_PYTHONS=("python3" "python" "py -3")
+
+# Defauly python interpreter
+PYTHON_CMD="python3"
+
+
 echo ""
 echo "=================================================="
 echo "  Aden Agent Framework - Python Setup"
 echo "=================================================="
 echo ""
 
-# Check for Python
-if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
-    echo -e "${RED}Error: Python is not installed.${NC}"
-    echo "Please install Python 3.11+ from https://python.org"
+# Available Python interpreter
+for cmd in ${POSSIBLE_PYTHONS[@]}; do
+    # Check for python interpreter
+    if command -v ${cmd} >/dev/null; then
+        # Check Python version
+        if $cmd -c "import sys; sys.exit(0 if sys.version_info >= ($PYTHON_MAJOR_VERSION, $PYTHON_MINOR_VERSION) else 1)" >/dev/null 2>&1; then
+            # Check for pip
+            if eval $cmd -m pip --version &> /dev/null; then
+                PYTHON_CMD="$cmd"
+                break
+            fi
+        fi
+    fi
+done
+
+# Check for python (Exit if not found)
+if [ -z $PYTHON_CMD ]; then
+    echo -e "${RED}Error: Python $PYTHON_MAJOR_VERSION.$PYTHON_MINOR_VERSION+ not found.${NC}"
+    echo "Please install Python $PYTHON_MAJOR_VERSION.$PYTHON_MINOR_VERSION+ from https://python.org"
     exit 1
-fi
+fi  
 
-# Use python3 if available, otherwise python
-PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
-    PYTHON_CMD="python"
-fi
-
-# Check Python version
+# Display Python version
 PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)')
-PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
-
 echo -e "${BLUE}Detected Python:${NC} $PYTHON_VERSION"
-
-if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
-    echo -e "${RED}Error: Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
-    echo "Please upgrade your Python installation"
-    exit 1
-fi
-
-if [ "$PYTHON_MINOR" -lt 11 ]; then
-    echo -e "${YELLOW}Warning: Python 3.11+ is recommended for best compatibility${NC}"
-    echo -e "${YELLOW}You have Python $PYTHON_VERSION which may work but is not officially supported${NC}"
-    echo ""
-fi
 
 echo -e "${GREEN}✓${NC} Python version check passed"
 echo ""
 
-# Check for pip
-if ! $PYTHON_CMD -m pip --version &> /dev/null; then
+# Check for pip (Exit if not found)
+if ! eval $PYTHON_CMD -m pip --version &> /dev/null; then
     echo -e "${RED}Error: pip is not installed${NC}"
     echo "Please install pip for Python $PYTHON_VERSION"
     exit 1
