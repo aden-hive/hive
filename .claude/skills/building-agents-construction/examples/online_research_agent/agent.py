@@ -16,11 +16,50 @@ class MockLLMProvider:
         self.model = "mock-model"
 
     def complete(self, messages, system="", tools=None, **kwargs):
+        # We construct a "Super JSON" that satisfies ALL nodes in the graph.
+        # This prevents validation errors no matter which node is running.
         
-        mock_content = '{"category": "general", "priority": "medium", "queries": ["mock query"], "topic": "AI Agents", "subtopics": ["Agents"], "reasoning": "This is a mock response."}'
+        super_mock_content = {
+            # Keys for 'parse-query' node
+            "category": "general", 
+            "priority": "medium", 
+            "queries": ["mock search query"], 
+            "topic": "AI Agents", 
+            "subtopics": ["LLMs", "Autonomous Agents"], 
+            "reasoning": "Mock reasoning",
+            
+            # Keys for 'search-sources' & 'fetch-content' nodes
+            "research_focus": "Overview of AI Agents",
+            "source_urls": ["https://example.com/ai-study"],
+            "fetched_sources": [
+                {"url": "https://example.com/ai-study", "content": "AI agents are autonomous systems..."}
+            ],
+            
+            # Keys for 'evaluate-sources' node
+            "key_aspects": ["Autonomy", "Reasoning"],
+            "ranked_sources": ["https://example.com/ai-study"],
+            "source_analysis": {"https://example.com/ai-study": "Highly relevant"},
+            
+            # Keys for 'synthesize-findings' node
+            "key_findings": ["Agents can plan", "Agents use tools"],
+            "themes": ["Automation", "AGI"],
+            
+            # Keys for 'write-report' & 'save-report' nodes
+            "report_content": "# AI Agents Report\n\nAI agents are cool.",
+            "source_citations": ["(Author, 2025)"],
+            "references": ["https://example.com/ai-study"],
+            "final_report": "# AI Agents Report\n\nAI agents are cool.",
+            "file_path": "/tmp/mock_report.md",
+            
+            # Generic keys
+            "quality_score": 100,
+            "issues": []
+        }
         
+        # Return as a proper LLMResponse object
+        import json
         return LLMResponse(
-            content=mock_content,
+            content=json.dumps(super_mock_content),
             model="mock-model"
         )
 
