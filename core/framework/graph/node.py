@@ -615,10 +615,8 @@ class LLMNode(NodeProtocol):
                                 ctx.memory.write(key, ctx.input_data[key])
                                 output[key] = ctx.input_data[key]
                             else:
-                                # Key not in parsed JSON or input, write the whole response (stripped)
-                                stripped_content = self._strip_code_blocks(response.content)
-                                ctx.memory.write(key, stripped_content)
-                                output[key] = stripped_content
+                                # Key missing from both JSON and input - this is a failure
+                                raise ValueError(f"Missing required output key '{key}' in LLM response")
                     else:
                         # Not a dict, fall back to writing entire response to all keys (stripped)
                         stripped_content = self._strip_code_blocks(response.content)
@@ -626,8 +624,8 @@ class LLMNode(NodeProtocol):
                             ctx.memory.write(key, stripped_content)
                             output[key] = stripped_content
 
-                except (json.JSONDecodeError, Exception) as e:
-                    # JSON extraction failed - fail explicitly instead of polluting memory
+                except (json.JSONDecodeError, ValueError, Exception) as e:
+                    # JSON extraction or key validation failed - fail explicitly
                     logger.error(f"      ✗ Failed to extract structured output: {e}")
                     logger.error(f"      Raw response (first 500 chars): {response.content[:500]}...")
 
