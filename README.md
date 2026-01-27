@@ -61,6 +61,27 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 <!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
+## New Contributors – Recommended Setup Order
+
+If you’re setting up Hive for the first time, follow this order to avoid confusion:
+
+1. **Python first**
+   - Ensure Python **3.11+** is installed.
+   - Run `./scripts/setup-python.sh` and confirm it completes successfully.
+
+2. **Docker (Optional)**
+   - Docker is optional and only required for containerized tools or self-hosting.
+   - You can build and test agents without Docker.
+
+3. **Agent Quickstart**
+   - After Python setup, run `./quickstart.sh` to install Claude Code skills.
+   - Use the `/building-agents` and `/testing-agent` commands to validate setup.
+
+**Expected outcome:**
+- Setup scripts complete without errors
+- Agent commands are available and runnable
+
+
 ## Quick Start
 
 ### Prerequisites
