@@ -572,7 +572,7 @@ class GraphExecutor:
                 if target_node_spec
                 else edge.target,
             ):
-                # Validate and clean output before mapping inputs
+                # Validate and clean output before mapping inputss
                 if self.cleansing_config.enabled and target_node_spec:
                     output_to_validate = result.output
 
