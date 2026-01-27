@@ -8,15 +8,14 @@ Wraps FileStorage with:
 """
 
 import asyncio
-import json
 import logging
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from framework.schemas.run import Run, RunSummary, RunStatus
+from framework.schemas.run import Run, RunStatus, RunSummary
 from framework.storage.backend import FileStorage
 
 logger = logging.getLogger(__name__)
@@ -25,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CacheEntry:
     """Cached value with timestamp."""
+
     value: Any
     timestamp: float
 
@@ -107,10 +107,7 @@ class ConcurrentStorage:
 
         self._running = False
 
-        # Flush remaining items
-        await self._flush_pending()
-
-        # Cancel batch task
+        # Cancel batch task first to prevent queue competition
         if self._batch_task:
             self._batch_task.cancel()
             try:
@@ -118,6 +115,9 @@ class ConcurrentStorage:
             except asyncio.CancelledError:
                 pass
             self._batch_task = None
+
+        # Now flush remaining items (batch task is stopped)
+        await self._flush_pending()
 
         logger.info("ConcurrentStorage stopped")
 
@@ -170,9 +170,7 @@ class ConcurrentStorage:
         lock_key = f"run:{run_id}"
         async with self._file_locks[lock_key]:
             loop = asyncio.get_event_loop()
-            run = await loop.run_in_executor(
-                None, self._base_storage.load_run, run_id
-            )
+            run = await loop.run_in_executor(None, self._base_storage.load_run, run_id)
 
         # Update cache
         if run:
@@ -192,9 +190,7 @@ class ConcurrentStorage:
 
         # Load from storage
         loop = asyncio.get_event_loop()
-        summary = await loop.run_in_executor(
-            None, self._base_storage.load_summary, run_id
-        )
+        summary = await loop.run_in_executor(None, self._base_storage.load_summary, run_id)
 
         # Update cache
         if summary:
@@ -207,9 +203,7 @@ class ConcurrentStorage:
         lock_key = f"run:{run_id}"
         async with self._file_locks[lock_key]:
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, self._base_storage.delete_run, run_id
-            )
+            result = await loop.run_in_executor(None, self._base_storage.delete_run, run_id)
 
         # Clear cache
         self._cache.pop(f"run:{run_id}", None)
@@ -223,9 +217,7 @@ class ConcurrentStorage:
         """Get all run IDs for a goal."""
         async with self._file_locks[f"index:by_goal:{goal_id}"]:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None, self._base_storage.get_runs_by_goal, goal_id
-            )
+            return await loop.run_in_executor(None, self._base_storage.get_runs_by_goal, goal_id)
 
     async def get_runs_by_status(self, status: str | RunStatus) -> list[str]:
         """Get all run IDs with a status."""
@@ -233,31 +225,23 @@ class ConcurrentStorage:
             status = status.value
         async with self._file_locks[f"index:by_status:{status}"]:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None, self._base_storage.get_runs_by_status, status
-            )
+            return await loop.run_in_executor(None, self._base_storage.get_runs_by_status, status)
 
     async def get_runs_by_node(self, node_id: str) -> list[str]:
         """Get all run IDs that executed a node."""
         async with self._file_locks[f"index:by_node:{node_id}"]:
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None, self._base_storage.get_runs_by_node, node_id
-            )
+            return await loop.run_in_executor(None, self._base_storage.get_runs_by_node, node_id)
 
     async def list_all_runs(self) -> list[str]:
         """List all run IDs."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._base_storage.list_all_runs
-        )
+        return await loop.run_in_executor(None, self._base_storage.list_all_runs)
 
     async def list_all_goals(self) -> list[str]:
         """List all goal IDs that have runs."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._base_storage.list_all_goals
-        )
+        return await loop.run_in_executor(None, self._base_storage.list_all_goals)
 
     # === BATCH OPERATIONS ===
 
@@ -283,7 +267,7 @@ class ConcurrentStorage:
                         except asyncio.QueueEmpty:
                             break
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
 
                 # Flush batch if we have items
@@ -339,11 +323,7 @@ class ConcurrentStorage:
 
     def get_cache_stats(self) -> dict:
         """Get cache statistics."""
-        now = time.time()
-        expired = sum(
-            1 for entry in self._cache.values()
-            if entry.is_expired(self._cache_ttl)
-        )
+        expired = sum(1 for entry in self._cache.values() if entry.is_expired(self._cache_ttl))
         return {
             "total_entries": len(self._cache),
             "expired_entries": expired,
@@ -355,9 +335,7 @@ class ConcurrentStorage:
     async def get_stats(self) -> dict:
         """Get storage statistics."""
         loop = asyncio.get_event_loop()
-        base_stats = await loop.run_in_executor(
-            None, self._base_storage.get_stats
-        )
+        base_stats = await loop.run_in_executor(None, self._base_storage.get_stats)
 
         return {
             **base_stats,

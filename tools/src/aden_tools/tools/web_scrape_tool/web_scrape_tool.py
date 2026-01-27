@@ -152,6 +152,17 @@ def register_tools(mcp: FastMCP) -> None:
             if response.status_code != 200:
                 return {"error": f"HTTP {response.status_code}: Failed to fetch URL"}
 
+            # --- START FIX: Validate Content-Type ---
+            # Added validation to prevent parsing non-HTML content (like JSON, PDF, Images)
+            content_type = response.headers.get("content-type", "").lower()
+            if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
+                return {
+                    "error": f"Skipping non-HTML content (Content-Type: {content_type})",
+                    "url": url,
+                    "skipped": True
+                }
+            # --- END FIX ---
+
             # Parse HTML
             soup = BeautifulSoup(response.text, "html.parser")
 

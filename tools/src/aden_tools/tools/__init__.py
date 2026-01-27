@@ -32,6 +32,7 @@ from .file_system_toolkits.apply_diff import register_tools as register_apply_di
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.grep_search import register_tools as register_grep_search
 from .file_system_toolkits.execute_command_tool import register_tools as register_execute_command
+from .csv_tool import register_tools as register_csv
 
 
 def register_all_tools(
@@ -51,11 +52,13 @@ def register_all_tools(
     """
     # Tools that don't need credentials
     register_example(mcp)
-    register_web_search(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
 
     # Tools that need credentials (pass credentials if provided)
+    # web_search handles both credential sources internally:
+    # - If credentials provided: uses credentials.get("brave_search")
+    # - If credentials is None: falls back to os.getenv("BRAVE_SEARCH_API_KEY")
     register_web_search(mcp, credentials=credentials)
 
     # Register file system toolkits
@@ -67,6 +70,7 @@ def register_all_tools(
     register_apply_patch(mcp)
     register_grep_search(mcp)
     register_execute_command(mcp)
+    register_csv(mcp)
 
     return [
         "example_tool",
@@ -81,6 +85,11 @@ def register_all_tools(
         "apply_patch",
         "grep_search",
         "execute_command_tool",
+        "csv_read",
+        "csv_write",
+        "csv_append",
+        "csv_info",
+        "csv_sql",
     ]
 
 
