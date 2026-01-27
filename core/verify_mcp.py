@@ -12,11 +12,11 @@ from pathlib import Path
 
 
 class Colors:
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    RED = '\033[0;31m'
-    BLUE = '\033[0;34m'
-    NC = '\033[0m'
+    GREEN = "\033[0;32m"
+    YELLOW = "\033[1;33m"
+    RED = "\033[0;31m"
+    BLUE = "\033[0;34m"
+    NC = "\033[0m"
 
 
 def check(description: str) -> bool:
@@ -55,7 +55,7 @@ def main():
             [sys.executable, "-c", "import framework; print(framework.__file__)"],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         framework_path = result.stdout.strip()
         success(f"installed at {framework_path}")
@@ -69,11 +69,7 @@ def main():
     missing_deps = []
     for dep in ["mcp", "fastmcp"]:
         try:
-            subprocess.run(
-                [sys.executable, "-c", f"import {dep}"],
-                capture_output=True,
-                check=True
-            )
+            subprocess.run([sys.executable, "-c", f"import {dep}"], capture_output=True, check=True)
         except subprocess.CalledProcessError:
             missing_deps.append(dep)
 
@@ -91,7 +87,7 @@ def main():
             [sys.executable, "-c", "from framework.mcp import agent_builder_server"],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         success("loads successfully")
     except subprocess.CalledProcessError as e:
@@ -138,9 +134,7 @@ def main():
     for module in modules_to_check:
         try:
             subprocess.run(
-                [sys.executable, "-c", f"import {module}"],
-                capture_output=True,
-                check=True
+                [sys.executable, "-c", f"import {module}"], capture_output=True, check=True
             )
         except subprocess.CalledProcessError:
             failed_modules.append(module)
@@ -156,12 +150,15 @@ def main():
     try:
         # Try to import and instantiate the MCP server
         result = subprocess.run(
-            [sys.executable, "-c",
-             "from framework.mcp.agent_builder_server import mcp; print('OK')"],
+            [
+                sys.executable,
+                "-c",
+                "from framework.mcp.agent_builder_server import mcp; print('OK')",
+            ],
             capture_output=True,
             text=True,
             check=True,
-            timeout=5
+            timeout=5,
         )
         if "OK" in result.stdout:
             success("server can start")
