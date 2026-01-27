@@ -9,9 +9,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, List
 
+import os 
 from fastmcp import FastMCP
 from pypdf import PdfReader
 
+DEFAULT_MAX_PDF_SIZE_MB = 20
 
 def register_tools(mcp: FastMCP) -> None:
     """Register PDF read tools with the MCP server."""
@@ -68,6 +70,7 @@ def register_tools(mcp: FastMCP) -> None:
         file_path: str,
         pages: str | None = None,
         max_pages: int = 100,
+       max_file_size_mb: int | None = None, 
         include_metadata: bool = True,
     ) -> dict:
         """
@@ -98,6 +101,34 @@ def register_tools(mcp: FastMCP) -> None:
             # Check extension
             if path.suffix.lower() != ".pdf":
                 return {"error": f"Not a PDF file (expected .pdf): {file_path}"}
+            # File Size Validation (Memory Safety)
+           # Get default limit from environment
+            env_limit = os.getenv("PDF_MAX_SIZE_MB")
+
+            if env_limit and env_limit.isdigit():
+                default_limit = int(env_limit)
+            else:
+                default_limit = DEFAULT_MAX_PDF_SIZE_MB
+
+            # Resolve final limit (arg > env > default)
+            if max_file_size_mb is None:
+                max_file_size_mb = default_limit
+
+            # Ensure minimum limit
+            if max_file_size_mb < 1:
+                max_file_size_mb = 1
+
+            # Get file size in MB
+            file_size_mb = path.stat().st_size / (1024 * 1024)
+
+            # Enforce file size limit
+            if file_size_mb > max_file_size_mb:
+                return {
+                    "error": (
+                        f"PDF file too large ({file_size_mb:.1f}MB). "
+                        f"Maximum allowed is {max_file_size_mb}MB."
+                    )
+                }
 
             # Validate max_pages
             if max_pages < 1:
