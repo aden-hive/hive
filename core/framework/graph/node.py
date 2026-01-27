@@ -15,6 +15,7 @@ Protocol:
     The framework provides NodeContext with everything the node needs.
 """
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -27,6 +28,62 @@ from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
 
 logger = logging.getLogger(__name__)
+
+
+def _fix_unescaped_newlines_in_json(json_str: str) -> str:
+    """Fix unescaped newlines inside JSON string values.
+
+    LLMs sometimes output actual newlines inside JSON strings instead of \\n.
+    This function fixes that by properly escaping newlines within string values.
+    """
+    result = []
+    in_string = False
+    escape_next = False
+    i = 0
+
+    while i < len(json_str):
+        char = json_str[i]
+
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+
+        if char == "\\" and in_string:
+            escape_next = True
+            result.append(char)
+            i += 1
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+
+        # Fix unescaped newlines inside strings
+        if in_string and char == "\n":
+            result.append("\\n")
+            i += 1
+            continue
+
+        # Fix unescaped carriage returns inside strings
+        if in_string and char == "\r":
+            result.append("\\r")
+            i += 1
+            continue
+
+        # Fix unescaped tabs inside strings
+        if in_string and char == "\t":
+            result.append("\\t")
+            i += 1
+            continue
+
+        result.append(char)
+        i += 1
+
+    return "".join(result)
 
 
 def find_json_object(text: str) -> str | None:
@@ -160,11 +217,22 @@ class SharedMemory:
 
     Nodes read and write to shared memory using typed keys.
     The memory is scoped to a single run.
+
+    For parallel execution, use write_async() which provides per-key locking
+    to prevent race conditions when multiple nodes write concurrently.
     """
 
     _data: dict[str, Any] = field(default_factory=dict)
     _allowed_read: set[str] = field(default_factory=set)
     _allowed_write: set[str] = field(default_factory=set)
+    # Locks for thread-safe parallel execution
+    _lock: asyncio.Lock | None = field(default=None, repr=False)
+    _key_locks: dict[str, asyncio.Lock] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        """Initialize the main lock if not provided."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
 
     def read(self, key: str) -> Any:
         """Read a value from shared memory."""
@@ -204,6 +272,48 @@ class SharedMemory:
                     )
 
         self._data[key] = value
+
+    async def write_async(self, key: str, value: Any, validate: bool = True) -> None:
+        """
+        Thread-safe async write with per-key locking.
+
+        Use this method when multiple nodes may write concurrently during
+        parallel execution. Each key has its own lock to minimize contention.
+
+        Args:
+            key: The memory key to write to
+            value: The value to write
+            validate: If True, check for suspicious content (default True)
+
+        Raises:
+            PermissionError: If node doesn't have write permission
+            MemoryWriteError: If value appears to be hallucinated content
+        """
+        # Check permissions first (no lock needed)
+        if self._allowed_write and key not in self._allowed_write:
+            raise PermissionError(f"Node not allowed to write key: {key}")
+
+        # Ensure key has a lock (double-checked locking pattern)
+        if key not in self._key_locks:
+            async with self._lock:
+                if key not in self._key_locks:
+                    self._key_locks[key] = asyncio.Lock()
+
+        # Acquire per-key lock and write
+        async with self._key_locks[key]:
+            if validate and isinstance(value, str):
+                if len(value) > 5000:
+                    if self._contains_code_indicators(value):
+                        logger.warning(
+                            f"⚠ Suspicious write to key '{key}': appears to be code "
+                            f"({len(value)} chars). Consider using validate=False if intended."
+                        )
+                        raise MemoryWriteError(
+                            f"Rejected suspicious content for key '{key}': "
+                            f"appears to be hallucinated code ({len(value)} chars). "
+                            "If this is intentional, use validate=False."
+                        )
+            self._data[key] = value
 
     def _contains_code_indicators(self, value: str) -> bool:
         """
@@ -277,11 +387,17 @@ class SharedMemory:
         read_keys: list[str],
         write_keys: list[str],
     ) -> "SharedMemory":
-        """Create a view with restricted permissions for a specific node."""
+        """Create a view with restricted permissions for a specific node.
+
+        The scoped view shares the same underlying data and locks,
+        enabling thread-safe parallel execution across scoped views.
+        """
         return SharedMemory(
             _data=self._data,
             _allowed_read=set(read_keys) if read_keys else set(),
             _allowed_write=set(write_keys) if write_keys else set(),
+            _lock=self._lock,  # Share lock for thread safety
+            _key_locks=self._key_locks,  # Share key locks
         )
 
 
@@ -316,6 +432,9 @@ class NodeContext:
     # Goal context
     goal_context: str = ""
     goal: Any = None  # Goal object for LLM-powered routers
+
+    # LLM configuration
+    max_tokens: int = 4096  # Maximum tokens for LLM responses
 
     # Execution metadata
     attempt: int = 1
@@ -487,9 +606,33 @@ class LLMNode(NodeProtocol):
     The LLM decides how to achieve the goal within constraints.
     """
 
-    def __init__(self, tool_executor: Callable | None = None, require_tools: bool = False):
+    # Stop reasons indicating truncation (varies by provider)
+    TRUNCATION_STOP_REASONS = {"length", "max_tokens", "token_limit"}
+
+    # Compaction instruction added when response is truncated
+    COMPACTION_INSTRUCTION = """
+IMPORTANT: Your previous response was truncated because it exceeded the token limit.
+Please provide a MORE CONCISE response that fits within the limit.
+Focus on the essential information and omit verbose details.
+Keep the same JSON structure but with shorter content values.
+"""
+
+    def __init__(
+        self,
+        tool_executor: Callable | None = None,
+        require_tools: bool = False,
+        cleanup_llm_model: str | None = None,
+        max_compaction_retries: int = 2,
+    ):
         self.tool_executor = tool_executor
         self.require_tools = require_tools
+        self.cleanup_llm_model = cleanup_llm_model
+        self.max_compaction_retries = max_compaction_retries
+
+    def _is_truncated(self, response) -> bool:
+        """Check if LLM response was truncated due to token limit."""
+        stop_reason = getattr(response, "stop_reason", "").lower()
+        return stop_reason in self.TRUNCATION_STOP_REASONS
 
     def _strip_code_blocks(self, content: str) -> str:
         """Strip markdown code block wrappers from content.
@@ -583,6 +726,7 @@ class LLMNode(NodeProtocol):
                     system=system,
                     tools=ctx.available_tools,
                     tool_executor=executor,
+                    max_tokens=ctx.max_tokens,
                 )
             else:
                 # Use JSON mode for llm_generate nodes with output_keys
@@ -601,6 +745,50 @@ class LLMNode(NodeProtocol):
                     messages=messages,
                     system=system,
                     json_mode=use_json_mode,
+                    max_tokens=ctx.max_tokens,
+                )
+
+            # Check for truncation and retry with compaction if needed
+            expects_json = (
+                ctx.node_spec.node_type in ("llm_generate", "llm_tool_use")
+                and ctx.node_spec.output_keys
+                and len(ctx.node_spec.output_keys) >= 1
+            )
+
+            compaction_attempt = 0
+            while self._is_truncated(response) and expects_json and compaction_attempt < self.max_compaction_retries:
+                compaction_attempt += 1
+                logger.warning(
+                    f"      ⚠ Response truncated (stop_reason: {response.stop_reason}), "
+                    f"retrying with compaction ({compaction_attempt}/{self.max_compaction_retries})"
+                )
+
+                # Add compaction instruction to messages
+                compaction_messages = messages + [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": self.COMPACTION_INSTRUCTION},
+                ]
+
+                # Retry the call with compaction instruction
+                if ctx.available_tools and self.tool_executor:
+                    response = ctx.llm.complete_with_tools(
+                        messages=compaction_messages,
+                        system=system,
+                        tools=ctx.available_tools,
+                        tool_executor=executor,
+                        max_tokens=ctx.max_tokens,
+                    )
+                else:
+                    response = ctx.llm.complete(
+                        messages=compaction_messages,
+                        system=system,
+                        json_mode=use_json_mode,
+                        max_tokens=ctx.max_tokens,
+                    )
+
+            if self._is_truncated(response) and expects_json:
+                logger.warning(
+                    f"      ⚠ Response still truncated after {compaction_attempt} compaction attempts"
                 )
 
             # Log the response
@@ -633,9 +821,13 @@ class LLMNode(NodeProtocol):
                     import json
 
                     # Try to extract JSON from response
-                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
+                    parsed = self._extract_json(
+                        response.content, ctx.node_spec.output_keys, self.cleanup_llm_model
+                    )
 
                     # If parsed successfully, write each field to its corresponding output key
+                    # Use validate=False since LLM output legitimately contains text that
+                    # may trigger false positives (e.g., "from OpenAI" matches "from ")
                     if isinstance(parsed, dict):
                         for key in ctx.node_spec.output_keys:
                             if key in parsed:
@@ -643,22 +835,22 @@ class LLMNode(NodeProtocol):
                                 # Strip code block wrappers from string values
                                 if isinstance(value, str):
                                     value = self._strip_code_blocks(value)
-                                ctx.memory.write(key, value)
+                                ctx.memory.write(key, value, validate=False)
                                 output[key] = value
                             elif key in ctx.input_data:
                                 # Key not in JSON but exists in input - pass through
-                                ctx.memory.write(key, ctx.input_data[key])
+                                ctx.memory.write(key, ctx.input_data[key], validate=False)
                                 output[key] = ctx.input_data[key]
                             else:
                                 # Key not in JSON or input, write whole response (stripped)
                                 stripped_content = self._strip_code_blocks(response.content)
-                                ctx.memory.write(key, stripped_content)
+                                ctx.memory.write(key, stripped_content, validate=False)
                                 output[key] = stripped_content
                     else:
                         # Not a dict, fall back to writing entire response to all keys (stripped)
                         stripped_content = self._strip_code_blocks(response.content)
                         for key in ctx.node_spec.output_keys:
-                            ctx.memory.write(key, stripped_content)
+                            ctx.memory.write(key, stripped_content, validate=False)
                             output[key] = stripped_content
 
                 except (json.JSONDecodeError, Exception) as e:
@@ -689,7 +881,7 @@ class LLMNode(NodeProtocol):
                 # For non-llm_generate or single output nodes, write entire response (stripped)
                 stripped_content = self._strip_code_blocks(response.content)
                 for key in ctx.node_spec.output_keys:
-                    ctx.memory.write(key, stripped_content)
+                    ctx.memory.write(key, stripped_content, validate=False)
                     output[key] = stripped_content
 
             return NodeResult(
@@ -719,14 +911,21 @@ class LLMNode(NodeProtocol):
         # Default output
         return {"result": content}
 
-    def _extract_json(self, raw_response: str, output_keys: list[str]) -> dict[str, Any]:
+    def _extract_json(
+        self, raw_response: str, output_keys: list[str], cleanup_llm_model: str | None = None
+    ) -> dict[str, Any]:
         """Extract clean JSON from potentially verbose LLM response.
 
         Tries multiple extraction strategies in order:
         1. Direct JSON parse
         2. Markdown code block extraction
         3. Balanced brace matching
-        4. Haiku LLM fallback (last resort)
+        4. Configured LLM fallback (last resort)
+
+        Args:
+            raw_response: The raw LLM response text
+            output_keys: Expected output keys for the JSON
+            cleanup_llm_model: Optional model to use for LLM cleanup fallback
         """
         import json
         import re
@@ -753,55 +952,116 @@ class LLMNode(NodeProtocol):
             parsed = json.loads(content)
             if isinstance(parsed, dict):
                 return parsed
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            logger.info(f"      Direct JSON parse failed: {e}")
+            logger.info(f"      Content first 200 chars repr: {repr(content[:200])}")
+            # Try fixing unescaped newlines in string values
+            try:
+                fixed = _fix_unescaped_newlines_in_json(content)
+                logger.info(f"      Fixed content first 200 chars repr: {repr(fixed[:200])}")
+                parsed = json.loads(fixed)
+                if isinstance(parsed, dict):
+                    logger.info("      ✓ Parsed JSON after fixing unescaped newlines")
+                    return parsed
+            except json.JSONDecodeError as e2:
+                logger.info(f"      Newline fix also failed: {e2}")
 
         # Try to extract JSON from markdown code blocks (greedy match to handle nested blocks)
-        # Use anchored match to capture from first ``` to last ```
-        code_block_match = re.match(r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL)
-        if code_block_match:
-            try:
-                parsed = json.loads(code_block_match.group(1).strip())
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
+        # Multiple patterns to handle different LLM formatting styles
+        code_block_patterns = [
+            # Anchored match from first ``` to last ```
+            r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$",
+            # Non-anchored: find ```json anywhere and extract to closing ```
+            r"```(?:json|JSON)?\s*\n([\s\S]*?)\n```",
+            # Handle case where closing ``` might have trailing content
+            r"```(?:json|JSON)?\s*\n([\s\S]*?)\n```",
+        ]
+        for pattern in code_block_patterns:
+            code_block_match = re.search(pattern, content, re.DOTALL)
+            if code_block_match:
+                try:
+                    extracted = code_block_match.group(1).strip()
+                    if extracted:  # Skip empty matches
+                        # Try direct parse first, then with newline fix
+                        try:
+                            parsed = json.loads(extracted)
+                        except json.JSONDecodeError:
+                            parsed = json.loads(_fix_unescaped_newlines_in_json(extracted))
+                        if isinstance(parsed, dict):
+                            return parsed
+                except json.JSONDecodeError:
+                    pass
 
         # Try to find JSON object by matching balanced braces (use module-level helper)
         json_str = find_json_object(content)
         if json_str:
             try:
-                parsed = json.loads(json_str)
+                # Try direct parse first, then with newline fix
+                try:
+                    parsed = json.loads(json_str)
+                except json.JSONDecodeError:
+                    parsed = json.loads(_fix_unescaped_newlines_in_json(json_str))
                 if isinstance(parsed, dict):
                     return parsed
             except json.JSONDecodeError:
                 pass
 
+        # Try stripping markdown prefix and finding JSON from there
+        # This handles cases like "```json\n{...}" where regex might fail
+        if "```" in content:
+            # Find position after ```json or ``` marker
+            json_start = content.find("{")
+            if json_start > 0:
+                # Extract from first { to end, then find balanced JSON
+                json_str = find_json_object(content[json_start:])
+                if json_str:
+                    try:
+                        # Try direct parse first, then with newline fix
+                        try:
+                            parsed = json.loads(json_str)
+                        except json.JSONDecodeError:
+                            parsed = json.loads(_fix_unescaped_newlines_in_json(json_str))
+                        if isinstance(parsed, dict):
+                            logger.info("      ✓ Extracted JSON via brace matching after markdown strip")
+                            return parsed
+                    except json.JSONDecodeError:
+                        pass
+
         # All local extraction failed - use LLM as last resort
-        # Prefer Cerebras (faster/cheaper), fallback to Haiku
         import os
-
-        api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "Cannot parse JSON and no API key for LLM cleanup "
-                "(set CEREBRAS_API_KEY or ANTHROPIC_API_KEY)"
-            )
-
-        # Use fast LLM to clean the response (Cerebras llama-3.3-70b preferred)
         from framework.llm.litellm import LiteLLMProvider
 
-        if os.environ.get("CEREBRAS_API_KEY"):
+        logger.info(f"      cleanup_llm_model param: {cleanup_llm_model}")
+
+        # Use configured cleanup model, or fall back to defaults
+        if cleanup_llm_model:
+            # Use the configured cleanup model (LiteLLM handles API keys via env vars)
             cleaner_llm = LiteLLMProvider(
-                api_key=os.environ.get("CEREBRAS_API_KEY"),
-                model="cerebras/llama-3.3-70b",
+                model=cleanup_llm_model,
                 temperature=0.0,
             )
+            logger.info(f"      Using configured cleanup LLM: {cleanup_llm_model}")
         else:
-            # Fallback to Anthropic Haiku via LiteLLM for consistency
-            cleaner_llm = LiteLLMProvider(
-                api_key=api_key, model="claude-3-5-haiku-20241022", temperature=0.0
-            )
+            # Fall back to default logic: Cerebras preferred, then Haiku
+            api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ValueError(
+                    "Cannot parse JSON and no API key for LLM cleanup "
+                    "(set CEREBRAS_API_KEY or ANTHROPIC_API_KEY, or configure cleanup_llm_model)"
+                )
+
+            if os.environ.get("CEREBRAS_API_KEY"):
+                cleaner_llm = LiteLLMProvider(
+                    api_key=os.environ.get("CEREBRAS_API_KEY"),
+                    model="cerebras/llama-3.3-70b",
+                    temperature=0.0,
+                )
+            else:
+                cleaner_llm = LiteLLMProvider(
+                    api_key=api_key,
+                    model="claude-3-5-haiku-20241022",
+                    temperature=0.0,
+                )
 
         prompt = f"""Extract the JSON object from this LLM response.
 
@@ -819,7 +1079,16 @@ Output ONLY the JSON object, nothing else."""
                 json_mode=True,
             )
 
-            cleaned = result.content.strip()
+            cleaned = result.content.strip() if result.content else ""
+
+            # Check for empty response
+            if not cleaned:
+                logger.warning("      ⚠ LLM cleanup returned empty response")
+                raise ValueError(
+                    f"LLM cleanup returned empty response. "
+                    f"Raw response starts with: {raw_response[:200]}..."
+                )
+
             # Remove markdown if LLM added it
             if cleaned.startswith("```"):
                 match = re.search(r"^```(?:json)?\s*\n([\s\S]*?)\n```\s*$", cleaned)
@@ -831,10 +1100,32 @@ Output ONLY the JSON object, nothing else."""
                     if lines[0].startswith("```") and lines[-1].strip() == "```":
                         cleaned = "\n".join(lines[1:-1]).strip()
 
-            parsed = json.loads(cleaned)
+            # Try balanced brace extraction if still not valid JSON
+            if not cleaned.startswith("{"):
+                json_str = find_json_object(cleaned)
+                if json_str:
+                    cleaned = json_str
+
+            if not cleaned:
+                raise ValueError(
+                    f"Could not extract JSON from LLM cleanup response. "
+                    f"Raw response starts with: {raw_response[:200]}..."
+                )
+
+            # Try direct parse first, then with newline fix
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                parsed = json.loads(_fix_unescaped_newlines_in_json(cleaned))
             logger.info("      ✓ LLM cleaned JSON output")
             return parsed
 
+        except json.JSONDecodeError as e:
+            logger.warning(f"      ⚠ LLM cleanup response not valid JSON: {e}")
+            raise ValueError(
+                f"LLM cleanup response not valid JSON: {e}. "
+                f"Expected keys: {output_keys}"
+            )
         except ValueError:
             raise  # Re-raise our descriptive error
         except Exception as e:

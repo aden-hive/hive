@@ -155,6 +155,7 @@ class LiteLLMProvider(LLMProvider):
         tools: list[Tool],
         tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
+        max_tokens: int = 4096,
     ) -> LLMResponse:
         """Run a tool-use loop until the LLM produces a final response."""
         # Prepare messages with system prompt
@@ -174,7 +175,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "messages": current_messages,
-                "max_tokens": 1024,
+                "max_tokens": max_tokens,
                 "tools": openai_tools,
                 **self.extra_kwargs,
             }
