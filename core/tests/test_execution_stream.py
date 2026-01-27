@@ -1,6 +1,7 @@
 """Tests for ExecutionStream retention behavior."""
 
 import json
+from collections.abc import Callable
 
 import pytest
 
@@ -33,7 +34,7 @@ class DummyLLMProvider(LLMProvider):
         messages: list[dict[str, object]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable,
         max_iterations: int = 10,
     ) -> LLMResponse:
         return LLMResponse(content=json.dumps({"result": "ok"}), model="dummy")

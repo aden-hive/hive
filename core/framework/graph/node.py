@@ -201,7 +201,20 @@ class NodeSpec(BaseModel):
     max_retries: int = Field(default=3)
     retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
 
-    model_config = {"extra": "allow"}
+    # Pydantic model for output validation
+    output_model: type[BaseModel] | None = Field(
+        default=None,
+        description=(
+            "Optional Pydantic model class for validating and parsing LLM output. "
+            "When set, the LLM response will be validated against this model."
+        ),
+    )
+    max_validation_retries: int = Field(
+        default=2,
+        description="Maximum retries when Pydantic validation fails (with feedback to LLM)"
+    )
+
+    model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
 
 class MemoryWriteError(Exception):
@@ -464,6 +477,9 @@ class NodeResult:
     # Metadata
     tokens_used: int = 0
     latency_ms: int = 0
+
+    # Pydantic validation errors (if any)
+    validation_errors: list[str] = field(default_factory=list)
 
     def to_summary(self, node_spec: Any = None) -> str:
         """
@@ -791,13 +807,97 @@ Keep the same JSON structure but with shorter content values.
                     f"      ⚠ Response still truncated after {compaction_attempt} compaction attempts"
                 )
 
-            # Log the response
-            response_preview = (
-                response.content[:200] if len(response.content) > 200 else response.content
-            )
-            if len(response.content) > 200:
-                response_preview += "..."
-            logger.info(f"      ← Response: {response_preview}")
+                    total_input_tokens += response.input_tokens
+                    total_output_tokens += response.output_tokens
+
+                    # Log the response
+                    response_preview = (
+                        response.content[:200] if len(response.content) > 200 else response.content
+                    )
+                    if len(response.content) > 200:
+                        response_preview += "..."
+                    logger.info(f"      ← Response: {response_preview}")
+
+                    # If no output_model, break immediately (no validation needed)
+                    if ctx.node_spec.output_model is None:
+                        break
+
+                    # Try to parse and validate the response
+                    try:
+                        import json
+                        parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
+
+                        if isinstance(parsed, dict):
+                            from framework.graph.validator import OutputValidator
+                            validator = OutputValidator()
+                            validation_result, validated_model = validator.validate_with_pydantic(
+                                parsed, ctx.node_spec.output_model
+                            )
+
+                            if validation_result.success:
+                                # Validation passed, break out of retry loop
+                                model_name = ctx.node_spec.output_model.__name__
+                                logger.info(f"      ✓ Pydantic validation passed for {model_name}")
+                                break
+                            else:
+                                # Validation failed
+                                validation_attempt += 1
+
+                                if validation_attempt <= max_validation_retries:
+                                    # Add validation feedback to messages and retry
+                                    feedback = validator.format_validation_feedback(
+                                        validation_result, ctx.node_spec.output_model
+                                    )
+                                    logger.warning(
+                                        f"      ⚠ Pydantic validation failed "
+                                        f"(attempt {validation_attempt}/{max_validation_retries}): "
+                                        f"{validation_result.error}"
+                                    )
+                                    logger.info("      🔄 Retrying with validation feedback...")
+
+                                    # Add the assistant's failed response and feedback
+                                    current_messages.append({
+                                        "role": "assistant",
+                                        "content": response.content
+                                    })
+                                    current_messages.append({
+                                        "role": "user",
+                                        "content": feedback
+                                    })
+                                    continue  # Retry the LLM call
+                                else:
+                                    # Max retries exceeded
+                                    latency_ms = int((time.time() - start) * 1000)
+                                    err = validation_result.error
+                                    logger.error(
+                                        f"      ✗ Pydantic validation failed after "
+                                        f"{max_validation_retries} retries: {err}"
+                                    )
+                                    ctx.runtime.record_outcome(
+                                        decision_id=decision_id,
+                                        success=False,
+                                        error=f"Validation failed: {validation_result.error}",
+                                        tokens_used=total_input_tokens + total_output_tokens,
+                                        latency_ms=latency_ms,
+                                    )
+                                    error_msg = (
+                                        f"Pydantic validation failed after "
+                                        f"{max_validation_retries} retries: {err}"
+                                    )
+                                    return NodeResult(
+                                        success=False,
+                                        error=error_msg,
+                                        output=parsed,
+                                        tokens_used=total_input_tokens + total_output_tokens,
+                                        latency_ms=latency_ms,
+                                        validation_errors=validation_result.errors,
+                                    )
+                        else:
+                            # Not a dict, can't validate - break and let downstream handle
+                            break
+                    except Exception:
+                        # JSON extraction failed - break and let downstream handle
+                        break
 
             latency_ms = int((time.time() - start) * 1000)
 
@@ -829,6 +929,17 @@ Keep the same JSON structure but with shorter content values.
                     # Use validate=False since LLM output legitimately contains text that
                     # may trigger false positives (e.g., "from OpenAI" matches "from ")
                     if isinstance(parsed, dict):
+                        # If we have output_model, the validation already happened in the retry loop
+                        if ctx.node_spec.output_model is not None:
+                            from framework.graph.validator import OutputValidator
+                            validator = OutputValidator()
+                            validation_result, validated_model = validator.validate_with_pydantic(
+                                parsed, ctx.node_spec.output_model
+                            )
+                            # Use validated model's dict representation
+                            if validated_model:
+                                parsed = validated_model.model_dump()
+
                         for key in ctx.node_spec.output_keys:
                             if key in parsed:
                                 value = parsed[key]

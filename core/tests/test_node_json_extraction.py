@@ -100,12 +100,18 @@ class TestJsonExtraction:
         result = node._extract_json(input_text, ["count", "price"])
         assert result == {"count": 42, "price": 19.99}
 
-    def test_invalid_json_raises_error(self, node):
-        """Test that completely invalid JSON raises an error."""
+    def test_invalid_json_raises_error(self, node, monkeypatch):
+        """Test that completely invalid JSON raises an error when no LLM fallback available."""
+        # Remove API keys so LLM fallback is not attempted
+        monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(ValueError, match="Cannot parse JSON"):
             node._extract_json("This is not JSON at all", ["key"])
 
-    def test_empty_string_raises_error(self, node):
-        """Test that empty string raises an error."""
+    def test_empty_string_raises_error(self, node, monkeypatch):
+        """Test that empty string raises an error when no LLM fallback available."""
+        # Remove API keys so LLM fallback is not attempted
+        monkeypatch.delenv("CEREBRAS_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(ValueError, match="Cannot parse JSON"):
             node._extract_json("", ["key"])

@@ -8,6 +8,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +132,71 @@ class OutputValidator:
                     errors.append(f"Output key '{key}' is empty string")
 
         return ValidationResult(success=len(errors) == 0, errors=errors)
+
+    def validate_with_pydantic(
+        self,
+        output: dict[str, Any],
+        model: type[BaseModel],
+    ) -> tuple[ValidationResult, BaseModel | None]:
+        """
+        Validate output against a Pydantic model.
+
+        Args:
+            output: The output dict to validate
+            model: Pydantic model class to validate against
+
+        Returns:
+            Tuple of (ValidationResult, validated_model_instance or None)
+        """
+        try:
+            validated = model.model_validate(output)
+            return ValidationResult(success=True, errors=[]), validated
+        except ValidationError as e:
+            errors = []
+            for error in e.errors():
+                field_path = ".".join(str(loc) for loc in error["loc"])
+                msg = error["msg"]
+                error_type = error["type"]
+                errors.append(f"{field_path}: {msg} (type: {error_type})")
+            return ValidationResult(success=False, errors=errors), None
+
+    def format_validation_feedback(
+        self,
+        validation_result: ValidationResult,
+        model: type[BaseModel],
+    ) -> str:
+        """
+        Format validation errors as feedback for LLM retry.
+
+        Args:
+            validation_result: The failed validation result
+            model: The Pydantic model that was used for validation
+
+        Returns:
+            Formatted feedback string to include in retry prompt
+        """
+        # Get the model's JSON schema for reference
+        schema = model.model_json_schema()
+
+        feedback = "Your previous response had validation errors:\n\n"
+        feedback += "ERRORS:\n"
+        for error in validation_result.errors:
+            feedback += f"  - {error}\n"
+
+        feedback += "\nEXPECTED SCHEMA:\n"
+        feedback += f"  Model: {model.__name__}\n"
+
+        if "properties" in schema:
+            feedback += "  Required fields:\n"
+            required = schema.get("required", [])
+            for prop_name, prop_info in schema["properties"].items():
+                req_marker = " (required)" if prop_name in required else ""
+                prop_type = prop_info.get("type", "any")
+                feedback += f"    - {prop_name}: {prop_type}{req_marker}\n"
+
+        feedback += "\nPlease fix the errors and respond with valid JSON matching the schema."
+
+        return feedback
 
     def validate_no_hallucination(
         self,

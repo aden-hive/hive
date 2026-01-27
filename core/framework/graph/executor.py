@@ -156,11 +156,13 @@ class GraphExecutor:
             if node.tools:
                 missing = set(node.tools) - available_tool_names
                 if missing:
-                    avail = sorted(available_tool_names) if available_tool_names else "none"
+                    available = (
+                        sorted(available_tool_names) if available_tool_names else "none"
+                    )
                     errors.append(
                         f"Node '{node.name}' (id={node.id}) requires tools "
                         f"{sorted(missing)} but they are not registered. "
-                        f"Available tools: {avail}"
+                        f"Available tools: {available}"
                     )
 
         return errors
@@ -202,7 +204,7 @@ class GraphExecutor:
                 success=False,
                 error=(
                     f"Missing tools: {'; '.join(tool_errors)}. "
-                    "Register tools via ToolRegistry or remove tool declarations."
+                    "Register tools via ToolRegistry or remove tool declarations from nodes."
                 ),
             )
 
@@ -212,15 +214,18 @@ class GraphExecutor:
         # Restore session state if provided
         if session_state and "memory" in session_state:
             memory_data = session_state["memory"]
-            if isinstance(memory_data, dict):
-                # Restore memory from previous session
-                for key, value in memory_data.items():
-                    memory.write(key, value)
-                self.logger.info(f"📥 Restored session state with {len(memory_data)} memory keys")
-            else:
+            # [RESTORED] Type safety check
+            if not isinstance(memory_data, dict):
                 self.logger.warning(
                     f"⚠️ Invalid memory data type in session state: "
                     f"{type(memory_data).__name__}, expected dict"
+                )
+            else:
+                # Restore memory from previous session
+                for key, value in memory_data.items():
+                    memory.write(key, value)
+                self.logger.info(
+                    f"📥 Restored session state with {len(memory_data)} memory keys"
                 )
 
         # Write new input data to memory (each key individually)
@@ -358,25 +363,37 @@ class GraphExecutor:
                         node_retry_counts.get(current_node_id, 0) + 1
                     )
 
-                    if node_retry_counts[current_node_id] < node_spec.max_retries:
+                    # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
+                    max_retries = getattr(node_spec, "max_retries", 3)
+
+                    if node_retry_counts[current_node_id] < max_retries:
                         # Retry - don't increment steps for retries
                         steps -= 1
+
+                        # --- EXPONENTIAL BACKOFF ---
                         retry_count = node_retry_counts[current_node_id]
+                        # Backoff formula: 1.0 * (2^(retry - 1)) -> 1s, 2s, 4s...
+                        delay = 1.0 * (2 ** (retry_count - 1))
+                        self.logger.info(f"   Using backoff: Sleeping {delay}s before retry...")
+                        await asyncio.sleep(delay)
+                        # --------------------------------------
+
                         self.logger.info(
-                            f"   ↻ Retrying ({retry_count}/{node_spec.max_retries})..."
+                            f"   ↻ Retrying ({node_retry_counts[current_node_id]}/"
+                            f"{max_retries})..."
                         )
                         continue
                     else:
                         # Max retries exceeded - fail the execution
                         self.logger.error(
-                            f"   ✗ Max retries ({node_spec.max_retries}) exceeded "
-                            f"for node {current_node_id}"
+                            f"   ✗ Max retries ({max_retries}) "
+                            f"exceeded for node {current_node_id}"
                         )
                         self.runtime.report_problem(
                             severity="critical",
                             description=(
                                 f"Node {current_node_id} failed after "
-                                f"{node_spec.max_retries} attempts: {result.error}"
+                                f"{max_retries} attempts: {result.error}"
                             ),
                         )
                         self.runtime.end_run(
@@ -384,14 +401,14 @@ class GraphExecutor:
                             output_data=memory.read_all(),
                             narrative=(
                                 f"Failed at {node_spec.name} after "
-                                f"{node_spec.max_retries} retries: {result.error}"
+                                f"{max_retries} retries: {result.error}"
                             ),
                         )
                         return ExecutionResult(
                             success=False,
                             error=(
                                 f"Node '{node_spec.name}' failed after "
-                                f"{node_spec.max_retries} attempts: {result.error}"
+                                f"{max_retries} attempts: {result.error}"
                             ),
                             output=memory.read_all(),
                             steps_executed=steps,
@@ -655,8 +672,12 @@ class GraphExecutor:
                 memory=memory.read_all(),
                 llm=self.llm,
                 goal=goal,
-                source_node_name=current_node_spec.name if current_node_spec else current_node_id,
-                target_node_name=target_node_spec.name if target_node_spec else edge.target,
+                source_node_name=current_node_spec.name
+                if current_node_spec
+                else current_node_id,
+                target_node_name=target_node_spec.name
+                if target_node_spec
+                else edge.target,
             ):
                 # Validate and clean output before mapping inputs
                 if self.cleansing_config.enabled and target_node_spec:
@@ -669,7 +690,9 @@ class GraphExecutor:
                     )
 
                     if not validation.valid:
-                        self.logger.warning(f"⚠ Output validation failed: {validation.errors}")
+                        self.logger.warning(
+                            f"⚠ Output validation failed: {validation.errors}"
+                        )
 
                         # Clean the output
                         cleaned_output = self.output_cleaner.clean_output(
@@ -694,7 +717,9 @@ class GraphExecutor:
                         )
 
                         if revalidation.valid:
-                            self.logger.info("✓ Output cleaned and validated successfully")
+                            self.logger.info(
+                                "✓ Output cleaned and validated successfully"
+                            )
                         else:
                             self.logger.error(
                                 f"✗ Cleaning failed, errors remain: {revalidation.errors}"
