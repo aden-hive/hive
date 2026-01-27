@@ -76,14 +76,9 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return node.value
 
     # --- Number/String/Bytes/NameConstant (Python < 3.8 compat if needed) ---
-    def visit_Num(self, node: ast.Num) -> Any:
-        return node.n
+   
 
-    def visit_Str(self, node: ast.Str) -> Any:
-        return node.s
-
-    def visit_NameConstant(self, node: ast.NameConstant) -> Any:
-        return node.value
+  
 
     # --- Data Structures ---
     def visit_List(self, node: ast.List) -> list:
@@ -226,9 +221,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
         return func(*args, **keywords)
 
-    def visit_Index(self, node: ast.Index) -> Any:
-        # Python < 3.9
-        return self.visit(node.value)
+  
 
 
 def safe_eval(expr: str, context: dict[str, Any] | None = None) -> Any:
