@@ -130,6 +130,44 @@ cd tools && python -m pytest
 PYTHONPATH=core:exports python -m agent_name test
 ```
 
+## Understanding Agents and the `exports/` Directory
+
+This repository is **framework-first** and does not include any agents by default.
+
+### Where are the agents?
+
+Agents are expected to live in an `exports/` directory at the repository root.  
+This directory is **not created automatically** when you clone the repo.
+
+You must create it manually if you want to build or run agents:
+
+```bash
+mkdir exports
+```
+
+Each subdirectory inside exports/ represents a single agent.
+
+### Why does the CLI show no agents?
+
+If the `exports/` directory does not exist, or if it exists but contains no agents, CLI commands such as:
+
+```bash
+python -m framework.cli list
+```
+
+may show no output. This is expected behavior.
+
+### Do I need an LLM API key?
+
+No API key is required to:
+
+- develop the core framework
+- run tests
+- improve documentation
+- work on tooling or CLI behavior
+
+An LLM API key is only required when running agents that make live model calls.
+
 ## Questions?
 
 Feel free to open an issue for questions or join our [Discord community](https://discord.com/invite/MXE49hrKDk).
