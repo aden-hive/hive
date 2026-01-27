@@ -323,6 +323,23 @@ For security concerns, please see [SECURITY.md](SECURITY.md).
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
+## Interactive Setup Wizard (for First-Time Contributors)
+
+To simplify setup, Hive now includes an **interactive setup wizard**:
+
+### Steps to run
+```powershell
+# Clone your fork
+git clone https://github.com/ananya-max/hive.git
+cd hive
+
+# Checkout your feature branch
+git checkout feature/first-contribution
+
+# Run the wizard
+python setup.py
+
+
 ## Frequently Asked Questions (FAQ)
 
 **Q: Does Aden depend on LangChain or other agent frameworks?**
