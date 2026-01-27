@@ -8,7 +8,6 @@
 /hive/ @adenhq/maintainers
 
 # Infrastructure
-/docker-compose*.yml @adenhq/maintainers
 /.github/ @adenhq/maintainers
 
 # Documentation

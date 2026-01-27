@@ -351,7 +351,7 @@ Aden collects telemetry data for monitoring and observability purposes, includin
 
 **Q: What deployment options does Aden support?**
 
-Aden supports Docker Compose deployment out of the box, with both production and development configurations. Self-hosted deployments work on any infrastructure supporting Docker. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
+Aden supports self-hosted deployments via Python packages. See the [Environment Setup Guide](ENVIRONMENT_SETUP.md) for installation instructions. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
 
 **Q: Can Aden handle complex, production-scale use cases?**
 
