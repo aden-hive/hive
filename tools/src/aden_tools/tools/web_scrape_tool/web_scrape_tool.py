@@ -14,6 +14,8 @@ from urllib.robotparser import RobotFileParser
 import httpx
 from bs4 import BeautifulSoup
 from fastmcp import FastMCP
+import random
+from pathlib import Path
 
 # Cache for robots.txt parsers (domain -> parser)
 _robots_cache: dict[str, RobotFileParser | None] = {}
@@ -21,8 +23,26 @@ _robots_cache: dict[str, RobotFileParser | None] = {}
 # User-Agent for the scraper - identifies as a bot for transparency
 USER_AGENT = "AdenBot/1.0 (https://adenhq.com; web scraping tool)"
 
-# Browser-like User-Agent for actual page requests
-BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+# Load browser-like User-Agents for rotation
+USER_AGENTS_FILE = Path(__file__).parent / "useragents.txt"
+_browser_user_agents: list[str] = []
+
+if USER_AGENTS_FILE.exists():
+    try:
+        with open(USER_AGENTS_FILE, "r") as f:
+            _browser_user_agents = [line.strip() for line in f if line.strip()]
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to load useragents.txt: {e}")
+
+def get_browser_user_agent() -> str:
+    """Get a random user agent from the loaded list or fallback to default."""
+    if _browser_user_agents:
+        return random.choice(_browser_user_agents)
+    return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# Keep the original name as an alias for the dynamic function
+BROWSER_USER_AGENT = get_browser_user_agent
 
 
 def _get_robots_parser(base_url: str, timeout: float = 10.0) -> RobotFileParser | None:
@@ -141,7 +161,7 @@ def register_tools(mcp: FastMCP) -> None:
             response = httpx.get(
                 url,
                 headers={
-                    "User-Agent": BROWSER_USER_AGENT,
+                    "User-Agent": BROWSER_USER_AGENT(),
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                     "Accept-Language": "en-US,en;q=0.5",
                 },
