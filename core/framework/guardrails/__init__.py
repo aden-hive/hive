@@ -15,10 +15,12 @@ to orchestrate and extend those protections.
 """
 
 from .manager import GuardrailsConfig, GuardrailsManager, GuardrailViolation
+from .policy import DEFAULT_GUARDRAIL_PROMPT
 
 __all__ = [
     "GuardrailsConfig",
     "GuardrailsManager",
     "GuardrailViolation",
+    "DEFAULT_GUARDRAIL_PROMPT",
 ]
 
