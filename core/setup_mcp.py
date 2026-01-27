@@ -12,7 +12,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Configure logger
 logger = logging.getLogger(__name__)
 
 
@@ -20,7 +19,7 @@ def setup_logger():
     """Configure logger for CLI usage with colored output."""
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
-        formatter = logging.Formatter('%(message)s')
+        formatter = logging.Formatter("%(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)

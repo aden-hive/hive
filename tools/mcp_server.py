@@ -30,7 +30,6 @@ import logging
 import os
 import sys
 
-# Configure logger
 logger = logging.getLogger(__name__)
 
 
@@ -40,33 +39,33 @@ def setup_logger():
         # For STDIO mode, log to stderr; for HTTP mode, log to stdout
         stream = sys.stderr if "--stdio" in sys.argv else sys.stdout
         handler = logging.StreamHandler(stream)
-        formatter = logging.Formatter('[MCP] %(message)s')
+        formatter = logging.Formatter("[MCP] %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
 
 
-# Initialize logger
 setup_logger()
 
 # Suppress FastMCP banner in STDIO mode
 if "--stdio" in sys.argv:
     # Monkey-patch rich Console to redirect to stderr
     import rich.console
+
     _original_console_init = rich.console.Console.__init__
 
     def _patched_console_init(self, *args, **kwargs):
-        kwargs['file'] = sys.stderr  # Force all rich output to stderr
+        kwargs["file"] = sys.stderr  # Force all rich output to stderr
         _original_console_init(self, *args, **kwargs)
 
     rich.console.Console.__init__ = _patched_console_init
 
-from fastmcp import FastMCP
-from starlette.requests import Request
-from starlette.responses import PlainTextResponse
+from fastmcp import FastMCP  # noqa: E402
+from starlette.requests import Request  # noqa: E402
+from starlette.responses import PlainTextResponse  # noqa: E402
 
-from aden_tools.credentials import CredentialManager, CredentialError
-from aden_tools.tools import register_all_tools
+from aden_tools.credentials import CredentialError, CredentialManager  # noqa: E402
+from aden_tools.tools import register_all_tools  # noqa: E402
 
 # Create credential manager
 credentials = CredentialManager()
