@@ -34,10 +34,10 @@ fi
 
 # Select Python interpreter, preferring the active virtualenv.
 # Fallback to system Python, then Windows py launcher as a last resort.
-if command -v python >/dev/null; then
-    PYTHON_CMD="python"
-elif command -v python3 >/dev/null; then
+if command -v python3 >/dev/null; then
     PYTHON_CMD="python3"
+elif command -v python >/dev/null; then
+    PYTHON_CMD="python"
 elif command -v py >/dev/null; then
     PYTHON_CMD="py -3"
 fi
