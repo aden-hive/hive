@@ -58,6 +58,7 @@ class LiteLLMProvider(LLMProvider):
         api_key: str | None = None,
         api_base: str | None = None,
         metrics_collector = None,
+        cache_manager = None,
         **kwargs: Any,
     ):
         """
@@ -83,6 +84,13 @@ class LiteLLMProvider(LLMProvider):
             self.metrics = MetricsCollector()
         else:
             self.metrics = metrics_collector
+        
+        # Initialize cache manager
+        if cache_manager is None:
+            from framework.cache import CacheManager
+            self.cache_manager = CacheManager(enable_caching=True)
+        else:
+            self.cache_manager = cache_manager
 
         if litellm is None:
             raise ImportError(
@@ -138,6 +146,27 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
+        # Check cache first
+        prompt_key = json.dumps(full_messages)
+        estimated_cost = self.metrics.calculate_cost(self.model, len(prompt_key) * 2, max_tokens)
+        
+        cached_response, is_cache_hit, cost_saved = self.cache_manager.get_cached_response(
+            prompt=prompt_key,
+            model=self.model,
+            estimated_cost=estimated_cost
+        )
+        
+        if is_cache_hit and cached_response:
+            # Return cached response
+            return LLMResponse(
+                content=cached_response,
+                model=self.model,
+                input_tokens=0,  # No API call made
+                output_tokens=0,
+                stop_reason="cached",
+                raw_response=None,
+            )
+        
         # Make the call with metrics tracking
         start_time = time.time()
         try:
@@ -170,6 +199,20 @@ class LiteLLMProvider(LLMProvider):
 
         # Extract content
         content = response.choices[0].message.content or ""
+        
+        # Cache the response for future use
+        actual_cost = self.metrics.calculate_cost(
+            self.model,
+            usage.prompt_tokens if usage else 0,
+            usage.completion_tokens if usage else 0
+        )
+        
+        self.cache_manager.cache_response(
+            prompt=prompt_key,
+            response=content,
+            model=self.model,
+            actual_cost=actual_cost
+        )
 
         # Get usage info
         usage = response.usage
