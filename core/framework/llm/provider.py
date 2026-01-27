@@ -45,6 +45,18 @@ class ToolResult:
     is_error: bool = False
 
 
+@dataclass
+class StreamChunk:
+    """A chunk of streaming response."""
+    
+    content: str
+    is_complete: bool = False
+    input_tokens: int = 0
+    output_tokens: int = 0
+    model: str = ""
+    stop_reason: str = ""
+
+
 class LLMProvider(ABC):
     """
     Abstract LLM provider - plug in any LLM backend.
@@ -54,6 +66,7 @@ class LLMProvider(ABC):
     - Request/response formatting
     - Token counting
     - Error handling
+    - Streaming support
     """
 
     @abstractmethod
@@ -82,6 +95,34 @@ class LLMProvider(ABC):
 
         Returns:
             LLMResponse with content and metadata
+        """
+        pass
+
+    @abstractmethod
+    async def stream_complete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        callback: Callable[[StreamChunk], None] | None = None,
+    ) -> Any: # Returns AsyncIterator[StreamChunk]
+        """
+        Stream a completion from the LLM (token by token).
+
+        Args:
+            messages: Conversation history
+            system: System prompt
+            tools: Available tools
+            max_tokens: Max tokens
+            response_format: Structured output format
+            json_mode: Enable JSON mode
+            callback: Optional callback for each chunk
+
+        Yields:
+            StreamChunk for each token
         """
         pass
 

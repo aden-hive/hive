@@ -129,6 +129,9 @@ class NodeSpec(BaseModel):
     model: str | None = Field(
         default=None, description="Specific model to use (defaults to graph default)"
     )
+    streaming_enabled: bool = Field(
+        default=False, description="Enable real-time token streaming for this node"
+    )
 
     # For function nodes
     function: str | None = Field(
@@ -613,6 +616,9 @@ class LLMNode(NodeProtocol):
                         f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}"
                     )
 
+                # Check if streaming is enabled
+                streaming_enabled = getattr(ctx.node_spec, "streaming_enabled", False)
+
                 # Phase 3: Auto-generate JSON schema from Pydantic model
                 response_format = None
                 if ctx.node_spec.output_model is not None:
@@ -637,12 +643,51 @@ class LLMNode(NodeProtocol):
                 current_messages = messages.copy()
 
                 while True:
-                    response = ctx.llm.complete(
-                        messages=current_messages,
-                        system=system,
-                        json_mode=use_json_mode,
-                        response_format=response_format,
-                    )
+                    if streaming_enabled:
+                        # Streaming execution
+                        logger.info("      🌊 Streaming response...")
+                        full_content = ""
+                        stream_input_tokens = 0
+                        stream_output_tokens = 0
+                        stop_reason = ""
+                        
+                        # Define callback for runtime events (optional)
+                        def on_token(chunk):
+                            # In future, hook this to runtime event bus
+                            pass
+
+                        stream = ctx.llm.stream_complete(
+                            messages=current_messages,
+                            system=system,
+                            json_mode=use_json_mode,
+                            response_format=response_format,
+                            callback=on_token
+                        )
+                        
+                        # Iterate and aggregate
+                        async for chunk in stream:
+                            full_content += chunk.content
+                            stream_input_tokens = chunk.input_tokens # Usually set in chunks
+                            stream_output_tokens = chunk.output_tokens
+                            stop_reason = chunk.stop_reason or stop_reason
+                            
+                        # Construct response object from aggregated data
+                        from framework.llm.provider import LLMResponse
+                        response = LLMResponse(
+                            content=full_content,
+                            model=ctx.llm.model if hasattr(ctx.llm, "model") else "unknown",
+                            input_tokens=stream_input_tokens,
+                            output_tokens=stream_output_tokens,
+                            stop_reason=stop_reason
+                        )
+                    else:
+                        # Standard execution
+                        response = ctx.llm.complete(
+                            messages=current_messages,
+                            system=system,
+                            json_mode=use_json_mode,
+                            response_format=response_format,
+                        )
 
                     total_input_tokens += response.input_tokens
                     total_output_tokens += response.output_tokens

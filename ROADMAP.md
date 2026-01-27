@@ -48,7 +48,7 @@ timeline
     - [x] Callback Handler System to receive events throughout execution
     - [ ] Tool-Based Intervention Points (tool to pause execution and request human input)
     - [x] Multiple entrypoint for different event source (e.g. Human input, webhook)
-    - [ ] Streaming Interface for Real-time Monitoring
+    - [x] Streaming Interface for Real-time Monitoring
     - [ ] Request State Management
 
 ### Essential Tools
@@ -105,7 +105,7 @@ timeline
 - [ ] Guardrail type support (Determined Condition as Guardrails)
 
 ### Agent Capability
-- [ ] Streaming mode support
+- [x] Streaming mode support
 
 ### Cross-Platform
 - [ ] JavaScript / TypeScript Version SDK

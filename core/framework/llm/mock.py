@@ -1,11 +1,10 @@
-"""Mock LLM Provider for testing and structural validation without real LLM calls."""
-
+import asyncio
 import json
 import re
 from collections.abc import Callable
 from typing import Any
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, StreamChunk, Tool, ToolResult, ToolUse
 
 
 class MockLLMProvider(LLMProvider):
@@ -138,6 +137,59 @@ class MockLLMProvider(LLMProvider):
             output_tokens=0,
             stop_reason="mock_complete",
         )
+
+    async def stream_complete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        callback: Callable[[StreamChunk], None] | None = None,
+    ):
+        """
+        Simulate a streaming completion.
+
+        Args:
+            messages: Conversation history
+            system: System prompt
+            tools: Available tools
+            max_tokens: Maximum tokens
+            response_format: Response format
+            json_mode: If True, generate JSON response
+            callback: Optional callback for each chunk
+
+        Yields:
+            StreamChunk for each simulated token
+        """
+        full_content = self._generate_mock_response(system=system, json_mode=json_mode)
+        
+        # Simulate streaming by splitting by word
+        words = full_content.split(" ")
+        for i, word in enumerate(words):
+            # Add back the space except for the last word
+            chunk_content = word + (" " if i < len(words) - 1 else "")
+            
+            # Simulated delay
+            await asyncio.sleep(0.05)
+            
+            is_complete = (i == len(words) - 1)
+            stop_reason = "mock_complete" if is_complete else ""
+            
+            chunk = StreamChunk(
+                content=chunk_content,
+                is_complete=is_complete,
+                input_tokens=0,
+                output_tokens=i + 1,
+                model=self.model,
+                stop_reason=stop_reason,
+            )
+            
+            if callback:
+                callback(chunk)
+                
+            yield chunk
 
     def complete_with_tools(
         self,

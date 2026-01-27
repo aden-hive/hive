@@ -96,6 +96,7 @@ class ActionSpec(BaseModel):
     prompt: str | None = None
     system_prompt: str | None = None
     model: str | None = None
+    streaming_enabled: bool = False
 
     # For TOOL_USE
     tool_name: str | None = None

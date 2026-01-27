@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from framework.llm.litellm import LiteLLMProvider
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, StreamChunk, Tool, ToolResult, ToolUse
 
 
 def _get_api_key_from_credential_manager() -> str | None:
@@ -80,6 +80,28 @@ class AnthropicProvider(LLMProvider):
             response_format=response_format,
             json_mode=json_mode,
         )
+
+    async def stream_complete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        callback: Callable[[StreamChunk], None] | None = None,
+    ):
+        """Stream a completion from Claude (via LiteLLM)."""
+        async for chunk in self._provider.stream_complete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+            callback=callback,
+        ):
+            yield chunk
 
     def complete_with_tools(
         self,
