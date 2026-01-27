@@ -63,6 +63,18 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## Quick Start
 
+### Recommended Setup Order (New Contributors)
+
+If you're new to the Hive codebase, we recommend following the setup steps in this order:
+
+1. **README.md** – High-level overview and project context  
+2. **ENVIRONMENT_SETUP.md** – Environment setup and platform-specific notes  
+3. **Developer Guide** – Architecture and advanced usage  
+4. **Quick Start** – Run examples after your environment is ready  
+
+This helps avoid common setup issues and ensures dependencies are configured correctly.
+
+
 ### Prerequisites
 
 - [Python 3.11+](https://www.python.org/downloads/) for agent development
