@@ -1,7 +1,9 @@
 import os
 import re
+
 from mcp.server.fastmcp import FastMCP
-from ..security import get_secure_path, WORKSPACES_DIR
+
+from ..security import WORKSPACES_DIR, get_secure_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -43,9 +45,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
             # Use session dir root for relative path calculations
-            session_root = os.path.join(
-                WORKSPACES_DIR, workspace_id, agent_id, session_id
-            )
+            session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
 
             matches = []
 
@@ -67,7 +67,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # Calculate relative path for display
                 display_path = os.path.relpath(file_path, session_root)
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    with open(file_path, encoding="utf-8") as f:
                         for i, line in enumerate(f, 1):
                             if regex.search(line):
                                 matches.append(
@@ -78,7 +78,7 @@ def register_tools(mcp: FastMCP) -> None:
                                     }
                                 )
                 except (UnicodeDecodeError, PermissionError):
-                    # As per README: Skips the files that cannot be decoded or have permission errors
+                    # Skips files that cannot be decoded or lack permissions
                     continue
 
             return {

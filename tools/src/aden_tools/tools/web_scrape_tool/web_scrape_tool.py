@@ -8,7 +8,7 @@ Respect robots.txt by default for ethical scraping.
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -23,7 +23,11 @@ _robots_cache: dict[str, RobotFileParser | None] = {}
 USER_AGENT = "AdenBot/1.0 (https://adenhq.com; web scraping tool)"
 
 # Browser-like User-Agent for actual page requests
-BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 def _get_robots_parser(base_url: str, timeout: float = 10.0) -> RobotFileParser | None:
@@ -160,7 +164,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "error": f"Skipping non-HTML content (Content-Type: {content_type})",
                     "url": url,
-                    "skipped": True
+                    "skipped": True,
                 }
             # --- END FIX ---
 
@@ -208,11 +212,7 @@ def register_tools(mcp: FastMCP) -> None:
                     or soup.find(class_=["content", "post", "entry", "article-body"])
                     or soup.find("body")
                 )
-                text = (
-                    main_content.get_text(separator=" ", strip=True)
-                    if main_content
-                    else ""
-                )
+                text = main_content.get_text(separator=" ", strip=True) if main_content else ""
 
             # Clean up whitespace
             text = " ".join(text.split())
@@ -232,7 +232,7 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Extract links if requested
             if include_links:
-                links: List[dict[str, str]] = []
+                links: list[dict[str, str]] = []
                 for a in soup.find_all("a", href=True)[:50]:
                     href = a["href"]
                     link_text = a.get_text(strip=True)

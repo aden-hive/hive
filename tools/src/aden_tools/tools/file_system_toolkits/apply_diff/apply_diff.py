@@ -1,6 +1,8 @@
 import os
+
 import diff_match_patch as dmp_module
 from mcp.server.fastmcp import FastMCP
+
 from ..security import get_secure_path
 
 
@@ -43,7 +45,7 @@ def register_tools(mcp: FastMCP) -> None:
             dmp = dmp_module.diff_match_patch()
             patches = dmp.patch_fromText(diff_text)
 
-            with open(secure_path, "r", encoding="utf-8") as f:
+            with open(secure_path, encoding="utf-8") as f:
                 content = f.read()
 
             new_content, results = dmp.patch_apply(patches, content)

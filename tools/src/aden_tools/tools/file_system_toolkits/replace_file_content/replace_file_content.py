@@ -1,5 +1,7 @@
 import os
+
 from mcp.server.fastmcp import FastMCP
+
 from ..security import get_secure_path
 
 
@@ -45,7 +47,7 @@ def register_tools(mcp: FastMCP) -> None:
             if not os.path.exists(secure_path):
                 return {"error": f"File not found at {path}"}
 
-            with open(secure_path, "r", encoding="utf-8") as f:
+            with open(secure_path, encoding="utf-8") as f:
                 content = f.read()
 
             if target not in content:

@@ -1,8 +1,8 @@
 """Shared fixtures for tools tests."""
 
-import pytest
 from pathlib import Path
 
+import pytest
 from fastmcp import FastMCP
 
 from aden_tools.credentials import CredentialManager
@@ -46,9 +46,7 @@ def sample_csv(tmp_path: Path) -> Path:
 def sample_json(tmp_path: Path) -> Path:
     """Create a simple JSON file for testing."""
     json_file = tmp_path / "test.json"
-    json_file.write_text(
-        '{"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}'
-    )
+    json_file.write_text('{"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]}')
     return json_file
 
 

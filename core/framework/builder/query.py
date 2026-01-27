@@ -326,8 +326,10 @@ class BuilderQuery:
                     "type": "node_improvement",
                     "target": node_id,
                     "reason": f"Node has {failure_rate:.1%} failure rate",
-                    "recommendation": (f"Review and improve node '{node_id}' - "
-                                       f"high failure rate suggests prompt or tool issues"),
+                    "recommendation": (
+                        f"Review and improve node '{node_id}' - "
+                        f"high failure rate suggests prompt or tool issues"
+                    ),
                     "priority": "high" if failure_rate > 0.3 else "medium",
                 }
             )
@@ -352,8 +354,9 @@ class BuilderQuery:
                     "type": "architecture",
                     "target": goal_id,
                     "reason": f"Goal success rate is only {patterns.success_rate:.1%}",
-                    "recommendation": ("Consider restructuring the agent "
-                                       "graph or improving goal definition"),
+                    "recommendation": (
+                        "Consider restructuring the agent graph or improving goal definition"
+                    ),
                     "priority": "high",
                 }
             )
@@ -424,9 +427,7 @@ class BuilderQuery:
             # Check for constraint issues
             if decision.active_constraints:
                 constraints = ", ".join(decision.active_constraints)
-                suggestions.append(
-                    f"Review constraints: {constraints} - may be too restrictive"
-                )
+                suggestions.append(f"Review constraints: {constraints} - may be too restrictive")
 
         # Check for reported problems with suggestions
         for problem in run.problems:

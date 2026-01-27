@@ -1,7 +1,7 @@
 """CSV Tool - Read and manipulate CSV files."""
+
 import csv
 import os
-from typing import List, Optional
 
 from fastmcp import FastMCP
 
@@ -17,7 +17,7 @@ def register_tools(mcp: FastMCP) -> None:
         workspace_id: str,
         agent_id: str,
         session_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
     ) -> dict:
         """
@@ -44,7 +44,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": "File must have .csv extension"}
 
             # Read CSV
-            with open(secure_path, "r", encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
 
                 if reader.fieldnames is None:
@@ -62,7 +62,7 @@ def register_tools(mcp: FastMCP) -> None:
                     rows.append(row)
 
             # Get total row count (re-read for accurate count)
-            with open(secure_path, "r", encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding="utf-8", newline="") as f:
                 total_rows = sum(1 for _ in f) - 1  # Subtract header
 
             return {
@@ -90,8 +90,8 @@ def register_tools(mcp: FastMCP) -> None:
         workspace_id: str,
         agent_id: str,
         session_id: str,
-        columns: List[str],
-        rows: List[dict],
+        columns: list[str],
+        rows: list[dict],
     ) -> dict:
         """
         Write data to a new CSV file.
@@ -145,7 +145,7 @@ def register_tools(mcp: FastMCP) -> None:
         workspace_id: str,
         agent_id: str,
         session_id: str,
-        rows: List[dict],
+        rows: list[dict],
     ) -> dict:
         """
         Append rows to an existing CSV file.
@@ -173,7 +173,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": "rows cannot be empty"}
 
             # Read existing columns
-            with open(secure_path, "r", encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
                 if reader.fieldnames is None:
                     return {"error": "CSV file is empty or has no headers"}
@@ -188,7 +188,7 @@ def register_tools(mcp: FastMCP) -> None:
                     writer.writerow(filtered_row)
 
             # Get new total row count
-            with open(secure_path, "r", encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding="utf-8", newline="") as f:
                 total_rows = sum(1 for _ in f) - 1  # Subtract header
 
             return {
@@ -237,7 +237,7 @@ def register_tools(mcp: FastMCP) -> None:
             file_size = os.path.getsize(secure_path)
 
             # Read headers and count rows
-            with open(secure_path, "r", encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
 
                 if reader.fieldnames is None:
@@ -293,7 +293,8 @@ def register_tools(mcp: FastMCP) -> None:
             query="SELECT * FROM data WHERE status = 'pending'"
 
             # Aggregate data
-            query="SELECT category, COUNT(*) as count, AVG(price) as avg_price FROM data GROUP BY category"
+            query="SELECT category, COUNT(*) as count, "
+                  "AVG(price) as avg_price FROM data GROUP BY category"
 
             # Sort and limit
             query="SELECT name, price FROM data ORDER BY price DESC LIMIT 5"
@@ -305,7 +306,10 @@ def register_tools(mcp: FastMCP) -> None:
             import duckdb
         except ImportError:
             return {
-                "error": "DuckDB not installed. Install with: pip install duckdb  or  pip install tools[sql]"
+                "error": (
+                    "DuckDB not installed. Install with: "
+                    "pip install duckdb  or  pip install tools[sql]"
+                )
             }
 
         try:
@@ -326,7 +330,17 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": "Only SELECT queries are allowed for security reasons"}
 
             # Disallowed keywords for security
-            disallowed = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "EXEC", "EXECUTE"]
+            disallowed = [
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "DROP",
+                "CREATE",
+                "ALTER",
+                "TRUNCATE",
+                "EXEC",
+                "EXECUTE",
+            ]
             for keyword in disallowed:
                 if keyword in query_upper:
                     return {"error": f"'{keyword}' is not allowed in queries"}
@@ -343,7 +357,7 @@ def register_tools(mcp: FastMCP) -> None:
                 rows = result.fetchall()
 
                 # Convert to list of dicts
-                rows_as_dicts = [dict(zip(columns, row)) for row in rows]
+                rows_as_dicts = [dict(zip(columns, row, strict=False)) for row in rows]
 
                 return {
                     "success": True,

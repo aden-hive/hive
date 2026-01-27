@@ -1,8 +1,9 @@
 import os
 import subprocess
-from typing import Optional
+
 from mcp.server.fastmcp import FastMCP
-from ..security import get_secure_path, WORKSPACES_DIR
+
+from ..security import WORKSPACES_DIR, get_secure_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -14,7 +15,7 @@ def register_tools(mcp: FastMCP) -> None:
         workspace_id: str,
         agent_id: str,
         session_id: str,
-        cwd: Optional[str] = None,
+        cwd: str | None = None,
     ) -> dict:
         """
         Purpose
@@ -42,9 +43,7 @@ def register_tools(mcp: FastMCP) -> None:
         """
         try:
             # Default cwd is the session root
-            session_root = os.path.join(
-                WORKSPACES_DIR, workspace_id, agent_id, session_id
-            )
+            session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
             os.makedirs(session_root, exist_ok=True)
 
             if cwd:

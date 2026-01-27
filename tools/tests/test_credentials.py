@@ -3,10 +3,10 @@
 import pytest
 
 from aden_tools.credentials import (
+    CREDENTIAL_SPECS,
+    CredentialError,
     CredentialManager,
     CredentialSpec,
-    CredentialError,
-    CREDENTIAL_SPECS,
 )
 
 
@@ -236,9 +236,7 @@ class TestCredentialManagerForTesting:
         """for_testing() without override still fails validation."""
         monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
 
-        creds = CredentialManager.for_testing(
-            {}, dotenv_path=tmp_path / ".env"
-        )  # No overrides
+        creds = CredentialManager.for_testing({}, dotenv_path=tmp_path / ".env")  # No overrides
 
         with pytest.raises(CredentialError):
             creds.validate_for_tools(["web_search"])
@@ -511,9 +509,7 @@ class TestDotenvReading:
         monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
 
         dotenv_file = tmp_path / ".env"
-        dotenv_file.write_text(
-            "ANTHROPIC_API_KEY=anthropic-key\nBRAVE_SEARCH_API_KEY=brave-key\n"
-        )
+        dotenv_file.write_text("ANTHROPIC_API_KEY=anthropic-key\nBRAVE_SEARCH_API_KEY=brave-key\n")
 
         creds = CredentialManager(dotenv_path=dotenv_file)
 
@@ -536,9 +532,7 @@ class TestDotenvReading:
         monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
 
         dotenv_file = tmp_path / ".env"
-        dotenv_file.write_text(
-            "# This is a comment\nBRAVE_SEARCH_API_KEY=key-after-comment\n"
-        )
+        dotenv_file.write_text("# This is a comment\nBRAVE_SEARCH_API_KEY=key-after-comment\n")
 
         creds = CredentialManager(dotenv_path=dotenv_file)
 

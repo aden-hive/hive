@@ -164,11 +164,8 @@ class CodeValidator:
         for node in ast.walk(tree):
             # Check for blocked node types
             if type(node) in self.blocked_nodes:
-                _lineno = getattr(node, "lineno", "?")
-                issues.append(
-                    f"Blocked operation: {type(node).__name__} "
-                    f"at line {getattr(node, 'lineno', '?')}"
-                )
+                lineno = getattr(node, "lineno", "?")
+                issues.append(f"Blocked operation: {type(node).__name__} at line {lineno}")
 
             # Check for dangerous attribute access
             if isinstance(node, ast.Attribute):

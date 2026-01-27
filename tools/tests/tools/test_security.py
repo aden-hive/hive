@@ -1,8 +1,9 @@
 """Tests for security.py - get_secure_path() function."""
 
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class TestGetSecurePath:
@@ -31,11 +32,10 @@ class TestGetSecurePath:
     def test_creates_session_directory(self, ids):
         """Session directory is created if it doesn't exist."""
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
-        _result =  get_secure_path("file.txt", **ids)
 
-        session_dir = (
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
-        )
+        _result = get_secure_path("file.txt", **ids)
+
+        session_dir = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         assert session_dir.exists()
         assert session_dir.is_dir()
 
@@ -133,9 +133,7 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         with pytest.raises(ValueError):
-            get_secure_path(
-                "file.txt", workspace_id=None, agent_id="agent", session_id="session"
-            )
+            get_secure_path("file.txt", workspace_id=None, agent_id="agent", session_id="session")
 
     def test_simple_filename(self, ids):
         """Simple filename resolves correctly."""
@@ -144,11 +142,7 @@ class TestGetSecurePath:
         result = get_secure_path("file.txt", **ids)
 
         expected = (
-            self.workspaces_dir
-            / "test-workspace"
-            / "test-agent"
-            / "test-session"
-            / "file.txt"
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "file.txt"
         )
         assert result == str(expected)
 
@@ -158,9 +152,7 @@ class TestGetSecurePath:
 
         result = get_secure_path(".", **ids)
 
-        expected = (
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
-        )
+        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         assert result == str(expected)
 
     def test_dot_slash_path(self, ids):
@@ -236,9 +228,7 @@ class TestGetSecurePath:
 
         result = get_secure_path("", **ids)
 
-        expected = (
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
-        )
+        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         assert result == str(expected)
 
     def test_symlink_within_sandbox_works(self, ids):
@@ -246,9 +236,7 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         # Create session directory structure
-        session_dir = (
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
-        )
+        session_dir = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # Create a target file and a symlink to it
@@ -273,9 +261,7 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         # Create session directory
-        session_dir = (
-            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
-        )
+        session_dir = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         session_dir.mkdir(parents=True, exist_ok=True)
 
         # Create a symlink inside session pointing outside

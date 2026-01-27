@@ -240,7 +240,7 @@ class OutputCleaner:
         for key, value in output.items():
             if isinstance(value, str):
                 repaired = _heuristic_repair(value)
-                if repaired and isinstance(repaired, (dict, list)):
+                if repaired and isinstance(repaired, dict | list):
                     # Check if this repaired structure looks like what we want
                     # e.g. if the key is 'data' and the string contained valid JSON
                     fixed_output[key] = repaired
@@ -289,8 +289,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
             response = self.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
-                    "You clean malformed agent outputs. "
-                    "Return only valid JSON matching the schema."
+                    "You clean malformed agent outputs. Return only valid JSON matching the schema."
                 ),
                 max_tokens=2048,  # Sufficient for cleaning most outputs
             )
