@@ -57,6 +57,7 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
+- **[WebSocket Streaming](docs/configuration.md#websocket-streaming)** - Real-time agent event streaming
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
 <!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests

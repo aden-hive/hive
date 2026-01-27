@@ -18,6 +18,9 @@ Testing commands:
 
 import argparse
 import sys
+import litellm
+import os
+from framework.llm import LiteLLMProvider
 
 
 def main():
@@ -39,6 +42,10 @@ def main():
     from framework.testing.cli import register_testing_commands
 
     register_testing_commands(subparsers)
+
+    # Register stream command
+    from framework.runtime.websocket_cli import register_stream_command
+    register_stream_command(subparsers)
 
     args = parser.parse_args()
 

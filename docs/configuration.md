@@ -14,6 +14,7 @@ config.yaml  -->  generate-env.ts  -->  .env files
 ## Getting Started
 
 1. Copy the example configuration:
+
    ```bash
    cp config.yaml.example config.yaml
    ```
@@ -72,6 +73,7 @@ database:
 ```
 
 **Connection URL Format:**
+
 ```
 postgresql://[user]:[password]@[host]:[port]/[database]
 ```
@@ -136,13 +138,13 @@ cp config.yaml.example config.production.yaml
 
 The root `.env` file is used by Docker Compose. Key variables:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FRONTEND_PORT` | Frontend container port | 3000 |
-| `BACKEND_PORT` | Backend container port | 4000 |
-| `NODE_ENV` | Node environment | production |
-| `DATABASE_URL` | Database connection | - |
-| `JWT_SECRET` | Auth secret key | - |
+| Variable        | Description             | Default    |
+| --------------- | ----------------------- | ---------- |
+| `FRONTEND_PORT` | Frontend container port | 3000       |
+| `BACKEND_PORT`  | Backend container port  | 4000       |
+| `NODE_ENV`      | Node environment        | production |
+| `DATABASE_URL`  | Database connection     | -          |
+| `JWT_SECRET`    | Auth secret key         | -          |
 
 ## Security Best Practices
 
@@ -187,3 +189,33 @@ If a required variable is missing, add it to:
 1. `config.yaml.example` (with safe default)
 2. `config.yaml` (with your value)
 3. `scripts/generate-env.ts` (to generate it)
+
+## WebSocket Streaming
+
+Stream EventBus events in real-time for live agent observability.
+
+**Quick Start:**
+
+```bash
+# 1. Start server
+PYTHONPATH=core python -m framework stream --host 0.0.0.0 --port 8765
+
+# 2. Connect & subscribe
+const ws = new WebSocket('ws://localhost:8765');
+ws.onopen = () => ws.send(JSON.stringify({ action: 'subscribe' }));
+ws.onmessage = (e) => console.log(JSON.parse(e.data));
+```
+
+**Use Cases:**
+
+- **Web Dashboards** - Live agent status, progress bars, event logs
+- **Monitoring** - Track failures, violations, performance metrics
+- **Orchestration** - Coordinate multi-agent workflows via events
+- **Webhooks** - Forward events to external services (Slack, PagerDuty)
+
+**[Complete Guide](websocket-streaming.md)** - Authentication, production deployment, React/Vue integration, examples
+
+**Examples:**
+
+- Client: [tools/tests/integration/test_websocket_client.py](../tools/tests/integration/test_websocket_client.py)
+- Integration: [tools/tests/integration/test_websocket_integration.py](../tools/tests/integration/test_websocket_integration.py)

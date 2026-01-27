@@ -75,10 +75,24 @@ class LiteLLMProvider(LLMProvider):
             api_base: Custom API base URL (for proxies or local deployments)
             **kwargs: Additional arguments passed to litellm.completion()
         """
+        import os
+        
         self.model = model
         self.api_key = api_key
         self.api_base = api_base
         self.extra_kwargs = kwargs
+        
+        # Auto-configure for Gemini AI Studio if using gemini-* models
+        if model.startswith("gemini-") and not api_base:
+            # Check if we have a Google API key (AI Studio)
+            google_key = api_key or os.environ.get("GOOGLE_API_KEY")
+            if google_key:
+                # Force AI Studio endpoint (not Vertex AI)
+                self.api_base = "https://generativelanguage.googleapis.com/v1beta"
+                self.extra_kwargs["gemini_api_key"] = google_key
+                self.extra_kwargs["custom_llm_provider"] = "gemini"
+                if not api_key:
+                    self.api_key = google_key
 
         if litellm is None:
             raise ImportError(
