@@ -68,17 +68,43 @@ python -c "import litellm; print('✓ litellm OK')"
 
 For running agents with real LLMs:
 
+**Unix/Mac:**
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
+```
+
+**Windows PowerShell:**
+```powershell
+$env:ANTHROPIC_API_KEY="your-key-here"
+```
+
+**Windows CMD:**
+```cmd
+set ANTHROPIC_API_KEY=your-key-here
 ```
 
 ## Running Agents
 
 All agent commands must be run from the project root with `PYTHONPATH` set:
 
+**Unix/Mac:**
 ```bash
 # From /hive/ directory
 PYTHONPATH=core:exports python -m agent_name COMMAND
+```
+
+**Windows PowerShell:**
+```powershell
+# From hive\ directory
+$env:PYTHONPATH="core;exports"
+python -m agent_name COMMAND
+```
+
+**Windows CMD:**
+```cmd
+REM From hive\ directory
+set PYTHONPATH=core;exports
+python -m agent_name COMMAND
 ```
 
 ### Example: Support Ticket Agent
@@ -158,23 +184,51 @@ Creates comprehensive test suites for your agent.
 
 **Solution:** Create and use a virtual environment:
 
+**Unix/Mac:**
 ```bash
 # Create virtual environment
 python3 -m venv .venv
 
 # Activate it
-source .venv/bin/activate  # macOS/Linux
-# .venv\Scripts\activate   # Windows
+source .venv/bin/activate
 
 # Then run setup
 ./scripts/setup-python.sh
 ```
 
+**Windows:**
+```powershell
+# Create virtual environment
+python -m venv .venv
+
+# Activate (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# Or activate (CMD)
+.venv\Scripts\activate.bat
+
+# Then install manually (no setup-python.sh on Windows)
+cd core
+pip install -e .
+cd ..\tools
+pip install -e .
+cd ..
+pip install --upgrade "openai>=1.0.0"
+```
+
 Always activate the venv before running agents:
 
+**Unix/Mac:**
 ```bash
 source .venv/bin/activate
 PYTHONPATH=core:exports python -m your_agent_name demo
+```
+
+**Windows PowerShell:**
+```powershell
+.venv\Scripts\Activate.ps1
+$env:PYTHONPATH="core;exports"
+python -m your_agent_name demo
 ```
 
 ### "ModuleNotFoundError: No module named 'framework'"
@@ -332,8 +386,19 @@ Add to `.vscode/settings.json`:
 
 ### Required for LLM Operations
 
+**Unix/Mac:**
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+**Windows PowerShell:**
+```powershell
+$env:ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+**Windows CMD:**
+```cmd
+set ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### Optional Configuration
