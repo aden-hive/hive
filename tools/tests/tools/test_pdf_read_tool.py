@@ -78,3 +78,32 @@ class TestPdfReadTool:
 
         result = pdf_read_fn(file_path=str(pdf_file), include_metadata=True)
         assert isinstance(result, dict)
+
+    def test_path_traversal_prevention(self, pdf_read_fn):
+        """Paths outside the workspace are rejected."""
+        result = pdf_read_fn(file_path="/etc/passwd.pdf")
+
+        assert "error" in result
+        assert "access denied" in result["error"].lower()
+
+    def test_empty_file_rejection(self, pdf_read_fn, tmp_path: Path):
+        """Empty PDF files are rejected."""
+        pdf_file = tmp_path / "empty.pdf"
+        pdf_file.write_bytes(b"")
+
+        result = pdf_read_fn(file_path=str(pdf_file))
+
+        assert "error" in result
+        assert "file is empty" in result["error"].lower()
+
+    def test_large_file_rejection(self, pdf_read_fn, tmp_path: Path):
+        """PDF files larger than 50MB are rejected."""
+        pdf_file = tmp_path / "large.pdf"
+        # Create a file larger than 50MB
+        large_content = b"x" * (50 * 1024 * 1024 + 1)
+        pdf_file.write_bytes(large_content)
+
+        result = pdf_read_fn(file_path=str(pdf_file))
+
+        assert "error" in result
+        assert "file too large" in result["error"].lower()

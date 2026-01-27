@@ -6,11 +6,19 @@ along with metadata.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, List
 
 from fastmcp import FastMCP
 from pypdf import PdfReader
+
+
+def validate_path_security(resolved_path: Path) -> None:
+    """Validate that the path is within the workspace directory for security."""
+    workspace_dir = Path(os.getcwd())
+    if not resolved_path.is_relative_to(workspace_dir):
+        raise ValueError(f"Access denied: Path '{resolved_path}' is outside the workspace.")
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -88,6 +96,8 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             path = Path(file_path).resolve()
 
+            validate_path_security(path)
+
             # Validate file exists
             if not path.exists():
                 return {"error": f"PDF file not found: {file_path}"}
@@ -98,6 +108,13 @@ def register_tools(mcp: FastMCP) -> None:
             # Check extension
             if path.suffix.lower() != ".pdf":
                 return {"error": f"Not a PDF file (expected .pdf): {file_path}"}
+
+            # Check file size
+            file_size = path.stat().st_size
+            if file_size == 0:
+                return {"error": "File is empty"}
+            if file_size > 50 * 1024 * 1024:
+                return {"error": "File too large (max 50MB)"}
 
             # Validate max_pages
             if max_pages < 1:
