@@ -42,10 +42,14 @@ ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
 ]
+sql = [
+    "duckdb>=1.0.0",
+]
 all = [
     "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
+    "duckdb>=1.0.0",
 ]
 
 [build-system]

@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd core
+          pip install -e .
+          pip install -r requirements-dev.txt
+
+      - name: Run ruff
+        run: |
+          cd core
+          ruff check .
+
+  test:
+    name: Test Python Framework
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd core
+          pip install -e .
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: |
+          cd core
+          pytest tests/ -v
+
+  validate:
+    name: Validate Agent Exports
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd core
+          pip install -e .
+          pip install -r requirements-dev.txt
+
+      - name: Validate exported agents
+        run: |
+          # Check that agent exports have valid structure
+          if [ ! -d "exports" ]; then
+            echo "No exports/ directory found, skipping validation"
+            exit 0
+          fi
+
+          shopt -s nullglob
+          agent_dirs=(exports/*/)
+          shopt -u nullglob
+
+          if [ ${#agent_dirs[@]} -eq 0 ]; then
+            echo "No agent directories in exports/, skipping validation"
+            exit 0
+          fi
+
+          validated=0
+          for agent_dir in "${agent_dirs[@]}"; do
+            if [ -f "$agent_dir/agent.json" ]; then
+              echo "Validating $agent_dir"
+              python -c "import json; json.load(open('$agent_dir/agent.json'))"
+              validated=$((validated + 1))
+            fi
+          done
+
+          if [ "$validated" -eq 0 ]; then
+            echo "No agent.json files found in exports/, skipping validation"
+          else
+            echo "Validated $validated agent(s)"
+          fi
