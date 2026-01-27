@@ -162,7 +162,8 @@ PYTHONPATH=core:exports python -m my_agent test --type success
 2. **Developer Guide**: See [DEVELOPER.md](../DEVELOPER.md)
 3. **Build Agents**: Use `/building-agents` skill in Claude Code
 4. **Custom Tools**: Learn to integrate MCP servers
-5. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
+5. **Real-time Streaming**: Implement [LLM Streaming](llm-streaming.md) for better UX
+6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
 ## Troubleshooting
 
