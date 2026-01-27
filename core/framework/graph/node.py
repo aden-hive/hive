@@ -698,7 +698,7 @@ class LLMNode(NodeProtocol):
         import json
         import re
 
-        content = raw_response.strip
+        content = raw_response.strip()
 
         # Try direct JSON parse first (fast paths)
         try:
