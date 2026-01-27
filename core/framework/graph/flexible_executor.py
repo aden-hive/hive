@@ -318,22 +318,48 @@ class FlexibleGraphExecutor:
         Returns None to continue execution, or PlanExecutionResult to stop.
         """
         if judgment.action == JudgmentAction.ACCEPT:
-            # Step succeeded - update state and continue
+            # Step succeeded - validate outputs and update state
+            outputs_to_store = work_result.outputs.copy()
+
+            # Validate output mapping: enforce strict key matching
+            if step.expected_outputs:
+                returned_keys = set(outputs_to_store.keys())
+                expected_keys = set(step.expected_outputs)
+                missing_keys = expected_keys - returned_keys
+
+                if missing_keys:
+                    # Output mapping is ambiguous or incomplete
+                    # This prevents silent data corruption from blind result mapping
+                    feedback = (
+                        f"Step '{step.id}' failed output validation: "
+                        f"expected outputs {sorted(step.expected_outputs)} "
+                        f"but worker returned {sorted(returned_keys)}. "
+                        f"Missing keys: {sorted(missing_keys)}. "
+                        f"Output mapping must be explicit and unambiguous. "
+                        f"Worker must return all expected output keys, "
+                        f"not rely on generic 'result' key mapping."
+                    )
+
+                    step.status = StepStatus.FAILED
+                    step.error = feedback
+
+                    # Trigger replanning instead of silently corrupting data
+                    return self._create_result(
+                        status=ExecutionStatus.NEEDS_REPLAN,
+                        plan=plan,
+                        context=context,
+                        feedback=feedback,
+                        steps_executed=steps_executed,
+                        total_tokens=total_tokens,
+                        total_latency=total_latency,
+                    )
+
+            # All validations passed - mark as completed
             step.status = StepStatus.COMPLETED
             step.completed_at = datetime.now()
             step.result = work_result.outputs
 
-            # Map outputs to expected output keys
-            # If output has generic "result" key but step expects specific keys, map it
-            outputs_to_store = work_result.outputs.copy()
-            if step.expected_outputs and "result" in outputs_to_store:
-                result_value = outputs_to_store["result"]
-                # For each expected output key that's not in outputs, map from "result"
-                for expected_key in step.expected_outputs:
-                    if expected_key not in outputs_to_store:
-                        outputs_to_store[expected_key] = result_value
-
-            # Update context with mapped outputs
+            # Update context with validated outputs
             context.update(outputs_to_store)
 
             # Store in plan context for replanning feedback

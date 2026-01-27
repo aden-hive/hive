@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ### Fixed
+- core: Fixed FlexibleExecutor silently mapping single generic result to all expected outputs, causing data corruption (#1196)
 - tools: Fixed web_scrape tool attempting to parse non-HTML content (PDF, JSON) as HTML (#487)
 
 ### Security

@@ -438,5 +438,342 @@ class TestFlexibleExecutorIntegration:
         assert executor.judge.rules[0].id == "custom_rule"
 
 
+class TestOutputValidationStrictMatching:
+    """Tests for strict output validation (issue #1196)."""
+
+    def test_strict_output_validation_passes_when_all_expected_outputs_present(
+        self, tmp_path
+    ):
+        """Test that validation passes when worker returns all expected outputs."""
+        from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.graph.worker_node import StepExecutionResult
+        from framework.runtime.core import Runtime
+
+        runtime = Runtime(storage_path=tmp_path / "runtime")
+        executor = FlexibleGraphExecutor(runtime=runtime)
+
+        # Create step with multiple expected outputs
+        step = PlanStep(
+            id="step_1",
+            description="Extract data",
+            action=ActionSpec(action_type=ActionType.FUNCTION),
+            expected_outputs=["extracted_data", "confidence_score"],
+        )
+
+        # Worker returns all expected outputs
+        work_result = StepExecutionResult(
+            success=True,
+            outputs={
+                "extracted_data": "important text",
+                "confidence_score": 0.95,
+            },
+        )
+
+        # Judge accepts the result
+        judgment = Judgment(
+            action=JudgmentAction.ACCEPT,
+            reasoning="All outputs present",
+        )
+
+        # Create plan and goal for context
+        plan = Plan(id="plan_1", goal_id="goal_1", description="Test plan", steps=[step])
+        from framework.graph.goal import Goal
+
+        goal = Goal(id="goal_1", name="Test Goal", description="Test goal")
+        context = {}
+
+        # Handle judgment - should not raise or return early
+        result = asyncio.run(
+            executor._handle_judgment(
+                step=step,
+                work_result=work_result,
+                judgment=judgment,
+                plan=plan,
+                goal=goal,
+                context=context,
+                steps_executed=1,
+                total_tokens=100,
+                total_latency=1000,
+            )
+        )
+
+        # Should return None to continue execution (not stop early)
+        assert result is None
+        # Context should be updated with outputs
+        assert context["extracted_data"] == "important text"
+        assert context["confidence_score"] == 0.95
+        # Step should be completed
+        assert step.status == StepStatus.COMPLETED
+
+    def test_strict_output_validation_fails_when_outputs_missing(self, tmp_path):
+        """Test that validation fails when worker doesn't return all expected outputs."""
+        from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.graph.worker_node import StepExecutionResult
+        from framework.runtime.core import Runtime
+
+        runtime = Runtime(storage_path=tmp_path / "runtime")
+        executor = FlexibleGraphExecutor(runtime=runtime)
+
+        # Create step expecting multiple outputs
+        step = PlanStep(
+            id="step_1",
+            description="Extract data",
+            action=ActionSpec(action_type=ActionType.FUNCTION),
+            expected_outputs=["extracted_data", "confidence_score"],
+        )
+
+        # Worker returns only generic "result" key (the problematic case)
+        work_result = StepExecutionResult(
+            success=True,
+            outputs={"result": "some text"},
+        )
+
+        # Judge accepts the result
+        judgment = Judgment(
+            action=JudgmentAction.ACCEPT,
+            reasoning="Result received",
+        )
+
+        # Create plan and goal
+        plan = Plan(id="plan_1", goal_id="goal_1", description="Test plan", steps=[step])
+        from framework.graph.goal import Goal
+
+        goal = Goal(id="goal_1", name="Test Goal", description="Test goal")
+        context = {}
+
+        # Handle judgment - should trigger replan due to missing outputs
+        result = asyncio.run(
+            executor._handle_judgment(
+                step=step,
+                work_result=work_result,
+                judgment=judgment,
+                plan=plan,
+                goal=goal,
+                context=context,
+                steps_executed=1,
+                total_tokens=100,
+                total_latency=1000,
+            )
+        )
+
+        # Should return PlanExecutionResult with NEEDS_REPLAN status
+        assert result is not None
+        assert result.status == ExecutionStatus.NEEDS_REPLAN
+        # Error message should mention missing keys
+        assert "Missing keys" in result.feedback
+        assert "confidence_score" in result.feedback or "extracted_data" in result.feedback
+        # Step should be marked as failed
+        assert step.status == StepStatus.FAILED
+
+    def test_no_blind_mapping_regression_single_result_not_duplicated(
+        self, tmp_path
+    ):
+        """Test that single 'result' value is NOT blindly copied to all expected outputs.
+
+        This is the regression test for issue #1196.
+        Before fix: result value would be copied to both extracted_data AND confidence_score
+        After fix: Step fails with NEEDS_REPLAN, forcing explicit output mapping
+        """
+        from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.graph.worker_node import StepExecutionResult
+        from framework.runtime.core import Runtime
+
+        runtime = Runtime(storage_path=tmp_path / "runtime")
+        executor = FlexibleGraphExecutor(runtime=runtime)
+
+        # Step expects two different outputs that should have different values
+        step = PlanStep(
+            id="step_1",
+            description="Analyze and score",
+            action=ActionSpec(action_type=ActionType.FUNCTION),
+            expected_outputs=["analysis_result", "confidence_score"],
+        )
+
+        # Worker mistakenly returns only "result" instead of separate outputs
+        # Before fix: "important data" would be copied to BOTH analysis_result AND confidence_score (BUG!)
+        # After fix: This should be rejected as invalid
+        work_result = StepExecutionResult(
+            success=True,
+            outputs={"result": "important data"},
+        )
+
+        judgment = Judgment(
+            action=JudgmentAction.ACCEPT,
+            reasoning="Result received",
+        )
+
+        plan = Plan(id="plan_1", goal_id="goal_1", description="Test plan", steps=[step])
+        from framework.graph.goal import Goal
+
+        goal = Goal(id="goal_1", name="Test Goal", description="Test goal")
+        from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.graph.worker_node import StepExecutionResult
+        from framework.runtime.core import Runtime
+
+        runtime = Runtime(storage_path=tmp_path / "runtime")
+        executor = FlexibleGraphExecutor(runtime=runtime)
+
+        step = PlanStep(
+            id="step_1",
+            description="Multi-output step",
+            action=ActionSpec(action_type=ActionType.FUNCTION),
+            expected_outputs=["output_a", "output_b", "output_c"],
+        )
+
+        # Worker returns only 1 out of 3 expected outputs
+        work_result = StepExecutionResult(
+            success=True,
+            outputs={"output_a": "value_a"},
+        )
+
+        judgment = Judgment(
+            action=JudgmentAction.ACCEPT,
+            reasoning="Partial result",
+        )
+
+        plan = Plan(id="plan_1", goal_id="goal_1", description="Test plan", steps=[step])
+        from framework.graph.goal import Goal
+
+        goal = Goal(id="goal_1", name="Test Goal", description="Test goal")
+        context = {}
+
+        result = asyncio.run(
+            executor._handle_judgment(
+                step=step,
+                work_result=work_result,
+                judgment=judgment,
+                plan=plan,
+                goal=goal,
+                context=context,
+                steps_executed=1,
+                total_tokens=100,
+                total_latency=1000,
+            )
+        )
+
+        # Should reject partial outputs
+        assert result is not None
+        assert result.status == ExecutionStatus.NEEDS_REPLAN
+        assert "Missing keys" in result.feedback
+        # Both missing outputs should be mentioned
+        assert ("output_b" in result.feedback or "output_c" in result.feedback)
+
+    def test_output_validation_succeeds_with_extra_outputs(self, tmp_path):
+        """Test that extra outputs beyond expected_outputs are allowed."""
+        from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.graph.worker_node import StepExecutionResult
+        from framework.runtime.core import Runtime
+
+        runtime = Runtime(storage_path=tmp_path / "runtime")
+        executor = FlexibleGraphExecutor(runtime=runtime)
+
+        step = PlanStep(
+            id="step_1",
+            description="Step with metadata",
+            action=ActionSpec(action_type=ActionType.FUNCTION),
+            expected_outputs=["main_output"],
+        )
+
+        # Worker returns expected output plus extra metadata
+        work_result = StepExecutionResult(
+            success=True,
+            outputs={
+                "main_output": "important data",
+                "metadata": {"source": "api", "version": "1.0"},
+                "timestamp_str": "2024-01-27T10:00:00Z",
+            },
+        )
+
+        judgment = Judgment(
+            action=JudgmentAction.ACCEPT,
+            reasoning="All required outputs present",
+        )
+
+        plan = Plan(id="plan_1", goal_id="goal_1", description="Test plan", steps=[step])
+        from framework.graph.goal import Goal
+
+        goal = Goal(id="goal_1", description="Test goal")
+        context = {}
+
+        result = asyncio.run(
+            executor._handle_judgment(
+                step=step,
+                work_result=work_result,
+                judgment=judgment,
+                plan=plan,
+                goal=goal,
+                context=context,
+                steps_executed=1,
+                total_tokens=100,
+                total_latency=1000,
+            )
+        )
+
+        # Should accept - all expected outputs are present
+        assert result is None
+        # All outputs (expected and extra) should be in context
+        assert context["main_output"] == "important data"
+        assert context["metadata"]["source"] == "api"
+        assert step.status == StepStatus.COMPLETED
+
+    def test_output_validation_succeeds_with_extra_outputs(self, tmp_path):
+        """Test that extra outputs beyond expected_outputs are allowed."""
+        from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.graph.worker_node import StepExecutionResult
+        from framework.runtime.core import Runtime
+
+        runtime = Runtime(storage_path=tmp_path / "runtime")
+        executor = FlexibleGraphExecutor(runtime=runtime)
+
+        step = PlanStep(
+            id="step_1",
+            description="Step with metadata",
+            action=ActionSpec(action_type=ActionType.FUNCTION),
+            expected_outputs=["main_output"],
+        )
+
+        # Worker returns expected output plus extra metadata
+        work_result = StepExecutionResult(
+            success=True,
+            outputs={
+                "main_output": "important data",
+                "metadata": {"source": "api", "version": "1.0"},
+                "timestamp_str": "2024-01-27T10:00:00Z",
+            },
+        )
+
+        judgment = Judgment(
+            action=JudgmentAction.ACCEPT,
+            reasoning="All required outputs present",
+        )
+
+        plan = Plan(id="plan_1", goal_id="goal_1", description="Test plan", steps=[step])
+        from framework.graph.goal import Goal
+
+        goal = Goal(id="goal_1", name="Test Goal", description="Test goal")
+        context = {}
+
+        result = asyncio.run(
+            executor._handle_judgment(
+                step=step,
+                work_result=work_result,
+                judgment=judgment,
+                plan=plan,
+                goal=goal,
+                context=context,
+                steps_executed=1,
+                total_tokens=100,
+                total_latency=1000,
+            )
+        )
+
+        # Should accept - all expected outputs are present
+        assert result is None
+        # All outputs (expected and extra) should be in context
+        assert context["main_output"] == "important data"
+        assert context["metadata"]["source"] == "api"
+        assert step.status == StepStatus.COMPLETED
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
