@@ -421,6 +421,7 @@ class ExecutionStream:
             default_model=self.graph.default_model,
             max_tokens=self.graph.max_tokens,
             max_steps=self.graph.max_steps,
+            cleanup_llm_model=self.graph.cleanup_llm_model,
         )
 
     async def wait_for_completion(
