@@ -11,23 +11,23 @@ Tests:
 """
 
 import asyncio
-import pytest
 import tempfile
 from pathlib import Path
 
-from framework.graph import Goal
-from framework.graph.goal import SuccessCriterion, Constraint
-from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition, AsyncEntryPointSpec
-from framework.graph.node import NodeSpec
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
-from framework.runtime.shared_state import SharedStateManager, IsolationLevel
-from framework.runtime.event_bus import EventBus, EventType, AgentEvent
-from framework.runtime.outcome_aggregator import OutcomeAggregator
-from framework.runtime.stream_runtime import StreamRuntime
+import pytest
 
+from framework.graph import Goal
+from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.goal import Constraint, SuccessCriterion
+from framework.graph.node import NodeSpec
+from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.event_bus import AgentEvent, EventBus, EventType
+from framework.runtime.execution_stream import EntryPointSpec
+from framework.runtime.outcome_aggregator import OutcomeAggregator
+from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 
 # === Test Fixtures ===
+
 
 @pytest.fixture
 def sample_goal():
@@ -141,6 +141,7 @@ def temp_storage():
 
 # === SharedStateManager Tests ===
 
+
 class TestSharedStateManager:
     """Tests for SharedStateManager."""
 
@@ -175,8 +176,8 @@ class TestSharedStateManager:
         """Test shared state is visible across executions."""
         manager = SharedStateManager()
 
-        mem1 = manager.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
-        mem2 = manager.create_memory("exec-2", "stream-1", IsolationLevel.SHARED)
+        manager.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
+        manager.create_memory("exec-2", "stream-1", IsolationLevel.SHARED)
 
         # Write to global scope
         await manager.write(
@@ -209,6 +210,7 @@ class TestSharedStateManager:
 
 # === EventBus Tests ===
 
+
 class TestEventBus:
     """Tests for EventBus pub/sub."""
 
@@ -226,12 +228,14 @@ class TestEventBus:
             handler=handler,
         )
 
-        await bus.publish(AgentEvent(
-            type=EventType.EXECUTION_STARTED,
-            stream_id="webhook",
-            execution_id="exec-1",
-            data={"test": "data"},
-        ))
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="webhook",
+                execution_id="exec-1",
+                data={"test": "data"},
+            )
+        )
 
         # Allow handler to run
         await asyncio.sleep(0.1)
@@ -256,16 +260,20 @@ class TestEventBus:
         )
 
         # Publish to webhook stream (should be received)
-        await bus.publish(AgentEvent(
-            type=EventType.EXECUTION_STARTED,
-            stream_id="webhook",
-        ))
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="webhook",
+            )
+        )
 
         # Publish to api stream (should NOT be received)
-        await bus.publish(AgentEvent(
-            type=EventType.EXECUTION_STARTED,
-            stream_id="api",
-        ))
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="api",
+            )
+        )
 
         await asyncio.sleep(0.1)
 
@@ -308,11 +316,13 @@ class TestEventBus:
 
         # Publish the event
         await asyncio.sleep(0.1)
-        await bus.publish(AgentEvent(
-            type=EventType.EXECUTION_COMPLETED,
-            stream_id="webhook",
-            execution_id="exec-1",
-        ))
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_COMPLETED,
+                stream_id="webhook",
+                execution_id="exec-1",
+            )
+        )
 
         event = await wait_task
 
@@ -321,6 +331,7 @@ class TestEventBus:
 
 
 # === OutcomeAggregator Tests ===
+
 
 class TestOutcomeAggregator:
     """Tests for OutcomeAggregator."""
@@ -375,6 +386,7 @@ class TestOutcomeAggregator:
 
 
 # === AgentRuntime Tests ===
+
 
 class TestAgentRuntime:
     """Tests for AgentRuntime orchestration."""
@@ -491,6 +503,7 @@ class TestAgentRuntime:
 
 # === GraphSpec Validation Tests ===
 
+
 class TestGraphSpecValidation:
     """Tests for GraphSpec with async_entry_points."""
 
@@ -594,6 +607,7 @@ class TestGraphSpecValidation:
 
 
 # === Integration Tests ===
+
 
 class TestCreateAgentRuntime:
     """Tests for the create_agent_runtime factory."""

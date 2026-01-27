@@ -28,3 +28,28 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["framework"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+lint.select = [
+  "B",   # bugbear errors
+  "C4",  # flake8-comprehensions errors
+  "E",   # pycodestyle errors
+  "F",   # pyflakes errors
+  "I",   # import sorting
+  "Q",   # flake8-quotes errors
+  "UP",  # py-upgrade
+  "W",   # pycodestyle warnings
+]
+
+lint.isort.combine-as-imports = true
+lint.isort.known-first-party = ["framework"]
+lint.isort.section-order = [
+  "future",
+  "standard-library",
+  "third-party",
+  "first-party",
+  "local-folder",
+]

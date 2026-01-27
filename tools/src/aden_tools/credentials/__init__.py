@@ -21,6 +21,21 @@ Usage:
     # In tests
     creds = CredentialManager.for_testing({"brave_search": "test-key"})
 
+For advanced usage with the new credential store:
+    from aden_tools.credentials import CredentialStoreAdapter
+    from core.framework.credentials import CredentialStore
+
+    store = CredentialStore.with_encrypted_storage("/var/hive/credentials")
+    credentials = CredentialStoreAdapter(store)
+
+    # Existing API works unchanged
+    api_key = credentials.get("brave_search")
+
+    # New features available
+    headers = credentials.resolve_headers({
+        "Authorization": "Bearer {{github_oauth.access_token}}"
+    })
+
 Credential categories:
 - llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
@@ -33,6 +48,7 @@ To add a new credential:
 from .base import CredentialError, CredentialManager, CredentialSpec
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
+from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -45,6 +61,8 @@ __all__ = [
     "CredentialSpec",
     "CredentialManager",
     "CredentialError",
+    # New credential store adapter
+    "CredentialStoreAdapter",
     # Merged registry
     "CREDENTIAL_SPECS",
     # Category registries (for direct access if needed)
