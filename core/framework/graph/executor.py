@@ -60,9 +60,11 @@ class ExecutionResult:
     path: list[str] = field(default_factory=list)  # Node IDs traversed
     paused_at: str | None = None  # Node ID where execution paused for HITL
     session_state: dict[str, Any] = field(default_factory=dict)  # State to resume from
+    
+    # [CHANGED] Add compare=False so existing tests don't fail on inequality
     history: list[ExecutionSnapshot] = field(
-        default_factory=list
-    )  # [ADDED] Time-travel history
+        default_factory=list, compare=False
+    )
 
 
 class GraphExecutor:
