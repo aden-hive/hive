@@ -629,7 +629,7 @@ class GraphExecutor:
                             )
                             # Continue anyway if fallback_to_raw is True
 
-                # Map inputsss
+                # Map inputs
                 mapped = edge.map_inputs(result.output, memory.read_all())
                 for key, value in mapped.items():
                     memory.write(key, value)
