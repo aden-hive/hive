@@ -72,38 +72,38 @@ For running agents with real LLMs:
 export ANTHROPIC_API_KEY="your-key-here"
 ```
 
+
 ## Running Agents (Important Note)
 
 **Agents are NOT included by default.**  
-You must generate an agent (or manually create one under `exports/`) **before running any command like**:
+You must generate an agent (or manually create one under `exports/`) before running any agent command.
 
 The `exports/` folder is only created when:
 - You build a new agent using **Claude Code**, or
 - You manually add an agent package under `exports/`
 
-Because of this, **agent commands will fail on a fresh clone**.
+Because of this, agent commands will fail on a fresh clone.
 
+All agent commands must be run from the project root with `PYTHONPATH` set:
 
-For example, the following commands will fail unless an agent exists:
+```bash
+# From /hive/ directory
+PYTHONPATH=core:exports python -m agent_name COMMAND
 
-
-
-
+# Validate agent structure
+PYTHONPATH=core:exports python -m support_ticket_agent validate
 
 # Show agent information
 PYTHONPATH=core:exports python -m support_ticket_agent info
 
 # Run agent with input
-PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
-  "ticket_content": "My login is broken. Error 401.",
-  "customer_id": "CUST-123",
-  "ticket_id": "TKT-456"
-}'
+PYTHONPATH=core:exports python -m support_ticket_agent run --input '{...}'
 
 # Run in mock mode (no LLM calls)
 PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{...}'
-```
 
+
+### Example: Other Agents
 ### Example: Other Agents
 
 ```bash
@@ -115,7 +115,8 @@ PYTHONPATH=core:exports python -m outbound_sales_agent validate
 
 # Personal Assistant Agent
 PYTHONPATH=core:exports python -m personal_assistant_agent run --input '{...}'
-```
+
+
 
 ## Building New Agents
 
