@@ -39,6 +39,28 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## 👋 New to Aden? Start Here
+
+If you are a first-time user or new contributor, this section explains what Aden is and how to get started quickly.
+
+**What is Aden?**  
+Aden is an outcome-driven AI agent framework. Instead of hardcoding workflows, you describe a goal in natural language, and Aden generates and runs AI agents that work toward that goal. When agents fail, Aden captures the failure, improves the agent logic, and redeploys automatically.
+
+**Who is this for?**
+- Developers building AI agents
+- Contributors exploring agent frameworks
+- Teams automating business processes with AI
+
+**How to get started (quick path):**
+1. Install Python 3.11+
+2. Clone the repository
+3. Run `./scripts/setup-python.sh`
+4. Follow the Quick Start section below to build your first agent
+
+For contributors:  
+Please read `CONTRIBUTING.md` to learn how to pick an issue, get assigned, and submit a pull request correctly.
+
+
 ## What is Aden
 
 <p align="center">
