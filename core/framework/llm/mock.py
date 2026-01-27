@@ -2,9 +2,10 @@
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
 
 class MockLLMProvider(LLMProvider):
@@ -143,7 +144,7 @@ class MockLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """
