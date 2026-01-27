@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 # Import register_tools from each tool module
 from .example_tool import register_tools as register_example
+from .hash_tool import register_tools as register_hash
 from .web_search_tool import register_tools as register_web_search
 from .web_scrape_tool import register_tools as register_web_scrape
 from .pdf_read_tool import register_tools as register_pdf_read
@@ -57,6 +58,7 @@ def register_all_tools(
     """
     # Tools that don't need credentials
     register_example(mcp)
+    register_hash(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
 
@@ -77,6 +79,7 @@ def register_all_tools(
 
     return [
         "example_tool",
+        "hash_tool",
         "web_search",
         "web_scrape",
         "pdf_read",
