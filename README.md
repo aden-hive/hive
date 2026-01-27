@@ -68,15 +68,25 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - [Python 3.11+](https://www.python.org/downloads/) for agent development
 - [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
 
+
 ### Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/adenhq/hive.git
+git clone [https://github.com/adenhq/hive.git](https://github.com/adenhq/hive.git)
 cd hive
 
-# Run Python environment setup
+# Run Python environment setup (Linux/Mac)
 ./scripts/setup-python.sh
+
+```powershell
+# Create and activate virtual environment
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install -e core
+pip install -e tools
 ```
 
 This installs:
@@ -85,6 +95,29 @@ This installs:
 - All required dependencies
 
 ### Build Your First Agent
+
+
+Set Environment Paths (Required for Windows):
+
+```PowerShell
+
+$env:PYTHONPATH = "core;tools\src"
+Install Claude Code skills (one-time):
+
+```Bash
+
+./quickstart.sh
+Run your agent:
+
+```Bash
+
+python -m your_agent_name run --input '{...}'
+Note for Windows Users: If you get a JSON error using the --input flag in PowerShell, use an environment variable:
+
+```PowerShell
+
+$env:AGENT_INPUT = '{"query": "test"}'
+python -m your_agent_name run --input $env:AGENT_INPUT
 
 ```bash
 # Install Claude Code skills (one-time)
