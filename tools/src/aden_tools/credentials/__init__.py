@@ -30,6 +30,7 @@ To add a new credential:
 2. Add the CredentialSpec to that file's dictionary
 3. If new category, import and merge it in this __init__.py
 """
+
 from .base import CredentialError, CredentialManager, CredentialSpec
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS

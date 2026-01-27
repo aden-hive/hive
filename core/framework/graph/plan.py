@@ -10,24 +10,26 @@ The Plan is the contract between the external planner and the executor:
 - If replanning needed, returns feedback to external planner
 """
 
-from typing import Any
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class ActionType(str, Enum):
     """Types of actions a PlanStep can perform."""
-    LLM_CALL = "llm_call"           # Call LLM for generation
-    TOOL_USE = "tool_use"           # Use a registered tool
-    SUB_GRAPH = "sub_graph"         # Execute a sub-graph
-    FUNCTION = "function"           # Call a Python function
+
+    LLM_CALL = "llm_call"  # Call LLM for generation
+    TOOL_USE = "tool_use"  # Use a registered tool
+    SUB_GRAPH = "sub_graph"  # Execute a sub-graph
+    FUNCTION = "function"  # Call a Python function
     CODE_EXECUTION = "code_execution"  # Execute dynamic code (sandboxed)
 
 
 class StepStatus(str, Enum):
     """Status of a plan step."""
+
     PENDING = "pending"
     AWAITING_APPROVAL = "awaiting_approval"  # Waiting for human approval
     IN_PROGRESS = "in_progress"
@@ -39,14 +41,16 @@ class StepStatus(str, Enum):
 
 class ApprovalDecision(str, Enum):
     """Human decision on a step requiring approval."""
-    APPROVE = "approve"      # Execute as planned
-    REJECT = "reject"        # Skip this step
-    MODIFY = "modify"        # Execute with modifications
-    ABORT = "abort"          # Stop entire execution
+
+    APPROVE = "approve"  # Execute as planned
+    REJECT = "reject"  # Skip this step
+    MODIFY = "modify"  # Execute with modifications
+    ABORT = "abort"  # Stop entire execution
 
 
 class ApprovalRequest(BaseModel):
     """Request for human approval before executing a step."""
+
     step_id: str
     step_description: str
     action_type: str
@@ -62,6 +66,7 @@ class ApprovalRequest(BaseModel):
 
 class ApprovalResult(BaseModel):
     """Result of human approval decision."""
+
     decision: ApprovalDecision
     reason: str | None = None
     modifications: dict[str, Any] = Field(default_factory=dict)
@@ -71,10 +76,11 @@ class ApprovalResult(BaseModel):
 
 class JudgmentAction(str, Enum):
     """Actions the judge can take after evaluating a step."""
-    ACCEPT = "accept"       # Step completed successfully, continue
-    RETRY = "retry"         # Retry the step with feedback
-    REPLAN = "replan"       # Return to external planner for new plan
-    ESCALATE = "escalate"   # Request human intervention
+
+    ACCEPT = "accept"  # Step completed successfully, continue
+    RETRY = "retry"  # Retry the step with feedback
+    REPLAN = "replan"  # Return to external planner for new plan
+    ESCALATE = "escalate"  # Request human intervention
 
 
 class ActionSpec(BaseModel):
@@ -83,6 +89,7 @@ class ActionSpec(BaseModel):
 
     This is the "what to do" part of a PlanStep.
     """
+
     action_type: ActionType
 
     # For LLM_CALL
@@ -114,6 +121,7 @@ class PlanStep(BaseModel):
 
     Created by external planner, executed by Worker, evaluated by Judge.
     """
+
     id: str
     description: str
     action: ActionSpec
@@ -121,27 +129,23 @@ class PlanStep(BaseModel):
     # Data flow
     inputs: dict[str, Any] = Field(
         default_factory=dict,
-        description="Input data for this step (can reference previous step outputs)"
+        description="Input data for this step (can reference previous step outputs)",
     )
     expected_outputs: list[str] = Field(
-        default_factory=list,
-        description="Keys this step should produce"
+        default_factory=list, description="Keys this step should produce"
     )
 
     # Dependencies
     dependencies: list[str] = Field(
-        default_factory=list,
-        description="IDs of steps that must complete before this one"
+        default_factory=list, description="IDs of steps that must complete before this one"
     )
 
     # Human-in-the-loop (HITL)
     requires_approval: bool = Field(
-        default=False,
-        description="If True, requires human approval before execution"
+        default=False, description="If True, requires human approval before execution"
     )
     approval_message: str | None = Field(
-        default=None,
-        description="Message to show human when requesting approval"
+        default=None, description="Message to show human when requesting approval"
     )
 
     # Execution state
@@ -170,6 +174,7 @@ class Judgment(BaseModel):
 
     The Judge evaluates step results and decides what to do next.
     """
+
     action: JudgmentAction
     reasoning: str
     feedback: str | None = None  # For retry/replan - what went wrong
@@ -193,6 +198,7 @@ class EvaluationRule(BaseModel):
 
     Rules are checked before falling back to LLM evaluation.
     """
+
     id: str
     description: str
 
@@ -216,6 +222,7 @@ class Plan(BaseModel):
     Created by external planner (Claude Code, etc).
     Executed by FlexibleGraphExecutor.
     """
+
     id: str
     goal_id: str
     description: str
@@ -361,12 +368,13 @@ class Plan(BaseModel):
 
 class ExecutionStatus(str, Enum):
     """Status of plan execution."""
+
     COMPLETED = "completed"
     AWAITING_APPROVAL = "awaiting_approval"  # Paused for human approval
     NEEDS_REPLAN = "needs_replan"
     NEEDS_ESCALATION = "needs_escalation"
     REJECTED = "rejected"  # Human rejected a step
-    ABORTED = "aborted"    # Human aborted execution
+    ABORTED = "aborted"  # Human aborted execution
     FAILED = "failed"
 
 
@@ -376,6 +384,7 @@ class PlanExecutionResult(BaseModel):
 
     Returned to external planner with status and feedback.
     """
+
     status: ExecutionStatus
 
     # Results from completed steps
@@ -421,6 +430,7 @@ def load_export(data: str | dict) -> tuple["Plan", Any]:
         result = await executor.execute_plan(plan, goal, context)
     """
     import json as json_module
+
     from framework.graph.goal import Goal
 
     if isinstance(data, str):

@@ -4,11 +4,12 @@ import importlib.util
 import inspect
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from framework.llm.provider import Tool, ToolUse, ToolResult
+from framework.llm.provider import Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ class ToolRegistry:
 
         # Check for TOOLS dict
         if hasattr(module, "TOOLS"):
-            tools_dict = getattr(module, "TOOLS")
+            tools_dict = module.TOOLS
             executor_func = getattr(module, "tool_executor", None)
 
             for name, tool in tools_dict.items():

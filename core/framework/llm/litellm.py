@@ -17,14 +17,15 @@ from tenacity import (
 
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 try:
     import litellm
 except ImportError:
-    litellm = None
+    litellm = None  # type: ignore[assignment]
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
 # Transient errors that should be retried with backoff
@@ -43,6 +44,7 @@ class LiteLLMProvider(LLMProvider):
     - OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo
     - Anthropic: claude-3-opus, claude-3-sonnet, claude-3-haiku
     - Google: gemini-pro, gemini-1.5-pro, gemini-1.5-flash
+    - DeepSeek: deepseek-chat, deepseek-coder, deepseek-reasoner
     - Mistral: mistral-large, mistral-medium, mistral-small
     - Groq: llama3-70b, mixtral-8x7b
     - Local: ollama/llama3, ollama/mistral
@@ -57,6 +59,9 @@ class LiteLLMProvider(LLMProvider):
 
         # Google Gemini
         provider = LiteLLMProvider(model="gemini/gemini-1.5-flash")
+
+        # DeepSeek
+        provider = LiteLLMProvider(model="deepseek/deepseek-chat")
 
         # Local Ollama
         provider = LiteLLMProvider(model="ollama/llama3")
@@ -126,9 +131,7 @@ class LiteLLMProvider(LLMProvider):
 
         # Add JSON mode via prompt engineering (works across all providers)
         if json_mode:
-            json_instruction = (
-                "\n\nPlease respond with a valid JSON object."
-            )
+            json_instruction = "\n\nPlease respond with a valid JSON object."
             # Append to system message if present, otherwise add as system message
             if full_messages and full_messages[0]["role"] == "system":
                 full_messages[0]["content"] += json_instruction
@@ -192,8 +195,9 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
+        max_tokens: int = 4096,
     ) -> LLMResponse:
         """Run a tool-use loop until the LLM produces a final response."""
         # Prepare messages with system prompt
@@ -213,7 +217,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "messages": current_messages,
-                "max_tokens": 1024,
+                "max_tokens": max_tokens,
                 "tools": openai_tools,
                 **self.extra_kwargs,
             }
@@ -257,21 +261,23 @@ class LiteLLMProvider(LLMProvider):
 
             # Process tool calls.
             # Add assistant message with tool calls.
-            current_messages.append({
-                "role": "assistant",
-                "content": message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in message.tool_calls
-                ],
-            })
+            current_messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ],
+                }
+            )
 
             # Execute tools and add results.
             for tool_call in message.tool_calls:
@@ -290,11 +296,13 @@ class LiteLLMProvider(LLMProvider):
                 result = tool_executor(tool_use)
 
                 # Add tool result message
-                current_messages.append({
-                    "role": "tool",
-                    "tool_call_id": result.tool_use_id,
-                    "content": result.content,
-                })
+                current_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": result.tool_use_id,
+                        "content": result.content,
+                    }
+                )
 
         # Max iterations reached
         return LLMResponse(
