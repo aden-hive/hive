@@ -318,8 +318,9 @@ class TestCredentialSpecs:
         assert spec.tools == []
         assert "llm_generate" in spec.node_types
         assert "llm_tool_use" in spec.node_types
-        assert spec.required is True
-        assert spec.startup_required is True
+        # Anthropic is optional in llm.py
+        assert spec.required is False
+        assert spec.startup_required is False
         assert "anthropic.com" in spec.help_url
 
 
@@ -327,16 +328,26 @@ class TestNodeTypeValidation:
     """Tests for node type credential validation."""
 
     def test_get_missing_for_node_types_returns_missing(self, monkeypatch, tmp_path):
-        """get_missing_for_node_types() returns missing credentials."""
+        """get_missing_for_node_types() returns missing REQUIRED credentials only."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-        creds = CredentialManager(dotenv_path=tmp_path / ".env")
-        missing = creds.get_missing_for_node_types(["llm_generate", "llm_tool_use"])
+        # Create a custom spec that IS required to test this logic
+        custom_specs = {
+            "required_llm": CredentialSpec(
+                env_var="REQUIRED_LLM_KEY",
+                node_types=["llm_generate"],
+                required=True,
+            )
+        }
+        
+        # Use custom specs strictly for this test
+        creds = CredentialManager(dotenv_path=tmp_path / ".env", specs=custom_specs)
+        missing = creds.get_missing_for_node_types(["llm_generate"])
 
         assert len(missing) == 1
         cred_name, spec = missing[0]
-        assert cred_name == "anthropic"
-        assert spec.env_var == "ANTHROPIC_API_KEY"
+        assert cred_name == "required_llm"
+        assert spec.env_var == "REQUIRED_LLM_KEY"
 
     def test_get_missing_for_node_types_returns_empty_when_present(self, monkeypatch):
         """get_missing_for_node_types() returns empty when credentials present."""
@@ -357,17 +368,25 @@ class TestNodeTypeValidation:
         assert missing == []
 
     def test_validate_for_node_types_raises_for_missing(self, monkeypatch, tmp_path):
-        """validate_for_node_types() raises CredentialError when missing."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        """validate_for_node_types() raises CredentialError when REQUIRED missing."""
+        monkeypatch.delenv("REQUIRED_KEY", raising=False)
 
-        creds = CredentialManager(dotenv_path=tmp_path / ".env")
+        custom_specs = {
+            "required_cred": CredentialSpec(
+                env_var="REQUIRED_KEY",
+                node_types=["test_node"],
+                required=True,
+            )
+        }
+
+        creds = CredentialManager(dotenv_path=tmp_path / ".env", specs=custom_specs)
 
         with pytest.raises(CredentialError) as exc_info:
-            creds.validate_for_node_types(["llm_generate"])
+            creds.validate_for_node_types(["test_node"])
 
         error_msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in error_msg
-        assert "llm_generate" in error_msg
+        assert "REQUIRED_KEY" in error_msg
+        assert "test_node" in error_msg
 
     def test_validate_for_node_types_passes_when_present(self, monkeypatch):
         """validate_for_node_types() passes when credentials present."""
@@ -384,15 +403,23 @@ class TestStartupValidation:
 
     def test_validate_startup_raises_for_missing(self, monkeypatch, tmp_path):
         """validate_startup() raises CredentialError when startup creds missing."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("STARTUP_KEY", raising=False)
 
-        creds = CredentialManager(dotenv_path=tmp_path / ".env")
+        custom_specs = {
+            "startup_cred": CredentialSpec(
+                env_var="STARTUP_KEY",
+                startup_required=True,
+                required=True
+            )
+        }
+
+        creds = CredentialManager(dotenv_path=tmp_path / ".env", specs=custom_specs)
 
         with pytest.raises(CredentialError) as exc_info:
             creds.validate_startup()
 
         error_msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in error_msg
+        assert "STARTUP_KEY" in error_msg
         assert "Server startup failed" in error_msg
 
     def test_validate_startup_passes_when_present(self, monkeypatch):
