@@ -362,12 +362,16 @@ class NodeResult:
     # Pydantic validation errors (if any)
     validation_errors: list[str] = field(default_factory=list)
 
-    def to_summary(self, node_spec: Any = None) -> str:
+    def to_summary(self, node_spec: Any = None, use_llm: bool = False) -> str:
         """
         Generate a human-readable summary of this node's execution and output.
 
-        This is like toString() - it describes what the node produced in its current state.
-        Uses Haiku to intelligently summarize complex outputs.
+        Args:
+            node_spec: Optional node specification for context
+            use_llm: If True AND output is complex, use LLM. Default: False (fast path)
+
+        Returns:
+            Human-readable summary string
         """
         if not self.success:
             return f"❌ Failed: {self.error}"
@@ -375,25 +379,40 @@ class NodeResult:
         if not self.output:
             return "✓ Completed (no output)"
 
-        # Use Haiku to generate intelligent summary
+        # FAST PATH: Always available, no LLM (default)
+        if not use_llm:
+            return self._simple_summary()
+
+        # CONDITIONAL: Only use LLM for complex outputs (> 500 chars)
+        import json
+
+        output_size = len(json.dumps(self.output, default=str))
+        if output_size < 500:
+            return self._simple_summary()
+
+        # LLM PATH: Only for opt-in + complex outputs
+        return self._llm_summary(node_spec)
+
+    def _simple_summary(self) -> str:
+        """Fast inline summary without LLM call."""
+        parts = [f"✓ Completed with {len(self.output)} outputs:"]
+        for key, value in list(self.output.items())[:5]:
+            value_str = str(value)[:100]
+            if len(str(value)) > 100:
+                value_str += "..."
+            parts.append(f"  • {key}: {value_str}")
+        return "\n".join(parts)
+
+    def _llm_summary(self, node_spec: Any = None) -> str:
+        """Generate LLM-powered summary (opt-in only)."""
+        import json
         import os
 
         api_key = os.environ.get("ANTHROPIC_API_KEY")
-
         if not api_key:
-            # Fallback: simple key-value listing
-            parts = [f"✓ Completed with {len(self.output)} outputs:"]
-            for key, value in list(self.output.items())[:5]:  # Limit to 5 keys
-                value_str = str(value)[:100]
-                if len(str(value)) > 100:
-                    value_str += "..."
-                parts.append(f"  • {key}: {value_str}")
-            return "\n".join(parts)
+            return self._simple_summary()
 
-        # Use Haiku to generate intelligent summary
         try:
-            import json
-
             import anthropic
 
             node_context = ""
@@ -420,14 +439,7 @@ class NodeResult:
             return f"✓ {summary}"
 
         except Exception:
-            # Fallback on error
-            parts = [f"✓ Completed with {len(self.output)} outputs:"]
-            for key, value in list(self.output.items())[:3]:
-                value_str = str(value)[:80]
-                if len(str(value)) > 80:
-                    value_str += "..."
-                parts.append(f"  • {key}: {value_str}")
-            return "\n".join(parts)
+            return self._simple_summary()
 
 
 class NodeProtocol(ABC):
