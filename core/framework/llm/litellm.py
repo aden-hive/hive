@@ -27,6 +27,7 @@ class LiteLLMProvider(LLMProvider):
     - OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo
     - Anthropic: claude-3-opus, claude-3-sonnet, claude-3-haiku
     - Google: gemini-pro, gemini-1.5-pro, gemini-1.5-flash
+    - DeepSeek: deepseek-chat, deepseek-coder, deepseek-reasoner
     - Mistral: mistral-large, mistral-medium, mistral-small
     - Groq: llama3-70b, mixtral-8x7b
     - Local: ollama/llama3, ollama/mistral
@@ -41,6 +42,9 @@ class LiteLLMProvider(LLMProvider):
 
         # Google Gemini
         provider = LiteLLMProvider(model="gemini/gemini-1.5-flash")
+
+        # DeepSeek
+        provider = LiteLLMProvider(model="deepseek/deepseek-chat")
 
         # Local Ollama
         provider = LiteLLMProvider(model="ollama/llama3")
