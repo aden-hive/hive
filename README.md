@@ -62,6 +62,24 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
 ## Quick Start
+### First-Time Setup (Recommended)
+
+Before running Hive for the first time, ensure the following:
+
+1. You have at least one LLM API key configured:
+   - OPENAI_API_KEY
+   - ANTHROPIC_API_KEY
+   - GEMINI_API_KEY
+
+2. Claude Code is installed and available in your shell.
+   Installation guide:
+   https://docs.anthropic.com/en/docs/claude-code
+
+3. Docker is running (required for containerized tools).
+
+Example (Linux/macOS):
+export ANTHROPIC_API_KEY=your_key_here
+
 
 ### Prerequisites
 
