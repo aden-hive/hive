@@ -171,7 +171,7 @@ hive/                                    # Repository root
 │   ├── requirements.txt                 # Python dependencies
 │   └── README.md                        # Tools documentation
 │
-├── exports/                             # AGENT PACKAGES
+├── exports/                             # AGENT PACKAGES ((optional / may not be present))
 │   ├── support_ticket_agent/            # Example: Support ticket handler
 │   ├── market_research_agent/           # Example: Market research
 │   ├── outbound_sales_agent/            # Example: Sales outreach
@@ -199,6 +199,7 @@ hive/                                    # Repository root
 ├── CODE_OF_CONDUCT.md                   # Community guidelines
 └── SECURITY.md                          # Security policy
 ```
+**Note:** Example agent packages under `exports/` may not be included in all distributions or branches of the repository.
 
 ---
 
