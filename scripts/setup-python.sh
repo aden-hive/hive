@@ -20,16 +20,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Python Version
-PYTHON_VERSION="3.11"
+REQUIRED_PYTHON_VERSION="3.11"
 
 # Python version split into Major and Minor
-IFS='.' read -r PYTHON_MAJOR_VERSION PYTHON_MINOR_VERSION <<< "$PYTHON_VERSION"
+IFS='.' read -r PYTHON_MAJOR_VERSION PYTHON_MINOR_VERSION <<< "$REQUIRED_PYTHON_VERSION"
 
 # Available python interpreter (follows sequence)
 POSSIBLE_PYTHONS=("python3" "python" "py -3")
 
-# Defauly python interpreter
-PYTHON_CMD="python3"
+# Default python interpreter (initialized)
+PYTHON_CMD=""
 
 
 echo ""
@@ -39,13 +39,13 @@ echo "=================================================="
 echo ""
 
 # Available Python interpreter
-for cmd in ${POSSIBLE_PYTHONS[@]}; do
+for cmd in "${POSSIBLE_PYTHONS[@]}"; do
     # Check for python interpreter
-    if command -v ${cmd} >/dev/null; then
+    if command -v ${cmd} >/dev/null 2>&1; then
         # Check Python version
         if $cmd -c "import sys; sys.exit(0 if sys.version_info >= ($PYTHON_MAJOR_VERSION, $PYTHON_MINOR_VERSION) else 1)" >/dev/null 2>&1; then
             # Check for pip
-            if eval $cmd -m pip --version &> /dev/null; then
+            if eval $cmd -m pip --version &> /dev/null 2>&1; then
                 PYTHON_CMD="$cmd"
                 break
             fi
@@ -54,7 +54,7 @@ for cmd in ${POSSIBLE_PYTHONS[@]}; do
 done
 
 # Check for python (Exit if not found)
-if [ -z $PYTHON_CMD ]; then
+if [ -z "$PYTHON_CMD" ]; then
     echo -e "${RED}Error: Python $PYTHON_MAJOR_VERSION.$PYTHON_MINOR_VERSION+ not found.${NC}"
     echo "Please install Python $PYTHON_MAJOR_VERSION.$PYTHON_MINOR_VERSION+ from https://python.org"
     exit 1
