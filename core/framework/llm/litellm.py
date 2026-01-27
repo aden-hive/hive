@@ -8,11 +8,15 @@ See: https://docs.litellm.ai/docs/providers
 """
 
 import json
+from collections.abc import Callable
 from typing import Any
 
-import litellm
+try:
+    import litellm
+except ImportError:
+    litellm = None
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
 
 class LiteLLMProvider(LLMProvider):
@@ -23,6 +27,7 @@ class LiteLLMProvider(LLMProvider):
     - OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo
     - Anthropic: claude-3-opus, claude-3-sonnet, claude-3-haiku
     - Google: gemini-pro, gemini-1.5-pro, gemini-1.5-flash
+    - DeepSeek: deepseek-chat, deepseek-coder, deepseek-reasoner
     - Mistral: mistral-large, mistral-medium, mistral-small
     - Groq: llama3-70b, mixtral-8x7b
     - Local: ollama/llama3, ollama/mistral
@@ -37,6 +42,9 @@ class LiteLLMProvider(LLMProvider):
 
         # Google Gemini
         provider = LiteLLMProvider(model="gemini/gemini-1.5-flash")
+
+        # DeepSeek
+        provider = LiteLLMProvider(model="deepseek/deepseek-chat")
 
         # Local Ollama
         provider = LiteLLMProvider(model="ollama/llama3")
@@ -72,6 +80,11 @@ class LiteLLMProvider(LLMProvider):
         self.api_base = api_base
         self.extra_kwargs = kwargs
 
+        if litellm is None:
+            raise ImportError(
+                "LiteLLM is not installed. Please install it with: pip install litellm"
+            )
+
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -90,9 +103,7 @@ class LiteLLMProvider(LLMProvider):
 
         # Add JSON mode via prompt engineering (works across all providers)
         if json_mode:
-            json_instruction = (
-                "\n\nPlease respond with a valid JSON object."
-            )
+            json_instruction = "\n\nPlease respond with a valid JSON object."
             # Append to system message if present, otherwise add as system message
             if full_messages and full_messages[0]["role"] == "system":
                 full_messages[0]["content"] += json_instruction
@@ -146,7 +157,7 @@ class LiteLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """Run a tool-use loop until the LLM produces a final response."""
@@ -201,21 +212,23 @@ class LiteLLMProvider(LLMProvider):
 
             # Process tool calls.
             # Add assistant message with tool calls.
-            current_messages.append({
-                "role": "assistant",
-                "content": message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in message.tool_calls
-                ],
-            })
+            current_messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ],
+                }
+            )
 
             # Execute tools and add results.
             for tool_call in message.tool_calls:
@@ -234,11 +247,13 @@ class LiteLLMProvider(LLMProvider):
                 result = tool_executor(tool_use)
 
                 # Add tool result message
-                current_messages.append({
-                    "role": "tool",
-                    "tool_call_id": result.tool_use_id,
-                    "content": result.content,
-                })
+                current_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": result.tool_use_id,
+                        "content": result.content,
+                    }
+                )
 
         # Max iterations reached
         return LLMResponse(

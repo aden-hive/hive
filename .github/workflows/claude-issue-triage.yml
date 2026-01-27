@@ -1,0 +1,83 @@
+name: Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Triage and check for duplicates
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_non_write_users: "*"
+          prompt: |
+            Analyze this new issue and perform triage tasks.
+
+            Issue: #${{ github.event.issue.number }}
+            Repository: ${{ github.repository }}
+
+            ## Your Tasks:
+
+            ### 1. Get issue details
+            Use mcp__github__get_issue to get the full details of issue #${{ github.event.issue.number }}
+
+            ### 2. Check for duplicates
+            Search for similar existing issues using mcp__github__search_issues with relevant keywords from the issue title and body.
+
+            Criteria for duplicates:
+            - Same bug or error being reported
+            - Same feature request (even if worded differently)
+            - Same question being asked
+            - Issues describing the same root problem
+
+            If you find a duplicate:
+            - Add a comment using EXACTLY this format (required for auto-close to work):
+              "Found a possible duplicate of #<issue_number>: <brief explanation of why it's a duplicate>"
+            - Do NOT apply the "duplicate" label yet (the auto-close script will add it after 12 hours if no objections)
+            - Suggest the user react with a thumbs-down if they disagree
+
+            ### 3. Check for invalid issues
+            If the issue lacks sufficient information, is spam, or doesn't make sense:
+            - Add the "invalid" label
+            - Comment asking for clarification or explaining why it's invalid
+
+            ### 4. Categorize with labels (if NOT a duplicate)
+            Apply appropriate labels based on the issue content. Use ONLY these labels:
+            - bug: Something isn't working
+            - enhancement: New feature or request
+            - question: Further information is requested
+            - documentation: Improvements or additions to documentation
+            - good first issue: Good for newcomers (if issue is well-defined and small scope)
+            - help wanted: Extra attention is needed (if issue needs community input)
+            - backlog: Tracked for the future, but not currently planned or prioritized
+
+            You may apply multiple labels if appropriate (e.g., "bug" and "help wanted").
+
+            ## Tools Available:
+            - mcp__github__get_issue: Get issue details
+            - mcp__github__search_issues: Search for similar issues
+            - mcp__github__list_issues: List recent issues if needed
+            - mcp__github__add_issue_comment: Add a comment
+            - mcp__github__update_issue: Add labels
+            - mcp__github__get_issue_comments: Get existing comments
+
+            Be thorough but efficient. Focus on accurate categorization and finding true duplicates.
+
+          claude_args: |
+            --model claude-haiku-4-5-20251001
+            --allowedTools "mcp__github__get_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__add_issue_comment,mcp__github__update_issue,mcp__github__get_issue_comments"
