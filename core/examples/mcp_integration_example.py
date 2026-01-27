@@ -19,7 +19,7 @@ async def example_1_programmatic_registration():
     print("\n=== Example 1: Programmatic MCP Server Registration ===\n")
 
     # Load an existing agent
-    runner = AgentRunner.load("exports/task-planner")
+    runner = AgentRunner.load(Path("exports/task-planner"))
 
     # Register tools MCP server via STDIO
     num_tools = runner.register_mcp_server(
@@ -27,7 +27,7 @@ async def example_1_programmatic_registration():
         transport="stdio",
         command="python",
         args=["-m", "aden_tools.mcp_server", "--stdio"],
-        cwd="../tools",
+        cwd=Path("../tools"),
     )
 
     print(f"Registered {num_tools} tools from tools MCP server")
@@ -54,7 +54,7 @@ async def example_2_http_transport():
     # First, start the tools MCP server in HTTP mode:
     # cd tools && python mcp_server.py --port 4001
 
-    runner = AgentRunner.load("exports/task-planner")
+    runner = AgentRunner.load(Path("exports/task-planner"))
 
     # Register tools via HTTP
     num_tools = runner.register_mcp_server(
@@ -79,7 +79,7 @@ async def example_3_config_file():
     # Copy example config (in practice, you'd place this in your agent folder)
     import shutil
     shutil.copy(
-        "examples/mcp_servers.json",
+        Path("examples/mcp_servers.json"),
         test_agent_path / "mcp_servers.json"
     )
 
@@ -164,7 +164,7 @@ async def example_4_custom_agent_with_mcp_tools():
         transport="stdio",
         command="python",
         args=["-m", "aden_tools.mcp_server", "--stdio"],
-        cwd="../tools",
+        cwd=Path("../tools"),
     )
 
     # Run the agent
