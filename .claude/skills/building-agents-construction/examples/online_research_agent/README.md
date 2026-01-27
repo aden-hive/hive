@@ -78,3 +78,33 @@ Edit `config.py` to change:
 - `model`: LLM model (default: groq/moonshotai/kimi-k2-instruct-0905)
 - `temperature`: Generation temperature (default: 0.7)
 - `max_tokens`: Max tokens per response (default: 16384)
+
+
+### Setup
+
+This agent uses LiteLLM. Set at least one supported provider API key, for example:
+
+```bash
+export GROQ_API_KEY="your-key"
+# or
+export OPENAI_API_KEY="your-key"
+```
+
+LiteLLM supports many providers. You can use any supported model
+(OpenAI, Groq, Cerebras, Mistral, etc.). See:
+https://docs.litellm.ai/
+
+## Run
+
+From the project root:
+
+```bash
+PYTHONPATH=core:exports python -m online_research_agent run --input '{"topic":"AI in healthcare"}'
+```
+
+This will:
+
+- Generate multiple search queries for the topic  
+- Fetch content from several sources  
+- Rank and cluster the results  
+- Produce a structured markdown report with citations  
