@@ -12,7 +12,8 @@ This guide covers everything you need to know to develop with the Aden Agent Fra
 6. [Code Style & Conventions](#code-style--conventions)
 7. [Git Workflow](#git-workflow)
 8. [Common Tasks](#common-tasks)
-9. [Troubleshooting](#troubleshooting)
+9. [LLM Streaming](#llm-streaming)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -764,6 +765,18 @@ npm run test -w honeycomb -- src/components/Button.test.tsx
 # Clear test cache
 npm run test -w honeycomb -- --clearCache
 ```
+
+---
+
+## LLM Streaming
+
+The Aden Agent Framework supports real-time token streaming for LLM nodes. This allows you to monitor agent execution in real-time and provide better user experience.
+
+- **Enable in Agent**: Set `"streaming_enabled": true` on any `llm_generate` or `llm_tool_use` node.
+- **Provider Support**: Works with `LiteLLMProvider`, `AnthropicProvider`, and `MockLLMProvider`.
+- **Aggregation**: Tokens are automatically aggregated and validated against your Pydantic models after the stream completes.
+
+For detailed usage instructions, see the [LLM Streaming Guide](docs/llm-streaming.md).
 
 ---
 
