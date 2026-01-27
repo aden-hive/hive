@@ -21,10 +21,11 @@ from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition, AsyncEntryP
 from framework.graph.node import NodeSpec
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
-from framework.runtime.shared_state import SharedStateManager, IsolationLevel
+from framework.runtime.shared_state import SharedStateManager, IsolationLevel, StateScope
 from framework.runtime.event_bus import EventBus, EventType, AgentEvent
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.stream_runtime import StreamRuntime
+from framework.storage.concurrent import ConcurrentStorage
 
 
 # === Test Fixtures ===
@@ -205,6 +206,128 @@ class TestSharedStateManager:
         manager.cleanup_execution("exec-1")
 
         assert "exec-1" not in manager._execution_state
+
+    @pytest.mark.asyncio
+    async def test_persistent_state_save_and_load(self, temp_storage):
+        """Test that state is persisted to disk and can be loaded."""
+        storage = ConcurrentStorage(base_path=temp_storage)
+        await storage.start()
+
+        try:
+            manager = SharedStateManager(storage=storage)
+
+            # Write state
+            mem = manager.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
+            await mem.write("test_key", "test_value", scope=StateScope.GLOBAL)
+
+            # Wait for async write to complete
+            await asyncio.sleep(0.2)
+
+            # Create a new manager and verify it loads from disk
+            manager2 = SharedStateManager(storage=storage)
+            mem2 = manager2.create_memory("exec-2", "stream-2", IsolationLevel.SHARED)
+
+            # Should load from disk on first read
+            value = await mem2.read("test_key")
+            assert value == "test_value"
+        finally:
+            await storage.stop()
+
+    @pytest.mark.asyncio
+    async def test_persistent_state_lazy_loading(self, temp_storage):
+        """Test that state is lazily loaded from disk on cache miss."""
+        storage = ConcurrentStorage(base_path=temp_storage)
+        await storage.start()
+
+        try:
+            # Pre-populate disk with state
+            await storage.save_state("global", "default", {"pre_existing": "value"}, immediate=True)
+            await storage.save_state("stream", "stream-1", {"stream_key": "stream_value"}, immediate=True)
+            await storage.save_state("execution", "exec-1", {"exec_key": "exec_value"}, immediate=True)
+
+            manager = SharedStateManager(storage=storage)
+
+            # Create memory and read - should lazy load
+            mem = manager.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
+
+            # Read should trigger lazy loading
+            global_val = await mem.read("pre_existing")
+            stream_val = await mem.read("stream_key")
+            exec_val = await mem.read("exec_key")
+
+            assert global_val == "value"
+            assert stream_val == "stream_value"
+            assert exec_val == "exec_value"
+        finally:
+            await storage.stop()
+
+    @pytest.mark.asyncio
+    async def test_persistent_state_write_through(self, temp_storage):
+        """Test that writes are persisted asynchronously."""
+        storage = ConcurrentStorage(base_path=temp_storage)
+        await storage.start()
+
+        try:
+            manager = SharedStateManager(storage=storage)
+            mem = manager.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
+
+            # Write to different scopes
+            await mem.write("global_key", "global_val", scope=StateScope.GLOBAL)
+            await mem.write("stream_key", "stream_val", scope=StateScope.STREAM)
+            await mem.write("exec_key", "exec_val", scope=StateScope.EXECUTION)
+
+            # Wait for async writes
+            await asyncio.sleep(0.2)
+
+            # Verify persisted to disk
+            global_state = await storage.load_state("global", "default")
+            stream_state = await storage.load_state("stream", "stream-1")
+            exec_state = await storage.load_state("execution", "exec-1")
+
+            assert global_state is not None
+            assert global_state.get("global_key") == "global_val"
+            assert stream_state is not None
+            assert stream_state.get("stream_key") == "stream_val"
+            assert exec_state is not None
+            assert exec_state.get("exec_key") == "exec_val"
+        finally:
+            await storage.stop()
+
+    @pytest.mark.asyncio
+    async def test_backward_compatibility_no_storage(self):
+        """Test that SharedStateManager works without storage (backward compatible)."""
+        manager = SharedStateManager(storage=None)
+
+        mem = manager.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
+        await mem.write("key", "value")
+
+        value = await mem.read("key")
+        assert value == "value"
+
+    @pytest.mark.asyncio
+    async def test_state_survives_restart(self, temp_storage):
+        """Test that state persists across manager restarts."""
+        storage = ConcurrentStorage(base_path=temp_storage)
+        await storage.start()
+
+        try:
+            # First session: write state
+            manager1 = SharedStateManager(storage=storage)
+            mem1 = manager1.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
+            await mem1.write("persistent_key", "persistent_value", scope=StateScope.GLOBAL)
+
+            # Wait for write
+            await asyncio.sleep(0.2)
+
+            # Simulate restart: create new manager
+            manager2 = SharedStateManager(storage=storage)
+            mem2 = manager2.create_memory("exec-2", "stream-2", IsolationLevel.SHARED)
+
+            # Should load from disk
+            value = await mem2.read("persistent_key")
+            assert value == "persistent_value"
+        finally:
+            await storage.stop()
 
 
 # === EventBus Tests ===

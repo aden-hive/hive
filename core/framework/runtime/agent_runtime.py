@@ -123,7 +123,8 @@ class AgentRuntime:
         )
 
         # Initialize shared components
-        self._state_manager = SharedStateManager()
+        # Inject storage into SharedStateManager for persistence
+        self._state_manager = SharedStateManager(storage=self._storage)
         self._event_bus = EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
 

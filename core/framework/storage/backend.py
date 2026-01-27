@@ -28,6 +28,13 @@ class FileStorage:
           {node_id}.json        # List of run IDs that used this node
       summaries/
         {run_id}.json           # Run summary (for quick loading)
+      states/
+        global/
+          default.json           # Global state
+        stream/
+          {stream_id}.json      # Stream-scoped state
+        execution/
+          {exec_id}.json        # Execution-scoped state
     """
 
     def __init__(self, base_path: str | Path):
@@ -42,6 +49,9 @@ class FileStorage:
             self.base_path / "indexes" / "by_status",
             self.base_path / "indexes" / "by_node",
             self.base_path / "summaries",
+            self.base_path / "states" / "global",
+            self.base_path / "states" / "stream",
+            self.base_path / "states" / "execution",
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
@@ -166,10 +176,95 @@ class FileStorage:
 
     # === UTILITY ===
 
+    # === STATE OPERATIONS ===
+
+    def save_state(self, scope: str, id: str, state: dict[str, Any]) -> None:
+        """
+        Save state for a given scope and ID.
+
+        Args:
+            scope: State scope ('global', 'stream', or 'execution')
+            id: Identifier for the scope (e.g., stream_id, exec_id, or 'default' for global)
+            state: State dictionary to save
+        """
+        if scope == "global":
+            state_path = self.base_path / "states" / "global" / f"{id}.json"
+        elif scope == "stream":
+            state_path = self.base_path / "states" / "stream" / f"{id}.json"
+        elif scope == "execution":
+            state_path = self.base_path / "states" / "execution" / f"{id}.json"
+        else:
+            raise ValueError(f"Invalid scope: {scope}. Must be 'global', 'stream', or 'execution'")
+
+        with open(state_path, "w") as f:
+            json.dump(state, f, indent=2)
+
+    def load_state(self, scope: str, id: str) -> dict[str, Any] | None:
+        """
+        Load state for a given scope and ID.
+
+        Args:
+            scope: State scope ('global', 'stream', or 'execution')
+            id: Identifier for the scope
+
+        Returns:
+            State dictionary or None if not found
+        """
+        if scope == "global":
+            state_path = self.base_path / "states" / "global" / f"{id}.json"
+        elif scope == "stream":
+            state_path = self.base_path / "states" / "stream" / f"{id}.json"
+        elif scope == "execution":
+            state_path = self.base_path / "states" / "execution" / f"{id}.json"
+        else:
+            raise ValueError(f"Invalid scope: {scope}. Must be 'global', 'stream', or 'execution'")
+
+        if not state_path.exists():
+            return None
+
+        with open(state_path) as f:
+            return json.load(f)
+
+    def delete_state(self, scope: str, id: str) -> bool:
+        """
+        Delete state for a given scope and ID.
+
+        Args:
+            scope: State scope ('global', 'stream', or 'execution')
+            id: Identifier for the scope
+
+        Returns:
+            True if deleted, False if not found
+        """
+        if scope == "global":
+            state_path = self.base_path / "states" / "global" / f"{id}.json"
+        elif scope == "stream":
+            state_path = self.base_path / "states" / "stream" / f"{id}.json"
+        elif scope == "execution":
+            state_path = self.base_path / "states" / "execution" / f"{id}.json"
+        else:
+            raise ValueError(f"Invalid scope: {scope}. Must be 'global', 'stream', or 'execution'")
+
+        if not state_path.exists():
+            return False
+
+        state_path.unlink()
+        return True
+
     def get_stats(self) -> dict:
         """Get storage statistics."""
+        states_dir = self.base_path / "states"
+        global_count = len(list((states_dir / "global").glob("*.json"))) if (states_dir / "global").exists() else 0
+        stream_count = len(list((states_dir / "stream").glob("*.json"))) if (states_dir / "stream").exists() else 0
+        execution_count = len(list((states_dir / "execution").glob("*.json"))) if (states_dir / "execution").exists() else 0
+
         return {
             "total_runs": len(self.list_all_runs()),
             "total_goals": len(self.list_all_goals()),
             "storage_path": str(self.base_path),
+            "state_files": {
+                "global": global_count,
+                "stream": stream_count,
+                "execution": execution_count,
+            },
         }

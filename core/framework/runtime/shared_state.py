@@ -12,7 +12,10 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from framework.storage.concurrent import ConcurrentStorage
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +75,28 @@ class SharedStateManager:
         value = await memory.read("customer_id")
     """
 
-    def __init__(self):
+    def __init__(self, storage: "ConcurrentStorage | None" = None):
+        """
+        Initialize shared state manager.
+
+        Args:
+            storage: Optional ConcurrentStorage instance for persistence.
+                    If None, state is in-memory only (backward compatible).
+        """
         # State storage at each level
         self._global_state: dict[str, Any] = {}
         self._stream_state: dict[str, dict[str, Any]] = {}  # stream_id -> {key: value}
         self._execution_state: dict[str, dict[str, Any]] = {}  # execution_id -> {key: value}
 
+        # Persistence support
+        self._storage: "ConcurrentStorage | None" = storage
+        self._loaded_scopes: set[str] = set()  # Track which scopes have been loaded from disk
+
         # Locks for synchronized access
         self._global_lock = asyncio.Lock()
         self._stream_locks: dict[str, asyncio.Lock] = {}
         self._key_locks: dict[str, asyncio.Lock] = {}
+        self._load_locks: dict[str, asyncio.Lock] = {}  # Locks for lazy loading
 
         # Change history for debugging/auditing
         self._change_history: list[StateChange] = []
@@ -160,7 +175,14 @@ class SharedStateManager:
         1. Execution state (always checked)
         2. Stream state (if isolation != ISOLATED)
         3. Global state (if isolation != ISOLATED)
+
+        If persistence is enabled, lazily loads state from disk on cache miss.
         """
+        # Lazy load execution state if not loaded yet and persistence enabled
+        exec_scope_key = f"execution:{execution_id}"
+        if exec_scope_key not in self._loaded_scopes and self._storage:
+            await self._ensure_scope_loaded("execution", execution_id)
+
         # Always check execution-local first
         if execution_id in self._execution_state:
             if key in self._execution_state[execution_id]:
@@ -168,9 +190,19 @@ class SharedStateManager:
 
         # Check stream-level (unless isolated)
         if isolation != IsolationLevel.ISOLATED:
+            # Lazy load stream state if not loaded yet and persistence enabled
+            stream_scope_key = f"stream:{stream_id}"
+            if stream_scope_key not in self._loaded_scopes and self._storage:
+                await self._ensure_scope_loaded("stream", stream_id)
+
             if stream_id in self._stream_state:
                 if key in self._stream_state[stream_id]:
                     return self._stream_state[stream_id][key]
+
+            # Lazy load global state if not loaded yet and persistence enabled
+            global_scope_key = "global:default"
+            if global_scope_key not in self._loaded_scopes and self._storage:
+                await self._ensure_scope_loaded("global", "default")
 
             # Check global
             if key in self._global_state:
@@ -234,14 +266,23 @@ class SharedStateManager:
             if execution_id not in self._execution_state:
                 self._execution_state[execution_id] = {}
             self._execution_state[execution_id][key] = value
+            # Persist asynchronously
+            if self._storage:
+                await self._persist_scope("execution", execution_id)
 
         elif scope == StateScope.STREAM:
             if stream_id not in self._stream_state:
                 self._stream_state[stream_id] = {}
             self._stream_state[stream_id][key] = value
+            # Persist asynchronously
+            if self._storage:
+                await self._persist_scope("stream", stream_id)
 
         elif scope == StateScope.GLOBAL:
             self._global_state[key] = value
+            # Persist asynchronously
+            if self._storage:
+                await self._persist_scope("global", "default")
 
         self._version += 1
 
@@ -336,6 +377,106 @@ class SharedStateManager:
     def get_recent_changes(self, limit: int = 10) -> list[StateChange]:
         """Get recent state changes."""
         return self._change_history[-limit:]
+
+    # === PERSISTENCE OPERATIONS ===
+
+    async def _ensure_scope_loaded(self, scope: str, id: str) -> None:
+        """
+        Lazy load a state scope from disk if not already loaded.
+
+        Args:
+            scope: State scope ('global', 'stream', or 'execution')
+            id: Identifier for the scope
+        """
+        scope_key = f"{scope}:{id}"
+
+        # Check if already loaded
+        if scope_key in self._loaded_scopes:
+            return
+
+        # Get or create load lock
+        if scope_key not in self._load_locks:
+            self._load_locks[scope_key] = asyncio.Lock()
+
+        async with self._load_locks[scope_key]:
+            # Double-check after acquiring lock
+            if scope_key in self._loaded_scopes:
+                return
+
+            if not self._storage:
+                self._loaded_scopes.add(scope_key)
+                return
+
+            try:
+                # Load from disk
+                state = await self._storage.load_state(scope, id)
+                if state:
+                    # Merge into memory (disk state takes precedence for missing keys)
+                    if scope == "global":
+                        self._global_state.update(state)
+                    elif scope == "stream":
+                        if id not in self._stream_state:
+                            self._stream_state[id] = {}
+                        self._stream_state[id].update(state)
+                    elif scope == "execution":
+                        if id not in self._execution_state:
+                            self._execution_state[id] = {}
+                        self._execution_state[id].update(state)
+
+                # Mark as loaded
+                self._loaded_scopes.add(scope_key)
+                logger.debug(f"Loaded {scope} state for {id} from disk")
+            except Exception as e:
+                logger.warning(f"Failed to load {scope} state for {id}: {e}")
+                # Mark as loaded anyway to avoid repeated failures
+                self._loaded_scopes.add(scope_key)
+
+    async def _persist_scope(self, scope: str, id: str) -> None:
+        """
+        Persist a state scope to disk asynchronously.
+
+        Args:
+            scope: State scope ('global', 'stream', or 'execution')
+            id: Identifier for the scope
+        """
+        if not self._storage:
+            return
+
+        try:
+            # Get current state for the scope
+            if scope == "global":
+                state_data = self._global_state.copy()
+            elif scope == "stream":
+                state_data = self._stream_state.get(id, {}).copy()
+            elif scope == "execution":
+                state_data = self._execution_state.get(id, {}).copy()
+            else:
+                return
+
+            # Save to disk (uses batch writer for performance)
+            await self._storage.save_state(scope, id, state_data, immediate=False)
+        except Exception as e:
+            logger.warning(f"Failed to persist {scope} state for {id}: {e}")
+
+    def get_scope_data(self, scope: StateScope, id: str) -> dict[str, Any]:
+        """
+        Get all data for a given scope and ID.
+
+        Args:
+            scope: State scope
+            id: Identifier for the scope
+
+        Returns:
+            State dictionary
+        """
+        if scope == StateScope.GLOBAL:
+            return self._global_state.copy()
+        elif scope == StateScope.STREAM:
+            return self._stream_state.get(id, {}).copy()
+        elif scope == StateScope.EXECUTION:
+            return self._execution_state.get(id, {}).copy()
+        else:
+            return {}
 
 
 class StreamMemory:

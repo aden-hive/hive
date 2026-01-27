@@ -311,6 +311,9 @@ class ConcurrentStorage:
             try:
                 if item_type == "run":
                     await self._save_run_locked(item)
+                elif item_type == "state":
+                    scope, id, state = item
+                    await self._save_state_locked(scope, id, state)
             except Exception as e:
                 logger.error(f"Failed to save {item_type}: {e}")
 
@@ -365,6 +368,95 @@ class ConcurrentStorage:
             "pending_writes": self._write_queue.qsize(),
             "running": self._running,
         }
+
+    # === STATE OPERATIONS (Async, Thread-Safe) ===
+
+    async def save_state(
+        self,
+        scope: str,
+        id: str,
+        state: dict[str, Any],
+        immediate: bool = False,
+    ) -> None:
+        """
+        Save state for a given scope and ID.
+
+        Args:
+            scope: State scope ('global', 'stream', or 'execution')
+            id: Identifier for the scope
+            state: State dictionary to save
+            immediate: If True, save immediately (bypasses batching)
+        """
+        if immediate or not self._running:
+            await self._save_state_locked(scope, id, state)
+        else:
+            await self._write_queue.put(("state", (scope, id, state)))
+
+        # Update cache
+        cache_key = f"state:{scope}:{id}"
+        self._cache[cache_key] = CacheEntry(state, time.time())
+
+    async def _save_state_locked(self, scope: str, id: str, state: dict[str, Any]) -> None:
+        """Save state with file locking."""
+        lock_key = f"state:{scope}:{id}"
+        async with self._file_locks[lock_key]:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, self._base_storage.save_state, scope, id, state
+            )
+
+    async def load_state(
+        self,
+        scope: str,
+        id: str,
+        use_cache: bool = True,
+    ) -> dict[str, Any] | None:
+        """
+        Load state for a given scope and ID.
+
+        Args:
+            scope: State scope ('global', 'stream', or 'execution')
+            id: Identifier for the scope
+            use_cache: Whether to use cached value if available
+
+        Returns:
+            State dictionary or None if not found
+        """
+        cache_key = f"state:{scope}:{id}"
+
+        # Check cache
+        if use_cache and cache_key in self._cache:
+            entry = self._cache[cache_key]
+            if not entry.is_expired(self._cache_ttl):
+                return entry.value
+
+        # Load from storage
+        lock_key = f"state:{scope}:{id}"
+        async with self._file_locks[lock_key]:
+            loop = asyncio.get_event_loop()
+            state = await loop.run_in_executor(
+                None, self._base_storage.load_state, scope, id
+            )
+
+        # Update cache
+        if state:
+            self._cache[cache_key] = CacheEntry(state, time.time())
+
+        return state
+
+    async def delete_state(self, scope: str, id: str) -> bool:
+        """Delete state for a given scope and ID."""
+        lock_key = f"state:{scope}:{id}"
+        async with self._file_locks[lock_key]:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, self._base_storage.delete_state, scope, id
+            )
+
+        # Clear cache
+        self._cache.pop(f"state:{scope}:{id}", None)
+
+        return result
 
     # === SYNC API (for backward compatibility) ===
 
