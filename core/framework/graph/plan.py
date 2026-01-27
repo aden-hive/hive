@@ -302,6 +302,37 @@ class Plan(BaseModel):
                 approval_message=step_data.get("approval_message"),
             )
             steps.append(step)
+        # ---- validate duplicate step ids ----
+        step_ids = [s.id for s in steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("Duplicate step ids detected")
+
+        # ---- validate dependency references ----
+        step_id_set = set(step_ids)
+        for step in steps:
+            for dep in step.dependencies or []:
+                if dep not in step_id_set:
+                    raise ValueError(f"Dependency references unknown step: {dep}")
+
+        # ---- detect circular dependencies ----
+        graph = {s.id: set(s.dependencies or []) for s in steps}
+
+        visited = set()
+        stack = set()
+
+        def visit(node):
+            if node in stack:
+                raise ValueError("Circular dependency detected")
+            if node in visited:
+                return
+            stack.add(node)
+            for nei in graph.get(node, []):
+                visit(nei)
+            stack.remove(node)
+            visited.add(node)
+
+        for node in graph:
+            visit(node)
 
         return cls(
             id=data.get("id", "plan"),

@@ -376,6 +376,64 @@ class TestPlanFromJson:
         assert plan.goal_id == ""
         assert plan.steps == []
 
+    def test_from_json_duplicate_step_ids(self):
+        """Duplicate step IDs should raise ValueError."""
+        data = {
+            "id": "plan",
+            "goal_id": "goal",
+            "description": "dup ids",
+            "steps": [
+                {"id": "step_1", "description": "A", "action": {"action_type": "function"}},
+                {"id": "step_1", "description": "B", "action": {"action_type": "function"}},
+            ],
+        }
+
+        with pytest.raises(ValueError):
+            Plan.from_json(data)
+
+    def test_from_json_dependency_missing_step(self):
+        """Dependency referencing unknown step should fail."""
+        data = {
+            "id": "plan",
+            "goal_id": "goal",
+            "description": "bad deps",
+            "steps": [
+                {
+                    "id": "step_1",
+                    "description": "Step",
+                    "dependencies": ["ghost"],
+                    "action": {"action_type": "function"},
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError):
+            Plan.from_json(data)
+
+    def test_from_json_circular_dependencies(self):
+        """Circular dependencies should raise ValueError."""
+        data = {
+            "id": "plan",
+            "goal_id": "goal",
+            "description": "cycle",
+            "steps": [
+                {
+                    "id": "a",
+                    "description": "A",
+                    "dependencies": ["b"],
+                    "action": {"action_type": "function"},
+                },
+                {
+                    "id": "b",
+                    "description": "B",
+                    "dependencies": ["a"],
+                    "action": {"action_type": "function"},
+                },
+            ],
+        }
+
+        with pytest.raises(ValueError):
+            Plan.from_json(data)
 
 class TestPlanMethods:
     """Tests for Plan instance methods."""
@@ -428,13 +486,38 @@ class TestPlanMethods:
         step = sample_plan.get_step("nonexistent")
 
         assert step is None
-
+        
     def test_plan_get_ready_steps(self, sample_plan):
         """Filter steps ready to execute."""
         ready = sample_plan.get_ready_steps()
 
         assert len(ready) == 1
         assert ready[0].id == "step_2"
+
+    def test_get_ready_steps_ignores_failed_dependencies(self):
+        plan = Plan(
+            id="p",
+            goal_id="g",
+            description="test",
+            steps=[
+                PlanStep(
+                    id="s1",
+                    description="fail",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.FAILED,
+                ),
+                PlanStep(
+                    id="s2",
+                    description="blocked",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    dependencies=["s1"],
+                    status=StepStatus.PENDING,
+                ),
+            ],
+        )
+
+        ready = plan.get_ready_steps()
+        assert ready == []
 
     def test_plan_get_completed_steps(self, sample_plan):
         """Filter completed steps."""
