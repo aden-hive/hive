@@ -484,6 +484,156 @@ class TestPlanMethods:
         )
         assert plan.is_complete() is True
 
+    def test_plan_is_complete_with_skipped_steps(self):
+        """Plan is complete when all steps are SKIPPED."""
+        plan = Plan(
+            id="test_plan",
+            goal_id="goal_1",
+            description="Test plan",
+            steps=[
+                PlanStep(
+                    id="step_1",
+                    description="First step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.SKIPPED,
+                ),
+                PlanStep(
+                    id="step_2",
+                    description="Second step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.SKIPPED,
+                ),
+            ],
+        )
+        assert plan.is_complete() is True
+
+    def test_plan_is_complete_with_rejected_steps(self):
+        """Plan is complete when steps are REJECTED by human."""
+        plan = Plan(
+            id="test_plan",
+            goal_id="goal_1",
+            description="Test plan",
+            steps=[
+                PlanStep(
+                    id="step_1",
+                    description="First step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.COMPLETED,
+                ),
+                PlanStep(
+                    id="step_2",
+                    description="Second step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.REJECTED,
+                ),
+            ],
+        )
+        assert plan.is_complete() is True
+
+    def test_plan_is_complete_with_failed_steps(self):
+        """Plan is complete when steps are FAILED."""
+        plan = Plan(
+            id="test_plan",
+            goal_id="goal_1",
+            description="Test plan",
+            steps=[
+                PlanStep(
+                    id="step_1",
+                    description="First step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.COMPLETED,
+                ),
+                PlanStep(
+                    id="step_2",
+                    description="Second step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.FAILED,
+                ),
+            ],
+        )
+        assert plan.is_complete() is True
+
+    def test_plan_is_complete_mixed_terminal_states(self):
+        """Plan is complete with mix of COMPLETED, SKIPPED, REJECTED, FAILED."""
+        plan = Plan(
+            id="test_plan",
+            goal_id="goal_1",
+            description="Test plan",
+            steps=[
+                PlanStep(
+                    id="step_1",
+                    description="First step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.COMPLETED,
+                ),
+                PlanStep(
+                    id="step_2",
+                    description="Second step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.SKIPPED,
+                ),
+                PlanStep(
+                    id="step_3",
+                    description="Third step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.REJECTED,
+                ),
+                PlanStep(
+                    id="step_4",
+                    description="Fourth step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.FAILED,
+                ),
+            ],
+        )
+        assert plan.is_complete() is True
+
+    def test_plan_is_complete_false_with_pending(self):
+        """Plan is NOT complete when any step is PENDING."""
+        plan = Plan(
+            id="test_plan",
+            goal_id="goal_1",
+            description="Test plan",
+            steps=[
+                PlanStep(
+                    id="step_1",
+                    description="First step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.COMPLETED,
+                ),
+                PlanStep(
+                    id="step_2",
+                    description="Second step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.PENDING,
+                ),
+            ],
+        )
+        assert plan.is_complete() is False
+
+    def test_plan_is_complete_false_with_in_progress(self):
+        """Plan is NOT complete when any step is IN_PROGRESS."""
+        plan = Plan(
+            id="test_plan",
+            goal_id="goal_1",
+            description="Test plan",
+            steps=[
+                PlanStep(
+                    id="step_1",
+                    description="First step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.COMPLETED,
+                ),
+                PlanStep(
+                    id="step_2",
+                    description="Second step",
+                    action=ActionSpec(action_type=ActionType.FUNCTION),
+                    status=StepStatus.IN_PROGRESS,
+                ),
+            ],
+        )
+        assert plan.is_complete() is False
+
     def test_plan_to_feedback_context(self, sample_plan):
         """Serializes context for replanning."""
         context = sample_plan.to_feedback_context()

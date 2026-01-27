@@ -336,8 +336,22 @@ class Plan(BaseModel):
         return [s for s in self.steps if s.status == StepStatus.COMPLETED]
 
     def is_complete(self) -> bool:
-        """Check if all steps are completed."""
-        return all(s.status == StepStatus.COMPLETED for s in self.steps)
+        """Check if all steps are in a terminal state.
+
+        A plan is considered complete when all steps have reached a terminal
+        state, not just when all steps have succeeded. Terminal states include:
+        - COMPLETED: Step finished successfully
+        - FAILED: Step failed after max retries
+        - SKIPPED: Step was skipped (e.g., due to conditional logic)
+        - REJECTED: Step was rejected by human in approval flow
+        """
+        terminal_states = {
+            StepStatus.COMPLETED,
+            StepStatus.FAILED,
+            StepStatus.SKIPPED,
+            StepStatus.REJECTED,
+        }
+        return all(s.status in terminal_states for s in self.steps)
 
     def to_feedback_context(self) -> dict[str, Any]:
         """Create context for replanning."""
