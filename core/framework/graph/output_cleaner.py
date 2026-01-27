@@ -310,7 +310,10 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
             response = self.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                system="You clean malformed agent outputs. Return only valid JSON matching the schema.",
+                system=(
+                    "You clean malformed agent outputs. "
+                    "Return only valid JSON matching the schema."
+                ),
                 max_tokens=2048,  # Sufficient for cleaning most outputs
             )
 
@@ -319,9 +322,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
             # Remove markdown if present
             if cleaned_text.startswith("```"):
-                match = re.search(
-                    r"```(?:json)?\s*\n?(.*?)\n?```", cleaned_text, re.DOTALL
-                )
+                match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned_text, re.DOTALL)
                 if match:
                     cleaned_text = match.group(1).strip()
 
@@ -335,15 +336,11 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     )
                 return cleaned
             else:
-                logger.warning(
-                    f"⚠ Cleaned output is not a dict: {type(cleaned)}"
-                )
+                logger.warning(f"⚠ Cleaned output is not a dict: {type(cleaned)}")
                 if self.config.fallback_to_raw:
                     return output
                 else:
-                    raise ValueError(
-                        f"Cleaning produced {type(cleaned)}, expected dict"
-                    )
+                    raise ValueError(f"Cleaning produced {type(cleaned)}, expected dict")
 
         except json.JSONDecodeError as e:
             logger.error(f"✗ Failed to parse cleaned JSON: {e}")
@@ -375,7 +372,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
                 line = f'  "{key}": {type_hint}'
                 if description:
-                    line += f'  // {description}'
+                    line += f"  // {description}"
                 if required:
                     line += " (required)"
                 lines.append(line + ",")
