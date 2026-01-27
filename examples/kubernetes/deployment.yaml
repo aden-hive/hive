@@ -1,0 +1,284 @@
+# Kubernetes Deployment for Hive Agent with Lifecycle Management
+# This manifest includes:
+# - Deployment with health probes
+# - Service for load balancing
+# - ConfigMap for configuration
+# - HorizontalPodAutoscaler for scaling
+
+---
+# ConfigMap for agent configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hive-agent-config
+  namespace: default
+data:
+  HIVE_LIFECYCLE_ENABLED: "true"
+  HIVE_LIFECYCLE_PORT: "8080"
+  HIVE_LIFECYCLE_HOST: "0.0.0.0"
+  HIVE_GRACEFUL_SHUTDOWN_TIMEOUT: "30"
+  HIVE_LIFECYCLE_METRICS: "true"
+  LOG_LEVEL: "INFO"
+
+---
+# Secret for API keys (create separately with actual values)
+# kubectl create secret generic hive-secrets \
+#   --from-literal=anthropic-api-key=YOUR_KEY \
+#   --from-literal=openai-api-key=YOUR_KEY
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hive-secrets
+  namespace: default
+type: Opaque
+# data:
+#   anthropic-api-key: <base64-encoded-key>
+#   openai-api-key: <base64-encoded-key>
+
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hive-agent
+  namespace: default
+  labels:
+    app: hive-agent
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Zero downtime deployments
+  selector:
+    matchLabels:
+      app: hive-agent
+  template:
+    metadata:
+      labels:
+        app: hive-agent
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      # Termination grace period (should be > graceful shutdown timeout)
+      terminationGracePeriodSeconds: 40
+
+      containers:
+      - name: agent
+        image: hive-agent:latest
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - name: lifecycle
+          containerPort: 8080
+          protocol: TCP
+
+        # Environment from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: hive-agent-config
+
+        # Environment from Secrets
+        env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: hive-secrets
+              key: anthropic-api-key
+              optional: true
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: hive-secrets
+              key: openai-api-key
+              optional: true
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+        # Liveness probe - is the process alive?
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: lifecycle
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Readiness probe - ready to accept traffic?
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: lifecycle
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+
+        # Startup probe - for slow-starting containers
+        startupProbe:
+          httpGet:
+            path: /health/live
+            port: lifecycle
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 12  # 60 seconds total
+
+        # Lifecycle hooks
+        lifecycle:
+          preStop:
+            exec:
+              # Trigger graceful shutdown via API
+              command:
+              - /bin/sh
+              - -c
+              - |
+                curl -X POST http://localhost:8080/api/v1/lifecycle/stop || true
+                sleep 5
+
+        # Volume mounts (if needed for persistent storage)
+        # volumeMounts:
+        # - name: agent-data
+        #   mountPath: /app/data
+
+      # Volumes (if needed)
+      # volumes:
+      # - name: agent-data
+      #   persistentVolumeClaim:
+      #     claimName: hive-agent-pvc
+
+---
+# Service for load balancing
+apiVersion: v1
+kind: Service
+metadata:
+  name: hive-agent-service
+  namespace: default
+  labels:
+    app: hive-agent
+spec:
+  type: ClusterIP
+  selector:
+    app: hive-agent
+  ports:
+  - name: lifecycle
+    port: 8080
+    targetPort: lifecycle
+    protocol: TCP
+  sessionAffinity: None
+
+---
+# HorizontalPodAutoscaler for auto-scaling
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hive-agent-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hive-agent
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hive-agent-pdb
+  namespace: default
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hive-agent
+
+# ============================================================================
+# Deployment Instructions
+# ============================================================================
+#
+# 1. Create secrets:
+#    kubectl create secret generic hive-secrets \
+#      --from-literal=anthropic-api-key=YOUR_KEY
+#
+# 2. Apply manifests:
+#    kubectl apply -f k8s-deployment.yaml
+#
+# 3. Check deployment:
+#    kubectl get deployments
+#    kubectl get pods
+#    kubectl get services
+#
+# 4. Test health probes:
+#    kubectl port-forward svc/hive-agent-service 8080:8080
+#    curl http://localhost:8080/health/live
+#    curl http://localhost:8080/health/ready
+#    curl http://localhost:8080/api/v1/status
+#
+# 5. Test graceful shutdown:
+#    kubectl delete pod <pod-name>
+#    # Watch logs to see graceful shutdown
+#    kubectl logs -f <pod-name>
+#
+# 6. Test rolling update:
+#    kubectl set image deployment/hive-agent agent=hive-agent:v2
+#    kubectl rollout status deployment/hive-agent
+#
+# 7. Monitor:
+#    kubectl top pods
+#    kubectl describe hpa hive-agent-hpa
+#
+# ============================================================================

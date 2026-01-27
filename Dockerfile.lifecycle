@@ -1,0 +1,108 @@
+# Production Dockerfile for Hive Agent with Lifecycle Server
+# Multi-stage build for smaller final image
+
+# ============================================================================
+# Stage 1: Builder
+# ============================================================================
+FROM python:3.11-slim as builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY core/requirements.txt .
+COPY tools/requirements.txt tools-requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --user -r requirements.txt && \
+    pip install --no-cache-dir --user -r tools-requirements.txt && \
+    pip install --no-cache-dir --user fastapi uvicorn[standard] pydantic
+
+# ============================================================================
+# Stage 2: Runtime
+# ============================================================================
+FROM python:3.11-slim
+
+# Metadata
+LABEL maintainer="Aden HQ <support@adenhq.com>"
+LABEL description="Hive Agent Runtime with Lifecycle Management"
+LABEL version="1.0.0"
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python packages from builder
+COPY --from=builder /root/.local /root/.local
+
+# Copy framework code
+COPY core/framework ./framework
+COPY tools/src/aden_tools ./aden_tools
+
+# Copy agent exports (if bundling agents in image)
+# COPY exports ./exports
+
+# Create non-root user for security
+RUN useradd -m -u 1000 -s /bin/bash hive && \
+    chown -R hive:hive /app
+
+# Switch to non-root user
+USER hive
+
+# Make sure scripts in .local are usable
+ENV PATH=/root/.local/bin:$PATH
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV HIVE_LIFECYCLE_ENABLED=true
+ENV HIVE_LIFECYCLE_PORT=8080
+ENV HIVE_LIFECYCLE_HOST=0.0.0.0
+ENV HIVE_GRACEFUL_SHUTDOWN_TIMEOUT=30
+
+# Expose lifecycle server port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/health/live || exit 1
+
+# Graceful shutdown signal
+STOPSIGNAL SIGTERM
+
+# Default command - start lifecycle server
+# Override with specific agent path in deployment
+CMD ["python", "-m", "framework.runtime.lifecycle_server", "--agent", "exports/default-agent"]
+
+# ============================================================================
+# Build and Run Instructions
+# ============================================================================
+#
+# Build:
+#   docker build -f Dockerfile.lifecycle -t hive-agent:latest .
+#
+# Run:
+#   docker run -d \
+#     --name hive-agent \
+#     -p 8080:8080 \
+#     -e HIVE_LIFECYCLE_ENABLED=true \
+#     -e ANTHROPIC_API_KEY=your-key \
+#     hive-agent:latest
+#
+# Test health:
+#   curl http://localhost:8080/health/live
+#   curl http://localhost:8080/health/ready
+#   curl http://localhost:8080/api/v1/status
+#
+# Graceful shutdown:
+#   docker stop --time=35 hive-agent  # Waits up to 35s for graceful shutdown
+#
+# ============================================================================
