@@ -5,6 +5,9 @@ from unittest.mock import patch
 
 from fastmcp import FastMCP
 from aden_tools.tools.csv_tool.csv_tool import register_tools
+import importlib.util
+
+duckdb_available = importlib.util.find_spec("duckdb") is not None
 
 
 # Test IDs for sandbox
@@ -617,6 +620,7 @@ class TestCsvInfo:
         assert ".csv" in result["error"].lower()
 
 
+@pytest.mark.skipif(not duckdb_available, reason="duckdb not installed")
 class TestCsvSql:
     """Tests for csv_sql function (requires duckdb)."""
 
