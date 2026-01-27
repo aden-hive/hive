@@ -1,5 +1,8 @@
 """Tests for file_system_toolkits tools (FastMCP)."""
+import cmd
 import os
+from sys import platform
+from unittest import result
 import pytest
 from unittest.mock import patch
 
@@ -558,12 +561,20 @@ class TestExecuteCommandTool:
         assert "error message" in result.get("stderr", "")
 
     def test_execute_command_list_files(self, execute_command_fn, mock_workspace, mock_secure_path, tmp_path):
-        """Executing ls command lists files."""
+    
+        import platform
+
         # Create a test file
         (tmp_path / "testfile.txt").write_text("content")
 
+         # Windows uses dir, Unix uses ls
+        if platform.system() == "Windows":
+            cmd = f"dir {tmp_path}"
+        else:
+            cmd = f"ls {tmp_path}"
+
         result = execute_command_fn(
-            command=f"ls {tmp_path}",
+            command=cmd,
             **mock_workspace
         )
 
@@ -571,8 +582,15 @@ class TestExecuteCommandTool:
         assert result["return_code"] == 0
         assert "testfile.txt" in result["stdout"]
 
+
     def test_execute_command_with_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
-        """Executing a command with pipe works correctly."""
+        import platform
+        import pytest
+
+        # Windows does not support Unix utilities like `tr`
+        if platform.system() == "Windows":
+            pytest.skip("Pipe test requires Unix tools (tr)")
+
         result = execute_command_fn(
             command="echo 'hello world' | tr 'a-z' 'A-Z'",
             **mock_workspace
