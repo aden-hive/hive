@@ -21,9 +21,7 @@ import sys
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Goal Agent - Build and run goal-driven agents"
-    )
+    parser = argparse.ArgumentParser(description="Goal Agent - Build and run goal-driven agents")
     parser.add_argument(
         "--model",
         default="claude-haiku-4-5-20251001",
@@ -34,10 +32,12 @@ def main():
 
     # Register runner commands (run, info, validate, list, dispatch, shell)
     from framework.runner.cli import register_commands
+
     register_commands(subparsers)
 
     # Register testing commands (test-run, test-debug, test-list, test-stats)
     from framework.testing.cli import register_testing_commands
+
     register_testing_commands(subparsers)
 
     args = parser.parse_args()
