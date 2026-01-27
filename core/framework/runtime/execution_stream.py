@@ -276,15 +276,52 @@ class ExecutionStream:
         )
 
         async with self._lock:
+            # Check for duplicate execution ID (should be unique)
+            if execution_id in self._active_executions:
+                raise RuntimeError(f"Execution {execution_id} already exists")
+            
+            # Atomically register execution
             self._active_executions[execution_id] = ctx
             self._completion_events[execution_id] = asyncio.Event()
 
-        # Start execution task
+        # Start execution task with proper error handling
         task = asyncio.create_task(self._run_execution(ctx))
+        # Add error handler callback
+        task.add_done_callback(
+            lambda t: asyncio.create_task(self._handle_execution_done(execution_id, t))
+        )
         self._execution_tasks[execution_id] = task
 
         logger.debug(f"Queued execution {execution_id} for stream {self.stream_id}")
         return execution_id
+
+    async def _handle_execution_done(self, execution_id: str, task: asyncio.Task) -> None:
+        """
+        Handle completion of an execution task.
+        
+        This method is called when an execution task completes (success, failure, or cancellation).
+        It propagates any exceptions and signals waiting coroutines.
+        """
+        try:
+            # This will re-raise any exception from the task
+            task.result()
+        except asyncio.CancelledError:
+            logger.info(f"Execution {execution_id} was cancelled")
+            async with self._lock:
+                if execution_id in self._active_executions:
+                    ctx = self._active_executions[execution_id]
+                    ctx.status = "cancelled"
+        except Exception as e:
+            logger.error(f"Execution {execution_id} failed with exception: {e}", exc_info=True)
+            # Mark execution as failed
+            async with self._lock:
+                if execution_id in self._active_executions:
+                    ctx = self._active_executions[execution_id]
+                    ctx.status = "failed"
+        finally:
+            # Signal any waiting coroutines
+            if execution_id in self._completion_events:
+                self._completion_events[execution_id].set()
 
     async def _run_execution(self, ctx: ExecutionContext) -> None:
         """Run a single execution within the stream."""

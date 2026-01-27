@@ -84,6 +84,9 @@ class ConcurrentStorage:
         self._max_batch_size = max_batch_size
         self._batch_task: asyncio.Task | None = None
 
+        # Cache eviction task
+        self._eviction_task: asyncio.Task | None = None
+
         # Locking
         self._file_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._global_lock = asyncio.Lock()
@@ -92,22 +95,32 @@ class ConcurrentStorage:
         self._running = False
 
     async def start(self) -> None:
-        """Start the batch writer background task."""
+        """Start the batch writer and cache eviction background tasks."""
         if self._running:
             return
 
         self._running = True
         self._batch_task = asyncio.create_task(self._batch_writer())
+        self._eviction_task = asyncio.create_task(self._cache_eviction_loop())
         logger.info(f"ConcurrentStorage started: {self.base_path}")
 
     async def stop(self) -> None:
-        """Stop the batch writer and flush pending writes."""
+        """Stop background tasks and flush pending writes."""
         if not self._running:
             return
 
         self._running = False
 
-        # Cancel batch task first to prevent queue competition
+        # Cancel eviction task
+        if self._eviction_task:
+            self._eviction_task.cancel()
+            try:
+                await self._eviction_task
+            except asyncio.CancelledError:
+                pass
+            self._eviction_task = None
+
+        # Cancel batch task to prevent queue competition
         if self._batch_task:
             self._batch_task.cancel()
             try:
@@ -116,10 +129,46 @@ class ConcurrentStorage:
                 pass
             self._batch_task = None
 
-        # Now flush remaining items (batch task is stopped)
+        # Now flush remaining items (background tasks are stopped)
         await self._flush_pending()
+        
+        logger.info(f"ConcurrentStorage stopped: {self.base_path}")
 
         logger.info("ConcurrentStorage stopped")
+
+    async def _cache_eviction_loop(self) -> None:
+        """
+        Background task to evict expired cache entries.
+        
+        Runs periodically to clean up entries that have exceeded TTL.
+        """
+        eviction_interval = 60  # Check every 60 seconds
+        while self._running:
+            try:
+                current_time = time.time()
+                # Find all expired entries
+                expired_keys = [
+                    key for key, entry in list(self._cache.items())
+                    if current_time - entry.timestamp > self._cache_ttl
+                ]
+                
+                # Remove expired entries
+                for key in expired_keys:
+                    self._cache.pop(key, None)
+                
+                if expired_keys:
+                    logger.debug(f"Evicted {len(expired_keys)} cache entries")
+                
+                # Sleep before next eviction check
+                await asyncio.sleep(eviction_interval)
+                
+            except asyncio.CancelledError:
+                # Task is being cancelled
+                logger.debug("Cache eviction loop cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error during cache eviction: {e}", exc_info=True)
+                await asyncio.sleep(eviction_interval)
 
     # === RUN OPERATIONS (Async, Thread-Safe) ===
 

@@ -387,9 +387,26 @@ class WorkerNode:
                 func = self.functions[tool_name]
                 result = func(**args)
 
+                # Validate result is not None
+                if result is None:
+                    logger.warning(f"Function {tool_name} returned None")
+                    return StepExecutionResult(
+                        success=True,
+                        outputs={"result": None},
+                        executor_type="tool_use",
+                    )
+
                 # Handle async functions
                 if hasattr(result, "__await__"):
-                    result = await result
+                    try:
+                        result = await result
+                    except Exception as e:
+                        return StepExecutionResult(
+                            success=False,
+                            error=f"Async function {tool_name} failed: {e}",
+                            error_type="async_exception",
+                            executor_type="tool_use",
+                        )
 
                 # If result is already a dict with success/outputs, use it directly
                 if isinstance(result, dict) and "success" in result:
@@ -408,6 +425,13 @@ class WorkerNode:
                     executor_type="tool_use",
                 )
 
+            except TypeError as e:
+                return StepExecutionResult(
+                    success=False,
+                    error=f"Function {tool_name} call failed: {e}",
+                    error_type="function_call_error",
+                    executor_type="tool_use",
+                )
             except Exception as e:
                 return StepExecutionResult(
                     success=False,

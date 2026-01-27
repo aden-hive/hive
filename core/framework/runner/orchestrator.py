@@ -152,12 +152,31 @@ class AgentOrchestrator:
         Route a request to the appropriate agent(s).
 
         Args:
-            request: The request data
+            request: The request data (will be validated before routing)
             intent: Optional description of what's being asked
 
         Returns:
             OrchestratorResult with results from handling agent(s)
         """
+        # Input validation - ensure request is properly formatted
+        if not isinstance(request, dict):
+            return OrchestratorResult(
+                success=False,
+                handled_by=[],
+                results={},
+                messages=[],
+                error=f"Request must be a dictionary, got {type(request).__name__}",
+            )
+        
+        if not request:
+            return OrchestratorResult(
+                success=False,
+                handled_by=[],
+                results={},
+                messages=[],
+                error="Request cannot be empty",
+            )
+        
         messages: list[AgentMessage] = []
 
         # Create initial message

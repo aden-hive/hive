@@ -87,40 +87,19 @@ class MCPClient:
         # If we have a persistent loop (for STDIO), use it
         if self._loop is not None:
             future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-            return future.result()
+            return future.result(timeout=300)  # 5 minute timeout
 
-        # Otherwise, use the standard approach
+        # Check if we're in an async context
         try:
-            # Try to get the current event loop
             asyncio.get_running_loop()
-            # If we're here, we're in an async context
-            # Create a new thread to run the coroutine
-            import threading
-
-            result = None
-            exception = None
-
-            def run_in_thread():
-                nonlocal result, exception
-                try:
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        result = new_loop.run_until_complete(coro)
-                    finally:
-                        new_loop.close()
-                except Exception as e:
-                    exception = e
-
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
-            thread.join()
-
-            if exception:
-                raise exception
-            return result
+            # We're in an async context - use executor to avoid deadlock/thread issues
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(asyncio.run, coro)
+                # 5 minute timeout to prevent hanging
+                return future.result(timeout=300)
         except RuntimeError:
-            # No event loop running, we can use asyncio.run
+            # No event loop running - safe to use asyncio.run directly
             return asyncio.run(coro)
 
     def connect(self) -> None:

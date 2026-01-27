@@ -393,7 +393,6 @@ class NodeResult:
         # Use Haiku to generate intelligent summary
         try:
             import json
-
             import anthropic
 
             node_context = ""
@@ -416,18 +415,35 @@ class NodeResult:
                 messages=[{"role": "user", "content": prompt}],
             )
 
+            # Validate response structure
+            if not message.content or not hasattr(message.content[0], 'text'):
+                logger.warning("Unexpected empty or invalid response from Anthropic API")
+                raise ValueError("Empty API response")
+            
             summary = message.content[0].text.strip()
+            if not summary:
+                logger.warning("API returned empty summary")
+                raise ValueError("Empty summary")
+            
             return f"✓ {summary}"
 
-        except Exception:
-            # Fallback on error
-            parts = [f"✓ Completed with {len(self.output)} outputs:"]
-            for key, value in list(self.output.items())[:3]:
-                value_str = str(value)[:80]
-                if len(str(value)) > 80:
-                    value_str += "..."
-                parts.append(f"  • {key}: {value_str}")
-            return "\n".join(parts)
+        except anthropic.APIError as e:
+            logger.warning(f"Anthropic API error (recoverable): {e}")
+        except anthropic.APIConnectionError as e:
+            logger.warning(f"Anthropic connection error: {e}")
+        except (KeyError, IndexError, ValueError, AttributeError) as e:
+            logger.error(f"Unexpected API response format: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Unexpected error during summary generation: {e}", exc_info=True)
+        
+        # Fallback on any error
+        parts = [f"✓ Completed with {len(self.output)} outputs:"]
+        for key, value in list(self.output.items())[:3]:
+            value_str = str(value)[:80]
+            if len(str(value)) > 80:
+                value_str += "..."
+            parts.append(f"  • {key}: {value_str}")
+        return "\n".join(parts)
 
 
 class NodeProtocol(ABC):

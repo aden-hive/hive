@@ -462,14 +462,95 @@ class GraphExecutor:
                 path=path,
             )
 
-        except Exception as e:
+        except asyncio.CancelledError:
+            self.logger.warning(f"Execution cancelled at step {steps}")
             self.runtime.report_problem(
-                severity="critical",
-                description=str(e),
+                severity="warning",
+                description=f"Execution cancelled at step {steps}",
             )
             self.runtime.end_run(
                 success=False,
-                narrative=f"Failed at step {steps}: {e}",
+                narrative=f"Execution cancelled at step {steps}",
+            )
+            return ExecutionResult(
+                success=False,
+                error="Execution was cancelled",
+                steps_executed=steps,
+                path=path,
+            )
+        except (TimeoutError, asyncio.TimeoutError) as e:
+            self.logger.error(f"Execution timeout at step {steps}: {e}")
+            self.runtime.report_problem(
+                severity="critical",
+                description=f"Timeout at step {steps}: {e}",
+            )
+            self.runtime.end_run(
+                success=False,
+                narrative=f"Timeout at step {steps}: {e}",
+            )
+            return ExecutionResult(
+                success=False,
+                error=f"Execution timed out: {e}",
+                steps_executed=steps,
+                path=path,
+            )
+        except ValueError as e:
+            self.logger.error(f"Invalid data at step {steps}: {e}")
+            self.runtime.report_problem(
+                severity="critical",
+                description=f"Invalid data at step {steps}: {e}",
+            )
+            self.runtime.end_run(
+                success=False,
+                narrative=f"Invalid data at step {steps}: {e}",
+            )
+            return ExecutionResult(
+                success=False,
+                error=f"Invalid input data: {e}",
+                steps_executed=steps,
+                path=path,
+            )
+        except KeyError as e:
+            self.logger.error(f"Missing memory key at step {steps}: {e}")
+            self.runtime.report_problem(
+                severity="critical",
+                description=f"Missing memory key: {e}",
+            )
+            self.runtime.end_run(
+                success=False,
+                narrative=f"Missing data key at step {steps}: {e}",
+            )
+            return ExecutionResult(
+                success=False,
+                error=f"Missing required data: {e}",
+                steps_executed=steps,
+                path=path,
+            )
+        except RuntimeError as e:
+            self.logger.error(f"Runtime error at step {steps}: {e}")
+            self.runtime.report_problem(
+                severity="critical",
+                description=f"Runtime error: {e}",
+            )
+            self.runtime.end_run(
+                success=False,
+                narrative=f"Runtime error at step {steps}: {e}",
+            )
+            return ExecutionResult(
+                success=False,
+                error=f"Runtime error: {e}",
+                steps_executed=steps,
+                path=path,
+            )
+        except Exception as e:
+            self.logger.error(f"Unexpected error at step {steps}: {e}", exc_info=True)
+            self.runtime.report_problem(
+                severity="critical",
+                description=f"Unexpected error: {type(e).__name__}: {e}",
+            )
+            self.runtime.end_run(
+                success=False,
+                narrative=f"Unexpected error at step {steps}: {e}",
             )
             return ExecutionResult(
                 success=False,
