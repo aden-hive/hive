@@ -22,6 +22,7 @@ from .example_tool import register_tools as register_example
 from .web_search_tool import register_tools as register_web_search
 from .web_scrape_tool import register_tools as register_web_scrape
 from .pdf_read_tool import register_tools as register_pdf_read
+from .audit_trail_tool import register_tools as register_audit_trail
 
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
@@ -71,6 +72,9 @@ def register_all_tools(
     register_grep_search(mcp)
     register_execute_command(mcp)
     register_csv(mcp)
+    
+    # Register audit trail tool
+    register_audit_trail(mcp)
 
     return [
         "example_tool",
@@ -90,6 +94,7 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "audit_trail",
     ]
 
 
