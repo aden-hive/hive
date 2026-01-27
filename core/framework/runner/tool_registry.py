@@ -113,6 +113,7 @@ class ToolRegistry:
         self.register(tool_name, tool, executor)
 
     def discover_from_module(self, module_path: Path) -> int:
+	
         """
         Load tools from a Python module file.
 
@@ -241,6 +242,12 @@ class ToolRegistry:
         self,
         server_config: dict[str, Any],
     ) -> int:
+        required_keys = {"name", "transport"}
+        missing = required_keys - server_config.key()
+        if missing:
+            missing_keys = ", ".join(sorted(missing))
+            raise ValueError(f"server_config is missing required key(s): {missing_keys}")
+
         """
         Register an MCP server and discover its tools.
 
