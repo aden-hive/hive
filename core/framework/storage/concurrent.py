@@ -9,14 +9,16 @@ Wraps FileStorage with:
 
 import asyncio
 import logging
+import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from framework.schemas.run import Run, RunStatus, RunSummary
 from framework.storage.backend import FileStorage
+from framework.security import LRUCache, ThreadSafeLockManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,9 @@ class CacheEntry:
         return time.time() - self.timestamp > ttl
 
 
+
+
+
 class ConcurrentStorage:
     """
     Thread-safe storage backend with file locking and batch writes.
@@ -39,8 +44,10 @@ class ConcurrentStorage:
     Provides:
     - Async file locking to prevent concurrent write corruption
     - Write batching to reduce I/O overhead
-    - Read caching for frequently accessed data
+    - LRU read caching for frequently accessed data
     - Compatible API with FileStorage
+    - Enhanced error handling and recovery
+    - Resource cleanup and monitoring
 
     Example:
         storage = ConcurrentStorage("/path/to/storage")
@@ -61,6 +68,7 @@ class ConcurrentStorage:
         cache_ttl: float = 60.0,
         batch_interval: float = 0.1,
         max_batch_size: int = 100,
+        cache_size: int = 1000,
     ):
         """
         Initialize concurrent storage.
@@ -70,13 +78,13 @@ class ConcurrentStorage:
             cache_ttl: Cache time-to-live in seconds
             batch_interval: Interval between batch flushes
             max_batch_size: Maximum items before forcing flush
+            cache_size: Maximum cache size
         """
         self.base_path = Path(base_path)
         self._base_storage = FileStorage(base_path)
 
-        # Caching
-        self._cache: dict[str, CacheEntry] = {}
-        self._cache_ttl = cache_ttl
+        # LRU Caching with thread safety
+        self._cache = LRUCache(max_size=cache_size, ttl=cache_ttl)
 
         # Batching
         self._write_queue: asyncio.Queue = asyncio.Queue()
@@ -84,12 +92,20 @@ class ConcurrentStorage:
         self._max_batch_size = max_batch_size
         self._batch_task: asyncio.Task | None = None
 
-        # Locking
-        self._file_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # Thread-safe lock manager
+        self._lock_manager = ThreadSafeLockManager()
         self._global_lock = asyncio.Lock()
 
-        # State
+        # State and monitoring
         self._running = False
+        self._start_time = time.time()
+        self._stats = {
+            "writes_queued": 0,
+            "writes_completed": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "errors": 0
+        }
 
     async def start(self) -> None:
         """Start the batch writer background task."""
@@ -131,21 +147,30 @@ class ConcurrentStorage:
             run: Run to save
             immediate: If True, save immediately (bypasses batching)
         """
-        if immediate or not self._running:
-            await self._save_run_locked(run)
-        else:
-            await self._write_queue.put(("run", run))
+        try:
+            if immediate or not self._running:
+                await self._save_run_locked(run)
+            else:
+                await self._write_queue.put(("run", run))
+                self._stats["writes_queued"] += 1
 
-        # Update cache
-        self._cache[f"run:{run.id}"] = CacheEntry(run, time.time())
+            # Update cache
+            self._cache.put(f"run:{run.id}", run)
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.error(f"Error saving run {run.id}: {e}")
+            raise
 
     async def _save_run_locked(self, run: Run) -> None:
         """Save a run with file locking."""
         lock_key = f"run:{run.id}"
-        async with self._file_locks[lock_key]:
+        lock = self._lock_manager.get_lock(lock_key)
+        async with lock:
             # Run in executor to avoid blocking event loop
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, self._base_storage.save_run, run)
+            self._stats["writes_completed"] += 1
 
     async def load_run(self, run_id: str, use_cache: bool = True) -> Run | None:
         """
@@ -161,20 +186,23 @@ class ConcurrentStorage:
         cache_key = f"run:{run_id}"
 
         # Check cache
-        if use_cache and cache_key in self._cache:
-            entry = self._cache[cache_key]
-            if not entry.is_expired(self._cache_ttl):
-                return entry.value
+        if use_cache:
+            cached_run = self._cache.get(cache_key)
+            if cached_run is not None:
+                self._stats["cache_hits"] += 1
+                return cached_run
+            self._stats["cache_misses"] += 1
 
         # Load from storage
         lock_key = f"run:{run_id}"
-        async with self._file_locks[lock_key]:
+        lock = self._lock_manager.get_lock(lock_key)
+        async with lock:
             loop = asyncio.get_event_loop()
             run = await loop.run_in_executor(None, self._base_storage.load_run, run_id)
 
         # Update cache
         if run:
-            self._cache[cache_key] = CacheEntry(run, time.time())
+            self._cache.put(cache_key, run)
 
         return run
 
@@ -183,10 +211,10 @@ class ConcurrentStorage:
         cache_key = f"summary:{run_id}"
 
         # Check cache
-        if use_cache and cache_key in self._cache:
-            entry = self._cache[cache_key]
-            if not entry.is_expired(self._cache_ttl):
-                return entry.value
+        if use_cache:
+            cached_summary = self._cache.get(cache_key)
+            if cached_summary is not None:
+                return cached_summary
 
         # Load from storage
         loop = asyncio.get_event_loop()
@@ -194,20 +222,21 @@ class ConcurrentStorage:
 
         # Update cache
         if summary:
-            self._cache[cache_key] = CacheEntry(summary, time.time())
+            self._cache.put(cache_key, summary)
 
         return summary
 
     async def delete_run(self, run_id: str) -> bool:
         """Delete a run from storage."""
         lock_key = f"run:{run_id}"
-        async with self._file_locks[lock_key]:
+        lock = self._lock_manager.get_lock(lock_key)
+        async with lock:
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, self._base_storage.delete_run, run_id)
 
         # Clear cache
-        self._cache.pop(f"run:{run_id}", None)
-        self._cache.pop(f"summary:{run_id}", None)
+        self._cache.invalidate(f"run:{run_id}")
+        self._cache.invalidate(f"summary:{run_id}")
 
         return result
 
@@ -215,7 +244,9 @@ class ConcurrentStorage:
 
     async def get_runs_by_goal(self, goal_id: str) -> list[str]:
         """Get all run IDs for a goal."""
-        async with self._file_locks[f"index:by_goal:{goal_id}"]:
+        lock_key = f"index:by_goal:{goal_id}"
+        lock = self._lock_manager.get_lock(lock_key)
+        async with lock:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, self._base_storage.get_runs_by_goal, goal_id)
 
@@ -223,13 +254,17 @@ class ConcurrentStorage:
         """Get all run IDs with a status."""
         if isinstance(status, RunStatus):
             status = status.value
-        async with self._file_locks[f"index:by_status:{status}"]:
+        lock_key = f"index:by_status:{status}"
+        lock = self._lock_manager.get_lock(lock_key)
+        async with lock:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, self._base_storage.get_runs_by_status, status)
 
     async def get_runs_by_node(self, node_id: str) -> list[str]:
         """Get all run IDs that executed a node."""
-        async with self._file_locks[f"index:by_node:{node_id}"]:
+        lock_key = f"index:by_node:{node_id}"
+        lock = self._lock_manager.get_lock(lock_key)
+        async with lock:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, self._base_storage.get_runs_by_node, node_id)
 
@@ -296,6 +331,7 @@ class ConcurrentStorage:
                 if item_type == "run":
                     await self._save_run_locked(item)
             except Exception as e:
+                self._stats["errors"] += 1
                 logger.error(f"Failed to save {item_type}: {e}")
 
     async def _flush_pending(self) -> None:
@@ -319,16 +355,11 @@ class ConcurrentStorage:
 
     def invalidate_cache(self, key: str) -> None:
         """Invalidate a specific cache entry."""
-        self._cache.pop(key, None)
+        self._cache.invalidate(key)
 
     def get_cache_stats(self) -> dict:
         """Get cache statistics."""
-        expired = sum(1 for entry in self._cache.values() if entry.is_expired(self._cache_ttl))
-        return {
-            "total_entries": len(self._cache),
-            "expired_entries": expired,
-            "valid_entries": len(self._cache) - expired,
-        }
+        return self._cache.get_stats()
 
     # === UTILITY ===
 
@@ -337,20 +368,55 @@ class ConcurrentStorage:
         loop = asyncio.get_event_loop()
         base_stats = await loop.run_in_executor(None, self._base_storage.get_stats)
 
+        uptime = time.time() - self._start_time
+
         return {
             **base_stats,
             "cache": self.get_cache_stats(),
+            "lock_manager": self._lock_manager.get_stats(),
             "pending_writes": self._write_queue.qsize(),
             "running": self._running,
+            "uptime_seconds": uptime,
+            "performance": {
+                "writes_per_second": self._stats["writes_completed"] / uptime if uptime > 0 else 0,
+                "cache_hit_rate": (
+                    self._stats["cache_hits"] / 
+                    (self._stats["cache_hits"] + self._stats["cache_misses"])
+                    if (self._stats["cache_hits"] + self._stats["cache_misses"]) > 0 else 0
+                ),
+                "error_rate": (
+                    self._stats["errors"] / max(1, self._stats["writes_completed"])
+                )
+            },
+            "operations": self._stats
         }
 
     # === SYNC API (for backward compatibility) ===
 
     def save_run_sync(self, run: Run) -> None:
-        """Synchronous save (uses base storage directly with lock)."""
-        # Use threading lock for sync operations
-        self._base_storage.save_run(run)
+        """Synchronous save (uses base storage directly)."""
+        try:
+            self._base_storage.save_run(run)
+            self._stats["writes_completed"] += 1
+        except Exception as e:
+            self._stats["errors"] += 1
+            raise
 
     def load_run_sync(self, run_id: str) -> Run | None:
         """Synchronous load (uses base storage directly)."""
         return self._base_storage.load_run(run_id)
+
+    # === RESOURCE CLEANUP ===
+
+    async def cleanup(self) -> None:
+        """Cleanup resources and stop background tasks."""
+        if self._running:
+            await self.stop()
+        
+        # Clear locks
+        self._lock_manager.clear_all()
+        
+        # Clear cache
+        self._cache.clear()
+        
+        logger.info("ConcurrentStorage cleanup completed")
