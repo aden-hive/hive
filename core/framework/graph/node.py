@@ -17,13 +17,14 @@ Protocol:
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from framework.runtime.core import Runtime
 from framework.llm.provider import LLMProvider, Tool
+from framework.runtime.core import Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def find_json_object(text: str) -> str | None:
 
     This handles nested objects correctly, unlike simple regex like r'\\{[^{}]*\\}'.
     """
-    start = text.find('{')
+    start = text.find("{")
     if start == -1:
         return None
 
@@ -46,7 +47,7 @@ def find_json_object(text: str) -> str | None:
             escape_next = False
             continue
 
-        if char == '\\' and in_string:
+        if char == "\\" and in_string:
             escape_next = True
             continue
 
@@ -57,9 +58,9 @@ def find_json_object(text: str) -> str | None:
         if in_string:
             continue
 
-        if char == '{':
+        if char == "{":
             depth += 1
-        elif char == '}':
+        elif char == "}":
             depth -= 1
             if depth == 0:
                 return text[start:i + 1]
@@ -317,8 +318,9 @@ class NodeResult:
 
         # Use Haiku to generate intelligent summary
         try:
-            import anthropic
             import json
+
+            import anthropic
 
             node_context = ""
             if node_spec:
@@ -438,7 +440,7 @@ class LLMNode(NodeProtocol):
         import re
         content = content.strip()
         # Match ```json or ``` at start and ``` at end (greedy to handle nested)
-        match = re.match(r'^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$', content, re.DOTALL)
+        match = re.match(r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL)
         if match:
             return match.group(1).strip()
         return content
@@ -488,13 +490,13 @@ class LLMNode(NodeProtocol):
             # Log the LLM call details
             logger.info("      🤖 LLM Call:")
             logger.info(f"         System: {system[:150]}..." if len(system) > 150 else f"         System: {system}")
-            logger.info(f"         User message: {messages[-1]['content'][:150]}..." if len(messages[-1]['content']) > 150 else f"         User message: {messages[-1]['content']}")
+            logger.info(f"         User message: {messages[-1]['content'][:150]}..." if len(messages[-1]["content"]) > 150 else f"         User message: {messages[-1]['content']}")
             if ctx.available_tools:
                 logger.info(f"         Tools available: {[t.name for t in ctx.available_tools]}")
 
             # Call LLM
             if ctx.available_tools and self.tool_executor:
-                from framework.llm.provider import ToolUse, ToolResult
+                from framework.llm.provider import ToolResult, ToolUse
 
                 def executor(tool_use: ToolUse) -> ToolResult:
                     logger.info(f"         🔧 Tool call: {tool_use.name}({', '.join(f'{k}={v}' for k, v in tool_use.input.items())})")
@@ -657,14 +659,14 @@ class LLMNode(NodeProtocol):
             if content.startswith("```"):
                 # Try multiple patterns for markdown code blocks
                 # Pattern 1: ```json\n...\n``` or ```\n...\n```
-                match = re.search(r'^```(?:json)?\s*\n([\s\S]*?)\n```\s*$', content)
+                match = re.search(r"^```(?:json)?\s*\n([\s\S]*?)\n```\s*$", content)
                 if match:
                     content = match.group(1).strip()
                 else:
                     # Pattern 2: Just strip the first and last lines if they're ```
-                    lines = content.split('\n')
-                    if lines[0].startswith('```') and lines[-1].strip() == '```':
-                        content = '\n'.join(lines[1:-1]).strip()
+                    lines = content.split("\n")
+                    if lines[0].startswith("```") and lines[-1].strip() == "```":
+                        content = "\n".join(lines[1:-1]).strip()
 
             parsed = json.loads(content)
             if isinstance(parsed, dict):
@@ -674,7 +676,7 @@ class LLMNode(NodeProtocol):
 
         # Try to extract JSON from markdown code blocks (greedy match to handle nested blocks)
         # Use anchored match to capture from first ``` to last ```
-        code_block_match = re.match(r'^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$', content, re.DOTALL)
+        code_block_match = re.match(r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL)
         if code_block_match:
             try:
                 parsed = json.loads(code_block_match.group(1).strip())
@@ -732,14 +734,14 @@ Output ONLY the JSON object, nothing else."""
             cleaned = result.content.strip()
             # Remove markdown if LLM added it
             if cleaned.startswith("```"):
-                match = re.search(r'^```(?:json)?\s*\n([\s\S]*?)\n```\s*$', cleaned)
+                match = re.search(r"^```(?:json)?\s*\n([\s\S]*?)\n```\s*$", cleaned)
                 if match:
                     cleaned = match.group(1).strip()
                 else:
                     # Fallback: strip first/last lines
-                    lines = cleaned.split('\n')
-                    if lines[0].startswith('```') and lines[-1].strip() == '```':
-                        cleaned = '\n'.join(lines[1:-1]).strip()
+                    lines = cleaned.split("\n")
+                    if lines[0].startswith("```") and lines[-1].strip() == "```":
+                        cleaned = "\n".join(lines[1:-1]).strip()
 
             parsed = json.loads(cleaned)
             logger.info("      ✓ LLM cleaned JSON output")
