@@ -2785,7 +2785,8 @@ def run_tests(
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
-    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+    sep = os.pathsep
+    env["PYTHONPATH"] = f"{project_root}{sep}{pythonpath}" if pythonpath else str(project_root)
 
     # Run pytest
     try:
