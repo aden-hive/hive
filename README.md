@@ -68,6 +68,29 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - [Python 3.11+](https://www.python.org/downloads/) for agent development
 - [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
 
+## 🔑 LLM API Keys: Required vs Optional
+
+LLM API keys are **not required** for many contribution paths.
+
+### ✅ LLM API keys are NOT required for:
+- Cloning the repository
+- Running the Python setup script (`./scripts/setup-python.sh`)
+- Installing framework dependencies and developer tools
+- Documentation improvements
+- Framework, tooling, or developer-experience contributions
+
+### 🔐 LLM API keys ARE required for:
+- Building agents using `/building-agents`
+- Testing agents using `/testing-agent`
+- Running agents via the runtime
+
+> 💡 Contributors without LLM credits can still make meaningful contributions
+> by improving documentation, tooling, tests, and developer experience.
+
+Optional alternatives such as **local models (e.g., Ollama)** may be explored
+for development and experimentation.
+
+
 ### Installation
 
 ```bash
