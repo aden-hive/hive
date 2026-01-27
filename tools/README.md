@@ -71,7 +71,7 @@ python mcp_server.py
 | `apply_diff`           | Apply diff patches to files                    |
 | `apply_patch`          | Apply unified patches to files                 |
 | `grep_search`          | Search file contents with regex                |
-| `execute_command`      | Execute shell commands                         |
+| `execute_command_tool` | Execute shell commands                         |
 | `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
