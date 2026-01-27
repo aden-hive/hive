@@ -1,14 +1,19 @@
 """
 Smoke tests for the MCP server module.
 """
-import importlib.util
 
 import pytest
 
 
 def _mcp_available() -> bool:
     """Check if MCP dependencies are installed."""
-    return importlib.util.find_spec("mcp") is not None
+    try:
+        import mcp  # noqa: F401
+        from mcp.server import FastMCP  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
 MCP_AVAILABLE = _mcp_available()

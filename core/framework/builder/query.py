@@ -409,23 +409,23 @@ class BuilderQuery:
                 alternatives = [o for o in decision.options if o.id != decision.chosen_option_id]
                 if alternatives:
                     alt_desc = alternatives[0].description
+                    chosen_desc = chosen.description if chosen else "unknown"
                     suggestions.append(
-                        f"Consider alternative: '{alt_desc}' "
-                        f"instead of '{chosen.description if chosen else 'unknown'}'"
+                        f"Consider alternative: '{alt_desc}' instead of '{chosen_desc}'"
                     )
 
             # Check for missing context
             if not decision.input_context:
                 suggestions.append(
-                    f"Decision '{decision.intent}' had no "
-                    f"input context - ensure relevant data is passed"
+                    f"Decision '{decision.intent}' had no input context - "
+                    "ensure relevant data is passed"
                 )
 
             # Check for constraint issues
             if decision.active_constraints:
+                constraints = ", ".join(decision.active_constraints)
                 suggestions.append(
-                    f"Review constraints: {', '.join(decision.active_constraints)}"
-                    f" - may be too restrictive"
+                    f"Review constraints: {constraints} - may be too restrictive"
                 )
 
         # Check for reported problems with suggestions
@@ -478,11 +478,11 @@ class BuilderQuery:
             differences.append(f"Decision count: {len(run1.decisions)} vs {len(run2.decisions)}")
 
         # Find first divergence point
-        for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions, strict=True)):
+        for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions, strict=False)):
             if d1.chosen_option_id != d2.chosen_option_id:
                 differences.append(
-                    f"Diverged at decision {i}: chose "
-                    f"'{d1.chosen_option_id}' vs '{d2.chosen_option_id}'"
+                    f"Diverged at decision {i}: "
+                    f"chose '{d1.chosen_option_id}' vs '{d2.chosen_option_id}'"
                 )
                 break
 

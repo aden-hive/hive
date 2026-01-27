@@ -8,6 +8,7 @@ handles all the structured logging.
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -165,7 +166,7 @@ class Runtime:
 
         Returns:
             The decision ID (use this to record outcome later), or
-            empty string if no run in progress
+            empty string if no run
         """
         if self._current_run is None:
             # Gracefully handle case where run ended during exception handling
@@ -300,7 +301,7 @@ class Runtime:
         options: list[dict[str, Any]],
         chosen: str,
         reasoning: str,
-        executor: callable,
+        executor: Callable,
         **kwargs,
     ) -> tuple[str, Any]:
         """

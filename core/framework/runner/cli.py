@@ -652,9 +652,9 @@ def _format_natural_language_to_json(
 
         session_info = (
             f'\n\nExisting {main_field}: "{existing_value}"\n\n'
-            f"The user is providing ADDITIONAL information. Append this "
-            f"new information to the existing {main_field} "
-            f"to create an enriched, more detailed version."
+            f"The user is providing ADDITIONAL information. Append this new "
+            f"information to the existing {main_field} to create an enriched, "
+            "more detailed version."
         )
 
     prompt = f"""You are formatting user input for an agent that requires specific input fields.

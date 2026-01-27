@@ -34,6 +34,12 @@ class TestLiteLLMProviderInit:
             provider = LiteLLMProvider(model="claude-3-haiku-20240307")
             assert provider.model == "claude-3-haiku-20240307"
 
+    def test_init_deepseek_model(self):
+        """Test initialization with DeepSeek model."""
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}):
+            provider = LiteLLMProvider(model="deepseek/deepseek-chat")
+            assert provider.model == "deepseek/deepseek-chat"
+
     def test_init_with_api_key(self):
         """Test initialization with explicit API key."""
         provider = LiteLLMProvider(model="gpt-4o-mini", api_key="my-api-key")
@@ -320,6 +326,28 @@ class TestAnthropicProviderBackwardCompatibility:
 
         assert result.content == "The time is 3:00 PM."
         mock_completion.assert_called_once()
+
+    @patch("litellm.completion")
+    def test_anthropic_provider_passes_response_format(self, mock_completion):
+        """Test that AnthropicProvider accepts and forwards response_format."""
+        # Setup mock
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "{}"
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "claude-3-haiku-20240307"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_completion.return_value = mock_response
+
+        provider = AnthropicProvider(api_key="test-key")
+        fmt = {"type": "json_object"}
+
+        provider.complete(messages=[{"role": "user", "content": "hi"}], response_format=fmt)
+
+        # Verify it was passed to litellm
+        call_kwargs = mock_completion.call_args[1]
+        assert call_kwargs["response_format"] == fmt
 
 
 class TestJsonMode:

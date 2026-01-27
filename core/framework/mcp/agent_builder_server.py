@@ -311,10 +311,7 @@ def set_goal(
         str, "JSON array of constraint objects with id, description, constraint_type, category"
     ] = "[]",
 ) -> str:
-    """
-    Define the goal for the agent. Goals are the
-    source of truth - they define what success looks like.
-    """
+    """Define the goal for the agent. Goals define what success looks like."""
     session = get_session()
 
     # Parse JSON inputs with error handling
@@ -884,8 +881,8 @@ def validate_graph() -> str:
 
     if is_pause_resume_agent:
         warnings.append(
-            f"Pause/resume architecture detected. Pause nodes: "
-            f"{pause_nodes}, Resume entry points: {resume_entry_points}"
+            f"Pause/resume architecture detected. Pause nodes:{pause_nodes},"
+            f"Resume entry points: {resume_entry_points}"
         )
 
     # Find entry node (no incoming edges)
@@ -1172,11 +1169,10 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
         const_dict = (
             constraint.model_dump() if hasattr(constraint, "model_dump") else constraint.__dict__
         )
-        constraints_section.append(
-            f"**{const_dict.get('description', 'N/A')}** "
-            f"({const_dict.get('constraint_type', 'hard')})\n"
-            f"- Category: {const_dict.get('category', 'N/A')}"
-        )
+        desc = const_dict.get("description", "N/A")
+        ctype = const_dict.get("constraint_type", "hard")
+        cat = const_dict.get("category", "N/A")
+        constraints_section.append(f"**{desc}** ({ctype})\n- Category: {cat}")
 
     readme = f"""# {goal.name}
 
@@ -1205,10 +1201,8 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
 """
 
     for edge in edges:
-        readme += (
-            f"- `{edge.source}` → `{edge.target}` (condition: "
-            f"{edge.condition.value if hasattr(edge.condition, 'value') else edge.condition})\n"
-        )
+        cond = edge.condition.value if hasattr(edge.condition, "value") else edge.condition
+        readme += f"- `{edge.source}` → `{edge.target}` (condition: {cond})\n"
 
     readme += f"""
 
@@ -1356,7 +1350,7 @@ def export_graph() -> str:
         # Strategy 2: Fallback - pair sequentially if no match found
         unmatched_pause = [p for p in pause_nodes if p not in pause_to_resume]
         unmatched_resume = [r for r in resume_entry_points if r not in pause_to_resume.values()]
-        for pause_id, resume_id in zip(unmatched_pause, unmatched_resume, strict=True):
+        for pause_id, resume_id in zip(unmatched_pause, unmatched_resume, strict=False):
             pause_to_resume[pause_id] = resume_id
 
         # Build entry_points dict
@@ -1660,7 +1654,7 @@ def add_mcp_server(
                     "total_mcp_servers": len(session.mcp_servers),
                     "note": (
                         f"MCP server '{name}' registered with {len(tool_names)} tools. "
-                        f"These tools can now be used in llm_tool_use nodes."
+                        "These tools can now be used in llm_tool_use nodes."
                     ),
                 },
                 indent=2,
@@ -1848,7 +1842,9 @@ def test_node(
 
     # Show memory state after (simulated)
     result["expected_memory_state"] = {
-        "inputs_available": {k: input_data.get(k, "<not provided>") for k in node_spec.input_keys},
+        "inputs_available": {
+            k: input_data.get(k, "<not provided>") for k in node_spec.input_keys
+        },
         "outputs_to_write": node_spec.output_keys,
     }
 
@@ -2115,7 +2111,7 @@ def create_plan(
       - For code_execution: code
     - inputs: Dict mapping input names to values or "$variable" references
     - expected_outputs: List of output keys this step should produce
-    - dependencies: List of step IDs that must complete first
+    - dependencies: List of step IDs that must complete first (deps)
 
     Example step:
     {
@@ -2445,8 +2441,8 @@ def simulate_plan_execution(
             "remaining_steps": remaining,
             "plan_complete": len(remaining) == 0,
             "note": (
-                "This is a simulation. Actual execution may "
-                "differ based on step results and judge decisions."
+                "This is a simulation. Actual execution may differ "
+                "based on step results and judge decisions."
             ),
         },
         indent=2,
@@ -2606,28 +2602,22 @@ def generate_constraint_tests(
                 "naming_convention": "test_constraint_<constraint_id>_<scenario>",
                 "required_decorator": "@pytest.mark.asyncio",
                 "required_fixture": "mock_mode",
-                "agent_call_pattern": (
-                    "result = await default_agent.run(input_dict, mock_mode=mock_mode)"
-                ),
-                "result_type": (
-                    "ExecutionResult with .success (bool), .output (dict), .error (str|None)"
-                ),
+                "agent_call_pattern": "await default_agent.run(input_dict, mock_mode=mock_mode)",
+                "result_type": "ExecutionResult with .success, .output (dict), .error",
                 "critical_rules": [
-                    "Every test function MUST be async with @pytest.mark.asyncio decorator",
+                    "Every test function MUST be async with @pytest.mark.asyncio",
                     "Every test MUST accept mock_mode as a parameter",
-                    "Use await default_agent.run(input, mock_mode=mock_mode) to execute the agent",
-                    "default_agent is already imported - do NOT add import statements",
-                    "NEVER call result.get() - result is NOT a dict! "
-                    "Use result.output.get() instead",
+                    "Use await default_agent.run(input, mock_mode=mock_mode)",
+                    "default_agent is already imported - do NOT add imports",
+                    "NEVER call result.get() - use result.output.get() instead",
                     "Always check result.success before accessing result.output",
                 ],
             },
             "file_header": file_header,
             "test_template": CONSTRAINT_TEST_TEMPLATE,
             "instruction": (
-                "Write tests directly to the output_file using the Write tool. "
-                "Use the file_header as the start of the file, "
-                "then add test functions following the test_template format. "
+                "Write tests directly to output_file using Write tool. "
+                "Use file_header as start, add test functions per test_template. "
                 "Generate up to 5 tests covering the most critical constraints."
             ),
         }
@@ -2704,28 +2694,22 @@ def generate_success_tests(
                 "naming_convention": "test_success_<criteria_id>_<scenario>",
                 "required_decorator": "@pytest.mark.asyncio",
                 "required_fixture": "mock_mode",
-                "agent_call_pattern": (
-                    "result = await default_agent.run(input_dict, mock_mode=mock_mode)"
-                ),
-                "result_type": (
-                    "ExecutionResult with .success (bool), .output (dict), .error (str|None)"
-                ),
+                "agent_call_pattern": "await default_agent.run(input_dict, mock_mode=mock_mode)",
+                "result_type": "ExecutionResult with .success, .output (dict), .error",
                 "critical_rules": [
-                    "Every test function MUST be async with @pytest.mark.asyncio decorator",
+                    "Every test function MUST be async with @pytest.mark.asyncio",
                     "Every test MUST accept mock_mode as a parameter",
-                    "Use await default_agent.run(input, mock_mode=mock_mode) to execute the agent",
-                    "default_agent is already imported - do NOT add import statements",
-                    "NEVER call result.get() - result is NOT a dict! "
-                    "Use result.output.get() instead",
+                    "Use await default_agent.run(input, mock_mode=mock_mode)",
+                    "default_agent is already imported - do NOT add imports",
+                    "NEVER call result.get() - use result.output.get() instead",
                     "Always check result.success before accessing result.output",
                 ],
             },
             "file_header": file_header,
             "test_template": SUCCESS_TEST_TEMPLATE,
             "instruction": (
-                "Write tests directly to the output_file using the Write tool. "
-                "Use the file_header as the start of the file, then add "
-                "test functions following the test_template format. "
+                "Write tests directly to output_file using Write tool. "
+                "Use file_header as start, add test functions per test_template. "
                 "Generate up to 12 tests covering the most critical success criteria."
             ),
         }
@@ -2764,7 +2748,7 @@ def run_tests(
                 "error": f"Tests directory not found: {tests_dir}",
                 "hint": (
                     "Use generate_constraint_tests or generate_success_tests "
-                    "to get guidelines, then write tests with the Write tool"
+                    "to get guidelines, then write tests with Write tool"
                 ),
             }
         )

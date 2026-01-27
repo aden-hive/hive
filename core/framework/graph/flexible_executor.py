@@ -167,8 +167,10 @@ class FlexibleGraphExecutor:
                             status=ExecutionStatus.NEEDS_REPLAN,
                             plan=plan,
                             context=context,
-                            feedback=("No executable steps available but plan "
-                                      "not complete. Check dependencies."),
+                            feedback=(
+                            "No executable steps available but plan not complete. "
+                            "Check dependencies."
+                        ),
                             steps_executed=steps_executed,
                             total_tokens=total_tokens,
                             total_latency=total_latency,
@@ -177,8 +179,8 @@ class FlexibleGraphExecutor:
                 # Execute next step (for now, sequential; could be parallel)
                 step = ready_steps[0]
                 # Debug: show ready steps
-                # print(f"  [DEBUG] Ready steps:
-                # {[s.id for s in ready_steps]}, executing: {step.id}")
+                # ready_ids = [s.id for s in ready_steps]
+                # print(f"  [DEBUG] Ready steps: {ready_ids}, executing: {step.id}")
 
                 # APPROVAL CHECK - before execution
                 if step.requires_approval:
@@ -364,9 +366,10 @@ class FlexibleGraphExecutor:
                     status=ExecutionStatus.NEEDS_REPLAN,
                     plan=plan,
                     context=context,
-                    feedback=(f"Step '{step.id}' failed after "
-                              f"{step.attempts} attempts: {judgment.feedback}"
-                              ),
+                    feedback=(
+                        f"Step '{step.id}' failed after {step.attempts} attempts: "
+                        f"{judgment.feedback}"
+                    ),
                     steps_executed=steps_executed,
                     total_tokens=total_tokens,
                     total_latency=total_latency,

@@ -44,8 +44,8 @@ def test_cleaning_with_cerebras():
     print("\n--- Scenario 1: JSON Parsing Trap ---")
     malformed_output = {
         "recommendation": (
-            '{\n  "approval_decision": "APPROVED",\n  '
-            '"risk_score": 3.5,\n  "reason": "Standard terms, low risk"\n}'
+            '{\n  "approval_decision": "APPROVED",\n  "risk_score": 3.5,\n  '
+            '"reason": "Standard terms, low risk"\n}'
         ),
     }
 

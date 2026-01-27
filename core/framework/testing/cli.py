@@ -111,8 +111,8 @@ def cmd_test_run(args: argparse.Namespace) -> int:
     if not tests_dir.exists():
         print(f"Error: Tests directory not found: {tests_dir}")
         print(
-            "Hint: Use generate_constraint_tests/generate_success_tests "
-            "MCP tools, then write tests with Write tool"
+            "Hint: Use generate_constraint_tests/generate_success_tests MCP tools, "
+            "then write tests with Write tool"
         )
         return 1
 

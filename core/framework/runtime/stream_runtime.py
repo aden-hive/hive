@@ -117,10 +117,8 @@ class StreamRuntime:
         Returns:
             The run ID
         """
-        run_id = (
-            f"run_{self.stream_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            f"_{uuid.uuid4().hex[:8]}"
-        )
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = f"run_{self.stream_id}_{timestamp}_{uuid.uuid4().hex[:8]}"
 
         run = Run(
             id=run_id,
@@ -349,8 +347,8 @@ class StreamRuntime:
         run = self._runs.get(execution_id)
         if run is None:
             logger.warning(
-                f"report_problem called but no run for execution "
-                f"{execution_id}: [{severity}] {description}"
+                f"report_problem called but no run for execution {execution_id}: "
+                f"[{severity}] {description}"
             )
             return ""
 

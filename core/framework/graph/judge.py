@@ -218,9 +218,9 @@ class HybridJudge:
                 return Judgment(
                     action=JudgmentAction.ESCALATE,
                     reasoning=(
-                               f"LLM confidence ({judgment.confidence:.2f}) below "
-                               f"threshold ({self.llm_confidence_threshold})"
-                               ),
+                        f"LLM confidence ({judgment.confidence:.2f}) "
+                        f"below threshold ({self.llm_confidence_threshold})"
+                    ),
                     feedback=judgment.feedback,
                     confidence=judgment.confidence,
                     llm_used=True,
@@ -358,9 +358,9 @@ def create_default_judge(llm: LLMProvider | None = None) -> HybridJudge:
             id="transient_error_retry",
             description="Transient error that can be retried",
             condition=(
-                       "isinstance(result, dict) and result.get('error_type') "
-                       "in ['timeout', 'rate_limit', 'connection_error']"
-                       ),
+                "isinstance(result, dict) and "
+                "result.get('error_type') in ['timeout', 'rate_limit', 'connection_error']"
+            ),
             action=JudgmentAction.RETRY,
             feedback_template="Transient error: {result[error]}. Please retry.",
             priority=90,

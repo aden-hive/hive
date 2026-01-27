@@ -386,10 +386,8 @@ class AgentRunner:
                 try:
                     self._tool_registry.register_mcp_server(server_config)
                 except Exception as e:
-                    print(
-                        f"Warning: Failed to register MCP server "
-                        f"'{server_config.get('name', 'unknown')}': {e}"
-                    )
+                    server_name = server_config.get("name", "unknown")
+                    print(f"Warning: Failed to register MCP server '{server_name}': {e}")
         except Exception as e:
             print(f"Warning: Failed to load MCP servers config from {config_path}: {e}")
 
@@ -419,9 +417,13 @@ class AgentRunner:
             session_id=session_id,
         )
 
-        # Create LLM provider (if not mock mode and API key available)
+        # Create LLM provider
         # Uses LiteLLM which auto-detects the provider from model name
-        if not self.mock_mode:
+        if self.mock_mode:
+            # Use mock LLM for testing without real API calls
+            from framework.llm.mock import MockLLMProvider
+            self._llm = MockLLMProvider(model=self.model)
+        else:
             # Detect required API key from model name
             api_key_env = self._get_api_key_env_var(self.model)
             if api_key_env and os.environ.get(api_key_env):
@@ -826,7 +828,7 @@ class AgentRunner:
 
             # Check tool credentials (Tier 2)
             missing_creds = cred_manager.get_missing_for_tools(info.required_tools)
-            for _cred_name, spec in missing_creds:
+            for _, spec in missing_creds:
                 missing_credentials.append(spec.env_var)
                 affected_tools = [t for t in info.required_tools if t in spec.tools]
                 tools_str = ", ".join(affected_tools)
@@ -838,7 +840,7 @@ class AgentRunner:
             # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
             node_types = list({node.node_type for node in self.graph.nodes})
             missing_node_creds = cred_manager.get_missing_for_node_types(node_types)
-            for _cred_name, spec in missing_node_creds:
+            for _, spec in missing_node_creds:
                 if spec.env_var not in missing_credentials:  # Avoid duplicates
                     missing_credentials.append(spec.env_var)
                     affected_types = [t for t in node_types if t in spec.node_types]
@@ -852,8 +854,14 @@ class AgentRunner:
             has_llm_nodes = any(
                 node.node_type in ("llm_generate", "llm_tool_use") for node in self.graph.nodes
             )
-            if has_llm_nodes and not os.environ.get("ANTHROPIC_API_KEY"):
-                warnings.append("Agent has LLM nodes but ANTHROPIC_API_KEY not set")
+            if has_llm_nodes:
+                api_key_env = self._get_api_key_env_var(self.model)
+                if api_key_env and not os.environ.get(api_key_env):
+                    if api_key_env not in missing_credentials:
+                        missing_credentials.append(api_key_env)
+                    warnings.append(
+                        f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
+                    )
 
         return ValidationResult(
             valid=len(errors) == 0,

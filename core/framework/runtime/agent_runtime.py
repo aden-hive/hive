@@ -35,6 +35,8 @@ class AgentRuntimeConfig:
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
     max_history: int = 1000
+    execution_result_max: int = 1000
+    execution_result_ttl_seconds: float | None = None
 
 
 class AgentRuntime:
@@ -208,6 +210,8 @@ class AgentRuntime:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    result_retention_max=self._config.execution_result_max,
+                    result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -287,7 +291,9 @@ class AgentRuntime:
             ExecutionResult or None if timeout
         """
         exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
-        stream = self._streams[entry_point_id]
+        stream = self._streams.get(entry_point_id)
+        if stream is None:
+            raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
 
     async def get_goal_progress(self) -> dict[str, Any]:

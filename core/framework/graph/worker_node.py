@@ -11,6 +11,7 @@ appropriate executor based on action type:
 """
 
 import json
+import logging
 import re
 import time
 from collections.abc import Callable
@@ -25,6 +26,8 @@ from framework.graph.plan import (
 )
 from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
+
+logger = logging.getLogger(__name__)
 
 
 def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
@@ -60,15 +63,22 @@ def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
             try:
                 parsed = json.loads(match.strip())
                 return parsed, match.strip()
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                logger.debug(
+                    f"Failed to parse JSON from code block: {e}. "
+                    f"Content preview: {match.strip()[:100]}..."
+                )
                 continue
 
     # No code blocks or parsing failed - try parsing the whole response
     try:
         parsed = json.loads(cleaned)
         return parsed, cleaned
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as e:
+        logger.debug(
+            f"Failed to parse entire response as JSON: {e}. "
+            f"Content preview: {cleaned[:100]}..."
+        )
 
     # Try to find JSON-like content (starts with { or [)
     json_start_pattern = r"(\{[\s\S]*\}|\[[\s\S]*\])"
@@ -78,10 +88,18 @@ def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
         try:
             parsed = json.loads(match)
             return parsed, match
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.debug(
+                f"Failed to parse JSON pattern: {e}. "
+                f"Content preview: {match[:100]}..."
+            )
             continue
 
-    # Could not parse as JSON
+    # Could not parse as JSON - log warning
+    logger.warning(
+        f"Could not parse LLM response as JSON after trying all strategies. "
+        f"Response preview: {cleaned[:200]}..."
+    )
     return None, cleaned
 
 

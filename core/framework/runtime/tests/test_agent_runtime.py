@@ -176,6 +176,9 @@ class TestSharedStateManager:
         """Test shared state is visible across executions."""
         manager = SharedStateManager()
 
+        manager.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
+        manager.create_memory("exec-2", "stream-1", IsolationLevel.SHARED)
+
         # Write to global scope
         await manager.write(
             key="global_key",
