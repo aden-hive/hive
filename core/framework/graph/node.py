@@ -772,7 +772,11 @@ Keep the same JSON structure but with shorter content values.
             )
 
             compaction_attempt = 0
-            while self._is_truncated(response) and expects_json and compaction_attempt < self.max_compaction_retries:
+            while (
+                self._is_truncated(response)
+                and expects_json
+                and compaction_attempt < self.max_compaction_retries
+            ):
                 compaction_attempt += 1
                 logger.warning(
                     f"      ⚠ Response truncated (stop_reason: {response.stop_reason}), "
@@ -804,11 +808,16 @@ Keep the same JSON structure but with shorter content values.
 
             if self._is_truncated(response) and expects_json:
                 logger.warning(
-                    f"      ⚠ Response still truncated after {compaction_attempt} compaction attempts"
+                    f"      ⚠ Response still truncated after "
+                    f"{compaction_attempt} compaction attempts"
                 )
 
             # Phase 2: Validation retry loop for Pydantic models
-            max_validation_retries = ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
+            max_validation_retries = (
+                ctx.node_spec.max_validation_retries
+                if ctx.node_spec.output_model
+                else 0
+            )
             validation_attempt = 0
             total_input_tokens = 0
             total_output_tokens = 0
@@ -1158,13 +1167,17 @@ Keep the same JSON structure but with shorter content values.
                         except json.JSONDecodeError:
                             parsed = json.loads(_fix_unescaped_newlines_in_json(json_str))
                         if isinstance(parsed, dict):
-                            logger.info("      ✓ Extracted JSON via brace matching after markdown strip")
+                            logger.info(
+                                "      ✓ Extracted JSON via brace matching"
+                                " after markdown strip"
+                            )
                             return parsed
                     except json.JSONDecodeError:
                         pass
 
         # All local extraction failed - use LLM as last resort
         import os
+
         from framework.llm.litellm import LiteLLMProvider
 
         logger.info(f"      cleanup_llm_model param: {cleanup_llm_model}")
@@ -1261,7 +1274,7 @@ Output ONLY the JSON object, nothing else."""
             raise ValueError(
                 f"LLM cleanup response not valid JSON: {e}. "
                 f"Expected keys: {output_keys}"
-            )
+            ) from e
         except ValueError:
             raise  # Re-raise our descriptive error
         except Exception as e:
