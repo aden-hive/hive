@@ -270,6 +270,13 @@ class CodeSandbox:
                 error=f"Code validation failed: {'; '.join(issues)}",
             )
 
+        # Additional security checks for exec
+        if any(dangerous in code for dangerous in ['__import__', 'exec(', 'eval(', 'compile(', 'open(', 'file(']):
+            return SandboxResult(
+                success=False,
+                error="Code contains potentially dangerous operations",
+            )
+
         # Create isolated namespace
         namespace = self._create_namespace(inputs)
 
@@ -344,13 +351,14 @@ class CodeSandbox:
         """
         Execute a single expression and return its value.
 
-        Simpler than execute() - just evaluates one expression.
+        Uses ast.literal_eval for safe evaluation of literals, falls back to
+        restricted eval for expressions with function calls.
         """
         inputs = inputs or {}
 
-        # Validate
+        # Parse the expression to check if it's safe for literal_eval
         try:
-            ast.parse(expression, mode="eval")
+            tree = ast.parse(expression, mode="eval")
         except SyntaxError as e:
             return SandboxResult(success=False, error=f"Syntax error: {e}")
 
@@ -358,7 +366,15 @@ class CodeSandbox:
 
         try:
             with self._timeout_context(self.timeout_seconds):
-                result = eval(expression, namespace)
+                # Try ast.literal_eval first for maximum safety
+                try:
+                    import ast as ast_module
+                    result = ast_module.literal_eval(expression)
+                    return SandboxResult(success=True, result=result)
+                except (ValueError, SyntaxError):
+                    # If literal_eval fails, use restricted eval with our safe namespace
+                    # This allows function calls and variable access but blocks dangerous operations
+                    result = eval(expression, {"__builtins__": {}}, namespace)
 
             return SandboxResult(success=True, result=result)
 
