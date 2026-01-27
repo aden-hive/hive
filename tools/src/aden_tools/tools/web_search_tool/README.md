@@ -24,7 +24,7 @@ Supports multiple search providers:
 
 Set credentials for at least one provider:
 
-### Option 1: Google Custom Search (Recommended)
+### Option 1: Google Custom Search
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GOOGLE_API_KEY` | Yes | API key from [Google Cloud Console](https://console.cloud.google.com/) |
