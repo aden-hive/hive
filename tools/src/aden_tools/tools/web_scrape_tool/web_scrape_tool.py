@@ -212,7 +212,7 @@ def register_tools(mcp: FastMCP) -> None:
                     # Convert relative URLs to absolute URLs
                     absolute_href = urljoin(base_url, href)
                     link_text = a.get_text(strip=True)
-                    if link_text and href:
+                    if link_text and absolute_href:
                         links.append({"text": link_text, "href": absolute_href})
                 result["links"] = links
 
