@@ -35,7 +35,7 @@
 
 ## Descripción General
 
-Construye agentes de IA confiables y auto-mejorables sin codificar flujos de trabajo. Define tu objetivo a través de una conversación con un agente de codificació, y el framework genera un grafo de nodos con código de conexión creado dinámicamente. Cuando algo falla, el framework captura los datos del error, evoluciona el agente a través del agente de codificación y lo vuelve a desplegar. Los nodos de intervención humana integrados, la gestión de credenciales y el monitoreo en tiempo real te dan control sin sacrificar la adaptabilidad.
+Construye agentes de IA confiables y auto-mejorables sin codificar flujos de trabajo. Define tu objetivo a través de una conversación con un agente de codificación, y el framework genera un grafo de nodos con código de conexión creado dinámicamente. Cuando algo falla, el framework captura los datos del error, evoluciona el agente a través del agente de codificación y lo vuelve a desplegar. Los nodos de intervención humana integrados, la gestión de credenciales y el monitoreo en tiempo real te dan control sin sacrificar la adaptabilidad.
 
 Visita [adenhq.com](https://adenhq.com) para documentación completa, ejemplos y guías.
 
