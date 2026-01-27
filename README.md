@@ -8,7 +8,8 @@
   <a href="README.es.md">Español</a> |
   <a href="README.pt.md">Português</a> |
   <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a>
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -263,7 +264,7 @@ See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions
 - **[Developer Guide](DEVELOPER.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
 - [Configuration Guide](docs/configuration.md) - All configuration options
-- [Architecture Overview](docs/architecture.md) - System design and structure
+- [Architecture Overview](docs/architecture/README.md) - System design and structure
 
 ## Roadmap
 
@@ -299,11 +300,14 @@ We use [Discord](https://discord.com/invite/MXE49hrKDk) for support, feature req
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+**Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you within 24 hours. This helps prevent duplicate work.
+
+1. Find or create an issue and get assigned
+2. Fork the repository
+3. Create your feature branch (`git checkout -b feature/amazing-feature`)
+4. Commit your changes (`git commit -m 'Add amazing feature'`)
+5. Push to the branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
 
 ## Join Our Team
 
@@ -327,7 +331,7 @@ No. Aden is built from the ground up with no dependencies on LangChain, CrewAI, 
 
 **Q: What LLM providers does Aden support?**
 
-Aden supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
+Aden supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
 
 **Q: Can I use Aden with local AI models like Ollama?**
 

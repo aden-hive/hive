@@ -13,32 +13,35 @@ Each step requires validation and human approval before proceeding.
 You cannot skip steps or bypass validation.
 """
 
+from collections.abc import Callable
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import NodeSpec
-from framework.graph.edge import EdgeSpec, EdgeCondition, GraphSpec
 
 
 class BuildPhase(str, Enum):
     """Current phase of the build process."""
-    INIT = "init"                    # Just started
-    GOAL_DRAFT = "goal_draft"        # Drafting goal
+
+    INIT = "init"  # Just started
+    GOAL_DRAFT = "goal_draft"  # Drafting goal
     GOAL_APPROVED = "goal_approved"  # Goal approved
-    ADDING_NODES = "adding_nodes"    # Adding nodes
-    ADDING_EDGES = "adding_edges"    # Adding edges
-    TESTING = "testing"              # Running tests
-    APPROVED = "approved"            # Fully approved
-    EXPORTED = "exported"            # Exported to file
+    ADDING_NODES = "adding_nodes"  # Adding nodes
+    ADDING_EDGES = "adding_edges"  # Adding edges
+    TESTING = "testing"  # Running tests
+    APPROVED = "approved"  # Fully approved
+    EXPORTED = "exported"  # Exported to file
 
 
 class ValidationResult(BaseModel):
     """Result of a validation check."""
+
     valid: bool
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -47,6 +50,7 @@ class ValidationResult(BaseModel):
 
 class TestCase(BaseModel):
     """A test case for validating agent behavior."""
+
     id: str
     description: str
     input: dict[str, Any]
@@ -56,6 +60,7 @@ class TestCase(BaseModel):
 
 class TestResult(BaseModel):
     """Result of running a test case."""
+
     test_id: str
     passed: bool
     actual_output: Any = None
@@ -69,6 +74,7 @@ class BuildSession(BaseModel):
 
     Saved after each approved step so you can resume later.
     """
+
     id: str
     name: str
     phase: BuildPhase = BuildPhase.INIT
@@ -457,11 +463,14 @@ class GraphBuilder:
 
             # Run the test
             import asyncio
-            result = asyncio.run(executor.execute(
-                graph=graph,
-                goal=self.session.goal,
-                input_data=test.input,
-            ))
+
+            result = asyncio.run(
+                executor.execute(
+                    graph=graph,
+                    goal=self.session.goal,
+                    input_data=test.input,
+                )
+            )
 
             # Check result
             passed = result.success
@@ -515,12 +524,14 @@ class GraphBuilder:
         if not self._pending_validation.valid:
             return False
 
-        self.session.approvals.append({
-            "phase": self.session.phase.value,
-            "comment": comment,
-            "timestamp": datetime.now().isoformat(),
-            "validation": self._pending_validation.model_dump(),
-        })
+        self.session.approvals.append(
+            {
+                "phase": self.session.phase.value,
+                "comment": comment,
+                "timestamp": datetime.now().isoformat(),
+                "validation": self._pending_validation.model_dump(),
+            }
+        )
 
         # Advance phase if appropriate
         if self.session.phase == BuildPhase.GOAL_DRAFT:
@@ -554,11 +565,13 @@ class GraphBuilder:
                 return False
 
         self.session.phase = BuildPhase.APPROVED
-        self.session.approvals.append({
-            "phase": "final",
-            "comment": comment,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self.session.approvals.append(
+            {
+                "phase": "final",
+                "comment": comment,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
         self._save_session()
         return True
@@ -630,69 +643,75 @@ class GraphBuilder:
         """Generate Python code for the graph."""
         lines = [
             '"""',
-            f'Generated agent: {self.session.name}',
-            f'Generated at: {datetime.now().isoformat()}',
+            f"Generated agent: {self.session.name}",
+            f"Generated at: {datetime.now().isoformat()}",
             '"""',
-            '',
-            'from framework.graph import (',
-            '    Goal, SuccessCriterion, Constraint,',
-            '    NodeSpec, EdgeSpec, EdgeCondition,',
-            ')',
-            'from framework.graph.edge import GraphSpec',
-            'from framework.graph.goal import GoalStatus',
-            '',
-            '',
-            '# Goal',
+            "",
+            "from framework.graph import (",
+            "    Goal, SuccessCriterion, Constraint,",
+            "    NodeSpec, EdgeSpec, EdgeCondition,",
+            ")",
+            "from framework.graph.edge import GraphSpec",
+            "from framework.graph.goal import GoalStatus",
+            "",
+            "",
+            "# Goal",
         ]
 
         if self.session.goal:
             goal_json = self.session.goal.model_dump_json(indent=4)
-            lines.append('GOAL = Goal.model_validate_json(\'\'\'')
+            lines.append("GOAL = Goal.model_validate_json('''")
             lines.append(goal_json)
             lines.append("''')")
         else:
-            lines.append('GOAL = None')
+            lines.append("GOAL = None")
 
-        lines.extend([
-            '',
-            '',
-            '# Nodes',
-            'NODES = [',
-        ])
+        lines.extend(
+            [
+                "",
+                "",
+                "# Nodes",
+                "NODES = [",
+            ]
+        )
 
         for node in self.session.nodes:
             node_json = node.model_dump_json(indent=4)
-            lines.append('    NodeSpec.model_validate_json(\'\'\'')
+            lines.append("    NodeSpec.model_validate_json('''")
             lines.append(node_json)
             lines.append("    '''),")
 
-        lines.extend([
-            ']',
-            '',
-            '',
-            '# Edges',
-            'EDGES = [',
-        ])
+        lines.extend(
+            [
+                "]",
+                "",
+                "",
+                "# Edges",
+                "EDGES = [",
+            ]
+        )
 
         for edge in self.session.edges:
             edge_json = edge.model_dump_json(indent=4)
-            lines.append('    EdgeSpec.model_validate_json(\'\'\'')
+            lines.append("    EdgeSpec.model_validate_json('''")
             lines.append(edge_json)
             lines.append("    '''),")
 
-        lines.extend([
-            ']',
-            '',
-            '',
-            '# Graph',
-        ])
+        lines.extend(
+            [
+                "]",
+                "",
+                "",
+                "# Graph",
+            ]
+        )
 
         graph_json = graph.model_dump_json(indent=4)
-        lines.append('GRAPH = GraphSpec.model_validate_json(\'\'\'')
+        lines.append("GRAPH = GraphSpec.model_validate_json('''")
         lines.append(graph_json)
         lines.append("''')")
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     # =========================================================================
     # SESSION MANAGEMENT
@@ -743,7 +762,9 @@ class GraphBuilder:
             "tests": len(self.session.test_cases),
             "tests_passed": sum(1 for t in self.session.test_results if t.passed),
             "approvals": len(self.session.approvals),
-            "pending_validation": self._pending_validation.model_dump() if self._pending_validation else None,
+            "pending_validation": self._pending_validation.model_dump()
+            if self._pending_validation
+            else None,
         }
 
     def show(self) -> str:
@@ -755,11 +776,13 @@ class GraphBuilder:
         ]
 
         if self.session.goal:
-            lines.extend([
-                f"Goal: {self.session.goal.name}",
-                f"  {self.session.goal.description}",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"Goal: {self.session.goal.name}",
+                    f"  {self.session.goal.description}",
+                    "",
+                ]
+            )
 
         if self.session.nodes:
             lines.append("Nodes:")

@@ -236,11 +236,6 @@ class OutputCleaner:
         # If output is a dictionary but malformed, we might need to serialize it first
         # to try and fix the underlying string representation if it came from raw text
 
-        # NOTE: In graph/node.py, output is usually already parsed as best-effort.
-        # But if 'output' is completely wrong (missing keys), we might look at
-        # whether the raw response was stored somewhere.
-        # For this cleaner, we assume 'output' is what we have.
-
         # Heuristic: Check if any value is actually a JSON string that should be promoted
         # This handles the "JSON Parsing Trap" where LLM returns {"key": "{\"nested\": ...}"}
         heuristic_fixed = False
@@ -295,7 +290,7 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     f"🧹 Cleaning output from '{source_node_id}' using {self.config.fast_model}"
                 )
 
-                response = self.llm.complete(
+            response = self.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
                     "You clean malformed agent outputs. "

@@ -8,6 +8,7 @@ with simple assertions.
 Usage in tests:
     from framework.testing.llm_judge import LLMJudge
 
+    # Default: uses Anthropic (requires ANTHROPIC_API_KEY)
     judge = LLMJudge()
     result = judge.evaluate(
         constraint="no-hallucination",
@@ -16,23 +17,42 @@ Usage in tests:
         criteria="Summary must only contain facts from the source"
     )
     assert result["passes"], result["explanation"]
+
+    # With custom LLM provider:
+    from framework.llm.litellm import LiteLLMProvider
+    judge = LLMJudge(llm_provider=LiteLLMProvider(model="gpt-4o-mini"))
 """
 
+from __future__ import annotations
+
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from framework.llm.provider import LLMProvider
 
 
 class LLMJudge:
     """
     LLM-based judge for semantic evaluation of test results.
 
-    Uses Claude to evaluate whether outputs meet semantic constraints
+    Uses an LLM to evaluate whether outputs meet semantic constraints
     that can't be verified with simple assertions.
+
+    Supports any LLMProvider (Anthropic, OpenAI, LiteLLM, etc.) or falls
+    back to Anthropic for backward compatibility.
     """
 
-    def __init__(self):
-        """Initialize the LLM judge."""
-        self._client = None
+    def __init__(self, llm_provider: LLMProvider | None = None):
+        """
+        Initialize the LLM judge.
+
+        Args:
+            llm_provider: Optional LLM provider instance. If not provided,
+                          falls back to Anthropic client (requires ANTHROPIC_API_KEY).
+        """
+        self._provider = llm_provider
+        self._client = None  # Fallback Anthropic client (lazy-loaded)
 
     def _get_client(self):
         """Lazy-load the Anthropic client."""
@@ -41,8 +61,8 @@ class LLMJudge:
                 import anthropic
 
                 self._client = anthropic.Anthropic()
-            except ImportError:
-                raise RuntimeError("anthropic package required for LLM judge")
+            except ImportError as err:
+                raise RuntimeError("anthropic package required for LLM judge") from err
         return self._client
 
     def evaluate(
@@ -64,8 +84,6 @@ class LLMJudge:
         Returns:
             Dict with 'passes' (bool) and 'explanation' (str)
         """
-        client = self._get_client()
-
         prompt = f"""You are evaluating whether a summary meets a specific constraint.
 
 CONSTRAINT: {constraint}
@@ -85,14 +103,25 @@ Respond with JSON in this exact format:
 Only output the JSON, nothing else."""
 
         try:
-            response = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            # Use injected provider if available
+            if self._provider is not None:
+                response = self._provider.complete(
+                    messages=[{"role": "user", "content": prompt}],
+                    system="",
+                    max_tokens=500,
+                    json_mode=True,
+                )
+                text = response.content.strip()
+            else:
+                # Fallback to Anthropic (backward compatible)
+                client = self._get_client()
+                response = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=500,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = response.content[0].text.strip()
 
-            # Parse the response
-            text = response.content[0].text.strip()
             # Handle potential markdown code blocks
             if text.startswith("```"):
                 text = text.split("```")[1]
