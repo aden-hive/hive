@@ -34,7 +34,7 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ./quickstart.sh
 
 # Start Claude Code and build an agent
-claude> /building-agents
+claude> /building-agents-construction
 ```
 
 Follow the interactive prompts to:
@@ -160,7 +160,7 @@ PYTHONPATH=core:exports python -m my_agent test --type success
 
 1. **Detailed Setup**: See [ENVIRONMENT_SETUP.md](../ENVIRONMENT_SETUP.md)
 2. **Developer Guide**: See [DEVELOPER.md](../DEVELOPER.md)
-3. **Build Agents**: Use `/building-agents` skill in Claude Code
+3. **Build Agents**: Use `/building-agents-construction`, `/building-agents-core`, and `/building-agents-patterns` in Claude Code
 4. **Custom Tools**: Learn to integrate MCP servers
 5. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 

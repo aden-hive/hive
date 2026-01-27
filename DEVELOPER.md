@@ -101,8 +101,11 @@ Get API keys:
 
 This installs:
 
-- `/building-agents` - Build new goal-driven agents
+- `/building-agents-construction` - Create agent structure and workflows
+- `/building-agents-core` - Core agent logic and runtime concepts
+- `/building-agents-patterns` - Reusable agent design patterns
 - `/testing-agent` - Test agents with evaluation framework
+
 
 ### Verify Setup
 
@@ -213,7 +216,9 @@ The fastest way to build agents is using the Claude Code skills:
 ./quickstart.sh
 
 # Build a new agent
-claude> /building-agents
+claude> /building-agents-construction
+claude> /building-agents-core
+claude> /building-agents-patterns
 
 # Test the agent
 claude> /testing-agent
@@ -224,7 +229,7 @@ claude> /testing-agent
 1. **Define Your Goal**
 
    ```
-   claude> /building-agents
+   claude> /building-agents-construction
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
