@@ -313,11 +313,11 @@ class GraphExecutor:
                 if result.success:
                     # Validate output before accepting it
                     if result.output and node_spec.output_keys:
+                        expected_keys = [k for k in node_spec.output_keys if not node_spec.output_schema or k not in node_spec.output_schema or node_spec.output_schema[k].get("required", True)]
                         validation = self.validator.validate_all(
                             output=result.output,
-                            expected_keys=node_spec.output_keys,
+                            expected_keys=expected_keys,
                             check_hallucination=True,
-                            nullable_keys=node_spec.nullable_output_keys,
                         )
                         if not validation.success:
                             self.logger.error(f"   ✗ Output validation failed: {validation.error}")
