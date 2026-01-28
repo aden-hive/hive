@@ -17,9 +17,13 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class StrictBaseModel(BaseModel):
-    """Base model with strict validation and no extra fields."""
+    """Base model with strict type validation.
 
-    model_config = ConfigDict(strict=True, extra="forbid")
+    Note: extra='allow' is used to accommodate @computed_field properties
+    which are serialized but not part of the model signature.
+    """
+
+    model_config = ConfigDict(strict=True, extra="allow")
 
 
 class DecisionType(str, Enum):
