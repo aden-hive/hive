@@ -5,8 +5,15 @@ Validates node outputs match expected schemas and uses fast LLM
 to clean malformed outputs before they flow to the next node.
 
 This prevents cascading failures and dramatically improves execution success rates.
+
+Features:
+- Heuristic repair (fast, no LLM call)
+- LLM-based repair (fallback for complex cases)
+- Pattern caching: Remembers successful cleanings to skip redundant LLM calls
+- Failure tracking: Avoids repeatedly attempting cleanings that consistently fail
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -14,6 +21,41 @@ from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _generate_cache_key(
+    source_node_id: str,
+    target_node_id: str,
+    validation_errors: list[str],
+    output_structure: dict[str, Any],
+) -> str:
+    """
+    Generate a deterministic cache key for a cleaning pattern.
+
+    The key is based on:
+    - Source and target node IDs (the edge)
+    - The specific validation errors encountered
+    - The structure of the output (keys and value types, not actual values)
+
+    This allows us to cache cleaning transformations and reuse them
+    when the same pattern of errors occurs on the same edge.
+    """
+    # Extract output structure (keys and types only, not values)
+    structure = {k: type(v).__name__ for k, v in output_structure.items()}
+
+    # Sort errors for deterministic hashing
+    sorted_errors = sorted(validation_errors)
+
+    # Build the key components
+    key_data = {
+        "edge": f"{source_node_id}->{target_node_id}",
+        "errors": sorted_errors,
+        "structure": structure,
+    }
+
+    # Create a hash for compact storage
+    key_str = json.dumps(key_data, sort_keys=True)
+    return hashlib.sha256(key_str.encode()).hexdigest()[:16]
 
 
 def _heuristic_repair(text: str) -> dict | None:
@@ -71,6 +113,11 @@ class CleansingConfig:
     fallback_to_raw: bool = True  # If cleaning fails, pass raw output
     log_cleanings: bool = True  # Log when cleansing happens
 
+    # Cache configuration
+    max_cache_size: int = 1000  # Maximum number of cached patterns
+    max_failure_count: int = 3  # Skip cleaning after this many failures for same pattern
+    cache_ttl_seconds: int = 3600  # Cache entries expire after 1 hour (0 = no expiry)
+
 
 @dataclass
 class ValidationResult:
@@ -98,10 +145,18 @@ class OutputCleaner:
             config: Cleansing configuration
             llm_provider: Optional LLM provider.
         """
+        import time
+
         self.config = config
-        self.success_cache: dict[str, Any] = {}  # Cache successful patterns
-        self.failure_count: dict[str, int] = {}  # Track edge failures
+        # Cache structure: {cache_key: {"transformation": {...}, "timestamp": float}}
+        self.success_cache: dict[str, dict[str, Any]] = {}
+        # Failure tracking: {cache_key: {"count": int, "last_error": str, "timestamp": float}}
+        self.failure_count: dict[str, dict[str, Any]] = {}
         self.cleansing_count = 0  # Track total cleanings performed
+        self.cache_hits = 0  # Track cache hits
+        self.cache_misses = 0  # Track cache misses
+        self.skipped_due_to_failures = 0  # Track skipped cleanings
+        self._init_time = time.time()
 
         # Initialize LLM provider for cleaning
         if llm_provider:
@@ -120,9 +175,13 @@ class OutputCleaner:
                         model=config.fast_model,
                         temperature=0.0,  # Deterministic cleaning
                     )
-                    logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
+                    logger.info(
+                        f"✓ Initialized OutputCleaner with {config.fast_model}"
+                    )
                 else:
-                    logger.warning("⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled")
+                    logger.warning(
+                        "⚠ CEREBRAS_API_KEY not found, output cleaning will be disabled"
+                    )
                     self.llm = None
             except ImportError:
                 logger.warning("⚠ LiteLLMProvider not available, output cleaning disabled")
@@ -214,6 +273,9 @@ class OutputCleaner:
         """
         Use heuristics and fast LLM to clean malformed output.
 
+        Now with caching: remembers successful cleanings and skips LLM calls
+        when the same error pattern is encountered again.
+
         Args:
             output: Raw output from source node
             source_node_id: ID of source node
@@ -223,9 +285,52 @@ class OutputCleaner:
         Returns:
             Cleaned output matching target schema
         """
+        import time
+
         if not self.config.enabled:
             logger.warning("⚠ Output cleansing disabled in config")
             return output
+
+        # Generate cache key for this cleaning pattern
+        cache_key = _generate_cache_key(
+            source_node_id,
+            target_node_spec.id,
+            validation_errors,
+            output,
+        )
+
+        # --- PHASE 0: Check Cache ---
+        if self.config.cache_successful_patterns:
+            # Check if we've successfully cleaned this pattern before
+            cached = self._get_cached_transformation(cache_key)
+            if cached is not None:
+                self.cache_hits += 1
+                if self.config.log_cleanings:
+                    logger.info(
+                        f"⚡ Cache hit for {source_node_id} → {target_node_spec.id} "
+                        f"(key: {cache_key[:8]}..., total hits: {self.cache_hits})"
+                    )
+                # Apply the cached transformation
+                return self._apply_cached_transformation(output, cached)
+
+            self.cache_misses += 1
+
+            # Check if this pattern has failed too many times
+            if self._should_skip_cleaning(cache_key):
+                self.skipped_due_to_failures += 1
+                if self.config.log_cleanings:
+                    failure_info = self.failure_count.get(cache_key, {})
+                    logger.warning(
+                        f"⏭ Skipping cleaning for {source_node_id} → {target_node_spec.id}: "
+                        f"pattern failed {failure_info.get('count', 0)} times "
+                        f"(last error: {failure_info.get('last_error', 'unknown')[:50]}...)"
+                    )
+                if self.config.fallback_to_raw:
+                    return output
+                else:
+                    raise RuntimeError(
+                        f"Cleaning pattern {cache_key[:8]} has failed too many times"
+                    )
 
         # --- PHASE 1: Fast Heuristic Repair (Avoids LLM call) ---
         # Often the output is just a string containing JSON, or has minor syntax errors
@@ -240,7 +345,7 @@ class OutputCleaner:
         for key, value in output.items():
             if isinstance(value, str):
                 repaired = _heuristic_repair(value)
-                if repaired and isinstance(repaired, dict | list):
+                if repaired and isinstance(repaired, (dict, list)):
                     # Check if this repaired structure looks like what we want
                     # e.g. if the key is 'data' and the string contained valid JSON
                     fixed_output[key] = repaired
@@ -249,6 +354,9 @@ class OutputCleaner:
         # If we fixed something, re-validate manually to see if it's enough
         if heuristic_fixed:
             logger.info("⚡ Heuristic repair applied (nested JSON expansion)")
+            # Cache this heuristic fix too (it's a valid transformation)
+            if self.config.cache_successful_patterns:
+                self._cache_transformation(cache_key, output, fixed_output, "heuristic")
             return fixed_output
 
         # --- PHASE 2: LLM-based Repair ---
@@ -289,7 +397,8 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
             response = self.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
-                    "You clean malformed agent outputs. Return only valid JSON matching the schema."
+                    "You clean malformed agent outputs. "
+                    "Return only valid JSON matching the schema."
                 ),
                 max_tokens=2048,  # Sufficient for cleaning most outputs
             )
@@ -310,16 +419,34 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                     logger.info(
                         f"✓ Output cleaned successfully (total cleanings: {self.cleansing_count})"
                     )
+
+                # Cache this successful transformation
+                if self.config.cache_successful_patterns:
+                    self._cache_transformation(cache_key, output, cleaned, "llm")
+                    if self.config.log_cleanings:
+                        logger.debug(
+                            f"📦 Cached transformation for key {cache_key[:8]}... "
+                            f"(cache size: {len(self.success_cache)})"
+                        )
+
                 return cleaned
             else:
-                logger.warning(f"⚠ Cleaned output is not a dict: {type(cleaned)}")
+                logger.warning(
+                    f"⚠ Cleaned output is not a dict: {type(cleaned)}"
+                )
+                # Track this as a failure
+                self._record_failure(cache_key, f"Cleaned output is not a dict: {type(cleaned)}")
                 if self.config.fallback_to_raw:
                     return output
                 else:
-                    raise ValueError(f"Cleaning produced {type(cleaned)}, expected dict")
+                    raise ValueError(
+                        f"Cleaning produced {type(cleaned)}, expected dict"
+                    )
 
         except json.JSONDecodeError as e:
             logger.error(f"✗ Failed to parse cleaned JSON: {e}")
+            # Track this failure
+            self._record_failure(cache_key, f"JSON parse error: {e}")
             if self.config.fallback_to_raw:
                 logger.info("↩ Falling back to raw output")
                 return output
@@ -328,11 +455,224 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
 
         except Exception as e:
             logger.error(f"✗ Output cleaning failed: {e}")
+            # Track this failure
+            self._record_failure(cache_key, str(e))
             if self.config.fallback_to_raw:
                 logger.info("↩ Falling back to raw output")
                 return output
             else:
                 raise
+
+    def _get_cached_transformation(self, cache_key: str) -> dict[str, Any] | None:
+        """
+        Retrieve a cached transformation if it exists and is not expired.
+
+        Args:
+            cache_key: The cache key to look up
+
+        Returns:
+            The cached transformation data, or None if not found/expired
+        """
+        import time
+
+        if cache_key not in self.success_cache:
+            return None
+
+        cached = self.success_cache[cache_key]
+
+        # Check TTL if configured
+        if self.config.cache_ttl_seconds > 0:
+            age = time.time() - cached.get("timestamp", 0)
+            if age > self.config.cache_ttl_seconds:
+                # Expired, remove from cache
+                del self.success_cache[cache_key]
+                logger.debug(f"🗑 Cache entry {cache_key[:8]}... expired (age: {age:.0f}s)")
+                return None
+
+        return cached.get("transformation")
+
+    def _apply_cached_transformation(
+        self,
+        output: dict[str, Any],
+        transformation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Apply a cached transformation to the output.
+
+        The transformation stores the mapping of how keys were transformed.
+        For simple cases, we just return the cached cleaned output directly.
+        For more complex cases, we apply the learned transformation rules.
+
+        Args:
+            output: The raw output to transform
+            transformation: The cached transformation data
+
+        Returns:
+            The transformed output
+        """
+        # For now, we use a simple approach: if the transformation type is "direct",
+        # we have stored key mappings that we can apply.
+        # For "llm" transformations, we store the output structure template.
+
+        transform_type = transformation.get("type", "direct")
+
+        if transform_type == "direct":
+            # Direct key mapping stored
+            result = {}
+            key_map = transformation.get("key_map", {})
+            for target_key, source_info in key_map.items():
+                if source_info["source_key"] in output:
+                    value = output[source_info["source_key"]]
+                    # Apply any necessary transformations
+                    if source_info.get("parse_json") and isinstance(value, str):
+                        try:
+                            value = json.loads(value)
+                        except json.JSONDecodeError:
+                            pass
+                    result[target_key] = value
+            return result
+
+        elif transform_type in ("heuristic", "llm"):
+            # For heuristic/LLM transformations, we stored a template
+            # Try to apply the same fix pattern
+            template = transformation.get("template", {})
+            fixed_keys = transformation.get("fixed_keys", [])
+
+            result = output.copy()
+            for key in fixed_keys:
+                if key in output and isinstance(output[key], str):
+                    # Try the same heuristic repair that worked before
+                    repaired = _heuristic_repair(output[key])
+                    if repaired:
+                        result[key] = repaired
+
+            # If we have a template with expected keys, ensure they exist
+            for key in template.get("expected_keys", []):
+                if key not in result:
+                    # Try to find the value in nested structures
+                    for v in output.values():
+                        if isinstance(v, dict) and key in v:
+                            result[key] = v[key]
+                            break
+
+            return result
+
+        # Fallback: return output as-is (shouldn't happen)
+        return output
+
+    def _cache_transformation(
+        self,
+        cache_key: str,
+        original_output: dict[str, Any],
+        cleaned_output: dict[str, Any],
+        transform_type: str,
+    ) -> None:
+        """
+        Cache a successful transformation for future reuse.
+
+        Args:
+            cache_key: The cache key
+            original_output: The original malformed output
+            cleaned_output: The successfully cleaned output
+            transform_type: "heuristic" or "llm"
+        """
+        import time
+
+        # Enforce max cache size (LRU-style: remove oldest entries)
+        if len(self.success_cache) >= self.config.max_cache_size:
+            # Remove the oldest 10% of entries
+            entries = sorted(
+                self.success_cache.items(),
+                key=lambda x: x[1].get("timestamp", 0),
+            )
+            num_to_remove = max(1, len(entries) // 10)
+            for key, _ in entries[:num_to_remove]:
+                del self.success_cache[key]
+            logger.debug(f"🗑 Evicted {num_to_remove} old cache entries")
+
+        # Determine which keys were fixed
+        fixed_keys = []
+        for key in original_output:
+            if key in cleaned_output:
+                orig_val = original_output[key]
+                clean_val = cleaned_output[key]
+                # If the value changed type or structure, it was "fixed"
+                if type(orig_val) != type(clean_val):
+                    fixed_keys.append(key)
+                elif isinstance(orig_val, str) and isinstance(clean_val, dict):
+                    fixed_keys.append(key)
+
+        transformation = {
+            "type": transform_type,
+            "fixed_keys": fixed_keys,
+            "template": {
+                "expected_keys": list(cleaned_output.keys()),
+            },
+        }
+
+        self.success_cache[cache_key] = {
+            "transformation": transformation,
+            "timestamp": time.time(),
+        }
+
+    def _should_skip_cleaning(self, cache_key: str) -> bool:
+        """
+        Check if we should skip cleaning based on failure history.
+
+        Args:
+            cache_key: The cache key to check
+
+        Returns:
+            True if this pattern has failed too many times
+        """
+        if cache_key not in self.failure_count:
+            return False
+
+        failure_info = self.failure_count[cache_key]
+        return failure_info.get("count", 0) >= self.config.max_failure_count
+
+    def _record_failure(self, cache_key: str, error_message: str) -> None:
+        """
+        Record a cleaning failure for tracking.
+
+        Args:
+            cache_key: The cache key
+            error_message: Description of the failure
+        """
+        import time
+
+        if cache_key not in self.failure_count:
+            self.failure_count[cache_key] = {
+                "count": 0,
+                "last_error": "",
+                "timestamp": 0,
+            }
+
+        self.failure_count[cache_key]["count"] += 1
+        self.failure_count[cache_key]["last_error"] = error_message
+        self.failure_count[cache_key]["timestamp"] = time.time()
+
+        if self.config.log_cleanings:
+            count = self.failure_count[cache_key]["count"]
+            logger.debug(
+                f"📊 Failure #{count} for pattern {cache_key[:8]}...: {error_message[:50]}"
+            )
+
+    def clear_cache(self) -> dict[str, int]:
+        """
+        Clear the transformation cache and failure tracking.
+
+        Returns:
+            Stats about what was cleared
+        """
+        stats = {
+            "cache_entries_cleared": len(self.success_cache),
+            "failure_entries_cleared": len(self.failure_count),
+        }
+        self.success_cache.clear()
+        self.failure_count.clear()
+        logger.info(f"🧹 Cache cleared: {stats}")
+        return stats
 
     def _build_schema_description(self, node_spec: Any) -> str:
         """Build human-readable schema description from NodeSpec."""
@@ -385,9 +725,48 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
         return True
 
     def get_stats(self) -> dict[str, Any]:
-        """Get cleansing statistics."""
+        """
+        Get comprehensive cleansing and caching statistics.
+
+        Returns:
+            Dict with cleaning stats, cache performance, and failure tracking
+        """
+        import time
+
+        total_requests = self.cache_hits + self.cache_misses
+        hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
+
+        # Calculate estimated LLM calls saved
+        # Each cache hit saves one LLM call (assuming heuristic doesn't fix it)
+        llm_calls_saved = self.cache_hits
+
+        # Calculate uptime
+        uptime_seconds = time.time() - self._init_time
+
         return {
+            # Cleaning stats
             "total_cleanings": self.cleansing_count,
-            "failure_count": dict(self.failure_count),
+            "skipped_due_to_failures": self.skipped_due_to_failures,
+
+            # Cache performance
             "cache_size": len(self.success_cache),
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "cache_hit_rate_percent": round(hit_rate, 1),
+            "llm_calls_saved": llm_calls_saved,
+
+            # Failure tracking
+            "tracked_failure_patterns": len(self.failure_count),
+            "failure_details": {
+                k: {"count": v["count"], "last_error": v["last_error"][:100]}
+                for k, v in self.failure_count.items()
+            },
+
+            # Runtime info
+            "uptime_seconds": round(uptime_seconds, 1),
+            "config": {
+                "max_cache_size": self.config.max_cache_size,
+                "max_failure_count": self.config.max_failure_count,
+                "cache_ttl_seconds": self.config.cache_ttl_seconds,
+            },
         }
