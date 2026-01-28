@@ -1,0 +1,2 @@
+exclude_dirs: ['**/tests', '**/venv', '.git', '__pycache__']
+skips: []

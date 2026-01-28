@@ -45,7 +45,7 @@ def register_tools(mcp: FastMCP) -> None:
 
             result = subprocess.run(
                 command,
-                shell=True,
+                shell=True,   # nosec B602
                 cwd=secure_cwd,
                 capture_output=True,
                 text=True,

@@ -57,6 +57,28 @@ jobs:
           cd core
           pytest tests/ -v
 
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+
+      - name: Run pip-audit
+        run: pip-audit
+
+      - name: Run Bandit
+        run: bandit -c .bandit.yml -r core/framework tools/src/aden_tools -lll
+
   validate:
     name: Validate Agent Exports
     runs-on: ubuntu-latest
