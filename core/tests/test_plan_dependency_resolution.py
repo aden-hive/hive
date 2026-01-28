@@ -6,14 +6,13 @@ instead of hanging indefinitely.
 """
 
 import pytest
-from datetime import datetime
 
 from framework.graph.plan import (
+    ActionSpec,
+    ActionType,
     Plan,
     PlanStep,
     StepStatus,
-    ActionSpec,
-    ActionType,
 )
 
 
@@ -134,60 +133,72 @@ class TestPlanGetReadySteps:
 
     def test_ready_steps_with_no_dependencies(self):
         """Steps with no dependencies should be ready."""
-        plan = self._make_plan([
-            self._make_step("step1"),
-            self._make_step("step2"),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1"),
+                self._make_step("step2"),
+            ]
+        )
         ready = plan.get_ready_steps()
         assert len(ready) == 2
         assert {s.id for s in ready} == {"step1", "step2"}
 
     def test_ready_steps_with_completed_dependency(self):
         """Dependent step should be ready when dependency is completed."""
-        plan = self._make_plan([
-            self._make_step("step1", status=StepStatus.COMPLETED),
-            self._make_step("step2", deps=["step1"]),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", status=StepStatus.COMPLETED),
+                self._make_step("step2", deps=["step1"]),
+            ]
+        )
         ready = plan.get_ready_steps()
         assert len(ready) == 1
         assert ready[0].id == "step2"
 
     def test_ready_steps_with_failed_dependency(self):
         """Dependent step should be ready when dependency failed."""
-        plan = self._make_plan([
-            self._make_step("step1", status=StepStatus.FAILED),
-            self._make_step("step2", deps=["step1"]),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", status=StepStatus.FAILED),
+                self._make_step("step2", deps=["step1"]),
+            ]
+        )
         ready = plan.get_ready_steps()
         assert len(ready) == 1
         assert ready[0].id == "step2"
 
     def test_ready_steps_with_skipped_dependency(self):
         """Dependent step should be ready when dependency was skipped."""
-        plan = self._make_plan([
-            self._make_step("step1", status=StepStatus.SKIPPED),
-            self._make_step("step2", deps=["step1"]),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", status=StepStatus.SKIPPED),
+                self._make_step("step2", deps=["step1"]),
+            ]
+        )
         ready = plan.get_ready_steps()
         assert len(ready) == 1
         assert ready[0].id == "step2"
 
     def test_ready_steps_with_rejected_dependency(self):
         """Dependent step should be ready when dependency was rejected."""
-        plan = self._make_plan([
-            self._make_step("step1", status=StepStatus.REJECTED),
-            self._make_step("step2", deps=["step1"]),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", status=StepStatus.REJECTED),
+                self._make_step("step2", deps=["step1"]),
+            ]
+        )
         ready = plan.get_ready_steps()
         assert len(ready) == 1
         assert ready[0].id == "step2"
 
     def test_no_ready_steps_when_dependency_in_progress(self):
         """Dependent step should not be ready when dependency is in progress."""
-        plan = self._make_plan([
-            self._make_step("step1", status=StepStatus.IN_PROGRESS),
-            self._make_step("step2", deps=["step1"]),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", status=StepStatus.IN_PROGRESS),
+                self._make_step("step2", deps=["step1"]),
+            ]
+        )
         ready = plan.get_ready_steps()
         assert len(ready) == 0
 
@@ -215,77 +226,95 @@ class TestPlanCompletion:
 
     def test_is_complete_when_all_completed(self):
         """Plan should be complete when all steps are completed."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.COMPLETED),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.COMPLETED),
+            ]
+        )
         assert plan.is_complete() is True
 
     def test_is_complete_when_all_terminal_mixed(self):
         """Plan should be complete when all steps are in terminal states (mixed)."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.FAILED),
-            self._make_step("step3", StepStatus.SKIPPED),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.FAILED),
+                self._make_step("step3", StepStatus.SKIPPED),
+            ]
+        )
         assert plan.is_complete() is True
 
     def test_is_not_complete_when_pending(self):
         """Plan should not be complete when steps are pending."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.PENDING),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.PENDING),
+            ]
+        )
         assert plan.is_complete() is False
 
     def test_is_not_complete_when_in_progress(self):
         """Plan should not be complete when steps are in progress."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.IN_PROGRESS),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.IN_PROGRESS),
+            ]
+        )
         assert plan.is_complete() is False
 
     def test_is_successful_when_all_completed(self):
         """Plan should be successful only when all steps completed."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.COMPLETED),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.COMPLETED),
+            ]
+        )
         assert plan.is_successful() is True
 
     def test_is_not_successful_when_failed(self):
         """Plan should not be successful when any step failed."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.FAILED),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.FAILED),
+            ]
+        )
         assert plan.is_successful() is False
 
     def test_has_failed_steps(self):
         """has_failed_steps should detect failed steps."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.FAILED),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.FAILED),
+            ]
+        )
         assert plan.has_failed_steps() is True
 
     def test_has_no_failed_steps(self):
         """has_failed_steps should return False when all succeeded."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.COMPLETED),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.COMPLETED),
+            ]
+        )
         assert plan.has_failed_steps() is False
 
     def test_get_failed_steps(self):
         """get_failed_steps should return all failed/skipped/rejected steps."""
-        plan = self._make_plan([
-            self._make_step("step1", StepStatus.COMPLETED),
-            self._make_step("step2", StepStatus.FAILED),
-            self._make_step("step3", StepStatus.SKIPPED),
-            self._make_step("step4", StepStatus.REJECTED),
-        ])
+        plan = self._make_plan(
+            [
+                self._make_step("step1", StepStatus.COMPLETED),
+                self._make_step("step2", StepStatus.FAILED),
+                self._make_step("step3", StepStatus.SKIPPED),
+                self._make_step("step4", StepStatus.REJECTED),
+            ]
+        )
         failed = plan.get_failed_steps()
         assert len(failed) == 3
         assert {s.id for s in failed} == {"step2", "step3", "step4"}
