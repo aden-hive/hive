@@ -66,7 +66,7 @@ Adenは、AIエージェントの構築、デプロイ、運用、適応のた�
 ### 前提条件
 
 - [Python 3.11+](https://www.python.org/downloads/) - エージェント開発用
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - オプション、コンテナ化されたツール用
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - 任意。PostgreSQL や Redis などのコンテナ化された依存関係を必要とする MCP ツールを使用する場合のみ必要です。基本的なエージェント開発には不要です。
 
 ### インストール
 
