@@ -21,10 +21,9 @@ Quick Start:
         AdenSyncProvider,
     )
 
-    # Configure
+    # Configure (API key loaded from ADEN_API_KEY env var)
     client = AdenCredentialClient(AdenClientConfig(
         base_url=os.environ["ADEN_API_URL"],
-        api_key=os.environ["ADEN_API_KEY"],
     ))
 
     provider = AdenSyncProvider(client=client)

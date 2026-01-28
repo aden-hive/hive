@@ -6,9 +6,15 @@ The Aden server handles OAuth2 authorization flows and token management.
 This client fetches tokens and delegates refresh operations to Aden.
 
 Usage:
+    # API key loaded from ADEN_API_KEY environment variable by default
     client = AdenCredentialClient(AdenClientConfig(
         base_url="https://hive.adenhq.com",
-        api_key=os.environ["ADEN_API_KEY"],
+    ))
+
+    # Or explicitly provide the API key
+    client = AdenCredentialClient(AdenClientConfig(
+        base_url="https://hive.adenhq.com",
+        api_key="your-api-key",
     ))
 
     # Fetch a credential
@@ -23,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -80,8 +87,9 @@ class AdenClientConfig:
     base_url: str
     """Base URL of the Aden server (e.g., 'https://hive.adenhq.com')."""
 
-    api_key: str
-    """Agent's API key for authenticating with Aden."""
+    api_key: str | None = None
+    """Agent's API key for authenticating with Aden.
+    If not provided, loaded from ADEN_API_KEY environment variable."""
 
     tenant_id: str | None = None
     """Optional tenant ID for multi-tenant deployments."""
@@ -94,6 +102,16 @@ class AdenClientConfig:
 
     retry_delay: float = 1.0
     """Base delay between retries in seconds (exponential backoff)."""
+
+    def __post_init__(self) -> None:
+        """Load API key from environment if not provided."""
+        if self.api_key is None:
+            self.api_key = os.environ.get("ADEN_API_KEY")
+            if not self.api_key:
+                raise ValueError(
+                    "Aden API key not provided. Either pass api_key to AdenClientConfig "
+                    "or set the ADEN_API_KEY environment variable."
+                )
 
 
 @dataclass
@@ -177,10 +195,9 @@ class AdenCredentialClient:
     - Request headers for authentication and tenant isolation
 
     Usage:
+        # API key loaded from ADEN_API_KEY environment variable
         config = AdenClientConfig(
             base_url="https://hive.adenhq.com",
-            api_key="your-agent-api-key",
-            tenant_id="optional-tenant-id",
         )
 
         client = AdenCredentialClient(config)

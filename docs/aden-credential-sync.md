@@ -267,7 +267,7 @@ HTTP client for communicating with the Aden server.
 class AdenClientConfig:
     """Configuration for Aden API client."""
     base_url: str                    # e.g., "https://hive.adenhq.com"
-    api_key: str                     # Agent's API key
+    api_key: str | None = None       # Loaded from ADEN_API_KEY env var if not provided
     tenant_id: str | None = None     # For multi-tenant
     timeout: float = 30.0
     retry_attempts: int = 3
@@ -320,9 +320,9 @@ class AdenSyncProvider(CredentialProvider):
     Provider that synchronizes credentials with Aden server.
 
     Usage:
+        # API key loaded from ADEN_API_KEY env var by default
         client = AdenCredentialClient(AdenClientConfig(
             base_url="https://hive.adenhq.com",
-            api_key=os.environ["ADEN_API_KEY"],
         ))
 
         provider = AdenSyncProvider(client=client)
@@ -417,9 +417,9 @@ from core.framework.credentials.storage import EncryptedFileStorage
 from core.framework.credentials.aden import AdenCredentialClient, AdenClientConfig, AdenSyncProvider
 
 # Configure
+# API key loaded from ADEN_API_KEY env var by default
 client = AdenCredentialClient(AdenClientConfig(
     base_url=os.environ["ADEN_API_URL"],
-    api_key=os.environ["ADEN_API_KEY"],
     tenant_id=os.environ.get("ADEN_TENANT_ID"),
 ))
 
@@ -466,6 +466,7 @@ store = CredentialStore(
 
 ```python
 def create_tenant_store(tenant_id: str) -> CredentialStore:
+    # Explicit api_key for per-tenant credentials
     client = AdenCredentialClient(AdenClientConfig(
         base_url=os.environ["ADEN_API_URL"],
         api_key=os.environ[f"ADEN_API_KEY_{tenant_id}"],

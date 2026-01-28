@@ -14,10 +14,9 @@ Usage:
         AdenSyncProvider,
     )
 
-    # Configure client
+    # Configure client (API key loaded from ADEN_API_KEY env var)
     client = AdenCredentialClient(AdenClientConfig(
         base_url=os.environ["ADEN_API_URL"],
-        api_key=os.environ["ADEN_API_KEY"],
     ))
 
     # Create provider
@@ -409,10 +408,8 @@ class AdenSyncProvider(CredentialProvider):
 
         return CredentialObject(
             id=aden_response.integration_id,
-            name=f"{aden_response.integration_type.title()} Integration",
             credential_type=CredentialType.OAUTH2,
             keys=keys,
             provider_id=self.provider_id,
             auto_refresh=True,
-            metadata=aden_response.metadata,
         )
