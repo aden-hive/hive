@@ -209,8 +209,12 @@ class HashiCorpVaultStorage(CredentialStorage):
                 mount_point=self._mount,
             )
             return True
-        except Exception:
-            return False
+        except Exception as e:
+            # "not found" / 404 means credential doesn't exist; other errors are operational failures
+            error_str = str(e).lower()
+            if "not found" in error_str or "404" in error_str:
+                return False
+            raise
 
     def _serialize_for_vault(self, credential: CredentialObject) -> dict[str, Any]:
         """Convert credential to Vault secret format."""
