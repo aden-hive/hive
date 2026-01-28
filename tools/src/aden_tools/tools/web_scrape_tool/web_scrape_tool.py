@@ -8,8 +8,8 @@ Respect robots.txt by default for ethical scraping.
 
 from __future__ import annotations
 
-from typing import Any
-from urllib.parse import urlparse
+from typing import Any, List
+from urllib.parse import urlparse, urljoin
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -137,10 +137,7 @@ def register_tools(mcp: FastMCP) -> None:
                     }
 
             # Validate max_length
-            if max_length < 1000:
-                max_length = 1000
-            elif max_length > 500000:
-                max_length = 500000
+            max_length = max(1000, min(max_length, 500000))
 
             # Make request
             response = httpx.get(
@@ -157,8 +154,7 @@ def register_tools(mcp: FastMCP) -> None:
             if response.status_code != 200:
                 return {"error": f"HTTP {response.status_code}: Failed to fetch URL"}
 
-            # --- START FIX: Validate Content-Type ---
-            # Added validation to prevent parsing non-HTML content (like JSON, PDF, Images)
+            # Check content type
             content_type = response.headers.get("content-type", "").lower()
             if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
                 return {
@@ -166,7 +162,6 @@ def register_tools(mcp: FastMCP) -> None:
                     "url": url,
                     "skipped": True,
                 }
-            # --- END FIX ---
 
             # Parse HTML
             soup = BeautifulSoup(response.text, "html.parser")
@@ -178,10 +173,7 @@ def register_tools(mcp: FastMCP) -> None:
                 tag.decompose()
 
             # Get title and description
-            title = ""
-            title_tag = soup.find("title")
-            if title_tag:
-                title = title_tag.get_text(strip=True)
+            title = soup.title.get_text(strip=True) if soup.title else ""
 
             description = ""
             meta_desc = soup.find("meta", attrs={"name": "description"})
@@ -223,12 +215,15 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Extract links if requested
             if include_links:
-                links: list[dict[str, str]] = []
+                links: List[dict[str, str]] = []
+                base_url = str(response.url)  # Use final URL after redirects
                 for a in soup.find_all("a", href=True)[:50]:
                     href = a["href"]
+                    # Convert relative URLs to absolute URLs
+                    absolute_href = urljoin(base_url, href)
                     link_text = a.get_text(strip=True)
-                    if link_text and href:
-                        links.append({"text": link_text, "href": href})
+                    if link_text and absolute_href:
+                        links.append({"text": link_text, "href": absolute_href})
                 result["links"] = links
 
             return result
