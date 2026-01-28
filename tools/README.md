@@ -75,6 +75,7 @@ python mcp_server.py
 | `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
+| `search_wikipedia`     | Search Wikipedia for pages and summaries       |
 
 ## Project Structure
 
@@ -96,7 +97,8 @@ tools/
 │       │   └── execute_command_tool.py
 │       ├── web_search_tool/
 │       ├── web_scrape_tool/
-│       └── pdf_read_tool/
+│       ├── pdf_read_tool/
+│       └── wikipedia_tool/
 ├── tests/                   # Test suite
 ├── mcp_server.py            # MCP server entry point
 ├── README.md

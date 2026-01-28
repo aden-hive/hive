@@ -32,6 +32,7 @@ from .file_system_toolkits.execute_command_tool import (
     register_tools as register_execute_command,
 )
 from .file_system_toolkits.grep_search import register_tools as register_grep_search
+from .wikipedia_tool import register_tools as register_wikipedia
 from .file_system_toolkits.list_dir import register_tools as register_list_dir
 from .file_system_toolkits.replace_file_content import (
     register_tools as register_replace_file_content,
@@ -69,6 +70,7 @@ def register_all_tools(
     register_web_scrape(mcp)
     register_pdf_read(mcp)
     register_runtime_logs(mcp)
+    register_wikipedia(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -97,6 +99,7 @@ def register_all_tools(
         "web_search",
         "web_scrape",
         "pdf_read",
+        "search_wikipedia",
         "view_file",
         "write_to_file",
         "list_dir",
