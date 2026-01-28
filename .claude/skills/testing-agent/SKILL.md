@@ -10,15 +10,13 @@ This skill provides tools for testing agents built with the building-agents skil
 ## Workflow Overview
 
 1. `mcp__agent-builder__list_tests` - Check what tests exist
-2. `mcp__agent-builder__generate_constraint_tests` or `mcp__agent-builder__generate_success_tests` - Get test guidelines
-3. **Write tests directly** using the Write tool with the guidelines provided
-4. `mcp__agent-builder__run_tests` - Execute tests
-5. `mcp__agent-builder__debug_test` - Debug failures
+2. **Generate tests yourself** using your LLM context and write them directly
+3. `mcp__agent-builder__run_tests` - Execute tests
+4. `mcp__agent-builder__debug_test` - Debug failures
 
 ## How Test Generation Works
 
-The `generate_*_tests` MCP tools return **guidelines and templates** - they do NOT generate test code via LLM.
-You (Claude) write the tests directly using the Write tool based on the guidelines.
+You (Claude) generate tests yourself using your LLM context. Write tests directly using the Write tool based on the agent's goal, constraints, and success criteria.
 
 ### Example Workflow
 
@@ -63,9 +61,8 @@ mcp__agent-builder__debug_test(
 
 Run goal-based evaluation tests for agents built with the building-agents skill.
 
-**Key Principle: MCP tools provide guidelines, Claude writes tests directly**
-- ✅ Get guidelines: `generate_constraint_tests`, `generate_success_tests` → returns templates and guidelines
-- ✅ Write tests: Use the Write tool with the provided file_header and test_template
+**Key Principle: Claude generates tests directly using LLM context**
+- ✅ Generate tests: Use your LLM context to write comprehensive tests
 - ✅ Run tests: `run_tests` (runs pytest via subprocess)
 - ✅ Debug failures: `debug_test` (re-runs single test with verbose output)
 - ✅ List tests: `list_tests` (scans Python test files)
@@ -111,11 +108,10 @@ async def test_happy_path(mock_mode):
 ## Quick Start
 
 1. **Check existing tests** - `list_tests(goal_id, agent_path)`
-2. **Get test guidelines** - `generate_constraint_tests` or `generate_success_tests`
-3. **Write tests** - Use the Write tool with the provided file_header and guidelines
-4. **Run tests** - `run_tests(goal_id, agent_path)`
-5. **Debug failures** - `debug_test(goal_id, test_name, agent_path)`
-6. **Iterate** - Repeat steps 4-5 until all pass
+2. **Generate tests yourself** - Use your LLM context to write comprehensive tests
+3. **Run tests** - `run_tests(goal_id, agent_path)`
+4. **Debug failures** - `debug_test(goal_id, test_name, agent_path)`
+5. **Iterate** - Repeat steps 3-4 until all pass
 
 ## ⚠️ API Key Requirement for Real Testing
 

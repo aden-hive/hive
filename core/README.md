@@ -132,7 +132,7 @@ runtime.end_run(success=True, narrative="Successfully processed all data")
 
 The framework includes a goal-based testing framework for validating agent behavior.
 
-Tests are generated using MCP tools (`generate_constraint_tests`, `generate_success_tests`) which return guidelines. Claude writes tests directly using the Write tool based on these guidelines.
+Tests are written directly by Claude using the Write tool based on the agent's goal, constraints, and success criteria.
 
 ```bash
 # Run tests against an agent
