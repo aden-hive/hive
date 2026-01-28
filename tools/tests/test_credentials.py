@@ -1,6 +1,7 @@
 """Tests for CredentialManager."""
 
 import pytest
+
 from aden_tools.credentials import (
     CREDENTIAL_SPECS,
     CredentialError,

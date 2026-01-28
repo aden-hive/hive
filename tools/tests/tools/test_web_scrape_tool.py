@@ -1,8 +1,9 @@
 """Tests for web_scrape tool (FastMCP)."""
 
 import pytest
-from aden_tools.tools.web_scrape_tool import register_tools
 from fastmcp import FastMCP
+
+from aden_tools.tools.web_scrape_tool import register_tools
 
 
 @pytest.fixture

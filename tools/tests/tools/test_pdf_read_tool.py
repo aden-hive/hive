@@ -3,8 +3,9 @@
 from pathlib import Path
 
 import pytest
-from aden_tools.tools.pdf_read_tool import register_tools
 from fastmcp import FastMCP
+
+from aden_tools.tools.pdf_read_tool import register_tools
 
 
 @pytest.fixture

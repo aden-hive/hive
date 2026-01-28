@@ -122,41 +122,97 @@ PYTHONPATH=core:exports python -m outbound_sales_agent validate
 PYTHONPATH=core:exports python -m personal_assistant_agent run --input '{...}'
 ```
 
-## Building New Agents
+## Building New Agents and Run Flow
 
-Use Claude Code CLI with the agent building skills:
+Build and run an agent using Claude Code CLI with the agent building skills:
 
-### 1. Install Skills (One-time)
+### 1. Install Claude Skills (One-time)
 
 ```bash
 ./quickstart.sh
 ```
 
-This installs:
+This installs agent-related Claude Code skills:
 
-- `/building-agents` - Build new agents
-- `/testing-agent` - Test agents
+- `/building-agents-construction` - Step-by-step build guide
+- `/building-agents-core` - Fundamental concepts
+- `/building-agents-patterns` - Best practices
+- `/testing-agent` - Test and validate agents
+- `/agent-workflow` - Complete workflow
 
 ### 2. Build an Agent
 
 ```
-claude> /building-agents
+claude> /building-agents-construction
 ```
 
 Follow the prompts to:
 
 1. Define your agent's goal
 2. Design the workflow nodes
-3. Connect edges
-4. Generate the agent package
+3. Connect nodes with edges
+4. Generate the agent package under `exports/`
 
-### 3. Test Your Agent
+This step creates the initial agent structure required for further development.
+
+### 3. Define Agent Logic
+
+```
+claude> /building-agents-core
+```
+
+Follow the prompts to:
+
+1. Understand the agent architecture and file structure
+2. Define the agent's goal, success criteria, and constraints
+3. Learn node types (LLM, tool-use, router, function)
+4. Discover and validate available tools before use
+
+This step establishes the core concepts and rules needed before building an agent.
+
+### 4. Apply Agent Patterns
+
+```
+claude> /building-agents-patterns
+```
+
+Follow the prompts to:
+
+1. Apply best-practice agent design patterns
+2. Add pause/resume flows for multi-turn interactions
+3. Improve robustness with routing, fallbacks, and retries
+4. Avoid common anti-patterns during agent construction
+
+This step helps optimize agent design before final testing.
+
+### 5. Test Your Agent
 
 ```
 claude> /testing-agent
 ```
+Follow the prompts to:
 
-Creates comprehensive test suites for your agent.
+1. Generate test guidelines for constraints and success criteria
+2. Write agent tests directly under `exports/{agent}/tests/`
+3. Run goal-based evaluation tests
+4. Debug failing tests and iterate on agent improvements
+
+This step verifies that the agent meets its goals before production use.
+
+### 6. Agent Development Workflow (End-to-End)
+
+```
+claude> /agent-workflow
+```
+
+Follow the guided flow to:
+
+1. Understand core agent concepts (optional)
+2. Build the agent structure step by step
+3. Apply best-practice design patterns (optional)
+4. Test and validate the agent against its goals
+
+This workflow orchestrates all agent-building skills to take you from idea → production-ready agent.
 
 ## Troubleshooting
 
@@ -289,7 +345,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-claude> /building-agents
+claude> /building-agents-construction
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 

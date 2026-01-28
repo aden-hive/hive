@@ -1,8 +1,9 @@
 """Tests for web_search tool with multi-provider support (FastMCP)."""
 
 import pytest
-from aden_tools.tools.web_search_tool import register_tools
 from fastmcp import FastMCP
+
+from aden_tools.tools.web_search_tool import register_tools
 
 
 @pytest.fixture
