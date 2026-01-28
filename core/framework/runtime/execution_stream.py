@@ -260,7 +260,7 @@ class ExecutionStream:
             raise RuntimeError(f"ExecutionStream '{self.stream_id}' is not running")
 
         # Generate execution ID
-        execution_id = f"exec_{self.stream_id}_{uuid.uuid4().hex[:8]}"
+        execution_id = f"exec_{self.stream_id}_{uuid.uuid4().hex}"
         if correlation_id is None:
             correlation_id = execution_id
 

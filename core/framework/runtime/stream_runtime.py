@@ -119,7 +119,7 @@ class StreamRuntime:
             The run ID
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_id = f"run_{self.stream_id}_{timestamp}_{uuid.uuid4().hex[:8]}"
+        run_id = f"run_{self.stream_id}_{timestamp}_{uuid.uuid4().hex}"
 
         # Generate trace_id for correlation across entire execution
         # Full UUID (128 bits) for uniqueness, displayed shortened in human mode
