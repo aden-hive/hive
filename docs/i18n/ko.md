@@ -264,7 +264,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[개발자 가이드](DEVELOPER.md)** - 개발자를 위한 종합 가이드
 - [시작하기](docs/getting-started.md) - 빠른 설정 방법
 - [설정 가이드](docs/configuration.md) - 모든 설정 옵션 안내
-- [아키텍처 개요](docs/architecture.md) - 시스템 설계 및 구조
+- [아키텍처 개요](docs/architecture/README.md) - 시스템 설계 및 구조
 
 ## 로드맵
 
