@@ -27,9 +27,7 @@ from typing import Any
 
 # Context variable for trace propagation
 # ContextVar is thread-safe and async-safe - perfect for concurrent agent execution
-trace_context: ContextVar[dict[str, Any] | None] = ContextVar(
-    "trace_context", default=None
-)
+trace_context: ContextVar[dict[str, Any] | None] = ContextVar("trace_context", default=None)
 
 # ANSI escape code pattern (matches \033[...m or \x1b[...m)
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m|\033\[[0-9;]*m")
@@ -72,7 +70,10 @@ class StructuredFormatter(logging.Formatter):
         # Add custom fields from extra (optional)
         event = getattr(record, "event", None)
         if event is not None:
-            log_entry["event"] = strip_ansi_codes(str(event)) if isinstance(event, str) else event
+            if isinstance(event, str):
+                log_entry["event"] = strip_ansi_codes(str(event))
+            else:
+                log_entry["event"] = event
 
         latency_ms = getattr(record, "latency_ms", None)
         if latency_ms is not None:
@@ -212,10 +213,16 @@ def configure_logging(
     # When in JSON mode, configure known third-party loggers to use JSON formatter
     # This ensures libraries like LiteLLM, httpcore also output clean JSON
     if format == "json":
-        third_party_loggers = ["LiteLLM", "httpcore", "httpx", "openai"]
+        third_party_loggers = [
+            "LiteLLM",
+            "httpcore",
+            "httpx",
+            "openai",
+        ]
         for logger_name in third_party_loggers:
             logger = logging.getLogger(logger_name)
-            # Clear existing handlers (which may have colors) and add our JSON formatter
+            # Clear existing handlers (which may have colors) and add our JSON
+            # formatter
             logger.handlers.clear()
             logger.addHandler(handler)
             logger.propagate = True  # Still propagate to root for consistency
@@ -230,6 +237,7 @@ def _disable_third_party_colors() -> None:
     # Disable LiteLLM debug/verbose output colors if available
     try:
         import litellm
+
         # LiteLLM respects NO_COLOR, but we can also suppress debug info
         if hasattr(litellm, "suppress_debug_info"):
             litellm.suppress_debug_info = True  # type: ignore[attr-defined]
