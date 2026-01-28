@@ -2,10 +2,60 @@
 
 import csv
 import os
+from typing import Any
 
 from fastmcp import FastMCP
 
 from ..file_system_toolkits.security import get_secure_path
+
+
+def _infer_type(values: list[str]) -> str:
+    """
+    Infer the data type of a list of string values (without pandas).
+    Returns: 'integer', 'float', 'boolean', or 'string'.
+    """
+    if not values:
+        return "unknown"
+
+    # Filter out empty strings
+    clean_values = [v for v in values if v and v.strip()]
+    if not clean_values:
+        return "string"
+
+    # Check for Boolean
+    bool_map = {"true", "false", "yes", "no", "t", "f", "0", "1"}
+    if all(v.lower() in bool_map for v in clean_values):
+        return "boolean"
+
+    # Check for Integer
+    is_integer = True
+    for v in clean_values:
+        try:
+            # Check if it parses as float first, then check if it's a whole number
+            val_float = float(v)
+            if not val_float.is_integer():
+                is_integer = False
+                break
+        except ValueError:
+            is_integer = False
+            break
+    
+    if is_integer:
+        return "integer"
+
+    # Check for Float
+    is_float = True
+    for v in clean_values:
+        try:
+            float(v)
+        except ValueError:
+            is_float = False
+            break
+    
+    if is_float:
+        return "float"
+
+    return "string"
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -83,6 +133,73 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": "File encoding error: unable to decode as UTF-8"}
         except Exception as e:
             return {"error": f"Failed to read CSV: {str(e)}"}
+
+    @mcp.tool()
+    def csv_inspect(
+        path: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+        sample_size: int = 10,
+    ) -> dict:
+        """
+        Inspect a CSV file to infer column data types and see sample data.
+        Use this BEFORE writing SQL queries to understand the schema.
+
+        Args:
+            path: Path to the CSV file (relative to session sandbox)
+            workspace_id: Workspace identifier
+            agent_id: Agent identifier
+            session_id: Session identifier
+            sample_size: Number of rows to analyze for type inference (default: 10)
+
+        Returns:
+            dict with column names, inferred types, and sample rows.
+        """
+        try:
+            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+
+            if not os.path.exists(secure_path):
+                return {"error": f"File not found: {path}"}
+
+            with open(secure_path, encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                
+                if reader.fieldnames is None:
+                    return {"error": "CSV file is empty or has no headers"}
+                
+                columns = list(reader.fieldnames)
+                
+                # Read sample rows for analysis
+                sample_rows = []
+                for i, row in enumerate(reader):
+                    if i >= sample_size:
+                        break
+                    sample_rows.append(row)
+
+            # Infer data types for each column
+            column_types = {}
+            for col in columns:
+                # Extract values for this column from sample rows
+                values = [row.get(col, "") for row in sample_rows]
+                inferred_type = _infer_type(values)
+                column_types[col] = inferred_type
+
+            # Get total row count
+            with open(secure_path, encoding="utf-8", newline="") as f:
+                total_rows = sum(1 for _ in f) - 1
+
+            return {
+                "success": True,
+                "path": path,
+                "schema": column_types,
+                "column_count": len(columns),
+                "total_rows": total_rows,
+                "sample_data": sample_rows
+            }
+
+        except Exception as e:
+            return {"error": f"Failed to inspect CSV: {str(e)}"}
 
     @mcp.tool()
     def csv_write(
