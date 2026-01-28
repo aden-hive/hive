@@ -66,7 +66,7 @@ Aden 是一个用于构建、部署、运营和适应 AI 智能体的平台：
 ### 前置要求
 
 - [Python 3.11+](https://www.python.org/downloads/) - 用于智能体开发
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - 可选，用于容器化工具
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - 可选。仅在使用需要容器化依赖（例如 PostgreSQL、Redis）的 MCP 工具时才需要。对于基础 Agent 开发并非必需。
 
 ### 安装
 
