@@ -49,6 +49,10 @@ If a high-quality PR is submitted for a "stale" assigned issue (no activity for 
 ## Development Setup
 
 ```bash
+# Create and activate a repo-local virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+
 # Install Python packages
 ./scripts/setup-python.sh
 

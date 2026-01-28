@@ -75,6 +75,10 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 git clone https://github.com/adenhq/hive.git
 cd hive
 
+# Create and activate a repo-local virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+
 # Run Python environment setup
 ./scripts/setup-python.sh
 ```

@@ -5,9 +5,15 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ## Quick Setup
 
 ```bash
+# Create and activate a repo-local virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+
 # Run the automated setup script
 ./scripts/setup-python.sh
 ```
+
+> **Note:** If you see `error: externally-managed-environment` (PEP 668), you're installing into an OS-managed Python. Activating `.venv` avoids modifying system Python (recommended over `--break-system-packages`).
 
 > **Note for Windows Users:**  
 > Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.  

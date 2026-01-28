@@ -63,7 +63,11 @@ git --version       # Any recent version
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# 2. Run automated Python setup
+# 2. Create and activate a repo-local virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Run automated Python setup
 ./scripts/setup-python.sh
 ```
 
