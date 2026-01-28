@@ -7,6 +7,7 @@ Uses Pydantic's built-in serialization.
 
 import json
 from pathlib import Path
+from typing import Any
 
 from framework.schemas.run import Run, RunStatus, RunSummary
 
@@ -42,6 +43,7 @@ class FileStorage:
             self.base_path / "indexes" / "by_status",
             self.base_path / "indexes" / "by_node",
             self.base_path / "summaries",
+            self.base_path / "states",  # directory for state persistence
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
@@ -109,6 +111,53 @@ class FileStorage:
             summary_path.unlink()
 
         return True
+
+    # === STATE OPERATIONS ===
+
+    def save_state(self, scope: str, resource_id: str, state: dict[str, Any]) -> None:
+        """
+        Save a state dictionary to storage.
+        """
+        # Create scope directory if needed
+        scope_dir = self.base_path / "states" / scope
+        scope_dir.mkdir(exist_ok=True)
+
+        state_path = scope_dir / f"{resource_id}.json"
+
+        # Atomic write pattern
+        temp_path = state_path.with_suffix(".tmp")
+        try:
+            with open(temp_path, "w") as f:
+                json.dump(state, f, indent=2, default=str)
+            temp_path.replace(state_path)
+        except Exception as e:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise e
+
+    def load_state(self, scope: str, resource_id: str) -> dict[str, Any] | None:
+        """
+        Load a state dictionary from storage.
+
+        Returns None if not found.
+        """
+        state_path = self.base_path / "states" / scope / f"{resource_id}.json"
+        if not state_path.exists():
+            return None
+
+        try:
+            with open(state_path) as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def delete_state(self, scope: str, resource_id: str) -> bool:
+        """Delete a state file."""
+        state_path = self.base_path / "states" / scope / f"{resource_id}.json"
+        if state_path.exists():
+            state_path.unlink()
+            return True
+        return False
 
     # === QUERY OPERATIONS ===
 

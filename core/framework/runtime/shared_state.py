@@ -12,9 +12,12 @@ import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from framework.storage.concurrent import ConcurrentStorage
 
 
 class IsolationLevel(str, Enum):
@@ -75,11 +78,15 @@ class SharedStateManager:
         value = await memory.read("customer_id")
     """
 
-    def __init__(self):
+    def __init__(self, storage: "ConcurrentStorage | None" = None):
         # State storage at each level
         self._global_state: dict[str, Any] = {}
         self._stream_state: dict[str, dict[str, Any]] = {}  # stream_id -> {key: value}
         self._execution_state: dict[str, dict[str, Any]] = {}  # execution_id -> {key: value}
+
+        # Persistence
+        self._storage = storage
+        self._loaded_scopes: set[str] = set()  # Track what we've loaded from disk
 
         # Locks for synchronized access
         self._global_lock = asyncio.Lock()
@@ -92,6 +99,30 @@ class SharedStateManager:
 
         # Version tracking
         self._version = 0
+
+    async def _ensure_loaded(self, scope: StateScope, resource_id: str) -> None:
+        """Lazy load state from storage if available."""
+        if not self._storage:
+            return
+
+        cache_key = f"{scope.value}:{resource_id}"
+        if cache_key in self._loaded_scopes:
+            return
+
+        data = await self._storage.load_state(scope.value, resource_id)
+        if data:
+            if scope == StateScope.GLOBAL:
+                self._global_state.update(data)
+            elif scope == StateScope.STREAM:
+                if resource_id not in self._stream_state:
+                    self._stream_state[resource_id] = {}
+                self._stream_state[resource_id].update(data)
+            elif scope == StateScope.EXECUTION:
+                if resource_id not in self._execution_state:
+                    self._execution_state[resource_id] = {}
+                self._execution_state[resource_id].update(data)
+
+        self._loaded_scopes.add(cache_key)
 
     def create_memory(
         self,
@@ -171,11 +202,17 @@ class SharedStateManager:
 
         # Check stream-level (unless isolated)
         if isolation != IsolationLevel.ISOLATED:
+            # Lazy load stream state
+            await self._ensure_loaded(StateScope.STREAM, stream_id)
+
             if stream_id in self._stream_state:
                 if key in self._stream_state[stream_id]:
                     return self._stream_state[stream_id][key]
 
             # Check global
+            # Lazy load global state
+            await self._ensure_loaded(StateScope.GLOBAL, "default")
+
             if key in self._global_state:
                 return self._global_state[key]
 
@@ -225,6 +262,23 @@ class SharedStateManager:
                 stream_id=stream_id,
             )
         )
+
+        # Persist to storage
+        if self._storage:
+            if scope == StateScope.GLOBAL:
+                await self._storage.save_state(scope.value, "default", self._global_state)
+            elif scope == StateScope.STREAM:
+                # Ensure we have the dict
+                if stream_id in self._stream_state:
+                    await self._storage.save_state(
+                        scope.value, stream_id, self._stream_state[stream_id]
+                    )
+            elif scope == StateScope.EXECUTION:
+                # Optional: Persist execution state
+                if execution_id in self._execution_state:
+                    await self._storage.save_state(
+                        scope.value, execution_id, self._execution_state[execution_id]
+                    )
 
     async def _write_direct(
         self,
@@ -302,9 +356,13 @@ class SharedStateManager:
 
         # Start with global (if visible)
         if isolation != IsolationLevel.ISOLATED:
+            # Load global state
+            await self._ensure_loaded(StateScope.GLOBAL, "default")
             result.update(self._global_state)
 
             # Add stream state (overwrites global)
+            # Load stream state
+            await self._ensure_loaded(StateScope.STREAM, stream_id)
             if stream_id in self._stream_state:
                 result.update(self._stream_state[stream_id])
 
