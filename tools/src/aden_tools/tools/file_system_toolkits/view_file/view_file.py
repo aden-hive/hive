@@ -19,10 +19,11 @@ def add_line_numbers(content: str, start: int = 1) -> str:
     numbered_lines = []
     for line in lines:
         line_num = line.rstrip("\r\n")
-        newline = line[len(line_num):]
+        newline = line[len(line_num) :]
         numbered_lines.append(f"{start}: {line_num}{newline}")
         start += 1
     return "".join(numbered_lines)
+
 
 def register_tools(mcp: FastMCP) -> None:
     """Register file view tools with the MCP server."""
