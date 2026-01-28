@@ -10,8 +10,6 @@ import importlib.util
 
 duckdb_available = importlib.util.find_spec("duckdb") is not None
 
-from aden_tools.tools.csv_tool.csv_tool import register_tools
-
 # Test IDs for sandbox
 TEST_WORKSPACE_ID = "test-workspace"
 TEST_AGENT_ID = "test-agent"
