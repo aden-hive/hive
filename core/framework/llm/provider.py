@@ -54,7 +54,21 @@ class LLMProvider(ABC):
     - Request/response formatting
     - Token counting
     - Error handling
+    - Resource cleanup (via close)
     """
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.close()
+
+    @abstractmethod
+    async def close(self):
+        """Cleanup resources, close connection pools."""
+        pass
 
     @abstractmethod
     def complete(
