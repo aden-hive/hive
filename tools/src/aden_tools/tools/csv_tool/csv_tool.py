@@ -43,7 +43,10 @@ def register_tools(mcp: FastMCP) -> None:
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
 
-            # Read CSV
+# Optimized: Read once and count rows in the same pass
+            rows = []
+            total_rows = 0
+            
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
 
@@ -53,17 +56,12 @@ def register_tools(mcp: FastMCP) -> None:
                 columns = list(reader.fieldnames)
 
                 # Apply offset and limit
-                rows = []
                 for i, row in enumerate(reader):
+                    total_rows += 1  # rows counter
                     if i < offset:
                         continue
-                    if limit is not None and len(rows) >= limit:
-                        break
-                    rows.append(row)
-
-            # Get total row count (re-read for accurate count)
-            with open(secure_path, encoding="utf-8", newline="") as f:
-                total_rows = sum(1 for _ in f) - 1  # Subtract header
+                    if limit is None or len(rows) < limit:
+                        rows.append(row)
 
             return {
                 "success": True,
