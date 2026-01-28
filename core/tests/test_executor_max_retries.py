@@ -5,7 +5,7 @@ This test verifies the fix for Issue #363 where GraphExecutor was ignoring
 the max_retries field in NodeSpec and using a hardcoded value of 3.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -45,6 +45,12 @@ class AlwaysFailsNode(NodeProtocol):
     async def execute(self, ctx: NodeContext) -> NodeResult:
         self.attempt_count += 1
         return NodeResult(success=False, error=f"Permanent error (attempt {self.attempt_count})")
+
+
+@pytest.fixture(autouse=True)
+def fast_sleep(monkeypatch):
+    """Mock asyncio.sleep to avoid real delays from exponential backoff."""
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
 
 
 @pytest.fixture
