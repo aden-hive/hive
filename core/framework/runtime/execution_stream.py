@@ -352,9 +352,13 @@ class ExecutionStream:
                 # Clean up state
                 self._state_manager.cleanup_execution(execution_id)
 
-                # Signal completion
-                if execution_id in self._completion_events:
-                    self._completion_events[execution_id].set()
+                # Signal completion and remove tracking structures to avoid leaks
+                completion_event = self._completion_events.pop(execution_id, None)
+                if completion_event:
+                    completion_event.set()
+
+                self._active_executions.pop(execution_id, None)
+                self._execution_tasks.pop(execution_id, None)
 
     def _create_modified_graph(self) -> "GraphSpec":
         """Create a graph with the entry point overridden."""
