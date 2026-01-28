@@ -120,7 +120,6 @@ class NodeSpec(BaseModel):
     output_model: Any | None = Field(
         default=None,
         description="Pydantic model class for strict validation (Runtime only)",
-        exclude=True,
     )
 
     # [FIXED] Default must be 2 to match tests
@@ -224,7 +223,8 @@ class SharedMemory:
                         f"Rejected suspicious content for key '{key}': "
                         "appears to be hallucinated code/injection."
                     )
-            else:
+            # 3. Only scan longer strings if they exceed the threshold (5000)
+            elif len(value) > 5000:
                 # 3. For longer strings, scan for Hallucination Indicators
                 code_indicators = [
                     "```python",
@@ -243,11 +243,15 @@ class SharedMemory:
 
                 # Use a window for massive strings, but ensure we catch headers
                 # We also check the end for cases where code is appended
+                length = len(value)
                 start_window = value[:3000]
+                middle_window = value[length // 2 - 500 : length // 2 + 500]
                 end_window = value[-1000:]
 
-                if any(i in start_window for i in code_indicators) or any(
-                    i in end_window for i in code_indicators
+                if (
+                    any(i in start_window for i in code_indicators)
+                    or any(i in middle_window for i in code_indicators)
+                    or any(i in end_window for i in code_indicators)
                 ):
                     logger.warning(
                         f"⚠ Suspicious write to key '{key}': appears to be code/injection "
@@ -617,13 +621,11 @@ class LLMNode(NodeProtocol):
                                 ctx.memory.write(key, value)
                                 output[key] = value
                             elif key in ctx.input_data:
-                                # Key not in parsed JSON but exists in input -
-                                # pass through input value
+                                # Key not in parsed JSON but exists in input - pass through input value
                                 ctx.memory.write(key, ctx.input_data[key])
                                 output[key] = ctx.input_data[key]
                             else:
-                                # Key not in parsed JSON or input,
-                                #  write the whole response (stripped)
+                                # Key not in parsed JSON or input, write the whole response (stripped)
                                 stripped_content = self._strip_code_blocks(
                                     response.content
                                 )
@@ -848,9 +850,7 @@ Required fields: {', '.join(ctx.node_spec.input_keys)}
 Memory context (may contain nested data, JSON strings, or extra information):
 {memory_json}
 
-Extract ONLY the clean values for the required fields.
- Ignore nested structures, JSON wrappers, 
-and irrelevant data.
+Extract ONLY the clean values for the required fields. Ignore nested structures, JSON wrappers, and irrelevant data.
 
 Output as JSON with the exact field names requested."""
 
