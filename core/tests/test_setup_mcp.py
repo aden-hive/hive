@@ -125,10 +125,7 @@ class TestRunCommand:
 
         assert result is True
         mock_subprocess.assert_called_once_with(
-            ["echo", "test"],
-            check=True,
-            capture_output=True,
-            text=True
+            ["echo", "test"], check=True, capture_output=True, text=True
         )
         mock_log_error.assert_not_called()
 
@@ -191,12 +188,14 @@ class TestMain:
             "mcpServers": {
                 "agent-builder": {
                     "command": "python",
-                    "args": ["-m", "framework.mcp.agent_builder_server"]
+                    "args": ["-m", "framework.mcp.agent_builder_server"],
                 }
             }
         }
         mock_file_open.return_value.read.return_value = json.dumps(config)
-        mock_file_open.return_value.__enter__.return_value.read.return_value = json.dumps(config)
+        mock_file_open.return_value.__enter__.return_value.read.return_value = (
+            json.dumps(config)
+        )
 
         with patch("setup_mcp.Path") as mock_path_class:
             mock_path_instance = MagicMock()
@@ -298,7 +297,9 @@ class TestMain:
         mock_exists.return_value = True
 
         # subprocess.run for module test fails
-        mock_subprocess.side_effect = subprocess.CalledProcessError(1, "cmd", stderr="import error")
+        mock_subprocess.side_effect = subprocess.CalledProcessError(
+            1, "cmd", stderr="import error"
+        )
 
         config = {"mcpServers": {}}
         with patch("builtins.open", mock_open(read_data=json.dumps(config))):
