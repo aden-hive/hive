@@ -78,8 +78,13 @@ async def example_3_config_file():
 
     # Copy example config (in practice, you'd place this in your agent folder)
     import shutil
+    example_config = Path(__file__).resolve().parent / "mcp_servers.json"
+    if not example_config.exists():
+        raise FileNotFoundError(
+            f"Missing example MCP config at {example_config}"
+        )
     shutil.copy(
-        "examples/mcp_servers.json",
+        example_config,
         test_agent_path / "mcp_servers.json"
     )
 
