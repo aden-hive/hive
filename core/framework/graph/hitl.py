@@ -197,7 +197,7 @@ Example format:
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-3-5-haiku-latest",
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}],
             )

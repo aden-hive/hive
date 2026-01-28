@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
+from framework.runtime.shared_state import IsolationLevel, StateScope
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ class NodeSpec(BaseModel):
     )
     nullable_output_keys: list[str] = Field(
         default_factory=list,
-        description="Output keys that can be None without triggering validation errors"
+        description="Output keys that can be None without triggering validation errors",
     )
 
     # Optional schemas for validation and cleansing
@@ -246,18 +247,31 @@ class SharedMemory:
     _lock: asyncio.Lock | None = field(default=None, repr=False)
     _key_locks: dict[str, asyncio.Lock] = field(default_factory=dict, repr=False)
 
+    # State Manager Integration (for cross-run/cross-stream memory)
+    _manager: Any = field(default=None, repr=False)
+    _execution_id: str | None = field(default=None)
+    _stream_id: str | None = field(default=None)
+    _isolation: IsolationLevel = field(default=IsolationLevel.ISOLATED)
+
     def __post_init__(self) -> None:
         """Initialize the main lock if not provided."""
         if self._lock is None:
             self._lock = asyncio.Lock()
 
-    def read(self, key: str) -> Any:
+    def read(self, key: str, scope: StateScope = StateScope.EXECUTION) -> Any:
         """Read a value from shared memory."""
         if self._allowed_read and key not in self._allowed_read:
             raise PermissionError(f"Node not allowed to read key: {key}")
+
+        # If we have a manager and a non-execution scope, delegate to it
+        if self._manager and scope != StateScope.EXECUTION:
+            # Note: This is synchronous for backward compatibility with NodeProtocol
+            # SharedStateManager.read_sync is used internally
+            return self._manager.read_sync(key, self._execution_id, self._stream_id, self._isolation)
+
         return self._data.get(key)
 
-    def write(self, key: str, value: Any, validate: bool = True) -> None:
+    def write(self, key: str, value: Any, validate: bool = True, scope: StateScope = StateScope.EXECUTION) -> None:
         """
         Write a value to shared memory.
 
@@ -265,6 +279,7 @@ class SharedMemory:
             key: The memory key to write to
             value: The value to write
             validate: If True, check for suspicious content (default True)
+            scope: The scope of the write (Execution, Stream, Global)
 
         Raises:
             PermissionError: If node doesn't have write permission
@@ -287,8 +302,13 @@ class SharedMemory:
                         f"appears to be hallucinated code ({len(value)} chars). "
                         "If this is intentional, use validate=False."
                     )
-
-        self._data[key] = value
+        
+        # If we have a manager and a non-execution scope, delegate to it
+        if self._manager and scope != StateScope.EXECUTION:
+            # Sync write to manager
+            self._manager.write_sync(key, value, self._execution_id, self._stream_id, self._isolation, scope)
+        else:
+            self._data[key] = value
 
     async def write_async(self, key: str, value: Any, validate: bool = True) -> None:
         """
@@ -415,6 +435,10 @@ class SharedMemory:
             _allowed_write=set(write_keys) if write_keys else set(),
             _lock=self._lock,  # Share lock for thread safety
             _key_locks=self._key_locks,  # Share key locks
+            _manager=self._manager,
+            _execution_id=self._execution_id,
+            _stream_id=self._stream_id,
+            _isolation=self._isolation,
         )
 
 
@@ -534,7 +558,7 @@ class NodeResult:
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-3-5-haiku-latest",
                 max_tokens=200,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -1208,7 +1232,7 @@ Keep the same JSON structure but with shorter content values.
             else:
                 cleaner_llm = LiteLLMProvider(
                     api_key=api_key,
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-3-5-haiku-latest",
                     temperature=0.0,
                 )
 
@@ -1344,7 +1368,7 @@ Output ONLY the JSON object, nothing else."""
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-3-5-haiku-latest",
                 max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}],
             )
