@@ -21,6 +21,26 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
+## Alpine Linux Setup
+
+If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
+
+1. Install System Dependencies:
+```bash
+apk update
+apk add bash git python3 py3-pip nodejs npm curl build-base python3-dev linux-headers libffi-dev
+```
+2. Set up Virtual Environment (Required for Python 3.12+):
+```
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip setuptools wheel
+```
+3. Run the Quickstart Script:
+```
+./quickstart.sh
+```
+
 ## Manual Setup (Alternative)
 
 If you prefer to set up manually or the script fails:
