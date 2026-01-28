@@ -179,7 +179,7 @@ class NodeSpec(BaseModel):
     output_schema: dict[str, dict] = Field(
         default_factory=dict,
         description=(
-            "Optional schema for input validation. "
+            "Optional schema for output validation. "
             "Format: {key: {type: 'string', required: True, description: '...'}}"
         ),
     )
