@@ -162,37 +162,16 @@ class NodeSpec(BaseModel):
     )
     output_keys: list[str] = Field(
         default_factory=list, description="Keys this node writes to shared memory or output"
-<<<<<<< HEAD
-    )
-    nullable_output_keys: list[str] = Field(
-        default_factory=list,
-        description="Output keys that can be None without triggering validation errors"
-=======
->>>>>>> 25c9059 (fixed the lint issues)
     )
 
     # Optional schemas for validation and cleansing
     input_schema: dict[str, dict] = Field(
         default_factory=dict,
-<<<<<<< HEAD
-        description=(
-            "Optional schema for input validation. "
-            "Format: {key: {type: 'string', required: True, description: '...'}}"
-        ),
-    )
-    output_schema: dict[str, dict] = Field(
-        default_factory=dict,
-        description=(
-            "Optional schema for output validation. "
-            "Format: {key: {type: 'dict', required: True, description: '...'}}"
-        ),
-=======
         description="Optional schema for input validation. Format: {key: {type: 'string', required: True, description: '...'}}",
     )
     output_schema: dict[str, dict] = Field(
         default_factory=dict,
         description="Optional schema for output validation. Format: {key: {type: 'dict', required: True, description: '...'}}",
->>>>>>> 25c9059 (fixed the lint issues)
     )
 
     # For LLM nodes
@@ -215,22 +194,6 @@ class NodeSpec(BaseModel):
     # Retry behavior
     max_retries: int = Field(default=3)
     retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
-<<<<<<< HEAD
-
-    # Pydantic model for output validation
-    output_model: type[BaseModel] | None = Field(
-        default=None,
-        description=(
-            "Optional Pydantic model class for validating and parsing LLM output. "
-            "When set, the LLM response will be validated against this model."
-        ),
-    )
-    max_validation_retries: int = Field(
-        default=2,
-        description="Maximum retries when Pydantic validation fails (with feedback to LLM)",
-    )
-=======
->>>>>>> 25c9059 (fixed the lint issues)
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
@@ -745,14 +708,9 @@ Keep the same JSON structure but with shorter content values.
                 from framework.llm.provider import ToolResult, ToolUse
 
                 def executor(tool_use: ToolUse) -> ToolResult:
-<<<<<<< HEAD
-                    args = ", ".join(f"{k}={v}" for k, v in tool_use.input.items())
-                    logger.info(f"         🔧 Tool call: {tool_use.name}({args})")
-=======
                     logger.info(
                         f"         🔧 Tool call: {tool_use.name}({', '.join(f'{k}={v}' for k, v in tool_use.input.items())})"
                     )
->>>>>>> 25c9059 (fixed the lint issues)
                     result = self.tool_executor(tool_use)
                     # Truncate long results
                     result_str = str(result.content)[:150]
@@ -788,172 +746,6 @@ Keep the same JSON structure but with shorter content values.
                     max_tokens=ctx.max_tokens,
                 )
 
-<<<<<<< HEAD
-            # Check for truncation and retry with compaction if needed
-            expects_json = (
-                ctx.node_spec.node_type in ("llm_generate", "llm_tool_use")
-                and ctx.node_spec.output_keys
-                and len(ctx.node_spec.output_keys) >= 1
-            )
-
-            compaction_attempt = 0
-            while (
-                self._is_truncated(response)
-                and expects_json
-                and compaction_attempt < self.max_compaction_retries
-            ):
-                compaction_attempt += 1
-                logger.warning(
-                    f"      ⚠ Response truncated (stop_reason: {response.stop_reason}), "
-                    f"retrying with compaction ({compaction_attempt}/{self.max_compaction_retries})"
-                )
-
-                # Add compaction instruction to messages
-                compaction_messages = messages + [
-                    {"role": "assistant", "content": response.content},
-                    {"role": "user", "content": self.COMPACTION_INSTRUCTION},
-                ]
-
-                # Retry the call with compaction instruction
-                if ctx.available_tools and self.tool_executor:
-                    response = ctx.llm.complete_with_tools(
-                        messages=compaction_messages,
-                        system=system,
-                        tools=ctx.available_tools,
-                        tool_executor=executor,
-                        max_tokens=ctx.max_tokens,
-                    )
-                else:
-                    response = ctx.llm.complete(
-                        messages=compaction_messages,
-                        system=system,
-                        json_mode=use_json_mode,
-                        max_tokens=ctx.max_tokens,
-                    )
-
-            if self._is_truncated(response) and expects_json:
-                logger.warning(
-                    f"      ⚠ Response still truncated after "
-                    f"{compaction_attempt} compaction attempts"
-                )
-
-            # Phase 2: Validation retry loop for Pydantic models
-            max_validation_retries = (
-                ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
-            )
-            validation_attempt = 0
-            total_input_tokens = 0
-            total_output_tokens = 0
-            current_messages = messages.copy()
-
-            while True:
-                total_input_tokens += response.input_tokens
-                total_output_tokens += response.output_tokens
-
-                # Log the response
-                response_preview = (
-                    response.content[:200] if len(response.content) > 200 else response.content
-                )
-                if len(response.content) > 200:
-                    response_preview += "..."
-                logger.info(f"      ← Response: {response_preview}")
-
-                # If no output_model, break immediately (no validation needed)
-                if ctx.node_spec.output_model is None:
-                    break
-
-                # Try to parse and validate the response
-                try:
-                    import json
-
-                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
-
-                    if isinstance(parsed, dict):
-                        from framework.graph.validator import OutputValidator
-
-                        validator = OutputValidator()
-                        validation_result, validated_model = validator.validate_with_pydantic(
-                            parsed, ctx.node_spec.output_model
-                        )
-
-                        if validation_result.success:
-                            # Validation passed, break out of retry loop
-                            model_name = ctx.node_spec.output_model.__name__
-                            logger.info(f"      ✓ Pydantic validation passed for {model_name}")
-                            break
-                        else:
-                            # Validation failed
-                            validation_attempt += 1
-
-                            if validation_attempt <= max_validation_retries:
-                                # Add validation feedback to messages and retry
-                                feedback = validator.format_validation_feedback(
-                                    validation_result, ctx.node_spec.output_model
-                                )
-                                logger.warning(
-                                    f"      ⚠ Pydantic validation failed "
-                                    f"(attempt {validation_attempt}/{max_validation_retries}): "
-                                    f"{validation_result.error}"
-                                )
-                                logger.info("      🔄 Retrying with validation feedback...")
-
-                                # Add the assistant's failed response and feedback
-                                current_messages.append(
-                                    {"role": "assistant", "content": response.content}
-                                )
-                                current_messages.append({"role": "user", "content": feedback})
-
-                                # Re-call LLM with feedback
-                                if ctx.available_tools and self.tool_executor:
-                                    response = ctx.llm.complete_with_tools(
-                                        messages=current_messages,
-                                        system=system,
-                                        tools=ctx.available_tools,
-                                        tool_executor=executor,
-                                        max_tokens=ctx.max_tokens,
-                                    )
-                                else:
-                                    response = ctx.llm.complete(
-                                        messages=current_messages,
-                                        system=system,
-                                        json_mode=use_json_mode,
-                                        max_tokens=ctx.max_tokens,
-                                    )
-                                continue  # Retry validation
-                            else:
-                                # Max retries exceeded
-                                latency_ms = int((time.time() - start) * 1000)
-                                err = validation_result.error
-                                logger.error(
-                                    f"      ✗ Pydantic validation failed after "
-                                    f"{max_validation_retries} retries: {err}"
-                                )
-                                ctx.runtime.record_outcome(
-                                    decision_id=decision_id,
-                                    success=False,
-                                    error=f"Validation failed: {validation_result.error}",
-                                    tokens_used=total_input_tokens + total_output_tokens,
-                                    latency_ms=latency_ms,
-                                )
-                                error_msg = (
-                                    f"Pydantic validation failed after "
-                                    f"{max_validation_retries} retries: {err}"
-                                )
-                                return NodeResult(
-                                    success=False,
-                                    error=error_msg,
-                                    output=parsed,
-                                    tokens_used=total_input_tokens + total_output_tokens,
-                                    latency_ms=latency_ms,
-                                    validation_errors=validation_result.errors,
-                                )
-                    else:
-                        # Not a dict, can't validate - break and let downstream handle
-                        break
-                except Exception:
-                    # JSON extraction failed - break and let downstream handle
-                    break
-=======
             # Log the response
             response_preview = (
                 response.content[:200] if len(response.content) > 200 else response.content
@@ -961,7 +753,6 @@ Keep the same JSON structure but with shorter content values.
             if len(response.content) > 200:
                 response_preview += "..."
             logger.info(f"      ← Response: {response_preview}")
->>>>>>> 25c9059 (fixed the lint issues)
 
             latency_ms = int((time.time() - start) * 1000)
 
@@ -1143,32 +934,6 @@ Keep the same JSON structure but with shorter content values.
                 logger.info(f"      Newline fix also failed: {e2}")
 
         # Try to extract JSON from markdown code blocks (greedy match to handle nested blocks)
-<<<<<<< HEAD
-        # Multiple patterns to handle different LLM formatting styles
-        code_block_patterns = [
-            # Anchored match from first ``` to last ```
-            r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$",
-            # Non-anchored: find ```json anywhere and extract to closing ```
-            r"```(?:json|JSON)?\s*\n([\s\S]*?)\n```",
-            # Handle case where closing ``` might have trailing content
-            r"```(?:json|JSON)?\s*\n([\s\S]*?)\n```",
-        ]
-        for pattern in code_block_patterns:
-            code_block_match = re.search(pattern, content, re.DOTALL)
-            if code_block_match:
-                try:
-                    extracted = code_block_match.group(1).strip()
-                    if extracted:  # Skip empty matches
-                        # Try direct parse first, then with newline fix
-                        try:
-                            parsed = json.loads(extracted)
-                        except json.JSONDecodeError:
-                            parsed = json.loads(_fix_unescaped_newlines_in_json(extracted))
-                        if isinstance(parsed, dict):
-                            return parsed
-                except json.JSONDecodeError:
-                    pass
-=======
         # Use anchored match to capture from first ``` to last ```
         code_block_match = re.match(r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL)
         if code_block_match:
@@ -1178,7 +943,6 @@ Keep the same JSON structure but with shorter content values.
                     return parsed
             except json.JSONDecodeError:
                 pass
->>>>>>> 25c9059 (fixed the lint issues)
 
         # Try to find JSON object by matching balanced braces (use module-level helper)
         json_str = find_json_object(content)
@@ -1194,33 +958,6 @@ Keep the same JSON structure but with shorter content values.
             except json.JSONDecodeError:
                 pass
 
-<<<<<<< HEAD
-        # Try stripping markdown prefix and finding JSON from there
-        # This handles cases like "```json\n{...}" where regex might fail
-        if "```" in content:
-            # Find position after ```json or ``` marker
-            json_start = content.find("{")
-            if json_start > 0:
-                # Extract from first { to end, then find balanced JSON
-                json_str = find_json_object(content[json_start:])
-                if json_str:
-                    try:
-                        # Try direct parse first, then with newline fix
-                        try:
-                            parsed = json.loads(json_str)
-                        except json.JSONDecodeError:
-                            parsed = json.loads(_fix_unescaped_newlines_in_json(json_str))
-                        if isinstance(parsed, dict):
-                            logger.info(
-                                "      ✓ Extracted JSON via brace matching after markdown strip"
-                            )
-                            return parsed
-                    except json.JSONDecodeError:
-                        pass
-
-        # All local extraction failed - use LLM as last resort
-        import os
-=======
         # All local extraction methods failed - use LLM as last resort
         # Prefer Cerebras (faster/cheaper), fallback to Anthropic Haiku
         import os
@@ -1230,55 +967,21 @@ Keep the same JSON structure but with shorter content values.
             raise ValueError(
                 "Cannot parse JSON and no API key for LLM cleanup (set CEREBRAS_API_KEY or ANTHROPIC_API_KEY)"
             )
->>>>>>> 25c9059 (fixed the lint issues)
 
         from framework.llm.litellm import LiteLLMProvider
 
-<<<<<<< HEAD
-        logger.info(f"      cleanup_llm_model param: {cleanup_llm_model}")
-
-        # Use configured cleanup model, or fall back to defaults
-        if cleanup_llm_model:
-            # Use the configured cleanup model (LiteLLM handles API keys via env vars)
-            cleaner_llm = LiteLLMProvider(
-                model=cleanup_llm_model,
-=======
         if os.environ.get("CEREBRAS_API_KEY"):
             cleaner_llm = LiteLLMProvider(
                 api_key=os.environ.get("CEREBRAS_API_KEY"),
                 model="cerebras/llama-3.3-70b",
->>>>>>> 25c9059 (fixed the lint issues)
                 temperature=0.0,
             )
             logger.info(f"      Using configured cleanup LLM: {cleanup_llm_model}")
         else:
-<<<<<<< HEAD
-            # Fall back to default logic: Cerebras preferred, then Haiku
-            api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-            if not api_key:
-                raise ValueError(
-                    "Cannot parse JSON and no API key for LLM cleanup "
-                    "(set CEREBRAS_API_KEY or ANTHROPIC_API_KEY, or configure cleanup_llm_model)"
-                )
-
-            if os.environ.get("CEREBRAS_API_KEY"):
-                cleaner_llm = LiteLLMProvider(
-                    api_key=os.environ.get("CEREBRAS_API_KEY"),
-                    model="cerebras/llama-3.3-70b",
-                    temperature=0.0,
-                )
-            else:
-                cleaner_llm = LiteLLMProvider(
-                    api_key=api_key,
-                    model="claude-3-5-haiku-20241022",
-                    temperature=0.0,
-                )
-=======
             # Fallback to Anthropic Haiku via LiteLLM for consistency
             cleaner_llm = LiteLLMProvider(
                 api_key=api_key, model="claude-3-5-haiku-20241022", temperature=0.0
             )
->>>>>>> 25c9059 (fixed the lint issues)
 
         prompt = f"""Extract the JSON object from this LLM response.
 
@@ -1396,18 +1099,6 @@ Output ONLY the JSON object, nothing else."""
         truncated_data = {k: truncate_value(v) for k, v in memory_data.items()}
         memory_json = json.dumps(truncated_data, indent=2, default=str)
 
-<<<<<<< HEAD
-        required_fields = ", ".join(ctx.node_spec.input_keys)
-        prompt = (
-            f"Extract the following information from the memory context:\n\n"
-            f"Required fields: {required_fields}\n\n"
-            f"Memory context (may contain nested data, JSON strings, "
-            f"or extra information):\n{memory_json}\n\n"
-            "Extract ONLY the clean values for the required fields. "
-            "Ignore nested structures, JSON wrappers, and irrelevant data.\n\n"
-            "Output as JSON with the exact field names requested."
-        )
-=======
         prompt = f"""Extract the following information from the memory context:
 
 Required fields: {", ".join(ctx.node_spec.input_keys)}
@@ -1418,7 +1109,6 @@ Memory context (may contain nested data, JSON strings, or extra information):
 Extract ONLY the clean values for the required fields. Ignore nested structures, JSON wrappers, and irrelevant data.
 
 Output as JSON with the exact field names requested."""
->>>>>>> 25c9059 (fixed the lint issues)
 
         try:
             import anthropic
