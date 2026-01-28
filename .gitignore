@@ -66,6 +66,7 @@ tmp/
 temp/
 
 exports/*
+!exports/support_ticket_agent/
 
 .agent-builder-sessions/*
 
