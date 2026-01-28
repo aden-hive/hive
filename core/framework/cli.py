@@ -14,6 +14,11 @@ Testing commands:
     python -m core test-debug <goal_id> <test_id>
     python -m core test-list <goal_id>
     python -m core test-stats <goal_id>
+
+History/Analytics commands:
+    python -m core history [--status completed|failed|running] [--goal-id <goal_id>] [--limit 10]
+    python -m core show <run_id>
+    python -m core stats [--goal-id <goal_id>]
 """
 
 import argparse
@@ -39,6 +44,11 @@ def main():
     from framework.testing.cli import register_testing_commands
 
     register_testing_commands(subparsers)
+
+    # Register history commands (history, show, stats)
+    from framework.runner.history import register_history_commands
+
+    register_history_commands(subparsers)
 
     args = parser.parse_args()
 
