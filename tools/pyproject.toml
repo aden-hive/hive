@@ -3,7 +3,7 @@ name = "tools"
 version = "0.1.0"
 description = "Tools library for the Aden agent framework"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [
     { name = "Aden", email = "team@aden.ai" }
@@ -14,7 +14,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
@@ -43,10 +42,14 @@ ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
 ]
+sql = [
+    "duckdb>=1.0.0",
+]
 all = [
     "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
+    "duckdb>=1.0.0",
 ]
 
 [build-system]
@@ -55,6 +58,31 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aden_tools"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+lint.select = [
+  "B",   # bugbear errors
+  "C4",  # flake8-comprehensions errors
+  "E",   # pycodestyle errors
+  "F",   # pyflakes errors
+  "I",   # import sorting
+  "Q",   # flake8-quotes errors
+  "UP",  # py-upgrade
+  "W",   # pycodestyle warnings
+]
+
+lint.isort.combine-as-imports = true
+lint.isort.known-first-party = ["aden_tools"]
+lint.isort.section-order = [
+  "future",
+  "standard-library",
+  "third-party",
+  "first-party",
+  "local-folder",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

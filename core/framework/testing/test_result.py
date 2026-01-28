@@ -21,6 +21,7 @@ class ErrorCategory(str, Enum):
     - IMPLEMENTATION_ERROR: Code bug → fix nodes/edges in Agent stage
     - EDGE_CASE: New scenario discovered → add new test only
     """
+
     LOGIC_ERROR = "logic_error"
     IMPLEMENTATION_ERROR = "implementation_error"
     EDGE_CASE = "edge_case"
@@ -36,12 +37,11 @@ class TestResult(BaseModel):
     - Error details for debugging
     - Runtime logs and execution path
     """
+
+    __test__ = False  # Not a pytest test class
     test_id: str
     passed: bool
-    duration_ms: int = Field(
-        ge=0,
-        description="Test execution time in milliseconds"
-    )
+    duration_ms: int = Field(ge=0, description="Test execution time in milliseconds")
 
     # Output comparison
     actual_output: Any = None
@@ -54,23 +54,17 @@ class TestResult(BaseModel):
 
     # Runtime data for debugging
     runtime_logs: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Log entries from test execution"
+        default_factory=list, description="Log entries from test execution"
     )
     node_outputs: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Output from each node executed during test"
+        default_factory=dict, description="Output from each node executed during test"
     )
     execution_path: list[str] = Field(
-        default_factory=list,
-        description="Sequence of nodes executed"
+        default_factory=list, description="Sequence of nodes executed"
     )
 
     # Associated run ID (links to Runtime data)
-    run_id: str | None = Field(
-        default=None,
-        description="Runtime run ID for detailed analysis"
-    )
+    run_id: str | None = Field(default=None, description="Runtime run ID for detailed analysis")
 
     timestamp: datetime = Field(default_factory=datetime.now)
 
@@ -93,6 +87,8 @@ class TestSuiteResult(BaseModel):
 
     Provides summary statistics and individual results.
     """
+
+    __test__ = False  # Not a pytest test class
     goal_id: str
     total: int
     passed: int
@@ -102,10 +98,7 @@ class TestSuiteResult(BaseModel):
 
     results: list[TestResult] = Field(default_factory=list)
 
-    duration_ms: int = Field(
-        default=0,
-        description="Total execution time in milliseconds"
-    )
+    duration_ms: int = Field(default=0, description="Total execution time in milliseconds")
 
     timestamp: datetime = Field(default_factory=datetime.now)
 
@@ -143,11 +136,6 @@ class TestSuiteResult(BaseModel):
         """Get all failed test results for debugging."""
         return [r for r in self.results if not r.passed]
 
-    def get_results_by_category(
-        self, category: ErrorCategory
-    ) -> list[TestResult]:
+    def get_results_by_category(self, category: ErrorCategory) -> list[TestResult]:
         """Get failed results by error category."""
-        return [
-            r for r in self.results
-            if not r.passed and r.error_category == category
-        ]
+        return [r for r in self.results if not r.passed and r.error_category == category]

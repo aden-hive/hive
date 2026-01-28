@@ -1,12 +1,17 @@
 import os
+
 from mcp.server.fastmcp import FastMCP
+
 from ..security import get_secure_path
+
 
 def register_tools(mcp: FastMCP) -> None:
     """Register file content replacement tools with the MCP server."""
 
     @mcp.tool()
-    def replace_file_content(path: str, target: str, replacement: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
+    def replace_file_content(
+        path: str, target: str, replacement: str, workspace_id: str, agent_id: str, session_id: str
+    ) -> dict:
         """
         Purpose
             Replace all occurrences of a target string with replacement text in a file.
@@ -37,7 +42,7 @@ def register_tools(mcp: FastMCP) -> None:
             if not os.path.exists(secure_path):
                 return {"error": f"File not found at {path}"}
 
-            with open(secure_path, "r", encoding="utf-8") as f:
+            with open(secure_path, encoding="utf-8") as f:
                 content = f.read()
 
             if target not in content:
@@ -53,7 +58,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "path": path,
                 "occurrences_replaced": occurrences,
                 "target_length": len(target),
-                "replacement_length": len(replacement)
+                "replacement_length": len(replacement),
             }
         except Exception as e:
             return {"error": f"Failed to replace content: {str(e)}"}

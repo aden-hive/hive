@@ -4,12 +4,13 @@ Base classes for credential management.
 Contains the core infrastructure: CredentialSpec, CredentialManager, and CredentialError.
 Credential specs are defined in separate category files (llm.py, search.py, etc.).
 """
+
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from dotenv import dotenv_values
 
@@ -24,10 +25,10 @@ class CredentialSpec:
     env_var: str
     """Environment variable name (e.g., 'BRAVE_SEARCH_API_KEY')"""
 
-    tools: List[str] = field(default_factory=list)
+    tools: list[str] = field(default_factory=list)
     """Tool names that require this credential (e.g., ['web_search'])"""
 
-    node_types: List[str] = field(default_factory=list)
+    node_types: list[str] = field(default_factory=list)
     """Node types that require this credential (e.g., ['llm_generate', 'llm_tool_use'])"""
 
     required: bool = True
@@ -71,9 +72,9 @@ class CredentialManager:
 
     def __init__(
         self,
-        specs: Optional[Dict[str, CredentialSpec]] = None,
-        _overrides: Optional[Dict[str, str]] = None,
-        dotenv_path: Optional[Path] = None,
+        specs: dict[str, CredentialSpec] | None = None,
+        _overrides: dict[str, str] | None = None,
+        dotenv_path: Path | None = None,
     ):
         """
         Initialize the credential manager.
@@ -92,12 +93,12 @@ class CredentialManager:
         self._overrides = _overrides or {}
         self._dotenv_path = dotenv_path
         # Build reverse mapping: tool_name -> credential_name
-        self._tool_to_cred: Dict[str, str] = {}
+        self._tool_to_cred: dict[str, str] = {}
         for cred_name, spec in self._specs.items():
             for tool_name in spec.tools:
                 self._tool_to_cred[tool_name] = cred_name
         # Build reverse mapping: node_type -> credential_name
-        self._node_type_to_cred: Dict[str, str] = {}
+        self._node_type_to_cred: dict[str, str] = {}
         for cred_name, spec in self._specs.items():
             for node_type in spec.node_types:
                 self._node_type_to_cred[node_type] = cred_name
@@ -105,17 +106,18 @@ class CredentialManager:
     @classmethod
     def for_testing(
         cls,
-        overrides: Dict[str, str],
-        specs: Optional[Dict[str, CredentialSpec]] = None,
-        dotenv_path: Optional[Path] = None,
-    ) -> "CredentialManager":
+        overrides: dict[str, str],
+        specs: dict[str, CredentialSpec] | None = None,
+        dotenv_path: Path | None = None,
+    ) -> CredentialManager:
         """
         Create a CredentialManager with test values.
 
         Args:
             overrides: Dict mapping credential names to test values
             specs: Optional custom specs (defaults to CREDENTIAL_SPECS)
-            dotenv_path: Optional path to .env file (use non-existent path to isolate from real .env)
+            dotenv_path: Optional path to .env file
+                (use non-existent path to isolate from real .env)
 
         Returns:
             CredentialManager pre-configured for testing
@@ -126,7 +128,7 @@ class CredentialManager:
         """
         return cls(specs=specs, _overrides=overrides, dotenv_path=dotenv_path)
 
-    def _get_raw(self, name: str) -> Optional[str]:
+    def _get_raw(self, name: str) -> str | None:
         """Get credential from overrides, os.environ, or .env file.
 
         Priority order:
@@ -150,7 +152,7 @@ class CredentialManager:
         # 3. Fallback: read from .env file (hot-reload)
         return self._read_from_dotenv(spec.env_var)
 
-    def _read_from_dotenv(self, env_var: str) -> Optional[str]:
+    def _read_from_dotenv(self, env_var: str) -> str | None:
         """Read a single env var from .env file.
 
         Uses dotenv_values() which reads the file without modifying os.environ,
@@ -164,7 +166,7 @@ class CredentialManager:
         values = dotenv_values(dotenv_path)
         return values.get(env_var)
 
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str) -> str | None:
         """
         Get a credential value by logical name.
 
@@ -182,10 +184,7 @@ class CredentialManager:
             KeyError: If the credential name is not in specs
         """
         if name not in self._specs:
-            raise KeyError(
-                f"Unknown credential '{name}'. "
-                f"Available: {list(self._specs.keys())}"
-            )
+            raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
 
         # No caching - read fresh each time for hot-reload support
         return self._get_raw(name)
@@ -201,7 +200,7 @@ class CredentialManager:
         value = self.get(name)
         return value is not None and value != ""
 
-    def get_credential_for_tool(self, tool_name: str) -> Optional[str]:
+    def get_credential_for_tool(self, tool_name: str) -> str | None:
         """
         Get the credential name required by a tool.
 
@@ -213,9 +212,7 @@ class CredentialManager:
         """
         return self._tool_to_cred.get(tool_name)
 
-    def get_missing_for_tools(
-        self, tool_names: List[str]
-    ) -> List[Tuple[str, CredentialSpec]]:
+    def get_missing_for_tools(self, tool_names: list[str]) -> list[tuple[str, CredentialSpec]]:
         """
         Get list of missing credentials for the given tools.
 
@@ -225,7 +222,7 @@ class CredentialManager:
         Returns:
             List of (credential_name, spec) tuples for missing credentials
         """
-        missing: List[Tuple[str, CredentialSpec]] = []
+        missing: list[tuple[str, CredentialSpec]] = []
         checked: set[str] = set()
 
         for tool_name in tool_names:
@@ -244,7 +241,7 @@ class CredentialManager:
 
         return missing
 
-    def validate_for_tools(self, tool_names: List[str]) -> None:
+    def validate_for_tools(self, tool_names: list[str]) -> None:
         """
         Validate that all credentials required by the given tools are available.
 
@@ -266,14 +263,14 @@ class CredentialManager:
 
     def _format_missing_error(
         self,
-        missing: List[Tuple[str, CredentialSpec]],
-        tool_names: List[str],
+        missing: list[tuple[str, CredentialSpec]],
+        tool_names: list[str],
     ) -> str:
         """Format a clear, actionable error message for missing credentials."""
         lines = ["Cannot run agent: Missing credentials\n"]
         lines.append("The following tools require credentials that are not set:\n")
 
-        for cred_name, spec in missing:
+        for _cred_name, spec in missing:
             # Find which of the requested tools need this credential
             affected_tools = [t for t in tool_names if t in spec.tools]
             tools_str = ", ".join(affected_tools)
@@ -289,9 +286,7 @@ class CredentialManager:
         lines.append("Set these environment variables and re-run the agent.")
         return "\n".join(lines)
 
-    def get_missing_for_node_types(
-        self, node_types: List[str]
-    ) -> List[Tuple[str, CredentialSpec]]:
+    def get_missing_for_node_types(self, node_types: list[str]) -> list[tuple[str, CredentialSpec]]:
         """
         Get list of missing credentials for the given node types.
 
@@ -301,7 +296,7 @@ class CredentialManager:
         Returns:
             List of (credential_name, spec) tuples for missing credentials
         """
-        missing: List[Tuple[str, CredentialSpec]] = []
+        missing: list[tuple[str, CredentialSpec]] = []
         checked: set[str] = set()
 
         for node_type in node_types:
@@ -320,7 +315,7 @@ class CredentialManager:
 
         return missing
 
-    def validate_for_node_types(self, node_types: List[str]) -> None:
+    def validate_for_node_types(self, node_types: list[str]) -> None:
         """
         Validate that all credentials required by the given node types are available.
 
@@ -338,20 +333,18 @@ class CredentialManager:
         missing = self.get_missing_for_node_types(node_types)
 
         if missing:
-            raise CredentialError(
-                self._format_missing_node_type_error(missing, node_types)
-            )
+            raise CredentialError(self._format_missing_node_type_error(missing, node_types))
 
     def _format_missing_node_type_error(
         self,
-        missing: List[Tuple[str, CredentialSpec]],
-        node_types: List[str],
+        missing: list[tuple[str, CredentialSpec]],
+        node_types: list[str],
     ) -> str:
         """Format a clear, actionable error message for missing node type credentials."""
         lines = ["Cannot run agent: Missing credentials\n"]
         lines.append("The following node types require credentials that are not set:\n")
 
-        for cred_name, spec in missing:
+        for _cred_name, spec in missing:
             # Find which of the requested node types need this credential
             affected_types = [t for t in node_types if t in spec.node_types]
             types_str = ", ".join(affected_types)
@@ -381,7 +374,7 @@ class CredentialManager:
             creds = CredentialManager()
             creds.validate_startup()  # Fails if ANTHROPIC_API_KEY is not set
         """
-        missing: List[Tuple[str, CredentialSpec]] = []
+        missing: list[tuple[str, CredentialSpec]] = []
 
         for cred_name, spec in self._specs.items():
             if spec.startup_required and not self.is_available(cred_name):
@@ -392,12 +385,12 @@ class CredentialManager:
 
     def _format_startup_error(
         self,
-        missing: List[Tuple[str, CredentialSpec]],
+        missing: list[tuple[str, CredentialSpec]],
     ) -> str:
         """Format a clear, actionable error message for missing startup credentials."""
         lines = ["Server startup failed: Missing required credentials\n"]
 
-        for cred_name, spec in missing:
+        for _cred_name, spec in missing:
             lines.append(f"  {spec.env_var}")
             if spec.description:
                 lines.append(f"    {spec.description}")

@@ -14,17 +14,20 @@ from pydantic import BaseModel, Field
 
 class ApprovalStatus(str, Enum):
     """Status of user approval for a generated test."""
-    PENDING = "pending"      # Awaiting user review
-    APPROVED = "approved"    # User accepted as-is
-    MODIFIED = "modified"    # User edited before accepting
-    REJECTED = "rejected"    # User declined (with reason)
+
+    PENDING = "pending"  # Awaiting user review
+    APPROVED = "approved"  # User accepted as-is
+    MODIFIED = "modified"  # User edited before accepting
+    REJECTED = "rejected"  # User declined (with reason)
 
 
 class TestType(str, Enum):
     """Type of test based on what it validates."""
-    CONSTRAINT = "constraint"           # Validates constraint boundaries
-    SUCCESS_CRITERIA = "outcome"        # Validates success criteria achievement
-    EDGE_CASE = "edge_case"            # Validates edge case handling
+
+    __test__ = False  # Not a pytest test class
+    CONSTRAINT = "constraint"  # Validates constraint boundaries
+    SUCCESS_CRITERIA = "outcome"  # Validates success criteria achievement
+    EDGE_CASE = "edge_case"  # Validates edge case handling
 
 
 class Test(BaseModel):
@@ -37,42 +40,28 @@ class Test(BaseModel):
 
     All tests require approval before being added to the test suite.
     """
+
+    __test__ = False  # Not a pytest test class
     id: str
     goal_id: str
-    parent_criteria_id: str = Field(
-        description="Links to success_criteria.id or constraint.id"
-    )
+    parent_criteria_id: str = Field(description="Links to success_criteria.id or constraint.id")
     test_type: TestType
 
     # Test definition
     test_name: str = Field(
         description="Descriptive function name, e.g., test_constraint_api_limits_respected"
     )
-    test_code: str = Field(
-        description="Python test function code (pytest compatible)"
-    )
-    description: str = Field(
-        description="Human-readable description of what the test validates"
-    )
-    input: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Test input data"
-    )
+    test_code: str = Field(description="Python test function code (pytest compatible)")
+    description: str = Field(description="Human-readable description of what the test validates")
+    input: dict[str, Any] = Field(default_factory=dict, description="Test input data")
     expected_output: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Expected output or assertions"
+        default_factory=dict, description="Expected output or assertions"
     )
 
     # LLM generation metadata
-    generated_by: str = Field(
-        default="llm",
-        description="Who created the test: 'llm' or 'human'"
-    )
+    generated_by: str = Field(default="llm", description="Who created the test: 'llm' or 'human'")
     llm_confidence: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="LLM's confidence in the test quality (0-1)"
+        default=0.0, ge=0.0, le=1.0, description="LLM's confidence in the test quality (0-1)"
     )
 
     # Approval tracking (CRITICAL - tests are never used without approval)
@@ -80,19 +69,16 @@ class Test(BaseModel):
     approved_by: str | None = None
     approved_at: datetime | None = None
     rejection_reason: str | None = Field(
-        default=None,
-        description="Reason for rejection if status is REJECTED"
+        default=None, description="Reason for rejection if status is REJECTED"
     )
     original_code: str | None = Field(
-        default=None,
-        description="Original LLM-generated code if user modified it"
+        default=None, description="Original LLM-generated code if user modified it"
     )
 
     # Execution tracking
     last_run: datetime | None = None
     last_result: str | None = Field(
-        default=None,
-        description="Result of last run: 'passed', 'failed', 'error'"
+        default=None, description="Result of last run: 'passed', 'failed', 'error'"
     )
     run_count: int = 0
     pass_count: int = 0

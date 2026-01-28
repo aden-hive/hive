@@ -15,17 +15,114 @@ Protocol:
     The framework provides NodeContext with everything the node needs.
 """
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-from framework.runtime.core import Runtime
 from framework.llm.provider import LLMProvider, Tool
+from framework.runtime.core import Runtime
 
 logger = logging.getLogger(__name__)
+
+
+def _fix_unescaped_newlines_in_json(json_str: str) -> str:
+    """Fix unescaped newlines inside JSON string values.
+
+    LLMs sometimes output actual newlines inside JSON strings instead of \\n.
+    This function fixes that by properly escaping newlines within string values.
+    """
+    result = []
+    in_string = False
+    escape_next = False
+    i = 0
+
+    while i < len(json_str):
+        char = json_str[i]
+
+        if escape_next:
+            result.append(char)
+            escape_next = False
+            i += 1
+            continue
+
+        if char == "\\" and in_string:
+            escape_next = True
+            result.append(char)
+            i += 1
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            result.append(char)
+            i += 1
+            continue
+
+        # Fix unescaped newlines inside strings
+        if in_string and char == "\n":
+            result.append("\\n")
+            i += 1
+            continue
+
+        # Fix unescaped carriage returns inside strings
+        if in_string and char == "\r":
+            result.append("\\r")
+            i += 1
+            continue
+
+        # Fix unescaped tabs inside strings
+        if in_string and char == "\t":
+            result.append("\\t")
+            i += 1
+            continue
+
+        result.append(char)
+        i += 1
+
+    return "".join(result)
+
+
+def find_json_object(text: str) -> str | None:
+    """Find the first valid JSON object in text using balanced brace matching.
+
+    This handles nested objects correctly, unlike simple regex like r'\\{[^{}]*\\}'.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i, char in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == "\\" and in_string:
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if in_string:
+            continue
+
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+
+    return None
 
 
 class NodeSpec(BaseModel):
@@ -48,6 +145,7 @@ class NodeSpec(BaseModel):
             system_prompt="You are a calculator..."
         )
     """
+
     id: str
     name: str
     description: str
@@ -55,53 +153,74 @@ class NodeSpec(BaseModel):
     # Node behavior type
     node_type: str = Field(
         default="llm_tool_use",
-        description="Type: 'llm_tool_use', 'llm_generate', 'function', 'router', 'human_input'"
+        description="Type: 'llm_tool_use', 'llm_generate', 'function', 'router', 'human_input'",
     )
 
     # Data flow
     input_keys: list[str] = Field(
-        default_factory=list,
-        description="Keys this node reads from shared memory or input"
+        default_factory=list, description="Keys this node reads from shared memory or input"
     )
     output_keys: list[str] = Field(
-        default_factory=list,
-        description="Keys this node writes to shared memory or output"
+        default_factory=list, description="Keys this node writes to shared memory or output"
+    )
+
+    # Optional schemas for validation and cleansing
+    input_schema: dict[str, dict] = Field(
+        default_factory=dict,
+        description=(
+            "Optional schema for input validation. "
+            "Format: {key: {type: 'string', required: True, description: '...'}}"
+        ),
+    )
+    output_schema: dict[str, dict] = Field(
+        default_factory=dict,
+        description=(
+            "Optional schema for output validation. "
+            "Format: {key: {type: 'dict', required: True, description: '...'}}"
+        ),
     )
 
     # For LLM nodes
-    system_prompt: str | None = Field(
-        default=None,
-        description="System prompt for LLM nodes"
-    )
-    tools: list[str] = Field(
-        default_factory=list,
-        description="Tool names this node can use"
-    )
+    system_prompt: str | None = Field(default=None, description="System prompt for LLM nodes")
+    tools: list[str] = Field(default_factory=list, description="Tool names this node can use")
     model: str | None = Field(
-        default=None,
-        description="Specific model to use (defaults to graph default)"
+        default=None, description="Specific model to use (defaults to graph default)"
     )
 
     # For function nodes
     function: str | None = Field(
-        default=None,
-        description="Function name or path for function nodes"
+        default=None, description="Function name or path for function nodes"
     )
 
     # For router nodes
     routes: dict[str, str] = Field(
-        default_factory=dict,
-        description="Condition -> target_node_id mapping for routers"
+        default_factory=dict, description="Condition -> target_node_id mapping for routers"
     )
 
     # Retry behavior
     max_retries: int = Field(default=3)
-    retry_on: list[str] = Field(
-        default_factory=list,
-        description="Error types to retry on"
+    retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
+
+    # Pydantic model for output validation
+    output_model: type[BaseModel] | None = Field(
+        default=None,
+        description=(
+            "Optional Pydantic model class for validating and parsing LLM output. "
+            "When set, the LLM response will be validated against this model."
+        ),
+    )
+    max_validation_retries: int = Field(
+        default=2,
+        description="Maximum retries when Pydantic validation fails (with feedback to LLM)",
     )
 
-    model_config = {"extra": "allow"}
+    model_config = {"extra": "allow", "arbitrary_types_allowed": True}
+
+
+class MemoryWriteError(Exception):
+    """Raised when an invalid value is written to memory."""
+
+    pass
 
 
 @dataclass
@@ -111,10 +230,22 @@ class SharedMemory:
 
     Nodes read and write to shared memory using typed keys.
     The memory is scoped to a single run.
+
+    For parallel execution, use write_async() which provides per-key locking
+    to prevent race conditions when multiple nodes write concurrently.
     """
+
     _data: dict[str, Any] = field(default_factory=dict)
     _allowed_read: set[str] = field(default_factory=set)
     _allowed_write: set[str] = field(default_factory=set)
+    # Locks for thread-safe parallel execution
+    _lock: asyncio.Lock | None = field(default=None, repr=False)
+    _key_locks: dict[str, asyncio.Lock] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        """Initialize the main lock if not provided."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
 
     def read(self, key: str) -> Any:
         """Read a value from shared memory."""
@@ -122,11 +253,141 @@ class SharedMemory:
             raise PermissionError(f"Node not allowed to read key: {key}")
         return self._data.get(key)
 
-    def write(self, key: str, value: Any) -> None:
-        """Write a value to shared memory."""
+    def write(self, key: str, value: Any, validate: bool = True) -> None:
+        """
+        Write a value to shared memory.
+
+        Args:
+            key: The memory key to write to
+            value: The value to write
+            validate: If True, check for suspicious content (default True)
+
+        Raises:
+            PermissionError: If node doesn't have write permission
+            MemoryWriteError: If value appears to be hallucinated content
+        """
         if self._allowed_write and key not in self._allowed_write:
             raise PermissionError(f"Node not allowed to write key: {key}")
+
+        if validate and isinstance(value, str):
+            # Check for obviously hallucinated content
+            if len(value) > 5000:
+                # Long strings that look like code are suspicious
+                if self._contains_code_indicators(value):
+                    logger.warning(
+                        f"⚠ Suspicious write to key '{key}': appears to be code "
+                        f"({len(value)} chars). Consider using validate=False if intended."
+                    )
+                    raise MemoryWriteError(
+                        f"Rejected suspicious content for key '{key}': "
+                        f"appears to be hallucinated code ({len(value)} chars). "
+                        "If this is intentional, use validate=False."
+                    )
+
         self._data[key] = value
+
+    async def write_async(self, key: str, value: Any, validate: bool = True) -> None:
+        """
+        Thread-safe async write with per-key locking.
+
+        Use this method when multiple nodes may write concurrently during
+        parallel execution. Each key has its own lock to minimize contention.
+
+        Args:
+            key: The memory key to write to
+            value: The value to write
+            validate: If True, check for suspicious content (default True)
+
+        Raises:
+            PermissionError: If node doesn't have write permission
+            MemoryWriteError: If value appears to be hallucinated content
+        """
+        # Check permissions first (no lock needed)
+        if self._allowed_write and key not in self._allowed_write:
+            raise PermissionError(f"Node not allowed to write key: {key}")
+
+        # Ensure key has a lock (double-checked locking pattern)
+        if key not in self._key_locks:
+            async with self._lock:
+                if key not in self._key_locks:
+                    self._key_locks[key] = asyncio.Lock()
+
+        # Acquire per-key lock and write
+        async with self._key_locks[key]:
+            if validate and isinstance(value, str):
+                if len(value) > 5000:
+                    if self._contains_code_indicators(value):
+                        logger.warning(
+                            f"⚠ Suspicious write to key '{key}': appears to be code "
+                            f"({len(value)} chars). Consider using validate=False if intended."
+                        )
+                        raise MemoryWriteError(
+                            f"Rejected suspicious content for key '{key}': "
+                            f"appears to be hallucinated code ({len(value)} chars). "
+                            "If this is intentional, use validate=False."
+                        )
+            self._data[key] = value
+
+    def _contains_code_indicators(self, value: str) -> bool:
+        """
+        Check for code patterns in a string using sampling for efficiency.
+
+        For strings under 10KB, checks the entire content.
+        For longer strings, samples at strategic positions to balance
+        performance with detection accuracy.
+
+        Args:
+            value: The string to check for code indicators
+
+        Returns:
+            True if code indicators are found, False otherwise
+        """
+        code_indicators = [
+            # Python
+            "```python",
+            "def ",
+            "class ",
+            "import ",
+            "async def ",
+            "from ",
+            # JavaScript/TypeScript
+            "function ",
+            "const ",
+            "let ",
+            "=> {",
+            "require(",
+            "export ",
+            # SQL
+            "SELECT ",
+            "INSERT ",
+            "UPDATE ",
+            "DELETE ",
+            "DROP ",
+            # HTML/Script injection
+            "<script",
+            "<?php",
+            "<%",
+        ]
+
+        # For strings under 10KB, check the entire content
+        if len(value) < 10000:
+            return any(indicator in value for indicator in code_indicators)
+
+        # For longer strings, sample at strategic positions
+        sample_positions = [
+            0,  # Start
+            len(value) // 4,  # 25%
+            len(value) // 2,  # 50%
+            3 * len(value) // 4,  # 75%
+            max(0, len(value) - 2000),  # Near end
+        ]
+
+        for pos in sample_positions:
+            chunk = value[pos : pos + 2000]
+            if any(indicator in chunk for indicator in code_indicators):
+                return True
+
+        return False
 
     def read_all(self) -> dict[str, Any]:
         """Read all accessible data."""
@@ -139,11 +400,17 @@ class SharedMemory:
         read_keys: list[str],
         write_keys: list[str],
     ) -> "SharedMemory":
-        """Create a view with restricted permissions for a specific node."""
+        """Create a view with restricted permissions for a specific node.
+
+        The scoped view shares the same underlying data and locks,
+        enabling thread-safe parallel execution across scoped views.
+        """
         return SharedMemory(
             _data=self._data,
             _allowed_read=set(read_keys) if read_keys else set(),
             _allowed_write=set(write_keys) if write_keys else set(),
+            _lock=self._lock,  # Share lock for thread safety
+            _key_locks=self._key_locks,  # Share key locks
         )
 
 
@@ -159,6 +426,7 @@ class NodeContext:
     - Access to tools (for actions)
     - The goal context (for guidance)
     """
+
     # Core runtime
     runtime: Runtime
 
@@ -178,6 +446,9 @@ class NodeContext:
     goal_context: str = ""
     goal: Any = None  # Goal object for LLM-powered routers
 
+    # LLM configuration
+    max_tokens: int = 4096  # Maximum tokens for LLM responses
+
     # Execution metadata
     attempt: int = 1
     max_attempts: int = 3
@@ -194,6 +465,7 @@ class NodeResult:
     - State changes made
     - Route decision (for routers)
     """
+
     success: bool
     output: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
@@ -205,6 +477,9 @@ class NodeResult:
     # Metadata
     tokens_used: int = 0
     latency_ms: int = 0
+
+    # Pydantic validation errors (if any)
+    validation_errors: list[str] = field(default_factory=list)
 
     def to_summary(self, node_spec: Any = None) -> str:
         """
@@ -221,6 +496,7 @@ class NodeResult:
 
         # Use Haiku to generate intelligent summary
         import os
+
         api_key = os.environ.get("ANTHROPIC_API_KEY")
 
         if not api_key:
@@ -235,25 +511,28 @@ class NodeResult:
 
         # Use Haiku to generate intelligent summary
         try:
-            import anthropic
             import json
+
+            import anthropic
 
             node_context = ""
             if node_spec:
                 node_context = f"\nNode: {node_spec.name}\nPurpose: {node_spec.description}"
 
-            prompt = f"""Generate a 1-2 sentence human-readable summary of what this node produced.{node_context}
-
-Node output:
-{json.dumps(self.output, indent=2, default=str)[:2000]}
-
-Provide a concise, clear summary that a human can quickly understand. Focus on the key information produced."""
+            output_json = json.dumps(self.output, indent=2, default=str)[:2000]
+            prompt = (
+                f"Generate a 1-2 sentence human-readable summary of "
+                f"what this node produced.{node_context}\n\n"
+                f"Node output:\n{output_json}\n\n"
+                "Provide a concise, clear summary that a human can quickly "
+                "understand. Focus on the key information produced."
+            )
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
                 model="claude-3-5-haiku-20241022",
                 max_tokens=200,
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
             )
 
             summary = message.content[0].text.strip()
@@ -343,8 +622,48 @@ class LLMNode(NodeProtocol):
     The LLM decides how to achieve the goal within constraints.
     """
 
-    def __init__(self, tool_executor: Callable | None = None):
+    # Stop reasons indicating truncation (varies by provider)
+    TRUNCATION_STOP_REASONS = {"length", "max_tokens", "token_limit"}
+
+    # Compaction instruction added when response is truncated
+    COMPACTION_INSTRUCTION = """
+IMPORTANT: Your previous response was truncated because it exceeded the token limit.
+Please provide a MORE CONCISE response that fits within the limit.
+Focus on the essential information and omit verbose details.
+Keep the same JSON structure but with shorter content values.
+"""
+
+    def __init__(
+        self,
+        tool_executor: Callable | None = None,
+        require_tools: bool = False,
+        cleanup_llm_model: str | None = None,
+        max_compaction_retries: int = 2,
+    ):
         self.tool_executor = tool_executor
+        self.require_tools = require_tools
+        self.cleanup_llm_model = cleanup_llm_model
+        self.max_compaction_retries = max_compaction_retries
+
+    def _is_truncated(self, response) -> bool:
+        """Check if LLM response was truncated due to token limit."""
+        stop_reason = getattr(response, "stop_reason", "").lower()
+        return stop_reason in self.TRUNCATION_STOP_REASONS
+
+    def _strip_code_blocks(self, content: str) -> str:
+        """Strip markdown code block wrappers from content.
+
+        LLMs often wrap JSON output in ```json...``` blocks.
+        This method removes those wrappers to get clean content.
+        """
+        import re
+
+        content = content.strip()
+        # Match ```json or ``` at start and ``` at end (greedy to handle nested)
+        match = re.match(r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return content
 
     async def execute(self, ctx: NodeContext) -> NodeResult:
         """Execute the LLM node."""
@@ -352,6 +671,15 @@ class LLMNode(NodeProtocol):
 
         if ctx.llm is None:
             return NodeResult(success=False, error="LLM not available")
+
+        # Fail fast if tools are required but not available
+        if self.require_tools and not ctx.available_tools:
+            return NodeResult(
+                success=False,
+                error=f"Node '{ctx.node_spec.name}' requires tools but none are available. "
+                f"Declared tools: {ctx.node_spec.tools}. "
+                "Register tools via ToolRegistry before running the agent.",
+            )
 
         ctx.runtime.set_node(ctx.node_id)
 
@@ -381,17 +709,26 @@ class LLMNode(NodeProtocol):
 
             # Log the LLM call details
             logger.info("      🤖 LLM Call:")
-            logger.info(f"         System: {system[:150]}..." if len(system) > 150 else f"         System: {system}")
-            logger.info(f"         User message: {messages[-1]['content'][:150]}..." if len(messages[-1]['content']) > 150 else f"         User message: {messages[-1]['content']}")
+            logger.info(
+                f"         System: {system[:150]}..."
+                if len(system) > 150
+                else f"         System: {system}"
+            )
+            logger.info(
+                f"         User message: {messages[-1]['content'][:150]}..."
+                if len(messages[-1]["content"]) > 150
+                else f"         User message: {messages[-1]['content']}"
+            )
             if ctx.available_tools:
                 logger.info(f"         Tools available: {[t.name for t in ctx.available_tools]}")
 
             # Call LLM
             if ctx.available_tools and self.tool_executor:
-                from framework.llm.provider import ToolUse, ToolResult
+                from framework.llm.provider import ToolResult, ToolUse
 
                 def executor(tool_use: ToolUse) -> ToolResult:
-                    logger.info(f"         🔧 Tool call: {tool_use.name}({', '.join(f'{k}={v}' for k, v in tool_use.input.items())})")
+                    args = ", ".join(f"{k}={v}" for k, v in tool_use.input.items())
+                    logger.info(f"         🔧 Tool call: {tool_use.name}({args})")
                     result = self.tool_executor(tool_use)
                     # Truncate long results
                     result_str = str(result.content)[:150]
@@ -405,18 +742,192 @@ class LLMNode(NodeProtocol):
                     system=system,
                     tools=ctx.available_tools,
                     tool_executor=executor,
+                    max_tokens=ctx.max_tokens,
                 )
             else:
+                # Use JSON mode for llm_generate nodes with output_keys
+                # Skip strict schema validation - just validate keys after parsing
+                use_json_mode = (
+                    ctx.node_spec.node_type == "llm_generate"
+                    and ctx.node_spec.output_keys
+                    and len(ctx.node_spec.output_keys) >= 1
+                )
+                if use_json_mode:
+                    logger.info(
+                        f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}"
+                    )
+
                 response = ctx.llm.complete(
                     messages=messages,
                     system=system,
+                    json_mode=use_json_mode,
+                    max_tokens=ctx.max_tokens,
                 )
 
-            # Log the response
-            response_preview = response.content[:200] if len(response.content) > 200 else response.content
-            if len(response.content) > 200:
-                response_preview += "..."
-            logger.info(f"      ← Response: {response_preview}")
+            # Check for truncation and retry with compaction if needed
+            expects_json = (
+                ctx.node_spec.node_type in ("llm_generate", "llm_tool_use")
+                and ctx.node_spec.output_keys
+                and len(ctx.node_spec.output_keys) >= 1
+            )
+
+            compaction_attempt = 0
+            while (
+                self._is_truncated(response)
+                and expects_json
+                and compaction_attempt < self.max_compaction_retries
+            ):
+                compaction_attempt += 1
+                logger.warning(
+                    f"      ⚠ Response truncated (stop_reason: {response.stop_reason}), "
+                    f"retrying with compaction ({compaction_attempt}/{self.max_compaction_retries})"
+                )
+
+                # Add compaction instruction to messages
+                compaction_messages = messages + [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": self.COMPACTION_INSTRUCTION},
+                ]
+
+                # Retry the call with compaction instruction
+                if ctx.available_tools and self.tool_executor:
+                    response = ctx.llm.complete_with_tools(
+                        messages=compaction_messages,
+                        system=system,
+                        tools=ctx.available_tools,
+                        tool_executor=executor,
+                        max_tokens=ctx.max_tokens,
+                    )
+                else:
+                    response = ctx.llm.complete(
+                        messages=compaction_messages,
+                        system=system,
+                        json_mode=use_json_mode,
+                        max_tokens=ctx.max_tokens,
+                    )
+
+            if self._is_truncated(response) and expects_json:
+                logger.warning(
+                    f"      ⚠ Response still truncated after "
+                    f"{compaction_attempt} compaction attempts"
+                )
+
+            # Phase 2: Validation retry loop for Pydantic models
+            max_validation_retries = (
+                ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
+            )
+            validation_attempt = 0
+            total_input_tokens = 0
+            total_output_tokens = 0
+            current_messages = messages.copy()
+
+            while True:
+                total_input_tokens += response.input_tokens
+                total_output_tokens += response.output_tokens
+
+                # Log the response
+                response_preview = (
+                    response.content[:200] if len(response.content) > 200 else response.content
+                )
+                if len(response.content) > 200:
+                    response_preview += "..."
+                logger.info(f"      ← Response: {response_preview}")
+
+                # If no output_model, break immediately (no validation needed)
+                if ctx.node_spec.output_model is None:
+                    break
+
+                # Try to parse and validate the response
+                try:
+                    import json
+
+                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
+
+                    if isinstance(parsed, dict):
+                        from framework.graph.validator import OutputValidator
+
+                        validator = OutputValidator()
+                        validation_result, validated_model = validator.validate_with_pydantic(
+                            parsed, ctx.node_spec.output_model
+                        )
+
+                        if validation_result.success:
+                            # Validation passed, break out of retry loop
+                            model_name = ctx.node_spec.output_model.__name__
+                            logger.info(f"      ✓ Pydantic validation passed for {model_name}")
+                            break
+                        else:
+                            # Validation failed
+                            validation_attempt += 1
+
+                            if validation_attempt <= max_validation_retries:
+                                # Add validation feedback to messages and retry
+                                feedback = validator.format_validation_feedback(
+                                    validation_result, ctx.node_spec.output_model
+                                )
+                                logger.warning(
+                                    f"      ⚠ Pydantic validation failed "
+                                    f"(attempt {validation_attempt}/{max_validation_retries}): "
+                                    f"{validation_result.error}"
+                                )
+                                logger.info("      🔄 Retrying with validation feedback...")
+
+                                # Add the assistant's failed response and feedback
+                                current_messages.append(
+                                    {"role": "assistant", "content": response.content}
+                                )
+                                current_messages.append({"role": "user", "content": feedback})
+
+                                # Re-call LLM with feedback
+                                if ctx.available_tools and self.tool_executor:
+                                    response = ctx.llm.complete_with_tools(
+                                        messages=current_messages,
+                                        system=system,
+                                        tools=ctx.available_tools,
+                                        tool_executor=executor,
+                                        max_tokens=ctx.max_tokens,
+                                    )
+                                else:
+                                    response = ctx.llm.complete(
+                                        messages=current_messages,
+                                        system=system,
+                                        json_mode=use_json_mode,
+                                        max_tokens=ctx.max_tokens,
+                                    )
+                                continue  # Retry validation
+                            else:
+                                # Max retries exceeded
+                                latency_ms = int((time.time() - start) * 1000)
+                                err = validation_result.error
+                                logger.error(
+                                    f"      ✗ Pydantic validation failed after "
+                                    f"{max_validation_retries} retries: {err}"
+                                )
+                                ctx.runtime.record_outcome(
+                                    decision_id=decision_id,
+                                    success=False,
+                                    error=f"Validation failed: {validation_result.error}",
+                                    tokens_used=total_input_tokens + total_output_tokens,
+                                    latency_ms=latency_ms,
+                                )
+                                error_msg = (
+                                    f"Pydantic validation failed after "
+                                    f"{max_validation_retries} retries: {err}"
+                                )
+                                return NodeResult(
+                                    success=False,
+                                    error=error_msg,
+                                    output=parsed,
+                                    tokens_used=total_input_tokens + total_output_tokens,
+                                    latency_ms=latency_ms,
+                                    validation_errors=validation_result.errors,
+                                )
+                    else:
+                        # Not a dict, can't validate - break and let downstream handle
+                        break
+                except Exception:
+                    # JSON extraction failed - break and let downstream handle
+                    break
 
             latency_ms = int((time.time() - start) * 1000)
 
@@ -432,44 +943,88 @@ class LLMNode(NodeProtocol):
             output = self._parse_output(response.content, ctx.node_spec)
 
             # For llm_generate and llm_tool_use nodes, try to parse JSON and extract fields
-            if ctx.node_spec.node_type in ("llm_generate", "llm_tool_use") and len(ctx.node_spec.output_keys) > 1:
+            if (
+                ctx.node_spec.node_type in ("llm_generate", "llm_tool_use")
+                and len(ctx.node_spec.output_keys) >= 1
+            ):
                 try:
                     import json
 
-                    # Try direct JSON parse first
-                    parsed = self._extract_json_with_haiku(response.content, ctx.node_spec.output_keys)
+                    # Try to extract JSON from response
+                    parsed = self._extract_json(
+                        response.content, ctx.node_spec.output_keys, self.cleanup_llm_model
+                    )
 
                     # If parsed successfully, write each field to its corresponding output key
+                    # Use validate=False since LLM output legitimately contains text that
+                    # may trigger false positives (e.g., "from OpenAI" matches "from ")
                     if isinstance(parsed, dict):
+                        # If we have output_model, the validation already happened in the retry loop
+                        if ctx.node_spec.output_model is not None:
+                            from framework.graph.validator import OutputValidator
+
+                            validator = OutputValidator()
+                            validation_result, validated_model = validator.validate_with_pydantic(
+                                parsed, ctx.node_spec.output_model
+                            )
+                            # Use validated model's dict representation
+                            if validated_model:
+                                parsed = validated_model.model_dump()
+
                         for key in ctx.node_spec.output_keys:
                             if key in parsed:
-                                ctx.memory.write(key, parsed[key])
-                                output[key] = parsed[key]
+                                value = parsed[key]
+                                # Strip code block wrappers from string values
+                                if isinstance(value, str):
+                                    value = self._strip_code_blocks(value)
+                                ctx.memory.write(key, value, validate=False)
+                                output[key] = value
                             elif key in ctx.input_data:
-                                # Key not in parsed JSON but exists in input - pass through input value
-                                ctx.memory.write(key, ctx.input_data[key])
+                                # Key not in JSON but exists in input - pass through
+                                ctx.memory.write(key, ctx.input_data[key], validate=False)
                                 output[key] = ctx.input_data[key]
                             else:
-                                # Key not in parsed JSON or input, write the whole response
-                                ctx.memory.write(key, response.content)
-                                output[key] = response.content
+                                # Key not in JSON or input, write whole response (stripped)
+                                stripped_content = self._strip_code_blocks(response.content)
+                                ctx.memory.write(key, stripped_content, validate=False)
+                                output[key] = stripped_content
                     else:
-                        # Not a dict, fall back to writing entire response to all keys
+                        # Not a dict, fall back to writing entire response to all keys (stripped)
+                        stripped_content = self._strip_code_blocks(response.content)
                         for key in ctx.node_spec.output_keys:
-                            ctx.memory.write(key, response.content)
-                            output[key] = response.content
+                            ctx.memory.write(key, stripped_content, validate=False)
+                            output[key] = stripped_content
 
                 except (json.JSONDecodeError, Exception) as e:
-                    # JSON extraction failed completely
-                    logger.warning(f"      ⚠ Failed to extract JSON output: {e}")
-                    for key in ctx.node_spec.output_keys:
-                        ctx.memory.write(key, response.content)
-                        output[key] = response.content
+                    # JSON extraction failed - fail explicitly instead of polluting memory
+                    logger.error(f"      ✗ Failed to extract structured output: {e}")
+                    logger.error(
+                        f"      Raw response (first 500 chars): {response.content[:500]}..."
+                    )
+
+                    # Return failure instead of writing garbage to all keys
+                    return NodeResult(
+                        success=False,
+                        error=(
+                            f"Output extraction failed: {e}. LLM returned non-JSON response. "
+                            f"Expected keys: {ctx.node_spec.output_keys}"
+                        ),
+                        output={},
+                        tokens_used=response.input_tokens + response.output_tokens,
+                        latency_ms=latency_ms,
+                    )
+                    # JSON extraction failed completely - still strip code blocks
+                    # logger.warning(f"      ⚠ Failed to extract JSON output: {e}")
+                    # stripped_content = self._strip_code_blocks(response.content)
+                    # for key in ctx.node_spec.output_keys:
+                    #     ctx.memory.write(key, stripped_content)
+                    #     output[key] = stripped_content
             else:
-                # For non-llm_generate or single output nodes, write entire response to all keys
+                # For non-llm_generate or single output nodes, write entire response (stripped)
+                stripped_content = self._strip_code_blocks(response.content)
                 for key in ctx.node_spec.output_keys:
-                    ctx.memory.write(key, response.content)
-                    output[key] = response.content
+                    ctx.memory.write(key, stripped_content, validate=False)
+                    output[key] = stripped_content
 
             return NodeResult(
                 success=True,
@@ -498,78 +1053,227 @@ class LLMNode(NodeProtocol):
         # Default output
         return {"result": content}
 
-    def _extract_json_with_haiku(self, raw_response: str, output_keys: list[str]) -> dict[str, Any]:
-        """Use Haiku to extract clean JSON from potentially verbose LLM response."""
+    def _extract_json(
+        self, raw_response: str, output_keys: list[str], cleanup_llm_model: str | None = None
+    ) -> dict[str, Any]:
+        """Extract clean JSON from potentially verbose LLM response.
+
+        Tries multiple extraction strategies in order:
+        1. Direct JSON parse
+        2. Markdown code block extraction
+        3. Balanced brace matching
+        4. Configured LLM fallback (last resort)
+
+        Args:
+            raw_response: The raw LLM response text
+            output_keys: Expected output keys for the JSON
+            cleanup_llm_model: Optional model to use for LLM cleanup fallback
+        """
         import json
         import re
+
+        content = raw_response.strip()
 
         # Try direct JSON parse first (fast path)
         try:
             content = raw_response.strip()
-            # Remove markdown code blocks if present
+
+            # Remove markdown code blocks if present - more robust extraction
             if content.startswith("```"):
-                match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
+                # Try multiple patterns for markdown code blocks
+                # Pattern 1: ```json\n...\n``` or ```\n...\n```
+                match = re.search(r"^```(?:json)?\s*\n([\s\S]*?)\n```\s*$", content)
                 if match:
                     content = match.group(1).strip()
+                else:
+                    # Pattern 2: Just strip the first and last lines if they're ```
+                    lines = content.split("\n")
+                    if lines[0].startswith("```") and lines[-1].strip() == "```":
+                        content = "\n".join(lines[1:-1]).strip()
 
             parsed = json.loads(content)
             if isinstance(parsed, dict):
                 return parsed
-        except json.JSONDecodeError:
-            pass
-
-        # JSON parse failed - use Haiku to extract clean JSON
-        import os
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            # No API key, try one more simple extraction
+        except json.JSONDecodeError as e:
+            logger.info(f"      Direct JSON parse failed: {e}")
+            logger.info(f"      Content first 200 chars repr: {repr(content[:200])}")
+            # Try fixing unescaped newlines in string values
             try:
-                # Find first { and last }
-                start = raw_response.find('{')
-                end = raw_response.rfind('}')
-                if start != -1 and end != -1:
-                    json_str = raw_response[start:end+1]
-                    return json.loads(json_str)
-            except (ValueError, json.JSONDecodeError):
+                fixed = _fix_unescaped_newlines_in_json(content)
+                logger.info(f"      Fixed content first 200 chars repr: {repr(fixed[:200])}")
+                parsed = json.loads(fixed)
+                if isinstance(parsed, dict):
+                    logger.info("      ✓ Parsed JSON after fixing unescaped newlines")
+                    return parsed
+            except json.JSONDecodeError as e2:
+                logger.info(f"      Newline fix also failed: {e2}")
+
+        # Try to extract JSON from markdown code blocks (greedy match to handle nested blocks)
+        # Multiple patterns to handle different LLM formatting styles
+        code_block_patterns = [
+            # Anchored match from first ``` to last ```
+            r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$",
+            # Non-anchored: find ```json anywhere and extract to closing ```
+            r"```(?:json|JSON)?\s*\n([\s\S]*?)\n```",
+            # Handle case where closing ``` might have trailing content
+            r"```(?:json|JSON)?\s*\n([\s\S]*?)\n```",
+        ]
+        for pattern in code_block_patterns:
+            code_block_match = re.search(pattern, content, re.DOTALL)
+            if code_block_match:
+                try:
+                    extracted = code_block_match.group(1).strip()
+                    if extracted:  # Skip empty matches
+                        # Try direct parse first, then with newline fix
+                        try:
+                            parsed = json.loads(extracted)
+                        except json.JSONDecodeError:
+                            parsed = json.loads(_fix_unescaped_newlines_in_json(extracted))
+                        if isinstance(parsed, dict):
+                            return parsed
+                except json.JSONDecodeError:
+                    pass
+
+        # Try to find JSON object by matching balanced braces (use module-level helper)
+        json_str = find_json_object(content)
+        if json_str:
+            try:
+                # Try direct parse first, then with newline fix
+                try:
+                    parsed = json.loads(json_str)
+                except json.JSONDecodeError:
+                    parsed = json.loads(_fix_unescaped_newlines_in_json(json_str))
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
                 pass
-            raise ValueError("Cannot parse JSON and no API key for Haiku cleanup")
 
-        # Use Haiku to clean the response
-        from framework.llm.anthropic import AnthropicProvider
-        haiku = AnthropicProvider(model="claude-3-5-haiku-20241022")
+        # Try stripping markdown prefix and finding JSON from there
+        # This handles cases like "```json\n{...}" where regex might fail
+        if "```" in content:
+            # Find position after ```json or ``` marker
+            json_start = content.find("{")
+            if json_start > 0:
+                # Extract from first { to end, then find balanced JSON
+                json_str = find_json_object(content[json_start:])
+                if json_str:
+                    try:
+                        # Try direct parse first, then with newline fix
+                        try:
+                            parsed = json.loads(json_str)
+                        except json.JSONDecodeError:
+                            parsed = json.loads(_fix_unescaped_newlines_in_json(json_str))
+                        if isinstance(parsed, dict):
+                            logger.info(
+                                "      ✓ Extracted JSON via brace matching after markdown strip"
+                            )
+                            return parsed
+                    except json.JSONDecodeError:
+                        pass
 
-        prompt = f"""Extract the JSON object from this LLM response. Extract ONLY the values that the LLM actually generated.
+        # All local extraction failed - use LLM as last resort
+        import os
+
+        from framework.llm.litellm import LiteLLMProvider
+
+        logger.info(f"      cleanup_llm_model param: {cleanup_llm_model}")
+
+        # Use configured cleanup model, or fall back to defaults
+        if cleanup_llm_model:
+            # Use the configured cleanup model (LiteLLM handles API keys via env vars)
+            cleaner_llm = LiteLLMProvider(
+                model=cleanup_llm_model,
+                temperature=0.0,
+            )
+            logger.info(f"      Using configured cleanup LLM: {cleanup_llm_model}")
+        else:
+            # Fall back to default logic: Cerebras preferred, then Haiku
+            api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise ValueError(
+                    "Cannot parse JSON and no API key for LLM cleanup "
+                    "(set CEREBRAS_API_KEY or ANTHROPIC_API_KEY, or configure cleanup_llm_model)"
+                )
+
+            if os.environ.get("CEREBRAS_API_KEY"):
+                cleaner_llm = LiteLLMProvider(
+                    api_key=os.environ.get("CEREBRAS_API_KEY"),
+                    model="cerebras/llama-3.3-70b",
+                    temperature=0.0,
+                )
+            else:
+                cleaner_llm = LiteLLMProvider(
+                    api_key=api_key,
+                    model="claude-3-5-haiku-20241022",
+                    temperature=0.0,
+                )
+
+        prompt = f"""Extract the JSON object from this LLM response.
 
 Expected output keys: {output_keys}
 
 LLM Response:
 {raw_response}
 
-IMPORTANT:
-- Only extract keys that the LLM explicitly output in its response
-- Do NOT include keys that were just mentioned or passed through from input
-- If the LLM output multiple pieces of text/JSON, extract the LAST JSON object only
-- Output ONLY valid JSON with no extra text, no markdown, no explanations"""
+Output ONLY the JSON object, nothing else."""
 
         try:
-            result = haiku.complete(
+            result = cleaner_llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                system="You extract clean JSON from messy responses. Output only valid JSON, nothing else.",
+                system="Extract JSON from text. Output only valid JSON.",
+                json_mode=True,
             )
 
-            cleaned = result.content.strip()
-            # Remove markdown if Haiku added it
+            cleaned = result.content.strip() if result.content else ""
+
+            # Check for empty response
+            if not cleaned:
+                logger.warning("      ⚠ LLM cleanup returned empty response")
+                raise ValueError(
+                    f"LLM cleanup returned empty response. "
+                    f"Raw response starts with: {raw_response[:200]}..."
+                )
+
+            # Remove markdown if LLM added it
             if cleaned.startswith("```"):
-                match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', cleaned, re.DOTALL)
+                match = re.search(r"^```(?:json)?\s*\n([\s\S]*?)\n```\s*$", cleaned)
                 if match:
                     cleaned = match.group(1).strip()
+                else:
+                    # Fallback: strip first/last lines
+                    lines = cleaned.split("\n")
+                    if lines[0].startswith("```") and lines[-1].strip() == "```":
+                        cleaned = "\n".join(lines[1:-1]).strip()
 
-            parsed = json.loads(cleaned)
-            logger.info("      ✓ Haiku cleaned JSON output")
+            # Try balanced brace extraction if still not valid JSON
+            if not cleaned.startswith("{"):
+                json_str = find_json_object(cleaned)
+                if json_str:
+                    cleaned = json_str
+
+            if not cleaned:
+                raise ValueError(
+                    f"Could not extract JSON from LLM cleanup response. "
+                    f"Raw response starts with: {raw_response[:200]}..."
+                )
+
+            # Try direct parse first, then with newline fix
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                parsed = json.loads(_fix_unescaped_newlines_in_json(cleaned))
+            logger.info("      ✓ LLM cleaned JSON output")
             return parsed
 
+        except json.JSONDecodeError as e:
+            logger.warning(f"      ⚠ LLM cleanup response not valid JSON: {e}")
+            raise ValueError(
+                f"LLM cleanup response not valid JSON: {e}. Expected keys: {output_keys}"
+            ) from e
+        except ValueError:
+            raise  # Re-raise our descriptive error
         except Exception as e:
-            logger.warning(f"      ⚠ Haiku JSON extraction failed: {e}")
+            logger.warning(f"      ⚠ LLM JSON extraction failed: {e}")
             raise
 
     def _build_messages(self, ctx: NodeContext) -> list[dict]:
@@ -598,6 +1302,7 @@ IMPORTANT:
 
         # Use Haiku to intelligently extract relevant data
         import os
+
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             # Fallback to simple formatting if no API key
@@ -610,34 +1315,43 @@ IMPORTANT:
 
         # Build prompt for Haiku to extract clean values
         import json
-        prompt = f"""Extract the following information from the memory context:
 
-Required fields: {', '.join(ctx.node_spec.input_keys)}
+        # Smart truncation: truncate values rather than corrupting JSON
+        def truncate_value(v, max_len=500):
+            s = str(v)
+            return s[:max_len] + "..." if len(s) > max_len else v
 
-Memory context (may contain nested data, JSON strings, or extra information):
-{json.dumps(memory_data, indent=2, default=str)[:3000]}
+        truncated_data = {k: truncate_value(v) for k, v in memory_data.items()}
+        memory_json = json.dumps(truncated_data, indent=2, default=str)
 
-Extract ONLY the clean values for the required fields. Ignore nested structures, JSON wrappers, and irrelevant data.
-
-Output as JSON with the exact field names requested."""
+        required_fields = ", ".join(ctx.node_spec.input_keys)
+        prompt = (
+            f"Extract the following information from the memory context:\n\n"
+            f"Required fields: {required_fields}\n\n"
+            f"Memory context (may contain nested data, JSON strings, "
+            f"or extra information):\n{memory_json}\n\n"
+            "Extract ONLY the clean values for the required fields. "
+            "Ignore nested structures, JSON wrappers, and irrelevant data.\n\n"
+            "Output as JSON with the exact field names requested."
+        )
 
         try:
             import anthropic
+
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
                 model="claude-3-5-haiku-20241022",
                 max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
             )
 
             # Parse Haiku's response
             response_text = message.content[0].text.strip()
 
-            # Try to extract JSON
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
-            if json_match:
-                extracted = json.loads(json_match.group())
+            # Try to extract JSON using balanced brace matching
+            json_str = find_json_object(response_text)
+            if json_str:
+                extracted = json.loads(json_str)
                 # Format as key: value pairs
                 parts = [f"{k}: {v}" for k, v in extracted.items() if k in ctx.node_spec.input_keys]
                 if parts:
@@ -708,11 +1422,13 @@ class RouterNode(NodeProtocol):
         # Build options from routes
         options = []
         for condition, target in ctx.node_spec.routes.items():
-            options.append({
-                "id": condition,
-                "description": f"Route to {target} when condition '{condition}' is met",
-                "target": target,
-            })
+            options.append(
+                {
+                    "id": condition,
+                    "description": f"Route to {target} when condition '{condition}' is met",
+                    "target": target,
+                }
+            )
 
         # Check if we should use LLM-based routing
         if ctx.node_spec.system_prompt and ctx.llm:
@@ -765,10 +1481,9 @@ class RouterNode(NodeProtocol):
         import json
 
         # Build routing options description
-        options_desc = "\n".join([
-            f"- {opt['id']}: {opt['description']} → goes to '{opt['target']}'"
-            for opt in options
-        ])
+        options_desc = "\n".join(
+            [f"- {opt['id']}: {opt['description']} → goes to '{opt['target']}'" for opt in options]
+        )
 
         # Build context
         context_data = {
@@ -797,15 +1512,15 @@ Respond with ONLY a JSON object:
         try:
             response = ctx.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                system=ctx.node_spec.system_prompt or "You are a routing agent. Respond with JSON only.",
+                system=ctx.node_spec.system_prompt
+                or "You are a routing agent. Respond with JSON only.",
                 max_tokens=150,
             )
 
-            # Parse response
-            import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
+            # Parse response using balanced brace matching
+            json_str = find_json_object(response.content)
+            if json_str:
+                data = json.loads(json_str)
                 chosen = data.get("chosen", "default")
                 reasoning = data.get("reasoning", "")
 
@@ -813,7 +1528,9 @@ Respond with ONLY a JSON object:
                 logger.info(f"         Reason: {reasoning}")
 
                 # Find the target for this choice
-                target = ctx.node_spec.routes.get(chosen, ctx.node_spec.routes.get("default", "end"))
+                target = ctx.node_spec.routes.get(
+                    chosen, ctx.node_spec.routes.get("default", "end")
+                )
                 return (chosen, target)
 
         except Exception as e:
@@ -864,10 +1581,12 @@ class FunctionNode(NodeProtocol):
 
         decision_id = ctx.runtime.decide(
             intent=f"Execute function {ctx.node_spec.function or 'unknown'}",
-            options=[{
-                "id": "execute",
-                "description": f"Run function with inputs: {list(ctx.input_data.keys())}",
-            }],
+            options=[
+                {
+                    "id": "execute",
+                    "description": f"Run function with inputs: {list(ctx.input_data.keys())}",
+                }
+            ],
             chosen="execute",
             reasoning="Deterministic function execution",
         )
@@ -888,9 +1607,13 @@ class FunctionNode(NodeProtocol):
             )
 
             # Write to output keys
-            output = {"result": result}
+            output = {}
             if ctx.node_spec.output_keys:
-                ctx.memory.write(ctx.node_spec.output_keys[0], result)
+                key = ctx.node_spec.output_keys[0]
+                output[key] = result
+                ctx.memory.write(key, result)
+            else:
+                output = {"result": result}
 
             return NodeResult(success=True, output=output, latency_ms=latency_ms)
 

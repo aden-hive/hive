@@ -1,112 +1,100 @@
 """
-LLM prompt templates for test generation.
+Pytest templates for test file generation.
 
-These prompts instruct the LLM to generate pytest-compatible tests
-from Goal success_criteria and constraints using tool calling.
+These templates provide headers and fixtures for pytest-compatible async tests.
+Tests are written to exports/{agent}/tests/ as Python files and run with pytest.
 """
 
-CONSTRAINT_TEST_PROMPT = """You are generating test cases for an AI agent's constraints.
+# Template for the test file header (imports and fixtures)
+PYTEST_TEST_FILE_HEADER = '''"""
+{test_type} tests for {agent_name}.
 
-## Goal
-Name: {goal_name}
-Description: {goal_description}
+{description}
 
-## Constraints to Test
-{constraints_formatted}
+REQUIRES: API_KEY (OpenAI or Anthropic) for real testing.
+"""
 
-## Instructions
-For each constraint, generate pytest-compatible tests that verify the constraint is satisfied.
+import os
+import pytest
+from {agent_module} import default_agent
 
-For EACH test, call the `submit_test` tool with:
-- constraint_id: The ID of the constraint being tested
-- test_name: A descriptive pytest function name (test_constraint_<constraint_id>_<scenario>)
-- test_code: Complete Python test function code
-- description: What the test validates
-- input: Test input data as an object
-- expected_output: Expected output as an object
-- confidence: 0-1 score based on how testable/well-defined the constraint is
 
-Consider for each constraint:
-- Happy path: Normal execution that should satisfy the constraint
-- Boundary conditions: Inputs at the edge of constraint boundaries
-- Violation scenarios: Inputs that should trigger constraint violation
+def _get_api_key():
+    """Get API key from CredentialManager (Anthropic) or environment (Any)."""
+    # 1. Try CredentialManager for Anthropic (the only provider it currently supports)
+    try:
+        from aden_tools.credentials import CredentialManager
+        creds = CredentialManager()
+        if creds.is_available("anthropic"):
+            return creds.get("anthropic")
+    except (ImportError, KeyError):
+        pass
 
-The test code should:
-- Be valid Python using pytest conventions
-- Use `agent.run(input)` to execute the agent
-- Include descriptive assertion messages
-- Handle potential exceptions appropriately
+    # 2. Fallback to standard environment variables for OpenAI and others
+    return (
+        os.environ.get("OPENAI_API_KEY") or
+        os.environ.get("ANTHROPIC_API_KEY") or
+        os.environ.get("CEREBRAS_API_KEY") or
+        os.environ.get("GROQ_API_KEY")
+    )
 
-Generate tests now by calling submit_test for each test."""
 
-SUCCESS_CRITERIA_TEST_PROMPT = """You are generating success criteria tests for an AI agent.
+# Skip all tests if no API key and not in mock mode
+pytestmark = pytest.mark.skipif(
+    not _get_api_key() and not os.environ.get("MOCK_MODE"),
+    reason="API key required. Please set OPENAI_API_KEY, ANTHROPIC_API_KEY, or use MOCK_MODE=1."
+)
+'''
 
-## Goal
-Name: {goal_name}
-Description: {goal_description}
+# Template for conftest.py with shared fixtures
+PYTEST_CONFTEST_TEMPLATE = '''"""Shared test fixtures for {agent_name} tests."""
 
-## Success Criteria
-{success_criteria_formatted}
+import os
+import pytest
 
-## Agent Flow (for context)
-Nodes: {node_names}
-Tools: {tool_names}
 
-## Instructions
-For each success criterion, generate tests that verify the agent achieves its goals.
+def _get_api_key():
+    """Get API key from CredentialManager (Anthropic) or environment (Any)."""
+    try:
+        from aden_tools.credentials import CredentialManager
+        creds = CredentialManager()
+        if creds.is_available("anthropic"):
+            return creds.get("anthropic")
+    except (ImportError, KeyError):
+        pass
 
-For EACH test, call the `submit_test` tool with:
-- criteria_id: The ID of the success criterion being tested
-- test_name: A descriptive pytest function name (test_<criteria_id>_<scenario>)
-- test_code: Complete Python test function code
-- description: What the test validates
-- input: Test input data as an object
-- expected_output: Expected output as an object
-- confidence: 0-1 score based on how measurable/specific the criterion is
+    return (
+        os.environ.get("OPENAI_API_KEY") or
+        os.environ.get("ANTHROPIC_API_KEY") or
+        os.environ.get("CEREBRAS_API_KEY") or
+        os.environ.get("GROQ_API_KEY")
+    )
 
-Consider for each criterion:
-- Happy path: Normal successful execution
-- Boundary conditions: Exactly at target thresholds (if applicable)
-- Graceful handling: Near-misses and edge cases
 
-The test code should:
-- Be valid Python using pytest conventions
-- Use `agent.run(input)` to execute the agent
-- Validate the metric defined in the success criterion
-- Include descriptive assertion messages
+@pytest.fixture
+def mock_mode():
+    """Check if running in mock mode."""
+    return bool(os.environ.get("MOCK_MODE"))
 
-Generate tests now by calling submit_test for each test."""
 
-EDGE_CASE_TEST_PROMPT = """You are generating edge case tests for an AI agent.
-
-## Goal
-Name: {goal_name}
-Description: {goal_description}
-
-## Existing Tests
-{existing_tests_summary}
-
-## Recent Failures (if any)
-{failures_summary}
-
-## Instructions
-Generate additional edge case tests that cover scenarios not addressed by existing tests.
-
-Focus on:
-1. Unusual input formats or values
-2. Empty or null inputs
-3. Extremely large or small values
-4. Unicode and special characters
-5. Concurrent or timing-related scenarios
-6. Network/API failure simulations (if applicable)
-
-For EACH test, call the `submit_test` tool with:
-- criteria_id: An identifier for the edge case category being tested
-- test_name: A descriptive pytest function name (test_edge_case_<scenario>)
-- test_code: Complete Python test function code
-- description: What the test validates
-- input: Test input data as an object
-- expected_output: Expected output as an object
-- confidence: 0-1 score
-
-Generate edge case tests now by calling submit_test for each test."""
+@pytest.fixture(scope="session", autouse=True)
+def check_api_key():
+    """Ensure API key is set for real testing."""
+    if not _get_api_key():
+        if os.environ.get("MOCK_MODE"):
+            print("\\n⚠️  Running in MOCK MODE - structure validation only")
+            print("   This does NOT test LLM behavior or agent quality")
+            print("   Set OPENAI_API_KEY or ANTHROPIC_API_KEY for real testing\\n")
+        else:
+            pytest.fail(
+                "\\n❌ No API key found!\\n\\n"
+                "Real testing requires an API key. Choose one:\\n"
+                "1. Set OpenAI key:\\n"
+                "   export OPENAI_API_KEY='your-key-here'\\n"
+                "2. Set Anthropic key:\\n"
+                "   export ANTHROPIC_API_KEY='your-key-here'\\n"
+                "3. Run structure validation only:\\n"
+                "   MOCK_MODE=1 pytest exports/{agent_name}/tests/\\n\\n"
+                "Note: Mock mode does NOT validate agent behavior or quality."
+            )
+'''

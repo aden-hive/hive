@@ -1,7 +1,8 @@
 """Tests for the Runtime class - the agent's interface to record decisions."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from framework import Runtime
 from framework.schemas.decision import DecisionType
@@ -28,8 +29,8 @@ class TestRuntimeBasics:
 
         assert runtime.current_run is None
 
-    def test_cannot_end_without_start(self, tmp_path: Path):
-        """Cannot end a run that wasn't started."""
+    def test_end_without_start_is_graceful(self, tmp_path: Path):
+        """Ending a run that wasn't started logs warning but doesn't raise."""
         runtime = Runtime(tmp_path)
 
         # Should not raise, but log a warning instead
@@ -76,8 +77,8 @@ class TestDecisionRecording:
 
         runtime.end_run(success=True)
 
-    def test_decision_requires_run(self, tmp_path: Path):
-        """Cannot record decisions without a run."""
+    def test_decision_without_run_is_graceful(self, tmp_path: Path):
+        """Recording decisions without a run logs warning and returns empty string."""
         runtime = Runtime(tmp_path)
 
         # Should not raise, but log a warning and return empty string

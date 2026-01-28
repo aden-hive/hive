@@ -10,8 +10,6 @@ Usage:
     python -m core shell exports/my-agent
 
 Testing commands:
-    python -m core test-generate goal.json
-    python -m core test-approve <goal_id>
     python -m core test-run <agent_path> --goal <goal_id>
     python -m core test-debug <goal_id> <test_id>
     python -m core test-list <goal_id>
@@ -23,9 +21,7 @@ import sys
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Goal Agent - Build and run goal-driven agents"
-    )
+    parser = argparse.ArgumentParser(description="Goal Agent - Build and run goal-driven agents")
     parser.add_argument(
         "--model",
         default="claude-haiku-4-5-20251001",
@@ -36,10 +32,12 @@ def main():
 
     # Register runner commands (run, info, validate, list, dispatch, shell)
     from framework.runner.cli import register_commands
+
     register_commands(subparsers)
 
-    # Register testing commands (test-generate, test-approve, test-run, test-debug, etc.)
+    # Register testing commands (test-run, test-debug, test-list, test-stats)
     from framework.testing.cli import register_testing_commands
+
     register_testing_commands(subparsers)
 
     args = parser.parse_args()

@@ -9,9 +9,13 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ./scripts/setup-python.sh
 ```
 
+> **Note for Windows Users:**  
+> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.  
+> It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for a smoother setup experience.
+
 This will:
 
-- Check Python version (requires 3.10+, recommends 3.11+)
+- Check Python version (requires 3.11+)
 - Install the core framework package (`framework`)
 - Install the tools package (`aden_tools`)
 - Fix package compatibility issues (openai + litellm)
@@ -50,11 +54,14 @@ python -c "import aden_tools; print('✓ aden_tools OK')"
 python -c "import litellm; print('✓ litellm OK')"
 ```
 
+> **Windows Tip:**  
+> On Windows, if the verification commands fail, ensure you are running them in **WSL** or after **disabling Python App Execution Aliases** in Windows Settings → Apps → App Execution Aliases.
+
 ## Requirements
 
 ### Python Version
 
-- **Minimum:** Python 3.10
+- **Minimum:** Python 3.11
 - **Recommended:** Python 3.11 or 3.12
 - **Tested on:** Python 3.11, 3.12, 3.13
 
@@ -63,6 +70,7 @@ python -c "import litellm; print('✓ litellm OK')"
 - pip (latest version)
 - 2GB+ RAM
 - Internet connection (for LLM API calls)
+- For Windows users: WSL 2 is recommended for full compatibility.
 
 ### API Keys (Optional)
 
@@ -77,7 +85,7 @@ export ANTHROPIC_API_KEY="your-key-here"
 All agent commands must be run from the project root with `PYTHONPATH` set:
 
 ```bash
-# From /home/timothy/oss/hive/ directory
+# From /hive/ directory
 PYTHONPATH=core:exports python -m agent_name COMMAND
 ```
 
@@ -152,6 +160,31 @@ Creates comprehensive test suites for your agent.
 
 ## Troubleshooting
 
+### "externally-managed-environment" error (PEP 668)
+
+**Cause:** Python 3.12+ on macOS/Homebrew, WSL, or some Linux distros prevents system-wide pip installs.
+
+**Solution:** Create and use a virtual environment:
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+
+# Activate it
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate   # Windows
+
+# Then run setup
+./scripts/setup-python.sh
+```
+
+Always activate the venv before running agents:
+
+```bash
+source .venv/bin/activate
+PYTHONPATH=core:exports python -m your_agent_name demo
+```
+
 ### "ModuleNotFoundError: No module named 'framework'"
 
 **Solution:** Install the core package:
@@ -188,7 +221,7 @@ pip install --upgrade "openai>=1.0.0"
 
 **Cause:** Not running from project root or missing PYTHONPATH
 
-**Solution:** Ensure you're in `/home/timothy/oss/hive/` and use:
+**Solution:** Ensure you're in the project root directory and use:
 
 ```bash
 PYTHONPATH=core:exports python -m support_ticket_agent validate
@@ -202,10 +235,9 @@ PYTHONPATH=core:exports python -m support_ticket_agent validate
 
 ```bash
 # Remove broken installations
-pip uninstall -y framework tools aden-tools
+pip uninstall -y framework tools
 
 # Reinstall correctly
-cd /home/timothy/oss/hive
 ./scripts/setup-python.sh
 ```
 

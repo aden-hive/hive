@@ -1,13 +1,12 @@
 """Tests for CredentialManager."""
-from pathlib import Path
 
 import pytest
 
 from aden_tools.credentials import (
+    CREDENTIAL_SPECS,
+    CredentialError,
     CredentialManager,
     CredentialSpec,
-    CredentialError,
-    CREDENTIAL_SPECS,
 )
 
 
@@ -510,10 +509,7 @@ class TestDotenvReading:
         monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
 
         dotenv_file = tmp_path / ".env"
-        dotenv_file.write_text(
-            "ANTHROPIC_API_KEY=anthropic-key\n"
-            "BRAVE_SEARCH_API_KEY=brave-key\n"
-        )
+        dotenv_file.write_text("ANTHROPIC_API_KEY=anthropic-key\nBRAVE_SEARCH_API_KEY=brave-key\n")
 
         creds = CredentialManager(dotenv_path=dotenv_file)
 
@@ -536,10 +532,7 @@ class TestDotenvReading:
         monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
 
         dotenv_file = tmp_path / ".env"
-        dotenv_file.write_text(
-            "# This is a comment\n"
-            "BRAVE_SEARCH_API_KEY=key-after-comment\n"
-        )
+        dotenv_file.write_text("# This is a comment\nBRAVE_SEARCH_API_KEY=key-after-comment\n")
 
         creds = CredentialManager(dotenv_path=dotenv_file)
 

@@ -45,8 +45,8 @@ PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
 
 echo -e "${BLUE}Detected Python:${NC} $PYTHON_VERSION"
 
-if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 10 ]); then
-    echo -e "${RED}Error: Python 3.10+ is required (found $PYTHON_VERSION)${NC}"
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
+    echo -e "${RED}Error: Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
     echo "Please upgrade your Python installation"
     exit 1
 fi
@@ -72,7 +72,10 @@ echo ""
 
 # Upgrade pip, setuptools, and wheel
 echo "Upgrading pip, setuptools, and wheel..."
-$PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
+if ! $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
+  echo "Error: Failed to upgrade pip. Please check your python/venv configuration."
+  exit 1
+fi
 echo -e "${GREEN}✓${NC} Core packages upgraded"
 echo ""
 

@@ -43,19 +43,35 @@ Follow the interactive prompts to:
 3. Generate the agent package
 4. Test the agent
 
-### Option 2: From an Example
+### Option 2: Create Agent Manually
+
+> **Note:** The `exports/` directory is where your agents are created. It is not included in the repository (gitignored) because agents are user-generated via Claude Code skills or created manually.
 
 ```bash
-# Copy an example agent
-cp -r exports/support_ticket_agent exports/my_agent
+# Create exports directory if it doesn't exist
+mkdir -p exports/my_agent
 
-# Customize the agent
+# Create your agent structure
 cd exports/my_agent
-# Edit agent.json, tools.py, README.md
+# Create agent.json, tools.py, README.md (see DEVELOPER.md for structure)
 
 # Validate the agent
 PYTHONPATH=core:exports python -m my_agent validate
 ```
+
+### Option 3: Manual Code-First (Minimal Example)
+
+If you prefer to start with code rather than CLI wizards, check out the manual agent example:
+
+```bash
+# View the minimal example
+cat core/examples/manual_agent.py
+
+# Run it (no API keys required)
+PYTHONPATH=core python core/examples/manual_agent.py
+```
+
+This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
 
 ## Project Structure
 
@@ -78,14 +94,15 @@ hive/
 │       │   └── file_system_toolkits/
 │       └── mcp_server.py   # HTTP MCP server
 │
-├── exports/                # Agent Packages
-│   ├── support_ticket_agent/
-│   ├── market_research_agent/
-│   └── ...                 # Your agents go here
+├── exports/                # Agent Packages (user-generated, not in repo)
+│   └── your_agent/         # Your agents created via /building-agents
 │
 ├── .claude/                # Claude Code Skills
 │   └── skills/
-│       ├── building-agents/
+│       ├── agent-workflow/
+│       ├── building-agents-construction/
+│       ├── building-agents-core/
+│       ├── building-agents-patterns/
 │       └── testing-agent/
 │
 └── docs/                   # Documentation
@@ -143,7 +160,7 @@ PYTHONPATH=core:exports python -m my_agent test --type success
 
 1. **Detailed Setup**: See [ENVIRONMENT_SETUP.md](../ENVIRONMENT_SETUP.md)
 2. **Developer Guide**: See [DEVELOPER.md](../DEVELOPER.md)
-3. **Agent Patterns**: Explore examples in `/exports`
+3. **Build Agents**: Use `/building-agents` skill in Claude Code
 4. **Custom Tools**: Learn to integrate MCP servers
 5. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
@@ -179,7 +196,7 @@ PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
 
 ```bash
 # Remove and reinstall
-pip uninstall -y framework aden-tools
+pip uninstall -y framework tools
 ./scripts/setup-python.sh
 ```
 
@@ -188,4 +205,4 @@ pip uninstall -y framework aden-tools
 - **Documentation**: Check the `/docs` folder
 - **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
-- **Examples**: Explore `/exports` for working agents
+- **Build Agents**: Use `/building-agents` skill to create agents

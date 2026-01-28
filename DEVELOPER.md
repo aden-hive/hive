@@ -20,12 +20,12 @@ This guide covers everything you need to know to develop with the Aden Agent Fra
 
 Aden Agent Framework is a Python-based system for building goal-driven, self-improving AI agents.
 
-| Package       | Directory  | Description                                  | Tech Stack        |
-| ------------- | ---------- | -------------------------------------------- | ----------------- |
-| **framework** | `/core`    | Core runtime, graph executor, protocols      | Python 3.11+      |
-| **tools**     | `/tools`   | 19 MCP tools for agent capabilities          | Python 3.11+      |
-| **exports**   | `/exports` | Agent packages and examples                  | Python 3.11+      |
-| **skills**    | `.claude`  | Claude Code skills for building/testing      | Markdown          |
+| Package       | Directory  | Description                             | Tech Stack   |
+| ------------- | ---------- | --------------------------------------- | ------------ |
+| **framework** | `/core`    | Core runtime, graph executor, protocols | Python 3.11+ |
+| **tools**     | `/tools`   | 19 MCP tools for agent capabilities     | Python 3.11+ |
+| **exports**   | `/exports` | Agent packages and examples             | Python 3.11+ |
+| **skills**    | `.claude`  | Claude Code skills for building/testing | Markdown     |
 
 ### Key Principles
 
@@ -69,7 +69,7 @@ cd hive
 
 The setup script performs these actions:
 
-1. Checks Python version (3.10+ required, 3.11+ recommended)
+1. Checks Python version (3.11+)
 2. Installs `framework` package from `/core` (editable mode)
 3. Installs `aden_tools` package from `/tools` (editable mode)
 4. Fixes package compatibility (upgrades openai for litellm)
@@ -87,6 +87,7 @@ export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search tool
 ```
 
 Get API keys:
+
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
@@ -99,6 +100,7 @@ Get API keys:
 ```
 
 This installs:
+
 - `/building-agents` - Build new goal-driven agents
 - `/testing-agent` - Test agents with evaluation framework
 
@@ -220,21 +222,25 @@ claude> /testing-agent
 ### Agent Development Workflow
 
 1. **Define Your Goal**
+
    ```
    claude> /building-agents-construction
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
 2. **Design the Workflow**
+
    - The skill guides you through defining nodes
    - Each node is a unit of work (LLM call, function, router)
    - Edges define how execution flows
 
 3. **Generate the Agent**
+
    - The skill generates a complete Python package in `exports/`
    - Includes: `agent.json`, `tools.py`, `README.md`
 
 4. **Validate the Agent**
+
    ```bash
    PYTHONPATH=core:exports python -m your_agent_name validate
    ```
@@ -261,7 +267,7 @@ If you prefer to build agents manually:
     {
       "node_id": "analyze",
       "name": "Analyze Ticket",
-      "node_type": "llm",
+      "node_type": "llm_generate",
       "system_prompt": "Analyze this support ticket...",
       "input_keys": ["ticket_content"],
       "output_keys": ["category", "priority"]
@@ -309,6 +315,7 @@ claude> /testing-agent
 ```
 
 This generates and runs:
+
 - **Constraint tests** - Verify agent respects constraints
 - **Success tests** - Verify agent achieves success criteria
 - **Integration tests** - End-to-end workflows
@@ -407,14 +414,14 @@ my_agent/
 
 ### File Naming
 
-| Type                | Convention               | Example                     |
-| ------------------- | ------------------------ | --------------------------- |
-| Modules             | snake_case               | `ticket_handler.py`         |
-| Classes             | PascalCase               | `TicketHandler`             |
-| Functions/Variables | snake_case               | `process_ticket()`          |
-| Constants           | UPPER_SNAKE_CASE         | `MAX_RETRIES = 3`           |
-| Test files          | `test_` prefix           | `test_ticket_handler.py`    |
-| Agent packages      | snake_case               | `support_ticket_agent/`     |
+| Type                | Convention       | Example                  |
+| ------------------- | ---------------- | ------------------------ |
+| Modules             | snake_case       | `ticket_handler.py`      |
+| Classes             | PascalCase       | `TicketHandler`          |
+| Functions/Variables | snake_case       | `process_ticket()`       |
+| Constants           | UPPER_SNAKE_CASE | `MAX_RETRIES = 3`        |
+| Test files          | `test_` prefix   | `test_ticket_handler.py` |
+| Agent packages      | snake_case       | `support_ticket_agent/`  |
 
 ### Import Order
 
@@ -589,10 +596,11 @@ pip install -e .
 # Option 1: Use Claude Code skill (recommended)
 claude> /building-agents-construction
 
-# Option 2: Copy from example
-cp -r exports/support_ticket_agent exports/my_new_agent
+# Option 2: Create manually
+# Note: exports/ is initially empty (gitignored). Create your agent directory:
+mkdir -p exports/my_new_agent
 cd exports/my_new_agent
-# Edit agent.json, tools.py, README.md
+# Create agent.json, tools.py, README.md (see Agent Package Structure below)
 
 # Option 3: Use the agent builder MCP tools (advanced)
 # See core/MCP_BUILDER_TOOLS_GUIDE.md

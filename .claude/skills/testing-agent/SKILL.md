@@ -3,18 +3,75 @@ name: testing-agent
 description: Run goal-based evaluation tests for agents. Use when you need to verify an agent meets its goals, debug failing tests, or iterate on agent improvements based on test results.
 ---
 
-# Testing Agents (Python Service Architecture)
+# Testing Workflow
+
+This skill provides tools for testing agents built with the building-agents skill.
+
+## Workflow Overview
+
+1. `mcp__agent-builder__list_tests` - Check what tests exist
+2. `mcp__agent-builder__generate_constraint_tests` or `mcp__agent-builder__generate_success_tests` - Get test guidelines
+3. **Write tests directly** using the Write tool with the guidelines provided
+4. `mcp__agent-builder__run_tests` - Execute tests
+5. `mcp__agent-builder__debug_test` - Debug failures
+
+## How Test Generation Works
+
+The `generate_*_tests` MCP tools return **guidelines and templates** - they do NOT generate test code via LLM.
+You (Claude) write the tests directly using the Write tool based on the guidelines.
+
+### Example Workflow
+
+```python
+# Step 1: Get test guidelines
+result = mcp__agent-builder__generate_constraint_tests(
+    goal_id="my-goal",
+    goal_json='{"id": "...", "constraints": [...]}',
+    agent_path="exports/my_agent"
+)
+
+# Step 2: The result contains:
+# - output_file: where to write tests
+# - file_header: imports and fixtures to use
+# - test_template: format for test functions
+# - constraints_formatted: the constraints to test
+# - test_guidelines: rules for writing tests
+
+# Step 3: Write tests directly using the Write tool
+Write(
+    file_path=result["output_file"],
+    content=result["file_header"] + test_code_you_write
+)
+
+# Step 4: Run tests via MCP tool
+mcp__agent-builder__run_tests(
+    goal_id="my-goal",
+    agent_path="exports/my_agent"
+)
+
+# Step 5: Debug failures via MCP tool
+mcp__agent-builder__debug_test(
+    goal_id="my-goal",
+    test_name="test_constraint_foo",
+    agent_path="exports/my_agent"
+)
+```
+
+---
+
+# Testing Agents with MCP Tools
 
 Run goal-based evaluation tests for agents built with the building-agents skill.
 
-**Key Principle: Tests are Python files that directly import and test your agent**
-- ✅ Tests created immediately in `exports/{agent}/tests/` directory
-- ✅ Direct imports: `from exports.my_agent import default_agent`
-- ✅ Use pytest framework - standard Python testing
-- ✅ Full debugging with pdb, breakpoints, introspection
-- ✅ No subprocess barriers - direct code access
+**Key Principle: MCP tools provide guidelines, Claude writes tests directly**
+- ✅ Get guidelines: `generate_constraint_tests`, `generate_success_tests` → returns templates and guidelines
+- ✅ Write tests: Use the Write tool with the provided file_header and test_template
+- ✅ Run tests: `run_tests` (runs pytest via subprocess)
+- ✅ Debug failures: `debug_test` (re-runs single test with verbose output)
+- ✅ List tests: `list_tests` (scans Python test files)
+- ✅ Tests stored in `exports/{agent}/tests/test_*.py`
 
-## Architecture: Direct Python Testing
+## Architecture: Python Test Files
 
 ```
 exports/my_agent/
@@ -23,9 +80,8 @@ exports/my_agent/
 ├── nodes/__init__.py
 ├── config.py
 ├── __main__.py
-└── tests/                ← Tests live here
-    ├── __init__.py
-    ├── conftest.py       ← Shared fixtures
+└── tests/                ← Test files written by MCP tools
+    ├── conftest.py       # Shared fixtures (auto-created)
     ├── test_constraints.py
     ├── test_success_criteria.py
     └── test_edge_cases.py
@@ -33,22 +89,33 @@ exports/my_agent/
 
 **Tests import the agent directly:**
 ```python
+import pytest
 from exports.my_agent import default_agent
 
-async def test_happy_path():
-    result = await default_agent.run({"query": "test"})
+
+@pytest.mark.asyncio
+async def test_happy_path(mock_mode):
+    result = await default_agent.run({"query": "test"}, mock_mode=mock_mode)
     assert result.success
     assert len(result.output) > 0
 ```
 
+## Why This Approach
+
+- MCP tools provide consistent test guidelines with proper imports, fixtures, and API key enforcement
+- Claude writes tests directly, eliminating circular LLM dependencies in the MCP server
+- `run_tests` parses pytest output into structured results for iteration
+- `debug_test` provides formatted output with actionable debugging info
+- File headers include conftest.py setup with proper fixtures
+
 ## Quick Start
 
-1. **Check existing tests** - See what already exists
-2. **Generate test files** - Create Python test files with pytest
-3. **User reviews and approves** - Human approval for each test
-4. **Run tests with pytest** - Standard Python testing workflow
-5. **Debug failures** - Direct Python debugging (pdb, breakpoints)
-6. **Iterate** - Edit agent code or tests directly
+1. **Check existing tests** - `list_tests(goal_id, agent_path)`
+2. **Get test guidelines** - `generate_constraint_tests` or `generate_success_tests`
+3. **Write tests** - Use the Write tool with the provided file_header and guidelines
+4. **Run tests** - `run_tests(goal_id, agent_path)`
+5. **Debug failures** - `debug_test(goal_id, test_name, agent_path)`
+6. **Iterate** - Repeat steps 4-5 until all pass
 
 ## ⚠️ API Key Requirement for Real Testing
 
@@ -168,7 +235,7 @@ if not creds.is_available("anthropic"):
 │                                                                          │
 │  Build nodes + edges, written immediately to files                      │
 │  Constraint tests can run during development:                           │
-│    $ pytest exports/{agent}/tests/test_constraints.py                   │
+│    run_tests(goal_id, agent_path, test_types='["constraint"]')          │
 └─────────────────────────────────────────────────────────────────────────┘
                                    ↓
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -176,10 +243,9 @@ if not creds.is_available("anthropic"):
 │                                                                          │
 │  1. Generate SUCCESS_CRITERIA TESTS → Write to tests/ → USER APPROVAL   │
 │     Files created: exports/{agent}/tests/test_success_criteria.py       │
-│  2. Run all tests with pytest:                                          │
-│     $ pytest exports/{agent}/tests/ -v                                  │
-│  3. On failure → Direct Python debugging                                │
-│  4. Iterate: Edit agent code → Re-run pytest (instant feedback)         │
+│  2. Run all tests: run_tests(goal_id, agent_path)                       │
+│  3. On failure → debug_test(goal_id, test_name, agent_path)             │
+│  4. Iterate: Edit agent code → Re-run run_tests (instant feedback)      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -190,400 +256,163 @@ if not creds.is_available("anthropic"):
 **ALWAYS check first** before generating new tests:
 
 ```python
-Glob(pattern="exports/{agent_name}/tests/test_*.py")
+mcp__agent-builder__list_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent"
+)
 ```
 
 This shows what test files already exist. If tests exist:
-- Read them to see what's covered
+- Review the list to see what's covered
 - Ask user if they want to add more or run existing tests
 
-### Step 2: Generate Constraint Tests (Goal Stage)
+### Step 2: Get Constraint Test Guidelines (Goal Stage)
 
-After goal is defined, generate constraint tests from the constraints:
+After goal is defined, get test guidelines using the MCP tool:
 
 ```python
-# Read the goal from agent.py
-goal_code = Read(file_path=f"exports/{agent_name}/agent.py")
+# First, read the goal from agent.py to get the goal JSON
+goal_code = Read(file_path="exports/your_agent/agent.py")
+# Extract the goal definition and convert to JSON
 
-# Extract constraints from goal
-# constraints = [...list of constraints from the goal...]
-
-# Generate test file content with API key enforcement
-test_file_content = f'''"""Constraint tests for {agent_name}.
-
-These tests validate that the agent respects its defined constraints.
-Generated from goal constraints during Goal stage.
-
-REQUIRES: ANTHROPIC_API_KEY for real testing.
-"""
-
-import os
-import pytest
-from exports.{agent_name} import default_agent
-from aden_tools.credentials import CredentialManager
-
-
-# Enforce API key for real testing
-pytestmark = pytest.mark.skipif(
-    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
-    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
+# Get constraint test guidelines via MCP tool
+result = mcp__agent-builder__generate_constraint_tests(
+    goal_id="your-goal-id",
+    goal_json='{"id": "goal-id", "name": "...", "constraints": [...]}',
+    agent_path="exports/your_agent"
 )
+```
 
+**Response includes:**
+- `output_file`: Where to write tests (e.g., `exports/your_agent/tests/test_constraints.py`)
+- `file_header`: Imports, fixtures, and pytest setup to use at the top of the file
+- `test_template`: Format for test functions
+- `constraints_formatted`: The constraints to test
+- `test_guidelines`: Rules and best practices for writing tests
+- `instruction`: How to proceed
 
-@pytest.mark.asyncio
-async def test_constraint_api_rate_limits(mock_mode):
-    """Test: Agent respects API rate limits"""
-    # Run multiple times quickly
-    results = []
-    for i in range(5):
-        result = await default_agent.run({{"query": f"test{{i}}"}}, mock_mode=mock_mode)
-        results.append(result)
+**Write tests directly** using the provided guidelines:
 
-    # Verify no rate limit errors
-    for result in results:
-        assert "rate limit" not in str(result.output).lower()
-        assert result.success or "rate" not in result.error.lower()
-
-
-@pytest.mark.asyncio
-async def test_constraint_content_safety(mock_mode):
-    """Test: Agent produces safe, appropriate content"""
-    result = await default_agent.run({{"query": "test query"}}, mock_mode=mock_mode)
-
-    # Verify no inappropriate content
-    output_text = str(result.output).lower()
-    unsafe_terms = ["explicit", "violent", "harmful"]
-    assert not any(term in output_text for term in unsafe_terms)
-
-
-# Add more constraint tests...
-'''
-
-# Write the test file
+```python
+# Write tests using the Write tool
 Write(
-    file_path=f"exports/{agent_name}/tests/test_constraints.py",
-    content=test_file_content
-)
-
-# Show user what was created
-print(f"✅ Created constraint tests: exports/{agent_name}/tests/test_constraints.py")
-print(f"   - test_constraint_api_rate_limits")
-print(f"   - test_constraint_content_safety")
-print(f"   - ... ({len(constraints)} total)")
-```
-
-**USER APPROVAL REQUIRED**: Show each test to the user and ask for approval.
-
-```python
-AskUserQuestion(
-    questions=[{
-        "question": "Approve constraint tests?",
-        "header": "Test Approval",
-        "options": [
-            {
-                "label": "Approve all (Recommended)",
-                "description": "Tests look good, include in test suite"
-            },
-            {
-                "label": "Review individually",
-                "description": "Show each test for approval"
-            },
-            {
-                "label": "Reject and regenerate",
-                "description": "Tests need improvement"
-            }
-        ],
-        "multiSelect": false
-    }]
+    file_path=result["output_file"],
+    content=result["file_header"] + "\n\n" + your_test_code
 )
 ```
 
-If user wants to modify tests, they can edit `test_constraints.py` directly.
+### Step 3: Get Success Criteria Test Guidelines (Eval Stage)
 
-### Step 3: Generate Success Criteria Tests (Eval Stage)
-
-After agent is fully built, generate success criteria tests:
+After agent is fully built, get success criteria test guidelines:
 
 ```python
-# Read the goal and agent structure
-goal_code = Read(file_path=f"exports/{agent_name}/agent.py")
-nodes_code = Read(file_path=f"exports/{agent_name}/nodes/__init__.py")
-
-# Extract success criteria from goal
-# success_criteria = [...list of success criteria from goal...]
-
-# Generate test file content with API key enforcement
-test_file_content = f'''"""Success criteria tests for {agent_name}.
-
-These tests validate that the agent achieves its defined success criteria.
-Generated from goal success_criteria during Eval stage.
-
-REQUIRES: ANTHROPIC_API_KEY for real testing - mock mode cannot validate success criteria.
-"""
-
-import os
-import pytest
-from exports.{agent_name} import default_agent
-from aden_tools.credentials import CredentialManager
-
-
-# Enforce API key for real testing
-pytestmark = pytest.mark.skipif(
-    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
-    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
+# Get success criteria test guidelines via MCP tool
+result = mcp__agent-builder__generate_success_tests(
+    goal_id="your-goal-id",
+    goal_json='{"id": "goal-id", "name": "...", "success_criteria": [...]}',
+    node_names="analyze_request,search_web,format_results",
+    tool_names="web_search,web_scrape",
+    agent_path="exports/your_agent"
 )
+```
 
+**Write tests directly** using the provided guidelines:
 
-@pytest.mark.asyncio
-async def test_success_find_relevant_results(mock_mode):
-    """Test: Agent finds 3-5 relevant results"""
-    result = await default_agent.run({{"topic": "machine learning"}}, mock_mode=mock_mode)
-
-    assert result.success, f"Agent failed: {{result.error}}"
-    assert "results" in result.output
-
-    results_count = len(result.output["results"])
-    assert 3 <= results_count <= 5, f"Expected 3-5 results, got {{results_count}}"
-
-    # Verify relevance
-    for item in result.output["results"]:
-        assert "title" in item
-        assert len(item["title"]) > 0
-
-
-@pytest.mark.asyncio
-async def test_success_response_quality(mock_mode):
-    """Test: Agent provides high-quality, formatted output"""
-    result = await default_agent.run({{"topic": "python tutorials"}}, mock_mode=mock_mode)
-
-    assert result.success
-    assert "output" in result.output
-
-    output_text = result.output["output"]
-    assert len(output_text) >= 100, "Output should be substantive"
-    assert any(keyword in output_text.lower() for keyword in ["python", "tutorial"])
-
-
-# Add more success criteria tests...
-'''
-
-# Write the test file
+```python
+# Write tests using the Write tool
 Write(
-    file_path=f"exports/{agent_name}/tests/test_success_criteria.py",
-    content=test_file_content
+    file_path=result["output_file"],
+    content=result["file_header"] + "\n\n" + your_test_code
 )
-
-print(f"✅ Created success criteria tests: exports/{agent_name}/tests/test_success_criteria.py")
 ```
 
-**USER APPROVAL REQUIRED**: Show each test and get approval.
+### Step 4: Test Fixtures (conftest.py)
 
-### Step 4: Create Test Fixtures (conftest.py)
-
-Create shared test fixtures for efficiency **with API key enforcement**:
+The `file_header` returned by the MCP tools includes proper imports and fixtures.
+You should also create a conftest.py file in the tests directory with shared fixtures:
 
 ```python
-conftest_content = '''"""Shared test fixtures for {agent_name} tests."""
-
-import os
-import pytest
-import asyncio
-from aden_tools.credentials import CredentialManager
-
-
-# Enforce API key requirement for real testing
-pytestmark = pytest.mark.skipif(
-    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
-    reason="API key required for real testing. Set ANTHROPIC_API_KEY or use MOCK_MODE=1 for structure validation only."
-)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def check_api_key():
-    """Ensure API key is set for real testing."""
-    creds = CredentialManager()
-    if not creds.is_available("anthropic"):
-        if os.environ.get("MOCK_MODE"):
-            print("\\n⚠️  Running in MOCK MODE - structure validation only")
-            print("   This does NOT test LLM behavior or agent quality")
-            print("   Set ANTHROPIC_API_KEY for real testing\\n")
-        else:
-            pytest.fail(
-                "\\n❌ ANTHROPIC_API_KEY not set!\\n\\n"
-                "Real testing requires an API key. Choose one:\\n"
-                "1. Set API key (RECOMMENDED):\\n"
-                "   export ANTHROPIC_API_KEY='your-key-here'\\n"
-                "2. Run structure validation only:\\n"
-                "   MOCK_MODE=1 pytest exports/{agent_name}/tests/\\n\\n"
-                "Note: Mock mode does NOT validate agent behavior or quality."
-            )
-
-
-@pytest.fixture
-def credentials():
-    """Provide CredentialManager instance to tests (with hot-reload support)."""
-    return CredentialManager()
-
-
-@pytest.fixture
-def sample_inputs():
-    """Sample inputs for testing."""
-    return {{
-        "simple": {{"query": "test"}},
-        "complex": {{"query": "detailed multi-step query", "depth": 3}},
-        "edge_case": {{"query": ""}},
-    }}
-
-
-@pytest.fixture
-def mock_mode():
-    """Check if running in mock mode."""
-    return bool(os.environ.get("MOCK_MODE"))
-
-
-# Add more shared fixtures as needed
-'''
-
+# Create conftest.py with the conftest template
 Write(
-    file_path=f"exports/{agent_name}/tests/conftest.py",
-    content=conftest_content
+    file_path="exports/your_agent/tests/conftest.py",
+    content=conftest_content  # Use PYTEST_CONFTEST_TEMPLATE format
 )
 ```
 
-**IMPORTANT:** The conftest.py fixture will automatically check for API keys and fail tests if not set, preventing accidental mock testing.
+### Step 5: Run Tests
 
-### Step 5: Run Tests with Pytest
-
-**IMPORTANT: Check for API key before running tests:**
+**Use the MCP tool to run tests** (not pytest directly):
 
 ```python
-import os
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent"
+)
 
-# Always check API key first
-if not os.environ.get("ANTHROPIC_API_KEY"):
-    print("⚠️  No ANTHROPIC_API_KEY found!")
-    print()
-    print("Testing requires a real API key to validate agent behavior.")
-    print()
-    print("Set your API key:")
-    print("  export ANTHROPIC_API_KEY='your-key-here'")
-    print()
-    print("Or run in mock mode (structure validation only):")
-    print(f"  MOCK_MODE=1 pytest exports/{agent_name}/tests/")
-    print()
-    # Ask user what to do or fail
-    raise RuntimeError("API key required for testing")
+**Response includes structured results:**
+```json
+{
+  "goal_id": "your-goal-id",
+  "overall_passed": false,
+  "summary": {
+    "total": 12,
+    "passed": 10,
+    "failed": 2,
+    "skipped": 0,
+    "errors": 0,
+    "pass_rate": "83.3%"
+  },
+  "test_results": [
+    {"file": "test_constraints.py", "test_name": "test_constraint_api_rate_limits", "status": "passed"},
+    {"file": "test_success_criteria.py", "test_name": "test_success_find_relevant_results", "status": "failed"}
+  ],
+  "failures": [
+    {"test_name": "test_success_find_relevant_results", "details": "AssertionError: Expected 3-5 results..."}
+  ]
+}
 ```
 
-Run tests using standard pytest commands:
-
-```bash
-# Ensure API key is set first!
-$ export ANTHROPIC_API_KEY="your-key-here"
-
-# Run all tests
-$ pytest exports/{agent_name}/tests/ -v
-
-# Run specific test file
-$ pytest exports/{agent_name}/tests/test_constraints.py -v
-
-# Run specific test
-$ pytest exports/{agent_name}/tests/test_success_criteria.py::test_success_find_relevant_results -v
-
-# Run with coverage
-$ pytest exports/{agent_name}/tests/ --cov=exports/{agent_name} --cov-report=html
-
-# Run in parallel (faster)
-$ pytest exports/{agent_name}/tests/ -n 4
-
-# Mock mode (structure validation only - NOT recommended for real testing)
-$ MOCK_MODE=1 pytest exports/{agent_name}/tests/ -v
-```
-
-Use Bash tool to run pytest **with API key check**:
-
+**Options for `run_tests`:**
 ```python
-import os
+# Run only constraint tests
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent",
+    test_types='["constraint"]'
+)
 
-# Check for API key before running tests
-if not os.environ.get("ANTHROPIC_API_KEY"):
-    print("❌ Cannot run tests: ANTHROPIC_API_KEY not set")
-    print("   Set with: export ANTHROPIC_API_KEY='your-key-here'")
-    # Either fail or ask user
-    AskUserQuestion(...)
-else:
-    Bash(
-        command=f"cd /home/timothy/oss/hive && PYTHONPATH=core:exports:$PYTHONPATH pytest exports/{agent_name}/tests/ -v --tb=short",
-        description="Run all tests for agent"
-    )
-```
+# Run with parallel workers
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent",
+    parallel=4
+)
 
-**Output shows:**
-```
-============================= test session starts ==============================
-collected 12 items
-
-test_constraints.py::test_constraint_api_rate_limits PASSED           [  8%]
-test_constraints.py::test_constraint_content_safety PASSED            [ 16%]
-test_success_criteria.py::test_success_find_relevant_results FAILED  [ 25%]
-test_success_criteria.py::test_success_response_quality PASSED       [ 33%]
-...
-
-=========================== 10 passed, 2 failed ============================
+# Stop on first failure
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent",
+    fail_fast=True
+)
 ```
 
 ### Step 6: Debug Failed Tests
 
-When tests fail, you have **direct Python debugging access**:
+**Use the MCP tool to debug** (not Bash/pytest directly):
 
-#### Option 1: Read the pytest output
 ```python
-# The pytest output shows:
-# - Which test failed
-# - The assertion that failed
-# - Stack trace with exact line numbers
-# - Captured logs
-```
-
-#### Option 2: Run single test with full output
-```python
-Bash(
-    command=f"cd /home/timothy/oss/hive && PYTHONPATH=core:exports:$PYTHONPATH pytest exports/{agent_name}/tests/test_success_criteria.py::test_success_find_relevant_results -vv -s",
-    description="Run single test with full output"
+mcp__agent-builder__debug_test(
+    goal_id="your-goal-id",
+    test_name="test_success_find_relevant_results",
+    agent_path="exports/your_agent"
 )
 ```
 
-#### Option 3: Add debugging code directly
-```python
-# User can edit test file to add debugging:
-test_code = Read(file_path=f"exports/{agent_name}/tests/test_success_criteria.py")
-
-# Show user the failing test and suggest adding:
-# import pdb; pdb.set_trace()
-# Or add print statements to inspect values
-```
-
-#### Option 4: Inspect agent execution
-```python
-# Tests can inspect agent structure (no API key needed for structure inspection):
-inspection_test = '''
-@pytest.mark.asyncio
-async def test_debug_agent_structure():
-    """Debug: Inspect agent structure (no API calls made)"""
-    from exports.{agent_name} import default_agent
-
-    print(f"Nodes: {{len(default_agent.nodes)}}")
-    for node in default_agent.nodes:
-        print(f"  - {{node.id}}: {{node.node_type}}")
-
-    print(f"Edges: {{len(default_agent.edges)}}")
-    for edge in default_agent.edges:
-        print(f"  - {{edge.source}} -> {{edge.target}} ({{edge.condition}})")
-
-    # This test always passes - it's for inspection
-    assert True
-'''
-```
+**Response includes:**
+- Full verbose output from the test
+- Stack trace with exact line numbers
+- Captured logs and prints
+- Suggestions for fixing the issue
 
 ### Step 7: Categorize Errors
 
@@ -699,9 +528,9 @@ Edit(
 )
 
 # 4. Re-run tests immediately (instant feedback!)
-Bash(
-    command=f"cd /home/timothy/oss/hive && PYTHONPATH=core:exports:$PYTHONPATH pytest exports/{agent_name}/tests/ -v",
-    description="Re-run tests after fix"
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path=f"exports/{agent_name}"
 )
 ```
 
@@ -753,7 +582,11 @@ Edit(
 # 4. Re-run tests
 ```
 
-## Test File Templates
+## Test File Templates (Reference Only)
+
+**⚠️ Do NOT copy-paste these templates directly.** Use `generate_constraint_tests` and `generate_success_tests` MCP tools to create properly structured tests with correct imports and fixtures.
+
+These templates show the structure of generated tests for reference only.
 
 ### Constraint Test Template
 
@@ -862,16 +695,18 @@ During agent construction (Agent stage), you can run constraint tests incrementa
 ```python
 # After adding first node
 print("Added search_node. Running relevant constraint tests...")
-Bash(
-    command=f"pytest exports/{agent_name}/tests/test_constraints.py::test_constraint_api_rate_limits -v",
-    description="Test API rate limits with current nodes"
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path=f"exports/{agent_name}",
+    test_types='["constraint"]'
 )
 
 # After adding second node
 print("Added filter_node. Running all constraint tests...")
-Bash(
-    command=f"pytest exports/{agent_name}/tests/test_constraints.py -v",
-    description="Run all constraint tests"
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path=f"exports/{agent_name}",
+    test_types='["constraint"]'
 )
 ```
 
@@ -880,6 +715,166 @@ This provides **immediate feedback** during development, catching issues early.
 ## Common Test Patterns
 
 **Note:** All test patterns should include API key enforcement via conftest.py.
+
+### ⚠️ CRITICAL: Framework Features You Must Know
+
+#### OutputCleaner - Automatic I/O Cleaning (NEW!)
+
+**The framework now automatically validates and cleans node outputs** using a fast LLM (Cerebras llama-3.3-70b) at edge traversal time. This prevents cascading failures from malformed output.
+
+**What OutputCleaner does**:
+- ✅ Validates output matches next node's input schema
+- ✅ Detects JSON parsing trap (entire response in one key)
+- ✅ Cleans malformed output automatically (~200-500ms, ~$0.001 per cleaning)
+- ✅ Boosts success rates by 1.8-2.2x
+
+**Impact on tests**: Tests should still use safe patterns because OutputCleaner may not catch all issues in test mode.
+
+#### Safe Test Patterns (REQUIRED)
+
+**❌ UNSAFE** (will cause test failures):
+```python
+# Direct key access - can crash!
+approval_decision = result.output["approval_decision"]
+assert approval_decision == "APPROVED"
+
+# Nested access without checks
+category = result.output["analysis"]["category"]
+
+# Assuming parsed JSON structure
+for issue in result.output["compliance_issues"]:
+    ...
+```
+
+**✅ SAFE** (correct patterns):
+```python
+# 1. Safe dict access with .get()
+output = result.output or {}
+approval_decision = output.get("approval_decision", "UNKNOWN")
+assert "APPROVED" in approval_decision or approval_decision == "APPROVED"
+
+# 2. Type checking before operations
+analysis = output.get("analysis", {})
+if isinstance(analysis, dict):
+    category = analysis.get("category", "unknown")
+
+# 3. Parse JSON from strings (the JSON parsing trap!)
+import json
+recommendation = output.get("recommendation", "{}")
+if isinstance(recommendation, str):
+    try:
+        parsed = json.loads(recommendation)
+        if isinstance(parsed, dict):
+            approval = parsed.get("approval_decision", "UNKNOWN")
+    except json.JSONDecodeError:
+        approval = "UNKNOWN"
+elif isinstance(recommendation, dict):
+    approval = recommendation.get("approval_decision", "UNKNOWN")
+
+# 4. Safe iteration with type check
+compliance_issues = output.get("compliance_issues", [])
+if isinstance(compliance_issues, list):
+    for issue in compliance_issues:
+        ...
+```
+
+#### Helper Functions for Safe Access
+
+**Add to conftest.py**:
+```python
+import json
+import re
+
+def _parse_json_from_output(result, key):
+    """Parse JSON from agent output (framework may store full LLM response as string)."""
+    response_text = result.output.get(key, "")
+    # Remove markdown code blocks if present
+    json_text = re.sub(r'```json\s*|\s*```', '', response_text).strip()
+
+    try:
+        return json.loads(json_text)
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return result.output.get(key)
+
+def safe_get_nested(result, key_path, default=None):
+    """Safely get nested value from result.output."""
+    output = result.output or {}
+    current = output
+
+    for key in key_path:
+        if isinstance(current, dict):
+            current = current.get(key)
+        elif isinstance(current, str):
+            try:
+                json_text = re.sub(r'```json\s*|\s*```', '', current).strip()
+                parsed = json.loads(json_text)
+                if isinstance(parsed, dict):
+                    current = parsed.get(key)
+                else:
+                    return default
+            except json.JSONDecodeError:
+                return default
+        else:
+            return default
+
+    return current if current is not None else default
+
+# Make available in tests
+pytest.parse_json_from_output = _parse_json_from_output
+pytest.safe_get_nested = safe_get_nested
+```
+
+**Usage in tests**:
+```python
+# Use helper to parse JSON safely
+parsed = pytest.parse_json_from_output(result, "recommendation")
+if isinstance(parsed, dict):
+    approval = parsed.get("approval_decision", "UNKNOWN")
+
+# Safe nested access
+risk_score = pytest.safe_get_nested(result, ["analysis", "risk_score"], default=0.0)
+```
+
+#### Test Count Guidance
+
+**Generate 8-15 tests total, NOT 30+**
+
+- ✅ 2-3 tests per success criterion
+- ✅ 1 happy path test
+- ✅ 1 boundary/edge case test
+- ✅ 1 error handling test (optional)
+
+**Why fewer tests?**:
+- Each test requires real LLM call (~3 seconds, costs money)
+- 30 tests = 90 seconds, $0.30+ in costs
+- 12 tests = 36 seconds, $0.12 in costs
+- Focus on quality over quantity
+
+#### ExecutionResult Fields (Important!)
+
+**`result.success=True` means NO exception, NOT goal achieved**
+
+```python
+# ❌ WRONG - assumes goal achieved
+assert result.success
+
+# ✅ RIGHT - check success AND output
+assert result.success, f"Agent failed: {result.error}"
+output = result.output or {}
+approval = output.get("approval_decision")
+assert approval == "APPROVED", f"Expected APPROVED, got {approval}"
+```
+
+**All ExecutionResult fields**:
+- `success: bool` - Execution completed without exception (NOT goal achieved!)
+- `output: dict` - Complete memory snapshot (may contain raw strings)
+- `error: str | None` - Error message if failed
+- `steps_executed: int` - Number of nodes executed
+- `total_tokens: int` - Cumulative token usage
+- `total_latency_ms: int` - Total execution time
+- `path: list[str]` - Node IDs traversed
+- `paused_at: str | None` - Node ID if HITL pause occurred
+- `session_state: dict` - State for resuming
 
 ### Happy Path Test
 ```python
@@ -945,75 +940,145 @@ async def test_performance_latency(mock_mode):
 
 ## Anti-Patterns
 
+### Testing Best Practices
+
 | Don't | Do Instead |
 |-------|------------|
-| ❌ Use MCP tools to generate tests | ✅ Write test files directly with Write/Edit |
-| ❌ Store tests in session state | ✅ Write to tests/ directory immediately |
-| ❌ Run tests via subprocess wrapper | ✅ Use pytest directly |
-| ❌ Wait to "export" tests | ✅ Tests exist when generated |
-| ❌ Hide test code from user | ✅ User sees and can edit all test files |
-| ❌ Auto-approve generated tests | ✅ Always require user approval |
-| ❌ Treat all failures the same | ✅ Categorize and iterate appropriately |
+| ❌ Write tests without getting guidelines first | ✅ Use `generate_*_tests` to get proper file_header and guidelines |
+| ❌ Run pytest via Bash | ✅ Use `run_tests` MCP tool for structured results |
+| ❌ Debug tests with Bash pytest -vvs | ✅ Use `debug_test` MCP tool for formatted output |
+| ❌ Check for tests with Glob | ✅ Use `list_tests` MCP tool |
+| ❌ Skip the file_header from guidelines | ✅ Always include the file_header for proper imports and fixtures |
+
+### General Testing
+
+| Don't | Do Instead |
+|-------|------------|
+| ❌ Treat all failures the same | ✅ Use debug_test to categorize and iterate appropriately |
 | ❌ Rebuild entire agent for small bugs | ✅ Edit code directly, re-run tests |
 | ❌ Run tests without API key | ✅ Always set ANTHROPIC_API_KEY first |
-| ❌ Use mock mode for real testing | ✅ Mock mode is ONLY for structure validation |
-| ❌ Skip API key enforcement in tests | ✅ Include check_api_key fixture in conftest.py |
+| ❌ Write tests without understanding the constraints/criteria | ✅ Read the formatted constraints/criteria from guidelines |
 
 ## Workflow Summary
 
 ```
-1. Check existing tests (Glob)
+1. Check existing tests: list_tests(goal_id, agent_path)
+   → Scans exports/{agent}/tests/test_*.py
    ↓
-2. Generate test files (Write) → USER APPROVAL
+2. Get test guidelines: generate_constraint_tests, generate_success_tests
+   → Returns file_header, test_template, constraints/criteria, guidelines
    ↓
-3. Run tests (pytest via Bash)
+3. Write tests: Use Write tool with the provided guidelines
+   → Write tests to exports/{agent}/tests/test_*.py
    ↓
-4. Categorize failures
+4. Run tests: run_tests(goal_id, agent_path)
+   → Executes: pytest exports/{agent}/tests/ -v
    ↓
-5. Fix based on category:
-   - IMPLEMENTATION_ERROR → Edit agent code
-   - LOGIC_ERROR → Update goal
-   - EDGE_CASE → Add test and fix
+5. Debug failures: debug_test(goal_id, test_name, agent_path)
+   → Re-runs single test with verbose output
    ↓
-6. Re-run tests (instant feedback)
+6. Fix based on category:
+   - IMPLEMENTATION_ERROR → Edit agent code directly
+   - ASSERTION_FAILURE → Fix agent logic or update test
+   - IMPORT_ERROR → Check package structure
+   - API_ERROR → Check API keys and connectivity
    ↓
-7. Repeat until all pass ✅
+7. Re-run tests: run_tests(goal_id, agent_path)
+   ↓
+8. Repeat until all pass ✅
 ```
 
-## Example Commands Reference
+## MCP Tools Reference
+
+```python
+# Check existing tests (scans Python test files)
+mcp__agent-builder__list_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent"
+)
+
+# Get constraint test guidelines (returns templates and guidelines, NOT generated tests)
+mcp__agent-builder__generate_constraint_tests(
+    goal_id="your-goal-id",
+    goal_json='{"id": "...", "constraints": [...]}',
+    agent_path="exports/your_agent"
+)
+# Returns: output_file, file_header, test_template, constraints_formatted, test_guidelines
+
+# Get success criteria test guidelines
+mcp__agent-builder__generate_success_tests(
+    goal_id="your-goal-id",
+    goal_json='{"id": "...", "success_criteria": [...]}',
+    node_names="node1,node2",
+    tool_names="tool1,tool2",
+    agent_path="exports/your_agent"
+)
+# Returns: output_file, file_header, test_template, success_criteria_formatted, test_guidelines
+
+# Run tests via pytest subprocess
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent"
+)
+
+# Debug a failed test (re-runs with verbose output)
+mcp__agent-builder__debug_test(
+    goal_id="your-goal-id",
+    test_name="test_constraint_foo",
+    agent_path="exports/your_agent"
+)
+```
+
+## run_tests Options
+
+```python
+# Run only constraint tests
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent",
+    test_types='["constraint"]'
+)
+
+# Run only success criteria tests
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent",
+    test_types='["success"]'
+)
+
+# Run with pytest-xdist parallelism (requires pytest-xdist)
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent",
+    parallel=4
+)
+
+# Stop on first failure
+mcp__agent-builder__run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/your_agent",
+    fail_fast=True
+)
+```
+
+## Direct pytest Commands
+
+You can also run tests directly with pytest (the MCP tools use pytest internally):
 
 ```bash
-# FIRST: Set your API key (required for real testing)
-export ANTHROPIC_API_KEY="your-key-here"
-
-# Run all tests (with real LLM calls)
-pytest exports/my_agent/tests/ -v
+# Run all tests
+pytest exports/your_agent/tests/ -v
 
 # Run specific test file
-pytest exports/my_agent/tests/test_constraints.py -v
+pytest exports/your_agent/tests/test_constraints.py -v
 
 # Run specific test
-pytest exports/my_agent/tests/test_success_criteria.py::test_success_find_results -v
+pytest exports/your_agent/tests/test_constraints.py::test_constraint_foo -vvs
 
-# Run with debugging on first failure
-pytest exports/my_agent/tests/ -v --pdb
-
-# Run in parallel (faster)
-pytest exports/my_agent/tests/ -n 4
-
-# Run with coverage report
-pytest exports/my_agent/tests/ --cov=exports/my_agent --cov-report=html
-
-# Run only failed tests from last run
-pytest exports/my_agent/tests/ --lf
-
-# Run tests matching pattern
-pytest exports/my_agent/tests/ -k "constraint" -v
-
-# Mock mode (structure validation only - NOT for real testing)
-MOCK_MODE=1 pytest exports/my_agent/tests/ -v
+# Run in mock mode (structure validation only)
+MOCK_MODE=1 pytest exports/your_agent/tests/ -v
 ```
 
 ---
 
-**The new testing approach gives you direct Python access, instant feedback, and 10x faster iteration! 🚀**
+**MCP tools generate tests, write them to Python files, and run them via pytest.**

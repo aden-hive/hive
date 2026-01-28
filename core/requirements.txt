@@ -7,3 +7,8 @@ litellm>=1.81.0
 # MCP server dependencies
 mcp
 fastmcp
+
+# Testing (required for test framework)
+pytest>=8.0
+pytest-asyncio>=0.23
+pytest-xdist>=3.0

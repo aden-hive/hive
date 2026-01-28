@@ -12,20 +12,21 @@ Goals are:
 """
 
 from datetime import datetime
-from typing import Any
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class GoalStatus(str, Enum):
     """Lifecycle status of a goal."""
-    DRAFT = "draft"           # Being defined
-    READY = "ready"           # Ready for agent creation
-    ACTIVE = "active"         # Has an agent graph, can execute
-    COMPLETED = "completed"   # Achieved
-    FAILED = "failed"         # Could not be achieved
-    SUSPENDED = "suspended"   # Paused for revision
+
+    DRAFT = "draft"  # Being defined
+    READY = "ready"  # Ready for agent creation
+    ACTIVE = "active"  # Has an agent graph, can execute
+    COMPLETED = "completed"  # Achieved
+    FAILED = "failed"  # Could not be achieved
+    SUSPENDED = "suspended"  # Paused for revision
 
 
 class SuccessCriterion(BaseModel):
@@ -37,22 +38,14 @@ class SuccessCriterion(BaseModel):
     - Measurable: Can be evaluated programmatically or by LLM
     - Achievable: Within the agent's capabilities
     """
+
     id: str
-    description: str = Field(
-        description="Human-readable description of what success looks like"
-    )
+    description: str = Field(description="Human-readable description of what success looks like")
     metric: str = Field(
         description="How to measure: 'output_contains', 'output_equals', 'llm_judge', 'custom'"
     )
-    target: Any = Field(
-        description="The target value or condition"
-    )
-    weight: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description="Relative importance (0-1)"
-    )
+    target: Any = Field(description="The target value or condition")
+    weight: float = Field(default=1.0, ge=0.0, le=1.0, description="Relative importance (0-1)")
     met: bool = False
 
     model_config = {"extra": "allow"}
@@ -66,18 +59,17 @@ class Constraint(BaseModel):
     - Hard: Violation means failure
     - Soft: Violation is discouraged but allowed
     """
+
     id: str
     description: str
     constraint_type: str = Field(
         description="Type: 'hard' (must not violate) or 'soft' (prefer not to violate)"
     )
     category: str = Field(
-        default="general",
-        description="Category: 'time', 'cost', 'safety', 'scope', 'quality'"
+        default="general", description="Category: 'time', 'cost', 'safety', 'scope', 'quality'"
     )
     check: str = Field(
-        default="",
-        description="How to check: expression, function name, or 'llm_judge'"
+        default="", description="How to check: expression, function name, or 'llm_judge'"
     )
 
     model_config = {"extra": "allow"}
@@ -119,6 +111,7 @@ class Goal(BaseModel):
             ]
         )
     """
+
     id: str
     name: str
     description: str
@@ -133,23 +126,19 @@ class Goal(BaseModel):
     # Context for the agent
     context: dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional context: domain knowledge, user preferences, etc."
+        description="Additional context: domain knowledge, user preferences, etc.",
     )
 
     # Capabilities required
     required_capabilities: list[str] = Field(
         default_factory=list,
-        description="What the agent needs: 'llm', 'web_search', 'code_execution', etc."
+        description="What the agent needs: 'llm', 'web_search', 'code_execution', etc.",
     )
 
     # Input/output schema
-    input_schema: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Expected input format"
-    )
+    input_schema: dict[str, Any] = Field(default_factory=dict, description="Expected input format")
     output_schema: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Expected output format"
+        default_factory=dict, description="Expected output format"
     )
 
     # Versioning for evolution

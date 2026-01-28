@@ -99,6 +99,8 @@ Creates the complete agent architecture:
 
 - ✅ `exports/agent_name/` package created
 - ✅ Goal defined in agent.py
+- ✅ 3-5 success criteria defined
+- ✅ 1-5 constraints defined
 - ✅ 5-10 nodes specified in nodes/__init__.py
 - ✅ 8-15 edges connecting workflow
 - ✅ Validated structure (passes `python -m agent_name validate`)
