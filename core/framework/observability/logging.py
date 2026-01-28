@@ -20,6 +20,7 @@ Architecture:
 import json
 import logging
 import os
+import re
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
@@ -29,6 +30,14 @@ from typing import Any
 trace_context: ContextVar[dict[str, Any] | None] = ContextVar(
     "trace_context", default=None
 )
+
+# ANSI escape code pattern (matches \033[...m or \x1b[...m)
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m|\033\[[0-9;]*m")
+
+
+def strip_ansi_codes(text: str) -> str:
+    """Remove ANSI escape codes from text for clean JSON logging."""
+    return ANSI_ESCAPE_PATTERN.sub("", text)
 
 
 class StructuredFormatter(logging.Formatter):
@@ -46,12 +55,15 @@ class StructuredFormatter(logging.Formatter):
         # Get trace context for correlation - AUTOMATIC!
         context = trace_context.get() or {}
 
+        # Strip ANSI codes from message for clean JSON output
+        message = strip_ansi_codes(record.getMessage())
+
         # Build base log entry
         log_entry = {
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname.lower(),
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": message,
         }
 
         # Add trace context (trace_id, execution_id, agent_id, etc.) - AUTOMATIC!
@@ -60,7 +72,7 @@ class StructuredFormatter(logging.Formatter):
         # Add custom fields from extra (optional)
         event = getattr(record, "event", None)
         if event is not None:
-            log_entry["event"] = event
+            log_entry["event"] = strip_ansi_codes(str(event)) if isinstance(event, str) else event
 
         latency_ms = getattr(record, "latency_ms", None)
         if latency_ms is not None:
@@ -78,9 +90,10 @@ class StructuredFormatter(logging.Formatter):
         if model is not None:
             log_entry["model"] = model
 
-        # Add exception info if present
+        # Add exception info if present (strip ANSI codes from exception text too)
         if record.exc_info:
-            log_entry["exception"] = self.formatException(record.exc_info)
+            exception_text = self.formatException(record.exc_info)
+            log_entry["exception"] = strip_ansi_codes(exception_text)
 
         return json.dumps(log_entry)
 
@@ -181,6 +194,8 @@ def configure_logging(
     # Select formatter
     if format == "json":
         formatter = StructuredFormatter()
+        # Disable colors in third-party libraries when using JSON format
+        _disable_third_party_colors()
     else:
         formatter = HumanReadableFormatter()
 
@@ -193,6 +208,33 @@ def configure_logging(
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(level.upper())
+
+    # When in JSON mode, configure known third-party loggers to use JSON formatter
+    # This ensures libraries like LiteLLM, httpcore also output clean JSON
+    if format == "json":
+        third_party_loggers = ["LiteLLM", "httpcore", "httpx", "openai"]
+        for logger_name in third_party_loggers:
+            logger = logging.getLogger(logger_name)
+            # Clear existing handlers (which may have colors) and add our JSON formatter
+            logger.handlers.clear()
+            logger.addHandler(handler)
+            logger.propagate = True  # Still propagate to root for consistency
+
+
+def _disable_third_party_colors() -> None:
+    """Disable color output in third-party libraries for clean JSON logging."""
+    # Set NO_COLOR environment variable (common convention for disabling colors)
+    os.environ["NO_COLOR"] = "1"
+    os.environ["FORCE_COLOR"] = "0"
+    
+    # Disable LiteLLM debug/verbose output colors if available
+    try:
+        import litellm
+        # LiteLLM respects NO_COLOR, but we can also suppress debug info
+        if hasattr(litellm, "suppress_debug_info"):
+            litellm.suppress_debug_info = True  # type: ignore[attr-defined]
+    except (ImportError, AttributeError):
+        pass
 
 
 def set_trace_context(**kwargs: Any) -> None:
