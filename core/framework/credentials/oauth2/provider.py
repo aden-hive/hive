@@ -10,9 +10,9 @@ This module defines the core OAuth2 data structures:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class TokenPlacement(str, Enum):
@@ -47,10 +47,10 @@ class OAuth2Token:
 
     access_token: str
     token_type: str = "Bearer"
-    expires_at: Optional[datetime] = None
-    refresh_token: Optional[str] = None
-    scope: Optional[str] = None
-    raw_response: Dict[str, Any] = field(default_factory=dict)
+    expires_at: datetime | None = None
+    refresh_token: str | None = None
+    scope: str | None = None
+    raw_response: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_expired(self) -> bool:
@@ -63,7 +63,7 @@ class OAuth2Token:
         if self.expires_at is None:
             return False
         buffer = timedelta(minutes=5)
-        return datetime.now(timezone.utc) >= (self.expires_at - buffer)
+        return datetime.now(UTC) >= (self.expires_at - buffer)
 
     @property
     def can_refresh(self) -> bool:
@@ -71,15 +71,15 @@ class OAuth2Token:
         return self.refresh_token is not None and self.refresh_token.strip() != ""
 
     @property
-    def expires_in_seconds(self) -> Optional[int]:
+    def expires_in_seconds(self) -> int | None:
         """Get seconds until expiration, or None if no expiration."""
         if self.expires_at is None:
             return None
-        delta = self.expires_at - datetime.now(timezone.utc)
+        delta = self.expires_at - datetime.now(UTC)
         return max(0, int(delta.total_seconds()))
 
     @classmethod
-    def from_token_response(cls, data: Dict[str, Any]) -> "OAuth2Token":
+    def from_token_response(cls, data: dict[str, Any]) -> OAuth2Token:
         """
         Create OAuth2Token from an OAuth2 token endpoint response.
 
@@ -91,7 +91,7 @@ class OAuth2Token:
         """
         expires_at = None
         if "expires_in" in data:
-            expires_at = datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])
+            expires_at = datetime.now(UTC) + timedelta(seconds=data["expires_in"])
 
         return cls(
             access_token=data["access_token"],
@@ -137,28 +137,28 @@ class OAuth2Config:
 
     # Endpoints (only token_url is strictly required)
     token_url: str
-    authorization_url: Optional[str] = None
-    revocation_url: Optional[str] = None
-    introspection_url: Optional[str] = None
+    authorization_url: str | None = None
+    revocation_url: str | None = None
+    introspection_url: str | None = None
 
     # Client credentials
     client_id: str = ""
     client_secret: str = ""
 
     # Scopes
-    default_scopes: List[str] = field(default_factory=list)
+    default_scopes: list[str] = field(default_factory=list)
 
     # Token placement for API calls (bipartisan model)
     token_placement: TokenPlacement = TokenPlacement.HEADER_BEARER
-    custom_header_name: Optional[str] = None
+    custom_header_name: str | None = None
     query_param_name: str = "access_token"
 
     # Request configuration
-    extra_token_params: Dict[str, str] = field(default_factory=dict)
+    extra_token_params: dict[str, str] = field(default_factory=dict)
     request_timeout: float = 30.0
 
     # Additional headers for token requests
-    extra_headers: Dict[str, str] = field(default_factory=dict)
+    extra_headers: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate configuration."""

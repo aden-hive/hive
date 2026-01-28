@@ -13,8 +13,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta, timezone
-from typing import List
+from datetime import UTC, datetime, timedelta
 
 from .models import CredentialObject, CredentialRefreshError, CredentialType
 
@@ -64,7 +63,7 @@ class CredentialProvider(ABC):
 
     @property
     @abstractmethod
-    def supported_types(self) -> List[CredentialType]:
+    def supported_types(self) -> list[CredentialType]:
         """
         Credential types this provider can manage.
 
@@ -127,7 +126,7 @@ class CredentialProvider(ABC):
             True if credential should be refreshed
         """
         buffer = timedelta(minutes=5)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for key in credential.keys.values():
             if key.expires_at is not None:
@@ -181,7 +180,7 @@ class StaticProvider(CredentialProvider):
         return "static"
 
     @property
-    def supported_types(self) -> List[CredentialType]:
+    def supported_types(self) -> list[CredentialType]:
         return [CredentialType.API_KEY, CredentialType.BASIC_AUTH, CredentialType.CUSTOM]
 
     def refresh(self, credential: CredentialObject) -> CredentialObject:
@@ -236,7 +235,7 @@ class BearerTokenProvider(CredentialProvider):
         return "bearer_token"
 
     @property
-    def supported_types(self) -> List[CredentialType]:
+    def supported_types(self) -> list[CredentialType]:
         return [CredentialType.BEARER_TOKEN]
 
     def refresh(self, credential: CredentialObject) -> CredentialObject:
@@ -273,7 +272,7 @@ class BearerTokenProvider(CredentialProvider):
         credential needs attention.
         """
         buffer = timedelta(minutes=5)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for key_name in ["access_token", "token"]:
             key = credential.keys.get(key_name)
