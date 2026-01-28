@@ -43,6 +43,7 @@ lint.select = [
   "Q",   # flake8-quotes errors
   "UP",  # py-upgrade
   "W",   # pycodestyle warnings
+  "PLW1514",  # unspecified-encoding - catch open() without encoding
 ]
 
 lint.isort.combine-as-imports = true
