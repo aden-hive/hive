@@ -422,6 +422,7 @@ class AgentRunner:
         if self.mock_mode:
             # Use mock LLM for testing without real API calls
             from framework.llm.mock import MockLLMProvider
+
             self._llm = MockLLMProvider(model=self.model)
         else:
             # Detect required API key from model name

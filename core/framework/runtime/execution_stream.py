@@ -371,10 +371,13 @@ class ExecutionStream:
                 logger.error(f"Execution {execution_id} failed: {e}")
 
                 # Store error result with retention
-                self._record_execution_result(execution_id, ExecutionResult(
-                    success=False,
-                    error=str(e),
-                ))
+                self._record_execution_result(
+                    execution_id,
+                    ExecutionResult(
+                        success=False,
+                        error=str(e),
+                    ),
+                )
 
                 # Emit failure event
                 if self._event_bus:
@@ -421,6 +424,7 @@ class ExecutionStream:
             default_model=self.graph.default_model,
             max_tokens=self.graph.max_tokens,
             max_steps=self.graph.max_steps,
+            cleanup_llm_model=self.graph.cleanup_llm_model,
         )
 
     async def wait_for_completion(

@@ -140,7 +140,7 @@ This installs:
 ### 2. Build an Agent
 
 ```
-claude> /building-agents
+claude> /building-agents-construction
 ```
 
 Follow the prompts to:
@@ -289,7 +289,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-claude> /building-agents
+claude> /building-agents-construction
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 

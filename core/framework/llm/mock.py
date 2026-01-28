@@ -2,9 +2,10 @@
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
 
 class MockLLMProvider(LLMProvider):
@@ -55,7 +56,7 @@ class MockLLMProvider(LLMProvider):
         match = re.search(r"output_keys:\s*\[(.*?)\]", system, re.IGNORECASE)
         if match:
             keys_str = match.group(1)
-            keys = [k.strip().strip('"\'') for k in keys_str.split(",")]
+            keys = [k.strip().strip("\"'") for k in keys_str.split(",")]
             return keys
 
         # Pattern 2: "keys: key1, key2" or "Generate JSON with keys: key1, key2"
@@ -143,7 +144,7 @@ class MockLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """

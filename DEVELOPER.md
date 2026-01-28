@@ -213,7 +213,7 @@ The fastest way to build agents is using the Claude Code skills:
 ./quickstart.sh
 
 # Build a new agent
-claude> /building-agents
+claude> /building-agents-construction
 
 # Test the agent
 claude> /testing-agent
@@ -224,7 +224,7 @@ claude> /testing-agent
 1. **Define Your Goal**
 
    ```
-   claude> /building-agents
+   claude> /building-agents-construction
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
@@ -594,7 +594,7 @@ pip install -e .
 
 ```bash
 # Option 1: Use Claude Code skill (recommended)
-claude> /building-agents
+claude> /building-agents-construction
 
 # Option 2: Create manually
 # Note: exports/ is initially empty (gitignored). Create your agent directory:
