@@ -5,6 +5,25 @@ from mcp.server.fastmcp import FastMCP
 from ..security import get_secure_path
 
 
+def add_line_numbers(content: str, start: int = 1) -> str:
+    """Add line numbers to each line in the content.
+
+    Args:
+        content: The content to add line numbers to.
+        start: The line number to start with. Defaults to 1.
+
+    Returns:
+        The content with line numbers added.
+    """
+    lines = content.splitlines(keepends=True)
+    numbered_lines = []
+    for line in lines:
+        line_num = line.rstrip("\r\n")
+        newline = line[len(line_num):]
+        numbered_lines.append(f"{start}: {line_num}{newline}")
+        start += 1
+    return "".join(numbered_lines)
+
 def register_tools(mcp: FastMCP) -> None:
     """Register file view tools with the MCP server."""
     if getattr(mcp, "_file_tools_registered", False):
@@ -68,7 +87,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "path": path,
                 "content": content,
                 "size_bytes": len(content.encode("utf-8")),
-                "lines": len(content.splitlines()),
+                "lines": add_line_numbers(content),
             }
         except Exception as e:
             return {"error": f"Failed to read file: {str(e)}"}
