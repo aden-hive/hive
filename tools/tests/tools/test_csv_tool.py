@@ -1,11 +1,15 @@
 """Tests for csv_tool - Read and manipulate CSV files."""
-import pytest
+
+import importlib.util
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastmcp import FastMCP
+
 from aden_tools.tools.csv_tool.csv_tool import register_tools
 
+duckdb_available = importlib.util.find_spec("duckdb") is not None
 
 # Test IDs for sandbox
 TEST_WORKSPACE_ID = "test-workspace"
@@ -269,7 +273,9 @@ class TestCsvRead:
     def test_quoted_fields(self, csv_tool_fn, session_dir, tmp_path):
         """Read CSV with quoted fields containing commas."""
         csv_file = session_dir / "quoted.csv"
-        csv_file.write_text('name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n')
+        csv_file.write_text(
+            'name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n'
+        )
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = csv_tool_fn(
@@ -617,6 +623,7 @@ class TestCsvInfo:
         assert ".csv" in result["error"].lower()
 
 
+@pytest.mark.skipif(not duckdb_available, reason="duckdb not installed")
 class TestCsvSql:
     """Tests for csv_sql function (requires duckdb)."""
 
@@ -675,7 +682,10 @@ class TestCsvSql:
                 workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
                 session_id=TEST_SESSION_ID,
-                query="SELECT category, COUNT(*) as count, AVG(price) as avg_price FROM data GROUP BY category",
+                query=(
+                    "SELECT category, COUNT(*) as count, "
+                    "AVG(price) as avg_price FROM data GROUP BY category"
+                ),
             )
 
         assert result["success"] is True

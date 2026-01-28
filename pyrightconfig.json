@@ -1,0 +1,7 @@
+{
+  "extraPaths": ["core", "tools/src"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "include": ["core", "tools/src", "exports"],
+  "exclude": ["**/node_modules", "**/__pycache__", "**/.*"]
+}

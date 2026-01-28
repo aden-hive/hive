@@ -91,7 +91,7 @@ This installs:
 ./quickstart.sh
 
 # Build an agent using Claude Code
-claude> /building-agents
+claude> /building-agents-construction
 
 # Test your agent
 claude> /testing-agent
@@ -101,6 +101,15 @@ PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
+
+### Cursor IDE Support
+
+Skills are also available in Cursor. To enable:
+
+1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
+2. Run `MCP: Enable` to enable MCP servers
+3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
+4. Type `/` in Agent chat and search for skills (e.g., `/building-agents-construction`)
 
 ## Features
 
@@ -226,6 +235,7 @@ hive/
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
 ├── .claude/                # Claude Code skills for building agents
+├── .cursor/                # Cursor IDE skills (symlinks to .claude/skills)
 ├── ENVIRONMENT_SETUP.md    # Python setup guide for agent development
 ├── DEVELOPER.md            # Developer guide
 ├── CONTRIBUTING.md         # Contribution guidelines
@@ -248,7 +258,7 @@ For building and running goal-driven agents with the framework:
 # - All dependencies
 
 # Build new agents using Claude Code skills
-claude> /building-agents
+claude> /building-agents-construction
 
 # Test agents
 claude> /testing-agent
@@ -351,7 +361,7 @@ Aden collects telemetry data for monitoring and observability purposes, includin
 
 **Q: What deployment options does Aden support?**
 
-Aden supports Docker Compose deployment out of the box, with both production and development configurations. Self-hosted deployments work on any infrastructure supporting Docker. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
+Aden supports self-hosted deployments via Python packages. See the [Environment Setup Guide](ENVIRONMENT_SETUP.md) for installation instructions. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
 
 **Q: Can Aden handle complex, production-scale use cases?**
 

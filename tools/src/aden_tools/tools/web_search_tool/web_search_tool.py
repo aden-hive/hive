@@ -11,7 +11,7 @@ Auto-detection: If provider="auto", tries Brave first (backward compatible), the
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 from fastmcp import FastMCP
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 def register_tools(
     mcp: FastMCP,
-    credentials: Optional["CredentialManager"] = None,
+    credentials: CredentialManager | None = None,
 ) -> None:
     """Register web search tools with the MCP server."""
 
@@ -190,15 +190,11 @@ def register_tools(
                         "error": "Brave credentials not configured",
                         "help": "Set BRAVE_SEARCH_API_KEY environment variable",
                     }
-                return _search_brave(
-                    query, num_results, country, creds["brave_api_key"]
-                )
+                return _search_brave(query, num_results, country, creds["brave_api_key"])
 
             else:  # auto - try Brave first for backward compatibility
                 if brave_available:
-                    return _search_brave(
-                        query, num_results, country, creds["brave_api_key"]
-                    )
+                    return _search_brave(query, num_results, country, creds["brave_api_key"])
                 elif google_available:
                     return _search_google(
                         query,

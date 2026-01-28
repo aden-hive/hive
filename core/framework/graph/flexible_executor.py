@@ -168,9 +168,9 @@ class FlexibleGraphExecutor:
                             plan=plan,
                             context=context,
                             feedback=(
-                            "No executable steps available but plan not complete. "
-                            "Check dependencies."
-                        ),
+                                "No executable steps available but plan not complete. "
+                                "Check dependencies."
+                            ),
                             steps_executed=steps_executed,
                             total_tokens=total_tokens,
                             total_latency=total_latency,

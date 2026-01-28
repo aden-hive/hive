@@ -173,12 +173,13 @@ async function autoCloseDuplicates(): Promise<void> {
       `[DEBUG] Issue #${issue.number} has ${comments.length} comments`
     );
 
-    const dupeComments = comments.filter(
-      (comment) =>
-        comment.body.includes("Found") &&
-        comment.body.includes("possible duplicate") &&
+    const dupeComments = comments.filter((comment) => {
+      const bodyLower = comment.body.toLowerCase();
+      return (
+        bodyLower.includes("possible duplicate") &&
         comment.user.type === "Bot"
-    );
+      );
+    });
     console.log(
       `[DEBUG] Issue #${issue.number} has ${dupeComments.length} duplicate detection comments`
     );
@@ -211,20 +212,6 @@ async function autoCloseDuplicates(): Promise<void> {
         (Date.now() - dupeCommentDate.getTime()) / (1000 * 60 * 60)
       )} hours)`
     );
-
-    const commentsAfterDupe = comments.filter(
-      (comment) => new Date(comment.created_at) > dupeCommentDate
-    );
-    console.log(
-      `[DEBUG] Issue #${issue.number} - ${commentsAfterDupe.length} comments after duplicate detection`
-    );
-
-    if (commentsAfterDupe.length > 0) {
-      console.log(
-        `[DEBUG] Issue #${issue.number} - has activity after duplicate comment, skipping`
-      );
-      continue;
-    }
 
     console.log(
       `[DEBUG] Issue #${issue.number} - checking reactions on duplicate comment...`

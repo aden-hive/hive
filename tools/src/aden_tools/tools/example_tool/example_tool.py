@@ -3,6 +3,7 @@ Example Tool - A simple text processing tool for FastMCP.
 
 Demonstrates native FastMCP tool registration pattern.
 """
+
 from __future__ import annotations
 
 from fastmcp import FastMCP
