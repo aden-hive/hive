@@ -25,6 +25,7 @@ from framework.llm.provider import LLMProvider
 @dataclass
 class RuleEvaluationResult:
     """Result of rule-based evaluation."""
+
     is_definitive: bool  # True if a rule matched definitively
     judgment: Judgment | None = None
     context: dict[str, Any] = field(default_factory=dict)
@@ -216,7 +217,10 @@ class HybridJudge:
                 # Low confidence - escalate
                 return Judgment(
                     action=JudgmentAction.ESCALATE,
-                    reasoning=f"LLM confidence ({judgment.confidence:.2f}) below threshold ({self.llm_confidence_threshold})",
+                    reasoning=(
+                        f"LLM confidence ({judgment.confidence:.2f}) "
+                        f"below threshold ({self.llm_confidence_threshold})"
+                    ),
                     feedback=judgment.feedback,
                     confidence=judgment.confidence,
                     llm_used=True,
@@ -338,52 +342,65 @@ def create_default_judge(llm: LLMProvider | None = None) -> HybridJudge:
     judge = HybridJudge(llm=llm)
 
     # Rule: Accept on explicit success flag
-    judge.add_rule(EvaluationRule(
-        id="explicit_success",
-        description="Step explicitly marked as successful",
-        condition="isinstance(result, dict) and result.get('success') == True",
-        action=JudgmentAction.ACCEPT,
-        priority=100,
-    ))
+    judge.add_rule(
+        EvaluationRule(
+            id="explicit_success",
+            description="Step explicitly marked as successful",
+            condition="isinstance(result, dict) and result.get('success') == True",
+            action=JudgmentAction.ACCEPT,
+            priority=100,
+        )
+    )
 
     # Rule: Retry on transient errors
-    judge.add_rule(EvaluationRule(
-        id="transient_error_retry",
-        description="Transient error that can be retried",
-        condition="isinstance(result, dict) and result.get('error_type') in ['timeout', 'rate_limit', 'connection_error']",
-        action=JudgmentAction.RETRY,
-        feedback_template="Transient error: {result[error]}. Please retry.",
-        priority=90,
-    ))
+    judge.add_rule(
+        EvaluationRule(
+            id="transient_error_retry",
+            description="Transient error that can be retried",
+            condition=(
+                "isinstance(result, dict) and "
+                "result.get('error_type') in ['timeout', 'rate_limit', 'connection_error']"
+            ),
+            action=JudgmentAction.RETRY,
+            feedback_template="Transient error: {result[error]}. Please retry.",
+            priority=90,
+        )
+    )
 
     # Rule: Replan on missing data
-    judge.add_rule(EvaluationRule(
-        id="missing_data_replan",
-        description="Required data not available",
-        condition="isinstance(result, dict) and result.get('error_type') == 'missing_data'",
-        action=JudgmentAction.REPLAN,
-        feedback_template="Missing required data: {result[error]}. Plan needs adjustment.",
-        priority=80,
-    ))
+    judge.add_rule(
+        EvaluationRule(
+            id="missing_data_replan",
+            description="Required data not available",
+            condition="isinstance(result, dict) and result.get('error_type') == 'missing_data'",
+            action=JudgmentAction.REPLAN,
+            feedback_template="Missing required data: {result[error]}. Plan needs adjustment.",
+            priority=80,
+        )
+    )
 
     # Rule: Escalate on security issues
-    judge.add_rule(EvaluationRule(
-        id="security_escalate",
-        description="Security issue detected",
-        condition="isinstance(result, dict) and result.get('error_type') == 'security'",
-        action=JudgmentAction.ESCALATE,
-        feedback_template="Security issue detected: {result[error]}",
-        priority=200,
-    ))
+    judge.add_rule(
+        EvaluationRule(
+            id="security_escalate",
+            description="Security issue detected",
+            condition="isinstance(result, dict) and result.get('error_type') == 'security'",
+            action=JudgmentAction.ESCALATE,
+            feedback_template="Security issue detected: {result[error]}",
+            priority=200,
+        )
+    )
 
     # Rule: Fail on max retries exceeded
-    judge.add_rule(EvaluationRule(
-        id="max_retries_fail",
-        description="Maximum retries exceeded",
-        condition="step.get('attempts', 0) >= step.get('max_retries', 3)",
-        action=JudgmentAction.REPLAN,
-        feedback_template="Step '{step[id]}' failed after {step[attempts]} attempts",
-        priority=150,
-    ))
+    judge.add_rule(
+        EvaluationRule(
+            id="max_retries_fail",
+            description="Maximum retries exceeded",
+            condition="step.get('attempts', 0) >= step.get('max_retries', 3)",
+            action=JudgmentAction.REPLAN,
+            feedback_template="Step '{step[id]}' failed after {step[attempts]} attempts",
+            priority=150,
+        )
+    )
 
     return judge

@@ -121,7 +121,9 @@ class TestSharedMemoryHallucinationDetection:
         # Create a 50KB string with code at the 75% mark
         size = 50000
         code_position = int(size * 0.75)
-        content = "A" * code_position + "def hidden_code(): pass" + "B" * (size - code_position - 25)
+        content = (
+            "A" * code_position + "def hidden_code(): pass" + "B" * (size - code_position - 25)
+        )
 
         with pytest.raises(MemoryWriteError) as exc_info:
             memory.write("output", content)

@@ -23,6 +23,7 @@ class DebugInfo(BaseModel):
     """
     Comprehensive debug information for a failed test.
     """
+
     test_id: str
     test_name: str
 

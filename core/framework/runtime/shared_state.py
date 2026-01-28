@@ -19,21 +19,24 @@ logger = logging.getLogger(__name__)
 
 class IsolationLevel(str, Enum):
     """State isolation level for concurrent executions."""
-    ISOLATED = "isolated"           # Private state per execution
-    SHARED = "shared"               # Shared state (eventual consistency)
-    SYNCHRONIZED = "synchronized"   # Shared with write locks (strong consistency)
+
+    ISOLATED = "isolated"  # Private state per execution
+    SHARED = "shared"  # Shared state (eventual consistency)
+    SYNCHRONIZED = "synchronized"  # Shared with write locks (strong consistency)
 
 
 class StateScope(str, Enum):
     """Scope for state operations."""
-    EXECUTION = "execution"   # Local to a single execution
-    STREAM = "stream"         # Shared within a stream
-    GLOBAL = "global"         # Shared across all streams
+
+    EXECUTION = "execution"  # Local to a single execution
+    STREAM = "stream"  # Shared within a stream
+    GLOBAL = "global"  # Shared across all streams
 
 
 @dataclass
 class StateChange:
     """Record of a state change."""
+
     key: str
     old_value: Any
     new_value: Any
@@ -212,14 +215,16 @@ class SharedStateManager:
             await self._write_direct(key, value, execution_id, stream_id, scope)
 
         # Record change
-        self._record_change(StateChange(
-            key=key,
-            old_value=old_value,
-            new_value=value,
-            scope=scope,
-            execution_id=execution_id,
-            stream_id=stream_id,
-        ))
+        self._record_change(
+            StateChange(
+                key=key,
+                old_value=old_value,
+                new_value=value,
+                scope=scope,
+                execution_id=execution_id,
+                stream_id=stream_id,
+            )
+        )
 
     async def _write_direct(
         self,
@@ -278,7 +283,7 @@ class SharedStateManager:
 
         # Trim history if too long
         if len(self._change_history) > self._max_history:
-            self._change_history = self._change_history[-self._max_history:]
+            self._change_history = self._change_history[-self._max_history :]
 
     # === BULK OPERATIONS ===
 

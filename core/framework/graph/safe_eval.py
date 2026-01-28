@@ -52,6 +52,7 @@ SAFE_FUNCTIONS = {
     "any": any,
 }
 
+
 class SafeEvalVisitor(ast.NodeVisitor):
     def __init__(self, context: dict[str, Any]):
         self.context = context
@@ -116,11 +117,11 @@ class SafeEvalVisitor(ast.NodeVisitor):
         for op, comparator in zip(node.ops, node.comparators, strict=False):
             op_func = SAFE_OPERATORS.get(type(op))
             if op_func is None:
-                 raise ValueError(f"Operator {type(op).__name__} is not allowed")
+                raise ValueError(f"Operator {type(op).__name__} is not allowed")
             right = self.visit(comparator)
             if not op_func(left, right):
                 return False
-            left = right # Chain comparisons
+            left = right  # Chain comparisons
         return True
 
     def visit_BoolOp(self, node: ast.BoolOp) -> Any:
@@ -156,7 +157,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
         # value.attr
         # STIRCT CHECK: No access to private attributes (starting with _)
         if node.attr.startswith("_"):
-             raise ValueError(f"Access to private attribute '{node.attr}' is not allowed")
+            raise ValueError(f"Access to private attribute '{node.attr}' is not allowed")
 
         val = self.visit(node.value)
 
@@ -170,12 +171,12 @@ class SafeEvalVisitor(ast.NodeVisitor):
         # The check starts_with("_") covers __class__, __init__, etc.
 
         try:
-             return getattr(val, node.attr)
+            return getattr(val, node.attr)
         except AttributeError:
-             # Fallback: maybe it's a dict and they want dot access?
-             # (Only if we want to support that sugar, usually not standard python)
-             # Let's stick to standard python behavior + strict private check.
-             pass
+            # Fallback: maybe it's a dict and they want dot access?
+            # (Only if we want to support that sugar, usually not standard python)
+            # Let's stick to standard python behavior + strict private check.
+            pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")
 
@@ -190,26 +191,35 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
         is_safe = False
         if isinstance(node.func, ast.Name):
-             if node.func.id in SAFE_FUNCTIONS:
-                 is_safe = True
+            if node.func.id in SAFE_FUNCTIONS:
+                is_safe = True
 
         # Also allow methods on objects if they are safe?
         # E.g. "somestring".lower() or list.append() (if we allowed mutation, but we don't for now)
         # For now, restrict to SAFE_FUNCTIONS whitelist for global calls and deny method calls
         # unless we explicitly add safe methods.
-        # Actually, allowing method calls on strings/lists (like split, join, get) is commonly needed.
+        # Allowing method calls on strings/lists (split, join, get) is commonly needed.
 
         if isinstance(node.func, ast.Attribute):
-             # Method call.
-             # Allow basic safe methods?
-             # For security, start strict. Only helper functions.
-             # Re-visiting: User might want 'output.get("key")'.
-             method_name = node.func.attr
-             if method_name in ["get", "keys", "values", "items", "lower", "upper", "strip", "split"]:
-                 is_safe = True
+            # Method call.
+            # Allow basic safe methods?
+            # For security, start strict. Only helper functions.
+            # Re-visiting: User might want 'output.get("key")'.
+            method_name = node.func.attr
+            if method_name in [
+                "get",
+                "keys",
+                "values",
+                "items",
+                "lower",
+                "upper",
+                "strip",
+                "split",
+            ]:
+                is_safe = True
 
         if not is_safe and func not in SAFE_FUNCTIONS.values():
-             raise ValueError("Call to function/method is not allowed")
+            raise ValueError("Call to function/method is not allowed")
 
         args = [self.visit(arg) for arg in node.args]
         keywords = {kw.arg: self.visit(kw.value) for kw in node.keywords}
@@ -246,7 +256,7 @@ def safe_eval(expr: str, context: dict[str, Any] | None = None) -> Any:
     try:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError as e:
-        raise SyntaxError(f"Invalid syntax in expression: {e}")
+        raise SyntaxError(f"Invalid syntax in expression: {e}") from e
 
     visitor = SafeEvalVisitor(full_context)
     return visitor.visit(tree)
