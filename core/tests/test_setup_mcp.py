@@ -4,7 +4,6 @@ import json
 import logging
 import subprocess
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, mock_open, patch
 
 import pytest
