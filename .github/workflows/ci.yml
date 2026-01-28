@@ -20,8 +20,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -48,19 +48,17 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
           cd core
           pip install -e .
           pip install -r requirements-dev.txt
-
-      - name: Run tests
-        run: |
-          cd core
-          pytest tests/ -v
+          cd ..
+          pip install -e tools
+          pytest core/tests tools/tests -v
 
   validate:
     name: Validate Agent Exports
@@ -72,8 +70,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
