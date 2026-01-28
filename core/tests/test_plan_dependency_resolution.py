@@ -5,7 +5,6 @@ These tests verify that plan execution correctly handles failed dependencies
 instead of hanging indefinitely.
 """
 
-
 import pytest
 
 from framework.graph.plan import (

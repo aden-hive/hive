@@ -9,18 +9,19 @@ class DebugCLI(cmd.Cmd):
     """
     Interactive CLI for the Agent Debugger.
     """
+
     intro = "\n🐞 Agent Debugger. Type help or ? to list commands.\n"
     prompt = "(debug) "
 
     def __init__(self, session: DebugSession):
         super().__init__()
         self.session = session
-        self.last_command = "step" # Default behavior for empty line? or repeat last
+        self.last_command = "step"  # Default behavior for empty line? or repeat last
 
     def do_next(self, arg):
         """Execute the next node and pause (alias for step)."""
         self.session.step()
-        return True # Return True to yield control back to executor loop
+        return True  # Return True to yield control back to executor loop
 
     def do_step(self, arg):
         """Execute the next node and pause."""
@@ -117,4 +118,4 @@ class DebugCLI(cmd.Cmd):
     do_b = do_break
     do_m = do_memory
     do_q = do_quit
-    do_l = do_info # list/look?
+    do_l = do_info  # list/look?

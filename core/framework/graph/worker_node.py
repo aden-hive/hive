@@ -335,11 +335,12 @@ class WorkerNode:
                     # Handle progress updates via runtime eventually
 
                 from framework.llm.provider import LLMResponse
+
                 response = LLMResponse(
                     content=full_content,
                     model=self.llm.model if hasattr(self.llm, "model") else "unknown",
                     input_tokens=stream_input_tokens,
-                    output_tokens=stream_output_tokens
+                    output_tokens=stream_output_tokens,
                 )
             else:
                 response = self.llm.complete(

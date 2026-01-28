@@ -174,7 +174,7 @@ class MockLLMProvider(LLMProvider):
             # Simulated delay
             await asyncio.sleep(0.05)
 
-            is_complete = (i == len(words) - 1)
+            is_complete = i == len(words) - 1
             stop_reason = "mock_complete" if is_complete else ""
 
             chunk = StreamChunk(

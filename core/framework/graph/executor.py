@@ -278,7 +278,7 @@ class GraphExecutor:
                         node_id=current_node_id,
                         node_spec=node_spec,
                         context=debug_ctx,
-                        memory=memory.read_all()
+                        memory=memory.read_all(),
                     )
 
                 # Check if pause (HITL) before execution

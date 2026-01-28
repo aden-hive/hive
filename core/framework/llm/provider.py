@@ -108,7 +108,7 @@ class LLMProvider(ABC):
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
         callback: Callable[[StreamChunk], None] | None = None,
-    ) -> Any: # Returns AsyncIterator[StreamChunk]
+    ) -> Any:  # Returns AsyncIterator[StreamChunk]
         """
         Stream a completion from the LLM (token by token).
 

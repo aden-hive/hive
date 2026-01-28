@@ -17,8 +17,8 @@ class DebugSession:
     def __init__(self, executor: GraphExecutor):
         self.executor = executor
         self.breakpoints: set[str] = set()  # Node IDs to break on
-        self.pause_on_next: bool = True     # Start paused
-        self.history: list[dict[str, Any]] = [] # Execution history
+        self.pause_on_next: bool = True  # Start paused
+        self.history: list[dict[str, Any]] = []  # Execution history
         self.current_step_info: dict[str, Any] | None = None
 
         # Hook into the executor
@@ -50,31 +50,24 @@ class DebugSession:
                 print(f"  - {bp}")
 
     def on_step(
-        self,
-        node_id: str,
-        node_spec: NodeSpec,
-        context: dict[str, Any],
-        memory: dict[str, Any]
+        self, node_id: str, node_spec: NodeSpec, context: dict[str, Any], memory: dict[str, Any]
     ) -> str:
         """
         Callback triggered before each node execution.
 
         Returns command: 'continue', 'step', 'quit' or modified state.
         """
-        should_break = (
-            self.pause_on_next or
-            node_id in self.breakpoints
-        )
+        should_break = self.pause_on_next or node_id in self.breakpoints
 
         self.current_step_info = {
             "node_id": node_id,
             "node_name": node_spec.name,
             "inputs": context,
-            "memory": memory
+            "memory": memory,
         }
 
         if should_break:
-            self.pause_on_next = False # Reset single step
+            self.pause_on_next = False  # Reset single step
             return "break"
 
         return "continue"

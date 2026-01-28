@@ -869,9 +869,7 @@ Keep the same JSON structure but with shorter content values.
                             (
                                 validation_result,
                                 validated_model,
-                            ) = validator.validate_with_pydantic(
-                                parsed, ctx.node_spec.output_model
-                            )
+                            ) = validator.validate_with_pydantic(parsed, ctx.node_spec.output_model)
 
                             if validation_result.success:
                                 # Validation passed, break out of retry loop

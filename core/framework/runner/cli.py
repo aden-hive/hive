@@ -71,7 +71,8 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Path to agent folder",
     )
     debug_parser.add_argument(
-        "--input", "-i",
+        "--input",
+        "-i",
         type=str,
         help="Input context as JSON string",
     )
@@ -1115,10 +1116,7 @@ def cmd_debug(args: argparse.Namespace) -> int:
             return 1
 
     try:
-        runner = AgentRunner.load(
-            args.agent_path,
-            mock_mode=getattr(args, "mock", False)
-        )
+        runner = AgentRunner.load(args.agent_path, mock_mode=getattr(args, "mock", False))
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -1127,11 +1125,12 @@ def cmd_debug(args: argparse.Namespace) -> int:
     class ExecutorShim:
         def __init__(self):
             self.debug_hook = None
+
         def set_debug_hook(self, hook):
             self.debug_hook = hook
 
     shim = ExecutorShim()
-    debug_session = DebugSession(shim) # type: ignore
+    debug_session = DebugSession(shim)  # type: ignore
     debug_cli = DebugCLI(debug_session)
 
     def debug_hook_callback(node_id, node_spec, context, memory):
