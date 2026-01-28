@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from framework.errors import CLIError, cli_error_handler
+
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
@@ -175,6 +177,7 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     shell_parser.set_defaults(func=cmd_shell)
 
 
+@cli_error_handler
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
@@ -195,26 +198,34 @@ def cmd_run(args: argparse.Namespace) -> int:
         try:
             context = json.loads(args.input)
         except json.JSONDecodeError as e:
-            print(f"Error parsing --input JSON: {e}", file=sys.stderr)
-            return 1
+            raise CLIError(
+                f"Invalid JSON in --input: {e}",
+                hint=(
+                    "Ensure the input is valid JSON. Example:\n"
+                    "    hive run <agent> --input '{\"key\": \"value\"}'"
+                ),
+            ) from e
     elif args.input_file:
         try:
             with open(args.input_file) as f:
                 context = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            print(f"Error reading input file: {e}", file=sys.stderr)
-            return 1
+        except FileNotFoundError as e:
+            raise CLIError(
+                f"Input file not found: {args.input_file}",
+                hint="Check that the file path is correct and the file exists.",
+            ) from e
+        except json.JSONDecodeError as e:
+            raise CLIError(
+                f"Invalid JSON in input file '{args.input_file}': {e}",
+                hint="Ensure the file contains valid JSON.",
+            ) from e
 
     # Load and run agent
-    try:
-        runner = AgentRunner.load(
-            args.agent_path,
-            mock_mode=args.mock,
-            model=getattr(args, "model", "claude-haiku-4-5-20251001"),
-        )
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    runner = AgentRunner.load(
+        args.agent_path,
+        mock_mode=args.mock,
+        model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+    )
 
     # Auto-inject user_id if the agent expects it but it's not provided
     entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
@@ -314,15 +325,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+@cli_error_handler
 def cmd_info(args: argparse.Namespace) -> int:
     """Show agent information."""
     from framework.runner import AgentRunner
 
-    try:
-        runner = AgentRunner.load(args.agent_path)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    runner = AgentRunner.load(args.agent_path)
 
     info = runner.info()
 
@@ -377,15 +385,12 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
+@cli_error_handler
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate an exported agent."""
     from framework.runner import AgentRunner
 
-    try:
-        runner = AgentRunner.load(args.agent_path)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    runner = AgentRunner.load(args.agent_path)
 
     validation = runner.validate()
 
@@ -411,13 +416,14 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0 if validation.valid else 1
 
 
+@cli_error_handler
 def cmd_list(args: argparse.Namespace) -> int:
     """List available agents."""
     from framework.runner import AgentRunner
 
     directory = Path(args.directory)
     if not directory.exists():
-        # FIX: Handle missing directory gracefully on fresh install
+        # Graceful handling for fresh installs where exports/ doesn't exist yet
         print(f"No agents found in {directory}")
         return 0
 
@@ -465,6 +471,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+@cli_error_handler
 def cmd_dispatch(args: argparse.Namespace) -> int:
     """Dispatch request to multiple agents via orchestrator."""
     from framework.runner import AgentOrchestrator
@@ -473,14 +480,21 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     try:
         context = json.loads(args.input)
     except json.JSONDecodeError as e:
-        print(f"Error parsing --input JSON: {e}", file=sys.stderr)
-        return 1
+        raise CLIError(
+            f"Invalid JSON in --input: {e}",
+            hint=(
+                "Ensure the input is valid JSON. Example:\n"
+                "    hive dispatch --input '{\"key\": \"value\"}'"
+            ),
+        ) from e
 
     # Find agents
     agents_dir = Path(args.agents_dir)
     if not agents_dir.exists():
-        print(f"Directory not found: {agents_dir}", file=sys.stderr)
-        return 1
+        raise CLIError(
+            f"Directory not found: {agents_dir}",
+            hint="Check the agents directory path. Default is 'exports/'.",
+        )
 
     # Create orchestrator and register agents
     orchestrator = AgentOrchestrator()
@@ -491,8 +505,13 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         for agent_name in args.agents:
             agent_path = agents_dir / agent_name
             if not (agent_path / "agent.json").exists():
-                print(f"Agent not found: {agent_path}", file=sys.stderr)
-                return 1
+                raise CLIError(
+                    f"Agent not found: {agent_path}",
+                    hint=(
+                        f"No agent.json in '{agent_path}'.\n"
+                        "  List available agents with: hive list"
+                    ),
+                )
             agent_paths.append((agent_name, agent_path))
     else:
         # Discover all agents
@@ -501,8 +520,13 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
                 agent_paths.append((path.name, path))
 
     if not agent_paths:
-        print(f"No agents found in {agents_dir}", file=sys.stderr)
-        return 1
+        raise CLIError(
+            f"No agents found in {agents_dir}",
+            hint=(
+                "Ensure the directory contains agent folders with agent.json.\n"
+                "  Export agents first, then retry."
+            ),
+        )
 
     # Register agents
     for name, path in agent_paths:
@@ -695,6 +719,7 @@ Output ONLY valid JSON, no explanation:"""
             return {input_keys[0]: user_input}
 
 
+@cli_error_handler
 def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
     import logging
@@ -721,11 +746,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
         if not agent_path:
             return 1
 
-    try:
-        runner = AgentRunner.load(agent_path)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    runner = AgentRunner.load(agent_path)
 
     # Set up approval callback by default (unless --no-approve is set)
     if not getattr(args, "no_approve", False):

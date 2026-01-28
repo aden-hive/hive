@@ -18,6 +18,7 @@ Testing commands:
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -62,6 +63,12 @@ def main():
         default="claude-haiku-4-5-20251001",
         help="Anthropic model to use",
     )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show full tracebacks on error",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -78,7 +85,22 @@ def main():
     args = parser.parse_args()
 
     if hasattr(args, "func"):
-        sys.exit(args.func(args))
+        try:
+            sys.exit(args.func(args))
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            sys.exit(130)
+        except Exception as exc:
+            # Last-resort handler for anything that escapes command-level handling
+            from framework.errors import _resolve_error, format_error
+
+            verbose = getattr(args, "verbose", False)
+            cli_err = _resolve_error(exc)
+            cli_err.__cause__ = exc
+            print(format_error(cli_err, verbose=verbose), file=sys.stderr)
+            if verbose:
+                traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":
