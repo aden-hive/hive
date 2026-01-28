@@ -1,6 +1,6 @@
 """Tests for web_scrape tool (FastMCP)."""
-import pytest
-from unittest.mock import patch, MagicMock
+
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP
@@ -54,6 +54,7 @@ class TestWebScrapeTool:
         result = web_scrape_fn(url="https://example.com", selector=".content")
         assert isinstance(result, dict)
 
+
 class TestWebScrapeToolLinkConversion:
     """Tests for link URL conversion (relative to absolute)."""
 
@@ -84,13 +85,14 @@ class TestWebScrapeToolLinkConversion:
         assert "links" in result
         links = result["links"]
         hrefs = {link["text"]: link["href"] for link in links}
-        
+
         # Verify relative URLs are converted to absolute
         assert "Home" in hrefs
         assert hrefs["Home"] == "https://example.com/home", f"Got {hrefs['Home']}"
-        
+
         assert "Next Page" in hrefs
-        assert hrefs["Next Page"] == "https://example.com/blog/page.html", f"Got {hrefs['Next Page']}"
+        expected = "https://example.com/blog/page.html"
+        assert hrefs["Next Page"] == expected, f"Got {hrefs['Next Page']}"
 
     @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.httpx.get")
     def test_root_relative_links_converted(self, mock_get, web_scrape_fn):
@@ -111,7 +113,7 @@ class TestWebScrapeToolLinkConversion:
         assert "links" in result
         links = result["links"]
         hrefs = {link["text"]: link["href"] for link in links}
-        
+
         # Root-relative URLs should resolve to domain root
         assert hrefs["About"] == "https://example.com/about"
         assert hrefs["Contact"] == "https://example.com/contact"
@@ -135,7 +137,7 @@ class TestWebScrapeToolLinkConversion:
         assert "links" in result
         links = result["links"]
         hrefs = {link["text"]: link["href"] for link in links}
-        
+
         # Absolute URLs should remain unchanged
         assert hrefs["Other Site"] == "https://other.com"
         assert hrefs["Internal"] == "https://example.com/page"
@@ -153,8 +155,8 @@ class TestWebScrapeToolLinkConversion:
         """
         # Mock redirect: request to /old/url redirects to /new/location
         mock_get.return_value = self._mock_response(
-            html, 
-            final_url="https://example.com/new/location"  # Final URL after redirect
+            html,
+            final_url="https://example.com/new/location",  # Final URL after redirect
         )
 
         result = web_scrape_fn(url="https://example.com/old/url", include_links=True)
@@ -163,10 +165,11 @@ class TestWebScrapeToolLinkConversion:
         assert "links" in result
         links = result["links"]
         hrefs = {link["text"]: link["href"] for link in links}
-        
+
         # Links should be resolved relative to FINAL URL, not requested URL
-        assert hrefs["Previous"] == "https://example.com/prev", \
-            "Links should resolve relative to final URL after redirects"
+        assert (
+            hrefs["Previous"] == "https://example.com/prev"
+        ), "Links should resolve relative to final URL after redirects"
         assert hrefs["Next"] == "https://example.com/new/next"
 
     @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.httpx.get")
@@ -188,7 +191,7 @@ class TestWebScrapeToolLinkConversion:
         assert "links" in result
         links = result["links"]
         hrefs = {link["text"]: link["href"] for link in links}
-        
+
         # Fragment links should be converted correctly
         assert hrefs["Section 1"] == "https://example.com/page#section1"
         assert hrefs["Page Section 2"] == "https://example.com/page#section2"
@@ -212,7 +215,7 @@ class TestWebScrapeToolLinkConversion:
         assert "links" in result
         links = result["links"]
         hrefs = {link["text"]: link["href"] for link in links}
-        
+
         # Query parameters should be preserved
         assert "id=123" in hrefs["View Item"]
         assert "q=test" in hrefs["Search"]
@@ -238,7 +241,7 @@ class TestWebScrapeToolLinkConversion:
         assert "links" in result
         links = result["links"]
         texts = [link["text"] for link in links]
-        
+
         # Only valid links should be included
         assert "Valid Link" in texts
         # Empty and whitespace-only text should be filtered

@@ -4,9 +4,10 @@ Tests for path traversal vulnerability fix in FileStorage.
 Verifies that the _validate_key() method properly blocks path traversal attempts.
 """
 
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+import pytest
 
 from framework.storage.backend import FileStorage
 
