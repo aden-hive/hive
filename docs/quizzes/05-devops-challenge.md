@@ -13,11 +13,11 @@ Master the deployment and operations of AI agent infrastructure! This challenge 
 ### Task 1.1: Docker Deep Dive 🐳
 Analyze the Aden Docker setup:
 
-1. List all services defined in `docker-compose.yml`
-2. What's the purpose of `docker-compose.override.yml`?
+1. What Dockerfile exists in the repository and what does it build?
+2. How would you containerize the MCP tools server?
 3. How is hot reload enabled for development?
-4. What volumes are mounted and why?
-5. What networking mode is used between services?
+4. What would need to be mounted as volumes for persistence?
+5. What networking considerations exist for the MCP server?
 
 ### Task 1.2: Service Dependencies 🔗
 Map the service dependencies:

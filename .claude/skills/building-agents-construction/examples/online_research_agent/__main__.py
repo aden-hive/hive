@@ -108,8 +108,10 @@ async def _interactive_shell(verbose=False):
     try:
         while True:
             try:
-                topic = await asyncio.get_event_loop().run_in_executor(None, input, "Topic> ")
-                if topic.lower() in ['quit', 'exit', 'q']:
+                topic = await asyncio.get_event_loop().run_in_executor(
+                    None, input, "Topic> "
+                )
+                if topic.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break
 
@@ -130,7 +132,11 @@ async def _interactive_shell(verbose=False):
                         click.echo(f"\nReport saved to: {output['file_path']}\n")
                     if "final_report" in output:
                         click.echo("\n--- Report Preview ---\n")
-                        preview = output["final_report"][:500] + "..." if len(output.get("final_report", "")) > 500 else output.get("final_report", "")
+                        preview = (
+                            output["final_report"][:500] + "..."
+                            if len(output.get("final_report", "")) > 500
+                            else output.get("final_report", "")
+                        )
                         click.echo(preview)
                         click.echo("\n")
                 else:
@@ -142,6 +148,7 @@ async def _interactive_shell(verbose=False):
             except Exception as e:
                 click.echo(f"Error: {e}", err=True)
                 import traceback
+
                 traceback.print_exc()
     finally:
         await agent.stop()
