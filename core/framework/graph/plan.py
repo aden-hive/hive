@@ -391,7 +391,8 @@ class Plan(BaseModel):
     def get_failed_steps(self) -> list[PlanStep]:
         """Get all steps that failed, were skipped, or were rejected."""
         return [
-            s for s in self.steps
+            s
+            for s in self.steps
             if s.status in (StepStatus.FAILED, StepStatus.SKIPPED, StepStatus.REJECTED)
         ]
 
