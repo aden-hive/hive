@@ -146,6 +146,7 @@ class MCPClient:
 
         try:
             import threading
+
             from mcp import StdioServerParameters
 
             # Create server parameters
@@ -353,9 +354,9 @@ class MCPClient:
             if len(result.content) > 0:
                 content_item = result.content[0]
                 # Check if it's a text content item
-                if hasattr(content_item, 'text'):
+                if hasattr(content_item, "text"):
                     return content_item.text
-                elif hasattr(content_item, 'data'):
+                elif hasattr(content_item, "data"):
                     return content_item.data
             return result.content
 

@@ -6,7 +6,8 @@ string content, not just the first 500 characters.
 """
 
 import pytest
-from framework.graph.node import SharedMemory, MemoryWriteError
+
+from framework.graph.node import MemoryWriteError, SharedMemory
 from framework.graph.validator import OutputValidator, ValidationResult
 
 

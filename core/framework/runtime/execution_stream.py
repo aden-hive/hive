@@ -10,21 +10,22 @@ Each stream has:
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from framework.graph.executor import GraphExecutor, ExecutionResult
+from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
-from framework.runtime.shared_state import SharedStateManager, IsolationLevel, StreamMemory
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
-    from framework.storage.concurrent import ConcurrentStorage
-    from framework.runtime.outcome_aggregator import OutcomeAggregator
-    from framework.runtime.event_bus import EventBus
     from framework.llm.provider import LLMProvider, Tool
+    from framework.runtime.event_bus import EventBus
+    from framework.runtime.outcome_aggregator import OutcomeAggregator
+    from framework.storage.concurrent import ConcurrentStorage
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ class ExecutionStream:
 
         # Emit stream started event
         if self._event_bus:
-            from framework.runtime.event_bus import EventType, AgentEvent
+            from framework.runtime.event_bus import AgentEvent, EventType
             await self._event_bus.publish(AgentEvent(
                 type=EventType.STREAM_STARTED,
                 stream_id=self.stream_id,
@@ -194,7 +195,7 @@ class ExecutionStream:
 
         # Emit stream stopped event
         if self._event_bus:
-            from framework.runtime.event_bus import EventType, AgentEvent
+            from framework.runtime.event_bus import AgentEvent, EventType
             await self._event_bus.publish(AgentEvent(
                 type=EventType.STREAM_STOPPED,
                 stream_id=self.stream_id,
@@ -408,7 +409,7 @@ class ExecutionStream:
 
             return self._execution_results.get(execution_id)
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     def get_result(self, execution_id: str) -> ExecutionResult | None:

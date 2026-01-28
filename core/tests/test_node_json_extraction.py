@@ -6,6 +6,7 @@ Run with:
 """
 
 import pytest
+
 from framework.graph.node import LLMNode
 
 

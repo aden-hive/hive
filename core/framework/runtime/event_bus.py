@@ -9,11 +9,11 @@ Allows streams to:
 
 import asyncio
 import logging
-import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -432,7 +432,7 @@ class EventBus:
             if timeout:
                 try:
                     await asyncio.wait_for(event_received.wait(), timeout=timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     return None
             else:
                 await event_received.wait()
