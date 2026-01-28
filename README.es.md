@@ -66,7 +66,7 @@ Aden es una plataforma para construir, desplegar, operar y adaptar agentes de IA
 ### Prerrequisitos
 
 - [Python 3.11+](https://www.python.org/downloads/) - Para desarrollo de agentes
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Opcional, para herramientas en contenedores
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Opcional. Solo es necesario al utilizar herramientas MCP que requieren dependencias en contenedores (por ejemplo, PostgreSQL, Redis). No es necesario para el desarrollo básico de agentes.
 
 ### Instalación
 
