@@ -478,9 +478,12 @@ class BaseOAuth2Provider(CredentialProvider):
         if not access_token:
             return {}
 
+        # Use get_key() to get the actual string value, not the CredentialKey object
+        token_type = credential.get_key("token_type") or "Bearer"
+
         token = OAuth2Token(
             access_token=access_token,
-            token_type=credential.keys.get("token_type", "Bearer") or "Bearer",
+            token_type=token_type,
         )
 
         return self.format_for_request(token)

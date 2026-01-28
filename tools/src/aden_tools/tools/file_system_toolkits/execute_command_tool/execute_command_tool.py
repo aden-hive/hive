@@ -1,9 +1,33 @@
 import os
+import shlex
 import subprocess
+import sys
 
 from mcp.server.fastmcp import FastMCP
 
 from ..security import WORKSPACES_DIR, get_secure_path
+
+
+def _parse_command(command: str) -> list[str]:
+    """
+    Safely parse a command string into arguments.
+
+    Uses shlex.split() for POSIX systems and a Windows-compatible approach
+    for Windows to avoid shell injection vulnerabilities.
+
+    Args:
+        command: The command string to parse
+
+    Returns:
+        List of command arguments
+    """
+    if sys.platform == "win32":
+        # On Windows, use shlex with posix=False for better compatibility
+        # This handles Windows-style paths and quoting
+        return shlex.split(command, posix=False)
+    else:
+        # On POSIX systems, use standard shlex parsing
+        return shlex.split(command)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -47,8 +71,12 @@ def register_tools(mcp: FastMCP) -> None:
             else:
                 secure_cwd = session_root
 
+            # Parse command safely to prevent shell injection
+            # Using shell=False with parsed arguments is more secure
+            parsed_command = _parse_command(command)
+
             result = subprocess.run(
-                command, shell=True, cwd=secure_cwd, capture_output=True, text=True, timeout=60
+                parsed_command, shell=False, cwd=secure_cwd, capture_output=True, text=True, timeout=60
             )
 
             return {
