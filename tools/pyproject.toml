@@ -28,6 +28,8 @@ dependencies = [
     "fastmcp>=2.0.0",
     "diff-match-patch>=20230430",
     "python-dotenv>=1.0.0",
+    "playwright>=1.40.0",
+    "playwright-stealth>=1.0.5",
 ]
 
 [project.optional-dependencies]
