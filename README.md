@@ -39,6 +39,19 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## Business & GTM Example Use Cases
+
+Hive can power real-world business automation beyond engineering workflows. Example agent use cases:
+
+- **Lead Qualification Agent** — Automatically qualifies inbound leads and enriches CRM data  
+- **Sales Follow-Up Agent** — Sends personalized follow-ups based on prospect behavior  
+- **Customer Support Agent** — Resolves common support tickets autonomously  
+- **Marketing Optimization Agent** — Tests and optimizes ad creatives and messaging  
+- **Revenue Ops Agent** — Monitors pipeline health, flags churn risks, and updates pipeline data  
+
+These examples help founders, GTM teams, and operators better understand Hive’s real-world revenue and growth applications.
+
+
 ## What is Aden
 
 <p align="center">
