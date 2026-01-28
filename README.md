@@ -4,12 +4,12 @@
 
 <p align="center">
   <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="docs/i18n/zh-CN.md">简体中文</a> |
+  <a href="docs/i18n/es.md">Español</a> |
+  <a href="docs/i18n/pt.md">Português</a> |
+  <a href="docs/i18n/ja.md">日本語</a> |
+  <a href="docs/i18n/ru.md">Русский</a> |
+  <a href="docs/i18n/ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
