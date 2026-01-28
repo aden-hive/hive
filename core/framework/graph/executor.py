@@ -34,6 +34,16 @@ from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
 
 
+# [ADDED BACK] Restored from main branch to fix ImportError in test_fanout.py
+@dataclass
+class ParallelExecutionConfig:
+    """
+    Configuration for parallel node execution.
+    """
+    max_workers: int = 10
+    enabled: bool = True
+
+
 @dataclass
 class ExecutionSnapshot:
     """
@@ -61,7 +71,9 @@ class ExecutionResult:
     paused_at: str | None = None  # Node ID where execution paused for HITL
     session_state: dict[str, Any] = field(default_factory=dict)  # State to resume from
     # compare=False prevents existing tests from failing on equality checks
-    history: list[ExecutionSnapshot] = field(default_factory=list, compare=False)
+    history: list[ExecutionSnapshot] = field(
+        default_factory=list, compare=False
+    )
 
 
 class GraphExecutor:
@@ -92,18 +104,11 @@ class GraphExecutor:
         node_registry: dict[str, NodeProtocol] | None = None,
         approval_callback: Callable | None = None,
         cleansing_config: CleansingConfig | None = None,
+        # Added to support parallel config if passed by main branch code
+        parallel_config: ParallelExecutionConfig | None = None,
     ):
         """
         Initialize the executor.
-
-        Args:
-            runtime: Runtime for decision logging
-            llm: LLM provider for LLM nodes
-            tools: Available tools
-            tool_executor: Function to execute tools
-            node_registry: Custom node implementations by ID
-            approval_callback: Optional callback for human-in-the-loop approval
-            cleansing_config: Optional output cleansing configuration
         """
         self.runtime = runtime
         self.llm = llm
@@ -113,6 +118,7 @@ class GraphExecutor:
         self.approval_callback = approval_callback
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
+        self.parallel_config = parallel_config or ParallelExecutionConfig()
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -135,7 +141,9 @@ class GraphExecutor:
             if node.tools:
                 missing = set(node.tools) - available_tool_names
                 if missing:
-                    available = sorted(available_tool_names) if available_tool_names else "none"
+                    available = (
+                        sorted(available_tool_names) if available_tool_names else "none"
+                    )
                     errors.append(
                         f"Node '{node.name}' (id={node.id}) requires tools "
                         f"{sorted(missing)} but they are not registered. "
@@ -200,7 +208,9 @@ class GraphExecutor:
                 # Restore memory from previous session
                 for key, value in memory_data.items():
                     memory.write(key, value)
-                self.logger.info(f"📥 Restored session state with {len(memory_data)} memory keys")
+                self.logger.info(
+                    f"📥 Restored session state with {len(memory_data)} memory keys"
+                )
 
         # Write new input data to memory (each key individually)
         if input_data:
@@ -260,7 +270,9 @@ class GraphExecutor:
                     # Execute this node, then pause
                     # (We'll check again after execution and save state)
 
-                self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
+                self.logger.info(
+                    f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})"
+                )
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
 
@@ -309,7 +321,9 @@ class GraphExecutor:
                             check_hallucination=True,
                         )
                         if not validation.success:
-                            self.logger.error(f"   ✗ Output validation failed: {validation.error}")
+                            self.logger.error(
+                                f"   ✗ Output validation failed: {validation.error}"
+                            )
                             result = NodeResult(
                                 success=False,
                                 error=f"Output validation failed: {validation.error}",
@@ -359,18 +373,22 @@ class GraphExecutor:
                         retry_count = node_retry_counts[current_node_id]
                         # Backoff formula: 1.0 * (2^(retry - 1)) -> 1s, 2s, 4s...
                         delay = 1.0 * (2 ** (retry_count - 1))
-                        self.logger.info(f"   Using backoff: Sleeping {delay}s before retry...")
+                        self.logger.info(
+                            f"   Using backoff: Sleeping {delay}s before retry..."
+                        )
                         await asyncio.sleep(delay)
                         # --------------------------------------
 
                         self.logger.info(
-                            f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
+                            f"   ↻ Retrying ({node_retry_counts[current_node_id]}/"
+                            f"{max_retries})..."
                         )
                         continue
                     else:
                         # Max retries exceeded - fail the execution
                         self.logger.error(
-                            f"   ✗ Max retries ({max_retries}) exceeded for node {current_node_id}"
+                            f"   ✗ Max retries ({max_retries}) "
+                            f"exceeded for node {current_node_id}"
                         )
                         self.runtime.report_problem(
                             severity="critical",
@@ -402,7 +420,7 @@ class GraphExecutor:
                         )
 
                 # Check if we just executed a pause node - if so, save state and return
-                # This must happen BEFORE determining next node, since pause nodes may have no edges
+                # This must happen BEFORE determining next node
                 if node_spec.id in graph.pause_nodes:
                     self.logger.info("💾 Saving session state after pause node")
                     saved_memory = memory.read_all()
@@ -455,7 +473,9 @@ class GraphExecutor:
                         self.logger.info("   → No more edges, ending execution")
                         break  # No valid edge, end execution
                     next_spec = graph.get_node(next_node)
-                    self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
+                    self.logger.info(
+                        f"   → Next: {next_spec.name if next_spec else next_node}"
+                    )
                     current_node_id = next_node
 
                 # Update input_data for next node
@@ -520,7 +540,8 @@ class GraphExecutor:
         4. Run normal execution from that point.
         """
         self.logger.info(
-            f"🔱 Forking execution from step {snapshot.step_index} (Node: {snapshot.node_id})"
+            f"🔱 Forking execution from step {snapshot.step_index} "
+            f"(Node: {snapshot.node_id})"
         )
 
         # Prepare state from snapshot
@@ -537,9 +558,6 @@ class GraphExecutor:
             "paused_at": None,  # Not paused, just forking
             # HACK: We assume get_entry_point handles logic to start from a specific node
             # if we pass it as 'resume_from' or 'paused_at' effectively.
-            # But since 'paused_at' usually implies the node finished, we need to be careful.
-            # Ideally we'd have a 'start_at' parameter in execute().
-            # For now, we will rely on 'resume_from' logic if implemented or standard resumption.
             "resume_from": snapshot.node_id,
         }
 
@@ -622,7 +640,8 @@ class GraphExecutor:
         if node_spec.node_type == "function":
             # Function nodes need explicit registration
             raise RuntimeError(
-                f"Function node '{node_spec.id}' not registered. Register with node_registry."
+                f"Function node '{node_spec.id}' not registered. "
+                "Register with node_registry."
             )
 
         if node_spec.node_type == "human_input":
@@ -653,8 +672,12 @@ class GraphExecutor:
                 memory=memory.read_all(),
                 llm=self.llm,
                 goal=goal,
-                source_node_name=current_node_spec.name if current_node_spec else current_node_id,
-                target_node_name=target_node_spec.name if target_node_spec else edge.target,
+                source_node_name=current_node_spec.name
+                if current_node_spec
+                else current_node_id,
+                target_node_name=target_node_spec.name
+                if target_node_spec
+                else edge.target,
             ):
                 # Validate and clean output before mapping inputs
                 if self.cleansing_config.enabled and target_node_spec:
@@ -667,7 +690,9 @@ class GraphExecutor:
                     )
 
                     if not validation.valid:
-                        self.logger.warning(f"⚠ Output validation failed: {validation.errors}")
+                        self.logger.warning(
+                            f"⚠ Output validation failed: {validation.errors}"
+                        )
 
                         # Clean the output
                         cleaned_output = self.output_cleaner.clean_output(
@@ -692,7 +717,9 @@ class GraphExecutor:
                         )
 
                         if revalidation.valid:
-                            self.logger.info("✓ Output cleaned and validated successfully")
+                            self.logger.info(
+                                "✓ Output cleaned and validated successfully"
+                            )
                         else:
                             self.logger.error(
                                 f"✗ Cleaning failed, errors remain: {revalidation.errors}"
