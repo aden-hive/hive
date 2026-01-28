@@ -154,6 +154,49 @@ class TestCsvRead:
         # First row should be id=50
         assert result["rows"][0] == {"id": "50", "value": "500"}
 
+    def test_negative_limit(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for negative limit."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                limit=-1,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
+    def test_negative_offset(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for negative offset."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                offset=-1,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
+    def test_negative_limit_and_offset(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for both negative limit and offset."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                limit=-5,
+                offset=-10,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
     def test_file_not_found(self, csv_tool_fn, session_dir, tmp_path):
         """Return error for non-existent file."""
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):

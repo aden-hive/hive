@@ -34,6 +34,8 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             dict with success status, data, and metadata
         """
+        if (offset < 0 or (limit is not None and limit < 0)):
+            return {"error": "offset and limit must be non-negative"}
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
