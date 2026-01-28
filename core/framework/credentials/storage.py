@@ -14,9 +14,9 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import SecretStr
 
@@ -44,7 +44,7 @@ class CredentialStorage(ABC):
         pass
 
     @abstractmethod
-    def load(self, credential_id: str) -> Optional[CredentialObject]:
+    def load(self, credential_id: str) -> CredentialObject | None:
         """
         Load a credential from storage.
 
@@ -70,7 +70,7 @@ class CredentialStorage(ABC):
         pass
 
     @abstractmethod
-    def list_all(self) -> List[str]:
+    def list_all(self) -> list[str]:
         """
         List all credential IDs in storage.
 
@@ -119,7 +119,7 @@ class EncryptedFileStorage(CredentialStorage):
     def __init__(
         self,
         base_path: str | Path,
-        encryption_key: Optional[bytes] = None,
+        encryption_key: bytes | None = None,
         key_env_var: str = "HIVE_CREDENTIAL_KEY",
     ):
         """
@@ -187,7 +187,7 @@ class EncryptedFileStorage(CredentialStorage):
         self._update_index(credential.id, "save", credential.credential_type.value)
         logger.debug(f"Saved encrypted credential '{credential.id}'")
 
-    def load(self, credential_id: str) -> Optional[CredentialObject]:
+    def load(self, credential_id: str) -> CredentialObject | None:
         """Load and decrypt credential."""
         cred_path = self._cred_path(credential_id)
         if not cred_path.exists():
@@ -202,7 +202,9 @@ class EncryptedFileStorage(CredentialStorage):
             json_bytes = self._fernet.decrypt(encrypted)
             data = json.loads(json_bytes.decode())
         except Exception as e:
-            raise CredentialDecryptionError(f"Failed to decrypt credential '{credential_id}': {e}") from e
+            raise CredentialDecryptionError(
+                f"Failed to decrypt credential '{credential_id}': {e}"
+            ) from e
 
         # Deserialize
         return self._deserialize_credential(data)
@@ -217,7 +219,7 @@ class EncryptedFileStorage(CredentialStorage):
             return True
         return False
 
-    def list_all(self) -> List[str]:
+    def list_all(self) -> list[str]:
         """List all credential IDs."""
         index_path = self.base_path / "metadata" / "index.json"
         if not index_path.exists():
@@ -230,7 +232,7 @@ class EncryptedFileStorage(CredentialStorage):
         """Check if credential exists."""
         return self._cred_path(credential_id).exists()
 
-    def _serialize_credential(self, credential: CredentialObject) -> Dict[str, Any]:
+    def _serialize_credential(self, credential: CredentialObject) -> dict[str, Any]:
         """Convert credential to JSON-serializable dict, extracting secret values."""
         data = credential.model_dump(mode="json")
 
@@ -244,7 +246,7 @@ class EncryptedFileStorage(CredentialStorage):
 
         return data
 
-    def _deserialize_credential(self, data: Dict[str, Any]) -> CredentialObject:
+    def _deserialize_credential(self, data: dict[str, Any]) -> CredentialObject:
         """Reconstruct credential from dict, wrapping values in SecretStr."""
         # Convert plain values back to SecretStr
         for key_data in data.get("keys", {}).values():
@@ -257,7 +259,7 @@ class EncryptedFileStorage(CredentialStorage):
         self,
         credential_id: str,
         operation: str,
-        credential_type: Optional[str] = None,
+        credential_type: str | None = None,
     ) -> None:
         """Update the metadata index."""
         index_path = self.base_path / "metadata" / "index.json"
@@ -270,13 +272,13 @@ class EncryptedFileStorage(CredentialStorage):
 
         if operation == "save":
             index["credentials"][credential_id] = {
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
                 "type": credential_type,
             }
         elif operation == "delete":
             index["credentials"].pop(credential_id, None)
 
-        index["last_modified"] = datetime.now(timezone.utc).isoformat()
+        index["last_modified"] = datetime.now(UTC).isoformat()
 
         with open(index_path, "w") as f:
             json.dump(index, f, indent=2)
@@ -301,8 +303,8 @@ class EnvVarStorage(CredentialStorage):
 
     def __init__(
         self,
-        env_mapping: Optional[Dict[str, str]] = None,
-        dotenv_path: Optional[Path] = None,
+        env_mapping: dict[str, str] | None = None,
+        dotenv_path: Path | None = None,
     ):
         """
         Initialize env var storage.
@@ -323,7 +325,7 @@ class EnvVarStorage(CredentialStorage):
         # Default pattern: CREDENTIAL_ID_API_KEY
         return f"{credential_id.upper().replace('-', '_')}_API_KEY"
 
-    def _read_env_value(self, env_var: str) -> Optional[str]:
+    def _read_env_value(self, env_var: str) -> str | None:
         """Read value from env var or .env file."""
         # Check os.environ first (takes precedence)
         value = os.environ.get(env_var)
@@ -346,10 +348,11 @@ class EnvVarStorage(CredentialStorage):
     def save(self, credential: CredentialObject) -> None:
         """Cannot save to environment variables at runtime."""
         raise NotImplementedError(
-            "EnvVarStorage is read-only. Set environment variables externally or use EncryptedFileStorage."
+            "EnvVarStorage is read-only. Set environment variables "
+            "externally or use EncryptedFileStorage."
         )
 
-    def load(self, credential_id: str) -> Optional[CredentialObject]:
+    def load(self, credential_id: str) -> CredentialObject | None:
         """Load credential from environment variable."""
         env_var = self._get_env_var_name(credential_id)
         value = self._read_env_value(env_var)
@@ -366,9 +369,11 @@ class EnvVarStorage(CredentialStorage):
 
     def delete(self, credential_id: str) -> bool:
         """Cannot delete environment variables at runtime."""
-        raise NotImplementedError("EnvVarStorage is read-only. Unset environment variables externally.")
+        raise NotImplementedError(
+            "EnvVarStorage is read-only. Unset environment variables externally."
+        )
 
-    def list_all(self) -> List[str]:
+    def list_all(self) -> list[str]:
         """List credentials that are available in environment."""
         available = []
 
@@ -407,20 +412,20 @@ class InMemoryStorage(CredentialStorage):
         credential = storage.load("test_cred")
     """
 
-    def __init__(self, initial_data: Optional[Dict[str, CredentialObject]] = None):
+    def __init__(self, initial_data: dict[str, CredentialObject] | None = None):
         """
         Initialize in-memory storage.
 
         Args:
             initial_data: Optional dict of credential_id -> CredentialObject
         """
-        self._data: Dict[str, CredentialObject] = initial_data or {}
+        self._data: dict[str, CredentialObject] = initial_data or {}
 
     def save(self, credential: CredentialObject) -> None:
         """Save credential to memory."""
         self._data[credential.id] = credential
 
-    def load(self, credential_id: str) -> Optional[CredentialObject]:
+    def load(self, credential_id: str) -> CredentialObject | None:
         """Load credential from memory."""
         return self._data.get(credential_id)
 
@@ -431,7 +436,7 @@ class InMemoryStorage(CredentialStorage):
             return True
         return False
 
-    def list_all(self) -> List[str]:
+    def list_all(self) -> list[str]:
         """List all credential IDs."""
         return list(self._data.keys())
 
@@ -462,7 +467,7 @@ class CompositeStorage(CredentialStorage):
     def __init__(
         self,
         primary: CredentialStorage,
-        fallbacks: Optional[List[CredentialStorage]] = None,
+        fallbacks: list[CredentialStorage] | None = None,
     ):
         """
         Initialize composite storage.
@@ -478,7 +483,7 @@ class CompositeStorage(CredentialStorage):
         """Save to primary storage."""
         self._primary.save(credential)
 
-    def load(self, credential_id: str) -> Optional[CredentialObject]:
+    def load(self, credential_id: str) -> CredentialObject | None:
         """Load from primary, then fallbacks."""
         # Try primary first
         credential = self._primary.load(credential_id)
@@ -497,7 +502,7 @@ class CompositeStorage(CredentialStorage):
         """Delete from primary storage only."""
         return self._primary.delete(credential_id)
 
-    def list_all(self) -> List[str]:
+    def list_all(self) -> list[str]:
         """List credentials from all storages."""
         all_ids = set(self._primary.list_all())
         for fallback in self._fallbacks:

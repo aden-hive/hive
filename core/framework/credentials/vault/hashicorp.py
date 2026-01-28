@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import SecretStr
 
@@ -72,10 +72,10 @@ class HashiCorpVaultStorage(CredentialStorage):
     def __init__(
         self,
         url: str,
-        token: Optional[str] = None,
+        token: str | None = None,
         mount_point: str = "secret",
         path_prefix: str = "hive/credentials",
-        namespace: Optional[str] = None,
+        namespace: str | None = None,
         verify_ssl: bool = True,
     ):
         """
@@ -107,7 +107,9 @@ class HashiCorpVaultStorage(CredentialStorage):
         self._namespace = namespace
 
         if not self._token:
-            raise ValueError("Vault token required. Set VAULT_TOKEN env var or pass token parameter.")
+            raise ValueError(
+                "Vault token required. Set VAULT_TOKEN env var or pass token parameter."
+            )
 
         self._client = hvac.Client(
             url=url,
@@ -143,7 +145,7 @@ class HashiCorpVaultStorage(CredentialStorage):
             logger.error(f"Failed to save credential '{credential.id}' to Vault: {e}")
             raise
 
-    def load(self, credential_id: str) -> Optional[CredentialObject]:
+    def load(self, credential_id: str) -> CredentialObject | None:
         """Load credential from Vault."""
         path = self._path(credential_id)
 
@@ -181,7 +183,7 @@ class HashiCorpVaultStorage(CredentialStorage):
             logger.error(f"Failed to delete credential '{credential_id}' from Vault: {e}")
             raise
 
-    def list_all(self) -> List[str]:
+    def list_all(self) -> list[str]:
         """List all credentials under the prefix."""
         try:
             response = self._client.secrets.kv.v2.list_secrets(
@@ -210,9 +212,9 @@ class HashiCorpVaultStorage(CredentialStorage):
         except Exception:
             return False
 
-    def _serialize_for_vault(self, credential: CredentialObject) -> Dict[str, Any]:
+    def _serialize_for_vault(self, credential: CredentialObject) -> dict[str, Any]:
         """Convert credential to Vault secret format."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "_type": credential.credential_type.value,
         }
 
@@ -237,7 +239,7 @@ class HashiCorpVaultStorage(CredentialStorage):
 
         return data
 
-    def _deserialize_from_vault(self, credential_id: str, data: Dict[str, Any]) -> CredentialObject:
+    def _deserialize_from_vault(self, credential_id: str, data: dict[str, Any]) -> CredentialObject:
         """Reconstruct credential from Vault secret."""
         # Extract metadata fields
         cred_type = CredentialType(data.pop("_type", "api_key"))
@@ -246,7 +248,7 @@ class HashiCorpVaultStorage(CredentialStorage):
         auto_refresh = data.pop("_auto_refresh", "") == "true"
 
         # Build keys dict
-        keys: Dict[str, CredentialKey] = {}
+        keys: dict[str, CredentialKey] = {}
 
         # Find all non-metadata keys
         key_names = [k for k in data.keys() if not k.startswith("_")]
@@ -264,7 +266,7 @@ class HashiCorpVaultStorage(CredentialStorage):
                     pass
 
             # Check for metadata
-            metadata: Dict[str, Any] = {}
+            metadata: dict[str, Any] = {}
             metadata_key = f"_metadata_{key_name}"
             if metadata_key in data:
                 try:
@@ -292,7 +294,7 @@ class HashiCorpVaultStorage(CredentialStorage):
 
     # --- Vault-Specific Operations ---
 
-    def get_secret_metadata(self, credential_id: str) -> Optional[Dict[str, Any]]:
+    def get_secret_metadata(self, credential_id: str) -> dict[str, Any] | None:
         """
         Get Vault metadata for a secret (version info, timestamps, etc.).
 
@@ -313,7 +315,7 @@ class HashiCorpVaultStorage(CredentialStorage):
         except Exception:
             return None
 
-    def soft_delete(self, credential_id: str, versions: Optional[List[int]] = None) -> bool:
+    def soft_delete(self, credential_id: str, versions: list[int] | None = None) -> bool:
         """
         Soft delete specific versions (can be recovered).
 
@@ -343,7 +345,7 @@ class HashiCorpVaultStorage(CredentialStorage):
             logger.error(f"Soft delete failed for '{credential_id}': {e}")
             return False
 
-    def undelete(self, credential_id: str, versions: List[int]) -> bool:
+    def undelete(self, credential_id: str, versions: list[int]) -> bool:
         """
         Recover soft-deleted versions.
 
@@ -367,7 +369,7 @@ class HashiCorpVaultStorage(CredentialStorage):
             logger.error(f"Undelete failed for '{credential_id}': {e}")
             return False
 
-    def load_version(self, credential_id: str, version: int) -> Optional[CredentialObject]:
+    def load_version(self, credential_id: str, version: int) -> CredentialObject | None:
         """
         Load a specific version of a credential.
 

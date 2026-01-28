@@ -26,7 +26,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from .base import CredentialError, CredentialSpec
 
@@ -55,8 +55,8 @@ class CredentialStoreAdapter:
 
     def __init__(
         self,
-        store: "CredentialStore",
-        specs: Optional[Dict[str, CredentialSpec]] = None,
+        store: CredentialStore,
+        specs: dict[str, CredentialSpec] | None = None,
     ):
         """
         Initialize the adapter.
@@ -74,8 +74,8 @@ class CredentialStoreAdapter:
         self._specs = specs
 
         # Build reverse mappings for validation
-        self._tool_to_cred: Dict[str, str] = {}
-        self._node_type_to_cred: Dict[str, str] = {}
+        self._tool_to_cred: dict[str, str] = {}
+        self._node_type_to_cred: dict[str, str] = {}
 
         for cred_name, spec in self._specs.items():
             for tool_name in spec.tools:
@@ -85,7 +85,7 @@ class CredentialStoreAdapter:
 
     # --- Existing CredentialManager API ---
 
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str) -> str | None:
         """
         Get a credential value by logical name.
 
@@ -117,7 +117,7 @@ class CredentialStoreAdapter:
         value = self._store.get(name)
         return value is not None and value != ""
 
-    def get_credential_for_tool(self, tool_name: str) -> Optional[str]:
+    def get_credential_for_tool(self, tool_name: str) -> str | None:
         """
         Get the credential name required by a tool.
 
@@ -129,7 +129,7 @@ class CredentialStoreAdapter:
         """
         return self._tool_to_cred.get(tool_name)
 
-    def get_missing_for_tools(self, tool_names: List[str]) -> List[Tuple[str, CredentialSpec]]:
+    def get_missing_for_tools(self, tool_names: list[str]) -> list[tuple[str, CredentialSpec]]:
         """
         Get list of missing credentials for the given tools.
 
@@ -139,7 +139,7 @@ class CredentialStoreAdapter:
         Returns:
             List of (credential_name, spec) tuples for missing credentials
         """
-        missing: List[Tuple[str, CredentialSpec]] = []
+        missing: list[tuple[str, CredentialSpec]] = []
         checked: set[str] = set()
 
         for tool_name in tool_names:
@@ -156,7 +156,7 @@ class CredentialStoreAdapter:
 
         return missing
 
-    def validate_for_tools(self, tool_names: List[str]) -> None:
+    def validate_for_tools(self, tool_names: list[str]) -> None:
         """
         Validate that all credentials required by the given tools are available.
 
@@ -170,9 +170,9 @@ class CredentialStoreAdapter:
         if missing:
             raise CredentialError(self._format_missing_error(missing, tool_names))
 
-    def get_missing_for_node_types(self, node_types: List[str]) -> List[Tuple[str, CredentialSpec]]:
+    def get_missing_for_node_types(self, node_types: list[str]) -> list[tuple[str, CredentialSpec]]:
         """Get list of missing credentials for the given node types."""
-        missing: List[Tuple[str, CredentialSpec]] = []
+        missing: list[tuple[str, CredentialSpec]] = []
         checked: set[str] = set()
 
         for node_type in node_types:
@@ -189,7 +189,7 @@ class CredentialStoreAdapter:
 
         return missing
 
-    def validate_for_node_types(self, node_types: List[str]) -> None:
+    def validate_for_node_types(self, node_types: list[str]) -> None:
         """
         Validate that all credentials required by the given node types are available.
 
@@ -210,7 +210,7 @@ class CredentialStoreAdapter:
         Raises:
             CredentialError: If any startup-required credentials are missing
         """
-        missing: List[Tuple[str, CredentialSpec]] = []
+        missing: list[tuple[str, CredentialSpec]] = []
 
         for cred_name, spec in self._specs.items():
             if spec.startup_required and not self.is_available(cred_name):
@@ -221,7 +221,7 @@ class CredentialStoreAdapter:
 
     # --- New CredentialStore Features ---
 
-    def get_key(self, credential_id: str, key_name: str) -> Optional[str]:
+    def get_key(self, credential_id: str, key_name: str) -> str | None:
         """
         Get a specific key from a multi-key credential.
 
@@ -250,7 +250,7 @@ class CredentialStoreAdapter:
         """
         return self._store.resolve(template)
 
-    def resolve_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
+    def resolve_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """
         Resolve credential templates in headers dictionary.
 
@@ -268,12 +268,12 @@ class CredentialStoreAdapter:
         """
         return self._store.resolve_headers(headers)
 
-    def resolve_params(self, params: Dict[str, str]) -> Dict[str, str]:
+    def resolve_params(self, params: dict[str, str]) -> dict[str, str]:
         """Resolve credential templates in query parameters."""
         return self._store.resolve_params(params)
 
     @property
-    def store(self) -> "CredentialStore":
+    def store(self) -> CredentialStore:
         """Access the underlying credential store for advanced operations."""
         return self._store
 
@@ -281,14 +281,14 @@ class CredentialStoreAdapter:
 
     def _format_missing_error(
         self,
-        missing: List[Tuple[str, CredentialSpec]],
-        tool_names: List[str],
+        missing: list[tuple[str, CredentialSpec]],
+        tool_names: list[str],
     ) -> str:
         """Format a clear, actionable error message for missing credentials."""
         lines = ["Cannot run agent: Missing credentials\n"]
         lines.append("The following tools require credentials that are not set:\n")
 
-        for cred_name, spec in missing:
+        for _cred_name, spec in missing:
             affected_tools = [t for t in tool_names if t in spec.tools]
             tools_str = ", ".join(affected_tools)
 
@@ -305,14 +305,14 @@ class CredentialStoreAdapter:
 
     def _format_missing_node_type_error(
         self,
-        missing: List[Tuple[str, CredentialSpec]],
-        node_types: List[str],
+        missing: list[tuple[str, CredentialSpec]],
+        node_types: list[str],
     ) -> str:
         """Format a clear, actionable error message for missing node type credentials."""
         lines = ["Cannot run agent: Missing credentials\n"]
         lines.append("The following node types require credentials that are not set:\n")
 
-        for cred_name, spec in missing:
+        for _cred_name, spec in missing:
             affected_types = [t for t in node_types if t in spec.node_types]
             types_str = ", ".join(affected_types)
 
@@ -329,12 +329,12 @@ class CredentialStoreAdapter:
 
     def _format_startup_error(
         self,
-        missing: List[Tuple[str, CredentialSpec]],
+        missing: list[tuple[str, CredentialSpec]],
     ) -> str:
         """Format a clear, actionable error message for missing startup credentials."""
         lines = ["Server startup failed: Missing required credentials\n"]
 
-        for cred_name, spec in missing:
+        for _cred_name, spec in missing:
             lines.append(f"  {spec.env_var}")
             if spec.description:
                 lines.append(f"    {spec.description}")
@@ -351,9 +351,9 @@ class CredentialStoreAdapter:
     @classmethod
     def for_testing(
         cls,
-        overrides: Dict[str, str],
-        specs: Optional[Dict[str, CredentialSpec]] = None,
-    ) -> "CredentialStoreAdapter":
+        overrides: dict[str, str],
+        specs: dict[str, CredentialSpec] | None = None,
+    ) -> CredentialStoreAdapter:
         """
         Create a CredentialStoreAdapter for testing with mock credentials.
 
@@ -380,9 +380,9 @@ class CredentialStoreAdapter:
     @classmethod
     def with_env_storage(
         cls,
-        env_mapping: Optional[Dict[str, str]] = None,
-        specs: Optional[Dict[str, CredentialSpec]] = None,
-    ) -> "CredentialStoreAdapter":
+        env_mapping: dict[str, str] | None = None,
+        specs: dict[str, CredentialSpec] | None = None,
+    ) -> CredentialStoreAdapter:
         """
         Create adapter with environment variable storage (current behavior).
 
