@@ -99,8 +99,8 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "directory",
         type=str,
         nargs="?",
-        default="exports",
-        help="Directory to search (default: exports)",
+        default=".",
+        help="Directory to search (default: current directory)",
     )
     list_parser.set_defaults(func=cmd_list)
 
@@ -114,8 +114,8 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "agents_dir",
         type=str,
         nargs="?",
-        default="exports",
-        help="Directory containing agent folders (default: exports)",
+        default=".",
+        help="Directory containing agent folders (default: current directory)",
     )
     dispatch_parser.add_argument(
         "--input",
@@ -159,8 +159,8 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     shell_parser.add_argument(
         "--agents-dir",
         type=str,
-        default="exports",
-        help="Directory containing agents (default: exports)",
+        default=".",
+        help="Directory containing agents (default: current directory)",
     )
     shell_parser.add_argument(
         "--multi",
