@@ -45,13 +45,13 @@ Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and
   <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
 </p>
 
-Aden is a platform for building, deploying, operating, and adapting AI agents:
+Aden is a platform designed to help teams build AI agents that can handle business tasks on their own. Instead of writing fixed workflows step by step, developers can describe their goals in plain language. Aden then creates the required agents, deploys them, and keeps improving their behavior as they run in real environments.
 
-- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
-- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
-- **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
-- **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
-- **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
+-**Build: A coding agent generates task-specific worker agents (such as sales or operations agents) based on natural language goals
+-**Deploy: Agents can be deployed without manual setup and integrate easily with CI/CD pipelines and APIs
+-**Operate: Built-in monitoring and runtime controls help keep agents stable and reliable
+-**Adapt: Agent performance is continuously evaluated, and failures are used to improve future behavior
+-**Infrastructure: Shared memory, LLM integrations, and reusable tools support all agents across the platform
 
 ## Quick Links
 
@@ -175,11 +175,11 @@ flowchart LR
 
 ### How It Works
 
-1. **Define Your Goal** → Describe what you want to achieve in plain English
-2. **Coding Agent Generates** → Creates the agent graph, connection code, and test cases
-3. **Workers Execute** → SDK-wrapped nodes run with full observability and tool access
-4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
-5. **Self-Improve** → On failure, the system evolves the graph and redeploys automatically
+1. A user defines a goal using natural language.
+2.Aden generates the agent logic and execution flow automatically
+3.Agents are deployed and observed while running in production
+4.Errors and failures are recorded and analyzed
+5.The system updates and redeploys improved versions of the agents
 
 ## How Aden Compares
 
