@@ -64,7 +64,7 @@ def find_json_object(text: str) -> str | None:
         elif char == "}":
             depth -= 1
             if depth == 0:
-                return text[start:i + 1]
+                return text[start : i + 1]
 
     return None
 
@@ -85,9 +85,7 @@ class NodeSpec(BaseModel):
     # Node behavior type
     node_type: str = Field(
         default="llm_tool_use",
-        description=(
-            "Type: 'llm_tool_use', 'llm_generate', 'function', 'router', 'human_input'"
-        ),
+        description=("Type: 'llm_tool_use', 'llm_generate', 'function', 'router', 'human_input'"),
     )
 
     # Data flow
@@ -129,12 +127,8 @@ class NodeSpec(BaseModel):
     )
 
     # For LLM nodes
-    system_prompt: str | None = Field(
-        default=None, description="System prompt for LLM nodes"
-    )
-    tools: list[str] = Field(
-        default_factory=list, description="Tool names this node can use"
-    )
+    system_prompt: str | None = Field(default=None, description="System prompt for LLM nodes")
+    tools: list[str] = Field(default_factory=list, description="Tool names this node can use")
     model: str | None = Field(
         default=None, description="Specific model to use (defaults to graph default)"
     )
@@ -152,9 +146,7 @@ class NodeSpec(BaseModel):
 
     # Retry behavior
     max_retries: int = Field(default=3)
-    retry_on: list[str] = Field(
-        default_factory=list, description="Error types to retry on"
-    )
+    retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
 
     model_config = {"extra": "allow"}
 
@@ -273,9 +265,7 @@ class SharedMemory:
         try:
             return copy.deepcopy(self._data)
         except Exception as e:
-            logger.warning(
-                f"Failed to deepcopy memory, falling back to shallow copy: {e}"
-            )
+            logger.warning(f"Failed to deepcopy memory, falling back to shallow copy: {e}")
             return self._data.copy()
 
     def read_all(self) -> dict[str, Any]:
@@ -397,9 +387,7 @@ class NodeResult:
 
             node_context = ""
             if node_spec:
-                node_context = (
-                    f"\nNode: {node_spec.name}\nPurpose: {node_spec.description}"
-                )
+                node_context = f"\nNode: {node_spec.name}\nPurpose: {node_spec.description}"
 
             prompt = (
                 f"Generate a 1-2 sentence human-readable summary of what this node produced."
@@ -452,9 +440,7 @@ class LLMNode(NodeProtocol):
     A node that uses an LLM with tools.
     """
 
-    def __init__(
-        self, tool_executor: Callable | None = None, require_tools: bool = False
-    ):
+    def __init__(self, tool_executor: Callable | None = None, require_tools: bool = False):
         self.tool_executor = tool_executor
         self.require_tools = require_tools
 
@@ -464,9 +450,7 @@ class LLMNode(NodeProtocol):
 
         content = content.strip()
         # Match ```json or ``` at start and ``` at end (greedy to handle nested)
-        match = re.match(
-            r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL
-        )
+        match = re.match(r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL)
         if match:
             return match.group(1).strip()
         return content
@@ -528,9 +512,7 @@ class LLMNode(NodeProtocol):
                 else f"         User message: {messages[-1]['content']}"
             )
             if ctx.available_tools:
-                logger.info(
-                    f"         Tools available: {[t.name for t in ctx.available_tools]}"
-                )
+                logger.info(f"         Tools available: {[t.name for t in ctx.available_tools]}")
 
             # Call LLM
             if ctx.available_tools and self.tool_executor:
@@ -576,9 +558,7 @@ class LLMNode(NodeProtocol):
 
             # Log the response
             response_preview = (
-                response.content[:200]
-                if len(response.content) > 200
-                else response.content
+                response.content[:200] if len(response.content) > 200 else response.content
             )
             if len(response.content) > 200:
                 response_preview += "..."
@@ -606,9 +586,7 @@ class LLMNode(NodeProtocol):
                     import json
 
                     # Try to extract JSON from response
-                    parsed = self._extract_json(
-                        response.content, ctx.node_spec.output_keys
-                    )
+                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
 
                     # If parsed successfully, write each field to its corresponding output key
                     if isinstance(parsed, dict):
@@ -621,14 +599,14 @@ class LLMNode(NodeProtocol):
                                 ctx.memory.write(key, value)
                                 output[key] = value
                             elif key in ctx.input_data:
-                                # Key not in parsed JSON but exists in input - pass through input value
+                                # Key not in parsed JSON but exists in input
+                                # pass through input value
                                 ctx.memory.write(key, ctx.input_data[key])
                                 output[key] = ctx.input_data[key]
                             else:
-                                # Key not in parsed JSON or input, write the whole response (stripped)
-                                stripped_content = self._strip_code_blocks(
-                                    response.content
-                                )
+                                # Key not in parsed JSON or input,
+                                #  write the whole response (stripped)
+                                stripped_content = self._strip_code_blocks(response.content)
                                 ctx.memory.write(key, stripped_content)
                                 output[key] = stripped_content
                     else:
@@ -690,9 +668,7 @@ class LLMNode(NodeProtocol):
         # Default output
         return {"result": content}
 
-    def _extract_json(
-        self, raw_response: str, output_keys: list[str]
-    ) -> dict[str, Any]:
+    def _extract_json(self, raw_response: str, output_keys: list[str]) -> dict[str, Any]:
         """Extract clean JSON from potentially verbose LLM response."""
         import json
         import re
@@ -720,9 +696,7 @@ class LLMNode(NodeProtocol):
             pass
 
         # Try to extract JSON from markdown code blocks
-        code_block_match = re.match(
-            r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL
-        )
+        code_block_match = re.match(r"^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$", content, re.DOTALL)
         if code_block_match:
             try:
                 parsed = json.loads(code_block_match.group(1).strip())
@@ -744,9 +718,7 @@ class LLMNode(NodeProtocol):
         # All local extraction methods failed - use LLM as last resort
         import os
 
-        api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get(
-            "ANTHROPIC_API_KEY"
-        )
+        api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError(
                 "Cannot parse JSON and no API key for LLM cleanup "
@@ -845,12 +817,13 @@ Output ONLY the JSON object, nothing else."""
 
         prompt = f"""Extract the following information from the memory context:
 
-Required fields: {', '.join(ctx.node_spec.input_keys)}
+Required fields: {", ".join(ctx.node_spec.input_keys)}
 
 Memory context (may contain nested data, JSON strings, or extra information):
 {memory_json}
 
-Extract ONLY the clean values for the required fields. Ignore nested structures, JSON wrappers, and irrelevant data.
+Extract ONLY the clean values for the required fields. Ignore nested structures,
+ JSON wrappers, and irrelevant data.
 
 Output as JSON with the exact field names requested."""
 
@@ -868,18 +841,12 @@ Output as JSON with the exact field names requested."""
             json_str = find_json_object(response_text)
             if json_str:
                 extracted = json.loads(json_str)
-                parts = [
-                    f"{k}: {v}"
-                    for k, v in extracted.items()
-                    if k in ctx.node_spec.input_keys
-                ]
+                parts = [f"{k}: {v}" for k, v in extracted.items() if k in ctx.node_spec.input_keys]
                 if parts:
                     return "\n".join(parts)
 
         except Exception as e:
-            logger.warning(
-                f"Haiku formatting failed: {e}, falling back to simple format"
-            )
+            logger.warning(f"Haiku formatting failed: {e}, falling back to simple format")
 
         parts = []
         for key in ctx.node_spec.input_keys:
@@ -981,10 +948,7 @@ class RouterNode(NodeProtocol):
         import json
 
         options_desc = "\n".join(
-            [
-                f"- {opt['id']}: {opt['description']} → goes to '{opt['target']}'"
-                for opt in options
-            ]
+            [f"- {opt['id']}: {opt['description']} → goes to '{opt['target']}'" for opt in options]
         )
 
         context_data = {
