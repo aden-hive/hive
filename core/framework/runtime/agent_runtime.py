@@ -7,15 +7,16 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Any, Callable, Callable, TYPE_CHECKING
 
 from framework.graph.executor import ExecutionResult
-from framework.runtime.shared_state import SharedStateManager
-from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import ExecutionStream, EntryPointSpec
+from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
+from framework.runtime.outcome_aggregator import OutcomeAggregator
+from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentRuntimeConfig:
     """Configuration for AgentRuntime."""
+
     max_concurrent_executions: int = 100
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
@@ -289,7 +291,9 @@ class AgentRuntime:
             ExecutionResult or None if timeout
         """
         exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
-        stream = self._streams[entry_point_id]
+        stream = self._streams.get(entry_point_id)
+        if stream is None:
+            raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
 
     async def get_goal_progress(self) -> dict[str, Any]:
@@ -414,6 +418,7 @@ class AgentRuntime:
 
 
 # === CONVENIENCE FACTORY ===
+
 
 def create_agent_runtime(
     graph: "GraphSpec",

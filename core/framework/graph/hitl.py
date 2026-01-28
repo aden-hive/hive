@@ -12,6 +12,7 @@ from typing import Any
 
 class HITLInputType(str, Enum):
     """Type of input expected from human."""
+
     FREE_TEXT = "free_text"  # Open-ended text response
     STRUCTURED = "structured"  # Specific fields to fill
     SELECTION = "selection"  # Choose from options
@@ -22,6 +23,7 @@ class HITLInputType(str, Enum):
 @dataclass
 class HITLQuestion:
     """A single question to ask the human."""
+
     id: str
     question: str
     input_type: HITLInputType = HITLInputType.FREE_TEXT
@@ -44,6 +46,7 @@ class HITLRequest:
 
     This is what the agent produces when it needs human input.
     """
+
     # Context
     objective: str  # What we're trying to accomplish
     current_state: str  # Where we are in the process
@@ -92,6 +95,7 @@ class HITLResponse:
 
     This is what gets passed back when resuming from a pause.
     """
+
     # Original request reference
     request_id: str
 
@@ -170,13 +174,13 @@ class HITLProtocol:
 
         # Use Haiku to extract answers
         try:
-            import anthropic
             import json
 
-            questions_str = "\n".join([
-                f"{i+1}. {q.question} (id: {q.id})"
-                for i, q in enumerate(request.questions)
-            ])
+            import anthropic
+
+            questions_str = "\n".join(
+                [f"{i + 1}. {q.question} (id: {q.id})" for i, q in enumerate(request.questions)]
+            )
 
             prompt = f"""Parse the user's response and extract answers for each question.
 
@@ -195,13 +199,14 @@ Example format:
             message = client.messages.create(
                 model="claude-3-5-haiku-20241022",
                 max_tokens=500,
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
             )
 
             # Parse Haiku's response
             import re
+
             response_text = message.content[0].text.strip()
-            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", response_text, re.DOTALL)
 
             if json_match:
                 parsed = json.loads(json_match.group())

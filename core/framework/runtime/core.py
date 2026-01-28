@@ -11,8 +11,12 @@ from typing import Any, Callable
 from pathlib import Path
 import logging
 import uuid
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
-from framework.schemas.decision import Decision, Option, Outcome, DecisionType
+from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.backend import FileStorage
 
@@ -164,7 +168,7 @@ class Runtime:
             context: Additional context available when deciding
 
         Returns:
-            The decision ID (use this to record outcome later), or empty string if no run in progress
+            The decision ID (use to record outcome later), or empty string if no run
         """
         if self._current_run is None:
             # Gracefully handle case where run ended during exception handling
@@ -174,15 +178,17 @@ class Runtime:
         # Build Option objects
         option_objects = []
         for opt in options:
-            option_objects.append(Option(
-                id=opt["id"],
-                description=opt.get("description", ""),
-                action_type=opt.get("action_type", "unknown"),
-                action_params=opt.get("action_params", {}),
-                pros=opt.get("pros", []),
-                cons=opt.get("cons", []),
-                confidence=opt.get("confidence", 0.5),
-            ))
+            option_objects.append(
+                Option(
+                    id=opt["id"],
+                    description=opt.get("description", ""),
+                    action_type=opt.get("action_type", "unknown"),
+                    action_params=opt.get("action_params", {}),
+                    pros=opt.get("pros", []),
+                    cons=opt.get("cons", []),
+                    confidence=opt.get("confidence", 0.5),
+                )
+            )
 
         # Create decision
         decision_id = f"dec_{len(self._current_run.decisions)}"
@@ -230,7 +236,9 @@ class Runtime:
         if self._current_run is None:
             # Gracefully handle case where run ended during exception handling
             # This can happen in cascading error scenarios
-            logger.warning(f"record_outcome called but no run in progress (decision_id={decision_id})")
+            logger.warning(
+                f"record_outcome called but no run in progress (decision_id={decision_id})"
+            )
             return
 
         outcome = Outcome(
@@ -274,7 +282,9 @@ class Runtime:
         if self._current_run is None:
             # Gracefully handle case where run ended during exception handling
             # Log the problem since we can't store it, then return empty ID
-            logger.warning(f"report_problem called but no run in progress: [{severity}] {description}")
+            logger.warning(
+                f"report_problem called but no run in progress: [{severity}] {description}"
+            )
             return ""
 
         return self._current_run.add_problem(
@@ -370,11 +380,13 @@ class Runtime:
         """
         return self.decide(
             intent=intent,
-            options=[{
-                "id": "action",
-                "description": action,
-                "action_type": "execute",
-            }],
+            options=[
+                {
+                    "id": "action",
+                    "description": action,
+                    "action_type": "execute",
+                }
+            ],
             chosen="action",
             reasoning=reasoning,
             node_id=node_id,

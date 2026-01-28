@@ -6,7 +6,7 @@ Hive uses a centralized configuration system based on a single `config.yaml` fil
 
 ```
 config.yaml  -->  generate-env.ts  -->  .env files
-                                        ├── .env (root, for Docker)
+                                        ├── .env (root)
                                         ├── honeycomb/.env (frontend)
                                         └── hive/.env (backend)
 ```
@@ -132,18 +132,6 @@ cp config.yaml.example config.production.yaml
 # Edit for production settings
 ```
 
-## Docker Compose Integration
-
-The root `.env` file is used by Docker Compose. Key variables:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FRONTEND_PORT` | Frontend container port | 3000 |
-| `BACKEND_PORT` | Backend container port | 4000 |
-| `NODE_ENV` | Node environment | production |
-| `DATABASE_URL` | Database connection | - |
-| `JWT_SECRET` | Auth secret key | - |
-
 ## Security Best Practices
 
 1. **Never commit `config.yaml`** - It may contain secrets
@@ -158,11 +146,6 @@ After changing `config.yaml`:
 ```bash
 # Regenerate .env files
 npm run generate:env
-
-# Restart services
-docker compose restart
-# or
-docker compose up --build
 ```
 
 ## Troubleshooting
@@ -175,11 +158,7 @@ docker compose up --build
 
 ### Configuration Validation Errors
 
-The backend validates configuration on startup. Check logs for specific errors:
-
-```bash
-docker compose logs hive
-```
+The backend validates configuration on startup. Check logs for specific errors.
 
 ### Missing Environment Variables
 

@@ -29,10 +29,15 @@ jobs:
           pip install -e .
           pip install -r requirements-dev.txt
 
-      - name: Run ruff
+      - name: Ruff lint
         run: |
-          cd core
-          ruff check .
+          ruff check core/
+          ruff check tools/
+
+      - name: Ruff format
+        run: |
+          ruff format --check core/
+          ruff format --check tools/
 
   test:
     name: Test Python Framework
@@ -79,9 +84,31 @@ jobs:
       - name: Validate exported agents
         run: |
           # Check that agent exports have valid structure
-          for agent_dir in exports/*/; do
+          if [ ! -d "exports" ]; then
+            echo "No exports/ directory found, skipping validation"
+            exit 0
+          fi
+
+          shopt -s nullglob
+          agent_dirs=(exports/*/)
+          shopt -u nullglob
+
+          if [ ${#agent_dirs[@]} -eq 0 ]; then
+            echo "No agent directories in exports/, skipping validation"
+            exit 0
+          fi
+
+          validated=0
+          for agent_dir in "${agent_dirs[@]}"; do
             if [ -f "$agent_dir/agent.json" ]; then
               echo "Validating $agent_dir"
               python -c "import json; json.load(open('$agent_dir/agent.json'))"
+              validated=$((validated + 1))
             fi
           done
+
+          if [ "$validated" -eq 0 ]; then
+            echo "No agent.json files found in exports/, skipping validation"
+          else
+            echo "Validated $validated agent(s)"
+          fi

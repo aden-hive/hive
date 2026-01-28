@@ -11,33 +11,39 @@ PYTEST_TEST_FILE_HEADER = '''"""
 
 {description}
 
-REQUIRES: ANTHROPIC_API_KEY for real testing.
+REQUIRES: API_KEY (OpenAI or Anthropic) for real testing.
 """
 
 import os
 import pytest
-from exports.{agent_module} import default_agent
+from {agent_module} import default_agent
 
 
 def _get_api_key():
-    """Get API key from CredentialManager or environment."""
+    """Get API key from CredentialManager (Anthropic) or environment (Any)."""
+    # 1. Try CredentialManager for Anthropic (the only provider it currently supports)
     try:
         from aden_tools.credentials import CredentialManager
         creds = CredentialManager()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
-    except ImportError:
+    except (ImportError, KeyError):
         pass
-    return os.environ.get("ANTHROPIC_API_KEY")
+
+    # 2. Fallback to standard environment variables for OpenAI and others
+    return (
+        os.environ.get("OPENAI_API_KEY") or
+        os.environ.get("ANTHROPIC_API_KEY") or
+        os.environ.get("CEREBRAS_API_KEY") or
+        os.environ.get("GROQ_API_KEY")
+    )
 
 
 # Skip all tests if no API key and not in mock mode
 pytestmark = pytest.mark.skipif(
     not _get_api_key() and not os.environ.get("MOCK_MODE"),
-    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
+    reason="API key required. Please set OPENAI_API_KEY, ANTHROPIC_API_KEY, or use MOCK_MODE=1."
 )
-
-
 '''
 
 # Template for conftest.py with shared fixtures
@@ -48,15 +54,21 @@ import pytest
 
 
 def _get_api_key():
-    """Get API key from CredentialManager or environment."""
+    """Get API key from CredentialManager (Anthropic) or environment (Any)."""
     try:
         from aden_tools.credentials import CredentialManager
         creds = CredentialManager()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
-    except ImportError:
+    except (ImportError, KeyError):
         pass
-    return os.environ.get("ANTHROPIC_API_KEY")
+
+    return (
+        os.environ.get("OPENAI_API_KEY") or
+        os.environ.get("ANTHROPIC_API_KEY") or
+        os.environ.get("CEREBRAS_API_KEY") or
+        os.environ.get("GROQ_API_KEY")
+    )
 
 
 @pytest.fixture
@@ -72,25 +84,17 @@ def check_api_key():
         if os.environ.get("MOCK_MODE"):
             print("\\n⚠️  Running in MOCK MODE - structure validation only")
             print("   This does NOT test LLM behavior or agent quality")
-            print("   Set ANTHROPIC_API_KEY for real testing\\n")
+            print("   Set OPENAI_API_KEY or ANTHROPIC_API_KEY for real testing\\n")
         else:
             pytest.fail(
-                "\\n❌ ANTHROPIC_API_KEY not set!\\n\\n"
+                "\\n❌ No API key found!\\n\\n"
                 "Real testing requires an API key. Choose one:\\n"
-                "1. Set API key (RECOMMENDED):\\n"
+                "1. Set OpenAI key:\\n"
+                "   export OPENAI_API_KEY='your-key-here'\\n"
+                "2. Set Anthropic key:\\n"
                 "   export ANTHROPIC_API_KEY='your-key-here'\\n"
-                "2. Run structure validation only:\\n"
+                "3. Run structure validation only:\\n"
                 "   MOCK_MODE=1 pytest exports/{agent_name}/tests/\\n\\n"
                 "Note: Mock mode does NOT validate agent behavior or quality."
             )
-
-
-@pytest.fixture
-def sample_inputs():
-    """Sample inputs for testing."""
-    return {{
-        "simple": {{"query": "test"}},
-        "complex": {{"query": "detailed multi-step query", "depth": 3}},
-        "edge_case": {{"query": ""}},
-    }}
 '''

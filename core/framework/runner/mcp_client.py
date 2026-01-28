@@ -146,6 +146,7 @@ class MCPClient:
 
         try:
             import threading
+
             from mcp import StdioServerParameters
 
             # Create server parameters
@@ -180,7 +181,10 @@ class MCPClient:
 
                         # Create persistent stdio client context
                         self._stdio_context = stdio_client(server_params)
-                        self._read_stream, self._write_stream = await self._stdio_context.__aenter__()
+                        (
+                            self._read_stream,
+                            self._write_stream,
+                        ) = await self._stdio_context.__aenter__()
 
                         # Create persistent session
                         self._session = ClientSession(self._read_stream, self._write_stream)
@@ -215,7 +219,7 @@ class MCPClient:
 
             logger.info(f"Connected to MCP server '{self.config.name}' via STDIO (persistent)")
         except Exception as e:
-            raise RuntimeError(f"Failed to connect to MCP server: {e}")
+            raise RuntimeError(f"Failed to connect to MCP server: {e}") from e
 
     def _connect_http(self) -> None:
         """Connect to MCP server via HTTP transport."""
@@ -232,7 +236,9 @@ class MCPClient:
         try:
             response = self._http_client.get("/health")
             response.raise_for_status()
-            logger.info(f"Connected to MCP server '{self.config.name}' via HTTP at {self.config.url}")
+            logger.info(
+                f"Connected to MCP server '{self.config.name}' via HTTP at {self.config.url}"
+            )
         except Exception as e:
             logger.warning(f"Health check failed for MCP server '{self.config.name}': {e}")
             # Continue anyway, server might not have health endpoint
@@ -255,7 +261,10 @@ class MCPClient:
                 )
                 self._tools[tool.name] = tool
 
-            logger.info(f"Discovered {len(self._tools)} tools from '{self.config.name}': {list(self._tools.keys())}")
+            tool_names = list(self._tools.keys())
+            logger.info(
+                f"Discovered {len(self._tools)} tools from '{self.config.name}': {tool_names}"
+            )
         except Exception as e:
             logger.error(f"Failed to discover tools from '{self.config.name}': {e}")
             raise
@@ -271,11 +280,13 @@ class MCPClient:
         # Convert tools to dict format
         tools_list = []
         for tool in response.tools:
-            tools_list.append({
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.inputSchema,
-            })
+            tools_list.append(
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.inputSchema,
+                }
+            )
 
         return tools_list
 
@@ -303,7 +314,7 @@ class MCPClient:
 
             return data.get("result", {}).get("tools", [])
         except Exception as e:
-            raise RuntimeError(f"Failed to list tools via HTTP: {e}")
+            raise RuntimeError(f"Failed to list tools via HTTP: {e}") from e
 
     def list_tools(self) -> list[MCPTool]:
         """
@@ -353,9 +364,9 @@ class MCPClient:
             if len(result.content) > 0:
                 content_item = result.content[0]
                 # Check if it's a text content item
-                if hasattr(content_item, 'text'):
+                if hasattr(content_item, "text"):
                     return content_item.text
-                elif hasattr(content_item, 'data'):
+                elif hasattr(content_item, "data"):
                     return content_item.data
             return result.content
 
@@ -387,7 +398,7 @@ class MCPClient:
 
             return data.get("result", {}).get("content", [])
         except Exception as e:
-            raise RuntimeError(f"Failed to call tool via HTTP: {e}")
+            raise RuntimeError(f"Failed to call tool via HTTP: {e}") from e
 
     def disconnect(self) -> None:
         """Disconnect from the MCP server."""

@@ -34,7 +34,7 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ./quickstart.sh
 
 # Start Claude Code and build an agent
-claude> /building-agents
+claude> /building-agents-construction
 ```
 
 Follow the interactive prompts to:

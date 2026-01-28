@@ -13,10 +13,8 @@ Security measures:
 """
 
 import ast
-import sys
 import signal
-from typing import Any
-from dataclasses import dataclass, field
+import sys
 from contextlib import contextmanager
 import platform
 
@@ -26,7 +24,6 @@ SAFE_BUILTINS = {
     "True": True,
     "False": False,
     "None": None,
-
     # Type constructors
     "bool": bool,
     "int": int,
@@ -37,7 +34,6 @@ SAFE_BUILTINS = {
     "set": set[Any],
     "tuple": tuple,
     "frozenset": frozenset,
-
     # Basic functions
     "abs": abs,
     "all": all,
@@ -98,22 +94,26 @@ BLOCKED_AST_NODES = {
 
 class CodeSandboxError(Exception):
     """Error during sandboxed code execution."""
+
     pass
 
 
 class TimeoutError(CodeSandboxError):
     """Code execution timed out."""
+
     pass
 
 
 class SecurityError(CodeSandboxError):
     """Code contains potentially dangerous operations."""
+
     pass
 
 
 @dataclass
 class SandboxResult:
     """Result of sandboxed code execution."""
+
     success: bool
     result: Any | None = None
     error: str | None = None
@@ -135,6 +135,7 @@ class RestrictedImporter:
 
         if name not in self._cache:
             import importlib
+
             self._cache[name] = importlib.import_module(name)
 
         return self._cache[name]
@@ -162,9 +163,8 @@ class CodeValidator:
         for node in ast.walk(tree):
             # Check for blocked node types
             if type(node) in self.blocked_nodes:
-                issues.append(
-                    f"Blocked operation: {type(node).__name__} at line {getattr(node, 'lineno', '?')}"
-                )
+                lineno = getattr(node, "lineno", "?")
+                issues.append(f"Blocked operation: {type(node).__name__} at line {lineno}")
 
             # Check for dangerous attribute access
             if isinstance(node, ast.Attribute):
@@ -217,7 +217,7 @@ class CodeSandbox:
             raise TimeoutError(f"Code execution timed out after {seconds} seconds")
 
         # Only works on Unix-like systems
-        if hasattr(signal, 'SIGALRM'):
+        if hasattr(signal, "SIGALRM"):
             old_handler = signal.signal(signal.SIGALRM, handler)
             if platform.system() != "Windows":
                 old_handler = signal.signal(signal.SIGALRM, handler)
@@ -278,6 +278,7 @@ class CodeSandbox:
 
         # Capture stdout
         import io
+
         old_stdout = sys.stdout
         sys.stdout = captured_stdout = io.StringIO()
 
@@ -299,11 +300,7 @@ class CodeSandbox:
 
             # Also extract any new variables (not in inputs or builtins)
             for key, value in namespace.items():
-                if (
-                    key not in inputs
-                    and key not in self.safe_builtins
-                    and not key.startswith("_")
-                ):
+                if key not in inputs and key not in self.safe_builtins and not key.startswith("_"):
                     extracted[key] = value
 
             return SandboxResult(

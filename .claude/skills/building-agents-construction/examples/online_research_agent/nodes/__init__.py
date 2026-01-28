@@ -1,4 +1,5 @@
 """Node definitions for Online Research Agent."""
+
 from framework.graph import NodeSpec
 
 # Node 1: Parse Query
@@ -10,9 +11,21 @@ parse_query_node = NodeSpec(
     input_keys=["topic"],
     output_keys=["search_queries", "research_focus", "key_aspects"],
     output_schema={
-        "research_focus": {"type": "string", "required": True, "description": "Brief statement of what we're researching"},
-        "key_aspects": {"type": "array", "required": True, "description": "List of 3-5 key aspects to investigate"},
-        "search_queries": {"type": "array", "required": True, "description": "List of 3-5 search queries"},
+        "research_focus": {
+            "type": "string",
+            "required": True,
+            "description": "Brief statement of what we're researching",
+        },
+        "key_aspects": {
+            "type": "array",
+            "required": True,
+            "description": "List of 3-5 key aspects to investigate",
+        },
+        "search_queries": {
+            "type": "array",
+            "required": True,
+            "description": "List of 3-5 search queries",
+        },
     },
     system_prompt="""\
 You are a research query strategist. Given a research topic, analyze it and generate search queries.
@@ -50,8 +63,16 @@ search_sources_node = NodeSpec(
     input_keys=["search_queries", "research_focus"],
     output_keys=["source_urls", "search_results_summary"],
     output_schema={
-        "source_urls": {"type": "array", "required": True, "description": "List of source URLs found"},
-        "search_results_summary": {"type": "string", "required": True, "description": "Brief summary of what was found"},
+        "source_urls": {
+            "type": "array",
+            "required": True,
+            "description": "List of source URLs found",
+        },
+        "search_results_summary": {
+            "type": "string",
+            "required": True,
+            "description": "Brief summary of what was found",
+        },
     },
     system_prompt="""\
 You are a research assistant executing web searches. Use the web_search tool to find sources.
@@ -80,8 +101,16 @@ fetch_content_node = NodeSpec(
     input_keys=["source_urls", "research_focus"],
     output_keys=["fetched_sources", "fetch_errors"],
     output_schema={
-        "fetched_sources": {"type": "array", "required": True, "description": "List of fetched source objects with url, title, content"},
-        "fetch_errors": {"type": "array", "required": True, "description": "List of URLs that failed to fetch"},
+        "fetched_sources": {
+            "type": "array",
+            "required": True,
+            "description": "List of fetched source objects with url, title, content",
+        },
+        "fetch_errors": {
+            "type": "array",
+            "required": True,
+            "description": "List of URLs that failed to fetch",
+        },
     },
     system_prompt="""\
 You are a content fetcher. Use web_scrape tool to retrieve content from URLs.
@@ -113,8 +142,16 @@ evaluate_sources_node = NodeSpec(
     input_keys=["fetched_sources", "research_focus", "key_aspects"],
     output_keys=["ranked_sources", "source_analysis"],
     output_schema={
-        "ranked_sources": {"type": "array", "required": True, "description": "List of ranked sources with scores"},
-        "source_analysis": {"type": "string", "required": True, "description": "Overview of source quality and coverage"},
+        "ranked_sources": {
+            "type": "array",
+            "required": True,
+            "description": "List of ranked sources with scores",
+        },
+        "source_analysis": {
+            "type": "string",
+            "required": True,
+            "description": "Overview of source quality and coverage",
+        },
     },
     system_prompt="""\
 You are a source evaluator. Assess each source for quality and relevance.
@@ -153,9 +190,21 @@ synthesize_findings_node = NodeSpec(
     input_keys=["ranked_sources", "research_focus", "key_aspects"],
     output_keys=["key_findings", "themes", "source_citations"],
     output_schema={
-        "key_findings": {"type": "array", "required": True, "description": "List of key findings with sources and confidence"},
-        "themes": {"type": "array", "required": True, "description": "List of themes with descriptions and supporting sources"},
-        "source_citations": {"type": "object", "required": True, "description": "Map of facts to supporting URLs"},
+        "key_findings": {
+            "type": "array",
+            "required": True,
+            "description": "List of key findings with sources and confidence",
+        },
+        "themes": {
+            "type": "array",
+            "required": True,
+            "description": "List of themes with descriptions and supporting sources",
+        },
+        "source_citations": {
+            "type": "object",
+            "required": True,
+            "description": "Map of facts to supporting URLs",
+        },
     },
     system_prompt="""\
 You are a research synthesizer. Analyze multiple sources to extract insights.
@@ -192,11 +241,25 @@ write_report_node = NodeSpec(
     name="Write Report",
     description="Generate a narrative report with proper citations",
     node_type="llm_generate",
-    input_keys=["key_findings", "themes", "source_citations", "research_focus", "ranked_sources"],
+    input_keys=[
+        "key_findings",
+        "themes",
+        "source_citations",
+        "research_focus",
+        "ranked_sources",
+    ],
     output_keys=["report_content", "references"],
     output_schema={
-        "report_content": {"type": "string", "required": True, "description": "Full markdown report text with citations"},
-        "references": {"type": "array", "required": True, "description": "List of reference objects with number, url, title"},
+        "report_content": {
+            "type": "string",
+            "required": True,
+            "description": "Full markdown report text with citations",
+        },
+        "references": {
+            "type": "array",
+            "required": True,
+            "description": "List of reference objects with number, url, title",
+        },
     },
     system_prompt="""\
 You are a research report writer. Create a well-structured narrative report.
@@ -239,9 +302,21 @@ quality_check_node = NodeSpec(
     input_keys=["report_content", "references", "source_citations"],
     output_keys=["quality_score", "issues", "final_report"],
     output_schema={
-        "quality_score": {"type": "number", "required": True, "description": "Quality score 0-1"},
-        "issues": {"type": "array", "required": True, "description": "List of issues found and fixed"},
-        "final_report": {"type": "string", "required": True, "description": "Corrected full report"},
+        "quality_score": {
+            "type": "number",
+            "required": True,
+            "description": "Quality score 0-1",
+        },
+        "issues": {
+            "type": "array",
+            "required": True,
+            "description": "List of issues found and fixed",
+        },
+        "final_report": {
+            "type": "string",
+            "required": True,
+            "description": "Corrected full report",
+        },
     },
     system_prompt="""\
 You are a quality assurance reviewer. Check the research report for issues.
@@ -278,8 +353,16 @@ save_report_node = NodeSpec(
     input_keys=["final_report", "references", "research_focus"],
     output_keys=["file_path", "save_status"],
     output_schema={
-        "file_path": {"type": "string", "required": True, "description": "Path where report was saved"},
-        "save_status": {"type": "string", "required": True, "description": "Status of save operation"},
+        "file_path": {
+            "type": "string",
+            "required": True,
+            "description": "Path where report was saved",
+        },
+        "save_status": {
+            "type": "string",
+            "required": True,
+            "description": "Status of save operation",
+        },
     },
     system_prompt="""\
 You are a file manager. Save the research report to disk.
