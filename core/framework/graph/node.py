@@ -1442,7 +1442,11 @@ class RouterNode(NodeProtocol):
             # Simple condition-based routing (deterministic)
             route_value = ctx.input_data.get("route_on") or ctx.memory.read("route_on")
             chosen_route = None
+            
+            # Check specific routes first
             for condition, target in ctx.node_spec.routes.items():
+                if condition == "default":
+                    continue
                 if self._check_condition(condition, route_value, ctx):
                     chosen_route = (condition, target)
                     break

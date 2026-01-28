@@ -466,6 +466,8 @@ class AgentRunner:
             return "GROQ_API_KEY"
         elif model_lower.startswith("ollama/"):
             return None  # Ollama doesn't need an API key (local)
+        elif model_lower.startswith("deepseek/"):
+            return "DEEPSEEK_API_KEY"
         elif model_lower.startswith("azure/"):
             return "AZURE_API_KEY"
         elif model_lower.startswith("cohere/"):

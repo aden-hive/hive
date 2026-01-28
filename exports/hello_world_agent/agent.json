@@ -1,0 +1,39 @@
+{
+    "goal": {
+        "goal_id": "hello_world",
+        "name": "Hello World Agent",
+        "description": "A simple agent that greets the user.",
+        "success_criteria": [
+            {
+                "id": "greeting_generated",
+                "description": "Greeting produced",
+                "metric": "custom",
+                "target": "any"
+            }
+        ]
+    },
+    "graph": {
+        "id": "hello_world_graph",
+        "goal_id": "hello_world",
+        "entry_node": "greeter",
+        "terminal_nodes": [
+            "greeter"
+        ],
+        "nodes": [
+            {
+                "id": "greeter",
+                "name": "Greeter",
+                "description": "Generates a simple greeting",
+                "node_type": "function",
+                "function": "greet",
+                "input_keys": [
+                    "name"
+                ],
+                "output_keys": [
+                    "greeting"
+                ]
+            }
+        ],
+        "edges": []
+    }
+}

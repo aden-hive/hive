@@ -75,16 +75,6 @@ class SafeEvalVisitor(ast.NodeVisitor):
     def visit_Constant(self, node: ast.Constant) -> Any:
         return node.value
 
-    # --- Number/String/Bytes/NameConstant (Python < 3.8 compat if needed) ---
-    def visit_Num(self, node: ast.Num) -> Any:
-        return node.n
-
-    def visit_Str(self, node: ast.Str) -> Any:
-        return node.s
-
-    def visit_NameConstant(self, node: ast.NameConstant) -> Any:
-        return node.value
-
     # --- Data Structures ---
     def visit_List(self, node: ast.List) -> list:
         return [self.visit(elt) for elt in node.elts]
@@ -95,7 +85,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
     def visit_Dict(self, node: ast.Dict) -> dict:
         return {
             self.visit(k): self.visit(v)
-            for k, v in zip(node.keys, node.values, strict=False)
+            for k, v in zip(node.keys, node.values, strict=True)
             if k is not None
         }
 
@@ -114,7 +104,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
     def visit_Compare(self, node: ast.Compare) -> Any:
         left = self.visit(node.left)
-        for op, comparator in zip(node.ops, node.comparators, strict=False):
+        for op, comparator in zip(node.ops, node.comparators, strict=True):
             op_func = SAFE_OPERATORS.get(type(op))
             if op_func is None:
                 raise ValueError(f"Operator {type(op).__name__} is not allowed")
@@ -155,27 +145,13 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         # value.attr
-        # STIRCT CHECK: No access to private attributes (starting with _)
         if node.attr.startswith("_"):
             raise ValueError(f"Access to private attribute '{node.attr}' is not allowed")
 
         val = self.visit(node.value)
-
-        # Safe attribute access: only allow if it's in the dict (if val is dict)
-        # or it's a safe property of a basic type?
-        # Actually, for flexibility, people often use dot access for dicts in these expressions.
-        # But standard Python dict doesn't support dot access.
-        # If val is a dict, Attribute access usually fails in Python unless wrapped.
-        # If the user context provides objects, we might want to allow attribute access.
-        # BUT we must be careful not to allow access to dangerous things like __class__ etc.
-        # The check starts_with("_") covers __class__, __init__, etc.
-
         try:
             return getattr(val, node.attr)
         except AttributeError:
-            # Fallback: maybe it's a dict and they want dot access?
-            # (Only if we want to support that sugar, usually not standard python)
-            # Let's stick to standard python behavior + strict private check.
             pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")
@@ -184,27 +160,12 @@ class SafeEvalVisitor(ast.NodeVisitor):
         # Only allow calling whitelisted functions
         func = self.visit(node.func)
 
-        # Check if the function object itself is in our whitelist values
-        # This is tricky because `func` is the actual function object,
-        # but we also want to verify it came from a safe place.
-        # Easier: Check if node.func is a Name and that name is in SAFE_FUNCTIONS.
-
         is_safe = False
         if isinstance(node.func, ast.Name):
             if node.func.id in SAFE_FUNCTIONS:
                 is_safe = True
 
-        # Also allow methods on objects if they are safe?
-        # E.g. "somestring".lower() or list.append() (if we allowed mutation, but we don't for now)
-        # For now, restrict to SAFE_FUNCTIONS whitelist for global calls and deny method calls
-        # unless we explicitly add safe methods.
-        # Allowing method calls on strings/lists (split, join, get) is commonly needed.
-
         if isinstance(node.func, ast.Attribute):
-            # Method call.
-            # Allow basic safe methods?
-            # For security, start strict. Only helper functions.
-            # Re-visiting: User might want 'output.get("key")'.
             method_name = node.func.attr
             if method_name in [
                 "get",
@@ -225,10 +186,6 @@ class SafeEvalVisitor(ast.NodeVisitor):
         keywords = {kw.arg: self.visit(kw.value) for kw in node.keywords}
 
         return func(*args, **keywords)
-
-    def visit_Index(self, node: ast.Index) -> Any:
-        # Python < 3.9
-        return self.visit(node.value)
 
 
 def safe_eval(expr: str, context: dict[str, Any] | None = None) -> Any:
