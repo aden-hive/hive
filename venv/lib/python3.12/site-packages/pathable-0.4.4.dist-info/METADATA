@@ -1,0 +1,75 @@
+Metadata-Version: 2.3
+Name: pathable
+Version: 0.4.4
+Summary: Object-oriented paths
+Home-page: https://github.com/p1c2u/pathable
+License: Apache-2.0
+Keywords: dict,dictionary,list,lookup,path,pathable
+Author: Artur Maciag
+Author-email: maciag.artur@gmail.com
+Requires-Python: >=3.7.0,<4.0.0
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Provides-Extra: dev
+Project-URL: Repository, https://github.com/p1c2u/pathable
+Description-Content-Type: text/x-rst
+
+********
+pathable
+********
+
+
+About
+#####
+
+Object-oriented paths
+
+Key features
+************
+
+* Traverse resources like paths
+* Access resources on demand with separate accessor layer
+
+Usage
+#####
+
+.. code-block:: python
+
+   from pathable import DictPath
+   
+   d = {
+       "parts": {
+           "part1": {
+               "name": "Part One",
+           },
+           "part2": {
+               "name": "Part Two",
+           },
+       },
+   }
+   
+   dp = DictPath(d)
+   
+   # Concatenate paths with /
+   parts = dp / "parts"
+   
+   # Stat path keys
+   "part2" in parts
+   
+   # Open path dict
+   with parts.open() as parts_dict:
+       print(parts_dict)
+
+

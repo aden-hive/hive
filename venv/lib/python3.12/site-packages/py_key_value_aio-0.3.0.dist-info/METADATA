@@ -1,0 +1,61 @@
+Metadata-Version: 2.3
+Name: py-key-value-aio
+Version: 0.3.0
+Summary: Async Key-Value
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Dist: py-key-value-shared==0.3.0
+Requires-Dist: beartype>=0.20.0
+Requires-Dist: diskcache>=5.0.0 ; extra == 'disk'
+Requires-Dist: pathvalidate>=3.3.1 ; extra == 'disk'
+Requires-Dist: duckdb>=1.1.1 ; extra == 'duckdb'
+Requires-Dist: pytz>=2025.2 ; extra == 'duckdb'
+Requires-Dist: aioboto3>=13.3.0 ; extra == 'dynamodb'
+Requires-Dist: types-aiobotocore-dynamodb>=2.16.0 ; extra == 'dynamodb'
+Requires-Dist: elasticsearch>=8.0.0 ; extra == 'elasticsearch'
+Requires-Dist: aiohttp>=3.12 ; extra == 'elasticsearch'
+Requires-Dist: aiofile>=3.5.0 ; extra == 'filetree'
+Requires-Dist: anyio>=4.4.0 ; extra == 'filetree'
+Requires-Dist: keyring>=25.6.0 ; extra == 'keyring'
+Requires-Dist: keyring>=25.6.0 ; extra == 'keyring-linux'
+Requires-Dist: dbus-python>=1.4.0 ; extra == 'keyring-linux'
+Requires-Dist: aiomcache>=0.8.0 ; extra == 'memcached'
+Requires-Dist: cachetools>=5.0.0 ; extra == 'memory'
+Requires-Dist: pymongo>=4.0.0 ; extra == 'mongodb'
+Requires-Dist: pydantic>=2.11.9 ; extra == 'pydantic'
+Requires-Dist: redis>=4.3.0 ; extra == 'redis'
+Requires-Dist: rocksdict>=0.3.24 ; python_full_version >= '3.12' and extra == 'rocksdb'
+Requires-Dist: rocksdict>=0.3.2 ; python_full_version < '3.12' and extra == 'rocksdb'
+Requires-Dist: valkey-glide>=2.1.0 ; extra == 'valkey'
+Requires-Dist: hvac>=2.3.0 ; extra == 'vault'
+Requires-Dist: types-hvac>=2.3.0 ; extra == 'vault'
+Requires-Dist: cryptography>=45.0.0 ; extra == 'wrappers-encryption'
+Requires-Python: >=3.10
+Provides-Extra: disk
+Provides-Extra: duckdb
+Provides-Extra: dynamodb
+Provides-Extra: elasticsearch
+Provides-Extra: filetree
+Provides-Extra: keyring
+Provides-Extra: keyring-linux
+Provides-Extra: memcached
+Provides-Extra: memory
+Provides-Extra: mongodb
+Provides-Extra: pydantic
+Provides-Extra: redis
+Provides-Extra: rocksdb
+Provides-Extra: valkey
+Provides-Extra: vault
+Provides-Extra: wrappers-encryption
+Description-Content-Type: text/markdown
+
+# py-key-value-aio
+
+See the [README.md for the project on GitHub](https://github.com/strawgate/py-key-value)
+for more information.

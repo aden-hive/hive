@@ -1,0 +1,2 @@
+[console_scripts]
+docket = docket.__main__:app

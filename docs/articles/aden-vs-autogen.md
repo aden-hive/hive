@@ -10,15 +10,15 @@ Microsoft's AutoGen and Aden both enable multi-agent systems but serve different
 
 ## Overview
 
-| Aspect | AutoGen | Aden |
-|--------|---------|------|
-| **Developed By** | Microsoft | Aden |
-| **Philosophy** | Conversational agents | Goal-driven, self-evolving |
-| **Primary Pattern** | Multi-agent conversations | Node-based agent graphs |
-| **Communication** | Natural language dialogue | Generated connection code |
-| **Self-Improvement** | No | Yes |
-| **Best For** | Dialogue-heavy applications | Production agent systems |
-| **License** | MIT | Apache 2.0 |
+| Aspect                | AutoGen                     | Aden                       |
+|-----------------------|-----------------------------|----------------------------|
+| **Developed By**      | Microsoft                   | Aden                       |
+| **Philosophy**        | Conversational agents       | Goal-driven, self-evolving |
+| **Primary Pattern**   | Multi-agent conversations   | Node-based agent graphs    |
+| **Communication**     | Natural language dialogue   | Generated connection code  |
+| **Self-Improvement**  | No                          | Yes                        |
+| **Best For**          | Dialogue-heavy applications | Production agent systems   |
+| **License**           | MIT                         | Apache 2.0                 |
 
 ---
 

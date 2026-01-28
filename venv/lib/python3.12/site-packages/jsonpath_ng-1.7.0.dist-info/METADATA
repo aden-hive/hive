@@ -1,0 +1,384 @@
+Metadata-Version: 2.1
+Name: jsonpath-ng
+Version: 1.7.0
+Summary: A final implementation of JSONPath for Python that aims to be standard compliant, including arithmetic and binary comparison operators and providing clear AST for metaprogramming.
+Home-page: https://github.com/h2non/jsonpath-ng
+Author: Tomas Aparicio
+Author-email: tomas@aparicio.me
+License: Apache 2.0
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Dist: ply
+
+Python JSONPath Next-Generation |Build Status| |PyPI|
+=====================================================
+
+A final implementation of JSONPath for Python that aims to be standard compliant, including arithmetic
+and binary comparison operators, as defined in the original `JSONPath proposal`_.
+
+This packages merges both `jsonpath-rw`_ and `jsonpath-rw-ext`_ and
+provides several AST API enhancements, such as the ability to update or remove nodes in the tree.
+
+About
+-----
+
+This library provides a robust and significantly extended implementation
+of JSONPath for Python. It is tested with CPython 3.8 and higher.
+
+This library differs from other JSONPath implementations in that it is a
+full *language* implementation, meaning the JSONPath expressions are
+first class objects, easy to analyze, transform, parse, print, and
+extend.
+
+Quick Start
+-----------
+
+To install, use pip:
+
+.. code:: bash
+
+    $ pip install --upgrade jsonpath-ng
+
+
+Usage
+-----
+
+Basic examples:
+
+.. code:: python
+
+    $ python
+
+    >>> from jsonpath_ng import jsonpath, parse
+
+    # A robust parser, not just a regex. (Makes powerful extensions possible; see below)
+    >>> jsonpath_expr = parse('foo[*].baz')
+
+    # Extracting values is easy
+    >>> [match.value for match in jsonpath_expr.find({'foo': [{'baz': 1}, {'baz': 2}]})]
+    [1, 2]
+
+    # Matches remember where they came from
+    >>> [str(match.full_path) for match in jsonpath_expr.find({'foo': [{'baz': 1}, {'baz': 2}]})]
+    ['foo.[0].baz', 'foo.[1].baz']
+
+    # Modifying values matching the path
+    >>> jsonpath_expr.update( {'foo': [{'baz': 1}, {'baz': 2}]}, 3)
+    {'foo': [{'baz': 3}, {'baz': 3}]}
+
+    # Modifying one of the values matching the path
+    >>> matches = jsonpath_expr.find({'foo': [{'baz': 1}, {'baz': 2}]})
+    >>> matches[0].full_path.update( {'foo': [{'baz': 1}, {'baz': 2}]}, 3)
+    {'foo': [{'baz': 3}, {'baz': 2}]}
+
+    # Removing all values matching a path
+    >>> jsonpath_expr.filter(lambda d: True, {'foo': [{'baz': 1}, {'baz': 2}]})
+    {'foo': [{}, {}]}
+
+    # Removing values containing particular data matching path
+    >>> jsonpath_expr.filter(lambda d: d == 2, {'foo': [{'baz': 1}, {'baz': 2}]})
+    {'foo': [{'baz': 1}, {}]}
+
+    # And this can be useful for automatically providing ids for bits of data that do not have them (currently a global switch)
+    >>> jsonpath.auto_id_field = 'id'
+    >>> [match.value for match in parse('foo[*].id').find({'foo': [{'id': 'bizzle'}, {'baz': 3}]})]
+    ['foo.bizzle', 'foo.[1]']
+
+    # A handy extension: named operators like `parent`
+    >>> [match.value for match in parse('a.*.b.`parent`.c').find({'a': {'x': {'b': 1, 'c': 'number one'}, 'y': {'b': 2, 'c': 'number two'}}})]
+    ['number two', 'number one']
+
+    # You can also build expressions directly quite easily
+    >>> from jsonpath_ng.jsonpath import Fields
+    >>> from jsonpath_ng.jsonpath import Slice
+
+    >>> jsonpath_expr_direct = Fields('foo').child(Slice('*')).child(Fields('baz'))  # This is equivalent
+
+
+Using the extended parser:
+
+.. code:: python
+
+  $ python
+
+  >>> from jsonpath_ng.ext import parse
+
+  # A robust parser, not just a regex. (Makes powerful extensions possible; see below)
+  >>> jsonpath_expr = parse('foo[*].baz')
+
+
+JSONPath Syntax
+---------------
+
+The JSONPath syntax supported by this library includes some additional
+features and omits some problematic features (those that make it
+unportable). In particular, some new operators such as ``|`` and
+``where`` are available, and parentheses are used for grouping not for
+callbacks into Python, since with these changes the language is not
+trivially associative. Also, fields may be quoted whether or not they
+are contained in brackets.
+
+Atomic expressions:
+
++-----------------------+---------------------------------------------------------------------------------------------+
+| Syntax                | Meaning                                                                                     |
++=======================+=============================================================================================+
+| ``$``                 | The root object                                                                             |
++-----------------------+---------------------------------------------------------------------------------------------+
+| ```this```            | The "current" object.                                                                       |
++-----------------------+---------------------------------------------------------------------------------------------+
+| ```foo```             | More generally, this syntax allows "named operators" to extend JSONPath is arbitrary ways   |
++-----------------------+---------------------------------------------------------------------------------------------+
+| *field*               | Specified field(s), described below                                                         |
++-----------------------+---------------------------------------------------------------------------------------------+
+| ``[`` *field* ``]``   | Same as *field*                                                                             |
++-----------------------+---------------------------------------------------------------------------------------------+
+| ``[`` *idx* ``]``     | Array access, described below (this is always unambiguous with field access)                |
++-----------------------+---------------------------------------------------------------------------------------------+
+
+Jsonpath operators:
+
++--------------------------------------+-----------------------------------------------------------------------------------+
+| Syntax                               | Meaning                                                                           |
++======================================+===================================================================================+
+| *jsonpath1* ``.`` *jsonpath2*        | All nodes matched by *jsonpath2* starting at any node matching *jsonpath1*        |
++--------------------------------------+-----------------------------------------------------------------------------------+
+| *jsonpath* ``[`` *whatever* ``]``    | Same as *jsonpath*\ ``.``\ *whatever*                                             |
++--------------------------------------+-----------------------------------------------------------------------------------+
+| *jsonpath1* ``..`` *jsonpath2*       | All nodes matched by *jsonpath2* that descend from any node matching *jsonpath1*  |
++--------------------------------------+-----------------------------------------------------------------------------------+
+| *jsonpath1* ``where`` *jsonpath2*    | Any nodes matching *jsonpath1* with a child matching *jsonpath2*                  |
++--------------------------------------+-----------------------------------------------------------------------------------+
+| *jsonpath1* ``wherenot`` *jsonpath2* | Any nodes matching *jsonpath1* with a child not matching *jsonpath2*              |
++--------------------------------------+-----------------------------------------------------------------------------------+
+| *jsonpath1* ``|`` *jsonpath2*        | Any nodes matching the union of *jsonpath1* and *jsonpath2*                       |
++--------------------------------------+-----------------------------------------------------------------------------------+
+
+Field specifiers ( *field* ):
+
++-------------------------+-------------------------------------------------------------------------------------+
+| Syntax                  | Meaning                                                                             |
++=========================+=====================================================================================+
+| ``fieldname``           | the field ``fieldname`` (from the "current" object)                                 |
++-------------------------+-------------------------------------------------------------------------------------+
+| ``"fieldname"``         | same as above, for allowing special characters in the fieldname                     |
++-------------------------+-------------------------------------------------------------------------------------+
+| ``'fieldname'``         | ditto                                                                               |
++-------------------------+-------------------------------------------------------------------------------------+
+| ``*``                   | any field                                                                           |
++-------------------------+-------------------------------------------------------------------------------------+
+| *field* ``,`` *field*   | either of the named fields (you can always build equivalent jsonpath using ``|``)   |
++-------------------------+-------------------------------------------------------------------------------------+
+
+Array specifiers ( *idx* ):
+
++-----------------------------------------+---------------------------------------------------------------------------------------+
+| Syntax                                  | Meaning                                                                               |
++=========================================+=======================================================================================+
+| ``[``\ *n*\ ``]``                       | array index (may be comma-separated list)                                             |
++-----------------------------------------+---------------------------------------------------------------------------------------+
+| ``[``\ *start*\ ``?:``\ *end*\ ``?]``   | array slicing (note that *step* is unimplemented only due to lack of need thus far)   |
++-----------------------------------------+---------------------------------------------------------------------------------------+
+| ``[*]``                                 | any array index                                                                       |
++-----------------------------------------+---------------------------------------------------------------------------------------+
+
+Programmatic JSONPath
+---------------------
+
+If you are programming in Python and would like a more robust way to
+create JSONPath expressions that does not depend on a parser, it is very
+easy to do so directly, and here are some examples:
+
+-  ``Root()``
+-  ``Slice(start=0, end=None, step=None)``
+-  ``Fields('foo', 'bar')``
+-  ``Index(42)``
+-  ``Child(Fields('foo'), Index(42))``
+-  ``Where(Slice(), Fields('subfield'))``
+-  ``Descendants(jsonpath, jsonpath)``
+
+
+Extras
+------
+
+-  *Path data*: The result of ``JsonPath.find`` provide detailed context
+   and path data so it is easy to traverse to parent objects, print full
+   paths to pieces of data, and generate automatic ids.
+-  *Automatic Ids*: If you set ``jsonpath_ng.auto_id_field`` to a value
+   other than None, then for any piece of data missing that field, it
+   will be replaced by the JSONPath to it, giving automatic unique ids
+   to any piece of data. These ids will take into account any ids
+   already present as well.
+-  *Named operators*: Instead of using ``@`` to reference the current
+   object, this library uses ```this```. In general, any string
+   contained in backquotes can be made to be a new operator, currently
+   by extending the library.
+
+
+Extensions
+----------
+
+To use the extensions below you must import from `jsonpath_ng.ext`.
+
++--------------+-----------------------------------------------+
+| name         | Example                                       |
++==============+===============================================+
+| len          | - ``$.objects.`len```                         |
++--------------+-----------------------------------------------+
+| sub          | - ``$.field.`sub(/foo\\\\+(.*)/, \\\\1)```    |
+|              | - ``$.field.`sub(/regex/, replacement)```     |
++--------------+-----------------------------------------------+
+| split        | - ``$.field.`split(+, 2, -1)```               |
+|              | - ``$.field.`split(",", *, -1)```             |
+|              | - ``$.field.`split(' ', -1, -1)```            |
+|              | - ``$.field.`split(sep, segement, maxsplit)```|
++--------------+-----------------------------------------------+
+| sorted       | - ``$.objects.`sorted```                      |
+|              | - ``$.objects[\\some_field]``                 |
+|              | - ``$.objects[\\some_field,/other_field]``    |
++--------------+-----------------------------------------------+
+| filter       | - ``$.objects[?(@some_field > 5)]``           |
+|              | - ``$.objects[?some_field = "foobar"]``       |
+|              | - ``$.objects[?some_field =~ "foobar"]``      |
+|              | - ``$.objects[?some_field > 5 & other < 2]``  |
+|              |                                               |
+|              | Supported operators:                          |
+|              | - Equality: ==, =, !=                         |
+|              | - Comparison: >, >=, <, <=                    |
+|              | - Regex match: =~                             |
+|              |                                               |
+|              | Combine multiple criteria with '&'.           |
+|              |                                               |
+|              | Properties can only be compared to static     |
+|              | values.                                       |
++--------------+-----------------------------------------------+
+| arithmetic   | - ``$.foo + "_" + $.bar``                     |
+| (-+*/)       | - ``$.foo * 12``                              |
+|              | - ``$.objects[*].cow + $.objects[*].cat``     |
++--------------+-----------------------------------------------+
+
+About arithmetic and string
+---------------------------
+
+Operations are done with python operators and allows types that python
+allows, and return [] if the operation can be done due to incompatible types.
+
+When operators are used, a jsonpath must be be fully defined otherwise
+jsonpath-rw-ext can't known if the expression is a string or a jsonpath field,
+in this case it will choice string as type.
+
+Example with data::
+
+    {
+        'cow': 'foo',
+        'fish': 'bar'
+    }
+
+| ``cow + fish`` returns ``cowfish``
+| ``$.cow + $.fish`` returns ``foobar``
+| ``$.cow + "_" + $.fish`` returns ``foo_bar``
+| ``$.cow + "_" + fish`` returns ``foo_fish``
+
+About arithmetic and list
+-------------------------
+
+Arithmetic can be used against two lists if they have the same size.
+
+Example with data::
+
+    {'objects': [
+        {'cow': 2, 'cat': 3},
+        {'cow': 4, 'cat': 6}
+    ]}
+
+| ``$.objects[\*].cow + $.objects[\*].cat`` returns ``[6, 9]``
+
+More to explore
+---------------
+
+There are way too many JSONPath implementations out there to discuss.
+Some are robust, some are toy projects that still work fine, some are
+exercises. There will undoubtedly be many more. This one is made for use
+in released, maintained code, and in particular for programmatic access
+to the abstract syntax and extension. But JSONPath at its simplest just
+isn't that complicated, so you can probably use any of them
+successfully. Why not this one?
+
+The original proposal, as far as I know:
+
+-  `JSONPath - XPath for
+   JSON <http://goessner.net/articles/JSONPath/>`__ by Stefan Goessner.
+
+Other examples
+--------------
+
+Loading json data from file
+
+.. code:: python
+
+    import json
+    d = json.loads('{"foo": [{"baz": 1}, {"baz": 2}]}')
+    # or
+    with open('myfile.json') as f:
+        d = json.load(f)
+
+Special note about PLY and docstrings
+-------------------------------------
+
+The main parsing toolkit underlying this library,
+`PLY <https://github.com/dabeaz/ply>`__, does not work with docstrings
+removed. For example, ``PYTHONOPTIMIZE=2`` and ``python -OO`` will both
+cause a failure.
+
+Contributors
+------------
+
+This package is authored and maintained by:
+
+-  `Kenn Knowles <https://github.com/kennknowles>`__
+   (`@kennknowles <https://twitter.com/KennKnowles>`__)
+-  `Tomas Aparicio <https://github.com/h2non>`
+
+with the help of patches submitted by `these contributors <https://github.com/kennknowles/python-jsonpath-ng/graphs/contributors>`__.
+
+Copyright and License
+---------------------
+
+Copyright 2013 - Kenneth Knowles
+
+Copyright 2017 - Tomas Aparicio
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this file except in compliance with the License. You may obtain
+a copy of the License at
+
+::
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+.. _`JSONPath proposal`: http://goessner.net/articles/JsonPath/
+.. _`jsonpath-rw`: https://github.com/kennknowles/python-jsonpath-rw
+.. _`jsonpath-rw-ext`: https://pypi.python.org/pypi/jsonpath-rw-ext/
+
+.. |PyPi downloads| image:: https://pypip.in/d/jsonpath-ng/badge.png
+   :target: https://pypi.python.org/pypi/jsonpath-ng
+.. |Build Status| image:: https://github.com/h2non/jsonpath-ng/actions/workflows/ci.yml/badge.svg
+   :target: https://github.com/h2non/jsonpath-ng/actions/workflows/ci.yml
+.. |PyPI| image:: https://img.shields.io/pypi/v/jsonpath-ng.svg?maxAge=2592000?style=flat-square
+   :target: https://pypi.python.org/pypi/jsonpath-ng
+
+

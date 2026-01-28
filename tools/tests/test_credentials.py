@@ -310,7 +310,7 @@ class TestCredentialSpecs:
         assert "brave.com" in spec.help_url
 
     def test_anthropic_spec_exists(self):
-        """CREDENTIAL_SPECS includes anthropic with startup_required=True."""
+        """CREDENTIAL_SPECS includes anthropic with required=False."""
         assert "anthropic" in CREDENTIAL_SPECS
 
         spec = CREDENTIAL_SPECS["anthropic"]
@@ -318,25 +318,23 @@ class TestCredentialSpecs:
         assert spec.tools == []
         assert "llm_generate" in spec.node_types
         assert "llm_tool_use" in spec.node_types
-        assert spec.required is True
-        assert spec.startup_required is True
+        assert spec.required is False  # Optional - agents can use other providers via LiteLLM
+        assert spec.startup_required is False  # MCP server doesn't need LLM credentials
         assert "anthropic.com" in spec.help_url
 
 
 class TestNodeTypeValidation:
     """Tests for node type credential validation."""
 
-    def test_get_missing_for_node_types_returns_missing(self, monkeypatch, tmp_path):
-        """get_missing_for_node_types() returns missing credentials."""
+    def test_get_missing_for_node_types_returns_empty_for_optional(self, monkeypatch, tmp_path):
+        """get_missing_for_node_types() returns empty for optional credentials."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
         missing = creds.get_missing_for_node_types(["llm_generate", "llm_tool_use"])
 
-        assert len(missing) == 1
-        cred_name, spec = missing[0]
-        assert cred_name == "anthropic"
-        assert spec.env_var == "ANTHROPIC_API_KEY"
+        # Anthropic is optional, so no missing credentials when API key not set
+        assert len(missing) == 0
 
     def test_get_missing_for_node_types_returns_empty_when_present(self, monkeypatch):
         """get_missing_for_node_types() returns empty when credentials present."""
@@ -356,18 +354,14 @@ class TestNodeTypeValidation:
 
         assert missing == []
 
-    def test_validate_for_node_types_raises_for_missing(self, monkeypatch, tmp_path):
-        """validate_for_node_types() raises CredentialError when missing."""
+    def test_validate_for_node_types_passes_for_optional_missing(self, monkeypatch, tmp_path):
+        """validate_for_node_types() passes when optional credentials are missing."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
 
-        with pytest.raises(CredentialError) as exc_info:
-            creds.validate_for_node_types(["llm_generate"])
-
-        error_msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in error_msg
-        assert "llm_generate" in error_msg
+        # Should not raise - anthropic is optional
+        creds.validate_for_node_types(["llm_generate"])
 
     def test_validate_for_node_types_passes_when_present(self, monkeypatch):
         """validate_for_node_types() passes when credentials present."""
@@ -382,18 +376,14 @@ class TestNodeTypeValidation:
 class TestStartupValidation:
     """Tests for startup credential validation."""
 
-    def test_validate_startup_raises_for_missing(self, monkeypatch, tmp_path):
-        """validate_startup() raises CredentialError when startup creds missing."""
+    def test_validate_startup_passes_for_optional_missing(self, monkeypatch, tmp_path):
+        """validate_startup() passes when optional credentials are missing."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
 
-        with pytest.raises(CredentialError) as exc_info:
-            creds.validate_startup()
-
-        error_msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in error_msg
-        assert "Server startup failed" in error_msg
+        # Should not raise - anthropic is not startup required
+        creds.validate_startup()
 
     def test_validate_startup_passes_when_present(self, monkeypatch):
         """validate_startup() passes when all startup creds are set."""

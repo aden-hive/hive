@@ -1,0 +1,1926 @@
+Metadata-Version: 2.4
+Name: lupa
+Version: 2.6
+Summary: Python wrapper around Lua and LuaJIT
+Home-page: https://github.com/scoder/lupa
+Author: Stefan Behnel
+Author-email: stefan_ml@behnel.de
+Maintainer: Lupa-dev mailing list
+Maintainer-email: lupa-dev@freelists.org
+License: MIT style
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Information Technology
+Classifier: Programming Language :: Cython
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Lua
+Classifier: Programming Language :: Other Scripting Engines
+Classifier: Operating System :: OS Independent
+Classifier: Topic :: Software Development
+License-File: LICENSE.txt
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: home-page
+Dynamic: license
+Dynamic: license-file
+Dynamic: maintainer
+Dynamic: maintainer-email
+Dynamic: summary
+
+Lupa
+====
+
+.. image:: logo/logo-220x200.png
+
+Lupa integrates the runtimes of Lua_ or LuaJIT2_ into CPython.
+It is a partial rewrite of LunaticPython_ in Cython_ with some
+additional features such as proper coroutine support.
+
+.. _Lua: http://lua.org/
+.. _LuaJIT2: http://luajit.org/
+.. _LunaticPython: http://labix.org/lunatic-python
+.. _Cython: http://cython.org
+
+For questions not answered here, please contact the `Lupa mailing list`_.
+
+.. _`Lupa mailing list`: http://www.freelists.org/list/lupa-dev
+
+.. contents:: :local:
+
+
+Major features
+--------------
+
+* separate Lua runtime states through a ``LuaRuntime`` class
+
+* Python coroutine wrapper for Lua coroutines
+
+* iteration support for Python objects in Lua and Lua objects in
+  Python
+
+* proper encoding and decoding of strings (configurable per runtime,
+  UTF-8 by default)
+
+* frees the GIL and supports threading in separate runtimes when
+  calling into Lua
+
+* tested with Python 3.8 and later
+
+* ships with Lua 5.1, 5.2, 5.3 and 5.4
+  as well as LuaJIT 2.0 and 2.1 on systems that support it.
+
+* easy to hack on and extend as it is written in Cython, not C
+
+
+Why the name?
+-------------
+
+In Latin, "lupa" is a female wolf, as elegant and wild as it sounds.
+If you don't like this kind of straight forward allegory to an
+endangered species, you may also happily assume it's just an
+amalgamation of the phonetic sounds that start the words "Lua" and
+"Python", two from each to keep the balance.
+
+
+Why use it?
+-----------
+
+It complements Python very well.  Lua is a language as dynamic as
+Python, but LuaJIT compiles it to very fast machine code, sometimes
+faster than many statically compiled languages for computational code.
+The language runtime is very small and carefully designed for
+embedding.  The complete binary module of Lupa, including a statically
+linked LuaJIT2 runtime, only weighs some 800KB on a 64 bit machine.
+With standard Lua 5.2, it's less than 600KB.
+
+However, the Lua ecosystem lacks many of the batteries that Python
+readily includes, either directly in its standard library or as third
+party packages. This makes real-world Lua applications harder to write
+than equivalent Python applications. Lua is therefore not commonly
+used as primary language for large applications, but it makes for a
+fast, high-level and resource-friendly backup language inside of
+Python when raw speed is required and the edit-compile-run cycle of
+binary extension modules is too heavy and too static for agile
+development or hot-deployment.
+
+Lupa is a very fast and thin wrapper around Lua or LuaJIT.  It makes it
+easy to write dynamic Lua code that accompanies dynamic Python code by
+switching between the two languages at runtime, based on the tradeoff
+between simplicity and speed.
+
+
+Which Lua version?
+------------------
+
+The binary wheels include different Lua versions as well as LuaJIT, if supported.
+By default, ``import lupa`` uses the latest Lua version, but you can choose
+a specific one via import:
+
+.. code:: python
+
+    try:
+        import lupa.luajit21 as lupa
+    except ImportError:
+        try:
+            import lupa.lua54 as lupa
+        except ImportError:
+            try:
+                import lupa.lua53 as lupa
+            except ImportError:
+                import lupa
+
+    print(f"Using {lupa.LuaRuntime().lua_implementation} (compiled with {lupa.LUA_VERSION})")
+
+
+Examples
+--------
+
+..
+      >>> import lupa.lua54 as lupa
+
+      ## doctest helpers:
+      >>> try: _ = sorted
+      ... except NameError:
+      ...     def sorted(seq):
+      ...         l = list(seq)
+      ...         l.sort()
+      ...         return l
+
+.. code:: python
+
+      >>> from lupa.lua54 import LuaRuntime
+      >>> lua = LuaRuntime(unpack_returned_tuples=True)
+
+      >>> lua.eval('1+1')
+      2
+
+      >>> lua_func = lua.eval('function(f, n) return f(n) end')
+
+      >>> def py_add1(n): return n+1
+      >>> lua_func(py_add1, 2)
+      3
+
+      >>> lua.eval('python.eval(" 2 ** 2 ")') == 4
+      True
+      >>> lua.eval('python.builtins.str(4)') == '4'
+      True
+
+The function ``lua_type(obj)`` can be used to find out the type of a
+wrapped Lua object in Python code, as provided by Lua's ``type()``
+function:
+
+.. code:: python
+
+      >>> lupa.lua_type(lua_func)
+      'function'
+      >>> lupa.lua_type(lua.eval('{}'))
+      'table'
+
+To help in distinguishing between wrapped Lua objects and normal
+Python objects, it returns ``None`` for the latter:
+
+.. code:: python
+
+      >>> lupa.lua_type(123) is None
+      True
+      >>> lupa.lua_type('abc') is None
+      True
+      >>> lupa.lua_type({}) is None
+      True
+
+Note the flag ``unpack_returned_tuples=True`` that is passed to create
+the Lua runtime.  It is new in Lupa 0.21 and changes the behaviour of
+tuples that get returned by Python functions.  With this flag, they
+explode into separate Lua values:
+
+.. code:: python
+
+      >>> lua.execute('a,b,c = python.eval("(1,2)")')
+      >>> g = lua.globals()
+      >>> g.a
+      1
+      >>> g.b
+      2
+      >>> g.c is None
+      True
+
+When set to False, functions that return a tuple pass it through to the
+Lua code:
+
+.. code:: python
+
+      >>> non_explode_lua = lupa.LuaRuntime(unpack_returned_tuples=False)
+      >>> non_explode_lua.execute('a,b,c = python.eval("(1,2)")')
+      >>> g = non_explode_lua.globals()
+      >>> g.a
+      (1, 2)
+      >>> g.b is None
+      True
+      >>> g.c is None
+      True
+
+Since the default behaviour (to not explode tuples) might change in a
+later version of Lupa, it is best to always pass this flag explicitly.
+
+
+Python objects in Lua
+---------------------
+
+Python objects are either converted when passed into Lua (e.g.
+numbers and strings) or passed as wrapped object references.
+
+.. code:: python
+
+      >>> wrapped_type = lua.globals().type     # Lua's own type() function
+      >>> wrapped_type(1) == 'number'
+      True
+      >>> wrapped_type('abc') == 'string'
+      True
+
+Wrapped Lua objects get unwrapped when they are passed back into Lua,
+and arbitrary Python objects get wrapped in different ways:
+
+.. code:: python
+
+      >>> wrapped_type(wrapped_type) == 'function'  # unwrapped Lua function
+      True
+      >>> wrapped_type(len) == 'userdata'       # wrapped Python function
+      True
+      >>> wrapped_type([]) == 'userdata'        # wrapped Python object
+      True
+
+Lua supports two main protocols on objects: calling and indexing.  It
+does not distinguish between attribute access and item access like
+Python does, so the Lua operations ``obj[x]`` and ``obj.x`` both map
+to indexing.  To decide which Python protocol to use for Lua wrapped
+objects, Lupa employs a simple heuristic.
+
+Pratically all Python objects allow attribute access, so if the object
+also has a ``__getitem__`` method, it is preferred when turning it
+into an indexable Lua object.  Otherwise, it becomes a simple object
+that uses attribute access for indexing from inside Lua.
+
+Obviously, this heuristic will fail to provide the required behaviour
+in many cases, e.g. when attribute access is required to an object
+that happens to support item access.  To be explicit about the
+protocol that should be used, Lupa provides the helper functions
+``as_attrgetter()`` and ``as_itemgetter()`` that restrict the view on
+an object to a certain protocol, both from Python and from inside
+Lua:
+
+.. code:: python
+
+      >>> lua_func = lua.eval('function(obj) return obj["get"] end')
+      >>> d = {'get' : 'value'}
+
+      >>> value = lua_func(d)
+      >>> value == d['get'] == 'value'
+      True
+
+      >>> value = lua_func( lupa.as_itemgetter(d) )
+      >>> value == d['get'] == 'value'
+      True
+
+      >>> dict_get = lua_func( lupa.as_attrgetter(d) )
+      >>> dict_get == d.get
+      True
+      >>> dict_get('get') == d.get('get') == 'value'
+      True
+
+      >>> lua_func = lua.eval(
+      ...     'function(obj) return python.as_attrgetter(obj)["get"] end')
+      >>> dict_get = lua_func(d)
+      >>> dict_get('get') == d.get('get') == 'value'
+      True
+
+Note that unlike Lua function objects, callable Python objects support
+indexing in Lua:
+
+.. code:: python
+
+      >>> def py_func(): pass
+      >>> py_func.ATTR = 2
+
+      >>> lua_func = lua.eval('function(obj) return obj.ATTR end')
+      >>> lua_func(py_func)
+      2
+      >>> lua_func = lua.eval(
+      ...     'function(obj) return python.as_attrgetter(obj).ATTR end')
+      >>> lua_func(py_func)
+      2
+      >>> lua_func = lua.eval(
+      ...     'function(obj) return python.as_attrgetter(obj)["ATTR"] end')
+      >>> lua_func(py_func)
+      2
+
+
+Iteration in Lua
+----------------
+
+Iteration over Python objects from Lua's for-loop is fully supported.
+However, Python iterables need to be converted using one of the
+utility functions which are described here.  This is similar to the
+functions like ``pairs()`` in Lua.
+
+To iterate over a plain Python iterable, use the ``python.iter()``
+function.  For example, you can manually copy a Python list into a Lua
+table like this:
+
+.. code:: python
+
+      >>> lua_copy = lua.eval('''
+      ...     function(L)
+      ...         local t, i = {}, 1
+      ...         for item in python.iter(L) do
+      ...             t[i] = item
+      ...             i = i + 1
+      ...         end
+      ...         return t
+      ...     end
+      ... ''')
+
+      >>> table = lua_copy([1,2,3,4])
+      >>> len(table)
+      4
+      >>> table[1]   # Lua indexing
+      1
+
+Python's ``enumerate()`` function is also supported, so the above
+could be simplified to:
+
+.. code:: python
+
+      >>> lua_copy = lua.eval('''
+      ...     function(L)
+      ...         local t = {}
+      ...         for index, item in python.enumerate(L) do
+      ...             t[ index+1 ] = item
+      ...         end
+      ...         return t
+      ...     end
+      ... ''')
+
+      >>> table = lua_copy([1,2,3,4])
+      >>> len(table)
+      4
+      >>> table[1]   # Lua indexing
+      1
+
+For iterators that return tuples, such as ``dict.iteritems()``, it is
+convenient to use the special ``python.iterex()`` function that
+automatically explodes the tuple items into separate Lua arguments:
+
+.. code:: python
+
+      >>> lua_copy = lua.eval('''
+      ...     function(d)
+      ...         local t = {}
+      ...         for key, value in python.iterex(d.items()) do
+      ...             t[key] = value
+      ...         end
+      ...         return t
+      ...     end
+      ... ''')
+
+      >>> d = dict(a=1, b=2, c=3)
+      >>> table = lua_copy( lupa.as_attrgetter(d) )
+      >>> table['b']
+      2
+
+Note that accessing the ``d.items`` method from Lua requires passing
+the dict as ``attrgetter``.  Otherwise, attribute access in Lua would
+use the ``getitem`` protocol of Python dicts and look up ``d['items']``
+instead.
+
+
+None vs. nil
+------------
+
+While ``None`` in Python and ``nil`` in Lua differ in their semantics, they
+usually just mean the same thing: no value.  Lupa therefore tries to map one
+directly to the other whenever possible:
+
+.. code:: python
+
+      >>> lua.eval('nil') is None
+      True
+      >>> is_nil = lua.eval('function(x) return x == nil end')
+      >>> is_nil(None)
+      True
+
+The only place where this cannot work is during iteration, because Lua
+considers a ``nil`` value the termination marker of iterators.  Therefore,
+Lupa special cases ``None`` values here and replaces them by a constant
+``python.none`` instead of returning ``nil``:
+
+.. code:: python
+
+      >>> _ = lua.require("table")
+      >>> func = lua.eval('''
+      ...     function(items)
+      ...         local t = {}
+      ...         for value in python.iter(items) do
+      ...             table.insert(t, value == python.none)
+      ...         end
+      ...         return t
+      ...     end
+      ... ''')
+
+      >>> items = [1, None ,2]
+      >>> list(func(items).values())
+      [False, True, False]
+
+Lupa avoids this value escaping whenever it's obviously not necessary.
+Thus, when unpacking tuples during iteration, only the first value will
+be subject to ``python.none`` replacement, as Lua does not look at the
+other items for loop termination anymore.  And on ``enumerate()``
+iteration, the first value is known to be always a number and never None,
+so no replacement is needed.
+
+.. code:: python
+
+      >>> func = lua.eval('''
+      ...     function(items)
+      ...         for a, b, c, d in python.iterex(items) do
+      ...             return {a == python.none, a == nil,   -->  a == python.none
+      ...                     b == python.none, b == nil,   -->  b == nil
+      ...                     c == python.none, c == nil,   -->  c == nil
+      ...                     d == python.none, d == nil}   -->  d == nil ...
+      ...         end
+      ...     end
+      ... ''')
+
+      >>> items = [(None, None, None, None)]
+      >>> list(func(items).values())
+      [True, False, False, True, False, True, False, True]
+
+      >>> items = [(None, None)]   # note: no values for c/d => nil in Lua
+      >>> list(func(items).values())
+      [True, False, False, True, False, True, False, True]
+
+
+Note that this behaviour changed in Lupa 1.0.  Previously, the ``python.none``
+replacement was done in more places, which made it not always very predictable.
+
+
+Lua Tables
+----------
+
+Lua tables mimic Python's mapping protocol.  For the special case of
+array tables, Lua automatically inserts integer indices as keys into
+the table.  Therefore, indexing starts from 1 as in Lua instead of 0
+as in Python.  For the same reason, negative indexing does not work.
+It is best to think of Lua tables as mappings rather than arrays, even
+for plain array tables.
+
+.. code:: python
+
+      >>> table = lua.eval('{10,20,30,40}')
+      >>> table[1]
+      10
+      >>> table[4]
+      40
+      >>> list(table)
+      [1, 2, 3, 4]
+      >>> dict(table)
+      {1: 10, 2: 20, 3: 30, 4: 40}
+      >>> list(table.values())
+      [10, 20, 30, 40]
+      >>> len(table)
+      4
+
+      >>> mapping = lua.eval('{ [1] = -1 }')
+      >>> list(mapping)
+      [1]
+
+      >>> mapping = lua.eval('{ [20] = -20; [3] = -3 }')
+      >>> mapping[20]
+      -20
+      >>> mapping[3]
+      -3
+      >>> sorted(mapping.values())
+      [-20, -3]
+      >>> sorted(mapping.items())
+      [(3, -3), (20, -20)]
+
+      >>> mapping[-3] = 3     # -3 used as key, not index!
+      >>> mapping[-3]
+      3
+      >>> sorted(mapping)
+      [-3, 3, 20]
+      >>> sorted(mapping.items())
+      [(-3, 3), (3, -3), (20, -20)]
+
+To simplify the table creation from Python, the ``LuaRuntime`` comes with
+a helper method that creates a Lua table from Python arguments:
+
+.. code:: python
+
+      >>> t = lua.table(10, 20, 30, 40)
+      >>> lupa.lua_type(t)
+      'table'
+      >>> list(t)
+      [1, 2, 3, 4]
+      >>> list(t.values())
+      [10, 20, 30, 40]
+
+      >>> t = lua.table(10, 20, 30, 40, a=1, b=2)
+      >>> t[3]
+      30
+      >>> t['b']
+      2
+
+A second helper method, ``.table_from()``, was added in Lupa 1.1 and accepts
+any number of mappings and sequences/iterables as arguments.  It collects
+all values and key-value pairs and builds a single Lua table from them.
+Any keys that appear in multiple mappings get overwritten with their last
+value (going from left to right).
+
+.. code:: python
+
+      >>> t = lua.table_from([10, 20, 30], {'a': 11, 'b': 22}, (40, 50), {'b': 42})
+      >>> t['a']
+      11
+      >>> t['b']
+      42
+      >>> t[5]
+      50
+      >>> sorted(t.values())
+      [10, 11, 20, 30, 40, 42, 50]
+
+Since Lupa 2.1, passing ``recursive=True`` will map data structures recursively
+to Lua tables.
+
+.. code:: python
+
+      >>> t = lua.table_from(
+      ...     [
+      ...         # t1:
+      ...         [
+      ...             [10, 20, 30],
+      ...             {'a': 11, 'b': 22}
+      ...         ],
+      ...         # t2:
+      ...         [
+      ...             (40, 50),
+      ...             {'b': 42}
+      ...         ]
+      ...     ],
+      ...     recursive=True
+      ... )
+      >>> t1, t2 = t.values()
+      >>> list(t1[1].values())
+      [10, 20, 30]
+      >>> t1[2]['a']
+      11
+      >>> t1[2]['b']
+      22
+      >>> t2[2]['b']
+      42
+      >>> list(t1[1].values())
+      [10, 20, 30]
+      >>> list(t2[1].values())
+      [40, 50]
+
+A lookup of non-existing keys or indices returns None (actually ``nil``
+inside of Lua).  A lookup is therefore more similar to the ``.get()``
+method of Python dicts than to a mapping lookup in Python.
+
+.. code:: python
+
+      >>> table = lua.table(10, 20, 30, 40)
+      >>> table[1000000] is None
+      True
+      >>> table['no such key'] is None
+      True
+
+      >>> mapping = lua.eval('{ [20] = -20; [3] = -3 }')
+      >>> mapping['no such key'] is None
+      True
+
+Note that ``len()`` does the right thing for array tables but does not
+work on mappings:
+
+.. code:: python
+
+      >>> len(table)
+      4
+      >>> len(mapping)
+      0
+
+This is because ``len()`` is based on the ``#`` (length) operator in
+Lua and because of the way Lua defines the length of a table.
+Remember that unset table indices always return ``nil``, including
+indices outside of the table size.  Thus, Lua basically looks for an
+index that returns ``nil`` and returns the index before that.  This
+works well for array tables that do not contain ``nil`` values, gives
+barely predictable results for tables with 'holes' and does not work
+at all for mapping tables.  For tables with both sequential and
+mapping content, this ignores the mapping part completely.
+
+Note that it is best not to rely on the behaviour of len() for
+mappings.  It might change in a later version of Lupa.
+
+Similar to the table interface provided by Lua, Lupa also supports
+attribute access to table members:
+
+.. code:: python
+
+      >>> table = lua.eval('{ a=1, b=2 }')
+      >>> table.a, table.b
+      (1, 2)
+      >>> table.a == table['a']
+      True
+
+This enables access to Lua 'methods' that are associated with a table,
+as used by the standard library modules:
+
+.. code:: python
+
+      >>> string = lua.eval('string')    # get the 'string' library table
+      >>> print( string.lower('A') )
+      a
+
+
+Python Callables
+----------------
+
+As discussed earlier, Lupa allows Lua scripts to call Python functions
+and methods:
+
+.. code:: python
+
+      >>> def add_one(num):
+      ...     return num + 1
+      >>> lua_func = lua.eval('function(num, py_func) return py_func(num) end')
+      >>> lua_func(48, add_one)
+      49
+
+      >>> class MyClass():
+      ...     def my_method(self):
+      ...         return 345
+      >>> obj = MyClass()
+      >>> lua_func = lua.eval('function(py_obj) return py_obj:my_method() end')
+      >>> lua_func(obj)
+      345
+
+Lua doesn't have a dedicated syntax for named arguments, so by default
+Python callables can only be called using positional arguments.
+
+A common pattern for implementing named arguments in Lua is passing them
+in a table as the first and only function argument.  See
+http://lua-users.org/wiki/NamedParameters for more details.  Lupa supports
+this pattern by providing two decorators: ``lupa.unpacks_lua_table``
+for Python functions and ``lupa.unpacks_lua_table_method`` for methods
+of Python objects.
+
+Python functions/methods wrapped in these decorators can be called from
+Lua code as ``func(foo, bar)``, ``func{foo=foo, bar=bar}``
+or ``func{foo, bar=bar}``.  Example:
+
+.. code:: python
+
+      >>> @lupa.unpacks_lua_table
+      ... def add(a, b):
+      ...     return a + b
+      >>> lua_func = lua.eval('function(a, b, py_func) return py_func{a=a, b=b} end')
+      >>> lua_func(5, 6, add)
+      11
+      >>> lua_func = lua.eval('function(a, b, py_func) return py_func{a, b=b} end')
+      >>> lua_func(5, 6, add)
+      11
+
+If you do not control the function implementation, you can also just
+manually wrap a callable object when passing it into Lupa:
+
+.. code:: python
+
+      >>> import operator
+      >>> wrapped_py_add = lupa.unpacks_lua_table(operator.add)
+
+      >>> lua_func = lua.eval('function(a, b, py_func) return py_func{a, b} end')
+      >>> lua_func(5, 6, wrapped_py_add)
+      11
+
+There are some limitations:
+
+1. Avoid using ``lupa.unpacks_lua_table`` and ``lupa.unpacks_lua_table_method``
+   for functions where the first argument can be a Lua table.  In this case
+   ``py_func{foo=bar}`` (which is the same as ``py_func({foo=bar})`` in Lua)
+   becomes ambiguous: it could mean either "call ``py_func`` with a named
+   ``foo`` argument" or "call ``py_func`` with a positional ``{foo=bar}``
+   argument".
+
+2. One should be careful with passing ``nil`` values to callables wrapped in
+   ``lupa.unpacks_lua_table`` or ``lupa.unpacks_lua_table_method`` decorators.
+   Depending on the context, passing ``nil`` as a parameter can mean either
+   "omit a parameter" or "pass None".  This even depends on the Lua version.
+
+   It is possible to use ``python.none`` instead of ``nil`` to pass None values
+   robustly.  Arguments with ``nil`` values are also fine when standard braces
+   ``func(a, b, c)`` syntax is used.
+
+Because of these limitations lupa doesn't enable named arguments for all
+Python callables automatically.  Decorators allow to enable named arguments
+on a per-callable basis.
+
+
+Lua Coroutines
+--------------
+
+The next is an example of Lua coroutines.  A wrapped Lua coroutine
+behaves exactly like a Python coroutine.  It needs to get created at
+the beginning, either by using the ``.coroutine()`` method of a
+function or by creating it in Lua code.  Then, values can be sent into
+it using the ``.send()`` method or it can be iterated over.  Note that
+the ``.throw()`` method is not supported, though.
+
+.. code:: python
+
+      >>> lua_code = '''\
+      ...     function(N)
+      ...         for i=0,N do
+      ...             coroutine.yield( i%2 )
+      ...         end
+      ...     end
+      ... '''
+      >>> lua = LuaRuntime()
+      >>> f = lua.eval(lua_code)
+
+      >>> gen = f.coroutine(4)
+      >>> list(enumerate(gen))
+      [(0, 0), (1, 1), (2, 0), (3, 1), (4, 0)]
+
+An example where values are passed into the coroutine using its
+``.send()`` method:
+
+.. code:: python
+
+      >>> lua_code = '''\
+      ...     function()
+      ...         local t,i = {},0
+      ...         local value = coroutine.yield()
+      ...         while value do
+      ...             t[i] = value
+      ...             i = i + 1
+      ...             value = coroutine.yield()
+      ...         end
+      ...         return t
+      ...     end
+      ... '''
+      >>> f = lua.eval(lua_code)
+
+      >>> co = f.coroutine()   # create coroutine
+      >>> co.send(None)        # start coroutine (stops at first yield)
+
+      >>> for i in range(3):
+      ...     co.send(i*2)
+
+      >>> mapping = co.send(None)   # loop termination signal
+      >>> sorted(mapping.items())
+      [(0, 0), (1, 2), (2, 4)]
+
+It also works to create coroutines in Lua and to pass them back into
+Python space:
+
+.. code:: python
+
+      >>> lua_code = '''\
+      ...   function f(N)
+      ...         for i=0,N do
+      ...             coroutine.yield( i%2 )
+      ...         end
+      ...   end ;
+      ...   co1 = coroutine.create(f) ;
+      ...   co2 = coroutine.create(f) ;
+      ...
+      ...   status, first_result = coroutine.resume(co2, 2) ;   -- starting!
+      ...
+      ...   return f, co1, co2, status, first_result
+      ... '''
+
+      >>> lua = LuaRuntime()
+      >>> f, co, lua_gen, status, first_result = lua.execute(lua_code)
+
+      >>> # a running coroutine:
+
+      >>> status
+      True
+      >>> first_result
+      0
+      >>> list(lua_gen)
+      [1, 0]
+      >>> list(lua_gen)
+      []
+
+      >>> # an uninitialised coroutine:
+
+      >>> gen = co(4)
+      >>> list(enumerate(gen))
+      [(0, 0), (1, 1), (2, 0), (3, 1), (4, 0)]
+
+      >>> gen = co(2)
+      >>> list(enumerate(gen))
+      [(0, 0), (1, 1), (2, 0)]
+
+      >>> # a plain function:
+
+      >>> gen = f.coroutine(4)
+      >>> list(enumerate(gen))
+      [(0, 0), (1, 1), (2, 0), (3, 1), (4, 0)]
+
+
+Threading
+---------
+
+The following example calculates a mandelbrot image in parallel
+threads and displays the result in PIL. It is based on a `benchmark
+implementation`_ for the `Computer Language Benchmarks Game`_.
+
+.. _`Computer Language Benchmarks Game`: http://shootout.alioth.debian.org/u64/benchmark.php?test=all&lang=luajit&lang2=python3
+.. _`benchmark implementation`: http://shootout.alioth.debian.org/u64/program.php?test=mandelbrot&lang=luajit&id=1
+
+.. code:: python
+
+    lua_code = '''\
+        function(N, i, total)
+            local char, unpack = string.char, table.unpack
+            local result = ""
+            local M, ba, bb, buf = 2/N, 2^(N%8+1)-1, 2^(8-N%8), {}
+            local start_line, end_line = N/total * (i-1), N/total * i - 1
+            for y=start_line,end_line do
+                local Ci, b, p = y*M-1, 1, 0
+                for x=0,N-1 do
+                    local Cr = x*M-1.5
+                    local Zr, Zi, Zrq, Ziq = Cr, Ci, Cr*Cr, Ci*Ci
+                    b = b + b
+                    for i=1,49 do
+                        Zi = Zr*Zi*2 + Ci
+                        Zr = Zrq-Ziq + Cr
+                        Ziq = Zi*Zi
+                        Zrq = Zr*Zr
+                        if Zrq+Ziq > 4.0 then b = b + 1; break; end
+                    end
+                    if b >= 256 then p = p + 1; buf[p] = 511 - b; b = 1; end
+                end
+                if b ~= 1 then p = p + 1; buf[p] = (ba-b)*bb; end
+                result = result .. char(unpack(buf, 1, p))
+            end
+            return result
+        end
+    '''
+
+    image_size = 1280   # == 1280 x 1280
+    thread_count = 8
+
+    from lupa import LuaRuntime
+    lua_funcs = [ LuaRuntime(encoding=None).eval(lua_code)
+                  for _ in range(thread_count) ]
+
+    results = [None] * thread_count
+    def mandelbrot(i, lua_func):
+        results[i] = lua_func(image_size, i+1, thread_count)
+
+    import threading
+    threads = [ threading.Thread(target=mandelbrot, args=(i,lua_func))
+                for i, lua_func in enumerate(lua_funcs) ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    result_buffer = b''.join(results)
+
+    # use Pillow to display the image
+    from PIL import Image
+    image = Image.frombytes('1', (image_size, image_size), result_buffer)
+    image.show()
+
+Note how the example creates a separate ``LuaRuntime`` for each thread
+to enable parallel execution.  Each ``LuaRuntime`` is protected by a
+global lock that prevents concurrent access to it.  The low memory
+footprint of Lua makes it reasonable to use multiple runtimes, but
+this setup also means that values cannot easily be exchanged between
+threads inside of Lua.  They must either get copied through Python
+space (passing table references will not work, either) or use some Lua
+mechanism for explicit communication, such as a pipe or some kind of
+shared memory setup.
+
+
+Restricting Lua access to Python objects
+----------------------------------------
+
+..
+        >>> try: unicode = unicode
+        ... except NameError: unicode = str
+
+Lupa provides a simple mechanism to control access to Python objects.
+Each attribute access can be passed through a filter function as
+follows:
+
+.. code:: python
+
+        >>> def filter_attribute_access(obj, attr_name, is_setting):
+        ...     if isinstance(attr_name, unicode):
+        ...         if not attr_name.startswith('_'):
+        ...             return attr_name
+        ...     raise AttributeError('access denied')
+
+        >>> lua = lupa.LuaRuntime(
+        ...           register_eval=False,
+        ...           attribute_filter=filter_attribute_access)
+        >>> func = lua.eval('function(x) return x.__class__ end')
+        >>> func(lua)
+        Traceback (most recent call last):
+         ...
+        AttributeError: access denied
+
+The ``is_setting`` flag indicates whether the attribute is being read
+or set.
+
+Note that the attributes of Python functions provide access to the
+current ``globals()`` and therefore to the builtins etc.  If you want
+to safely restrict access to a known set of Python objects, it is best
+to work with a whitelist of safe attribute names.  One way to do that
+could be to use a well selected list of dedicated API objects that you
+provide to Lua code, and to only allow Python attribute access to the
+set of public attribute/method names of these objects.
+
+Since Lupa 1.0, you can alternatively provide dedicated getter and
+setter function implementations for a ``LuaRuntime``:
+
+.. code:: python
+
+        >>> def getter(obj, attr_name):
+        ...     if attr_name == 'yes':
+        ...         return getattr(obj, attr_name)
+        ...     raise AttributeError(
+        ...         'not allowed to read attribute "%s"' % attr_name)
+
+        >>> def setter(obj, attr_name, value):
+        ...     if attr_name == 'put':
+        ...         setattr(obj, attr_name, value)
+        ...         return
+        ...     raise AttributeError(
+        ...         'not allowed to write attribute "%s"' % attr_name)
+
+        >>> class X:
+        ...     yes = 123
+        ...     put = 'abc'
+        ...     noway = 2.1
+
+        >>> x = X()
+
+        >>> lua = lupa.LuaRuntime(attribute_handlers=(getter, setter))
+        >>> func = lua.eval('function(x) return x.yes end')
+        >>> func(x)  # getting 'yes'
+        123
+        >>> func = lua.eval('function(x) x.put = "ABC"; end')
+        >>> func(x)  # setting 'put'
+        >>> print(x.put)
+        ABC
+        >>> func = lua.eval('function(x) x.noway = 42; end')
+        >>> func(x)  # setting 'noway'
+        Traceback (most recent call last):
+         ...
+        AttributeError: not allowed to write attribute "noway"
+
+
+Restricting Lua Memory Usage
+----------------------------
+
+Lupa provides a simple mechanism to control the maximum memory
+usage of the Lua Runtime since version 2.0.
+By default Lupa does not interfere with Lua's memory allocation, to opt-in
+you must set the ``max_memory`` when creating the LuaRuntime.
+
+The ``LuaRuntime`` provides three methods for controlling and reading the
+memory usage:
+
+1. ``get_memory_used(total=False)`` to get the current memory
+   usage of the LuaRuntime.
+
+2. ``get_max_memory(total=False)`` to get the current memory limit.
+   ``0`` means there is no memory limitation.
+
+3. ``set_max_memory(max_memory, total=False)`` to change the memory limit.
+   Values below or equal to 0 mean no limit.
+
+There is always some memory used by the LuaRuntime itself (around ~20KiB,
+depending on your lua version and other factors) which is excluded from all
+calculations unless you specify ``total=True``.
+
+.. code:: python
+
+        >>> from lupa import lua52
+        >>> lua = lua52.LuaRuntime(max_memory=0)  # 0 for unlimited, default is None
+        >>> lua.get_memory_used()  # memory used by your code
+        0
+        >>> total_lua_memory = lua.get_memory_used(total=True)  # includes memory used by the runtime itself
+        >>> assert total_lua_memory > 0  # exact amount depends on your lua version and other factors
+
+
+Lua code hitting the memory limit will receive memory errors:
+
+.. code:: python
+
+        >>> lua.set_max_memory(100)
+        >>> lua.eval("string.rep('a', 1000)")   # doctest: +IGNORE_EXCEPTION_DETAIL
+        Traceback (most recent call last):
+         ...
+        lupa.LuaMemoryError: not enough memory
+
+``LuaMemoryError`` inherits from ``LuaError`` and ``MemoryError``.
+
+
+Importing Lua binary modules
+----------------------------
+
+**This will usually work as is**, but here are the details, in case
+anything goes wrong for you.
+
+To use binary modules in Lua, you need to compile them against the
+header files of the LuaJIT sources that you used to build Lupa, but do
+not link them against the LuaJIT library.
+
+Furthermore, CPython needs to enable global symbol visibility for
+shared libraries before loading the Lupa module.  This can be done by
+calling ``sys.setdlopenflags(flag_values)``.  Importing the ``lupa``
+module will automatically try to set up the correct ``dlopen`` flags
+if it can find the platform specific ``DLFCN`` Python module that
+defines the necessary flag constants.  In that case, using binary
+modules in Lua should work out of the box.
+
+If this setup fails, however, you have to set the flags manually.
+When using the above configuration call, the argument ``flag_values``
+must represent the sum of your system's values for ``RTLD_NEW`` and
+``RTLD_GLOBAL``.  If ``RTLD_NEW`` is 2 and ``RTLD_GLOBAL`` is 256, you
+need to call ``sys.setdlopenflags(258)``.
+
+Assuming that the Lua luaposix_ (``posix``) module is available, the
+following should work on a Linux system:
+
+.. code:: python
+
+      >>> import sys
+      >>> orig_dlflags = sys.getdlopenflags()
+      >>> sys.setdlopenflags(258)
+      >>> import lupa
+      >>> sys.setdlopenflags(orig_dlflags)
+
+      >>> lua = lupa.LuaRuntime()
+      >>> posix_module = lua.require('posix')     # doctest: +SKIP
+
+.. _luaposix: http://git.alpinelinux.org/cgit/luaposix
+
+
+Building with different Lua versions
+------------------------------------
+
+The build is configured to automatically search for an installed version
+of first LuaJIT and then Lua, and failing to find either, to use the bundled
+LuaJIT or Lua version.
+
+If you wish to build Lupa with a specific version of Lua, you can
+configure the following options on setup:
+
+.. list-table::
+   :widths: 20 35
+   :header-rows: 1
+
+   * - Option
+     - Description
+   * - ``--lua-lib <libfile>``
+     - Lua library file path, e.g. ``--lua-lib /usr/local/lib/lualib.a``
+   * - ``--lua-includes <incdir>``
+     - Lua include directory, e.g. ``--lua-includes /usr/local/include``
+   * - ``--use-bundle``
+     - Use bundled LuaJIT or Lua instead of searching for an installed version.
+   * - ``--no-bundle``
+     - Don't use the bundled LuaJIT/Lua, search for an installed version of LuaJIT or Lua,
+       e.g. using ``pkg-config``.
+   * - ``--no-lua-jit``
+     - Don't use or search for LuaJIT, only use or search Lua instead.
+
+
+Installing lupa
+===============
+
+Building with LuaJIT2
+---------------------
+
+#) Download and unpack lupa
+
+   http://pypi.python.org/pypi/lupa
+
+#) Download LuaJIT2
+
+   http://luajit.org/download.html
+
+#) Unpack the archive into the lupa base directory, e.g.::
+
+     .../lupa-0.1/LuaJIT-2.0.2
+
+#) Build LuaJIT::
+
+     cd LuaJIT-2.0.2
+     make
+     cd ..
+
+   If you need specific C compiler flags, pass them to ``make`` as follows::
+
+     make CFLAGS="..."
+
+   For trickier target platforms like Windows and MacOS-X, please see
+   the official `installation instructions for LuaJIT`_.
+
+   NOTE: When building on Windows, make sure that lua51.lib is made in addition
+   to lua51.dll. The MSVC build produces this file, MinGW does NOT.
+
+#) Build lupa::
+
+     python setup.py build_ext -i
+
+   Or any other distutils target of your choice, such as ``build``
+   or one of the ``bdist`` targets.  See the `distutils
+   documentation`_ for help, also the `hints on building extension
+   modules`_.
+
+   Note that on 64bit MacOS-X installations, the following additional
+   compiler flags are reportedly required due to the embedded LuaJIT::
+
+     -pagezero_size 10000 -image_base 100000000
+
+   You can find additional installation hints for MacOS-X in this
+   `somewhat unclear blog post`_, which may or may not tell you at
+   which point in the installation process to provide these flags.
+
+   Also, on 64bit MacOS-X, you will typically have to set the
+   environment variable ``ARCHFLAGS`` to make sure it only builds
+   for your system instead of trying to generate a fat binary with
+   both 32bit and 64bit support::
+
+     export ARCHFLAGS="-arch x86_64"
+
+   Note that this applies to both LuaJIT and Lupa, so make sure
+   you try a clean build of everything if you forgot to set it
+   initially.
+
+.. _`installation instructions for LuaJIT`: http://luajit.org/install.html
+.. _`somewhat unclear blog post`: http://t-p-j.blogspot.com/2010/11/lupa-on-os-x-with-macports-python-26.html
+.. _`distutils documentation`: http://docs.python.org/install/index.html#install-index
+.. _`hints on building extension modules`: http://docs.python.org/install/index.html#building-extensions-tips-and-tricks
+
+
+Building with Lua 5.x
+---------------------
+
+It also works to use Lupa with the standard (non-JIT) Lua
+runtime. The easiest way is to use the bundled lua submodule:
+
+#) Clone the submodule::
+
+     $ git submodule update --init third-party/lua
+     
+#) Build Lupa::
+
+     $ python3 setup.py bdist_wheel --use-bundle --with-cython
+
+You can also build it by installing a Lua 5.x package, including
+any development packages (header files etc.). On systems that
+use the "pkg-config" configuration mechanism, Lupa's
+setup.py will pick up either LuaJIT2 or Lua automatically, with a
+preference for LuaJIT2 if it is found.  Pass the ``--no-luajit`` option
+to the setup.py script if you have both installed but do not want to
+use LuaJIT2.
+
+On other systems, you may have to supply the build parameters
+externally, e.g. using environment variables or by changing the
+setup.py script manually.  Pass the ``--no-luajit`` option to the
+setup.py script in order to ignore the failure you get when neither
+LuaJIT2 nor Lua are found automatically.
+
+For further information, read this mailing list post:
+
+https://www.freelists.org/post/lupa-dev/Lupa-with-normal-Lua-interpreter-Lua-51,2
+
+
+Installing lupa from packages
+=============================
+
+Debian/Ubuntu + Lua 5.2
+-----------------------
+
+#) Install Lua 5.2 development package::
+
+     $ apt-get install liblua5.2-dev
+
+#) Install lupa::
+
+     $ pip install lupa
+
+Debian/Ubuntu + LuaJIT2
+-----------------------
+
+#) Install LuaJIT2 development package::
+
+     $ apt-get install libluajit-5.1-dev
+
+#) Install lupa::
+
+     $ pip install lupa
+
+Depending on OS version, you might get an older LuaJIT2 version.
+
+OS X + Lua 5.2 + Homebrew
+-------------------------
+
+#) Install Lua::
+
+     $ brew install lua
+
+#) Install pkg-config::
+
+     $ brew install pkg-config
+
+#) Install lupa::
+
+     $ pip install lupa
+
+
+Lupa change log
+===============
+
+2.6 (2025-10-24)
+----------------
+
+* The bundled LuaJIT versions were updated to the latest git branches.
+
+* Built with Cython 3.1.6.
+
+
+2.5 (2025-06-15)
+----------------
+
+* GH#284: Lua uses ``dlopen()`` again, which was lost in Lupa 2.3.
+  Patch by Philipp Krones.
+
+* The bundled Lua 5.4 was updated to 5.4.8.
+
+* The bundled LuaJIT versions were updated to the latest git branches.
+
+* Built with Cython 3.1.2.
+
+
+2.4 (2025-01-10)
+----------------
+
+* The windows wheels now bundle LuaJIT 2.0 and 2.1.
+  (patch by Michal Plichta)
+
+* Failures in the test suite didn't set a non-zero process exit value.
+
+
+2.3 (2025-01-09)
+----------------
+
+* The bundled LuaJIT versions were updated to the latest git branches.
+
+* The bundled Lua 5.4 was updated to 5.4.7.
+
+* Removed support for Python 2.x.
+
+* Built with Cython 3.0.11.
+
+
+2.2 (2024-06-02)
+----------------
+
+* A new method ``LuaRuntime.gccollect()`` was added to trigger the Lua garbage collector.
+
+* A new context manager ``LuaRuntime.nogc()`` was added to temporarily disable the Lua
+  garbage collector.
+
+* Freeing Python objects from a thread while running Lua code could run into a deadlock.
+
+* The bundled LuaJIT versions were updated to the latest git branches.
+
+* Built with Cython 3.0.10.
+
+
+2.1 (2024-03-24)
+----------------
+
+* GH#199: The ``table_from()`` method gained a new keyword argument ``recursive=False``.
+  If true, Python data structures will be recursively mapped to Lua tables,
+  taking care of loops and duplicates via identity de-duplication.
+
+* GH#248: The LuaRuntime methods "eval", "execute" and "compile" gained new
+  keyword options ``mode`` and ``name`` that allow constraining the input type
+  and modifying the (chunk) name shown in error messages, following similar
+  arguments in the Lua ``load()`` function.
+  See https://www.lua.org/manual/5.4/manual.html#pdf-load
+
+* GH#246: Loading Lua modules did not work for the version specific Lua modules
+  introduced in Lupa 2.0.  It turned out that it can only be enabled for
+  one of them in a given Python run, so it is now left to users to enable it
+  explicitly at need.
+  (original patch by Richard Connon)
+
+* GH#234: The bundled Lua 5.1 was updated to 5.1.5 and Lua 5.2 to 5.2.4.
+  (patch by xxyzz)
+
+* The bundled Lua 5.4 was updated to 5.4.6.
+
+* The bundled LuaJIT versions were updated to the latest git branches.
+
+* Built with Cython 3.0.9 for improved support of Python 3.12/13.
+
+
+2.0 (2023-04-03)
+----------------
+
+* GH#217: Lua stack traces in Python exception messages are now reversed to
+  match the order of Python stack traces.
+
+* GH#196: Lupa now ships separate extension modules built with Lua 5.3,
+  Lua 5.4, LuaJIT 2.0 and LuaJIT 2.1 beta.  Note that this is build specific
+  and may depend on the platform.  A normal Python import cascade can be used.
+
+* GH#211: A new option `max_memory` allows to limit the memory usage of Lua code.
+  (patch by Leo Developer)
+
+* GH#171: Python references in Lua are now more safely reference counted
+  to prevent garbage collection glitches.
+  (patch by Guilherme Dantas)
+
+* GH#146: Lua integers in Lua 5.3+ are converted from and to Python integers.
+  (patch by Guilherme Dantas)
+
+* GH#180: The ``python.enumerate()`` function now returns indices as integers
+  if supported by Lua.
+  (patch by Guilherme Dantas)
+
+* GH#178: The Lua integer limits can be read from the module as
+  ``LUA_MAXINTEGER`` and ``LUA_MININTEGER``.
+  (patch by Guilherme Dantas)
+
+* GH#174: Failures while calling the ``__index`` method in Lua during a
+  table index lookup from Python could crash Python.
+  (patch by Guilherme Dantas)
+
+* GH#137: Passing ``None`` as a dict key into ``table_from()`` crashed.
+  (patch by Leo Developer)
+
+* GH#176: A new function ``python.args(*args, **kwargs)`` was added
+  to help with building Python argument tuples and keyword argument dicts
+  for Python function calls from Lua code.
+
+* GH#177: Tables that are not sequences raise ``IndexError`` when unpacking
+  them.  Previously, non-sequential items were simply ignored.
+
+* GH#179: Resolve some C compiler warnings about signed/unsigned comparisons.
+  (patch by Guilherme Dantas)
+
+* Built with Cython 0.29.34.
+
+
+1.14.1 (2022-11-16)
+-------------------
+
+* Rebuild with Cython 0.29.32 to support Python 3.11.
+
+
+1.13 (2022-03-01)
+-----------------
+
+* Bundled Lua source files were missing in the source distribution.
+
+
+1.12 (2022-02-24)
+-----------------
+
+* GH#197: Some binary wheels in the last releases were not correctly linked with Lua.
+
+* GH#194: An absolute file path appeared in the ``SOURCES.txt`` metadata
+  of the source distribution.
+
+
+1.11 (2022-02-23)
+-----------------
+
+* Use Lua 5.4.4 in binary wheels and as bundled Lua.
+
+* Built with Cython 0.29.28 to support Python 3.10/11.
+
+
+1.10 (2021-09-02)
+-----------------
+
+* GH#147: Lua 5.4 is supported.
+  (patch by Russel Davis)
+
+* The runtime version of the Lua library as a tuple (e.g. ``(5,3)``)
+  is provided via ``lupa.LUA_VERSION`` and ``LuaRuntime.lua_version``.
+
+* The Lua implementation name and version string is provided as
+  ``LuaRuntime.lua_implementation``.
+
+* ``setup.py`` accepts new command line arguments ``--lua-lib`` and ``--lua-includes``
+  to specify the
+
+* Use Lua 5.4.3 in binary wheels and as bundled Lua.
+
+* Built with Cython 0.29.24 to support Python 3.9.
+
+
+1.9 (2019-12-21)
+----------------
+
+* Build against Lua 5.3 if available.
+
+* Use Lua 5.3.5 in binary wheels and as bundled Lua.
+
+* GH#129: Fix Lua module loading in Python 3.x.
+
+* GH#126: Fix build on Linux systems that install Lua as "lua52" package.
+
+* Built with Cython 0.29.14 for better Py3.8 compatibility.
+
+
+1.8 (2019-02-01)
+----------------
+
+* GH#107: Fix a deprecated import in Py3.
+
+* Built with Cython 0.29.3 for better Py3.7 compatibility.
+
+
+1.7 (2018-08-06)
+----------------
+
+* GH#103: Provide wheels for MS Windows and fix MSVC build on Py2.7.
+
+
+1.6 (2017-12-15)
+----------------
+
+* GH#95: Improved compatibility with Lua 5.3.
+  (patch by TitanSnow)
+
+
+1.5 (2017-09-16)
+----------------
+
+* GH#93: New method ``LuaRuntime.compile()`` to compile Lua code
+  without executing it.
+  (patch by TitanSnow)
+
+* GH#91: Lua 5.3 is bundled in the source distribution to simplify
+  one-shot installs.
+  (patch by TitanSnow)
+
+* GH#87: Lua stack trace is included in output in debug mode.
+  (patch by aaiyer)
+
+* GH#78: Allow Lua code to intercept Python exceptions.
+  (patch by Sergey Dobrov)
+
+* Built with Cython 0.26.1.
+
+
+1.4 (2016-12-10)
+----------------
+
+* GH#82: Lua coroutines were using the wrong runtime state
+  (patch by Sergey Dobrov)
+
+* GH#81: copy locally provided Lua DLL into installed package on Windows
+  (patch by Gareth Coles)
+
+* built with Cython 0.25.2
+
+
+1.3 (2016-04-12)
+----------------
+
+* GH#70: ``eval()`` and ``execute()`` accept optional positional arguments
+  (patch by John Vandenberg)
+
+* GH#65: calling ``str()`` on a Python object from Lua could fail if the
+  ``LuaRuntime`` is set up without auto-encoding (patch by Mikhail Korobov)
+
+* GH#63: attribute/keyword names were not properly encoded if the
+  ``LuaRuntime`` is set up without auto-encoding (patch by Mikhail Korobov)
+
+* built with Cython 0.24
+
+
+1.2 (2015-10-10)
+----------------
+
+* callbacks returned from Lua coroutines were incorrectly mixing
+  coroutine state with global Lua state (patch by Mikhail Korobov)
+
+* availability of ``python.builtins`` in Lua can be disabled via
+  ``LuaRuntime`` option.
+
+* built with Cython 0.23.4
+
+
+1.1 (2014-11-21)
+----------------
+
+* new module function ``lupa.lua_type()`` that returns the Lua type of
+  a wrapped object as string, or ``None`` for normal Python objects
+
+* new helper method ``LuaRuntime.table_from(...)`` that creates a Lua
+  table from one or more Python mappings and/or sequences
+
+* new ``lupa.unpacks_lua_table`` and ``lupa.unpacks_lua_table_method``
+  decorators to allow calling Python functions from Lua using named
+  arguments
+
+* fix a hang on shutdown where the LuaRuntime failed to deallocate due
+  to reference cycles
+
+* Lupa now plays more nicely with other Lua extensions that create
+  userdata objects
+
+
+1.0.1 (2014-10-11)
+------------------
+
+* fix a crash when requesting attributes of wrapped Lua coroutine objects
+
+* looking up attributes on Lua objects that do not support it now always
+  raises an AttributeError instead of sometimes raising a TypeError depending
+  on the attribute name
+
+
+1.0 (2014-09-28)
+----------------
+
+* NOTE: this release includes the major backwards incompatible changes listed
+  below.  It is believed that they simplify the interaction between Python code
+  and Lua code by more strongly following idiomatic Lua on the Lua side.
+
+  * Instead of passing a wrapped ``python.none`` object into Lua, ``None``
+    return values are now mapped to ``nil``, making them more straight forward
+    to handle in Lua code.  This makes the behaviour more consistent, as it
+    was previously somewhat arbitrary where ``none`` could appear and where a
+    ``nil`` value was used.  The only remaining exception is during iteration,
+    where the first returned value must not be ``nil`` in Lua, or otherwise
+    the loop terminates prematurely.  To prevent this, any ``None`` value
+    that the iterator returns, or any first item in exploded tuples that is
+    ``None``, is still mapped to ``python.none``. Any further values
+    returned in the same iteration will be mapped to ``nil`` if they are
+    ``None``, not to ``none``.  This means that only the first argument
+    needs to be manually checked for this special case.  For the
+    ``enumerate()`` iterator, the counter is never ``None`` and thus the
+    following unpacked items will never be mapped to ``python.none``.
+
+  * When ``unpack_returned_tuples=True``, iteration now also unpacks tuple
+    values, including ``enumerate()`` iteration, which yields a flat sequence
+    of counter and unpacked values.
+
+  * When calling bound Python methods from Lua as "obj:meth()", Lupa now
+    prevents Python from prepending the self argument a second time, so that
+    the Python method is now called as "obj.meth()".  Previously, it was called
+    as "obj.meth(obj)".  Note that this can be undesired when the object itself
+    is explicitly passed as first argument from Lua, e.g. when calling
+    "func(obj)" where "func" is "obj.meth", but these constellations should be
+    rare.  As a work-around for this case, user code can wrap the bound method
+    in another function so that the final call comes from Python.
+
+* garbage collection works for reference cycles that span both runtimes,
+  Python and Lua
+
+* calling from Python into Lua and back into Python did not clean up the
+  Lua call arguments before the innermost call, so that they could leak
+  into the nested Python call or its return arguments
+
+* support for Lua 5.2 (in addition to Lua 5.1 and LuaJIT 2.0)
+
+* Lua tables support Python's "del" statement for item deletion
+  (patch by Jason Fried)
+
+* Attribute lookup can use a more fine-grained control mechanism by
+  implementing explicit getter and setter functions for a LuaRuntime
+  (``attribute_handlers`` argument).  Patch by Brian Moe.
+
+* item assignments/lookups on Lua objects from Python no longer
+  special case double underscore names (as opposed to attribute lookups)
+
+
+0.21 (2014-02-12)
+-----------------
+
+* some garbage collection issues were cleaned up using new Cython features
+
+* new ``LuaRuntime`` option ``unpack_returned_tuples`` which automatically
+  unpacks tuples returned from Python functions into separate Lua objects
+  (instead of returning a single Python tuple object)
+
+* some internal wrapper classes were removed from the module API
+
+* Windows build fixes
+
+* Py3.x build fixes
+
+* support for building with Lua 5.1 instead of LuaJIT (setup.py --no-luajit)
+
+* no longer uses Cython by default when building from released sources (pass
+  ``--with-cython`` to explicitly request a rebuild)
+
+* requires Cython 0.20+ when building from unreleased sources
+
+* built with Cython 0.20.1
+
+
+0.20 (2011-05-22)
+-----------------
+
+* fix "deallocating None" crash while iterating over Lua tables in
+  Python code
+
+* support for filtering attribute access to Python objects for Lua
+  code
+
+* fix: setting source encoding for Lua code was broken
+
+
+0.19 (2011-03-06)
+-----------------
+
+* fix serious resource leak when creating multiple LuaRuntime instances
+
+* portability fix for binary module importing
+
+
+0.18 (2010-11-06)
+-----------------
+
+* fix iteration by returning ``Py_None`` object for ``None`` instead
+  of ``nil``, which would terminate the iteration
+
+* when converting Python values to Lua, represent ``None`` as a
+  ``Py_None`` object in places where ``nil`` has a special meaning,
+  but leave it as ``nil`` where it doesn't hurt
+
+* support for counter start value in ``python.enumerate()``
+
+* native implementation for ``python.enumerate()`` that is several
+  times faster
+
+* much faster Lua iteration over Python objects
+
+
+0.17 (2010-11-05)
+-----------------
+
+* new helper function ``python.enumerate()`` in Lua that returns a Lua
+  iterator for a Python object and adds the 0-based index to each
+  item.
+
+* new helper function ``python.iterex()`` in Lua that returns a Lua
+  iterator for a Python object and unpacks any tuples that the
+  iterator yields.
+
+* new helper function ``python.iter()`` in Lua that returns a Lua
+  iterator for a Python object.
+
+* reestablished the ``python.as_function()`` helper function for Lua
+  code as it can be needed in cases where Lua cannot determine how to
+  run a Python function.
+
+
+0.16 (2010-09-03)
+-----------------
+
+* dropped ``python.as_function()`` helper function for Lua as all
+  Python objects are callable from Lua now (potentially raising a
+  ``TypeError`` at call time if they are not callable)
+
+* fix regression in 0.13 and later where ordinary Lua functions failed
+  to print due to an accidentally used meta table
+
+* fix crash when calling ``str()`` on wrapped Lua objects without
+  metatable
+
+
+0.15 (2010-09-02)
+-----------------
+
+* support for loading binary Lua modules on systems that support it
+
+
+0.14 (2010-08-31)
+-----------------
+
+* relicensed to the MIT license used by LuaJIT2 to simplify licensing
+  considerations
+
+
+0.13.1 (2010-08-30)
+-------------------
+
+* fix Cython generated C file using Cython 0.13
+
+
+0.13 (2010-08-29)
+-----------------
+
+* fixed undefined behaviour on ``str(lua_object)`` when the object's
+  ``__tostring()`` meta method fails
+
+* removed redundant "error:" prefix from ``LuaError`` messages
+
+* access to Python's ``python.builtins`` from Lua code
+
+* more generic wrapping rules for Python objects based on supported
+  protocols (callable, getitem, getattr)
+
+* new helper functions ``as_attrgetter()`` and ``as_itemgetter()`` to
+  specify the Python object protocol used by Lua indexing when
+  wrapping Python objects in Python code
+
+* new helper functions ``python.as_attrgetter()``,
+  ``python.as_itemgetter()`` and ``python.as_function()`` to specify
+  the Python object protocol used by Lua indexing of Python objects in
+  Lua code
+
+* item and attribute access for Python objects from Lua code
+
+
+0.12 (2010-08-16)
+-----------------
+
+* fix Lua stack leak during table iteration
+
+* fix lost Lua object reference after iteration
+
+
+0.11 (2010-08-07)
+-----------------
+
+* error reporting on Lua syntax errors failed to clean up the stack so
+  that errors could leak into the next Lua run
+
+* Lua error messages were not properly decoded
+
+
+0.10 (2010-07-27)
+-----------------
+
+* much faster locking of the LuaRuntime, especially in the single
+  threaded case (see
+  http://code.activestate.com/recipes/577336-fast-re-entrant-optimistic-lock-implemented-in-cyt/)
+
+* fixed several error handling problems when executing Python code
+  inside of Lua
+
+
+0.9 (2010-07-23)
+----------------
+
+* fixed Python special double-underscore method access on LuaObject
+  instances
+
+* Lua coroutine support through dedicated wrapper classes, including
+  Python iteration support.  In Python space, Lua coroutines behave
+  exactly like Python generators.
+
+
+0.8 (2010-07-21)
+----------------
+
+* support for returning multiple values from Lua evaluation
+
+* ``repr()`` support for Lua objects
+
+* ``LuaRuntime.table()`` method for creating Lua tables from Python
+  space
+
+* encoding fix for ``str(LuaObject)``
+
+
+0.7 (2010-07-18)
+----------------
+
+* ``LuaRuntime.require()`` and ``LuaRuntime.globals()`` methods
+
+* renamed ``LuaRuntime.run()`` to ``LuaRuntime.execute()``
+
+* support for ``len()``, ``setattr()`` and subscripting of Lua objects
+
+* provide all built-in Lua libraries in ``LuaRuntime``, including
+  support for library loading
+
+* fixed a thread locking issue
+
+* fix passing Lua objects back into the runtime from Python space
+
+
+0.6 (2010-07-18)
+----------------
+
+* Python iteration support for Lua objects (e.g. tables)
+
+* threading fixes
+
+* fix compile warnings
+
+
+0.5 (2010-07-14)
+----------------
+
+* explicit encoding options per LuaRuntime instance to decode/encode
+  strings and Lua code
+
+
+0.4 (2010-07-14)
+----------------
+
+* attribute read access on Lua objects, e.g. to read Lua table values
+  from Python
+
+* str() on Lua objects
+
+* include .hg repository in source downloads
+
+* added missing files to source distribution
+
+
+0.3 (2010-07-13)
+----------------
+
+* fix several threading issues
+
+* safely free the GIL when calling into Lua
+
+
+0.2 (2010-07-13)
+----------------
+
+* propagate Python exceptions through Lua calls
+
+
+0.1 (2010-07-12)
+----------------
+
+* first public release
+
+
+License
+=======
+
+Lupa
+----
+
+Copyright (c) 2010-2017 Stefan Behnel.  All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+Lua
+---
+
+(See https://www.lua.org/license.html)
+
+Copyright © 1994–2017 Lua.org, PUC-Rio.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
