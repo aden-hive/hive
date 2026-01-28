@@ -78,6 +78,10 @@ cd hive
 # Run Python environment setup
 ./scripts/setup-python.sh
 ```
+> **Common pitfall (new contributors):** This repo is **Python-first**.  
+> - Use `./scripts/setup-python.sh` (recommended) or follow `ENVIRONMENT_SETUP.md`.  
+> - Don’t run `pip install -r requirements.txt` from the repo root — the `requirements.txt` file lives under `core/`.  
+> - You may see a `package.json`, but `npm` is **not** required for agent development.
 
 This installs:
 - **framework** - Core agent runtime and graph executor
