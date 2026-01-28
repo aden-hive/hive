@@ -1,4 +1,5 @@
 """Tests for http_request tool (FastMCP)."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -48,47 +49,31 @@ class TestHttpRequestValidation:
 
     def test_both_body_and_json_body_returns_error(self, http_request_fn):
         """Specifying both body and json_body returns error."""
-        result = http_request_fn(
-            url="https://example.com",
-            body="raw",
-            json_body={"key": "value"}
-        )
+        result = http_request_fn(url="https://example.com", body="raw", json_body={"key": "value"})
         assert "error" in result
         assert "both" in result["error"].lower()
 
     def test_headers_must_be_dict(self, http_request_fn):
         """Non-dict headers returns error."""
-        result = http_request_fn(
-            url="https://example.com",
-            headers="invalid"
-        )
+        result = http_request_fn(url="https://example.com", headers="invalid")
         assert "error" in result
         assert "dict" in result["error"].lower()
 
     def test_params_must_be_dict(self, http_request_fn):
         """Non-dict params returns error."""
-        result = http_request_fn(
-            url="https://example.com",
-            params="invalid"
-        )
+        result = http_request_fn(url="https://example.com", params="invalid")
         assert "error" in result
         assert "dict" in result["error"].lower()
 
     def test_json_body_must_be_dict(self, http_request_fn):
         """Non-dict json_body returns error."""
-        result = http_request_fn(
-            url="https://example.com",
-            json_body="invalid"
-        )
+        result = http_request_fn(url="https://example.com", json_body="invalid")
         assert "error" in result
         assert "dict" in result["error"].lower()
 
     def test_body_must_be_string(self, http_request_fn):
         """Non-string body returns error."""
-        result = http_request_fn(
-            url="https://example.com",
-            body={"key": "value"}
-        )
+        result = http_request_fn(url="https://example.com", body={"key": "value"})
         assert "error" in result
         assert "string" in result["error"].lower()
 
@@ -141,11 +126,7 @@ class TestSsrfProtection:
     def test_allow_private_ips_override(self, http_request_fn):
         """allow_private_ips=True allows private IP requests (but they may fail connection)."""
         # This will fail at connection time, but should NOT be blocked by SSRF check
-        result = http_request_fn(
-            url="http://192.168.1.1/api",
-            allow_private_ips=True,
-            timeout=1
-        )
+        result = http_request_fn(url="http://192.168.1.1/api", allow_private_ips=True, timeout=1)
         # Should either succeed or fail with connection error, not SSRF error
         if "error" in result:
             assert "private" not in result["error"].lower() or "allow" in result["error"].lower()
@@ -180,9 +161,7 @@ class TestHttpMethods:
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
             result = http_request_fn(
-                url="https://example.com/api",
-                method="POST",
-                json_body={"name": "test"}
+                url="https://example.com/api", method="POST", json_body={"name": "test"}
             )
 
             assert result["status_code"] == 201
@@ -260,10 +239,7 @@ class TestResponseParsing:
         with patch("httpx.Client") as mock_client:
             mock_response = MagicMock()
             mock_response.status_code = 200
-            mock_response.headers = {
-                "content-type": "application/json",
-                "x-request-id": "abc123"
-            }
+            mock_response.headers = {"content-type": "application/json", "x-request-id": "abc123"}
             mock_response.json.return_value = {}
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
@@ -380,8 +356,7 @@ class TestRequestOptions:
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
             http_request_fn(
-                url="https://api.example.com",
-                headers={"Authorization": "Bearer token123"}
+                url="https://api.example.com", headers={"Authorization": "Bearer token123"}
             )
 
             call_args = mock_client.return_value.__enter__.return_value.request.call_args
@@ -397,10 +372,7 @@ class TestRequestOptions:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            http_request_fn(
-                url="https://api.example.com/search",
-                params={"q": "test", "limit": 10}
-            )
+            http_request_fn(url="https://api.example.com/search", params={"q": "test", "limit": 10})
 
             call_args = mock_client.return_value.__enter__.return_value.request.call_args
             assert call_args.kwargs["params"] == {"q": "test", "limit": 10}
@@ -447,9 +419,7 @@ class TestRequestOptions:
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
             http_request_fn(
-                url="https://api.example.com/webhook",
-                method="POST",
-                body="raw content here"
+                url="https://api.example.com/webhook", method="POST", body="raw content here"
             )
 
             call_args = mock_client.return_value.__enter__.return_value.request.call_args
