@@ -5,8 +5,8 @@ These types are used for both interactive CLI approval and
 programmatic/MCP-based approval.
 """
 
-from enum import Enum
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field

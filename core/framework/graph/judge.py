@@ -8,17 +8,17 @@ The HybridJudge evaluates step execution results using:
 Escalation path: rules → LLM → human
 """
 
-from typing import Any
 from dataclasses import dataclass, field
+from typing import Any
 
+from framework.graph.code_sandbox import safe_eval
+from framework.graph.goal import Goal
 from framework.graph.plan import (
-    PlanStep,
+    EvaluationRule,
     Judgment,
     JudgmentAction,
-    EvaluationRule,
+    PlanStep,
 )
-from framework.graph.goal import Goal
-from framework.graph.code_sandbox import safe_eval
 from framework.llm.provider import LLMProvider
 
 
@@ -136,9 +136,9 @@ class HybridJudge:
 
         # Build evaluation context
         eval_context = {
-            "step": step.model_dump() if hasattr(step, 'model_dump') else step,
+            "step": step.model_dump() if hasattr(step, "model_dump") else step,
             "result": result,
-            "goal": goal.model_dump() if hasattr(goal, 'model_dump') else goal,
+            "goal": goal.model_dump() if hasattr(goal, "model_dump") else goal,
             "context": context,
             "success": isinstance(result, dict) and result.get("success", False),
             "error": isinstance(result, dict) and result.get("error"),

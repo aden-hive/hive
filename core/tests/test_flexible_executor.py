@@ -10,27 +10,28 @@ Tests cover:
 """
 
 import asyncio
+
 import pytest
 
-from framework.graph.plan import (
-    Plan,
-    PlanStep,
-    ActionSpec,
-    ActionType,
-    StepStatus,
-    Judgment,
-    JudgmentAction,
-    EvaluationRule,
-    PlanExecutionResult,
-    ExecutionStatus,
-)
 from framework.graph.code_sandbox import (
     CodeSandbox,
-    safe_exec,
     safe_eval,
+    safe_exec,
 )
-from framework.graph.judge import HybridJudge, create_default_judge
 from framework.graph.goal import Goal, SuccessCriterion
+from framework.graph.judge import HybridJudge, create_default_judge
+from framework.graph.plan import (
+    ActionSpec,
+    ActionType,
+    EvaluationRule,
+    ExecutionStatus,
+    Judgment,
+    JudgmentAction,
+    Plan,
+    PlanExecutionResult,
+    PlanStep,
+    StepStatus,
+)
 
 
 class TestPlanDataStructures:
@@ -397,8 +398,8 @@ class TestFlexibleExecutorIntegration:
 
     def test_executor_creation(self, tmp_path):
         """Test creating a FlexibleGraphExecutor."""
-        from framework.runtime.core import Runtime
         from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.runtime.core import Runtime
 
         runtime = Runtime(storage_path=tmp_path / "runtime")
         executor = FlexibleGraphExecutor(runtime=runtime)
@@ -409,8 +410,8 @@ class TestFlexibleExecutorIntegration:
 
     def test_executor_with_custom_judge(self, tmp_path):
         """Test executor with custom judge."""
-        from framework.runtime.core import Runtime
         from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.runtime.core import Runtime
 
         runtime = Runtime(storage_path=tmp_path / "runtime")
         custom_judge = HybridJudge()

@@ -1,16 +1,17 @@
 """Tests for plan.py - Plan enums and Pydantic models."""
 import json
+
 import pytest
 
 from framework.graph.plan import (
-    ActionType,
-    StepStatus,
-    ApprovalDecision,
-    JudgmentAction,
-    ExecutionStatus,
     ActionSpec,
-    PlanStep,
+    ActionType,
+    ApprovalDecision,
+    ExecutionStatus,
+    JudgmentAction,
     Plan,
+    PlanStep,
+    StepStatus,
 )
 
 

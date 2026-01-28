@@ -10,9 +10,9 @@ The Plan is the contract between the external planner and the executor:
 - If replanning needed, returns feedback to external planner
 """
 
-from typing import Any
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -421,6 +421,7 @@ def load_export(data: str | dict) -> tuple["Plan", Any]:
         result = await executor.execute_plan(plan, goal, context)
     """
     import json as json_module
+
     from framework.graph.goal import Goal
 
     if isinstance(data, str):

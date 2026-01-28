@@ -13,10 +13,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from framework.testing.test_case import Test
-from framework.testing.test_result import TestResult, ErrorCategory
-from framework.testing.test_storage import TestStorage
 from framework.testing.categorizer import ErrorCategorizer
+from framework.testing.test_case import Test
+from framework.testing.test_result import ErrorCategory, TestResult
+from framework.testing.test_storage import TestStorage
 
 
 class DebugInfo(BaseModel):

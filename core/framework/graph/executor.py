@@ -10,25 +10,26 @@ The executor:
 """
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
-from framework.runtime.core import Runtime
+from framework.graph.edge import GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import (
-    NodeSpec,
-    NodeContext,
-    NodeResult,
-    NodeProtocol,
-    SharedMemory,
-    LLMNode,
-    RouterNode,
     FunctionNode,
+    LLMNode,
+    NodeContext,
+    NodeProtocol,
+    NodeResult,
+    NodeSpec,
+    RouterNode,
+    SharedMemory,
 )
-from framework.graph.edge import GraphSpec
+from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.graph.validator import OutputValidator
-from framework.graph.output_cleaner import OutputCleaner, CleansingConfig
 from framework.llm.provider import LLMProvider, Tool
+from framework.runtime.core import Runtime
 
 
 @dataclass

@@ -8,12 +8,12 @@ This is designed around the questions I need to answer:
 4. What should we change? (suggestions)
 """
 
-from typing import Any
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 from framework.schemas.decision import Decision
-from framework.schemas.run import Run, RunSummary, RunStatus
+from framework.schemas.run import Run, RunStatus, RunSummary
 from framework.storage.backend import FileStorage
 
 
@@ -476,7 +476,7 @@ class BuilderQuery:
             )
 
         # Find first divergence point
-        for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions)):
+        for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions, strict=False)):
             if d1.chosen_option_id != d2.chosen_option_id:
                 differences.append(
                     f"Diverged at decision {i}: chose '{d1.chosen_option_id}' vs '{d2.chosen_option_id}'"

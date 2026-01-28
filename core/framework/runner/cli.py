@@ -170,15 +170,16 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
+
     from framework.runner import AgentRunner
 
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
-        logging.basicConfig(level=logging.ERROR, format='%(message)s')
-    elif getattr(args, 'verbose', False):
-        logging.basicConfig(level=logging.INFO, format='%(message)s')
+        logging.basicConfig(level=logging.ERROR, format="%(message)s")
+    elif getattr(args, "verbose", False):
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
     else:
-        logging.basicConfig(level=logging.WARNING, format='%(message)s')
+        logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     # Load input context
     context = {}
@@ -333,8 +334,8 @@ def cmd_info(args: argparse.Namespace) -> int:
         print()
         print(f"Nodes ({info.node_count}):")
         for node in info.nodes:
-            inputs = f" [in: {', '.join(node['input_keys'])}]" if node.get('input_keys') else ""
-            outputs = f" [out: {', '.join(node['output_keys'])}]" if node.get('output_keys') else ""
+            inputs = f" [in: {', '.join(node['input_keys'])}]" if node.get("input_keys") else ""
+            outputs = f" [out: {', '.join(node['output_keys'])}]" if node.get("output_keys") else ""
             print(f"  - {node['id']}: {node['name']}{inputs}{outputs}")
         print()
         print(f"Success Criteria ({len(info.success_criteria)}):")
@@ -540,7 +541,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
 
 def _interactive_approval(request):
     """Interactive approval callback for HITL mode."""
-    from framework.graph import ApprovalResult, ApprovalDecision
+    from framework.graph import ApprovalDecision, ApprovalResult
 
     print()
     print("=" * 60)
@@ -607,8 +608,9 @@ def _interactive_approval(request):
 
 def _format_natural_language_to_json(user_input: str, input_keys: list[str], agent_description: str, session_context: dict = None) -> dict:
     """Use Haiku to convert natural language input to JSON based on agent's input schema."""
-    import anthropic
     import os
+
+    import anthropic
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -619,7 +621,7 @@ def _format_natural_language_to_json(user_input: str, input_keys: list[str], age
         main_field = input_keys[0] if input_keys else "objective"
         existing_value = session_context.get(main_field, "")
 
-        session_info = f"\n\nExisting {main_field}: \"{existing_value}\"\n\nThe user is providing ADDITIONAL information. Append this new information to the existing {main_field} to create an enriched, more detailed version."
+        session_info = f'\n\nExisting {main_field}: "{existing_value}"\n\nThe user is providing ADDITIONAL information. Append this new information to the existing {main_field} to create an enriched, more detailed version.'
 
     prompt = f"""You are formatting user input for an agent that requires specific input fields.
 
@@ -661,12 +663,13 @@ Output ONLY valid JSON, no explanation:"""
 def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
     import logging
+
     from framework.runner import AgentRunner
 
     # Configure logging to show runtime visibility
     logging.basicConfig(
         level=logging.INFO,
-        format='%(message)s',  # Simple format for clean output
+        format="%(message)s",  # Simple format for clean output
     )
 
     agents_dir = Path(args.agents_dir)
@@ -690,7 +693,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
         return 1
 
     # Set up approval callback by default (unless --no-approve is set)
-    if not getattr(args, 'no_approve', False):
+    if not getattr(args, "no_approve", False):
         runner.set_approval_callback(_interactive_approval)
         print("\n🔔 Human-in-the-loop mode enabled")
         print("   Steps marked for approval will pause for your review")
@@ -748,8 +751,8 @@ def cmd_shell(args: argparse.Namespace) -> int:
         if user_input == "/nodes":
             print("\nAgent nodes:")
             for node in info.nodes:
-                inputs = f" [in: {', '.join(node['input_keys'])}]" if node.get('input_keys') else ""
-                outputs = f" [out: {', '.join(node['output_keys'])}]" if node.get('output_keys') else ""
+                inputs = f" [in: {', '.join(node['input_keys'])}]" if node.get("input_keys") else ""
+                outputs = f" [out: {', '.join(node['output_keys'])}]" if node.get("output_keys") else ""
                 print(f"  {node['id']}: {node['name']}{inputs}{outputs}")
                 print(f"    {node['description']}")
             print()

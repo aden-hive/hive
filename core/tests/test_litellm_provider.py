@@ -10,11 +10,11 @@ For live tests (requires API keys):
 """
 
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from framework.llm.litellm import LiteLLMProvider
 from framework.llm.anthropic import AnthropicProvider
-from framework.llm.provider import LLMProvider, Tool, ToolUse, ToolResult
+from framework.llm.litellm import LiteLLMProvider
+from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
 
 
 class TestLiteLLMProviderInit:

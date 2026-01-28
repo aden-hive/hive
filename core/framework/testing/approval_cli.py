@@ -6,19 +6,19 @@ This CLI provides the interactive approval workflow.
 """
 
 import json
-import tempfile
-import subprocess
 import os
-from typing import Callable
+import subprocess
+import tempfile
+from collections.abc import Callable
 
-from framework.testing.test_case import Test
-from framework.testing.test_storage import TestStorage
 from framework.testing.approval_types import (
     ApprovalAction,
     ApprovalRequest,
     ApprovalResult,
     BatchApprovalResult,
 )
+from framework.testing.test_case import Test
+from framework.testing.test_storage import TestStorage
 
 
 def interactive_approval(

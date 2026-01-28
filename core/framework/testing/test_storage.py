@@ -6,10 +6,10 @@ storing tests as JSON files with indexes for efficient querying.
 """
 
 import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-from framework.testing.test_case import Test, ApprovalStatus, TestType
+from framework.testing.test_case import ApprovalStatus, Test, TestType
 from framework.testing.test_result import TestResult
 
 
