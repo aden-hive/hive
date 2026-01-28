@@ -93,6 +93,7 @@ class BuildSession:
                     "on_success": EdgeCondition.ON_SUCCESS,
                     "on_failure": EdgeCondition.ON_FAILURE,
                     "conditional": EdgeCondition.CONDITIONAL,
+                    "llm_decide": EdgeCondition.LLM_DECIDE,
                 }
                 e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
             session.edges.append(EdgeSpec(**e))
@@ -629,6 +630,7 @@ def add_edge(
         "on_success": EdgeCondition.ON_SUCCESS,
         "on_failure": EdgeCondition.ON_FAILURE,
         "conditional": EdgeCondition.CONDITIONAL,
+        "llm_decide": EdgeCondition.LLM_DECIDE,
     }
     edge_condition = condition_map.get(condition, EdgeCondition.ON_SUCCESS)
 
