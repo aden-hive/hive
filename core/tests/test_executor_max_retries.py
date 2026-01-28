@@ -5,7 +5,7 @@ This test verifies the fix for Issue #363 where GraphExecutor was ignoring
 the max_retries field in NodeSpec and using a hardcoded value of 3.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -28,13 +28,11 @@ class FlakyTestNode(NodeProtocol):
 
         if self.attempt_count <= self.fail_times:
             return NodeResult(
-                success=False,
-                error=f"Transient error (attempt {self.attempt_count})"
+                success=False, error=f"Transient error (attempt {self.attempt_count})"
             )
 
         return NodeResult(
-            success=True,
-            output={"result": f"succeeded after {self.attempt_count} attempts"}
+            success=True, output={"result": f"succeeded after {self.attempt_count} attempts"}
         )
 
 
@@ -46,10 +44,13 @@ class AlwaysFailsNode(NodeProtocol):
 
     async def execute(self, ctx: NodeContext) -> NodeResult:
         self.attempt_count += 1
-        return NodeResult(
-            success=False,
-            error=f"Permanent error (attempt {self.attempt_count})"
-        )
+        return NodeResult(success=False, error=f"Permanent error (attempt {self.attempt_count})")
+
+
+@pytest.fixture(autouse=True)
+def fast_sleep(monkeypatch):
+    """Mock asyncio.sleep to avoid real delays from exponential backoff."""
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
 
 
 @pytest.fixture
@@ -79,7 +80,7 @@ async def test_executor_respects_custom_max_retries_high(runtime):
         description="A node that fails multiple times before succeeding",
         max_retries=10,  # Should allow 10 retries
         node_type="function",
-        output_keys=["result"]
+        output_keys=["result"],
     )
 
     # Create graph
@@ -90,15 +91,11 @@ async def test_executor_respects_custom_max_retries_high(runtime):
         entry_node="flaky_node",
         nodes=[node_spec],
         edges=[],
-        terminal_nodes=["flaky_node"]
+        terminal_nodes=["flaky_node"],
     )
 
     # Create goal
-    goal = Goal(
-        id="test_goal",
-        name="Test Goal",
-        description="Test that max_retries is respected"
-    )
+    goal = Goal(id="test_goal", name="Test Goal", description="Test that max_retries is respected")
 
     # Create executor and register flaky node (fails 5 times, succeeds on 6th)
     executor = GraphExecutor(runtime=runtime)
@@ -108,7 +105,7 @@ async def test_executor_respects_custom_max_retries_high(runtime):
     # Execute
     result = await executor.execute(graph, goal, {})
 
-    # Should succeed because 5 failures < 10 max_retries (max_retries=N means N total attempts allowed)
+    # Should succeed because 5 failures < 10 max_retries (N total attempts allowed)
     assert result.success
     assert flaky_node.attempt_count == 6  # 5 failures + 1 success
 
@@ -127,7 +124,7 @@ async def test_executor_respects_custom_max_retries_low(runtime):
         description="A node with low retry tolerance",
         max_retries=2,  # max_retries=N means N total attempts allowed
         node_type="function",
-        output_keys=["result"]
+        output_keys=["result"],
     )
 
     # Create graph
@@ -138,15 +135,11 @@ async def test_executor_respects_custom_max_retries_low(runtime):
         entry_node="fragile_node",
         nodes=[node_spec],
         edges=[],
-        terminal_nodes=["fragile_node"]
+        terminal_nodes=["fragile_node"],
     )
 
     # Create goal
-    goal = Goal(
-        id="test_goal",
-        name="Test Goal",
-        description="Test low max_retries"
-    )
+    goal = Goal(id="test_goal", name="Test Goal", description="Test low max_retries")
 
     # Create executor and register always-failing node
     executor = GraphExecutor(runtime=runtime)
@@ -174,7 +167,7 @@ async def test_executor_respects_default_max_retries(runtime):
         description="A node using default retry settings",
         # max_retries not specified, should default to 3
         node_type="function",
-        output_keys=["result"]
+        output_keys=["result"],
     )
 
     # Create graph
@@ -185,15 +178,11 @@ async def test_executor_respects_default_max_retries(runtime):
         entry_node="default_node",
         nodes=[node_spec],
         edges=[],
-        terminal_nodes=["default_node"]
+        terminal_nodes=["default_node"],
     )
 
     # Create goal
-    goal = Goal(
-        id="test_goal",
-        name="Test Goal",
-        description="Test default max_retries"
-    )
+    goal = Goal(id="test_goal", name="Test Goal", description="Test default max_retries")
 
     # Create executor with always-failing node
     executor = GraphExecutor(runtime=runtime)
@@ -223,7 +212,7 @@ async def test_executor_max_retries_two_succeeds_on_second(runtime):
         description="A node with two attempts allowed",
         max_retries=2,  # max_retries=N means N total attempts allowed
         node_type="function",
-        output_keys=["result"]
+        output_keys=["result"],
     )
 
     # Create graph
@@ -234,15 +223,11 @@ async def test_executor_max_retries_two_succeeds_on_second(runtime):
         entry_node="two_retry_node",
         nodes=[node_spec],
         edges=[],
-        terminal_nodes=["two_retry_node"]
+        terminal_nodes=["two_retry_node"],
     )
 
     # Create goal
-    goal = Goal(
-        id="test_goal",
-        name="Test Goal",
-        description="Test max_retries=2"
-    )
+    goal = Goal(id="test_goal", name="Test Goal", description="Test max_retries=2")
 
     # Create executor with node that fails once, succeeds on second try
     executor = GraphExecutor(runtime=runtime)
@@ -269,7 +254,7 @@ async def test_executor_different_nodes_different_max_retries(runtime):
         description="First node in multi-node test",
         max_retries=2,
         node_type="function",
-        output_keys=["result1"]
+        output_keys=["result1"],
     )
 
     node2_spec = NodeSpec(
@@ -279,7 +264,7 @@ async def test_executor_different_nodes_different_max_retries(runtime):
         max_retries=5,
         node_type="function",
         input_keys=["result1"],
-        output_keys=["result2"]
+        output_keys=["result2"],
     )
 
     # Note: This test would require more complex graph setup with edges

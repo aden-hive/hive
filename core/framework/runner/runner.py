@@ -103,16 +103,18 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     # Build AsyncEntryPointSpec objects for multi-entry-point support
     async_entry_points = []
     for aep_data in graph_data.get("async_entry_points", []):
-        async_entry_points.append(AsyncEntryPointSpec(
-            id=aep_data["id"],
-            name=aep_data.get("name", aep_data["id"]),
-            entry_node=aep_data["entry_node"],
-            trigger_type=aep_data.get("trigger_type", "manual"),
-            trigger_config=aep_data.get("trigger_config", {}),
-            isolation_level=aep_data.get("isolation_level", "shared"),
-            priority=aep_data.get("priority", 0),
-            max_concurrent=aep_data.get("max_concurrent", 10),
-        ))
+        async_entry_points.append(
+            AsyncEntryPointSpec(
+                id=aep_data["id"],
+                name=aep_data.get("name", aep_data["id"]),
+                entry_node=aep_data["entry_node"],
+                trigger_type=aep_data.get("trigger_type", "manual"),
+                trigger_config=aep_data.get("trigger_config", {}),
+                isolation_level=aep_data.get("isolation_level", "shared"),
+                priority=aep_data.get("priority", 0),
+                max_concurrent=aep_data.get("max_concurrent", 10),
+            )
+        )
 
     # Build GraphSpec
     graph = GraphSpec(
@@ -136,23 +138,27 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
 
     success_criteria = []
     for sc_data in goal_data.get("success_criteria", []):
-        success_criteria.append(SuccessCriterion(
-            id=sc_data["id"],
-            description=sc_data["description"],
-            metric=sc_data.get("metric", ""),
-            target=sc_data.get("target", ""),
-            weight=sc_data.get("weight", 1.0),
-        ))
+        success_criteria.append(
+            SuccessCriterion(
+                id=sc_data["id"],
+                description=sc_data["description"],
+                metric=sc_data.get("metric", ""),
+                target=sc_data.get("target", ""),
+                weight=sc_data.get("weight", 1.0),
+            )
+        )
 
     constraints = []
     for c_data in goal_data.get("constraints", []):
-        constraints.append(Constraint(
-            id=c_data["id"],
-            description=c_data["description"],
-            constraint_type=c_data.get("constraint_type", "hard"),
-            category=c_data.get("category", "safety"),
-            check=c_data.get("check", ""),
-        ))
+        constraints.append(
+            Constraint(
+                id=c_data["id"],
+                description=c_data["description"],
+                constraint_type=c_data.get("constraint_type", "hard"),
+                category=c_data.get("category", "safety"),
+                check=c_data.get("check", ""),
+            )
+        )
 
     goal = Goal(
         id=goal_data.get("id", ""),
@@ -380,7 +386,8 @@ class AgentRunner:
                 try:
                     self._tool_registry.register_mcp_server(server_config)
                 except Exception as e:
-                    print(f"Warning: Failed to register MCP server '{server_config.get('name', 'unknown')}': {e}")
+                    server_name = server_config.get("name", "unknown")
+                    print(f"Warning: Failed to register MCP server '{server_name}': {e}")
         except Exception as e:
             print(f"Warning: Failed to load MCP servers config from {config_path}: {e}")
 
@@ -410,13 +417,19 @@ class AgentRunner:
             session_id=session_id,
         )
 
-        # Create LLM provider (if not mock mode and API key available)
+        # Create LLM provider
         # Uses LiteLLM which auto-detects the provider from model name
-        if not self.mock_mode:
+        if self.mock_mode:
+            # Use mock LLM for testing without real API calls
+            from framework.llm.mock import MockLLMProvider
+
+            self._llm = MockLLMProvider(model=self.model)
+        else:
             # Detect required API key from model name
             api_key_env = self._get_api_key_env_var(self.model)
             if api_key_env and os.environ.get(api_key_env):
                 from framework.llm.litellm import LiteLLMProvider
+
                 self._llm = LiteLLMProvider(model=self.model)
             elif api_key_env:
                 print(f"Warning: {api_key_env} not set. LLM calls will fail.")
@@ -761,7 +774,12 @@ class AgentRunner:
             entry_node=self.graph.entry_node,
             terminal_nodes=self.graph.terminal_nodes,
             success_criteria=[
-                {"id": sc.id, "description": sc.description, "metric": sc.metric, "target": sc.target}
+                {
+                    "id": sc.id,
+                    "description": sc.description,
+                    "metric": sc.metric,
+                    "target": sc.target,
+                }
                 for sc in self.goal.success_criteria
             ],
             constraints=[
@@ -811,7 +829,7 @@ class AgentRunner:
 
             # Check tool credentials (Tier 2)
             missing_creds = cred_manager.get_missing_for_tools(info.required_tools)
-            for _cred_name, spec in missing_creds:
+            for _, spec in missing_creds:
                 missing_credentials.append(spec.env_var)
                 affected_tools = [t for t in info.required_tools if t in spec.tools]
                 tools_str = ", ".join(affected_tools)
@@ -823,7 +841,7 @@ class AgentRunner:
             # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
             node_types = list({node.node_type for node in self.graph.nodes})
             missing_node_creds = cred_manager.get_missing_for_node_types(node_types)
-            for _cred_name, spec in missing_node_creds:
+            for _, spec in missing_node_creds:
                 if spec.env_var not in missing_credentials:  # Avoid duplicates
                     missing_credentials.append(spec.env_var)
                     affected_types = [t for t in node_types if t in spec.node_types]
@@ -835,8 +853,7 @@ class AgentRunner:
         except ImportError:
             # aden_tools not installed - fall back to direct check
             has_llm_nodes = any(
-                node.node_type in ("llm_generate", "llm_tool_use")
-                for node in self.graph.nodes
+                node.node_type in ("llm_generate", "llm_tool_use") for node in self.graph.nodes
             )
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
@@ -855,7 +872,9 @@ class AgentRunner:
             missing_credentials=missing_credentials,
         )
 
-    async def can_handle(self, request: dict, llm: LLMProvider | None = None) -> "CapabilityResponse":
+    async def can_handle(
+        self, request: dict, llm: LLMProvider | None = None
+    ) -> "CapabilityResponse":
         """
         Ask the agent if it can handle this request.
 
@@ -925,6 +944,7 @@ Respond with JSON only:
 
             # Parse response
             import re
+
             json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())

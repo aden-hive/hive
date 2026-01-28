@@ -28,6 +28,7 @@ from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 
 # === Test Fixtures ===
 
+
 @pytest.fixture
 def sample_goal():
     """Create a sample goal for testing."""
@@ -140,6 +141,7 @@ def temp_storage():
 
 # === SharedStateManager Tests ===
 
+
 class TestSharedStateManager:
     """Tests for SharedStateManager."""
 
@@ -208,6 +210,7 @@ class TestSharedStateManager:
 
 # === EventBus Tests ===
 
+
 class TestEventBus:
     """Tests for EventBus pub/sub."""
 
@@ -225,12 +228,14 @@ class TestEventBus:
             handler=handler,
         )
 
-        await bus.publish(AgentEvent(
-            type=EventType.EXECUTION_STARTED,
-            stream_id="webhook",
-            execution_id="exec-1",
-            data={"test": "data"},
-        ))
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="webhook",
+                execution_id="exec-1",
+                data={"test": "data"},
+            )
+        )
 
         # Allow handler to run
         await asyncio.sleep(0.1)
@@ -255,16 +260,20 @@ class TestEventBus:
         )
 
         # Publish to webhook stream (should be received)
-        await bus.publish(AgentEvent(
-            type=EventType.EXECUTION_STARTED,
-            stream_id="webhook",
-        ))
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="webhook",
+            )
+        )
 
         # Publish to api stream (should NOT be received)
-        await bus.publish(AgentEvent(
-            type=EventType.EXECUTION_STARTED,
-            stream_id="api",
-        ))
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="api",
+            )
+        )
 
         await asyncio.sleep(0.1)
 
@@ -307,11 +316,13 @@ class TestEventBus:
 
         # Publish the event
         await asyncio.sleep(0.1)
-        await bus.publish(AgentEvent(
-            type=EventType.EXECUTION_COMPLETED,
-            stream_id="webhook",
-            execution_id="exec-1",
-        ))
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_COMPLETED,
+                stream_id="webhook",
+                execution_id="exec-1",
+            )
+        )
 
         event = await wait_task
 
@@ -320,6 +331,7 @@ class TestEventBus:
 
 
 # === OutcomeAggregator Tests ===
+
 
 class TestOutcomeAggregator:
     """Tests for OutcomeAggregator."""
@@ -374,6 +386,7 @@ class TestOutcomeAggregator:
 
 
 # === AgentRuntime Tests ===
+
 
 class TestAgentRuntime:
     """Tests for AgentRuntime orchestration."""
@@ -490,6 +503,7 @@ class TestAgentRuntime:
 
 # === GraphSpec Validation Tests ===
 
+
 class TestGraphSpecValidation:
     """Tests for GraphSpec with async_entry_points."""
 
@@ -593,6 +607,7 @@ class TestGraphSpecValidation:
 
 
 # === Integration Tests ===
+
 
 class TestCreateAgentRuntime:
     """Tests for the create_agent_runtime factory."""

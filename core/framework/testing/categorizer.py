@@ -80,15 +80,11 @@ class ErrorCategorizer:
 
     def __init__(self):
         """Initialize categorizer with compiled patterns."""
-        self._logic_patterns = [
-            re.compile(p, re.IGNORECASE) for p in self.LOGIC_ERROR_PATTERNS
-        ]
+        self._logic_patterns = [re.compile(p, re.IGNORECASE) for p in self.LOGIC_ERROR_PATTERNS]
         self._impl_patterns = [
             re.compile(p, re.IGNORECASE) for p in self.IMPLEMENTATION_ERROR_PATTERNS
         ]
-        self._edge_patterns = [
-            re.compile(p, re.IGNORECASE) for p in self.EDGE_CASE_PATTERNS
-        ]
+        self._edge_patterns = [re.compile(p, re.IGNORECASE) for p in self.EDGE_CASE_PATTERNS]
 
     def categorize(self, result: TestResult) -> ErrorCategory | None:
         """
@@ -125,9 +121,7 @@ class ErrorCategorizer:
         # Default to implementation error (most common)
         return ErrorCategory.IMPLEMENTATION_ERROR
 
-    def categorize_with_confidence(
-        self, result: TestResult
-    ) -> tuple[ErrorCategory | None, float]:
+    def categorize_with_confidence(self, result: TestResult) -> tuple[ErrorCategory | None, float]:
         """
         Categorize with a confidence score.
 
@@ -143,15 +137,9 @@ class ErrorCategorizer:
         error_text = self._get_error_text(result)
 
         # Count pattern matches for each category
-        logic_matches = sum(
-            1 for p in self._logic_patterns if p.search(error_text)
-        )
-        impl_matches = sum(
-            1 for p in self._impl_patterns if p.search(error_text)
-        )
-        edge_matches = sum(
-            1 for p in self._edge_patterns if p.search(error_text)
-        )
+        logic_matches = sum(1 for p in self._logic_patterns if p.search(error_text))
+        impl_matches = sum(1 for p in self._impl_patterns if p.search(error_text))
+        edge_matches = sum(1 for p in self._edge_patterns if p.search(error_text))
 
         total_matches = logic_matches + impl_matches + edge_matches
 
@@ -247,14 +235,16 @@ class ErrorCategorizer:
                 "action": "Add new test only",
                 "restart_required": False,
                 "description": (
-                    "This is a new scenario. Add a test for it and continue "
-                    "in the Eval stage."
+                    "This is a new scenario. Add a test for it and continue in the Eval stage."
                 ),
             },
         }
-        return guidance.get(category, {
-            "stage": "Unknown",
-            "action": "Review manually",
-            "restart_required": False,
-            "description": "Unable to determine category. Manual review required.",
-        })
+        return guidance.get(
+            category,
+            {
+                "stage": "Unknown",
+                "action": "Review manually",
+                "restart_required": False,
+                "description": "Unable to determine category. Manual review required.",
+            },
+        )

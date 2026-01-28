@@ -34,6 +34,7 @@ class TestStorage:
       suites/
         {goal_id}_suite.json       # Test suite metadata
     """
+
     __test__ = False  # Not a pytest test class
 
     def __init__(self, base_path: str | Path):
@@ -198,8 +199,7 @@ class TestStorage:
 
         # Get all result files except latest.json
         result_files = sorted(
-            [f for f in results_dir.glob("*.json") if f.name != "latest.json"],
-            reverse=True
+            [f for f in results_dir.glob("*.json") if f.name != "latest.json"], reverse=True
         )[:limit]
 
         results = []
