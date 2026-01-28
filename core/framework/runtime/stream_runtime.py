@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from framework.observability import set_trace_context
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.concurrent import ConcurrentStorage
@@ -119,6 +120,19 @@ class StreamRuntime:
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id = f"run_{self.stream_id}_{timestamp}_{uuid.uuid4().hex[:8]}"
+
+        # Generate trace_id for correlation across entire execution
+        # Full UUID (128 bits) for uniqueness, displayed shortened in human mode
+        trace_id = f"tr_{uuid.uuid4().hex}"
+
+        # Set trace context - automatically propagates to all logs in this execution
+        set_trace_context(
+            trace_id=trace_id,
+            execution_id=execution_id,
+            run_id=run_id,
+            goal_id=goal_id,
+            stream_id=self.stream_id,
+        )
 
         run = Run(
             id=run_id,

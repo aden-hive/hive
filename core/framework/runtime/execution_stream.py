@@ -314,6 +314,13 @@ class ExecutionStream:
                 # Create runtime adapter for this execution
                 runtime_adapter = StreamRuntimeAdapter(self._runtime, execution_id)
 
+                # Start run to set trace context (CRITICAL for observability)
+                runtime_adapter.start_run(
+                    goal_id=self.goal.id,
+                    goal_description=self.goal.description,
+                    input_data=ctx.input_data,
+                )
+
                 # Create executor for this execution
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
@@ -336,6 +343,13 @@ class ExecutionStream:
 
                 # Store result with retention
                 self._record_execution_result(execution_id, result)
+
+                # End run to complete trace (for observability)
+                runtime_adapter.end_run(
+                    success=result.success,
+                    narrative=f"Execution {'succeeded' if result.success else 'failed'}",
+                    output_data=result.output,
+                )
 
                 # Update context
                 ctx.completed_at = datetime.now()
@@ -378,6 +392,16 @@ class ExecutionStream:
                         error=str(e),
                     ),
                 )
+
+                # End run with failure (for observability)
+                try:
+                    runtime_adapter.end_run(
+                        success=False,
+                        narrative=f"Execution failed: {str(e)}",
+                        output_data={},
+                    )
+                except Exception:
+                    pass  # Don't let end_run errors mask the original error
 
                 # Emit failure event
                 if self._event_bus:
