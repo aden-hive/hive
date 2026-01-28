@@ -1,13 +1,12 @@
 """Tests for the storage module - FileStorage and ConcurrentStorage backends."""
 
-import asyncio
 import json
 import time
 from pathlib import Path
 
 import pytest
 
-from framework.schemas.run import Run, RunMetrics, RunStatus, RunSummary
+from framework.schemas.run import Run, RunMetrics, RunStatus
 from framework.storage.backend import FileStorage
 from framework.storage.concurrent import CacheEntry, ConcurrentStorage
 
@@ -45,7 +44,7 @@ class TestFileStorageBasics:
 
     def test_init_creates_directories(self, tmp_path: Path):
         """FileStorage should create the directory structure on init."""
-        storage = FileStorage(tmp_path)
+        FileStorage(tmp_path)
 
         assert (tmp_path / "runs").exists()
         assert (tmp_path / "summaries").exists()
