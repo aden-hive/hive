@@ -13,17 +13,15 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import SecretStr
 
 from .models import (
-    CredentialError,
     CredentialKey,
     CredentialObject,
     CredentialRefreshError,
-    CredentialType,
     CredentialUsageSpec,
 )
 from .provider import CredentialProvider, StaticProvider
@@ -69,8 +67,8 @@ class CredentialStore:
 
     def __init__(
         self,
-        storage: Optional[CredentialStorage] = None,
-        providers: Optional[List[CredentialProvider]] = None,
+        storage: CredentialStorage | None = None,
+        providers: list[CredentialProvider] | None = None,
         cache_ttl_seconds: int = 300,
         auto_refresh: bool = True,
     ):
@@ -84,11 +82,11 @@ class CredentialStore:
             auto_refresh: Whether to auto-refresh expired credentials on access.
         """
         self._storage = storage or EnvVarStorage()
-        self._providers: Dict[str, CredentialProvider] = {}
-        self._usage_specs: Dict[str, CredentialUsageSpec] = {}
+        self._providers: dict[str, CredentialProvider] = {}
+        self._usage_specs: dict[str, CredentialUsageSpec] = {}
 
         # Cache: credential_id -> (CredentialObject, cached_at)
-        self._cache: Dict[str, tuple[CredentialObject, datetime]] = {}
+        self._cache: dict[str, tuple[CredentialObject, datetime]] = {}
         self._cache_ttl = cache_ttl_seconds
         self._lock = threading.RLock()
 
@@ -113,7 +111,7 @@ class CredentialStore:
         self._providers[provider.provider_id] = provider
         logger.debug(f"Registered credential provider: {provider.provider_id}")
 
-    def get_provider(self, provider_id: str) -> Optional[CredentialProvider]:
+    def get_provider(self, provider_id: str) -> CredentialProvider | None:
         """
         Get a provider by ID.
 
@@ -125,7 +123,9 @@ class CredentialStore:
         """
         return self._providers.get(provider_id)
 
-    def get_provider_for_credential(self, credential: CredentialObject) -> Optional[CredentialProvider]:
+    def get_provider_for_credential(
+        self, credential: CredentialObject
+    ) -> CredentialProvider | None:
         """
         Get the appropriate provider for a credential.
 
@@ -159,7 +159,7 @@ class CredentialStore:
         """
         self._usage_specs[spec.credential_id] = spec
 
-    def get_usage_spec(self, credential_id: str) -> Optional[CredentialUsageSpec]:
+    def get_usage_spec(self, credential_id: str) -> CredentialUsageSpec | None:
         """
         Get the usage spec for a credential.
 
@@ -177,7 +177,7 @@ class CredentialStore:
         self,
         credential_id: str,
         refresh_if_needed: bool = True,
-    ) -> Optional[CredentialObject]:
+    ) -> CredentialObject | None:
         """
         Get a credential by ID.
 
@@ -210,7 +210,7 @@ class CredentialStore:
 
             return credential
 
-    def get_key(self, credential_id: str, key_name: str) -> Optional[str]:
+    def get_key(self, credential_id: str, key_name: str) -> str | None:
         """
         Convenience method to get a specific key value.
 
@@ -226,7 +226,7 @@ class CredentialStore:
             return None
         return credential.get_key(key_name)
 
-    def get(self, credential_id: str) -> Optional[str]:
+    def get(self, credential_id: str) -> str | None:
         """
         Legacy compatibility: get the primary key value.
 
@@ -262,7 +262,7 @@ class CredentialStore:
         """
         return self._resolver.resolve(template)
 
-    def resolve_headers(self, headers: Dict[str, str]) -> Dict[str, str]:
+    def resolve_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """
         Resolve credential templates in headers dictionary.
 
@@ -280,7 +280,7 @@ class CredentialStore:
         """
         return self._resolver.resolve_headers(headers)
 
-    def resolve_params(self, params: Dict[str, str]) -> Dict[str, str]:
+    def resolve_params(self, params: dict[str, str]) -> dict[str, str]:
         """
         Resolve credential templates in query parameters dictionary.
 
@@ -292,7 +292,7 @@ class CredentialStore:
         """
         return self._resolver.resolve_params(params)
 
-    def resolve_for_usage(self, credential_id: str) -> Dict[str, Any]:
+    def resolve_for_usage(self, credential_id: str) -> dict[str, Any]:
         """
         Get resolved request kwargs for a registered usage spec.
 
@@ -309,7 +309,7 @@ class CredentialStore:
         if spec is None:
             raise ValueError(f"No usage spec registered for '{credential_id}'")
 
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         if spec.headers:
             result["headers"] = self.resolve_headers(spec.headers)
@@ -353,7 +353,7 @@ class CredentialStore:
                 logger.info(f"Deleted credential '{credential_id}'")
             return result
 
-    def list_credentials(self) -> List[str]:
+    def list_credentials(self) -> list[str]:
         """
         List all available credential IDs.
 
@@ -376,7 +376,7 @@ class CredentialStore:
 
     # --- Validation ---
 
-    def validate_for_usage(self, credential_id: str) -> List[str]:
+    def validate_for_usage(self, credential_id: str) -> list[str]:
         """
         Validate that a credential meets its usage spec requirements.
 
@@ -401,7 +401,7 @@ class CredentialStore:
 
         return errors
 
-    def validate_all(self) -> Dict[str, List[str]]:
+    def validate_all(self) -> dict[str, list[str]]:
         """
         Validate all registered usage specs.
 
@@ -462,7 +462,7 @@ class CredentialStore:
 
         try:
             refreshed = provider.refresh(credential)
-            refreshed.last_refreshed = datetime.now(timezone.utc)
+            refreshed.last_refreshed = datetime.now(UTC)
 
             # Persist the refreshed credential
             self._storage.save(refreshed)
@@ -475,7 +475,7 @@ class CredentialStore:
             logger.error(f"Failed to refresh credential '{credential.id}': {e}")
             return credential
 
-    def refresh_credential(self, credential_id: str) -> Optional[CredentialObject]:
+    def refresh_credential(self, credential_id: str) -> CredentialObject | None:
         """
         Manually refresh a credential.
 
@@ -496,13 +496,13 @@ class CredentialStore:
 
     # --- Caching ---
 
-    def _get_from_cache(self, credential_id: str) -> Optional[CredentialObject]:
+    def _get_from_cache(self, credential_id: str) -> CredentialObject | None:
         """Get credential from cache if not expired."""
         if credential_id not in self._cache:
             return None
 
         credential, cached_at = self._cache[credential_id]
-        age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+        age = (datetime.now(UTC) - cached_at).total_seconds()
 
         if age > self._cache_ttl:
             del self._cache[credential_id]
@@ -512,7 +512,7 @@ class CredentialStore:
 
     def _add_to_cache(self, credential: CredentialObject) -> None:
         """Add credential to cache."""
-        self._cache[credential.id] = (credential, datetime.now(timezone.utc))
+        self._cache[credential.id] = (credential, datetime.now(UTC))
 
     def _remove_from_cache(self, credential_id: str) -> None:
         """Remove credential from cache."""
@@ -528,8 +528,8 @@ class CredentialStore:
     @classmethod
     def for_testing(
         cls,
-        credentials: Dict[str, Dict[str, str]],
-    ) -> "CredentialStore":
+        credentials: dict[str, dict[str, str]],
+    ) -> CredentialStore:
         """
         Create a credential store for testing with mock credentials.
 
@@ -550,7 +550,7 @@ class CredentialStore:
             })
         """
         # Convert test data to CredentialObjects
-        cred_objects: Dict[str, CredentialObject] = {}
+        cred_objects: dict[str, CredentialObject] = {}
 
         for cred_id, keys in credentials.items():
             cred_objects[cred_id] = CredentialObject(
@@ -567,9 +567,9 @@ class CredentialStore:
     def with_encrypted_storage(
         cls,
         base_path: str,
-        providers: Optional[List[CredentialProvider]] = None,
+        providers: list[CredentialProvider] | None = None,
         **kwargs: Any,
-    ) -> "CredentialStore":
+    ) -> CredentialStore:
         """
         Create a credential store with encrypted file storage.
 
@@ -592,10 +592,10 @@ class CredentialStore:
     @classmethod
     def with_env_storage(
         cls,
-        env_mapping: Optional[Dict[str, str]] = None,
-        providers: Optional[List[CredentialProvider]] = None,
+        env_mapping: dict[str, str] | None = None,
+        providers: list[CredentialProvider] | None = None,
         **kwargs: Any,
-    ) -> "CredentialStore":
+    ) -> CredentialStore:
         """
         Create a credential store with environment variable storage.
 

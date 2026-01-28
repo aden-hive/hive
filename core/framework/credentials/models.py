@@ -7,16 +7,16 @@ containing one or more keys (e.g., api_key, access_token, refresh_token).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field, SecretStr
 
 
 def _utc_now() -> datetime:
     """Get current UTC time as timezone-aware datetime."""
-    return datetime.now(timezone.utc)
-from typing import Any, Dict, List, Optional
-
-from pydantic import BaseModel, Field, SecretStr
+    return datetime.now(UTC)
 
 
 class CredentialType(str, Enum):
@@ -53,8 +53,8 @@ class CredentialKey(BaseModel):
 
     name: str
     value: SecretStr
-    expires_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"extra": "allow"}
 
@@ -63,7 +63,7 @@ class CredentialKey(BaseModel):
         """Check if this key has expired."""
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc) >= self.expires_at
+        return datetime.now(UTC) >= self.expires_at
 
     def get_secret_value(self) -> str:
         """Get the actual secret value (use sparingly)."""
@@ -98,28 +98,29 @@ class CredentialObject(BaseModel):
 
     id: str = Field(description="Unique identifier (e.g., 'brave_search', 'github_oauth')")
     credential_type: CredentialType = CredentialType.API_KEY
-    keys: Dict[str, CredentialKey] = Field(default_factory=dict)
+    keys: dict[str, CredentialKey] = Field(default_factory=dict)
 
     # Lifecycle management
-    provider_id: Optional[str] = Field(
-        default=None, description="ID of provider responsible for lifecycle (e.g., 'oauth2', 'static')"
+    provider_id: str | None = Field(
+        default=None,
+        description="ID of provider responsible for lifecycle (e.g., 'oauth2', 'static')",
     )
-    last_refreshed: Optional[datetime] = None
+    last_refreshed: datetime | None = None
     auto_refresh: bool = False
 
     # Usage tracking
-    last_used: Optional[datetime] = None
+    last_used: datetime | None = None
     use_count: int = 0
 
     # Metadata
     description: str = ""
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
 
     model_config = {"extra": "allow"}
 
-    def get_key(self, key_name: str) -> Optional[str]:
+    def get_key(self, key_name: str) -> str | None:
         """
         Get a specific key's value.
 
@@ -138,8 +139,8 @@ class CredentialObject(BaseModel):
         self,
         key_name: str,
         value: str,
-        expires_at: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        expires_at: datetime | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Set or update a key.
@@ -156,7 +157,7 @@ class CredentialObject(BaseModel):
             expires_at=expires_at,
             metadata=metadata or {},
         )
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def has_key(self, key_name: str) -> bool:
         """Check if a key exists."""
@@ -179,10 +180,10 @@ class CredentialObject(BaseModel):
 
     def record_usage(self) -> None:
         """Record that this credential was used."""
-        self.last_used = datetime.now(timezone.utc)
+        self.last_used = datetime.now(UTC)
         self.use_count += 1
 
-    def get_default_key(self) -> Optional[str]:
+    def get_default_key(self) -> str | None:
         """
         Get the default key value.
 
@@ -232,18 +233,18 @@ class CredentialUsageSpec(BaseModel):
     """
 
     credential_id: str = Field(description="ID of credential to use (e.g., 'brave_search')")
-    required_keys: List[str] = Field(default_factory=list, description="Keys that must be present")
+    required_keys: list[str] = Field(default_factory=list, description="Keys that must be present")
 
     # Injection templates (bipartisan model)
-    headers: Dict[str, str] = Field(
+    headers: dict[str, str] = Field(
         default_factory=dict,
         description="Header templates (e.g., {'Authorization': 'Bearer {{access_token}}'})",
     )
-    query_params: Dict[str, str] = Field(
+    query_params: dict[str, str] = Field(
         default_factory=dict,
         description="Query param templates (e.g., {'api_key': '{{api_key}}'})",
     )
-    body_fields: Dict[str, str] = Field(
+    body_fields: dict[str, str] = Field(
         default_factory=dict,
         description="Request body field templates",
     )

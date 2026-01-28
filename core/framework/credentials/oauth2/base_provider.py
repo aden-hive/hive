@@ -8,13 +8,18 @@ OAuth2 servers. OSS users can extend this class for custom providers.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import urlencode
 
 from ..models import CredentialObject, CredentialRefreshError, CredentialType
 from ..provider import CredentialProvider
-from .provider import OAuth2Config, OAuth2Error, OAuth2Token, RefreshTokenInvalidError, TokenPlacement
+from .provider import (
+    OAuth2Config,
+    OAuth2Error,
+    OAuth2Token,
+    TokenPlacement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +77,14 @@ class BaseOAuth2Provider(CredentialProvider):
         """
         self.config = config
         self._provider_id = provider_id
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
 
     @property
     def provider_id(self) -> str:
         return self._provider_id
 
     @property
-    def supported_types(self) -> List[CredentialType]:
+    def supported_types(self) -> list[CredentialType]:
         return [CredentialType.OAUTH2, CredentialType.BEARER_TOKEN]
 
     def _get_client(self) -> Any:
@@ -90,7 +95,9 @@ class BaseOAuth2Provider(CredentialProvider):
 
                 self._client = httpx.Client(timeout=self.config.request_timeout)
             except ImportError as e:
-                raise ImportError("OAuth2 provider requires 'httpx'. Install with: pip install httpx") from e
+                raise ImportError(
+                    "OAuth2 provider requires 'httpx'. Install with: pip install httpx"
+                ) from e
         return self._client
 
     def _close_client(self) -> None:
@@ -109,7 +116,7 @@ class BaseOAuth2Provider(CredentialProvider):
         self,
         state: str,
         redirect_uri: str,
-        scopes: Optional[List[str]] = None,
+        scopes: list[str] | None = None,
         **kwargs: Any,
     ) -> str:
         """
@@ -175,7 +182,7 @@ class BaseOAuth2Provider(CredentialProvider):
 
     def client_credentials_grant(
         self,
-        scopes: Optional[List[str]] = None,
+        scopes: list[str] | None = None,
         **kwargs: Any,
     ) -> OAuth2Token:
         """
@@ -209,7 +216,7 @@ class BaseOAuth2Provider(CredentialProvider):
     def refresh_access_token(
         self,
         refresh_token: str,
-        scopes: Optional[List[str]] = None,
+        scopes: list[str] | None = None,
         **kwargs: Any,
     ) -> OAuth2Token:
         """
@@ -316,7 +323,7 @@ class BaseOAuth2Provider(CredentialProvider):
         if new_token.refresh_token and new_token.refresh_token != refresh_tok:
             credential.set_key("refresh_token", new_token.refresh_token)
 
-        credential.last_refreshed = datetime.now(timezone.utc)
+        credential.last_refreshed = datetime.now(UTC)
         logger.info(f"Refreshed OAuth2 credential '{credential.id}'")
 
         return credential
@@ -350,7 +357,7 @@ class BaseOAuth2Provider(CredentialProvider):
             return False
 
         buffer = timedelta(minutes=5)
-        return datetime.now(timezone.utc) >= (access_key.expires_at - buffer)
+        return datetime.now(UTC) >= (access_key.expires_at - buffer)
 
     def revoke(self, credential: CredentialObject) -> bool:
         """
@@ -380,7 +387,7 @@ class BaseOAuth2Provider(CredentialProvider):
 
     # --- Token Request Helpers ---
 
-    def _token_request(self, data: Dict[str, Any]) -> OAuth2Token:
+    def _token_request(self, data: dict[str, Any]) -> OAuth2Token:
         """
         Make a token request to the OAuth2 server.
 
@@ -415,11 +422,13 @@ class BaseOAuth2Provider(CredentialProvider):
         if response.status_code != 200 or "error" in response_data:
             error = response_data.get("error", "unknown_error")
             description = response_data.get("error_description", response.text)
-            raise OAuth2Error(error=error, description=description, status_code=response.status_code)
+            raise OAuth2Error(
+                error=error, description=description, status_code=response.status_code
+            )
 
         return OAuth2Token.from_token_response(response_data)
 
-    def _parse_form_response(self, text: str) -> Dict[str, str]:
+    def _parse_form_response(self, text: str) -> dict[str, str]:
         """Parse form-encoded response (some providers use this instead of JSON)."""
         from urllib.parse import parse_qs
 
@@ -428,7 +437,7 @@ class BaseOAuth2Provider(CredentialProvider):
 
     # --- Token Formatting for Requests ---
 
-    def format_for_request(self, token: OAuth2Token) -> Dict[str, Any]:
+    def format_for_request(self, token: OAuth2Token) -> dict[str, Any]:
         """
         Format token for use in HTTP requests (bipartisan model).
 
@@ -455,7 +464,7 @@ class BaseOAuth2Provider(CredentialProvider):
 
         return {}
 
-    def format_credential_for_request(self, credential: CredentialObject) -> Dict[str, Any]:
+    def format_credential_for_request(self, credential: CredentialObject) -> dict[str, Any]:
         """
         Format a credential for use in HTTP requests.
 

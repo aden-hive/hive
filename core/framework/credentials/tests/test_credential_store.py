@@ -12,24 +12,17 @@ Tests cover:
 
 import os
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
-
 from core.framework.credentials import (
-    BearerTokenProvider,
     CompositeStorage,
-    CredentialError,
     CredentialKey,
     CredentialKeyNotFoundError,
     CredentialNotFoundError,
     CredentialObject,
-    CredentialProvider,
-    CredentialRefreshError,
-    CredentialStorage,
     CredentialStore,
     CredentialType,
     CredentialUsageSpec,
@@ -39,6 +32,7 @@ from core.framework.credentials import (
     StaticProvider,
     TemplateResolver,
 )
+from pydantic import SecretStr
 
 
 class TestCredentialKey:
@@ -54,13 +48,13 @@ class TestCredentialKey:
 
     def test_key_with_expiration(self):
         """Test key with expiration time."""
-        future = datetime.now(timezone.utc) + timedelta(hours=1)
+        future = datetime.now(UTC) + timedelta(hours=1)
         key = CredentialKey(name="token", value=SecretStr("xxx"), expires_at=future)
         assert not key.is_expired
 
     def test_expired_key(self):
         """Test that expired key is detected."""
-        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        past = datetime.now(UTC) - timedelta(hours=1)
         key = CredentialKey(name="token", value=SecretStr("xxx"), expires_at=past)
         assert key.is_expired
 
@@ -111,13 +105,13 @@ class TestCredentialObject:
     def test_set_key_with_expiration(self):
         """Test setting a key with expiration."""
         cred = CredentialObject(id="test", keys={})
-        expires = datetime.now(timezone.utc) + timedelta(hours=1)
+        expires = datetime.now(UTC) + timedelta(hours=1)
         cred.set_key("token", "xxx", expires_at=expires)
         assert cred.keys["token"].expires_at == expires
 
     def test_needs_refresh(self):
         """Test needs_refresh property."""
-        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        past = datetime.now(UTC) - timedelta(hours=1)
         cred = CredentialObject(
             id="test",
             keys={"token": CredentialKey(name="token", value=SecretStr("xxx"), expires_at=past)},
@@ -136,7 +130,9 @@ class TestCredentialObject:
         # With access_token
         cred2 = CredentialObject(
             id="test",
-            keys={"access_token": CredentialKey(name="access_token", value=SecretStr("token-value"))},
+            keys={
+                "access_token": CredentialKey(name="access_token", value=SecretStr("token-value"))
+            },
         )
         assert cred2.get_default_key() == "token-value"
 
@@ -301,7 +297,9 @@ class TestEncryptedFileStorage:
         key = Fernet.generate_key().decode()
         with patch.dict(os.environ, {"HIVE_CREDENTIAL_KEY": key}):
             storage = EncryptedFileStorage(temp_dir)
-            cred = CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))})
+            cred = CredentialObject(
+                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))}
+            )
             storage.save(cred)
 
             # Create new storage instance with same key
@@ -332,10 +330,18 @@ class TestCompositeStorage:
     def test_read_from_primary(self):
         """Test reading from primary storage."""
         primary = InMemoryStorage()
-        primary.save(CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("primary"))}))
+        primary.save(
+            CredentialObject(
+                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("primary"))}
+            )
+        )
 
         fallback = InMemoryStorage()
-        fallback.save(CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}))
+        fallback.save(
+            CredentialObject(
+                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}
+            )
+        )
 
         storage = CompositeStorage(primary, [fallback])
         cred = storage.load("test")
@@ -347,7 +353,11 @@ class TestCompositeStorage:
         """Test fallback when credential not in primary."""
         primary = InMemoryStorage()
         fallback = InMemoryStorage()
-        fallback.save(CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}))
+        fallback.save(
+            CredentialObject(
+                id="test", keys={"k": CredentialKey(name="k", value=SecretStr("fallback"))}
+            )
+        )
 
         storage = CompositeStorage(primary, [fallback])
         cred = storage.load("test")
@@ -383,7 +393,9 @@ class TestStaticProvider:
     def test_refresh_returns_unchanged(self):
         """Test that refresh returns credential unchanged."""
         provider = StaticProvider()
-        cred = CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))})
+        cred = CredentialObject(
+            id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))}
+        )
 
         refreshed = provider.refresh(cred)
         assert refreshed.get_key("k") == "v"
@@ -391,7 +403,9 @@ class TestStaticProvider:
     def test_validate_with_keys(self):
         """Test validation with keys present."""
         provider = StaticProvider()
-        cred = CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))})
+        cred = CredentialObject(
+            id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))}
+        )
 
         assert provider.validate(cred)
 
@@ -592,10 +606,12 @@ class TestCredentialStore:
         storage = InMemoryStorage()
         store = CredentialStore(storage=storage, cache_ttl_seconds=60)
 
-        storage.save(CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))}))
+        storage.save(
+            CredentialObject(id="test", keys={"k": CredentialKey(name="k", value=SecretStr("v"))})
+        )
 
         # First load
-        cred1 = store.get_credential("test")
+        store.get_credential("test")
 
         # Delete from storage
         storage.delete("test")
@@ -646,12 +662,12 @@ class TestOAuth2Module:
         from core.framework.credentials.oauth2 import OAuth2Token
 
         # Not expired
-        future = datetime.now(timezone.utc) + timedelta(hours=1)
+        future = datetime.now(UTC) + timedelta(hours=1)
         token = OAuth2Token(access_token="xxx", expires_at=future)
         assert not token.is_expired
 
         # Expired
-        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        past = datetime.now(UTC) - timedelta(hours=1)
         expired_token = OAuth2Token(access_token="xxx", expires_at=past)
         assert expired_token.is_expired
 
@@ -670,7 +686,9 @@ class TestOAuth2Module:
         from core.framework.credentials.oauth2 import OAuth2Config, TokenPlacement
 
         # Valid config
-        config = OAuth2Config(token_url="https://example.com/token", client_id="id", client_secret="secret")
+        config = OAuth2Config(
+            token_url="https://example.com/token", client_id="id", client_secret="secret"
+        )
         assert config.token_url == "https://example.com/token"
 
         # Missing token_url

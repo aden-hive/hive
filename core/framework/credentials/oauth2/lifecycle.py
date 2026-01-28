@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Callable, Optional
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from pydantic import SecretStr
 
-from ..models import CredentialKey, CredentialObject, CredentialRefreshError, CredentialType
+from ..models import CredentialKey, CredentialObject, CredentialType
 from .base_provider import BaseOAuth2Provider
 from .provider import OAuth2Token
 
@@ -30,8 +31,8 @@ class TokenRefreshResult:
     """Result of a token refresh operation."""
 
     success: bool
-    token: Optional[OAuth2Token] = None
-    error: Optional[str] = None
+    token: OAuth2Token | None = None
+    error: str | None = None
     needs_reauthorization: bool = False
 
 
@@ -70,10 +71,10 @@ class TokenLifecycleManager:
         self,
         provider: BaseOAuth2Provider,
         credential_id: str,
-        store: "CredentialStore",
+        store: CredentialStore,
         refresh_buffer_minutes: int = 5,
-        on_token_refreshed: Optional[Callable[[OAuth2Token], None]] = None,
-        on_refresh_failed: Optional[Callable[[str], None]] = None,
+        on_token_refreshed: Callable[[OAuth2Token], None] | None = None,
+        on_refresh_failed: Callable[[str], None] | None = None,
     ):
         """
         Initialize the lifecycle manager.
@@ -94,12 +95,12 @@ class TokenLifecycleManager:
         self.on_refresh_failed = on_refresh_failed
 
         # In-memory cache for performance
-        self._cached_token: Optional[OAuth2Token] = None
-        self._cache_time: Optional[datetime] = None
+        self._cached_token: OAuth2Token | None = None
+        self._cache_time: datetime | None = None
 
     # --- Async Token Access ---
 
-    async def get_valid_token(self) -> Optional[OAuth2Token]:
+    async def get_valid_token(self) -> OAuth2Token | None:
         """
         Get a valid access token, refreshing if necessary.
 
@@ -137,12 +138,12 @@ class TokenLifecycleManager:
                 logger.warning(f"Refresh failed for {self.credential_id}, using existing token")
 
         self._cached_token = token
-        self._cache_time = datetime.now(timezone.utc)
+        self._cache_time = datetime.now(UTC)
         return token
 
     async def acquire_token_client_credentials(
         self,
-        scopes: Optional[list[str]] = None,
+        scopes: list[str] | None = None,
     ) -> OAuth2Token:
         """
         Acquire a new token using client credentials flow.
@@ -157,7 +158,9 @@ class TokenLifecycleManager:
         """
         # Run in executor to avoid blocking
         loop = asyncio.get_event_loop()
-        token = await loop.run_in_executor(None, lambda: self.provider.client_credentials_grant(scopes=scopes))
+        token = await loop.run_in_executor(
+            None, lambda: self.provider.client_credentials_grant(scopes=scopes)
+        )
 
         self._save_token_to_store(token)
         self._cached_token = token
@@ -180,7 +183,7 @@ class TokenLifecycleManager:
 
     # --- Synchronous Token Access ---
 
-    def sync_get_valid_token(self) -> Optional[OAuth2Token]:
+    def sync_get_valid_token(self) -> OAuth2Token | None:
         """
         Synchronous version of get_valid_token().
 
@@ -212,12 +215,12 @@ class TokenLifecycleManager:
                     return None
 
         self._cached_token = token
-        self._cache_time = datetime.now(timezone.utc)
+        self._cache_time = datetime.now(UTC)
         return token
 
     def sync_acquire_token_client_credentials(
         self,
-        scopes: Optional[list[str]] = None,
+        scopes: list[str] | None = None,
     ) -> OAuth2Token:
         """Synchronous version of acquire_token_client_credentials()."""
         token = self.provider.client_credentials_grant(scopes=scopes)
@@ -231,9 +234,9 @@ class TokenLifecycleManager:
         """Check if token needs refresh."""
         if token.expires_at is None:
             return False
-        return datetime.now(timezone.utc) >= (token.expires_at - self.refresh_buffer)
+        return datetime.now(UTC) >= (token.expires_at - self.refresh_buffer)
 
-    def _credential_to_token(self, credential: CredentialObject) -> Optional[OAuth2Token]:
+    def _credential_to_token(self, credential: CredentialObject) -> OAuth2Token | None:
         """Convert credential to OAuth2Token."""
         access_token = credential.get_key("access_token")
         if not access_token:
