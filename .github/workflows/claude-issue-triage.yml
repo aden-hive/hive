@@ -51,12 +51,26 @@ jobs:
             - Do NOT apply the "duplicate" label yet (the auto-close script will add it after 12 hours if no objections)
             - Suggest the user react with a thumbs-down if they disagree
 
-            ### 3. Check for invalid issues
-            If the issue lacks sufficient information, is spam, or doesn't make sense:
-            - Add the "invalid" label
-            - Comment asking for clarification or explaining why it's invalid
+            ### 3. Check for Low-Quality / AI Spam
+            Analyze the issue quality. We are receiving many low-effort, AI-generated spam issues.
+            Flag the issue as INVALID if it matches these criteria:
+            - **Vague/Generic**: Title is "Fix bug" or "Error" without specific context.
+            - **Hallucinated**: Refers to files or features that do not exist in this repo.
+            - **Template Filler**: Body contains "Insert description here" or unrelated gibberish.
+            - **Low Effort**: No reproduction steps, no logs, only 1-2 sentences.
 
-            ### 4. Categorize with labels (if NOT a duplicate)
+            If identified as spam/low-quality:
+            - Add the "invalid" label.
+            - Add a comment:
+              "This issue has been automatically flagged as low-quality or potentially AI-generated spam. It lacks specific details (logs, reproduction steps, file references) required for us to help. Please open a new issue following the template exactly if this is a legitimate request."
+            - Do NOT proceed to other steps.
+
+            ### 4. Check for invalid issues (General)
+            If the issue is not spam but still lacks information:
+            - Add the "invalid" label
+            - Comment asking for clarification
+
+            ### 5. Categorize with labels (if NOT a duplicate or spam)
             Apply appropriate labels based on the issue content. Use ONLY these labels:
             - bug: Something isn't working
             - enhancement: New feature or request

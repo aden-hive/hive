@@ -102,6 +102,15 @@ PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
 
+### Cursor IDE Support
+
+Skills are also available in Cursor. To enable:
+
+1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
+2. Run `MCP: Enable` to enable MCP servers
+3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
+4. Type `/` in Agent chat and search for skills (e.g., `/building-agents-construction`)
+
 ## Features
 
 - **Goal-Driven Development** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
@@ -226,6 +235,7 @@ hive/
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
 ├── .claude/                # Claude Code skills for building agents
+├── .cursor/                # Cursor IDE skills (symlinks to .claude/skills)
 ├── ENVIRONMENT_SETUP.md    # Python setup guide for agent development
 ├── DEVELOPER.md            # Developer guide
 ├── CONTRIBUTING.md         # Contribution guidelines
