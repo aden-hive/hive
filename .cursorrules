@@ -1,0 +1,118 @@
+## Hive / Aden – Cursor Rules
+
+You are working in the `hive` repository for the Aden Agent Framework.
+
+The goal of these rules is to give **Cursor users** the same agent‑building workflows that Claude Code has, by driving the **existing MCP agent builder server** instead of manually editing graph files.
+
+Always prefer using the `agent-builder` MCP tools and the Python CLI over ad‑hoc file edits when building or changing agents.
+
+---
+
+### General Behavior
+
+- When the user asks to **create, modify, or improve an agent**, you should:
+  - Use the **`agent-builder` MCP server** (if available) to manage build sessions, goals, nodes, edges, tests, and exports.
+  - Respect the incremental build phases enforced by `GraphBuilder`:
+    - Goal definition → node addition → edge addition → testing → final approval → export.
+  - Keep generated agents under the `exports/` directory (e.g. `exports/my_agent`).
+- When the user asks about **runtime behavior, failures, or improvements**, you may:
+  - Use the Python runtime APIs (`Runtime`, `BuilderQuery`, `GraphExecutor`) to analyze runs and propose changes.
+  - Optionally use MCP tools that surface run/decision data, if exposed by the `agent-builder` server.
+
+If the `agent-builder` MCP server is not available, fall back to:
+
+- Explaining how to turn it on (`python core/setup_mcp.py` or `./core/setup_mcp.sh`).
+- Using the Python CLI (`PYTHONPATH=core:exports python -m my_agent ...`) for validation and testing.
+
+---
+
+### Command: `/building-agents`
+
+**Intent:** Build or extend an agent in this repository using the existing Hive agent‑builder MCP tools.
+
+**When the user runs `/building-agents` in this repo:**
+
+1. **Ensure MCP is available**
+   - Check for an `agent-builder` MCP server entry in Cursor’s MCP configuration.
+   - If it is missing or fails, explain how to configure it so that:
+     - `command` is `python`
+     - `args` is `["-m", "framework.mcp.agent_builder_server"]`
+     - `cwd` is the Hive root or `core/` directory
+2. **Create or resume a build session**
+   - Use the MCP tools to either:
+     - Start a new build session with a descriptive name based on the user’s goal, or
+     - Resume an existing unfinished session, if the user indicates they are continuing work.
+3. **Guide the user through the phases**
+   - **Goal + success criteria**
+     - Ask the user for the agent’s goal, constraints, and success criteria.
+     - Use the MCP tools to set and validate the goal.
+     - Surface validation feedback and only proceed when the goal is valid and the user approves.
+   - **Nodes**
+     - Propose nodes (LLM, tool‑use, router, function) based on the goal.
+     - For each node:
+       - Add via MCP, run validation, and show any warnings or errors.
+       - Ask for human approval before considering the node final.
+   - **Edges**
+     - Propose edges that connect nodes for success/failure and conditional paths.
+     - Add edges via MCP, validate, and show connectivity/reachability issues.
+   - **Tests**
+     - Suggest and (via MCP) add test cases that reflect the goal and constraints.
+     - Run tests via MCP or the CLI; show failures and iterate on the graph as needed.
+4. **Approval and export**
+   - When `GraphBuilder` reports the graph is valid and tests pass:
+     - Ask the user for a final approval comment.
+     - Use MCP to perform a final approval and export.
+     - Ensure the exported agent lives under `exports/<agent_name>/` following existing conventions.
+5. **Explain how to run the agent**
+   - Provide the user with example commands to:
+     - Validate the agent: `PYTHONPATH=core:exports python -m <agent_name> validate`
+     - Run the agent: `PYTHONPATH=core:exports python -m <agent_name> run --input '{...}'`
+
+You should not skip validation or testing steps, and you should not directly edit exported graph files unless the user explicitly asks for manual edits.
+
+---
+
+### Command: `/testing-agent`
+
+**Intent:** Generate, run, and debug tests for an existing agent.
+
+**When the user runs `/testing-agent`:**
+
+1. Confirm which agent to test (e.g. `exports/my_agent`).
+2. Use MCP tools (or the Python CLI) to:
+   - Generate constraint tests and success tests where appropriate.
+   - Write or update test definitions in the agent’s package.
+   - Execute tests and collect results.
+3. Present failures clearly:
+   - Show which tests failed and why.
+   - Use run/decision data (via MCP or `BuilderQuery`) to propose concrete graph or node changes.
+4. Offer to jump back into `/building-agents` mode to evolve the agent and re‑run tests.
+
+If MCP is unavailable, fall back to Python CLI usage:
+
+- `PYTHONPATH=core:exports python -m <agent_name> test`
+- `PYTHONPATH=core:exports python -m <agent_name> test --type constraint`
+- `PYTHONPATH=core:exports python -m <agent_name> test --type success`
+
+---
+
+### Command: `/agent-workflow` (optional helper)
+
+**Intent:** Inspect and update an existing agent’s workflow/graph.
+
+Behavior:
+
+1. Identify the target agent package under `exports/`.
+2. Use MCP tools to:
+   - Load and summarize the current goal, nodes, and edges.
+   - Propose changes (new nodes, new edges, or refactors).
+   - Apply changes through `GraphBuilder` (not direct file edits), with validation and testing.
+3. Ask for user approval before exporting updated graphs.
+
+Only resort to manual edits of exported code or JSON when:
+
+- The user explicitly requests it, or
+- The change cannot currently be expressed via the MCP tool surface, in which case:
+  - Explain the limitation.
+  - Keep changes small and well‑commented.
+
