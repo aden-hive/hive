@@ -13,13 +13,16 @@ def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str
     session_dir = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
     os.makedirs(session_dir, exist_ok=True)
 
+    session_dir=os.path.realpath(session_dir)
+
+    is_absolute_path = os.path.isabs(path) or path.startswith(("/","\\"))
     # Resolve absolute path
-    if os.path.isabs(path):
+    if is_absolute_path:
         # Treat absolute paths as relative to the session root if they start with /
-        rel_path = path.lstrip(os.sep)
-        final_path = os.path.abspath(os.path.join(session_dir, rel_path))
+        rel_path = path.lstrip("/\\")
+        final_path = os.path.realpath(os.path.join(session_dir, rel_path))
     else:
-        final_path = os.path.abspath(os.path.join(session_dir, path))
+        final_path = os.path.realpath(os.path.join(session_dir, path))
 
     # Verify path is within session_dir
     common_prefix = os.path.commonpath([final_path, session_dir])
