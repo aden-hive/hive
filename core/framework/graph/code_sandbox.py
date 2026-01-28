@@ -165,9 +165,7 @@ class CodeValidator:
             # Check for blocked node types
             if type(node) in self.blocked_nodes:
                 lineno = getattr(node, "lineno", "?")
-                issues.append(
-                    f"Blocked operation: {type(node).__name__} at line {lineno}"
-                )
+                issues.append(f"Blocked operation: {type(node).__name__} at line {lineno}")
 
             # Check for dangerous attribute access
             if isinstance(node, ast.Attribute):

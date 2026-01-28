@@ -291,9 +291,7 @@ class OutcomeAggregator:
                     / max(1, self._successful_outcomes + self._failed_outcomes)
                 ),
                 "streams_active": len({d.stream_id for d in self._decisions}),
-                "executions_total": len(
-                    {(d.stream_id, d.execution_id) for d in self._decisions}
-                ),
+                "executions_total": len({(d.stream_id, d.execution_id) for d in self._decisions}),
             }
 
             # Determine recommendation

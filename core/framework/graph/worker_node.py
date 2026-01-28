@@ -76,8 +76,7 @@ def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
         return parsed, cleaned
     except json.JSONDecodeError as e:
         logger.debug(
-            f"Failed to parse entire response as JSON: {e}. "
-            f"Content preview: {cleaned[:100]}..."
+            f"Failed to parse entire response as JSON: {e}. Content preview: {cleaned[:100]}..."
         )
 
     # Try to find JSON-like content (starts with { or [)
@@ -89,10 +88,7 @@ def parse_llm_json_response(text: str) -> tuple[Any | None, str]:
             parsed = json.loads(match)
             return parsed, match
         except json.JSONDecodeError as e:
-            logger.debug(
-                f"Failed to parse JSON pattern: {e}. "
-                f"Content preview: {match[:100]}..."
-            )
+            logger.debug(f"Failed to parse JSON pattern: {e}. Content preview: {match[:100]}...")
             continue
 
     # Could not parse as JSON - log warning
@@ -310,7 +306,7 @@ class WorkerNode:
             if inputs:
                 context_section = "\n\n--- Context Data ---\n"
                 for key, value in inputs.items():
-                    if isinstance(value, (dict, list)):
+                    if isinstance(value, dict | list):
                         context_section += f"{key}: {json.dumps(value, indent=2)}\n"
                     else:
                         context_section += f"{key}: {value}\n"
