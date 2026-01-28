@@ -10,7 +10,7 @@ Wraps FileStorage with:
 import asyncio
 import logging
 import time
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
