@@ -39,6 +39,20 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## What is Aden
+
+<p align="center">
+  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+</p>
+
+Aden is a platform for building, deploying, operating, and adapting AI agents:
+
+- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
+- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
+- **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
+- **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
+- **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
+
 ## How Hive Works (High-level Overview)
 
 Hive is an agent framework designed to orchestrate tasks, tools, and execution flows in a structured way.
@@ -55,61 +69,12 @@ At a high level, Hive operates as follows:
 
 ```mermaid
 flowchart TD
-  User --> Agent
-  Agent --> Task
-  Task --> Tool
-  Tool --> Executor
-  Executor --> Result
+    User --> Agent
+    Agent --> Task
+    Task --> Tool
+    Tool --> Executor
+    Executor --> Result
 ```
-
-## Getting Started
-
-### 1. Install
-
-```bash
-pip install hive-agent-framework
-```
-
-### 2. Create a simple agent
-
-```python
-from hive import Agent
-
-agent = Agent(
-  name="Example Agent",
-  goal="Demonstrate basic Hive execution"
-)
-```
-
-### 3. Run the agent
-
-```python
-result = agent.run()
-print(result)
-```
-
-## Glossary
-
-**Agent** — entity responsible for decision-making and task execution  
-**Task** — single unit of work performed by an agent  
-**Tool** — external capability used by an agent (e.g., file access, APIs)  
-**Workflow** — structured sequence of tasks executed by an agent  
-**Executor** — component responsible for coordinating task execution  
-**Result** — output produced after an agent completes its workflow
-
-## What is Aden
-
-<p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
-</p>
-
-Aden is a platform for building, deploying, operating, and adapting AI agents:
-
-- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
-- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
-- **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
-- **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
-- **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
 
 ## Quick Links
 
@@ -159,6 +124,32 @@ PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
+
+## Getting Started
+
+### 1. Install
+
+```bash
+pip install hive-agent-framework
+```
+
+### 2. Create a Simple Agent
+
+```python
+from hive import Agent
+
+agent = Agent(
+    name="Example Agent",
+    goal="Demonstrate basic Hive execution"
+)
+```
+
+### 3. Run the Agent
+
+```python
+result = agent.run()
+print(result)
+```
 
 ## Features
 
@@ -380,6 +371,15 @@ For security concerns, please see [SECURITY.md](SECURITY.md).
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Glossary
+
+**Agent** — entity responsible for decision-making and task execution  
+**Task** — single unit of work performed by an agent  
+**Tool** — external capability used by an agent (e.g., file access, APIs)  
+**Workflow** — structured sequence of tasks executed by an agent  
+**Executor** — component responsible for coordinating task execution  
+**Result** — output produced after an agent completes its workflow
 
 ## Frequently Asked Questions (FAQ)
 
