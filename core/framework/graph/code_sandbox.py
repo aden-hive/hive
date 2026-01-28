@@ -13,11 +13,11 @@ Security measures:
 """
 
 import ast
-import sys
 import signal
-from typing import Any
-from dataclasses import dataclass, field
+import sys
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any
 
 # Safe builtins whitelist
 SAFE_BUILTINS = {
@@ -216,7 +216,7 @@ class CodeSandbox:
             raise TimeoutError(f"Code execution timed out after {seconds} seconds")
 
         # Only works on Unix-like systems
-        if hasattr(signal, 'SIGALRM'):
+        if hasattr(signal, "SIGALRM"):
             old_handler = signal.signal(signal.SIGALRM, handler)
             signal.alarm(seconds)
             try:

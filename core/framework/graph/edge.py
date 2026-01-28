@@ -22,8 +22,8 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
-from typing import Any
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -238,7 +238,7 @@ Respond with ONLY a JSON object:
 
             # Parse response
             import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 proceed = data.get("proceed", False)

@@ -55,8 +55,9 @@ class TestAgentBuilderServerModule:
         if not MCP_AVAILABLE:
             pytest.skip(MCP_SKIP_REASON)
 
-        from framework.mcp.agent_builder_server import mcp
         from mcp.server import FastMCP
+
+        from framework.mcp.agent_builder_server import mcp
 
         assert mcp is not None
         assert isinstance(mcp, FastMCP)
@@ -86,8 +87,9 @@ class TestMCPPackageExports:
         if not MCP_AVAILABLE:
             pytest.skip(MCP_SKIP_REASON)
 
-        from framework.mcp import agent_builder_server
         from mcp.server import FastMCP
+
+        from framework.mcp import agent_builder_server
 
         assert agent_builder_server is not None
         assert isinstance(agent_builder_server, FastMCP)

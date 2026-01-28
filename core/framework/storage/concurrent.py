@@ -8,15 +8,14 @@ Wraps FileStorage with:
 """
 
 import asyncio
-import json
 import logging
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from framework.schemas.run import Run, RunSummary, RunStatus
+from framework.schemas.run import Run, RunStatus, RunSummary
 from framework.storage.backend import FileStorage
 
 logger = logging.getLogger(__name__)
@@ -283,7 +282,7 @@ class ConcurrentStorage:
                         except asyncio.QueueEmpty:
                             break
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
 
                 # Flush batch if we have items
@@ -339,7 +338,7 @@ class ConcurrentStorage:
 
     def get_cache_stats(self) -> dict:
         """Get cache statistics."""
-        now = time.time()
+        time.time()
         expired = sum(
             1 for entry in self._cache.values()
             if entry.is_expired(self._cache_ttl)

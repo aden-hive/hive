@@ -10,9 +10,9 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from framework.schemas.decision import Decision, Option, Outcome, DecisionType
+from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.concurrent import ConcurrentStorage
 

@@ -15,28 +15,29 @@ using a Worker-Judge loop:
 This keeps planning external while execution/evaluation is internal.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from framework.runtime.core import Runtime
+from framework.graph.code_sandbox import CodeSandbox
 from framework.graph.goal import Goal
+from framework.graph.judge import HybridJudge, create_default_judge
 from framework.graph.plan import (
-    Plan,
-    PlanStep,
-    PlanExecutionResult,
-    ExecutionStatus,
-    StepStatus,
-    Judgment,
-    JudgmentAction,
+    ApprovalDecision,
     ApprovalRequest,
     ApprovalResult,
-    ApprovalDecision,
+    ExecutionStatus,
+    Judgment,
+    JudgmentAction,
+    Plan,
+    PlanExecutionResult,
+    PlanStep,
+    StepStatus,
 )
-from framework.graph.judge import HybridJudge, create_default_judge
-from framework.graph.worker_node import WorkerNode, StepExecutionResult
-from framework.graph.code_sandbox import CodeSandbox
+from framework.graph.worker_node import StepExecutionResult, WorkerNode
 from framework.llm.provider import LLMProvider, Tool
+from framework.runtime.core import Runtime
 
 # Type alias for approval callback
 ApprovalCallback = Callable[[ApprovalRequest], ApprovalResult]

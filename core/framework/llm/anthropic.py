@@ -3,8 +3,8 @@
 import os
 from typing import Any
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.litellm import LiteLLMProvider
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
 
 def _get_api_key_from_credential_manager() -> str | None:
@@ -55,7 +55,7 @@ class AnthropicProvider(LLMProvider):
             )
 
         self.model = model
-        
+
         self._provider = LiteLLMProvider(
             model=model,
             api_key=self.api_key,

@@ -6,8 +6,8 @@ summaries and metrics that Builder needs to understand what happened.
 """
 
 from datetime import datetime
-from typing import Any
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 

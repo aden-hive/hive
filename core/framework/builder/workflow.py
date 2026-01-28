@@ -13,16 +13,17 @@ Each step requires validation and human approval before proceeding.
 You cannot skip steps or bypass validation.
 """
 
+from collections.abc import Callable
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import NodeSpec
-from framework.graph.edge import EdgeSpec, EdgeCondition, GraphSpec
 
 
 class BuildPhase(str, Enum):
@@ -630,69 +631,69 @@ class GraphBuilder:
         """Generate Python code for the graph."""
         lines = [
             '"""',
-            f'Generated agent: {self.session.name}',
-            f'Generated at: {datetime.now().isoformat()}',
+            f"Generated agent: {self.session.name}",
+            f"Generated at: {datetime.now().isoformat()}",
             '"""',
-            '',
-            'from framework.graph import (',
-            '    Goal, SuccessCriterion, Constraint,',
-            '    NodeSpec, EdgeSpec, EdgeCondition,',
-            ')',
-            'from framework.graph.edge import GraphSpec',
-            'from framework.graph.goal import GoalStatus',
-            '',
-            '',
-            '# Goal',
+            "",
+            "from framework.graph import (",
+            "    Goal, SuccessCriterion, Constraint,",
+            "    NodeSpec, EdgeSpec, EdgeCondition,",
+            ")",
+            "from framework.graph.edge import GraphSpec",
+            "from framework.graph.goal import GoalStatus",
+            "",
+            "",
+            "# Goal",
         ]
 
         if self.session.goal:
             goal_json = self.session.goal.model_dump_json(indent=4)
-            lines.append('GOAL = Goal.model_validate_json(\'\'\'')
+            lines.append("GOAL = Goal.model_validate_json('''")
             lines.append(goal_json)
             lines.append("''')")
         else:
-            lines.append('GOAL = None')
+            lines.append("GOAL = None")
 
         lines.extend([
-            '',
-            '',
-            '# Nodes',
-            'NODES = [',
+            "",
+            "",
+            "# Nodes",
+            "NODES = [",
         ])
 
         for node in self.session.nodes:
             node_json = node.model_dump_json(indent=4)
-            lines.append('    NodeSpec.model_validate_json(\'\'\'')
+            lines.append("    NodeSpec.model_validate_json('''")
             lines.append(node_json)
             lines.append("    '''),")
 
         lines.extend([
-            ']',
-            '',
-            '',
-            '# Edges',
-            'EDGES = [',
+            "]",
+            "",
+            "",
+            "# Edges",
+            "EDGES = [",
         ])
 
         for edge in self.session.edges:
             edge_json = edge.model_dump_json(indent=4)
-            lines.append('    EdgeSpec.model_validate_json(\'\'\'')
+            lines.append("    EdgeSpec.model_validate_json('''")
             lines.append(edge_json)
             lines.append("    '''),")
 
         lines.extend([
-            ']',
-            '',
-            '',
-            '# Graph',
+            "]",
+            "",
+            "",
+            "# Graph",
         ])
 
         graph_json = graph.model_dump_json(indent=4)
-        lines.append('GRAPH = GraphSpec.model_validate_json(\'\'\'')
+        lines.append("GRAPH = GraphSpec.model_validate_json('''")
         lines.append(graph_json)
         lines.append("''')")
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     # =========================================================================
     # SESSION MANAGEMENT

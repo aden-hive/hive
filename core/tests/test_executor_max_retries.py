@@ -5,31 +5,33 @@ This test verifies the fix for Issue #363 where GraphExecutor was ignoring
 the max_retries field in NodeSpec and using a hardcoded value of 3.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-from framework.graph.executor import GraphExecutor, ExecutionResult
-from framework.graph.node import NodeSpec, NodeProtocol, NodeContext, NodeResult
+
 from framework.graph.edge import GraphSpec
+from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
+from framework.graph.node import NodeContext, NodeProtocol, NodeResult, NodeSpec
 from framework.runtime.core import Runtime
 
 
 class FlakyTestNode(NodeProtocol):
     """A test node that fails a configurable number of times before succeeding."""
-    
+
     def __init__(self, fail_times: int = 2):
         self.fail_times = fail_times
         self.attempt_count = 0
-    
+
     async def execute(self, ctx: NodeContext) -> NodeResult:
         self.attempt_count += 1
-        
+
         if self.attempt_count <= self.fail_times:
             return NodeResult(
                 success=False,
                 error=f"Transient error (attempt {self.attempt_count})"
             )
-        
+
         return NodeResult(
             success=True,
             output={"result": f"succeeded after {self.attempt_count} attempts"}
@@ -38,10 +40,10 @@ class FlakyTestNode(NodeProtocol):
 
 class AlwaysFailsNode(NodeProtocol):
     """A test node that always fails."""
-    
+
     def __init__(self):
         self.attempt_count = 0
-    
+
     async def execute(self, ctx: NodeContext) -> NodeResult:
         self.attempt_count += 1
         return NodeResult(
@@ -67,7 +69,7 @@ def runtime():
 async def test_executor_respects_custom_max_retries_high(runtime):
     """
     Test that executor respects max_retries when set to high value (10).
-    
+
     Node fails 5 times before succeeding. With max_retries=10, should succeed.
     """
     # Create node with max_retries=10
@@ -79,7 +81,7 @@ async def test_executor_respects_custom_max_retries_high(runtime):
         node_type="function",
         output_keys=["result"]
     )
-    
+
     # Create graph
     graph = GraphSpec(
         id="test_graph",
@@ -97,17 +99,17 @@ async def test_executor_respects_custom_max_retries_high(runtime):
         name="Test Goal",
         description="Test that max_retries is respected"
     )
-    
+
     # Create executor and register flaky node (fails 5 times, succeeds on 6th)
     executor = GraphExecutor(runtime=runtime)
     flaky_node = FlakyTestNode(fail_times=5)
     executor.register_node("flaky_node", flaky_node)
-    
+
     # Execute
     result = await executor.execute(graph, goal, {})
 
     # Should succeed because 5 failures < 10 max_retries (max_retries=N means N total attempts allowed)
-    assert result.success == True
+    assert result.success
     assert flaky_node.attempt_count == 6  # 5 failures + 1 success
 
 
@@ -155,7 +157,7 @@ async def test_executor_respects_custom_max_retries_low(runtime):
     result = await executor.execute(graph, goal, {})
 
     # Should fail after exactly 2 attempts (max_retries=N means N total attempts)
-    assert result.success == False
+    assert not result.success
     assert failing_node.attempt_count == 2  # 2 total attempts
     assert "failed after 2 attempts" in result.error
 
@@ -202,7 +204,7 @@ async def test_executor_respects_default_max_retries(runtime):
     result = await executor.execute(graph, goal, {})
 
     # Should fail after default 3 total attempts (max_retries=N means N total attempts)
-    assert result.success == False
+    assert not result.success
     assert failing_node.attempt_count == 3  # 3 total attempts
     assert "failed after 3 attempts" in result.error
 
@@ -251,7 +253,7 @@ async def test_executor_max_retries_two_succeeds_on_second(runtime):
     result = await executor.execute(graph, goal, {})
 
     # Should succeed on second attempt (max_retries=2 allows 2 total attempts)
-    assert result.success == True
+    assert result.success
     assert flaky_node.attempt_count == 2  # 1 failure + 1 success
 
 
@@ -279,7 +281,7 @@ async def test_executor_different_nodes_different_max_retries(runtime):
         input_keys=["result1"],
         output_keys=["result2"]
     )
-    
+
     # Note: This test would require more complex graph setup with edges
     # For now, we've verified that max_retries is read from node_spec correctly
     # The actual value varies per node as expected
