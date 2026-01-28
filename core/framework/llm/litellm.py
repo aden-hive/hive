@@ -85,6 +85,16 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: pip install litellm"
             )
 
+    async def close(self):
+        """Cleanup resources.
+
+        Note: LiteLLM uses a global aiohttp session singleton for connection pooling.
+        Closing it here would break other LiteLLMProvider instances in the same process.
+        If per-instance cleanup is needed in the future, we should manage our own
+        AsyncClient rather than relying on the global handler.
+        """
+        pass
+
     def complete(
         self,
         messages: list[dict[str, Any]],
