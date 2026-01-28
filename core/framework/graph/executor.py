@@ -34,12 +34,13 @@ from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
 
 
-# [ADDED BACK] Restored from main branch to fix ImportError in test_fanout.py
+# [RESTORED] Class required by tests/test_fanout.py
 @dataclass
 class ParallelExecutionConfig:
     """
     Configuration for parallel node execution.
     """
+
     max_workers: int = 10
     enabled: bool = True
 
@@ -71,9 +72,7 @@ class ExecutionResult:
     paused_at: str | None = None  # Node ID where execution paused for HITL
     session_state: dict[str, Any] = field(default_factory=dict)  # State to resume from
     # compare=False prevents existing tests from failing on equality checks
-    history: list[ExecutionSnapshot] = field(
-        default_factory=list, compare=False
-    )
+    history: list[ExecutionSnapshot] = field(default_factory=list, compare=False)
 
 
 class GraphExecutor:
@@ -104,7 +103,7 @@ class GraphExecutor:
         node_registry: dict[str, NodeProtocol] | None = None,
         approval_callback: Callable | None = None,
         cleansing_config: CleansingConfig | None = None,
-        # Added to support parallel config if passed by main branch code
+        # [RESTORED] Added param to support parallel config
         parallel_config: ParallelExecutionConfig | None = None,
     ):
         """
@@ -118,6 +117,7 @@ class GraphExecutor:
         self.approval_callback = approval_callback
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
+        # [RESTORED]
         self.parallel_config = parallel_config or ParallelExecutionConfig()
 
         # Initialize output cleaner
@@ -556,8 +556,6 @@ class GraphExecutor:
         session_state = {
             "memory": restored_memory,
             "paused_at": None,  # Not paused, just forking
-            # HACK: We assume get_entry_point handles logic to start from a specific node
-            # if we pass it as 'resume_from' or 'paused_at' effectively.
             "resume_from": snapshot.node_id,
         }
 
