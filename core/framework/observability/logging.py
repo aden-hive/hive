@@ -226,7 +226,7 @@ def _disable_third_party_colors() -> None:
     # Set NO_COLOR environment variable (common convention for disabling colors)
     os.environ["NO_COLOR"] = "1"
     os.environ["FORCE_COLOR"] = "0"
-    
+
     # Disable LiteLLM debug/verbose output colors if available
     try:
         import litellm
