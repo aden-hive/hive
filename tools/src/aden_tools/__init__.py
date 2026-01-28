@@ -17,18 +17,17 @@ Usage:
 __version__ = "0.1.0"
 
 # Utilities
-from .utils import get_env_var
-
 # Credential management
 from .credentials import (
+    CREDENTIAL_SPECS,
+    CredentialError,
     CredentialManager,
     CredentialSpec,
-    CredentialError,
-    CREDENTIAL_SPECS,
 )
 
 # MCP registration
 from .tools import register_all_tools
+from .utils import get_env_var
 
 __all__ = [
     # Version

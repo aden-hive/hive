@@ -178,6 +178,7 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
+
     from framework.runner import AgentRunner
 
     # Set logging level (quiet by default for cleaner output)
@@ -566,7 +567,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
 
 def _interactive_approval(request):
     """Interactive approval callback for HITL mode."""
-    from framework.graph import ApprovalResult, ApprovalDecision
+    from framework.graph import ApprovalDecision, ApprovalResult
 
     print()
     print("=" * 60)
@@ -636,8 +637,9 @@ def _format_natural_language_to_json(
     user_input: str, input_keys: list[str], agent_description: str, session_context: dict = None
 ) -> dict:
     """Use Haiku to convert natural language input to JSON based on agent's input schema."""
-    import anthropic
     import os
+
+    import anthropic
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -648,7 +650,12 @@ def _format_natural_language_to_json(
         main_field = input_keys[0] if input_keys else "objective"
         existing_value = session_context.get(main_field, "")
 
-        session_info = f'\n\nExisting {main_field}: "{existing_value}"\n\nThe user is providing ADDITIONAL information. Append this new information to the existing {main_field} to create an enriched, more detailed version.'
+        session_info = (
+            f'\n\nExisting {main_field}: "{existing_value}"\n\n'
+            f"The user is providing ADDITIONAL information. Append this new "
+            f"information to the existing {main_field} to create an enriched, "
+            "more detailed version."
+        )
 
     prompt = f"""You are formatting user input for an agent that requires specific input fields.
 
@@ -658,7 +665,7 @@ Required input fields: {", ".join(input_keys)}{session_info}
 
 User input: {user_input}
 
-{"If this is a follow-up message, APPEND the new information to the existing field value to create a more complete, detailed version. Do not create new fields." if session_context else ""}
+{"If this is a follow-up, APPEND new info to the existing field value." if session_context else ""}
 
 Output ONLY valid JSON, no explanation:"""
 
@@ -690,6 +697,7 @@ Output ONLY valid JSON, no explanation:"""
 def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
     import logging
+
     from framework.runner import AgentRunner
 
     # Configure logging to show runtime visibility
