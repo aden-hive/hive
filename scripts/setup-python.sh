@@ -29,7 +29,7 @@ IFS='.' read -r PYTHON_MAJOR_VERSION PYTHON_MINOR_VERSION <<< "$REQUIRED_PYTHON_
 POSSIBLE_PYTHONS=("python3" "python" "py")
 
 # Default python interpreter (initialized)
-PYTHON_CMD=""
+PYTHON_CMD=()
 
 
 echo ""
@@ -44,49 +44,57 @@ for cmd in "${POSSIBLE_PYTHONS[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
 
         # Specific check for Windows 'py' launcher
-        CURRENT_CMD="$cmd"
         if [ "$cmd" = "py" ]; then
-            CURRENT_CMD="py -3"
+            CURRENT_CMD=(py -3)
+        else
+            CURRENT_CMD=("$cmd")
         fi
 
         # Check Python version
-        if $CURRENT_CMD -c "import sys; sys.exit(0 if sys.version_info >= ($PYTHON_MAJOR_VERSION, $PYTHON_MINOR_VERSION) else 1)" >/dev/null 2>&1; then
+        if "${CURRENT_CMD[@]}" -c "import sys; sys.exit(0 if sys.version_info >= ($PYTHON_MAJOR_VERSION, $PYTHON_MINOR_VERSION) else 1)" >/dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC} interpreter detected: ${CURRENT_CMD[@]}"
             # Check for pip
-            if $CURRENT_CMD -m pip --version &> /dev/null 2>&1; then
-                PYTHON_CMD="$CURRENT_CMD"
+            if "${CURRENT_CMD[@]}" -m pip --version >/dev/null 2>&1; then
+                PYTHON_CMD=("${CURRENT_CMD[@]}")
+                echo -e "${GREEN}✓${NC} pip detected"
+                echo ""
                 break
+            else
+                echo -e "${RED}✗${NC} pip not found"
+                echo ""
             fi
+        else
+            echo -e "${RED}✗${NC} ${CURRENT_CMD[@]} not found"
+            echo ""
         fi
     fi
 done
 
-# Check for python (Exit if not found)
-if [ -z "$PYTHON_CMD" ]; then
-    echo -e "${RED}Error: Python $PYTHON_MAJOR_VERSION.$PYTHON_MINOR_VERSION+ not found.${NC}"
-    echo "Please install Python $PYTHON_MAJOR_VERSION.$PYTHON_MINOR_VERSION+ from https://python.org"
-    exit 1
-fi  
-
-# Display Python version
-PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-echo -e "${BLUE}Detected Python:${NC} $PYTHON_VERSION"
-
-echo -e "${GREEN}✓${NC} Python version check passed"
-echo ""
-
-# Check for pip (Exit if not found)
-if ! $PYTHON_CMD -m pip --version &> /dev/null; then
-    echo -e "${RED}Error: pip is not installed${NC}"
-    echo "Please install pip for Python $PYTHON_VERSION"
+# Display error message if python not found
+if [ "${#PYTHON_CMD[@]}" -eq 0 ]; then
+    echo -e "${RED}Error:${NC} No suitable Python interpreter found with pip installed."
+    echo ""
+    echo "Requirements:"
+    echo "  • Python $PYTHON_MAJOR_VERSION.$PYTHON_MINOR_VERSION+"
+    echo "  • pip installed"
+    echo ""
+    echo "Tried the following commands:"
+    echo "  ${POSSIBLE_PYTHONS[*]}"
+    echo ""
+    echo "Please install Python from:"
+    echo "  https://www.python.org/downloads/"
     exit 1
 fi
 
-echo -e "${GREEN}✓${NC} pip detected"
+# Display Python version
+PYTHON_VERSION=$("${PYTHON_CMD[@]}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+echo -e "${BLUE}Detected Python:${NC} $PYTHON_VERSION"
+echo -e "${GREEN}✓${NC} Python version check passed"
 echo ""
 
 # Upgrade pip, setuptools, and wheel
 echo "Upgrading pip, setuptools, and wheel..."
-if ! $PYTHON_CMD -m pip install --upgrade pip setuptools wheel; then
+if ! "${PYTHON_CMD[@]}" -m pip install --upgrade pip setuptools wheel; then
   echo "Error: Failed to upgrade pip. Please check your python/venv configuration."
   exit 1
 fi
@@ -102,7 +110,8 @@ cd "$PROJECT_ROOT/core"
 
 if [ -f "pyproject.toml" ]; then
     echo "Installing framework from core/ (editable mode)..."
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
+    "${PYTHON_CMD[@]}" -m pip install -e . > /dev/null 2>&1
+
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓${NC} Framework package installed"
     else
@@ -122,7 +131,7 @@ cd "$PROJECT_ROOT/tools"
 
 if [ -f "pyproject.toml" ]; then
     echo "Installing aden_tools from tools/ (editable mode)..."
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
+    "${PYTHON_CMD[@]}" -m pip install -e . > /dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓${NC} Tools package installed"
     else
@@ -142,17 +151,17 @@ echo "=================================================="
 echo ""
 
 # Check openai version
-OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
+OPENAI_VERSION=$("${PYTHON_CMD[@]}" -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
 
 if [ "$OPENAI_VERSION" = "not_installed" ]; then
     echo "Installing openai package..."
-    $PYTHON_CMD -m pip install "openai>=1.0.0" > /dev/null 2>&1
+    "${PYTHON_CMD[@]}" -m pip install "openai>=1.0.0" > /dev/null 2>&1
     echo -e "${GREEN}✓${NC} openai package installed"
 elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
     echo -e "${YELLOW}Found old openai version: $OPENAI_VERSION${NC}"
     echo "Upgrading to openai 1.x+ for litellm compatibility..."
-    $PYTHON_CMD -m pip install --upgrade "openai>=1.0.0" > /dev/null 2>&1
-    OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null)
+    "${PYTHON_CMD[@]}" -m pip install --upgrade "openai>=1.0.0" > /dev/null 2>&1
+    OPENAI_VERSION=$("${PYTHON_CMD[@]}" -c "import openai; print(openai.__version__)" 2>/dev/null)
     echo -e "${GREEN}✓${NC} openai upgraded to $OPENAI_VERSION"
 else
     echo -e "${GREEN}✓${NC} openai $OPENAI_VERSION is compatible"
@@ -168,7 +177,7 @@ echo ""
 cd "$PROJECT_ROOT"
 
 # Test framework import
-if $PYTHON_CMD -c "import framework; print('framework OK')" > /dev/null 2>&1; then
+if "${PYTHON_CMD[@]}" -c "import framework; print('framework OK')" > /dev/null 2>&1; then
     echo -e "${GREEN}✓${NC} framework package imports successfully"
 else
     echo -e "${RED}✗${NC} framework package import failed"
@@ -176,7 +185,7 @@ else
 fi
 
 # Test aden_tools import
-if $PYTHON_CMD -c "import aden_tools; print('aden_tools OK')" > /dev/null 2>&1; then
+if "${PYTHON_CMD[@]}" -c "import aden_tools; print('aden_tools OK')" > /dev/null 2>&1; then
     echo -e "${GREEN}✓${NC} aden_tools package imports successfully"
 else
     echo -e "${RED}✗${NC} aden_tools package import failed"
@@ -184,7 +193,7 @@ else
 fi
 
 # Test litellm + openai compatibility
-if $PYTHON_CMD -c "import litellm; print('litellm OK')" > /dev/null 2>&1; then
+if "${PYTHON_CMD[@]}" -c "import litellm; print('litellm OK')" > /dev/null 2>&1; then
     echo -e "${GREEN}✓${NC} litellm package imports successfully"
 else
     echo -e "${YELLOW}⚠${NC} litellm import had issues (may be OK if not using LLM features)"
