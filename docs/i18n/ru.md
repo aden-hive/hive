@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -91,7 +91,7 @@ cd hive
 ./quickstart.sh
 
 # Создать агента с помощью Claude Code
-claude> /building-agents
+claude> /building-agents-construction
 
 # Протестировать агента
 claude> /testing-agent
@@ -237,7 +237,7 @@ hive/
 # - Все зависимости
 
 # Создать новых агентов с помощью навыков Claude Code
-claude> /building-agents
+claude> /building-agents-construction
 
 # Протестировать агентов
 claude> /testing-agent
@@ -253,7 +253,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[Руководство разработчика](DEVELOPER.md)** - Полное руководство для разработчиков
 - [Начало работы](docs/getting-started.md) - Инструкции по быстрой настройке
 - [Руководство по конфигурации](docs/configuration.md) - Все опции конфигурации
-- [Обзор архитектуры](docs/architecture.md) - Дизайн и структура системы
+- [Обзор архитектуры](docs/architecture/README.md) - Дизайн и структура системы
 
 ## Дорожная карта
 
@@ -289,11 +289,14 @@ timeline
 
 Мы приветствуем вклад! Пожалуйста, ознакомьтесь с [CONTRIBUTING.md](CONTRIBUTING.md) для руководств.
 
-1. Сделайте форк репозитория
-2. Создайте ветку функции (`git checkout -b feature/amazing-feature`)
-3. Зафиксируйте изменения (`git commit -m 'Add amazing feature'`)
-4. Отправьте в ветку (`git push origin feature/amazing-feature`)
-5. Откройте Pull Request
+**Важно:** Пожалуйста, получите назначение на issue перед отправкой PR. Оставьте комментарий в issue, чтобы заявить о своём желании работать над ним, и мейнтейнер назначит вас в течение 24 часов. Это помогает избежать дублирования работы.
+
+1. Найдите или создайте issue и получите назначение
+2. Сделайте форк репозитория
+3. Создайте ветку функции (`git checkout -b feature/amazing-feature`)
+4. Зафиксируйте изменения (`git commit -m 'Add amazing feature'`)
+5. Отправьте в ветку (`git push origin feature/amazing-feature`)
+6. Откройте Pull Request
 
 ## Присоединяйтесь к команде
 

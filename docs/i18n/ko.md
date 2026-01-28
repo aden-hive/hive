@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -264,7 +264,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[개발자 가이드](DEVELOPER.md)** - 개발자를 위한 종합 가이드
 - [시작하기](docs/getting-started.md) - 빠른 설정 방법
 - [설정 가이드](docs/configuration.md) - 모든 설정 옵션 안내
-- [아키텍처 개요](docs/architecture.md) - 시스템 설계 및 구조
+- [아키텍처 개요](docs/architecture/README.md) - 시스템 설계 및 구조
 
 ## 로드맵
 
@@ -301,11 +301,14 @@ Aden은 지원, 기능 요청, 커뮤니티 토론을 위해 [Discord](https://d
 
 기여를 환영합니다. 기여 가이드라인은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고해 주세요.
 
-1. 저장소를 포크합니다
-2. 기능 브랜치를 생성합니다 (`git checkout -b feature/amazing-feature`)
-3. 변경 사항을 커밋합니다 (`git commit -m 'Add amazing feature'`)
-4. 브랜치에 푸시합니다 (`git push origin feature/amazing-feature`)
-5. Pull Request를 생성합니다
+**중요:** PR을 제출하기 전에 먼저 Issue에 할당받으세요. Issue에 댓글을 달아 담당을 요청하면 유지관리자가 24시간 내에 할당해 드립니다. 이는 중복 작업을 방지하는 데 도움이 됩니다.
+
+1. Issue를 찾거나 생성하고 할당받습니다
+2. 저장소를 포크합니다
+3. 기능 브랜치를 생성합니다 (`git checkout -b feature/amazing-feature`)
+4. 변경 사항을 커밋합니다 (`git commit -m 'Add amazing feature'`)
+5. 브랜치에 푸시합니다 (`git push origin feature/amazing-feature`)
+6. Pull Request를 생성합니다
 
 ## 팀에 합류하세요
 
@@ -349,7 +352,7 @@ Aden은 모니터링과 관측성을 위해 토큰 사용량, 지연 시간 메�
 
 **Q: Aden은 어떤 배포 방식을 지원하나요?**
 
-Aden은 기본적으로 Docker Compose 배포를 지원하며, 프로덕션 및 개발 환경 설정을 모두 제공합니다. Docker를 지원하는 모든 인프라에서 셀프 호스팅이 가능합니다. 클라우드 배포 옵션과 Kubernetes 대응 설정은 로드맵에 포함되어 있습니다.
+Aden은 Python 패키지를 통한 셀프 호스팅 배포를 지원합니다. 설치 방법은 [환경 설정 가이드](ENVIRONMENT_SETUP.md)를 참조하세요. 클라우드 배포 옵션과 Kubernetes 대응 설정은 로드맵에 포함되어 있습니다.
 
 **Q: Aden은 복잡한 프로덕션 규모의 사용 사례도 처리할 수 있나요?**
 

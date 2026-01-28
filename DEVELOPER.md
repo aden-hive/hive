@@ -99,10 +99,13 @@ Get API keys:
 ./quickstart.sh
 ```
 
-This installs:
+This installs agent-related Claude Code skills:
 
-- `/building-agents` - Build new goal-driven agents
-- `/testing-agent` - Test agents with evaluation framework
+- `/building-agents-core` - Fundamental agent concepts
+- `/building-agents-construction` - Step-by-step agent building
+- `/building-agents-patterns` - Best practices and design patterns
+- `/testing-agent` - Test and validate agents
+- `/agent-workflow` - End-to-end guided workflow
 
 ### Verify Setup
 
@@ -132,15 +135,22 @@ hive/                                    # Repository root
 │   └── CODEOWNERS                       # Auto-assign reviewers
 │
 ├── .claude/                             # Claude Code Skills
-│   └── skills/
-│       ├── building-agents/             # Skills for building agents
-│       │   ├── SKILL.md                 # Main skill definition
-│       │   ├── building-agents-core/
-│       │   ├── building-agents-patterns/
-│       │   └── building-agents-construction/
+│   └── skills/                          # Skills for building
+│       ├── building-agents-core/
+|       |   ├── SKILL.md                 # Main skill definition
+│       |   └── examples
+│       ├── building-agents-patterns/
+|       |   ├── SKILL.md
+│       |   └── examples
+│       ├── building-agents-construction/
+|       |   ├── SKILL.md
+│       |   └── examples
 │       ├── testing-agent/               # Skills for testing agents
-│       │   └── SKILL.md
-│       └── agent-workflow/              # Complete workflow orchestration
+│       │   ├── SKILL.md
+│       |   └── examples
+│       └── agent-workflow/              # Complete workflow 
+|           ├── SKILL.md
+│           └── examples
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
@@ -213,7 +223,7 @@ The fastest way to build agents is using the Claude Code skills:
 ./quickstart.sh
 
 # Build a new agent
-claude> /building-agents
+claude> /building-agents-construction
 
 # Test the agent
 claude> /testing-agent
@@ -224,7 +234,7 @@ claude> /testing-agent
 1. **Define Your Goal**
 
    ```
-   claude> /building-agents
+   claude> /building-agents-construction
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
@@ -511,30 +521,7 @@ chore(deps): update React to 18.2.0
 
 ## Debugging
 
-### Frontend Debugging
 
-**React Developer Tools:**
-
-1. Install the [React DevTools browser extension](https://react.dev/learn/react-developer-tools)
-2. Open browser DevTools → React tab
-3. Inspect component tree, props, state, and hooks
-
-**VS Code Debugging:**
-
-1. Add Chrome debug configuration to `.vscode/launch.json`:
-
-```json
-{
-  "type": "chrome",
-  "request": "launch",
-  "name": "Debug Frontend",
-  "url": "http://localhost:3000",
-  "webRoot": "${workspaceFolder}/honeycomb/src"
-}
-```
-
-2. Start the dev server: `npm run dev -w honeycomb`
-3. Press F5 in VS Code
 
 ### Backend Debugging
 
@@ -594,7 +581,7 @@ pip install -e .
 
 ```bash
 # Option 1: Use Claude Code skill (recommended)
-claude> /building-agents
+claude> /building-agents-construction
 
 # Option 2: Create manually
 # Note: exports/ is initially empty (gitignored). Create your agent directory:
@@ -709,14 +696,6 @@ kill -9 <PID>
 # Or change ports in config.yaml and regenerate
 ```
 
-### Node Modules Issues
-
-```bash
-# Clean everything and reinstall
-npm run clean
-rm -rf node_modules package-lock.json
-npm install
-```
 
 ### Docker Issues
 
@@ -728,15 +707,7 @@ docker compose build --no-cache
 docker compose up
 ```
 
-### TypeScript Errors After Pull
 
-```bash
-# Rebuild TypeScript
-npm run build
-
-# Or restart TS server in VS Code
-# Cmd/Ctrl + Shift + P → "TypeScript: Restart TS Server"
-```
 
 ### Environment Variables Not Loading
 
@@ -746,24 +717,12 @@ npm run generate:env
 
 # Verify files exist
 cat .env
-cat honeycomb/.env
 cat hive/.env
 
 # Restart dev servers after changing env
 ```
 
-### Tests Failing
 
-```bash
-# Run with verbose output
-npm run test -w honeycomb -- --reporter=verbose
-
-# Run single test file
-npm run test -w honeycomb -- src/components/Button.test.tsx
-
-# Clear test cache
-npm run test -w honeycomb -- --clearCache
-```
 
 ---
 

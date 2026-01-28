@@ -29,10 +29,26 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0"]
-sandbox = ["RestrictedPython>=7.0"]
-ocr = ["pytesseract>=0.3.10", "pillow>=10.0.0"]
-all = ["RestrictedPython>=7.0", "pytesseract>=0.3.10", "pillow>=10.0.0"]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+sandbox = [
+    "RestrictedPython>=7.0",
+]
+ocr = [
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
+]
+sql = [
+    "duckdb>=1.0.0",
+]
+all = [
+    "RestrictedPython>=7.0",
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
+    "duckdb>=1.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -40,6 +56,31 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aden_tools"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+lint.select = [
+  "B",   # bugbear errors
+  "C4",  # flake8-comprehensions errors
+  "E",   # pycodestyle errors
+  "F",   # pyflakes errors
+  "I",   # import sorting
+  "Q",   # flake8-quotes errors
+  "UP",  # py-upgrade
+  "W",   # pycodestyle warnings
+]
+
+lint.isort.combine-as-imports = true
+lint.isort.known-first-party = ["aden_tools"]
+lint.isort.section-order = [
+  "future",
+  "standard-library",
+  "third-party",
+  "first-party",
+  "local-folder",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,16 +1,18 @@
 """Tests for plan.py - Plan enums and Pydantic models."""
+
 import json
+
 import pytest
 
 from framework.graph.plan import (
-    ActionType,
-    StepStatus,
-    ApprovalDecision,
-    JudgmentAction,
-    ExecutionStatus,
     ActionSpec,
-    PlanStep,
+    ActionType,
+    ApprovalDecision,
+    ExecutionStatus,
+    JudgmentAction,
     Plan,
+    PlanStep,
+    StepStatus,
 )
 
 
@@ -210,21 +212,23 @@ class TestPlanFromJson:
 
     def test_plan_from_json_string(self):
         """Parse Plan from JSON string."""
-        json_str = json.dumps({
-            "id": "plan_1",
-            "goal_id": "goal_1",
-            "description": "Test plan",
-            "steps": [
-                {
-                    "id": "step_1",
-                    "description": "First step",
-                    "action": {
-                        "action_type": "function",
-                        "function_name": "do_something",
-                    },
-                }
-            ],
-        })
+        json_str = json.dumps(
+            {
+                "id": "plan_1",
+                "goal_id": "goal_1",
+                "description": "Test plan",
+                "steps": [
+                    {
+                        "id": "step_1",
+                        "description": "First step",
+                        "action": {
+                            "action_type": "function",
+                            "function_name": "do_something",
+                        },
+                    }
+                ],
+            }
+        )
 
         plan = Plan.from_json(json_str)
 

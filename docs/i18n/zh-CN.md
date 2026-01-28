@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -91,7 +91,7 @@ cd hive
 ./quickstart.sh
 
 # 使用 Claude Code 构建智能体
-claude> /building-agents
+claude> /building-agents-construction
 
 # 测试您的智能体
 claude> /testing-agent
@@ -237,7 +237,7 @@ hive/
 # - 所有依赖项
 
 # 使用 Claude Code 技能构建新智能体
-claude> /building-agents
+claude> /building-agents-construction
 
 # 测试智能体
 claude> /testing-agent
@@ -253,7 +253,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[开发者指南](DEVELOPER.md)** - 开发者综合指南
 - [入门指南](docs/getting-started.md) - 快速设置说明
 - [配置指南](docs/configuration.md) - 所有配置选项
-- [架构概述](docs/architecture.md) - 系统设计和结构
+- [架构概述](docs/architecture/README.md) - 系统设计和结构
 
 ## 路线图
 
@@ -289,11 +289,14 @@ timeline
 
 我们欢迎贡献！请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 了解指南。
 
-1. Fork 仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
+**重要提示：** 请在提交 PR 之前先认领 Issue。在 Issue 下评论认领，维护者将在 24 小时内分配给您。我们致力于避免重复工作，让大家的努力不被浪费。
+
+1. 找到或创建 Issue 并获得分配
+2. Fork 仓库
+3. 创建功能分支 (`git checkout -b feature/amazing-feature`)
+4. 提交更改 (`git commit -m 'Add amazing feature'`)
+5. 推送到分支 (`git push origin feature/amazing-feature`)
+6. 创建 Pull Request
 
 ## 加入我们的团队
 

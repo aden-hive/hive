@@ -10,22 +10,23 @@ This is MORE important than actions because:
 """
 
 from datetime import datetime
-from typing import Any
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 
 
 class DecisionType(str, Enum):
     """Types of decisions an agent can make."""
-    TOOL_SELECTION = "tool_selection"      # Which tool to use
+
+    TOOL_SELECTION = "tool_selection"  # Which tool to use
     PARAMETER_CHOICE = "parameter_choice"  # What parameters to pass
-    PATH_CHOICE = "path_choice"            # Which branch to take
-    OUTPUT_FORMAT = "output_format"        # How to format output
-    RETRY_STRATEGY = "retry_strategy"      # How to handle failure
-    DELEGATION = "delegation"              # Whether to delegate to another node
-    TERMINATION = "termination"            # Whether to stop or continue
-    CUSTOM = "custom"                      # User-defined decision type
+    PATH_CHOICE = "path_choice"  # Which branch to take
+    OUTPUT_FORMAT = "output_format"  # How to format output
+    RETRY_STRATEGY = "retry_strategy"  # How to handle failure
+    DELEGATION = "delegation"  # Whether to delegate to another node
+    TERMINATION = "termination"  # Whether to stop or continue
+    CUSTOM = "custom"  # User-defined decision type
 
 
 class Option(BaseModel):
@@ -35,9 +36,10 @@ class Option(BaseModel):
     Capturing options is crucial - it shows what the agent considered
     and enables us to evaluate whether the right choice was made.
     """
+
     id: str
-    description: str                    # Human-readable: "Call search API"
-    action_type: str                    # "tool_call", "generate", "delegate"
+    description: str  # Human-readable: "Call search API"
+    action_type: str  # "tool_call", "generate", "delegate"
     action_params: dict[str, Any] = Field(default_factory=dict)
 
     # Why might this be good or bad?
@@ -57,9 +59,10 @@ class Outcome(BaseModel):
     This is filled in AFTER the action completes, allowing us to
     correlate decisions with their results.
     """
+
     success: bool
-    result: Any = None                  # The actual output
-    error: str | None = None            # Error message if failed
+    result: Any = None  # The actual output
+    error: str | None = None  # Error message if failed
 
     # Side effects
     state_changes: dict[str, Any] = Field(default_factory=dict)
@@ -67,7 +70,7 @@ class Outcome(BaseModel):
     latency_ms: int = 0
 
     # Natural language summary (crucial for Builder)
-    summary: str = ""                   # "Found 3 contacts matching query"
+    summary: str = ""  # "Found 3 contacts matching query"
 
     timestamp: datetime = Field(default_factory=datetime.now)
 
@@ -81,6 +84,7 @@ class DecisionEvaluation(BaseModel):
     This is computed AFTER the run completes, allowing us to
     judge decisions in light of their eventual outcomes.
     """
+
     # Did it move toward the goal?
     goal_aligned: bool = True
     alignment_score: float = Field(default=1.0, ge=0.0, le=1.0)
@@ -109,6 +113,7 @@ class Decision(BaseModel):
     Every significant choice the agent makes is captured here.
     This is the core data structure for understanding and improving agents.
     """
+
     id: str
     timestamp: datetime = Field(default_factory=datetime.now)
     node_id: str

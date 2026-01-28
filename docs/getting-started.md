@@ -34,7 +34,7 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ./quickstart.sh
 
 # Start Claude Code and build an agent
-claude> /building-agents
+claude> /building-agents-construction
 ```
 
 Follow the interactive prompts to:
@@ -58,6 +58,20 @@ cd exports/my_agent
 # Validate the agent
 PYTHONPATH=core:exports python -m my_agent validate
 ```
+
+### Option 3: Manual Code-First (Minimal Example)
+
+If you prefer to start with code rather than CLI wizards, check out the manual agent example:
+
+```bash
+# View the minimal example
+cat core/examples/manual_agent.py
+
+# Run it (no API keys required)
+PYTHONPATH=core python core/examples/manual_agent.py
+```
+
+This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
 
 ## Project Structure
 

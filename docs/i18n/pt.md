@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -91,7 +91,7 @@ Isto instala:
 ./quickstart.sh
 
 # Construir um agente usando Claude Code
-claude> /building-agents
+claude> /building-agents-construction
 
 # Testar seu agente
 claude> /testing-agent
@@ -237,7 +237,7 @@ Para construir e executar agentes orientados a objetivos com o framework:
 # - Todas as dependências
 
 # Construir novos agentes usando habilidades Claude Code
-claude> /building-agents
+claude> /building-agents-construction
 
 # Testar agentes
 claude> /testing-agent
@@ -253,7 +253,7 @@ Consulte [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instruções completa
 - **[Guia do Desenvolvedor](DEVELOPER.md)** - Guia abrangente para desenvolvedores
 - [Começando](docs/getting-started.md) - Instruções de configuração rápida
 - [Guia de Configuração](docs/configuration.md) - Todas as opções de configuração
-- [Visão Geral da Arquitetura](docs/architecture.md) - Design e estrutura do sistema
+- [Visão Geral da Arquitetura](docs/architecture/README.md) - Design e estrutura do sistema
 
 ## Roadmap
 
@@ -289,11 +289,14 @@ Usamos [Discord](https://discord.com/invite/MXE49hrKDk) para suporte, solicitaç
 
 Aceitamos contribuições! Por favor, consulte [CONTRIBUTING.md](CONTRIBUTING.md) para diretrizes.
 
-1. Faça fork do repositório
-2. Crie sua branch de funcionalidade (`git checkout -b feature/amazing-feature`)
-3. Faça commit das suas alterações (`git commit -m 'Add amazing feature'`)
-4. Faça push para a branch (`git push origin feature/amazing-feature`)
-5. Abra um Pull Request
+**Importante:** Por favor, seja atribuído a uma issue antes de enviar um PR. Comente na issue para reivindicá-la e um mantenedor irá atribuí-la a você em 24 horas. Isso ajuda a evitar trabalho duplicado.
+
+1. Encontre ou crie uma issue e seja atribuído
+2. Faça fork do repositório
+3. Crie sua branch de funcionalidade (`git checkout -b feature/amazing-feature`)
+4. Faça commit das suas alterações (`git commit -m 'Add amazing feature'`)
+5. Faça push para a branch (`git push origin feature/amazing-feature`)
+6. Abra um Pull Request
 
 ## Junte-se ao Nosso Time
 
