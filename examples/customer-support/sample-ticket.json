@@ -1,0 +1,11 @@
+{
+    "ticket_id": "TKT-12345",
+    "channel": "email",
+    "from": "customer@example.com",
+    "customer_name": "John",
+    "subject": "Can't login to my account",
+    "body": "Hi team, I've been trying to log in for the past hour but I keep getting an 'invalid session' error. Username: john_doe. Can you help?",
+    "timestamp": "2026-01-28T20:40:00Z",
+    "attachments": [],
+    "urgency": "unknown"
+}

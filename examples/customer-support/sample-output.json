@@ -1,0 +1,16 @@
+{
+    "ticket_id": "TKT-12345",
+    "urgency": "medium",
+    "problem_category": "authentication",
+    "relevant_docs": [
+        "https://docs.company.com/login-troubleshooting",
+        "https://docs.company.com/password-reset"
+    ],
+    "draft_response": {
+        "to": "customer@example.com",
+        "subject": "Re: Can't login to my account",
+        "body": "Hi John,\n\nThanks for reaching out — I understand you’re seeing an invalid session error while logging in.\n\nTry this:\n1) Clear cookies/cache for the site\n2) Try an incognito window\n3) Use the password reset flow if the issue persists\n\nIf it still fails, reply with a screenshot of the error and your browser + OS version.\n\nBest,\nSupport Team"
+    },
+    "confidence": 0.87,
+    "requires_human": false
+}
