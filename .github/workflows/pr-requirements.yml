@@ -22,10 +22,12 @@ jobs:
             const prTitle = pr.title || '';
             const prLabels = (pr.labels || []).map(l => l.name);
 
-            // Allow micro-fix PRs without a linked issue
+            // Allow micro-fix and documentation PRs without a linked issue
             const isMicroFix = prLabels.includes('micro-fix') || /micro-fix/i.test(prTitle);
-            if (isMicroFix) {
-              console.log(`PR #${prNumber} is a Micro-fix, skipping issue requirement.`);
+            const isDocumentation = prLabels.includes('documentation') || /\bdocs?\b/i.test(prTitle);
+            if (isMicroFix || isDocumentation) {
+              const reason = isMicroFix ? 'micro-fix' : 'documentation';
+              console.log(`PR #${prNumber} is a ${reason}, skipping issue requirement.`);
               return;
             }
 
@@ -52,7 +54,9 @@ jobs:
             2. Assign yourself to the issue
             3. Re-open this PR and add \`Fixes #123\` in the description
 
-            **Exception:** If this is a micro-fix, add the \`micro-fix\` label or include \`micro-fix\` in the PR title to bypass this requirement.
+            **Exception:** To bypass this requirement, you can:
+            - Add the \`micro-fix\` label or include \`micro-fix\` in your PR title for trivial fixes
+            - Add the \`documentation\` label or include \`doc\`/\`docs\` in your PR title for documentation changes
 
             **Why is this required?** See #472 for details.`;
 
@@ -133,7 +137,9 @@ jobs:
             1. Assign yourself (@${prAuthor}) to one of the linked issues
             2. Re-open this PR
 
-            **Exception:** If this is a micro-fix, add the \`micro-fix\` label or include \`micro-fix\` in the PR title to bypass this requirement.
+            **Exception:** To bypass this requirement, you can:
+            - Add the \`micro-fix\` label or include \`micro-fix\` in your PR title for trivial fixes
+            - Add the \`documentation\` label or include \`doc\`/\`docs\` in your PR title for documentation changes
 
             **Why is this required?** See #472 for details.`;
 
