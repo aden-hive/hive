@@ -30,8 +30,8 @@ To keep the project moving, issues with **no activity for 5 days** (no PR or sta
 ### Exceptions (No Assignment Needed)
 
 You may submit PRs without prior assignment for:
-- **Documentation:** Fixing typos or clarifying instructions
-- **Micro-fixes:** Minor tweaks or obvious linting errors
+- **Documentation:** Fixing typos or clarifying instructions — add the `documentation` label or include `doc`/`docs` in your PR title to bypass the linked issue requirement
+- **Micro-fixes:** Minor tweaks or obvious linting errors — add the `micro-fix` label or include `micro-fix` in your PR title to bypass the linked issue requirement
 - **Small Refactors:** Tiny improvements that don't change core logic
 
 If a high-quality PR is submitted for a "stale" assigned issue (no activity for 7+ days), we may proceed with the submitted code.
