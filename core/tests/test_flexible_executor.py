@@ -10,27 +10,28 @@ Tests cover:
 """
 
 import asyncio
+
 import pytest
 
-from framework.graph.plan import (
-    Plan,
-    PlanStep,
-    ActionSpec,
-    ActionType,
-    StepStatus,
-    Judgment,
-    JudgmentAction,
-    EvaluationRule,
-    PlanExecutionResult,
-    ExecutionStatus,
-)
 from framework.graph.code_sandbox import (
     CodeSandbox,
-    safe_exec,
     safe_eval,
+    safe_exec,
 )
-from framework.graph.judge import HybridJudge, create_default_judge
 from framework.graph.goal import Goal, SuccessCriterion
+from framework.graph.judge import HybridJudge, create_default_judge
+from framework.graph.plan import (
+    ActionSpec,
+    ActionType,
+    EvaluationRule,
+    ExecutionStatus,
+    Judgment,
+    JudgmentAction,
+    Plan,
+    PlanExecutionResult,
+    PlanStep,
+    StepStatus,
+)
 
 
 class TestPlanDataStructures:
@@ -216,12 +217,14 @@ class TestHybridJudge:
     def test_rule_based_accept(self):
         """Test rule-based accept judgment."""
         judge = HybridJudge()
-        judge.add_rule(EvaluationRule(
-            id="success_check",
-            description="Accept on success flag",
-            condition="result.get('success') == True",
-            action=JudgmentAction.ACCEPT,
-        ))
+        judge.add_rule(
+            EvaluationRule(
+                id="success_check",
+                description="Accept on success flag",
+                condition="result.get('success') == True",
+                action=JudgmentAction.ACCEPT,
+            )
+        )
 
         step = PlanStep(
             id="test_step",
@@ -233,14 +236,14 @@ class TestHybridJudge:
             name="Test Goal",
             description="A test goal",
             success_criteria=[
-                SuccessCriterion(id="sc1", description="Complete task", metric="completion", target="100%"),
+                SuccessCriterion(
+                    id="sc1", description="Complete task", metric="completion", target="100%"
+                ),
             ],
         )
 
         # Use sync version for testing
-        judgment = asyncio.run(
-            judge.evaluate(step, {"success": True}, goal)
-        )
+        judgment = asyncio.run(judge.evaluate(step, {"success": True}, goal))
 
         assert judgment.action == JudgmentAction.ACCEPT
         assert judgment.rule_matched == "success_check"
@@ -248,13 +251,15 @@ class TestHybridJudge:
     def test_rule_based_retry(self):
         """Test rule-based retry judgment."""
         judge = HybridJudge()
-        judge.add_rule(EvaluationRule(
-            id="timeout_retry",
-            description="Retry on timeout",
-            condition="result.get('error_type') == 'timeout'",
-            action=JudgmentAction.RETRY,
-            feedback_template="Timeout occurred, please retry",
-        ))
+        judge.add_rule(
+            EvaluationRule(
+                id="timeout_retry",
+                description="Retry on timeout",
+                condition="result.get('error_type') == 'timeout'",
+                action=JudgmentAction.RETRY,
+                feedback_template="Timeout occurred, please retry",
+            )
+        )
 
         step = PlanStep(
             id="test_step",
@@ -266,13 +271,13 @@ class TestHybridJudge:
             name="Test Goal",
             description="A test goal",
             success_criteria=[
-                SuccessCriterion(id="sc1", description="Complete task", metric="completion", target="100%"),
+                SuccessCriterion(
+                    id="sc1", description="Complete task", metric="completion", target="100%"
+                ),
             ],
         )
 
-        judgment = asyncio.run(
-            judge.evaluate(step, {"error_type": "timeout"}, goal)
-        )
+        judgment = asyncio.run(judge.evaluate(step, {"error_type": "timeout"}, goal))
 
         assert judgment.action == JudgmentAction.RETRY
 
@@ -281,22 +286,26 @@ class TestHybridJudge:
         judge = HybridJudge()
 
         # Lower priority - would match
-        judge.add_rule(EvaluationRule(
-            id="low_priority",
-            description="Low priority accept",
-            condition="True",
-            action=JudgmentAction.ACCEPT,
-            priority=1,
-        ))
+        judge.add_rule(
+            EvaluationRule(
+                id="low_priority",
+                description="Low priority accept",
+                condition="True",
+                action=JudgmentAction.ACCEPT,
+                priority=1,
+            )
+        )
 
         # Higher priority - should match first
-        judge.add_rule(EvaluationRule(
-            id="high_priority",
-            description="High priority escalate",
-            condition="True",
-            action=JudgmentAction.ESCALATE,
-            priority=100,
-        ))
+        judge.add_rule(
+            EvaluationRule(
+                id="high_priority",
+                description="High priority escalate",
+                condition="True",
+                action=JudgmentAction.ESCALATE,
+                priority=100,
+            )
+        )
 
         step = PlanStep(
             id="test_step",
@@ -308,13 +317,13 @@ class TestHybridJudge:
             name="Test Goal",
             description="A test goal",
             success_criteria=[
-                SuccessCriterion(id="sc1", description="Complete task", metric="completion", target="100%"),
+                SuccessCriterion(
+                    id="sc1", description="Complete task", metric="completion", target="100%"
+                ),
             ],
         )
 
-        judgment = asyncio.run(
-            judge.evaluate(step, {}, goal)
-        )
+        judgment = asyncio.run(judge.evaluate(step, {}, goal))
 
         assert judgment.rule_matched == "high_priority"
         assert judgment.action == JudgmentAction.ESCALATE
@@ -397,8 +406,8 @@ class TestFlexibleExecutorIntegration:
 
     def test_executor_creation(self, tmp_path):
         """Test creating a FlexibleGraphExecutor."""
-        from framework.runtime.core import Runtime
         from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.runtime.core import Runtime
 
         runtime = Runtime(storage_path=tmp_path / "runtime")
         executor = FlexibleGraphExecutor(runtime=runtime)
@@ -409,17 +418,19 @@ class TestFlexibleExecutorIntegration:
 
     def test_executor_with_custom_judge(self, tmp_path):
         """Test executor with custom judge."""
-        from framework.runtime.core import Runtime
         from framework.graph.flexible_executor import FlexibleGraphExecutor
+        from framework.runtime.core import Runtime
 
         runtime = Runtime(storage_path=tmp_path / "runtime")
         custom_judge = HybridJudge()
-        custom_judge.add_rule(EvaluationRule(
-            id="custom_rule",
-            description="Custom rule",
-            condition="True",
-            action=JudgmentAction.ACCEPT,
-        ))
+        custom_judge.add_rule(
+            EvaluationRule(
+                id="custom_rule",
+                description="Custom rule",
+                condition="True",
+                action=JudgmentAction.ACCEPT,
+            )
+        )
 
         executor = FlexibleGraphExecutor(runtime=runtime, judge=custom_judge)
 

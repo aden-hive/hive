@@ -6,34 +6,48 @@ This script installs the framework and configures the MCP server.
 """
 
 import json
+import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
+
+def setup_logger():
+    """Configure logger for CLI usage with colored output."""
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter("%(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
 
 class Colors:
     """ANSI color codes for terminal output."""
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    RED = '\033[0;31m'
-    BLUE = '\033[0;34m'
-    NC = '\033[0m'  # No Color
+
+    GREEN = "\033[0;32m"
+    YELLOW = "\033[1;33m"
+    RED = "\033[0;31m"
+    BLUE = "\033[0;34m"
+    NC = "\033[0m"  # No Color
 
 
-def print_step(message: str, color: str = Colors.YELLOW):
-    """Print a colored step message."""
-    print(f"{color}{message}{Colors.NC}")
+def log_step(message: str):
+    """Log a colored step message."""
+    logger.info(f"{Colors.YELLOW}{message}{Colors.NC}")
 
 
-def print_success(message: str):
-    """Print a success message."""
-    print(f"{Colors.GREEN}✓ {message}{Colors.NC}")
+def log_success(message: str):
+    """Log a success message."""
+    logger.info(f"{Colors.GREEN}✓ {message}{Colors.NC}")
 
 
-def print_error(message: str):
-    """Print an error message."""
-    print(f"{Colors.RED}✗ {message}{Colors.NC}", file=sys.stderr)
+def log_error(message: str):
+    """Log an error message."""
+    logger.error(f"{Colors.RED}✗ {message}{Colors.NC}")
 
 
 def run_command(cmd: list, error_msg: str) -> bool:
@@ -42,113 +56,113 @@ def run_command(cmd: list, error_msg: str) -> bool:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
         return True
     except subprocess.CalledProcessError as e:
-        print_error(error_msg)
-        print(f"Error output: {e.stderr}", file=sys.stderr)
+        log_error(error_msg)
+        logger.error(f"Error output: {e.stderr}")
         return False
 
 
 def main():
     """Main setup function."""
-    print("=== Aden Hive Framework MCP Server Setup ===")
-    print()
+    setup_logger()
+    logger.info("=== Aden Hive Framework MCP Server Setup ===")
+    logger.info("")
 
     # Get script directory
     script_dir = Path(__file__).parent.absolute()
     os.chdir(script_dir)
 
     # Step 1: Install framework package
-    print_step("Step 1: Installing framework package...")
+    log_step("Step 1: Installing framework package...")
     if not run_command(
-        [sys.executable, "-m", "pip", "install", "-e", "."],
-        "Failed to install framework package"
+        [sys.executable, "-m", "pip", "install", "-e", "."], "Failed to install framework package"
     ):
         sys.exit(1)
-    print_success("Framework package installed")
-    print()
+    log_success("Framework package installed")
+    logger.info("")
 
     # Step 2: Install MCP dependencies
-    print_step("Step 2: Installing MCP dependencies...")
+    log_step("Step 2: Installing MCP dependencies...")
     if not run_command(
         [sys.executable, "-m", "pip", "install", "mcp", "fastmcp"],
-        "Failed to install MCP dependencies"
+        "Failed to install MCP dependencies",
     ):
         sys.exit(1)
-    print_success("MCP dependencies installed")
-    print()
+    log_success("MCP dependencies installed")
+    logger.info("")
 
     # Step 3: Verify/create MCP configuration
-    print_step("Step 3: Verifying MCP server configuration...")
+    log_step("Step 3: Verifying MCP server configuration...")
     mcp_config_path = script_dir / ".mcp.json"
 
     if mcp_config_path.exists():
-        print_success("MCP configuration found at .mcp.json")
-        print("Configuration:")
+        log_success("MCP configuration found at .mcp.json")
+        logger.info("Configuration:")
         with open(mcp_config_path) as f:
             config = json.load(f)
-            print(json.dumps(config, indent=2))
+            logger.info(json.dumps(config, indent=2))
     else:
-        print_error("No .mcp.json found")
-        print("Creating default MCP configuration...")
+        log_error("No .mcp.json found")
+        logger.info("Creating default MCP configuration...")
 
         config = {
             "mcpServers": {
                 "agent-builder": {
                     "command": "python",
                     "args": ["-m", "framework.mcp.agent_builder_server"],
-                    "cwd": str(script_dir)
+                    "cwd": str(script_dir),
                 }
             }
         }
 
-        with open(mcp_config_path, 'w') as f:
+        with open(mcp_config_path, "w") as f:
             json.dump(config, f, indent=2)
 
-        print_success("Created .mcp.json")
-    print()
+        log_success("Created .mcp.json")
+    logger.info("")
 
     # Step 4: Test MCP server
-    print_step("Step 4: Testing MCP server...")
+    log_step("Step 4: Testing MCP server...")
     try:
         # Try importing the MCP server module
         subprocess.run(
             [sys.executable, "-c", "from framework.mcp import agent_builder_server"],
             check=True,
             capture_output=True,
-            text=True
+            text=True,
         )
-        print_success("MCP server module verified")
+        log_success("MCP server module verified")
     except subprocess.CalledProcessError as e:
-        print_error("Failed to import MCP server module")
-        print(f"Error: {e.stderr}", file=sys.stderr)
+        log_error("Failed to import MCP server module")
+        logger.error(f"Error: {e.stderr}")
         sys.exit(1)
-    print()
+    logger.info("")
 
     # Success summary
-    print(f"{Colors.GREEN}=== Setup Complete ==={Colors.NC}")
-    print()
-    print("The MCP server is now ready to use!")
-    print()
-    print(f"{Colors.BLUE}To start the MCP server manually:{Colors.NC}")
-    print("  python -m framework.mcp.agent_builder_server")
-    print()
-    print(f"{Colors.BLUE}MCP Configuration location:{Colors.NC}")
-    print(f"  {mcp_config_path}")
-    print()
-    print(f"{Colors.BLUE}To use with Claude Desktop or other MCP clients,{Colors.NC}")
-    print(f"{Colors.BLUE}add the following to your MCP client configuration:{Colors.NC}")
-    print()
+    logger.info(f"{Colors.GREEN}=== Setup Complete ==={Colors.NC}")
+    logger.info("")
+    logger.info("The MCP server is now ready to use!")
+    logger.info("")
+    logger.info(f"{Colors.BLUE}To start the MCP server manually:{Colors.NC}")
+    logger.info("  python -m framework.mcp.agent_builder_server")
+    logger.info("")
+    logger.info(f"{Colors.BLUE}MCP Configuration location:{Colors.NC}")
+    logger.info(f"  {mcp_config_path}")
+    logger.info("")
+    logger.info(f"{Colors.BLUE}To use with Claude Desktop or other MCP clients,{Colors.NC}")
+    logger.info(f"{Colors.BLUE}add the following to your MCP client configuration:{Colors.NC}")
+    logger.info("")
 
     example_config = {
         "mcpServers": {
             "agent-builder": {
                 "command": "python",
                 "args": ["-m", "framework.mcp.agent_builder_server"],
-                "cwd": str(script_dir)
+                "cwd": str(script_dir),
             }
         }
     }
-    print(json.dumps(example_config, indent=2))
-    print()
+    logger.info(json.dumps(example_config, indent=2))
+    logger.info("")
 
 
 if __name__ == "__main__":

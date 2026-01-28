@@ -1,4 +1,5 @@
 """Agent graph construction for Online Research Agent."""
+
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult
@@ -8,6 +9,16 @@ from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
 
 from .config import default_config, metadata
+from .nodes import (
+    parse_query_node,
+    search_sources_node,
+    fetch_content_node,
+    evaluate_sources_node,
+    synthesize_findings_node,
+    write_report_node,
+    quality_check_node,
+    save_report_node,
+)
 
 # Goal definition
 goal = Goal(
@@ -77,17 +88,6 @@ goal = Goal(
             category="accessibility",
         ),
     ],
-)
-# Import nodes
-from .nodes import (
-    parse_query_node,
-    search_sources_node,
-    fetch_content_node,
-    evaluate_sources_node,
-    synthesize_findings_node,
-    write_report_node,
-    quality_check_node,
-    save_report_node,
 )
 
 # Node list
@@ -195,13 +195,15 @@ class OnlineResearchAgent:
                 trigger_type = "manual"
                 name = ep_id.replace("-", " ").title()
 
-            specs.append(EntryPointSpec(
-                id=ep_id,
-                name=name,
-                entry_node=node_id,
-                trigger_type=trigger_type,
-                isolation_level="shared",
-            ))
+            specs.append(
+                EntryPointSpec(
+                    id=ep_id,
+                    name=name,
+                    entry_node=node_id,
+                    trigger_type=trigger_type,
+                    isolation_level="shared",
+                )
+            )
         return specs
 
     def _create_runtime(self, mock_mode=False) -> AgentRuntime:
@@ -226,7 +228,10 @@ class OnlineResearchAgent:
             for server_name, server_config in mcp_servers.items():
                 server_config["name"] = server_name
                 # Resolve relative cwd paths
-                if "cwd" in server_config and not Path(server_config["cwd"]).is_absolute():
+                if (
+                    "cwd" in server_config
+                    and not Path(server_config["cwd"]).is_absolute()
+                ):
                     server_config["cwd"] = str(agent_dir / server_config["cwd"])
                 tool_registry.register_mcp_server(server_config)
 
@@ -298,7 +303,9 @@ class OnlineResearchAgent:
         """
         if self._runtime is None or not self._runtime.is_running:
             raise RuntimeError("Agent runtime not started. Call start() first.")
-        return await self._runtime.trigger(entry_point, input_data, correlation_id, session_state=session_state)
+        return await self._runtime.trigger(
+            entry_point, input_data, correlation_id, session_state=session_state
+        )
 
     async def trigger_and_wait(
         self,
@@ -321,9 +328,13 @@ class OnlineResearchAgent:
         """
         if self._runtime is None or not self._runtime.is_running:
             raise RuntimeError("Agent runtime not started. Call start() first.")
-        return await self._runtime.trigger_and_wait(entry_point, input_data, timeout, session_state=session_state)
+        return await self._runtime.trigger_and_wait(
+            entry_point, input_data, timeout, session_state=session_state
+        )
 
-    async def run(self, context: dict, mock_mode=False, session_state=None) -> ExecutionResult:
+    async def run(
+        self, context: dict, mock_mode=False, session_state=None
+    ) -> ExecutionResult:
         """
         Run the agent (convenience method for simple single execution).
 
@@ -342,7 +353,9 @@ class OnlineResearchAgent:
             else:
                 entry_point = "start"
 
-            result = await self.trigger_and_wait(entry_point, context, session_state=session_state)
+            result = await self.trigger_and_wait(
+                entry_point, context, session_state=session_state
+            )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
@@ -404,7 +417,9 @@ class OnlineResearchAgent:
         # Validate entry points
         for ep_id, node_id in self.entry_points.items():
             if node_id not in node_ids:
-                errors.append(f"Entry point '{ep_id}' references unknown node '{node_id}'")
+                errors.append(
+                    f"Entry point '{ep_id}' references unknown node '{node_id}'"
+                )
 
         return {
             "valid": len(errors) == 0,
