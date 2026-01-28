@@ -330,3 +330,18 @@ class TestBuilderWorkflow:
         # Step 6: Check node performance
         perf = query.get_node_performance("process-node")
         assert perf["success_rate"] < 1.0  # process-node fails in failed runs
+
+import pytest
+
+class TestBuilderQueryInvalidRunId:
+    def test_empty_run_id_raises_error(self, tmp_path):
+        query = BuilderQuery(tmp_path)
+
+        with pytest.raises(ValueError):
+            query.get_run_summary("")
+    def test_get_full_run_empty_run_id_raises_error(self, tmp_path):
+        query = BuilderQuery(tmp_path)
+
+        with pytest.raises(ValueError):
+            query.get_full_run("")
+

@@ -140,10 +140,12 @@ class BuilderQuery:
 
     def get_run_summary(self, run_id: str) -> RunSummary | None:
         """Get a quick summary of a run."""
+        run_id = self._validate_run_id(run_id)
         return self.storage.load_summary(run_id)
 
     def get_full_run(self, run_id: str) -> Run | None:
         """Get the complete run with all decisions."""
+        run_id = self._validate_run_id(run_id)
         return self.storage.load_run(run_id)
 
     def list_runs_for_goal(self, goal_id: str) -> list[RunSummary]:
@@ -502,3 +504,15 @@ class BuilderQuery:
                 differences.append(f"Nodes only in run 2: {only_2}")
 
         return differences
+    
+    def _validate_run_id(self, run_id: str) -> str:
+        """Validate a run_id passed to public BuilderQuery methods."""
+        # Explicit type check to catch programmer errors early
+        if not isinstance(run_id, str):
+            raise TypeError("run_id must be a string")
+        # Reject empty or whitespace-only identifiers.
+        # An empty run_id is always a bug and should never be interpreted
+        if not run_id.strip():
+            raise ValueError("run_id cannot be empty")
+        return run_id
+
