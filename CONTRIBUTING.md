@@ -6,6 +6,10 @@ Thank you for your interest in contributing to the Aden Agent Framework! This do
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Contributor License Agreement
+
+By submitting a Pull Request, you agree that your contributions will be licensed under the Aden Agent Framework license.
+
 ## Issue Assignment Policy
 
 To prevent duplicate work and respect contributors' time, we require issue assignment before submitting PRs.
@@ -26,8 +30,8 @@ To keep the project moving, issues with **no activity for 5 days** (no PR or sta
 ### Exceptions (No Assignment Needed)
 
 You may submit PRs without prior assignment for:
-- **Documentation:** Fixing typos or clarifying instructions
-- **Micro-fixes:** Minor tweaks or obvious linting errors
+- **Documentation:** Fixing typos or clarifying instructions — add the `documentation` label or include `doc`/`docs` in your PR title to bypass the linked issue requirement
+- **Micro-fixes:** Minor tweaks or obvious linting errors — add the `micro-fix` label or include `micro-fix` in your PR title to bypass the linked issue requirement
 - **Small Refactors:** Tiny improvements that don't change core logic
 
 If a high-quality PR is submitted for a "stale" assigned issue (no activity for 7+ days), we may proceed with the submitted code.
@@ -54,6 +58,12 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 # Install Claude Code skills (optional)
 ./quickstart.sh
 ```
+
+> **Windows Users:**  
+> If you are on native Windows, it is recommended to use **WSL (Windows Subsystem for Linux)**.  
+> Alternatively, make sure to run PowerShell or Git Bash with Python 3.11+ installed, and disable "App Execution Aliases" in Windows settings.
+
+> **Tip:** Installing Claude Code skills is optional for running existing agents, but required if you plan to **build new agents**.
 
 ## Commit Convention
 
@@ -118,6 +128,12 @@ feat(component): add new feature description
 - Keep functions focused and small
 
 ## Testing
+
+> **Note:** When testing agents in `exports/`, always set PYTHONPATH:
+>
+> ```bash
+> PYTHONPATH=core:exports python -m agent_name test
+> ```
 
 ```bash
 # Run all tests for the framework

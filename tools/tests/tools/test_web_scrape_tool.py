@@ -2,7 +2,9 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
+import pytest
 from fastmcp import FastMCP
+
 from aden_tools.tools.web_scrape_tool import register_tools
 
 

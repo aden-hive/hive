@@ -1,7 +1,9 @@
 """Tests for security.py - get_secure_path() function."""
+
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class TestGetSecurePath:
@@ -31,7 +33,7 @@ class TestGetSecurePath:
         """Session directory is created if it doesn't exist."""
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
-        result = get_secure_path("file.txt", **ids)
+        get_secure_path("file.txt", **ids)  # Called for side effect (creates directory)
 
         session_dir = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         assert session_dir.exists()
@@ -43,7 +45,14 @@ class TestGetSecurePath:
 
         result = get_secure_path("subdir/file.txt", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "subdir" / "file.txt"
+        expected = (
+            self.workspaces_dir
+            / "test-workspace"
+            / "test-agent"
+            / "test-session"
+            / "subdir"
+            / "file.txt"
+        )
         assert result == str(expected)
 
     def test_absolute_path_treated_as_relative(self, ids):
@@ -52,7 +61,14 @@ class TestGetSecurePath:
 
         result = get_secure_path("/etc/passwd", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "etc" / "passwd"
+        expected = (
+            self.workspaces_dir
+            / "test-workspace"
+            / "test-agent"
+            / "test-session"
+            / "etc"
+            / "passwd"
+        )
         assert result == str(expected)
 
     def test_path_traversal_blocked(self, ids):
@@ -81,21 +97,33 @@ class TestGetSecurePath:
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         with pytest.raises(ValueError, match="workspace_id.*required"):
-            get_secure_path("file.txt", workspace_id="", agent_id=ids["agent_id"], session_id=ids["session_id"])
+            get_secure_path(
+                "file.txt", workspace_id="", agent_id=ids["agent_id"], session_id=ids["session_id"]
+            )
 
     def test_missing_agent_id_raises(self, ids):
         """Missing agent_id raises ValueError."""
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         with pytest.raises(ValueError, match="agent_id.*required"):
-            get_secure_path("file.txt", workspace_id=ids["workspace_id"], agent_id="", session_id=ids["session_id"])
+            get_secure_path(
+                "file.txt",
+                workspace_id=ids["workspace_id"],
+                agent_id="",
+                session_id=ids["session_id"],
+            )
 
     def test_missing_session_id_raises(self, ids):
         """Missing session_id raises ValueError."""
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
         with pytest.raises(ValueError, match="session_id.*required"):
-            get_secure_path("file.txt", workspace_id=ids["workspace_id"], agent_id=ids["agent_id"], session_id="")
+            get_secure_path(
+                "file.txt",
+                workspace_id=ids["workspace_id"],
+                agent_id=ids["agent_id"],
+                session_id="",
+            )
 
     def test_none_ids_raise(self):
         """None values for IDs raise ValueError."""
@@ -110,7 +138,9 @@ class TestGetSecurePath:
 
         result = get_secure_path("file.txt", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "file.txt"
+        expected = (
+            self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "file.txt"
+        )
         assert result == str(expected)
 
     def test_current_dir_path(self, ids):
@@ -128,7 +158,14 @@ class TestGetSecurePath:
 
         result = get_secure_path("./subdir/file.txt", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "subdir" / "file.txt"
+        expected = (
+            self.workspaces_dir
+            / "test-workspace"
+            / "test-agent"
+            / "test-session"
+            / "subdir"
+            / "file.txt"
+        )
         assert result == str(expected)
 
     def test_deeply_nested_path(self, ids):
@@ -137,7 +174,18 @@ class TestGetSecurePath:
 
         result = get_secure_path("a/b/c/d/e/file.txt", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "a" / "b" / "c" / "d" / "e" / "file.txt"
+        expected = (
+            self.workspaces_dir
+            / "test-workspace"
+            / "test-agent"
+            / "test-session"
+            / "a"
+            / "b"
+            / "c"
+            / "d"
+            / "e"
+            / "file.txt"
+        )
         assert result == str(expected)
 
     def test_path_with_spaces(self, ids):
@@ -146,7 +194,14 @@ class TestGetSecurePath:
 
         result = get_secure_path("my folder/my file.txt", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "my folder" / "my file.txt"
+        expected = (
+            self.workspaces_dir
+            / "test-workspace"
+            / "test-agent"
+            / "test-session"
+            / "my folder"
+            / "my file.txt"
+        )
         assert result == str(expected)
 
     def test_path_with_special_characters(self, ids):
@@ -155,7 +210,13 @@ class TestGetSecurePath:
 
         result = get_secure_path("file-name_v2.0.txt", **ids)
 
-        expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session" / "file-name_v2.0.txt"
+        expected = (
+            self.workspaces_dir
+            / "test-workspace"
+            / "test-agent"
+            / "test-session"
+            / "file-name_v2.0.txt"
+        )
         assert result == str(expected)
 
     def test_empty_path(self, ids):

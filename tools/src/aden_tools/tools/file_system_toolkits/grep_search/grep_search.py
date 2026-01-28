@@ -1,13 +1,23 @@
 import os
 import re
+
 from mcp.server.fastmcp import FastMCP
-from ..security import get_secure_path, WORKSPACES_DIR
+
+from ..security import WORKSPACES_DIR, get_secure_path
+
 
 def register_tools(mcp: FastMCP) -> None:
     """Register grep search tools with the MCP server."""
 
     @mcp.tool()
-    def grep_search(path: str, pattern: str, workspace_id: str, agent_id: str, session_id: str, recursive: bool = False) -> dict:
+    def grep_search(
+        path: str,
+        pattern: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+        recursive: bool = False,
+    ) -> dict:
         """
         Search for a pattern in a file or directory within the session sandbox.
 
@@ -47,22 +57,28 @@ def register_tools(mcp: FastMCP) -> None:
                     for filename in filenames:
                         files.append(os.path.join(root, filename))
             else:
-                files = [os.path.join(secure_path, f) for f in os.listdir(secure_path) if os.path.isfile(os.path.join(secure_path, f))]
+                files = [
+                    os.path.join(secure_path, f)
+                    for f in os.listdir(secure_path)
+                    if os.path.isfile(os.path.join(secure_path, f))
+                ]
 
             for file_path in files:
                 # Calculate relative path for display
                 display_path = os.path.relpath(file_path, session_root)
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    with open(file_path, encoding="utf-8") as f:
                         for i, line in enumerate(f, 1):
                             if regex.search(line):
-                                matches.append({
-                                    "file": display_path,
-                                    "line_number": i,
-                                    "line_content": line.strip()
-                                })
+                                matches.append(
+                                    {
+                                        "file": display_path,
+                                        "line_number": i,
+                                        "line_content": line.strip(),
+                                    }
+                                )
                 except (UnicodeDecodeError, PermissionError):
-                    # As per README: Skips the files that cannot be decoded or have permission errors
+                    # Skips files that cannot be decoded or lack permissions
                     continue
 
             return {
@@ -71,7 +87,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "path": path,
                 "recursive": recursive,
                 "matches": matches,
-                "total_matches": len(matches)
+                "total_matches": len(matches),
             }
 
         # 2. Specific Exception Handling (Issue #55 Requirements)
@@ -82,4 +98,3 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception as e:
             # 3. Generic Fallback
             return {"error": f"Failed to perform grep search: {str(e)}"}
-

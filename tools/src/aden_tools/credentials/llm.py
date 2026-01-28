@@ -3,6 +3,7 @@ LLM provider credentials.
 
 Contains credentials for language model providers like Anthropic, OpenAI, etc.
 """
+
 from .base import CredentialSpec
 
 LLM_CREDENTIALS = {
