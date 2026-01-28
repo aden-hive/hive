@@ -20,6 +20,14 @@ jobs:
             const prNumber = pr.number;
             const prBody = pr.body || '';
             const prTitle = pr.title || '';
+            const prLabels = (pr.labels || []).map(l => l.name);
+
+            // Allow micro-fix PRs without a linked issue
+            const isMicroFix = prLabels.includes('micro-fix') || /micro-fix/i.test(prTitle);
+            if (isMicroFix) {
+              console.log(`PR #${prNumber} is a Micro-fix, skipping issue requirement.`);
+              return;
+            }
 
             // Extract issue numbers from body and title
             // Matches: fixes #123, closes #123, resolves #123, or plain #123
@@ -43,6 +51,8 @@ jobs:
             1. Create or find an existing issue for this work
             2. Assign yourself to the issue
             3. Re-open this PR and add \`Fixes #123\` in the description
+
+            **Exception:** If this is a micro-fix, add the \`micro-fix\` label or include \`micro-fix\` in the PR title to bypass this requirement.
 
             **Why is this required?** See #472 for details.`;
 
@@ -122,6 +132,8 @@ jobs:
             **To fix:**
             1. Assign yourself (@${prAuthor}) to one of the linked issues
             2. Re-open this PR
+
+            **Exception:** If this is a micro-fix, add the \`micro-fix\` label or include \`micro-fix\` in the PR title to bypass this requirement.
 
             **Why is this required?** See #472 for details.`;
 
