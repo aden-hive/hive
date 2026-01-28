@@ -14,7 +14,7 @@ from typing import Any
 try:
     import litellm
 except ImportError:
-    litellm = None
+    litellm = None  # type: ignore[assignment]
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
@@ -133,7 +133,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["response_format"] = response_format
 
         # Make the call
-        response = litellm.completion(**kwargs)
+        response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
         # Extract content
         content = response.choices[0].message.content or ""
@@ -159,6 +159,7 @@ class LiteLLMProvider(LLMProvider):
         tools: list[Tool],
         tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
+        max_tokens: int = 4096,
     ) -> LLMResponse:
         """Run a tool-use loop until the LLM produces a final response."""
         # Prepare messages with system prompt
@@ -178,7 +179,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "messages": current_messages,
-                "max_tokens": 1024,
+                "max_tokens": max_tokens,
                 "tools": openai_tools,
                 **self.extra_kwargs,
             }
@@ -188,7 +189,7 @@ class LiteLLMProvider(LLMProvider):
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
-            response = litellm.completion(**kwargs)
+            response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
             # Track tokens
             usage = response.usage

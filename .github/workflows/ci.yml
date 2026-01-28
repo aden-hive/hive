@@ -29,10 +29,15 @@ jobs:
           pip install -e .
           pip install -r requirements-dev.txt
 
-      - name: Run ruff
+      - name: Ruff lint
         run: |
-          cd core
-          ruff check .
+          ruff check core/
+          ruff check tools/
+
+      - name: Ruff format
+        run: |
+          ruff format --check core/
+          ruff format --check tools/
 
   test:
     name: Test Python Framework

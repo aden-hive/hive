@@ -83,13 +83,13 @@ Answer these questions:
 1. What is the main frontend folder called?
 2. What is the main backend folder called?
 3. What file would you edit to configure the application?
-4. What's the Docker command to start all services (hint: check README)?
+4. What's the command to set up the Python environment (hint: check README)?
 
 ### Task 3.2: Find the Features 🎯
 Look through the codebase to find:
 
 1. Where are the MCP tools defined? (provide the file path)
-2. What port does the API run on? (hint: check README or docker-compose)
+2. What port does the MCP server run on? (hint: check the tools/Dockerfile)
 3. Find one TypeScript interface related to agents (provide file path and interface name)
 
 ---

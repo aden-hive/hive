@@ -91,7 +91,7 @@ cd hive
 ./quickstart.sh
 
 # 使用 Claude Code 构建智能体
-claude> /building-agents
+claude> /building-agents-construction
 
 # 测试您的智能体
 claude> /testing-agent
@@ -237,7 +237,7 @@ hive/
 # - 所有依赖项
 
 # 使用 Claude Code 技能构建新智能体
-claude> /building-agents
+claude> /building-agents-construction
 
 # 测试智能体
 claude> /testing-agent

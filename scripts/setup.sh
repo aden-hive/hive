@@ -65,12 +65,6 @@ echo "Generating environment files from config.yaml..."
 npx tsx scripts/generate-env.ts
 echo "✓ Environment files generated"
 
-# Create docker-compose.override.yml for development
-if [ ! -f "$PROJECT_ROOT/docker-compose.override.yml" ]; then
-    cp "$PROJECT_ROOT/docker-compose.override.yml.example" "$PROJECT_ROOT/docker-compose.override.yml"
-    echo "✓ Created docker-compose.override.yml for development"
-fi
-
 echo ""
 echo "==================================="
 echo "  Setup Complete (Legacy)"
