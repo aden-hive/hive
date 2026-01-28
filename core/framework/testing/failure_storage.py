@@ -69,6 +69,47 @@ class FailureStorage:
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
     
+    def _scrub_sensitive_data(self, data: Any) -> Any:
+        """
+        Recursively scrub sensitive data from dictionaries and lists.
+        
+        Replaces values for keys containing 'api_key', 'token', or 'password' with '***'.
+        """
+        if isinstance(data, dict):
+            scrubbed = {}
+            for key, value in data.items():
+                lower_key = key.lower()
+                if any(sensitive in lower_key for sensitive in ['api_key', 'token', 'password']):
+                    scrubbed[key] = "***"
+                else:
+                    scrubbed[key] = self._scrub_sensitive_data(value)
+            return scrubbed
+        elif isinstance(data, list):
+            return [self._scrub_sensitive_data(item) for item in data]
+        else:
+            return data
+    
+    def _enforce_retention_limit(self) -> None:
+        """Enforce retention limit by deleting oldest failures if over 1000 total."""
+        failures_dir = self.base_path / "failures"
+        all_files = list(failures_dir.glob("**/*.json"))
+        
+        if len(all_files) <= 1000:
+            return
+        
+        # Sort by modification time (oldest first)
+        all_files.sort(key=lambda f: f.stat().st_mtime)
+        
+        # Delete oldest files
+        to_delete = all_files[:len(all_files) - 1000]
+        for file_path in to_delete:
+            # Parse goal_id and failure_id from path: failures/goal_id/failure_id.json
+            parts = file_path.relative_to(failures_dir).parts
+            if len(parts) == 2:
+                goal_id = parts[0]
+                failure_id = file_path.stem  # remove .json
+                self.delete_failure(goal_id, failure_id)
+    
     # === RECORD OPERATIONS ===
     
     def record_failure(self, failure: FailureRecord) -> str:
@@ -85,10 +126,17 @@ class FailureStorage:
         goal_dir = self.base_path / "failures" / failure.goal_id
         goal_dir.mkdir(parents=True, exist_ok=True)
         
+        # Scrub sensitive data before saving
+        failure_data = failure.model_dump()
+        scrubbed_data = self._scrub_sensitive_data(failure_data)
+        
         # Save full failure record
         failure_path = goal_dir / f"{failure.id}.json"
         with open(failure_path, "w") as f:
-            f.write(failure.model_dump_json(indent=2))
+            json.dump(scrubbed_data, f, indent=2)
+        
+        # Retention: Keep only the most recent 1000 failures
+        self._enforce_retention_limit()
         
         # Update indexes
         self._add_to_index("by_goal", failure.goal_id, failure.id)

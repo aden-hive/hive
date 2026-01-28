@@ -56,6 +56,7 @@ from framework.testing.failure_record import (
 )
 from framework.testing.failure_storage import FailureStorage
 
+from framework.testing.approval_cli import batch_approval, interactive_approval
 
 # Approval
 from framework.testing.approval_types import (
@@ -65,19 +66,31 @@ from framework.testing.approval_types import (
     BatchApprovalRequest,
     BatchApprovalResult,
 )
-from framework.testing.approval_cli import interactive_approval, batch_approval
 
 # Error categorization
 from framework.testing.categorizer import ErrorCategorizer
 
-# LLM Judge for semantic evaluation
-from framework.testing.llm_judge import LLMJudge
-
-# Debug
-from framework.testing.debug_tool import DebugTool, DebugInfo
-
 # CLI
 from framework.testing.cli import register_testing_commands
+
+# Debug
+from framework.testing.debug_tool import DebugInfo, DebugTool
+
+# LLM Judge for semantic evaluation
+from framework.testing.llm_judge import LLMJudge
+from framework.testing.test_case import (
+    ApprovalStatus,
+    Test,
+    TestType,
+)
+from framework.testing.test_result import (
+    ErrorCategory,
+    TestResult,
+    TestSuiteResult,
+)
+
+# Storage
+from framework.testing.test_storage import TestStorage
 
 __all__ = [
     # Schemas
