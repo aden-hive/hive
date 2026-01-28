@@ -310,7 +310,7 @@ class TestCredentialSpecs:
         assert "brave.com" in spec.help_url
 
     def test_anthropic_spec_exists(self):
-        """CREDENTIAL_SPECS includes anthropic with startup_required=True."""
+        """CREDENTIAL_SPECS includes anthropic with optional credentials."""
         assert "anthropic" in CREDENTIAL_SPECS
 
         spec = CREDENTIAL_SPECS["anthropic"]
@@ -318,25 +318,23 @@ class TestCredentialSpecs:
         assert spec.tools == []
         assert "llm_generate" in spec.node_types
         assert "llm_tool_use" in spec.node_types
-        assert spec.required is True
-        assert spec.startup_required is True
+        assert spec.required is False
+        assert spec.startup_required is False
         assert "anthropic.com" in spec.help_url
 
 
 class TestNodeTypeValidation:
     """Tests for node type credential validation."""
 
-    def test_get_missing_for_node_types_returns_missing(self, monkeypatch, tmp_path):
-        """get_missing_for_node_types() returns missing credentials."""
+    def test_get_missing_for_node_types_returns_empty_for_optional_creds(self, monkeypatch, tmp_path):
+        """get_missing_for_node_types() doesn't return optional credentials."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
         missing = creds.get_missing_for_node_types(["llm_generate", "llm_tool_use"])
 
-        assert len(missing) == 1
-        cred_name, spec = missing[0]
-        assert cred_name == "anthropic"
-        assert spec.env_var == "ANTHROPIC_API_KEY"
+        # Anthropic is optional, so it's not returned as missing
+        assert missing == []
 
     def test_get_missing_for_node_types_returns_empty_when_present(self, monkeypatch):
         """get_missing_for_node_types() returns empty when credentials present."""
@@ -356,18 +354,14 @@ class TestNodeTypeValidation:
 
         assert missing == []
 
-    def test_validate_for_node_types_raises_for_missing(self, monkeypatch, tmp_path):
-        """validate_for_node_types() raises CredentialError when missing."""
+    def test_validate_for_node_types_passes_without_optional_creds(self, monkeypatch, tmp_path):
+        """validate_for_node_types() passes without optional credentials like Anthropic."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
 
-        with pytest.raises(CredentialError) as exc_info:
-            creds.validate_for_node_types(["llm_generate"])
-
-        error_msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in error_msg
-        assert "llm_generate" in error_msg
+        # Should not raise - anthropic is optional
+        creds.validate_for_node_types(["llm_generate"])
 
     def test_validate_for_node_types_passes_when_present(self, monkeypatch):
         """validate_for_node_types() passes when credentials present."""
@@ -382,26 +376,22 @@ class TestNodeTypeValidation:
 class TestStartupValidation:
     """Tests for startup credential validation."""
 
-    def test_validate_startup_raises_for_missing(self, monkeypatch, tmp_path):
-        """validate_startup() raises CredentialError when startup creds missing."""
+    def test_validate_startup_passes_without_anthropic(self, monkeypatch, tmp_path):
+        """validate_startup() passes even when optional creds like Anthropic are missing."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
 
-        with pytest.raises(CredentialError) as exc_info:
-            creds.validate_startup()
+        # Should not raise - anthropic is no longer startup_required
+        creds.validate_startup()
 
-        error_msg = str(exc_info.value)
-        assert "ANTHROPIC_API_KEY" in error_msg
-        assert "Server startup failed" in error_msg
-
-    def test_validate_startup_passes_when_present(self, monkeypatch):
-        """validate_startup() passes when all startup creds are set."""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    def test_validate_startup_passes_with_optional_creds(self, monkeypatch):
+        """validate_startup() passes when optional creds are not set."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         creds = CredentialManager()
 
-        # Should not raise
+        # Should not raise - anthropic is now optional
         creds.validate_startup()
 
     def test_validate_startup_ignores_non_startup_creds(self, monkeypatch):
@@ -414,11 +404,11 @@ class TestStartupValidation:
         # Should not raise - BRAVE_SEARCH_API_KEY is not startup_required
         creds.validate_startup()
 
-    def test_validate_startup_with_test_overrides(self):
-        """validate_startup() works with for_testing() overrides."""
-        creds = CredentialManager.for_testing({"anthropic": "test-key"})
+    def test_validate_startup_with_empty_overrides(self):
+        """validate_startup() works even without anthropic since it's optional."""
+        creds = CredentialManager.for_testing({})
 
-        # Should not raise
+        # Should not raise - anthropic is optional
         creds.validate_startup()
 
 
