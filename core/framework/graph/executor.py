@@ -317,6 +317,7 @@ class GraphExecutor:
                             output=result.output,
                             expected_keys=node_spec.output_keys,
                             check_hallucination=True,
+                            nullable_keys=node_spec.nullable_output_keys,
                         )
                         if not validation.success:
                             self.logger.error(f"   ✗ Output validation failed: {validation.error}")
