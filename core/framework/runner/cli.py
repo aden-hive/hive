@@ -281,7 +281,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                             print(value)
                             shown = True
                             break
-                        elif isinstance(value, (dict, list)):
+                        elif isinstance(value, dict | list):
                             print(json.dumps(value, indent=2, default=str))
                             shown = True
                             break
@@ -296,7 +296,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                             "user_profile",
                             "recent_context",
                         ]:
-                            if isinstance(value, (dict, list)):
+                            if isinstance(value, dict | list):
                                 print(f"\n{key}:")
                                 value_str = json.dumps(value, indent=2, default=str)
                                 if len(value_str) > 300:
@@ -586,7 +586,7 @@ def _interactive_approval(request):
         print("\n--- Content to be sent ---")
         for key, value in request.context.items():
             print(f"\n[{key}]:")
-            if isinstance(value, (dict, list)):
+            if isinstance(value, dict | list):
                 import json
 
                 value_str = json.dumps(value, indent=2, default=str)

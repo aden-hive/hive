@@ -242,7 +242,7 @@ def _scan_test_files(tests_dir: Path) -> list[dict]:
             tree = ast.parse(content)
 
             for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                     if node.name.startswith("test_"):
                         # Determine test type from filename
                         if "constraint" in test_file.name:

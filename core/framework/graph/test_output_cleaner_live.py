@@ -88,9 +88,9 @@ def test_cleaning_with_cerebras():
     print(json.dumps(cleaned, indent=2))
 
     assert isinstance(cleaned, dict), "Should return dict"
-    assert "approval_decision" in str(cleaned) or isinstance(cleaned.get("recommendation"), dict), (
-        "Should have recommendation structure"
-    )
+    assert "approval_decision" in str(cleaned) or isinstance(
+        cleaned.get("recommendation"), dict
+    ), "Should have recommendation structure"
 
     # Scenario 2: Multiple keys with JSON string
     print("\n\n--- Scenario 2: Multiple Keys, JSON String ---")
@@ -138,7 +138,7 @@ def test_cleaning_with_cerebras():
 
         assert isinstance(cleaned2, dict), "Should return dict"
         assert isinstance(cleaned2.get("analysis"), dict), "analysis should be dict"
-        assert isinstance(cleaned2.get("risk_score"), (int, float)), "risk_score should be number"
+        assert isinstance(cleaned2.get("risk_score"), int | float), "risk_score should be number"
 
     # Stats
     stats = cleaner.get_stats()
