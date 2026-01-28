@@ -11,13 +11,13 @@ The Plan is the contract between the external planner and the executor:
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ActionType(str, Enum):
+class ActionType(StrEnum):
     """Types of actions a PlanStep can perform."""
 
     LLM_CALL = "llm_call"  # Call LLM for generation
@@ -27,7 +27,7 @@ class ActionType(str, Enum):
     CODE_EXECUTION = "code_execution"  # Execute dynamic code (sandboxed)
 
 
-class StepStatus(str, Enum):
+class StepStatus(StrEnum):
     """Status of a plan step."""
 
     PENDING = "pending"
@@ -39,7 +39,7 @@ class StepStatus(str, Enum):
     REJECTED = "rejected"  # Human rejected execution
 
 
-class ApprovalDecision(str, Enum):
+class ApprovalDecision(StrEnum):
     """Human decision on a step requiring approval."""
 
     APPROVE = "approve"  # Execute as planned
@@ -74,7 +74,7 @@ class ApprovalResult(BaseModel):
     model_config = {"extra": "allow"}
 
 
-class JudgmentAction(str, Enum):
+class JudgmentAction(StrEnum):
     """Actions the judge can take after evaluating a step."""
 
     ACCEPT = "accept"  # Step completed successfully, continue
@@ -366,7 +366,7 @@ class Plan(BaseModel):
         }
 
 
-class ExecutionStatus(str, Enum):
+class ExecutionStatus(StrEnum):
     """Status of plan execution."""
 
     COMPLETED = "completed"
