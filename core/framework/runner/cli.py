@@ -931,7 +931,10 @@ def _select_agent(agents_dir: Path) -> str | None:
     """Let user select an agent from available agents."""
     if not agents_dir.exists():
         print(f"Directory not found: {agents_dir}", file=sys.stderr)
-        return None
+        # fixes issue #696, creates an exports folder if it does not exist
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Created directory: {agents_dir}", file=sys.stderr)
+        # return None
 
     agents = []
     for path in agents_dir.iterdir():
