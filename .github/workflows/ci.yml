@@ -40,18 +40,32 @@ jobs:
           ruff format --check tools/
 
   test:
-    name: Test Python Framework
-    runs-on: ubuntu-latest
+    name: Test Python Framework (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.11', '3.12', '3.13']
+    
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install dependencies (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd core
+          pip install -e .
+          pip install -r requirements-dev.txt
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
         run: |
           cd core
           pip install -e .
@@ -112,3 +126,4 @@ jobs:
           else
             echo "Validated $validated agent(s)"
           fi
+          
