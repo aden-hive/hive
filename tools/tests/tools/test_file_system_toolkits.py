@@ -189,6 +189,7 @@ class TestViewFileTool:
         result = view_file_fn(path="encoded.txt", encoding="utf-8", **mock_workspace)
 
         assert result["success"] is True
+        assert result["total_size_bytes"] == 1000
         assert result["content"] == content
 
     def test_view_file_with_invalid_encoding(
