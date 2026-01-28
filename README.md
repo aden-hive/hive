@@ -382,6 +382,7 @@ Aden provides granular budget controls including spending limits, throttles, and
 
 Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API reference, and getting started tutorials. The repository also includes documentation in the `docs/` folder and a comprehensive [DEVELOPER.md](DEVELOPER.md) guide.
 
+
 **Q: How can I contribute to Aden?**
 
 Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
@@ -389,6 +390,8 @@ Contributions are welcome! Fork the repository, create your feature branch, impl
 **Q: Does Aden offer enterprise support?**
 
 For enterprise inquiries, contact the Aden team through [adenhq.com](https://adenhq.com) or join our [Discord community](https://discord.com/invite/MXE49hrKDk) for support and discussions.
+Hive helps businesses run AI agents autonomously.
+
 
 ---
 
