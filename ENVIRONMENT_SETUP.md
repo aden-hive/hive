@@ -178,6 +178,20 @@ source .venv/bin/activate  # macOS/Linux
 ./scripts/setup-python.sh
 ```
 
+> **Mac/Homebrew Users:** If after creating the venv you still get `Error: Python 3.11+ is required (found 3.9)`, your venv picked up an older system Python. Create the venv with the explicit Homebrew Python path instead:
+>
+> ```bash
+> # Find your Python 3.11+ installation
+> which python3.14  # or python3.12, python3.13
+>
+> # Create venv with explicit path (adjust version as needed)
+> /opt/homebrew/bin/python3.14 -m venv .venv
+> source .venv/bin/activate
+>
+> # Then run setup
+> ./scripts/setup-python.sh
+> ```
+
 Always activate the venv before running agents:
 
 ```bash
