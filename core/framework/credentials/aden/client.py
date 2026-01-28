@@ -175,8 +175,8 @@ class AdenIntegrationInfo:
 
         return cls(
             integration_id=data["integration_id"],
-            integration_type=data["integration_type"],
-            status=data["status"],
+            integration_type=data.get("provider", data["integration_id"]),
+            status=data.get("status", "unknown"),
             expires_at=expires_at,
         )
 
@@ -254,6 +254,9 @@ class AdenCredentialClient:
     ) -> httpx.Response:
         """Make a request with retry logic."""
         client = self._get_client()
+        print(client.base_url)
+        print(client.headers)
+        print(method, path, kwargs)
         last_error: Exception | None = None
 
         for attempt in range(self.config.retry_attempts):
