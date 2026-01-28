@@ -25,7 +25,11 @@ cp .env.example .env
 | Variable               | Required For                  | Get Key                                                 |
 | ---------------------- | ----------------------------- | ------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`    | MCP server startup, LLM nodes | [console.anthropic.com](https://console.anthropic.com/) |
-| `BRAVE_SEARCH_API_KEY` | `web_search` tool             | [brave.com/search/api](https://brave.com/search/api/)   |
+| `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
+| `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
+| `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+
+> **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
 Alternatively, export as environment variables:
 
@@ -67,8 +71,8 @@ python mcp_server.py
 | `apply_diff`           | Apply diff patches to files                    |
 | `apply_patch`          | Apply unified patches to files                 |
 | `grep_search`          | Search file contents with regex                |
-| `execute_command`      | Execute shell commands                         |
-| `web_search`           | Search the web using Brave Search API          |
+| `execute_command_tool` | Execute shell commands                         |
+| `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
 

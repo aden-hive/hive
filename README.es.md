@@ -91,7 +91,7 @@ Esto instala:
 ./quickstart.sh
 
 # Construir un agente usando Claude Code
-claude> /building-agents
+claude> /building-agents-construction
 
 # Probar tu agente
 claude> /testing-agent
@@ -237,7 +237,7 @@ Para construir y ejecutar agentes orientados a objetivos con el framework:
 # - Todas las dependencias
 
 # Construir nuevos agentes usando habilidades de Claude Code
-claude> /building-agents
+claude> /building-agents-construction
 
 # Probar agentes
 claude> /testing-agent
