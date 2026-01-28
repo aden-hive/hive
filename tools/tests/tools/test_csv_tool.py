@@ -732,6 +732,29 @@ class TestCsvSql:
         assert "id" in result["columns"]
         assert "name" in result["columns"]
 
+    def test_path_with_single_quote(self, csv_tools, session_dir, tmp_path):
+        """Regression: CSV paths containing single quotes should work (parameter binding)."""
+        csv_file = session_dir / "O'Reilly.csv"
+        csv_file.write_text("name,age\nAlice,21\nBob,22\n", encoding="utf-8")
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path="O'Reilly.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data",
+            )
+
+        assert "error" not in result, result
+        assert result["success"] is True
+        assert result["row_count"] == 2
+        names = [row["name"] for row in result["rows"]]
+        assert "Alice" in names
+        assert "Bob" in names
+  
+    
+
     def test_where_clause(self, csv_tools, products_csv, tmp_path):
         """Filter with WHERE clause."""
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
