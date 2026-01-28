@@ -1,0 +1,10 @@
+version: "3.9"
+
+services:
+  hello-hive-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./exports:/app/exports
+    command: python -c "from hello_hive_agent.main import run; run()"
