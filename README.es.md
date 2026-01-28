@@ -253,7 +253,7 @@ Consulta [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instrucciones de conf
 - **[Guía del Desarrollador](DEVELOPER.md)** - Guía completa para desarrolladores
 - [Primeros Pasos](docs/getting-started.md) - Instrucciones de configuración rápida
 - [Guía de Configuración](docs/configuration.md) - Todas las opciones de configuración
-- [Visión General de Arquitectura](docs/architecture.md) - Diseño y estructura del sistema
+- [Visión General de Arquitectura](docs/architecture/README.md) - Diseño y estructura del sistema
 
 ## Hoja de Ruta
 

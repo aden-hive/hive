@@ -253,7 +253,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[开发者指南](DEVELOPER.md)** - 开发者综合指南
 - [入门指南](docs/getting-started.md) - 快速设置说明
 - [配置指南](docs/configuration.md) - 所有配置选项
-- [架构概述](docs/architecture.md) - 系统设计和结构
+- [架构概述](docs/architecture/README.md) - 系统设计和结构
 
 ## 路线图
 

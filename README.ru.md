@@ -253,7 +253,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[Руководство разработчика](DEVELOPER.md)** - Полное руководство для разработчиков
 - [Начало работы](docs/getting-started.md) - Инструкции по быстрой настройке
 - [Руководство по конфигурации](docs/configuration.md) - Все опции конфигурации
-- [Обзор архитектуры](docs/architecture.md) - Дизайн и структура системы
+- [Обзор архитектуры](docs/architecture/README.md) - Дизайн и структура системы
 
 ## Дорожная карта
 
