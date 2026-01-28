@@ -8,7 +8,7 @@ Uses Pydantic's built-in serialization.
 import json
 from pathlib import Path
 
-from framework.schemas.run import Run, RunSummary, RunStatus
+from framework.schemas.run import Run, RunStatus, RunSummary
 
 
 class FileStorage:
