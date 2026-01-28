@@ -32,11 +32,20 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Use python3 if available, otherwise python
+# Default to python3
 PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
-    PYTHON_CMD="python"
-fi
+
+    case "$OSTYPE" in
+        msys*|cygwin*|win32*)
+            PYTHON_CMD="py"      # Windows fallback
+            ;;
+        *)
+            # If python3 is not available, choose fallback based on OS
+            if ! command -v python3 &> /dev/null; then
+                PYTHON_CMD="python"  # Linux/macOS fallback
+            fi
+            ;;
+    esac
 
 # Check Python version
 PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')

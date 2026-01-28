@@ -45,9 +45,17 @@ fi
 
 # Use python3 if available, otherwise python
 PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
-    PYTHON_CMD="python"
-fi
+
+case "$OSTYPE" in
+    msys*|cygwin*|win32*)
+        PYTHON_CMD="py"      # Windows fallback
+        ;;
+    *)
+        if ! command -v python3 &> /dev/null; then
+            PYTHON_CMD="python"
+        fi
+        ;;
+esac
 
 # Check Python version
 PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
