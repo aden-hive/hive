@@ -163,6 +163,10 @@ class NodeSpec(BaseModel):
     output_keys: list[str] = Field(
         default_factory=list, description="Keys this node writes to shared memory or output"
     )
+    nullable_output_keys: list[str] = Field(
+        default_factory=list,
+        description="Output keys that can be None without triggering validation errors",
+    )
 
     # Optional schemas for validation and cleansing
     input_schema: dict[str, dict] = Field(
