@@ -1,12 +1,90 @@
-"""CSV Tool - Read and manipulate CSV files."""
+"""CSV Tool - Read and manipulate CSV files with strong typing and validation."""
 import csv
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional, TypedDict, Union
 
 from fastmcp import FastMCP
 
 from ..file_system_toolkits.security import get_secure_path
 
+
+# -----------------------------
+# Typed response models
+# -----------------------------
+
+class ErrorResponse(TypedDict):
+    error: str
+
+
+class CsvReadResponse(TypedDict):
+    success: bool
+    path: str
+    columns: List[str]
+    column_count: int
+    rows: List[Dict[str, str]]
+    row_count: int
+    total_rows: int
+    offset: int
+    limit: Optional[int]
+
+
+class CsvWriteResponse(TypedDict):
+    success: bool
+    path: str
+    columns: List[str]
+    column_count: int
+    rows_written: int
+
+
+class CsvAppendResponse(TypedDict):
+    success: bool
+    path: str
+    rows_appended: int
+    total_rows: int
+
+
+class CsvInfoResponse(TypedDict):
+    success: bool
+    path: str
+    columns: List[str]
+    column_count: int
+    total_rows: int
+    file_size_bytes: int
+
+
+class CsvSqlResponse(TypedDict):
+    success: bool
+    path: str
+    query: str
+    columns: List[str]
+    column_count: int
+    rows: List[Dict[str, object]]
+    row_count: int
+
+
+CsvReadResult = Union[CsvReadResponse, ErrorResponse]
+CsvWriteResult = Union[CsvWriteResponse, ErrorResponse]
+CsvAppendResult = Union[CsvAppendResponse, ErrorResponse]
+CsvInfoResult = Union[CsvInfoResponse, ErrorResponse]
+CsvSqlResult = Union[CsvSqlResponse, ErrorResponse]
+
+
+# -----------------------------
+# Internal helpers
+# -----------------------------
+
+def _validate_csv_path(path: str, secure_path: str) -> Optional[ErrorResponse]:
+    """Validate CSV file existence and extension."""
+    if not path.lower().endswith(".csv"):
+        return {"error": "File must have .csv extension"}
+    if not os.path.exists(secure_path):
+        return {"error": f"File not found: {path}"}
+    return None
+
+
+# -----------------------------
+# Tool registration
+# -----------------------------
 
 def register_tools(mcp: FastMCP) -> None:
     """Register CSV tools with the MCP server."""
@@ -19,31 +97,15 @@ def register_tools(mcp: FastMCP) -> None:
         session_id: str,
         limit: Optional[int] = None,
         offset: int = 0,
-    ) -> dict:
-        """
-        Read a CSV file and return its contents.
-
-        Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
-            agent_id: Agent identifier
-            session_id: Session identifier
-            limit: Maximum number of rows to return (None = all rows)
-            offset: Number of rows to skip from the beginning
-
-        Returns:
-            dict with success status, data, and metadata
-        """
+    ) -> CsvReadResult:
+        """Read a CSV file and return its contents with predictable typing."""
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
-            if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}"}
+            error = _validate_csv_path(path, secure_path)
+            if error:
+                return error
 
-            if not path.lower().endswith(".csv"):
-                return {"error": "File must have .csv extension"}
-
-            # Read CSV
             with open(secure_path, "r", encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
 
@@ -51,9 +113,8 @@ def register_tools(mcp: FastMCP) -> None:
                     return {"error": "CSV file is empty or has no headers"}
 
                 columns = list(reader.fieldnames)
+                rows: List[Dict[str, str]] = []
 
-                # Apply offset and limit
-                rows = []
                 for i, row in enumerate(reader):
                     if i < offset:
                         continue
@@ -61,9 +122,8 @@ def register_tools(mcp: FastMCP) -> None:
                         break
                     rows.append(row)
 
-            # Get total row count (re-read for accurate count)
             with open(secure_path, "r", encoding="utf-8", newline="") as f:
-                total_rows = sum(1 for _ in f) - 1  # Subtract header
+                total_rows = max(sum(1 for _ in f) - 1, 0)
 
             return {
                 "success": True,
@@ -77,12 +137,12 @@ def register_tools(mcp: FastMCP) -> None:
                 "limit": limit,
             }
 
-        except csv.Error as e:
-            return {"error": f"CSV parsing error: {str(e)}"}
+        except csv.Error as exc:
+            return {"error": f"CSV parsing error: {exc}"}
         except UnicodeDecodeError:
             return {"error": "File encoding error: unable to decode as UTF-8"}
-        except Exception as e:
-            return {"error": f"Failed to read CSV: {str(e)}"}
+        except Exception as exc:
+            return {"error": f"Failed to read CSV: {exc}"}
 
     @mcp.tool()
     def csv_write(
@@ -91,22 +151,9 @@ def register_tools(mcp: FastMCP) -> None:
         agent_id: str,
         session_id: str,
         columns: List[str],
-        rows: List[dict],
-    ) -> dict:
-        """
-        Write data to a new CSV file.
-
-        Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
-            agent_id: Agent identifier
-            session_id: Session identifier
-            columns: List of column names for the header
-            rows: List of dictionaries, each representing a row
-
-        Returns:
-            dict with success status and metadata
-        """
+        rows: List[Dict[str, object]],
+    ) -> CsvWriteResult:
+        """Write data to a new CSV file with validation."""
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
@@ -116,16 +163,13 @@ def register_tools(mcp: FastMCP) -> None:
             if not columns:
                 return {"error": "columns cannot be empty"}
 
-            # Create parent directories if needed
             os.makedirs(os.path.dirname(secure_path), exist_ok=True)
 
-            # Write CSV
             with open(secure_path, "w", encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=columns)
                 writer.writeheader()
                 for row in rows:
-                    # Only write columns that exist in fieldnames
-                    filtered_row = {k: v for k, v in row.items() if k in columns}
+                    filtered_row = {k: row.get(k) for k in columns}
                     writer.writerow(filtered_row)
 
             return {
@@ -136,8 +180,8 @@ def register_tools(mcp: FastMCP) -> None:
                 "rows_written": len(rows),
             }
 
-        except Exception as e:
-            return {"error": f"Failed to write CSV: {str(e)}"}
+        except Exception as exc:
+            return {"error": f"Failed to write CSV: {exc}"}
 
     @mcp.tool()
     def csv_append(
@@ -145,51 +189,33 @@ def register_tools(mcp: FastMCP) -> None:
         workspace_id: str,
         agent_id: str,
         session_id: str,
-        rows: List[dict],
-    ) -> dict:
-        """
-        Append rows to an existing CSV file.
-
-        Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
-            agent_id: Agent identifier
-            session_id: Session identifier
-            rows: List of dictionaries to append, keys should match existing columns
-
-        Returns:
-            dict with success status and metadata
-        """
+        rows: List[Dict[str, object]],
+    ) -> CsvAppendResult:
+        """Append rows to an existing CSV file."""
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
-            if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}. Use csv_write to create a new file."}
-
-            if not path.lower().endswith(".csv"):
-                return {"error": "File must have .csv extension"}
+            error = _validate_csv_path(path, secure_path)
+            if error:
+                return error
 
             if not rows:
                 return {"error": "rows cannot be empty"}
 
-            # Read existing columns
             with open(secure_path, "r", encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
                 if reader.fieldnames is None:
                     return {"error": "CSV file is empty or has no headers"}
                 columns = list(reader.fieldnames)
 
-            # Append rows
             with open(secure_path, "a", encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=columns)
                 for row in rows:
-                    # Only write columns that exist in fieldnames
-                    filtered_row = {k: v for k, v in row.items() if k in columns}
+                    filtered_row = {k: row.get(k) for k in columns}
                     writer.writerow(filtered_row)
 
-            # Get new total row count
             with open(secure_path, "r", encoding="utf-8", newline="") as f:
-                total_rows = sum(1 for _ in f) - 1  # Subtract header
+                total_rows = max(sum(1 for _ in f) - 1, 0)
 
             return {
                 "success": True,
@@ -198,12 +224,12 @@ def register_tools(mcp: FastMCP) -> None:
                 "total_rows": total_rows,
             }
 
-        except csv.Error as e:
-            return {"error": f"CSV parsing error: {str(e)}"}
+        except csv.Error as exc:
+            return {"error": f"CSV parsing error: {exc}"}
         except UnicodeDecodeError:
             return {"error": "File encoding error: unable to decode as UTF-8"}
-        except Exception as e:
-            return {"error": f"Failed to append to CSV: {str(e)}"}
+        except Exception as exc:
+            return {"error": f"Failed to append to CSV: {exc}"}
 
     @mcp.tool()
     def csv_info(
@@ -211,41 +237,22 @@ def register_tools(mcp: FastMCP) -> None:
         workspace_id: str,
         agent_id: str,
         session_id: str,
-    ) -> dict:
-        """
-        Get metadata about a CSV file without reading all data.
-
-        Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
-            agent_id: Agent identifier
-            session_id: Session identifier
-
-        Returns:
-            dict with file metadata (columns, row count, file size)
-        """
+    ) -> CsvInfoResult:
+        """Return CSV metadata without loading full file."""
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
-            if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}"}
+            error = _validate_csv_path(path, secure_path)
+            if error:
+                return error
 
-            if not path.lower().endswith(".csv"):
-                return {"error": "File must have .csv extension"}
-
-            # Get file size
             file_size = os.path.getsize(secure_path)
 
-            # Read headers and count rows
             with open(secure_path, "r", encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
-
                 if reader.fieldnames is None:
                     return {"error": "CSV file is empty or has no headers"}
-
                 columns = list(reader.fieldnames)
-
-                # Count rows
                 total_rows = sum(1 for _ in reader)
 
             return {
@@ -257,109 +264,5 @@ def register_tools(mcp: FastMCP) -> None:
                 "file_size_bytes": file_size,
             }
 
-        except csv.Error as e:
-            return {"error": f"CSV parsing error: {str(e)}"}
-        except UnicodeDecodeError:
-            return {"error": "File encoding error: unable to decode as UTF-8"}
-        except Exception as e:
-            return {"error": f"Failed to get CSV info: {str(e)}"}
-
-    @mcp.tool()
-    def csv_sql(
-        path: str,
-        workspace_id: str,
-        agent_id: str,
-        session_id: str,
-        query: str,
-    ) -> dict:
-        """
-        Query a CSV file using SQL (powered by DuckDB).
-
-        The CSV file is loaded as a table named 'data'. Use standard SQL syntax.
-
-        Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
-            agent_id: Agent identifier
-            session_id: Session identifier
-            query: SQL query to execute. The CSV is available as table 'data'.
-                   Example: "SELECT * FROM data WHERE price > 100 ORDER BY name LIMIT 10"
-
-        Returns:
-            dict with query results, columns, and row count
-
-        Examples:
-            # Filter rows
-            query="SELECT * FROM data WHERE status = 'pending'"
-
-            # Aggregate data
-            query="SELECT category, COUNT(*) as count, AVG(price) as avg_price FROM data GROUP BY category"
-
-            # Sort and limit
-            query="SELECT name, price FROM data ORDER BY price DESC LIMIT 5"
-
-            # Search text (case-insensitive)
-            query="SELECT * FROM data WHERE LOWER(name) LIKE '%phone%'"
-        """
-        try:
-            import duckdb
-        except ImportError:
-            return {
-                "error": "DuckDB not installed. Install with: pip install duckdb  or  pip install tools[sql]"
-            }
-
-        try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-
-            if not os.path.exists(secure_path):
-                return {"error": f"File not found: {path}"}
-
-            if not path.lower().endswith(".csv"):
-                return {"error": "File must have .csv extension"}
-
-            if not query or not query.strip():
-                return {"error": "query cannot be empty"}
-
-            # Security: only allow SELECT statements
-            query_upper = query.strip().upper()
-            if not query_upper.startswith("SELECT"):
-                return {"error": "Only SELECT queries are allowed for security reasons"}
-
-            # Disallowed keywords for security
-            disallowed = ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE", "EXEC", "EXECUTE"]
-            for keyword in disallowed:
-                if keyword in query_upper:
-                    return {"error": f"'{keyword}' is not allowed in queries"}
-
-            # Execute query using in-memory DuckDB
-            con = duckdb.connect(":memory:")
-            try:
-                # Load CSV as 'data' table
-                con.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')")
-
-                # Execute user query
-                result = con.execute(query)
-                columns = [desc[0] for desc in result.description]
-                rows = result.fetchall()
-
-                # Convert to list of dicts
-                rows_as_dicts = [dict(zip(columns, row)) for row in rows]
-
-                return {
-                    "success": True,
-                    "path": path,
-                    "query": query,
-                    "columns": columns,
-                    "column_count": len(columns),
-                    "rows": rows_as_dicts,
-                    "row_count": len(rows_as_dicts),
-                }
-            finally:
-                con.close()
-
-        except Exception as e:
-            error_msg = str(e)
-            # Make DuckDB errors more readable
-            if "Catalog Error" in error_msg:
-                return {"error": f"SQL error: {error_msg}. Remember the table is named 'data'."}
-            return {"error": f"Query failed: {error_msg}"}
+        except Exception as exc:
+            return {"error": f"Failed to get CSV info: {exc}"}
