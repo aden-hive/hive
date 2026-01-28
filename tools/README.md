@@ -25,7 +25,11 @@ cp .env.example .env
 | Variable               | Required For                  | Get Key                                                 |
 | ---------------------- | ----------------------------- | ------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`    | MCP server startup, LLM nodes | [console.anthropic.com](https://console.anthropic.com/) |
-| `BRAVE_SEARCH_API_KEY` | `web_search` tool             | [brave.com/search/api](https://brave.com/search/api/)   |
+| `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
+| `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
+| `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+
+> **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
 Alternatively, export as environment variables:
 
@@ -57,14 +61,20 @@ python mcp_server.py
 
 ## Available Tools
 
-| Tool           | Description                              |
-| -------------- | ---------------------------------------- |
-| `example_tool` | Template tool demonstrating the pattern  |
-| `file_read`    | Read contents of local files             |
-| `file_write`   | Write content to local files             |
-| `web_search`   | Search the web using Brave Search API    |
-| `web_scrape`   | Scrape and extract content from webpages |
-| `pdf_read`     | Read and extract text from PDF files     |
+| Tool                   | Description                                    |
+| ---------------------- | ---------------------------------------------- |
+| `example_tool`         | Template tool demonstrating the pattern        |
+| `view_file`            | Read contents of local files                   |
+| `write_to_file`        | Write content to local files                   |
+| `list_dir`             | List directory contents                        |
+| `replace_file_content` | Replace content in files                       |
+| `apply_diff`           | Apply diff patches to files                    |
+| `apply_patch`          | Apply unified patches to files                 |
+| `grep_search`          | Search file contents with regex                |
+| `execute_command_tool` | Execute shell commands                         |
+| `web_search`           | Search the web (Google or Brave, auto-detected) |
+| `web_scrape`           | Scrape and extract content from webpages       |
+| `pdf_read`             | Read and extract text from PDF files           |
 
 ## Project Structure
 
@@ -72,11 +82,18 @@ python mcp_server.py
 tools/
 ├── src/aden_tools/
 │   ├── __init__.py          # Main exports
-│   ├── utils/               # Utility functions
+│   ├── credentials/         # Credential management
 │   └── tools/               # Tool implementations
 │       ├── example_tool/
-│       ├── file_read_tool/
-│       ├── file_write_tool/
+│       ├── file_system_toolkits/  # File operation tools
+│       │   ├── view_file.py
+│       │   ├── write_to_file.py
+│       │   ├── list_dir.py
+│       │   ├── replace_file_content.py
+│       │   ├── apply_diff.py
+│       │   ├── apply_patch.py
+│       │   ├── grep_search.py
+│       │   └── execute_command_tool.py
 │       ├── web_search_tool/
 │       ├── web_scrape_tool/
 │       └── pdf_read_tool/
