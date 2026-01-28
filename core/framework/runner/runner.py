@@ -48,13 +48,18 @@ class AgentInfo:
 
 @dataclass
 class ValidationResult:
-    """Result of agent validation."""
+    """Result of agent validation checks."""
 
     valid: bool
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     missing_tools: list[str] = field(default_factory=list)
     missing_credentials: list[str] = field(default_factory=list)
+    
+    # Preflight validation fields
+    env_var_issues: list[dict] = field(default_factory=list)
+    llm_connectivity: dict | None = None
+    mcp_server_issues: list[dict] = field(default_factory=list)
 
 
 def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
@@ -791,6 +796,132 @@ class AgentRunner:
             is_multi_entry_point=self._uses_async_entry_points,
         )
 
+    def _validate_environment_variables(self) -> list[dict]:
+        """
+        Validate all required environment variables are set.
+        
+        Returns:
+            List of issues with environment variables
+        """
+        issues = []
+        
+        # Check LLM provider API key
+        api_key_env = self._get_api_key_env_var(self.model)
+        if api_key_env:  # None for Ollama (local)
+            value = os.environ.get(api_key_env)
+            if not value:
+                issues.append({
+                    "env_var": api_key_env,
+                    "status": "missing",
+                    "required_by": [f"LLM provider ({self.model})"],
+                    "suggestion": f"export {api_key_env}=your-key-here"
+                })
+            elif not value.strip():
+                issues.append({
+                    "env_var": api_key_env,
+                    "status": "empty",
+                    "required_by": [f"LLM provider ({self.model})"],
+                })
+        
+        return issues
+    
+    def _validate_llm_connectivity(self) -> dict:
+        """
+        Test LLM provider configuration.
+        
+        Returns:
+            Dictionary with connectivity status
+        """
+        if self.mock_mode:
+            return {"status": "skipped", "reason": "mock mode"}
+        
+        api_key_env = self._get_api_key_env_var(self.model)
+        if not api_key_env:  # Ollama or other local model
+            return {
+                "provider": "local",
+                "model": self.model,
+                "status": "skipped",
+                "reason": "local model (no API key required)"
+            }
+        
+        if not os.environ.get(api_key_env):
+            return {
+                "provider": self.model.split("/")[0] if "/" in self.model else "unknown",
+                "model": self.model,
+                "status": "failed",
+                "error": f"{api_key_env} not set"
+            }
+        
+        try:
+            import time
+            from framework.llm.litellm import LiteLLMProvider
+            
+            start = time.time()
+            # Just initialize the provider - don't make actual API calls to avoid costs
+            llm = LiteLLMProvider(model=self.model)
+            latency = (time.time() - start) * 1000
+            
+            return {
+                "provider": self.model.split("/")[0] if "/" in self.model else "openai",
+                "model": self.model,
+                "status": "configured",
+                "latency_ms": round(latency, 2),
+                "note": "Provider initialized (no API call made)"
+            }
+        except Exception as e:
+            return {
+                "provider": self.model.split("/")[0] if "/" in self.model else "unknown",
+                "model": self.model,
+                "status": "failed",
+                "error": str(e)
+            }
+    
+    def _validate_mcp_servers(self) -> list[dict]:
+        """
+        Validate MCP servers can be loaded.
+        
+        Returns:
+            List of MCP server issues
+        """
+        issues = []
+        
+        # Check if mcp_servers.json exists
+        mcp_config = self.agent_path / "mcp_servers.json"
+        if not mcp_config.exists():
+            return []  # No MCP servers configured - not an error
+        
+        try:
+            with open(mcp_config) as f:
+                config = json.load(f)
+            
+            servers = config.get("servers", [])
+            for server_config in servers:
+                server_name = server_config.get("name", "unknown")
+                try:
+                    # Try to register the server (this validates it can load)
+                    self._tool_registry.register_mcp_server(server_config)
+                except Exception as e:
+                    issues.append({
+                        "server_name": server_name,
+                        "status": "failed",
+                        "error": str(e),
+                        "transport": server_config.get("transport", "unknown")
+                    })
+        except json.JSONDecodeError as e:
+            issues.append({
+                "server_name": "config",
+                "status": "failed",
+                "error": f"Invalid JSON in mcp_servers.json: {e}"
+            })
+        except Exception as e:
+            issues.append({
+                "server_name": "config",
+                "status": "failed",
+                "error": f"Failed to load mcp_servers.json: {e}"
+            })
+        
+        return issues
+
     def validate(self) -> ValidationResult:
         """
         Check agent is valid and all required tools are registered.
@@ -863,12 +994,33 @@ class AgentRunner:
                         f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
                     )
 
+        # Preflight validation checks
+        env_var_issues = self._validate_environment_variables()
+        llm_connectivity = self._validate_llm_connectivity()
+        mcp_server_issues = self._validate_mcp_servers()
+        
+        # Add environment variable issues to errors if critical
+        for issue in env_var_issues:
+            if issue["status"] == "missing":
+                errors.append(f"Missing required environment variable: {issue['env_var']}")
+        
+        # Add LLM connectivity issues to errors if failed
+        if llm_connectivity and llm_connectivity.get("status") == "failed":
+            errors.append(f"LLM provider validation failed: {llm_connectivity.get('error', 'Unknown error')}")
+        
+        # Add MCP server issues to warnings
+        for issue in mcp_server_issues:
+            warnings.append(f"MCP server '{issue['server_name']}' failed to load: {issue['error']}")
+        
         return ValidationResult(
             valid=len(errors) == 0,
             errors=errors,
             warnings=warnings,
             missing_tools=missing_tools,
             missing_credentials=missing_credentials,
+            env_var_issues=env_var_issues,
+            llm_connectivity=llm_connectivity,
+            mcp_server_issues=mcp_server_issues,
         )
 
     async def can_handle(

@@ -87,6 +87,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         help="Path to agent folder (containing agent.json)",
     )
+    validate_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output validation results as JSON (for CI/CD)",
+    )
     validate_parser.set_defaults(func=cmd_validate)
 
     # list command
@@ -389,23 +394,84 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     validation = runner.validate()
 
+    # JSON output for CI/CD
+    if getattr(args, 'json', False):
+        output = {
+            "valid": validation.valid,
+            "errors": validation.errors,
+            "warnings": validation.warnings,
+            "missing_tools": validation.missing_tools,
+            "missing_credentials": validation.missing_credentials,
+            "env_var_issues": validation.env_var_issues,
+            "llm_connectivity": validation.llm_connectivity,
+            "mcp_server_issues": validation.mcp_server_issues,
+        }
+        print(json.dumps(output, indent=2))
+        runner.cleanup()
+        return 0 if validation.valid else 1
+
+    # Human-readable output
+    print()
     if validation.valid:
-        print("✓ Agent is valid")
+        print("✓ Agent is valid and ready to run")
     else:
-        print("✗ Agent has errors:")
+        print("✗ Agent validation failed")
+    print()
+
+    # Show errors
+    if validation.errors:
+        print("ERRORS:")
         for error in validation.errors:
-            print(f"  ERROR: {error}")
+            print(f"  ✗ {error}")
+        print()
 
+    # Show environment variable issues
+    if validation.env_var_issues:
+        print("ENVIRONMENT VARIABLES:")
+        for issue in validation.env_var_issues:
+            status_icon = "✗" if issue["status"] == "missing" else "⚠"
+            print(f"  {status_icon} {issue['env_var']}: {issue['status']}")
+            if "suggestion" in issue:
+                print(f"     {issue['suggestion']}")
+        print()
+
+    # Show LLM connectivity
+    if validation.llm_connectivity:
+        llm = validation.llm_connectivity
+        if llm["status"] == "configured":
+            print(f"LLM PROVIDER: ✓ {llm['model']}")
+            if "latency_ms" in llm:
+                print(f"  Initialized in {llm['latency_ms']}ms")
+            if "note" in llm:
+                print(f"  {llm['note']}")
+        elif llm["status"] == "failed":
+            print(f"LLM PROVIDER: ✗ {llm['model']}")
+            print(f"  Error: {llm.get('error', 'Unknown error')}")
+        elif llm["status"] == "skipped":
+            print(f"LLM PROVIDER: ⊘ {llm.get('reason', 'Skipped')}")
+        print()
+
+    # Show MCP server issues
+    if validation.mcp_server_issues:
+        print("MCP SERVERS:")
+        for issue in validation.mcp_server_issues:
+            print(f"  ✗ {issue['server_name']}: {issue['error']}")
+        print()
+
+    # Show warnings
     if validation.warnings:
-        print("\nWarnings:")
+        print("WARNINGS:")
         for warning in validation.warnings:
-            print(f"  WARNING: {warning}")
+            print(f"  ⚠ {warning}")
+        print()
 
+    # Show missing tools
     if validation.missing_tools:
-        print("\nMissing tool implementations:")
+        print("MISSING TOOLS:")
         for tool in validation.missing_tools:
             print(f"  - {tool}")
-        print("\nTo fix: Create tools.py in the agent folder or register tools programmatically")
+        print()
+        print("To fix: Create tools.py in the agent folder or register tools programmatically")
 
     runner.cleanup()
     return 0 if validation.valid else 1
