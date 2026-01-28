@@ -151,7 +151,6 @@ hive/                                    # Repository root
 │       └── agent-workflow/              # Complete workflow 
 |           ├── SKILL.md
 │           └── examples
-orchestration
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
