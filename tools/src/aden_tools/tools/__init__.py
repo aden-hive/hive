@@ -35,10 +35,10 @@ from .file_system_toolkits.replace_file_content import (
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
+from .http_request_tool import register_tools as register_http_request
 from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
-from .http_request_tool import register_tools as register_http_request
 
 
 def register_all_tools(

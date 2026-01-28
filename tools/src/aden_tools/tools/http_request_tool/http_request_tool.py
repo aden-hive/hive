@@ -6,10 +6,10 @@ query parameters, and configurable timeouts.
 """
 from __future__ import annotations
 
-import json
 import ipaddress
+import json
 import socket
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
@@ -62,7 +62,7 @@ def _is_private_ip(hostname: str) -> bool:
 
 def register_tools(
     mcp: FastMCP,
-    credentials: Optional["CredentialManager"] = None,
+    credentials: CredentialManager | None = None,
 ) -> None:
     """Register HTTP request tools with the MCP server."""
 
@@ -70,10 +70,10 @@ def register_tools(
     def http_request(
         url: str,
         method: str = "GET",
-        headers: Optional[dict] = None,
-        body: Optional[str] = None,
-        json_body: Optional[dict] = None,
-        params: Optional[dict] = None,
+        headers: dict | None = None,
+        body: str | None = None,
+        json_body: dict | None = None,
+        params: dict | None = None,
         timeout: int = 30,
         follow_redirects: bool = True,
         allow_private_ips: bool = False,
@@ -124,8 +124,8 @@ def register_tools(
         # Security: Block private IPs (unless explicitly allowed)
         if not allow_private_ips and _is_private_ip(parsed.hostname):
             return {
-                "error": f"Requests to private/internal IP addresses are not allowed. "
-                f"Set allow_private_ips=True to override."
+                "error": "Requests to private/internal IP addresses are not allowed. "
+                "Set allow_private_ips=True to override."
             }
 
         # Validate method
@@ -198,7 +198,8 @@ def register_tools(
                 # For non-JSON, return text (limit size to prevent memory issues)
                 response_body = response.text
                 if len(response_body) > 1_000_000:  # 1MB limit
-                    response_body = response_body[:1_000_000] + "\n... [truncated, response exceeded 1MB]"
+                    truncated_msg = "\n... [truncated, response exceeded 1MB]"
+                    response_body = response_body[:1_000_000] + truncated_msg
 
             return {
                 "status_code": response.status_code,

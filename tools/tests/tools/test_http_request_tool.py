@@ -1,9 +1,9 @@
 """Tests for http_request tool (FastMCP)."""
-import json
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from fastmcp import FastMCP
+
 from aden_tools.tools.http_request_tool import register_tools
 
 
@@ -164,7 +164,7 @@ class TestHttpMethods:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            result = http_request_fn(url="https://example.com/api")
+            http_request_fn(url="https://example.com/api")
 
             call_args = mock_client.return_value.__enter__.return_value.request.call_args
             assert call_args.kwargs["method"] == "GET"
@@ -200,7 +200,7 @@ class TestHttpMethods:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            result = http_request_fn(url="https://example.com/api", method="post")
+            http_request_fn(url="https://example.com/api", method="post")
 
             call_args = mock_client.return_value.__enter__.return_value.request.call_args
             assert call_args.kwargs["method"] == "POST"
@@ -296,7 +296,8 @@ class TestErrorHandling:
         import httpx
 
         with patch("httpx.Client") as mock_client:
-            mock_client.return_value.__enter__.return_value.request.side_effect = httpx.TimeoutException("timeout")
+            mock_request = mock_client.return_value.__enter__.return_value.request
+            mock_request.side_effect = httpx.TimeoutException("timeout")
 
             result = http_request_fn(url="https://example.com", timeout=5)
 
@@ -309,7 +310,8 @@ class TestErrorHandling:
         import httpx
 
         with patch("httpx.Client") as mock_client:
-            mock_client.return_value.__enter__.return_value.request.side_effect = httpx.ConnectError("connection refused")
+            mock_request = mock_client.return_value.__enter__.return_value.request
+            mock_request.side_effect = httpx.ConnectError("connection refused")
 
             result = http_request_fn(url="https://example.com")
 
@@ -321,7 +323,8 @@ class TestErrorHandling:
         import httpx
 
         with patch("httpx.Client") as mock_client:
-            mock_client.return_value.__enter__.return_value.request.side_effect = httpx.TooManyRedirects("too many")
+            mock_request = mock_client.return_value.__enter__.return_value.request
+            mock_request.side_effect = httpx.TooManyRedirects("too many")
 
             result = http_request_fn(url="https://example.com")
 
@@ -342,7 +345,7 @@ class TestTimeoutHandling:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            result = http_request_fn(url="https://example.com", timeout=0)
+            http_request_fn(url="https://example.com", timeout=0)
 
             call_args = mock_client.return_value.__enter__.return_value.request.call_args
             assert call_args.kwargs["timeout"] == 1.0
@@ -357,7 +360,7 @@ class TestTimeoutHandling:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            result = http_request_fn(url="https://example.com", timeout=999)
+            http_request_fn(url="https://example.com", timeout=999)
 
             call_args = mock_client.return_value.__enter__.return_value.request.call_args
             assert call_args.kwargs["timeout"] == 120.0
@@ -376,7 +379,7 @@ class TestRequestOptions:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            result = http_request_fn(
+            http_request_fn(
                 url="https://api.example.com",
                 headers={"Authorization": "Bearer token123"}
             )
@@ -394,7 +397,7 @@ class TestRequestOptions:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            result = http_request_fn(
+            http_request_fn(
                 url="https://api.example.com/search",
                 params={"q": "test", "limit": 10}
             )
@@ -412,7 +415,7 @@ class TestRequestOptions:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            result = http_request_fn(url="https://example.com")
+            http_request_fn(url="https://example.com")
 
             call_args = mock_client.return_value.__enter__.return_value.request.call_args
             assert call_args.kwargs["follow_redirects"] is True
@@ -443,7 +446,7 @@ class TestRequestOptions:
             mock_response.elapsed.total_seconds.return_value = 0.1
             mock_client.return_value.__enter__.return_value.request.return_value = mock_response
 
-            result = http_request_fn(
+            http_request_fn(
                 url="https://api.example.com/webhook",
                 method="POST",
                 body="raw content here"
