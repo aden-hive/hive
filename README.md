@@ -53,6 +53,13 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
 - **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
 
+## Who Should Use Hive?
+
+Hive is ideal for:
+- Developers building production AI agents
+- Teams who want self-healing, goal-driven agents
+- NOT ideal if you want simple prompt chaining
+
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
