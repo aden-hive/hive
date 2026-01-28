@@ -205,6 +205,17 @@ class NodeSpec(BaseModel):
     max_retries: int = Field(default=3)
     retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
 
+    # Output validation (pydantic)
+    output_model: type[BaseModel] | None = Field(
+        default=None,
+        description="Optional Pydantic model used to validate structured LLM output",
+    )
+
+    max_validation_retries: int = Field(
+        default=2,
+        description="Maximum retries when output validation fails",
+    )
+
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
 
