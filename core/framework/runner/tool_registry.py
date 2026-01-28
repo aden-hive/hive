@@ -54,6 +54,133 @@ class ToolRegistry:
         """
         self._tools[name] = RegisteredTool(tool=tool, executor=executor)
 
+    def _validate_and_bind_arguments(
+        self,
+        tool_name: str,
+        sig: inspect.Signature,
+        inputs: dict[str, Any],
+    ) -> inspect.BoundArguments:
+        """
+        Validate and bind arguments for tool execution.
+
+        Validates:
+        - Required parameters are provided
+        - No unexpected parameters (unless *args/**kwargs present)
+        - Basic type checking for annotated parameters
+
+        Args:
+            tool_name: Name of the tool (for error messages)
+            sig: Function signature to validate against
+            inputs: Input dictionary from tool execution
+
+        Returns:
+            BoundArguments object with validated and bound arguments
+
+        Raises:
+            ValueError: If validation fails (missing required, unexpected params, type mismatch)
+        """
+        # Filter out 'self' and 'cls' from inputs if present
+        filtered_inputs = {
+            k: v for k, v in inputs.items() if k not in ("self", "cls")
+        }
+
+        # Check for **kwargs in signature
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+
+        # Get valid parameter names (excluding self/cls)
+        valid_param_names = {
+            name
+            for name, param in sig.parameters.items()
+            if name not in ("self", "cls")
+            and param.kind
+            not in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            )
+        }
+
+        # Check for missing required parameters
+        missing_required = []
+        for param_name, param in sig.parameters.items():
+            if param_name in ("self", "cls"):
+                continue
+            if (
+                param.default == inspect.Parameter.empty
+                and param_name not in filtered_inputs
+            ):
+                missing_required.append(param_name)
+
+        if missing_required:
+            raise ValueError(
+                f"Tool '{tool_name}' missing required argument(s): "
+                f"{', '.join(missing_required)}"
+            )
+
+        # Check for unexpected parameters (only if no **kwargs)
+        if not has_var_keyword:
+            provided_params = set(filtered_inputs.keys())
+            extra_params = provided_params - valid_param_names
+            if extra_params:
+                raise ValueError(
+                    f"Tool '{tool_name}' received unexpected argument(s): "
+                    f"{', '.join(sorted(extra_params))}. "
+                    f"Valid parameters are: {', '.join(sorted(valid_param_names))}"
+                )
+
+        # Use bind_partial to apply defaults and prepare arguments
+        # bind_partial doesn't raise for missing params, but we've already checked above
+        try:
+            bound = sig.bind_partial(**filtered_inputs)
+            bound.apply_defaults()
+        except TypeError as e:
+            # This should rarely happen now, but handle edge cases
+            raise ValueError(
+                f"Tool '{tool_name}' argument binding failed: {str(e)}"
+            ) from e
+
+        # Type validation for provided parameters
+        for param_name, param in sig.parameters.items():
+            if param_name in ("self", "cls") or param_name not in bound.arguments:
+                continue
+
+            value = bound.arguments[param_name]
+            annotation = param.annotation
+
+            # Skip type checking if annotation is empty or value is None (for optional params)
+            if annotation == inspect.Parameter.empty or value is None:
+                continue
+
+            # Basic type checking
+            if annotation is int:
+                if not isinstance(value, int):
+                    raise ValueError(
+                        f"Tool '{tool_name}' parameter '{param_name}' must be int, "
+                        f"got {type(value).__name__}"
+                    )
+            elif annotation is float:
+                if not isinstance(value, (int, float)):
+                    raise ValueError(
+                        f"Tool '{tool_name}' parameter '{param_name}' must be float, "
+                        f"got {type(value).__name__}"
+                    )
+            elif annotation is bool:
+                if not isinstance(value, bool):
+                    raise ValueError(
+                        f"Tool '{tool_name}' parameter '{param_name}' must be bool, "
+                        f"got {type(value).__name__}"
+                    )
+            elif annotation is str:
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"Tool '{tool_name}' parameter '{param_name}' must be str, "
+                        f"got {type(value).__name__}"
+                    )
+
+        return bound    
+
     def register_function(
         self,
         func: Callable,
@@ -111,113 +238,8 @@ class ToolRegistry:
         def executor(inputs: dict) -> Any:
             """
             Execute the function with validated inputs.
-
-            Validates:
-            - Required parameters are provided
-            - No unexpected parameters (unless *args/**kwargs present)
-            - Basic type checking for annotated parameters
             """
-            # Filter out 'self' and 'cls' from inputs if present
-            filtered_inputs = {
-                k: v for k, v in inputs.items() if k not in ("self", "cls")
-            }
-
-            # Check for **kwargs in signature
-            has_var_keyword = any(
-                p.kind == inspect.Parameter.VAR_KEYWORD
-                for p in sig.parameters.values()
-            )
-
-            # Get valid parameter names (excluding self/cls)
-            valid_param_names = {
-                name
-                for name, param in sig.parameters.items()
-                if name not in ("self", "cls")
-                and param.kind
-                not in (
-                    inspect.Parameter.VAR_POSITIONAL,
-                    inspect.Parameter.VAR_KEYWORD,
-                )
-            }
-
-            # Check for missing required parameters
-            missing_required = []
-            for param_name, param in sig.parameters.items():
-                if param_name in ("self", "cls"):
-                    continue
-                if (
-                    param.default == inspect.Parameter.empty
-                    and param_name not in filtered_inputs
-                ):
-                    missing_required.append(param_name)
-
-            if missing_required:
-                raise ValueError(
-                    f"Tool '{tool_name}' missing required argument(s): "
-                    f"{', '.join(missing_required)}"
-                )
-
-            # Check for unexpected parameters (only if no **kwargs)
-            if not has_var_keyword:
-                provided_params = set(filtered_inputs.keys())
-                extra_params = provided_params - valid_param_names
-                if extra_params:
-                    raise ValueError(
-                        f"Tool '{tool_name}' received unexpected argument(s): "
-                        f"{', '.join(sorted(extra_params))}. "
-                        f"Valid parameters are: {', '.join(sorted(valid_param_names))}"
-                    )
-
-            # Use bind_partial to apply defaults and prepare arguments
-            # bind_partial doesn't raise for missing params, but we've already checked above
-            try:
-                bound = sig.bind_partial(**filtered_inputs)
-                bound.apply_defaults()
-            except TypeError as e:
-                # This should rarely happen now, but handle edge cases
-                raise ValueError(
-                    f"Tool '{tool_name}' argument binding failed: {str(e)}"
-                ) from e
-
-            # Type validation for provided parameters
-            for param_name, param in sig.parameters.items():
-                if param_name in ("self", "cls") or param_name not in bound.arguments:
-                    continue
-
-                value = bound.arguments[param_name]
-                annotation = param.annotation
-
-                # Skip type checking if annotation is empty or value is None (for optional params)
-                if annotation == inspect.Parameter.empty or value is None:
-                    continue
-
-                # Basic type checking
-                if annotation is int:
-                    if not isinstance(value, int):
-                        raise ValueError(
-                            f"Tool '{tool_name}' parameter '{param_name}' must be int, "
-                            f"got {type(value).__name__}"
-                        )
-                elif annotation is float:
-                    if not isinstance(value, (int, float)):
-                        raise ValueError(
-                            f"Tool '{tool_name}' parameter '{param_name}' must be float, "
-                            f"got {type(value).__name__}"
-                        )
-                elif annotation is bool:
-                    if not isinstance(value, bool):
-                        raise ValueError(
-                            f"Tool '{tool_name}' parameter '{param_name}' must be bool, "
-                            f"got {type(value).__name__}"
-                        )
-                elif annotation is str:
-                    if not isinstance(value, str):
-                        raise ValueError(
-                            f"Tool '{tool_name}' parameter '{param_name}' must be str, "
-                            f"got {type(value).__name__}"
-                        )
-
-            # All validation passed, call the function with bound arguments
+            bound = self._validate_and_bind_arguments(tool_name, sig, inputs)
             return func(**bound.arguments)
 
         self.register(tool_name, tool, executor)
