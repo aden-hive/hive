@@ -524,11 +524,13 @@ def add_node(
         tools_list = json.loads(tools)
         routes_dict = json.loads(routes)
     except json.JSONDecodeError as e:
-        return json.dumps({
-            "valid": False,
-            "errors": [f"Invalid JSON input: {e}"],
-            "warnings": [],
-        })
+        return json.dumps(
+            {
+                "valid": False,
+                "errors": [f"Invalid JSON input: {e}"],
+                "warnings": [],
+            }
+        )
 
     # Validate credentials for tools BEFORE adding the node
     cred_error = _validate_tool_credentials(tools_list)
@@ -717,11 +719,13 @@ def update_node(
         tools_list = json.loads(tools) if tools else None
         routes_dict = json.loads(routes) if routes else None
     except json.JSONDecodeError as e:
-        return json.dumps({
-            "valid": False,
-            "errors": [f"Invalid JSON input: {e}"],
-            "warnings": [],
-        })
+        return json.dumps(
+            {
+                "valid": False,
+                "errors": [f"Invalid JSON input: {e}"],
+                "warnings": [],
+            }
+        )
 
     # Validate credentials for new tools BEFORE updating
     if tools_list:
