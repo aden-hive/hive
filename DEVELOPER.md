@@ -99,10 +99,13 @@ Get API keys:
 ./quickstart.sh
 ```
 
-This installs:
+This installs agent-related Claude Code skills:
 
-- `/building-agents` - Build new goal-driven agents
-- `/testing-agent` - Test agents with evaluation framework
+- `/building-agents-core` - Fundamental agent concepts
+- `/building-agents-construction` - Step-by-step agent building
+- `/building-agents-patterns` - Best practices and design patterns
+- `/testing-agent` - Test and validate agents
+- `/agent-workflow` - End-to-end guided workflow
 
 ### Verify Setup
 
@@ -132,15 +135,23 @@ hive/                                    # Repository root
 │   └── CODEOWNERS                       # Auto-assign reviewers
 │
 ├── .claude/                             # Claude Code Skills
-│   └── skills/
-│       ├── building-agents/             # Skills for building agents
-│       │   ├── SKILL.md                 # Main skill definition
-│       │   ├── building-agents-core/
-│       │   ├── building-agents-patterns/
-│       │   └── building-agents-construction/
+│   └── skills/                          # Skills for building
+│       ├── building-agents-core/
+|       |   ├── SKILL.md                 # Main skill definition
+│       |   └── examples
+│       ├── building-agents-patterns/
+|       |   ├── SKILL.md
+│       |   └── examples
+│       ├── building-agents-construction/
+|       |   ├── SKILL.md
+│       |   └── examples
 │       ├── testing-agent/               # Skills for testing agents
-│       │   └── SKILL.md
-│       └── agent-workflow/              # Complete workflow orchestration
+│       │   ├── SKILL.md
+│       |   └── examples
+│       └── agent-workflow/              # Complete workflow 
+|           ├── SKILL.md
+│           └── examples
+orchestration
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
