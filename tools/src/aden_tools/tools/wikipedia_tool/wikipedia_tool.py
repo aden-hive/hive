@@ -53,7 +53,6 @@ def register_tools(mcp: FastMCP) -> None:
             )
             
             if response.status_code != 200:
-                print(f"Error: {response.status_code} - {response.text}")
                 return {"error": f"Wikipedia API error: {response.status_code}", "query": query}
                 
             data = response.json()

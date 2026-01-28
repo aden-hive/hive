@@ -55,7 +55,7 @@ def test_search_wikipedia_success(tool_func):
         ]
     }
 
-    with patch("httpx.get", return_value=mock_response) as mock_get:
+    with patch("aden_tools.tools.wikipedia_tool.wikipedia_tool.httpx.get", return_value=mock_response) as mock_get:
         result = tool_func(query="AI")
         
         assert result["query"] == "AI"
@@ -79,14 +79,14 @@ def test_search_wikipedia_api_error(tool_func):
     mock_response = MagicMock()
     mock_response.status_code = 500
     
-    with patch("httpx.get", return_value=mock_response):
+    with patch("aden_tools.tools.wikipedia_tool.wikipedia_tool.httpx.get", return_value=mock_response):
         result = tool_func(query="Error")
         assert "error" in result
         assert "Wikipedia API error: 500" in result["error"]
 
 def test_search_wikipedia_timeout(tool_func):
     import httpx
-    with patch("httpx.get", side_effect=httpx.TimeoutException("Timeout")):
+    with patch("aden_tools.tools.wikipedia_tool.wikipedia_tool.httpx.get", side_effect=httpx.TimeoutException("Timeout")):
         result = tool_func(query="Timeout")
         assert "error" in result
         assert "Request timed out" in result["error"]
