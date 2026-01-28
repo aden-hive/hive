@@ -21,12 +21,6 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
-## Common Pitfalls (Read This If Setup Fails)
-
-- **No `requirements.txt` in the repo root:** Running `pip install -r requirements.txt` from `/hive` will fail. The framework requirements file is located at `core/requirements.txt`.
-- **`package.json` exists, but `npm` is not required for agent development:** The agent framework and tools are Python-based.
-- **Use Python 3.11+:** If your Python version is older, install Python 3.11+ and rerun `./scripts/setup-python.sh`.
-
 ## Manual Setup (Alternative)
 
 If you prefer to set up manually or the script fails:
