@@ -90,7 +90,7 @@ cd hive
 ./quickstart.sh
 
 # Claude Codeを使用してエージェントを構築
-claude> /building-agents
+claude> /building-agents-construction
 
 # エージェントをテスト
 claude> /testing-agent
@@ -236,7 +236,7 @@ hive/
 # - すべての依存関係
 
 # Claude Codeスキルを使用して新しいエージェントを構築
-claude> /building-agents
+claude> /building-agents-construction
 
 # エージェントをテスト
 claude> /testing-agent
