@@ -132,10 +132,7 @@ def register_tools(mcp: FastMCP) -> None:
                     }
 
             # Validate max_length
-            if max_length < 1000:
-                max_length = 1000
-            elif max_length > 500000:
-                max_length = 500000
+            max_length = max(1000, min(max_length, 500000))
 
             # Make request
             response = httpx.get(
@@ -152,6 +149,15 @@ def register_tools(mcp: FastMCP) -> None:
             if response.status_code != 200:
                 return {"error": f"HTTP {response.status_code}: Failed to fetch URL"}
 
+            # Check content type
+            content_type = response.headers.get("content-type", "").lower()
+            if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
+                return {
+                    "error": f"Skipping non-HTML content (Content-Type: {content_type})",
+                    "url": url,
+                    "skipped": True,
+                }
+
             # Parse HTML
             soup = BeautifulSoup(response.text, "html.parser")
 
@@ -160,10 +166,7 @@ def register_tools(mcp: FastMCP) -> None:
                 tag.decompose()
 
             # Get title and description
-            title = ""
-            title_tag = soup.find("title")
-            if title_tag:
-                title = title_tag.get_text(strip=True)
+            title = soup.title.get_text(strip=True) if soup.title else ""
 
             description = ""
             meta_desc = soup.find("meta", attrs={"name": "description"})
