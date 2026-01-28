@@ -57,6 +57,73 @@ python -c "import litellm; print('✓ litellm OK')"
 > **Windows Tip:**  
 > On Windows, if the verification commands fail, ensure you are running them in **WSL** or after **disabling Python App Execution Aliases** in Windows Settings → Apps → App Execution Aliases.
 
+---
+
+## Native Windows (PowerShell) Setup
+
+If you are using Windows without WSL, follow these steps instead of the bash script.
+
+### 1. Install Core Framework
+
+cd core
+python -m pip install -e .
+cd ..
+
+### 2. Install Tools Package
+
+cd tools
+python -m pip install -e .
+cd ..
+
+### 3. Set PYTHONPATH (PowerShell syntax)
+
+Windows PowerShell uses ; instead of : as the path separator.
+
+$env:PYTHONPATH = "core;exports"
+
+This sets the variable for the current terminal session.
+
+### 4. Verify CLI works
+
+python -m framework.cli list exports
+
+If this prints available agents, setup is successful.
+
+### 5. Running an agent (example)
+
+$env:PYTHONPATH = "core;exports"
+python -m support_ticket_agent info
+
+---
+
+### Common Windows Errors
+
+Error:
+PYTHONPATH=core:exports is not recognized
+
+Fix:
+Use PowerShell syntax:
+
+$env:PYTHONPATH = "core;exports"
+
+---
+
+Error:
+No module named core.__main__
+
+Cause:
+Trying to run:
+python -m core
+
+Correct command:
+python -m framework.cli
+
+---
+
+This section documents native Windows setup without requiring WSL and prevents common first-time setup errors.
+
+
+
 ## Requirements
 
 ### Python Version
