@@ -6,6 +6,8 @@ on:
 
 jobs:
   triage:
+    # Only run triage on the upstream repo where secrets (Anthropic key) are configured
+    if: github.repository == 'adenhq/hive'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

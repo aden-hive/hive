@@ -5,6 +5,8 @@ on:
 
 jobs:
   check-all-open-prs:
+    # Only run this backfill on the upstream repository where maintainers can close PRs
+    if: github.repository == 'adenhq/hive'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

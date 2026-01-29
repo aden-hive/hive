@@ -11,6 +11,8 @@ permissions:
 jobs:
   release:
     name: Create Release
+    # Only create releases from the upstream repository
+    if: github.repository == 'adenhq/hive'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

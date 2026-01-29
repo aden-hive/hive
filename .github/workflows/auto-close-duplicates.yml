@@ -7,6 +7,8 @@ on:
 
 jobs:
   auto-close-duplicates:
+    # Only run this job for the upstream repository where required secrets exist
+    if: github.repository == 'adenhq/hive'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

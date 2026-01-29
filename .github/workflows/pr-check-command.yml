@@ -6,8 +6,8 @@ on:
 
 jobs:
   check-pr:
-    # Only run on PR comments that start with /check
-    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/check')
+    # Only run on PR comments that start with /check and only on upstream repo
+    if: github.repository == 'adenhq/hive' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/check')
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

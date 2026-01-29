@@ -6,6 +6,8 @@ on:
 
 jobs:
   check-requirements:
+    # Run requirements check only on the upstream repository (avoid auto-closing PRs on forks)
+    if: github.repository == 'adenhq/hive'
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
