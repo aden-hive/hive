@@ -6,21 +6,22 @@ declare global {
   };
 }
 
-interface GitHubIssue {
+export interface GitHubIssue {
   number: number;
   title: string;
+  state: string;
   user: { id: number };
   created_at: string;
 }
 
-interface GitHubComment {
+export interface GitHubComment {
   id: number;
   body: string;
   created_at: string;
   user: { type: string; id: number };
 }
 
-interface GitHubReaction {
+export interface GitHubReaction {
   user: { id: number };
   content: string;
 }
@@ -57,7 +58,41 @@ async function githubRequest<T>(
   return response.json();
 }
 
-function extractDuplicateIssueNumber(commentBody: string): number | null {
+/** True if comment is a bot "possible duplicate" detection (used for filtering). */
+export function isDupeComment(comment: GitHubComment): boolean {
+  const bodyLower = comment.body.toLowerCase();
+  return (
+    bodyLower.includes("possible duplicate") && comment.user.type === "Bot"
+  );
+}
+
+/** True if the duplicate comment is old enough to auto-close (>= 12h). */
+export function isDupeCommentOldEnough(
+  dupeCommentDate: Date,
+  twelveHoursAgo: Date
+): boolean {
+  return dupeCommentDate <= twelveHoursAgo;
+}
+
+/** True if the issue author reacted with thumbs down to the duplicate comment. */
+export function authorDisagreedWithDupe(
+  reactions: GitHubReaction[],
+  issue: GitHubIssue
+): boolean {
+  return reactions.some(
+    (r) => r.user.id === issue.user.id && r.content === "-1"
+  );
+}
+
+/** Returns the most recent duplicate-detection comment, or null if none. */
+export function getLastDupeComment(
+  comments: GitHubComment[]
+): GitHubComment | null {
+  const dupeComments = comments.filter(isDupeComment);
+  return dupeComments.length > 0 ? dupeComments[dupeComments.length - 1]! : null;
+}
+
+export function extractDuplicateIssueNumber(commentBody: string): number | null {
   // Try to match #123 format first
   let match = commentBody.match(/#(\d+)/);
   if (match) {
@@ -71,6 +106,30 @@ function extractDuplicateIssueNumber(commentBody: string): number | null {
   }
 
   return null;
+}
+
+/**
+ * Decides whether to auto-close this issue as duplicate of another.
+ * Returns the target issue number to close as duplicate of, or null to skip.
+ * Used by the main loop and by tests.
+ */
+export async function decideAutoClose(
+  issue: GitHubIssue,
+  lastDupeComment: GitHubComment,
+  getTargetIssue: (issueNumber: number) => Promise<{ state: string } | null>
+): Promise<number | null> {
+  const duplicateIssueNumber = extractDuplicateIssueNumber(lastDupeComment.body);
+  if (duplicateIssueNumber === null) return null;
+
+  if (duplicateIssueNumber === issue.number) return null;
+
+  try {
+    const targetIssue = await getTargetIssue(duplicateIssueNumber);
+    if (!targetIssue || targetIssue.state !== "open") return null;
+    return duplicateIssueNumber;
+  } catch {
+    return null;
+  }
 }
 
 async function closeIssueAsDuplicate(
@@ -173,25 +232,18 @@ async function autoCloseDuplicates(): Promise<void> {
       `[DEBUG] Issue #${issue.number} has ${comments.length} comments`
     );
 
-    const dupeComments = comments.filter((comment) => {
-      const bodyLower = comment.body.toLowerCase();
-      return (
-        bodyLower.includes("possible duplicate") &&
-        comment.user.type === "Bot"
-      );
-    });
+    const lastDupeComment = getLastDupeComment(comments);
+    const dupeCount = comments.filter(isDupeComment).length;
     console.log(
-      `[DEBUG] Issue #${issue.number} has ${dupeComments.length} duplicate detection comments`
+      `[DEBUG] Issue #${issue.number} has ${dupeCount} duplicate detection comments`
     );
 
-    if (dupeComments.length === 0) {
+    if (lastDupeComment === null) {
       console.log(
         `[DEBUG] Issue #${issue.number} - no duplicate comments found, skipping`
       );
       continue;
     }
-
-    const lastDupeComment = dupeComments[dupeComments.length - 1];
     const dupeCommentDate = new Date(lastDupeComment.created_at);
     console.log(
       `[DEBUG] Issue #${
@@ -199,7 +251,7 @@ async function autoCloseDuplicates(): Promise<void> {
       } - most recent duplicate comment from: ${dupeCommentDate.toISOString()}`
     );
 
-    if (dupeCommentDate > twelveHoursAgo) {
+    if (!isDupeCommentOldEnough(dupeCommentDate, twelveHoursAgo)) {
       console.log(
         `[DEBUG] Issue #${issue.number} - duplicate comment is too recent, skipping`
       );
@@ -224,10 +276,7 @@ async function autoCloseDuplicates(): Promise<void> {
       `[DEBUG] Issue #${issue.number} - duplicate comment has ${reactions.length} reactions`
     );
 
-    const authorThumbsDown = reactions.some(
-      (reaction) =>
-        reaction.user.id === issue.user.id && reaction.content === "-1"
-    );
+    const authorThumbsDown = authorDisagreedWithDupe(reactions, issue);
     console.log(
       `[DEBUG] Issue #${issue.number} - author thumbs down reaction: ${authorThumbsDown}`
     );
@@ -239,12 +288,19 @@ async function autoCloseDuplicates(): Promise<void> {
       continue;
     }
 
-    const duplicateIssueNumber = extractDuplicateIssueNumber(
-      lastDupeComment.body
+    const duplicateOf = await decideAutoClose(
+      issue,
+      lastDupeComment,
+      (issueNumber) =>
+        githubRequest<GitHubIssue>(
+          `/repos/${owner}/${repo}/issues/${issueNumber}`,
+          token
+        ).then((i) => ({ state: i.state }))
     );
-    if (!duplicateIssueNumber) {
+
+    if (duplicateOf === null) {
       console.log(
-        `[DEBUG] Issue #${issue.number} - could not extract duplicate issue number from comment, skipping`
+        `[DEBUG] Issue #${issue.number} - skipping (invalid/self/closed target or fetch error)`
       );
       continue;
     }
@@ -254,17 +310,17 @@ async function autoCloseDuplicates(): Promise<void> {
 
     try {
       console.log(
-        `[INFO] Auto-closing issue #${issue.number} as duplicate of #${duplicateIssueNumber}: ${issueUrl}`
+        `[INFO] Auto-closing issue #${issue.number} as duplicate of #${duplicateOf}: ${issueUrl}`
       );
       await closeIssueAsDuplicate(
         owner,
         repo,
         issue.number,
-        duplicateIssueNumber,
+        duplicateOf,
         token
       );
       console.log(
-        `[SUCCESS] Successfully closed issue #${issue.number} as duplicate of #${duplicateIssueNumber}`
+        `[SUCCESS] Successfully closed issue #${issue.number} as duplicate of #${duplicateOf}`
       );
     } catch (error) {
       console.error(
@@ -278,6 +334,8 @@ async function autoCloseDuplicates(): Promise<void> {
   );
 }
 
-autoCloseDuplicates().catch(console.error);
+if (import.meta.main) {
+  autoCloseDuplicates().catch(console.error);
+}
 
 export {};
