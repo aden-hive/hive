@@ -90,6 +90,16 @@ This installs:
 # Install Claude Code skills (one-time)
 ./quickstart.sh
 
+If you don't already have Anthropic's Claude Console Platform account, you can add your API key either by,
+
+Option 1. Running below command on the terminal to create the file and add your key:
+echo "ANTHROPIC_API_KEY='your-actual-key-here'" > .env
+
+Option 2. Open the hive folder in VS Code. On the left-hand sidebar (Explorer), right-click in the empty space and select New File. Name it exactly .env (don't forget the dot at the beginning). Type in the following inside,
+ANTHROPIC_API_KEY=your-actual-key-here
+
+
+
 # Build an agent using Claude Code
 claude> /building-agents-construction
 
