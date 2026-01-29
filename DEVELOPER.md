@@ -43,7 +43,7 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 
 Ensure you have installed:
 
-- **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.12 or 3.13 recommended)
+- **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.11 or 3.12 recommended)
 - **pip** - Package installer for Python (comes with Python)
 - **git** - Version control
 - **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional, for using building skills)
@@ -66,6 +66,7 @@ cd hive
 # 2. Run automated Python setup
 ./scripts/setup-python.sh
 ```
+**windows note:**`setup-python.sh` is designed for Unix-Based systems
 
 The setup script performs these actions:
 
@@ -92,12 +93,20 @@ Get API keys:
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
 
+#### Windows (Powershell) - virtual environment
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate
+
 ### Install Claude Code Skills
 
 ```bash
 # Install building-agents and testing-agent skills
 ./quickstart.sh
 ```
+##### if the activation is blocked (Optional-solution)
+
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 This installs:
 
@@ -115,7 +124,10 @@ python -c "import litellm; print('✓ litellm OK')"
 # Run an example agent
 PYTHONPATH=core:exports python -m support_ticket_agent validate
 ```
-
+**Windows (PowerShell):**
+```powershell
+$env:PYTHONPATH="core;exports"
+python -m support_ticket_agent validate
 ---
 
 ## Project Structure
