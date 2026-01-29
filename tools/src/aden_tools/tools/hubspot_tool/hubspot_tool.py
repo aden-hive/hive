@@ -17,7 +17,9 @@ import httpx
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from aden_tools.credentials import CredentialManager
+    from aden_tools.credentials import CredentialManager, CredentialStoreAdapter
+
+    CredentialProvider = CredentialManager | CredentialStoreAdapter
 
 HUBSPOT_API_BASE = "https://api.hubapi.com"
 
@@ -127,14 +129,21 @@ class _HubSpotClient:
 
 def register_tools(
     mcp: FastMCP,
-    credentials: CredentialManager | None = None,
+    credentials: CredentialProvider | None = None,
 ) -> None:
     """Register HubSpot CRM tools with the MCP server."""
 
     def _get_token() -> str | None:
         """Get HubSpot access token from credential manager or environment."""
         if credentials is not None:
-            return credentials.get("hubspot")
+            token = credentials.get("hubspot")
+            # Defensive check: ensure we get a string, not a complex object
+            if token is not None and not isinstance(token, str):
+                raise TypeError(
+                    f"Expected string from credentials.get('hubspot'), "
+                    f"got {type(token).__name__}"
+                )
+            return token
         return os.getenv("HUBSPOT_ACCESS_TOKEN")
 
     def _get_client() -> _HubSpotClient | dict[str, str]:
