@@ -554,7 +554,9 @@ class TestExecuteCommandTool:
 
     def test_execute_failing_command(self, execute_command_fn, mock_workspace, mock_secure_path):
         """Executing a failing command returns non-zero exit code."""
-        result = execute_command_fn(command="exit 1", **mock_workspace)
+        result = execute_command_fn(
+            command='python -c "__import__(\"sys\").exit(1)"', **mock_workspace
+        )
 
         assert result["success"] is True
         assert result["return_code"] == 1
@@ -563,7 +565,10 @@ class TestExecuteCommandTool:
         self, execute_command_fn, mock_workspace, mock_secure_path
     ):
         """Executing a command that writes to stderr captures it."""
-        result = execute_command_fn(command="echo 'error message' >&2", **mock_workspace)
+        result = execute_command_fn(
+            command='python -c "__import__(\"sys\").stderr.write(\"error message\\n\")"',
+            **mock_workspace,
+        )
 
         assert result["success"] is True
         assert "error message" in result.get("stderr", "")
@@ -581,13 +586,31 @@ class TestExecuteCommandTool:
         assert result["return_code"] == 0
         assert "testfile.txt" in result["stdout"]
 
-    def test_execute_command_with_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
-        """Executing a command with pipe works correctly."""
-        result = execute_command_fn(command="echo 'hello world' | tr 'a-z' 'A-Z'", **mock_workspace)
+    def test_execute_command_rejects_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Shell operators (e.g. pipe) are rejected in safe mode."""
+        result = execute_command_fn(
+            command="echo 'hello world' | tr 'a-z' 'A-Z'", **mock_workspace
+        )
 
-        assert result["success"] is True
-        assert result["return_code"] == 0
-        assert "HELLO WORLD" in result["stdout"]
+        assert "error" in result
+        assert "Shell operators" in result["error"]
+
+    def test_execute_command_rejects_disallowed_command(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Commands not in the allowlist are rejected."""
+        result = execute_command_fn(command="rm -rf /", **mock_workspace)
+
+        assert "error" in result
+        assert "not allowed" in result["error"]
+        assert "allowed_commands" in result
+
+    def test_execute_command_rejects_empty(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Empty command is rejected."""
+        result = execute_command_fn(command="   ", **mock_workspace)
+
+        assert "error" in result
+        assert "Empty command" in result["error"]
 
 
 class TestApplyDiffTool:

@@ -4,21 +4,20 @@ Executes shell commands within the secure session sandbox.
 
 ## Description
 
-The `execute_command_tool` allows you to run arbitrary shell commands in a sandboxed environment. Commands are executed with a 60-second timeout and capture both stdout and stderr output.
+The `execute_command_tool` runs **allowlisted** commands in a sandboxed environment. By default it uses **argv execution** (no shell): no pipes, redirects, or shell operators. Commands have a 60-second timeout; stdout and stderr are captured.
 
 ## Use Cases
 
-- Running build commands (npm build, make, etc.)
-- Executing tests
-- Running linters or formatters
-- Performing git operations
-- Installing dependencies
+- Running linters or formatters (ruff, black, mypy, flake8, pytest)
+- Build/docs (make)
+- Listing files (ls), inspecting output (cat, head, tail, wc, echo, pwd)
+- Dev tasks (python, pip)
 
 ## Usage
 
 ```python
 execute_command_tool(
-    command="npm install",
+    command="ruff check .",
     workspace_id="workspace-123",
     agent_id="agent-456",
     session_id="session-789",
@@ -30,37 +29,31 @@ execute_command_tool(
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `command` | str | Yes | - | The shell command to execute |
+| `command` | str | Yes | - | The command to execute (single command, no shell operators) |
 | `workspace_id` | str | Yes | - | The ID of the workspace |
 | `agent_id` | str | Yes | - | The ID of the agent |
 | `session_id` | str | Yes | - | The ID of the current session |
-| `cwd` | str | No | "." | The working directory for the command (relative to session root) |
+| `cwd` | str | No | `None` | Working directory (relative to session root); defaults to session root |
 
 ## Returns
-
-Returns a dictionary with the following structure:
 
 **Success:**
 ```python
 {
     "success": True,
-    "command": "npm install",
+    "command": "ruff check .",
     "return_code": 0,
-    "stdout": "added 42 packages in 3s",
+    "stdout": "...",
     "stderr": "",
     "cwd": "project"
 }
 ```
 
-**Command failure (non-zero exit):**
+**Validation error (disallowed command, shell operators, etc.):**
 ```python
 {
-    "success": True,  # Command executed successfully, but exited with error code
-    "command": "npm test",
-    "return_code": 1,
-    "stdout": "",
-    "stderr": "Error: Tests failed",
-    "cwd": "."
+    "error": "Command 'rm' is not allowed",
+    "allowed_commands": ["black", "cat", "echo", ...]
 }
 ```
 
@@ -71,44 +64,38 @@ Returns a dictionary with the following structure:
 }
 ```
 
-**Error:**
+**Execution error:**
 ```python
 {
-    "error": "Failed to execute command: [error message]"
+    "error": "Failed to execute command: [message]"
 }
 ```
 
+## Security
+
+- **Safe mode (default):** Commands run via `subprocess.run(args, ...)` with **no shell**. Shell operators (`|`, `;`, `&&`, `||`, `$()`, `` ` ``, `>`, `<`) are forbidden. Only allowlisted commands run (e.g. `ls`, `pwd`, `cat`, `echo`, `wc`, `head`, `tail`, `python`, `python3`, `pip`, `pytest`, `ruff`, `black`, `mypy`, `flake8`, `make`).
+- **Unsafe mode:** Set `HIVE_ENABLE_UNSAFE_COMMANDS=true` to allow arbitrary shell execution (`shell=True`). Use only in trusted environments. A warning is logged when used.
+
 ## Error Handling
 
-- Returns an error dict if the command times out (60 second limit)
-- Returns an error dict if the command cannot be executed
-- Returns success with non-zero return_code if command runs but fails
-- Commands are executed in a sandboxed session environment
-- Working directory defaults to session root if not specified
-
-## Security Considerations
-
-- Commands are executed within the session sandbox only
-- File access is restricted to the session directory
-- Network access depends on sandbox configuration
-- Commands run with the permissions of the session user
-- Use with caution as shell injection is possible
+- Returns an error dict if the command times out (60 s), uses forbidden operators, is empty, or uses a disallowed command.
+- Returns success with non-zero `return_code` if the command runs but exits with an error.
+- Working directory is validated via `get_secure_path` and must stay inside the session sandbox.
 
 ## Examples
 
-### Running a build command
+### Linting
 ```python
 result = execute_command_tool(
-    command="npm run build",
+    command="ruff check .",
     workspace_id="ws-1",
     agent_id="agent-1",
     session_id="session-1",
-    cwd="frontend"
+    cwd="src"
 )
-# Returns: {"success": True, "return_code": 0, "stdout": "Build complete", ...}
 ```
 
-### Running tests with output
+### Tests
 ```python
 result = execute_command_tool(
     command="pytest -v",
@@ -116,37 +103,22 @@ result = execute_command_tool(
     agent_id="agent-1",
     session_id="session-1"
 )
-# Returns: {"success": True, "return_code": 0, "stdout": "test output...", "stderr": ""}
 ```
 
-### Handling command failures
+### List files
 ```python
 result = execute_command_tool(
-    command="nonexistent-command",
-    workspace_id="ws-1",
-    agent_id="agent-1",
-    session_id="session-1"
-)
-# Returns: {"success": True, "return_code": 127, "stderr": "command not found", ...}
-```
-
-### Running git commands
-```python
-result = execute_command_tool(
-    command="git status",
+    command="ls .",
     workspace_id="ws-1",
     agent_id="agent-1",
     session_id="session-1",
     cwd="repo"
 )
-# Returns: {"success": True, "return_code": 0, "stdout": "On branch main...", ...}
 ```
 
 ## Notes
 
-- 60-second timeout for all commands
-- Commands are executed using shell=True (supports pipes, redirects, etc.)
-- Both stdout and stderr are captured separately
-- Return code 0 typically indicates success
-- Working directory is created if it doesn't exist
-- Command output is returned as text (UTF-8 encoding)
+- 60-second timeout for all commands.
+- Safe mode: argv execution only; no pipes, redirects, or chaining.
+- Both stdout and stderr are captured.
+- Working directory is created if it doesn’t exist.
