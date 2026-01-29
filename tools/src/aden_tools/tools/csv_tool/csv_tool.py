@@ -118,7 +118,9 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": "columns cannot be empty"}
 
             # Create parent directories if needed
-            os.makedirs(os.path.dirname(secure_path), exist_ok=True)
+            parent_dir = os.path.dirname(secure_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
 
             # Write CSV
             with open(secure_path, "w", encoding="utf-8", newline="") as f:
