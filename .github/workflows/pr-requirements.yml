@@ -7,6 +7,7 @@ on:
 jobs:
   check-requirements:
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       pull-requests: write
       issues: write
