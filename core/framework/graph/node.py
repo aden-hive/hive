@@ -533,14 +533,19 @@ class NodeResult:
             )
 
             client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            summary = message.content[0].text.strip()
-            return f"✓ {summary}"
+            try:
+                message = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=200,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                
+                summary = message.content[0].text.strip()
+                return f"✓ {summary}"
+            finally:
+                # Ensure the client is properly closed
+                if hasattr(client, 'close'):
+                    client.close()
 
         except Exception:
             # Fallback on error
@@ -1343,23 +1348,28 @@ Output ONLY the JSON object, nothing else."""
             import anthropic
 
             client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            try:
+                message = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=1000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
-            # Parse Haiku's response
-            response_text = message.content[0].text.strip()
+                # Parse Haiku's response
+                response_text = message.content[0].text.strip()
 
-            # Try to extract JSON using balanced brace matching
-            json_str = find_json_object(response_text)
-            if json_str:
-                extracted = json.loads(json_str)
-                # Format as key: value pairs
-                parts = [f"{k}: {v}" for k, v in extracted.items() if k in ctx.node_spec.input_keys]
-                if parts:
-                    return "\n".join(parts)
+                # Try to extract JSON using balanced brace matching
+                json_str = find_json_object(response_text)
+                if json_str:
+                    extracted = json.loads(json_str)
+                    # Format as key: value pairs
+                    parts = [f"{k}: {v}" for k, v in extracted.items() if k in ctx.node_spec.input_keys]
+                    if parts:
+                        return "\n".join(parts)
+            finally:
+                # Ensure the client is properly closed
+                if hasattr(client, 'close'):
+                    client.close()
 
         except Exception as e:
             # Fallback to simple formatting on error
