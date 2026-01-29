@@ -417,8 +417,9 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     directory = Path(args.directory)
     if not directory.exists():
-        print(f"Directory not found: {directory}", file=sys.stderr)
-        return 1
+        # FIX: Handle missing directory gracefully on fresh install
+        print(f"No agents found in {directory}")
+        return 0
 
     agents = []
     for path in directory.iterdir():

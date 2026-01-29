@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -264,7 +264,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[개발자 가이드](DEVELOPER.md)** - 개발자를 위한 종합 가이드
 - [시작하기](docs/getting-started.md) - 빠른 설정 방법
 - [설정 가이드](docs/configuration.md) - 모든 설정 옵션 안내
-- [아키텍처 개요](docs/architecture.md) - 시스템 설계 및 구조
+- [아키텍처 개요](docs/architecture/README.md) - 시스템 설계 및 구조
 
 ## 로드맵
 

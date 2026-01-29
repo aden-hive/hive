@@ -240,7 +240,7 @@ class OutputCleaner:
         for key, value in output.items():
             if isinstance(value, str):
                 repaired = _heuristic_repair(value)
-                if repaired and isinstance(repaired, dict | list):
+                if repaired and isinstance(repaired, (dict, list)):
                     # Check if this repaired structure looks like what we want
                     # e.g. if the key is 'data' and the string contained valid JSON
                     fixed_output[key] = repaired
