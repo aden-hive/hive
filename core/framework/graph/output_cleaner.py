@@ -118,7 +118,6 @@ class OutputCleaner:
                     self.llm = LiteLLMProvider(
                         api_key=api_key,
                         model=config.fast_model,
-                        temperature=0.0,  # Deterministic cleaning
                     )
                     logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
                 else:

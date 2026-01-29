@@ -45,7 +45,7 @@ class CredentialStore:
     Usage:
         # Basic usage
         store = CredentialStore(
-            storage=EncryptedFileStorage("/path/to/creds"),
+            storage=EncryptedFileStorage("~/.hive/credentials"),
             providers=[OAuth2Provider(), StaticProvider()]
         )
 
@@ -566,7 +566,7 @@ class CredentialStore:
     @classmethod
     def with_encrypted_storage(
         cls,
-        base_path: str,
+        base_path: str | None = None,
         providers: list[CredentialProvider] | None = None,
         **kwargs: Any,
     ) -> CredentialStore:
@@ -574,7 +574,7 @@ class CredentialStore:
         Create a credential store with encrypted file storage.
 
         Args:
-            base_path: Directory for credential files
+            base_path: Directory for credential files. Defaults to ~/.hive/credentials.
             providers: List of credential providers
             **kwargs: Additional arguments passed to CredentialStore
 

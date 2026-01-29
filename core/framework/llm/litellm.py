@@ -8,15 +8,24 @@ See: https://docs.litellm.ai/docs/providers
 """
 
 import json
+import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
 try:
     import litellm
+    from litellm.exceptions import RateLimitError
 except ImportError:
     litellm = None  # type: ignore[assignment]
+    RateLimitError = Exception  # type: ignore[assignment, misc]
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+
+logger = logging.getLogger(__name__)
+
+RATE_LIMIT_MAX_RETRIES = 10
+RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 
 
 class LiteLLMProvider(LLMProvider):
@@ -85,6 +94,60 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: pip install litellm"
             )
 
+    def _completion_with_rate_limit_retry(self, **kwargs: Any) -> Any:
+        """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
+        model = kwargs.get("model", self.model)
+        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+            try:
+                response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+
+                # Some providers (e.g. Gemini) return 200 with empty content on
+                # rate limit / quota exhaustion instead of a proper 429.  Treat
+                # empty responses the same as a rate-limit error and retry.
+                content = response.choices[0].message.content if response.choices else None
+                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                if not content and not has_tool_calls:
+                    finish_reason = (
+                        response.choices[0].finish_reason if response.choices else "unknown"
+                    )
+                    if attempt == RATE_LIMIT_MAX_RETRIES:
+                        logger.error(
+                            f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                            f"attempts — empty response "
+                            f"(finish_reason={finish_reason}, "
+                            f"choices={len(response.choices) if response.choices else 0})"
+                        )
+                        return response
+                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    logger.warning(
+                        f"[retry] {model} returned empty response "
+                        f"(finish_reason={finish_reason}, "
+                        f"choices={len(response.choices) if response.choices else 0}) — "
+                        f"likely rate limited or quota exceeded. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    time.sleep(wait)
+                    continue
+
+                return response
+            except RateLimitError as e:
+                if attempt == RATE_LIMIT_MAX_RETRIES:
+                    logger.error(
+                        f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                        f"attempts — rate limit error: {e!s}"
+                    )
+                    raise
+                wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                logger.warning(
+                    f"[retry] {model} rate limited (429): {e!s}. "
+                    f"Retrying in {wait}s "
+                    f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                )
+                time.sleep(wait)
+        # unreachable, but satisfies type checker
+        raise RuntimeError("Exhausted rate limit retries")
+
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -133,7 +196,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["response_format"] = response_format
 
         # Make the call
-        response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+        response = self._completion_with_rate_limit_retry(**kwargs)
 
         # Extract content
         content = response.choices[0].message.content or ""
@@ -189,7 +252,7 @@ class LiteLLMProvider(LLMProvider):
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
-            response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+            response = self._completion_with_rate_limit_retry(**kwargs)
 
             # Track tokens
             usage = response.usage

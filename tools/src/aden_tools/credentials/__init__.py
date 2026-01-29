@@ -25,7 +25,7 @@ For advanced usage with the new credential store:
     from aden_tools.credentials import CredentialStoreAdapter
     from core.framework.credentials import CredentialStore
 
-    store = CredentialStore.with_encrypted_storage("/var/hive/credentials")
+    store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
     credentials = CredentialStoreAdapter(store)
 
     # Existing API works unchanged
@@ -39,6 +39,7 @@ For advanced usage with the new credential store:
 Credential categories:
 - llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
+- integrations.py: Third-party integrations (hubspot, etc.)
 
 To add a new credential:
 1. Find the appropriate category file (or create a new one)

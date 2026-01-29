@@ -530,6 +530,10 @@ class AgentRunner:
         """
         Execute the agent with given input data.
 
+        Validates credentials before execution. If any required credentials
+        are missing, returns an error result with instructions on how to
+        provide them.
+
         For single-entry-point agents, this is the standard execution path.
         For multi-entry-point agents, you can optionally specify which entry point to use.
 
@@ -542,6 +546,20 @@ class AgentRunner:
         Returns:
             ExecutionResult with output, path, and metrics
         """
+        # Validate credentials before execution (fail-fast)
+        validation = self.validate()
+        if validation.missing_credentials:
+            error_lines = ["Cannot run agent: missing required credentials\n"]
+            for warning in validation.warnings:
+                if "Missing " in warning:
+                    error_lines.append(f"  {warning}")
+            error_lines.append("\nSet the required environment variables and re-run the agent.")
+            error_msg = "\n".join(error_lines)
+            return ExecutionResult(
+                success=False,
+                error=error_msg,
+            )
+
         if self._uses_async_entry_points:
             # Multi-entry-point mode: use AgentRuntime
             return await self._run_with_agent_runtime(

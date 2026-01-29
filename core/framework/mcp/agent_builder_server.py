@@ -3230,6 +3230,241 @@ def load_exported_plan(
 
 
 # =============================================================================
+# CREDENTIAL STORE TOOLS
+# =============================================================================
+
+
+def _get_credential_manager():
+    """Get a CredentialManager instance."""
+    from aden_tools.credentials import CredentialManager
+
+    return CredentialManager()
+
+
+def _get_credential_store():
+    """Get a CredentialStore with encrypted file storage at ~/.hive/credentials."""
+    from framework.credentials import CredentialStore
+
+    return CredentialStore.with_encrypted_storage()
+
+
+@mcp.tool()
+def check_missing_credentials(
+    agent_path: Annotated[str, "Path to the exported agent directory (e.g., 'exports/my-agent')"],
+) -> str:
+    """
+    Detect missing credentials for an agent by inspecting its tools and node types.
+
+    Returns a list of missing credentials with env var names, descriptions, and help URLs.
+    Use this before running or testing an agent to identify what needs to be configured.
+    """
+    try:
+        from framework.runner import AgentRunner
+
+        runner = AgentRunner.load(agent_path)
+        runner.validate()
+
+        cred_manager = _get_credential_manager()
+        info = runner.info()
+
+        # Gather missing tool credentials
+        missing_tools = cred_manager.get_missing_for_tools(info.required_tools)
+
+        # Gather missing node-type credentials
+        node_types = list({node.node_type for node in runner.graph.nodes})
+        missing_nodes = cred_manager.get_missing_for_node_types(node_types)
+
+        # Deduplicate
+        seen = set()
+        all_missing = []
+        for name, spec in missing_tools + missing_nodes:
+            if spec.env_var not in seen:
+                seen.add(spec.env_var)
+                all_missing.append(
+                    {
+                        "credential_name": name,
+                        "env_var": spec.env_var,
+                        "description": spec.description,
+                        "help_url": spec.help_url,
+                        "tools": spec.tools,
+                    }
+                )
+
+        # Also check what's already set
+        all_specs = cred_manager._specs
+        available = []
+        for name, spec in all_specs.items():
+            if spec.env_var not in seen and cred_manager.is_available(name):
+                # Only include if relevant to this agent's tools/nodes
+                relevant_tools = [t for t in spec.tools if t in info.required_tools]
+                relevant_nodes = [n for n in spec.node_types if n in node_types]
+                if relevant_tools or relevant_nodes:
+                    available.append(
+                        {
+                            "credential_name": name,
+                            "env_var": spec.env_var,
+                            "description": spec.description,
+                            "status": "available",
+                        }
+                    )
+
+        return json.dumps(
+            {
+                "agent": agent_path,
+                "missing": all_missing,
+                "available": available,
+                "total_missing": len(all_missing),
+                "ready": len(all_missing) == 0,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def store_credential(
+    credential_name: Annotated[
+        str, "Logical credential name (e.g., 'hubspot', 'brave_search', 'anthropic')"
+    ],
+    credential_value: Annotated[str, "The secret value to store (API key, token, etc.)"],
+    key_name: Annotated[
+        str, "Key name within the credential (e.g., 'api_key', 'access_token')"
+    ] = "api_key",
+    display_name: Annotated[str, "Human-readable name (e.g., 'HubSpot Access Token')"] = "",
+) -> str:
+    """
+    Store a credential securely in the encrypted credential store at ~/.hive/credentials.
+
+    Uses Fernet encryption (AES-128-CBC + HMAC). Requires HIVE_CREDENTIAL_KEY env var.
+    """
+    try:
+        from pydantic import SecretStr
+
+        from framework.credentials import CredentialKey, CredentialObject
+
+        store = _get_credential_store()
+
+        if not display_name:
+            display_name = credential_name.replace("_", " ").title()
+
+        cred = CredentialObject(
+            id=credential_name,
+            name=display_name,
+            keys={
+                key_name: CredentialKey(
+                    name=key_name,
+                    value=SecretStr(credential_value),
+                )
+            },
+        )
+        store.save_credential(cred)
+
+        return json.dumps(
+            {
+                "success": True,
+                "credential": credential_name,
+                "key": key_name,
+                "location": "~/.hive/credentials",
+                "encrypted": True,
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def list_stored_credentials() -> str:
+    """
+    List all credentials currently stored in the encrypted credential store.
+
+    Returns credential IDs and metadata (never returns secret values).
+    """
+    try:
+        store = _get_credential_store()
+        credential_ids = store.list_credentials()
+
+        credentials = []
+        for cred_id in credential_ids:
+            try:
+                cred = store.get_credential(cred_id)
+                credentials.append(
+                    {
+                        "id": cred.id,
+                        "name": cred.name,
+                        "keys": list(cred.keys.keys()),
+                        "created_at": cred.created_at.isoformat() if cred.created_at else None,
+                    }
+                )
+            except Exception:
+                credentials.append({"id": cred_id, "error": "Could not load"})
+
+        return json.dumps(
+            {
+                "count": len(credentials),
+                "credentials": credentials,
+                "location": "~/.hive/credentials",
+            },
+            indent=2,
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def delete_stored_credential(
+    credential_name: Annotated[str, "Logical credential name to delete (e.g., 'hubspot')"],
+) -> str:
+    """
+    Delete a credential from the encrypted credential store.
+    """
+    try:
+        store = _get_credential_store()
+        deleted = store.delete_credential(credential_name)
+        return json.dumps(
+            {
+                "success": deleted,
+                "credential": credential_name,
+                "message": f"Credential '{credential_name}' deleted"
+                if deleted
+                else f"Credential '{credential_name}' not found",
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def verify_credentials(
+    agent_path: Annotated[str, "Path to the exported agent directory (e.g., 'exports/my-agent')"],
+) -> str:
+    """
+    Verify that all required credentials are configured for an agent.
+
+    Runs the full validation pipeline and reports pass/fail status.
+    Use this after storing credentials to confirm the agent is ready to run.
+    """
+    try:
+        from framework.runner import AgentRunner
+
+        runner = AgentRunner.load(agent_path)
+        validation = runner.validate()
+
+        return json.dumps(
+            {
+                "agent": agent_path,
+                "ready": not validation.missing_credentials,
+                "missing_credentials": validation.missing_credentials,
+                "warnings": validation.warnings,
+                "errors": validation.errors,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 

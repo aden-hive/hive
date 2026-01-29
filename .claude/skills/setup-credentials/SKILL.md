@@ -24,6 +24,7 @@ Interactive credential setup for agents with multiple authentication options. De
 ### Step 1: Identify the Agent
 
 Determine which agent needs credentials. The user will either:
+
 - Name the agent directly (e.g., "set up credentials for hubspot-agent")
 - Have an agent directory open (check `exports/` for agent dirs)
 - Be working on an agent in the current session
@@ -45,6 +46,7 @@ validation = runner.validate()
 ```
 
 Alternatively, inspect manually:
+
 ```python
 from aden_tools.credentials import CredentialManager
 
@@ -346,10 +348,10 @@ Report the result to the user.
 
 Health checks validate credentials by making lightweight API calls:
 
-| Credential | Endpoint | What It Checks |
-|---|---|---|
-| `hubspot` | `GET /crm/v3/objects/contacts?limit=1` | Bearer token validity, CRM scopes |
-| `brave_search` | `GET /res/v1/web/search?q=test&count=1` | API key validity |
+| Credential     | Endpoint                                | What It Checks                    |
+| -------------- | --------------------------------------- | --------------------------------- |
+| `hubspot`      | `GET /crm/v3/objects/contacts?limit=1`  | Bearer token validity, CRM scopes |
+| `brave_search` | `GET /res/v1/web/search?q=test&count=1` | API key validity                  |
 
 ```python
 from aden_tools.credentials import check_credential_health, HealthCheckResult
@@ -370,6 +372,7 @@ The encrypted credential store requires `HIVE_CREDENTIAL_KEY` to encrypt/decrypt
 - This is the ONLY secret that should live in `~/.bashrc` or environment config
 
 If `HIVE_CREDENTIAL_KEY` is not set:
+
 1. Let the store generate one
 2. Tell the user to save it: `export HIVE_CREDENTIAL_KEY="{generated_key}"`
 3. Recommend adding it to `~/.bashrc` or their shell profile
@@ -389,13 +392,14 @@ If `HIVE_CREDENTIAL_KEY` is not set:
 
 All credential specs are defined in `tools/src/aden_tools/credentials/`:
 
-| File | Category | Credentials | Aden Supported |
-|---|---|---|---|
-| `llm.py` | LLM Providers | `anthropic`, `openai`, `cerebras`, `groq` | No |
-| `search.py` | Search Tools | `brave_search`, `google_search`, `google_cse` | No |
-| `integrations.py` | Integrations | `hubspot` | Yes |
+| File              | Category      | Credentials                                   | Aden Supported |
+| ----------------- | ------------- | --------------------------------------------- | -------------- |
+| `llm.py`          | LLM Providers | `anthropic`, `openai`, `cerebras`, `groq`     | No             |
+| `search.py`       | Search Tools  | `brave_search`, `google_search`, `google_cse` | No             |
+| `integrations.py` | Integrations  | `hubspot`                                     | Yes            |
 
 To check what's registered:
+
 ```python
 from aden_tools.credentials import CREDENTIAL_SPECS
 for name, spec in CREDENTIAL_SPECS.items():
