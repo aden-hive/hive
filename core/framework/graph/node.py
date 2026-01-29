@@ -511,6 +511,7 @@ class LLMNode(NodeProtocol):
                     system=system,
                     tools=ctx.available_tools,
                     tool_executor=executor,
+                    timeout=30,  # Prevent indefinite hangs
                 )
             else:
                 # Use JSON mode for llm_generate nodes with output_keys
@@ -527,6 +528,7 @@ class LLMNode(NodeProtocol):
                     messages=messages,
                     system=system,
                     json_mode=use_json_mode,
+                    timeout=30,  # Prevent indefinite hangs
                 )
 
             # Log the response
@@ -727,6 +729,7 @@ Output ONLY the JSON object, nothing else."""
                 messages=[{"role": "user", "content": prompt}],
                 system="Extract JSON from text. Output only valid JSON.",
                 json_mode=True,
+                timeout=30,  # Prevent indefinite hangs
             )
 
             cleaned = result.content.strip()
@@ -988,6 +991,7 @@ Respond with ONLY a JSON object:
                 messages=[{"role": "user", "content": prompt}],
                 system=ctx.node_spec.system_prompt or "You are a routing agent. Respond with JSON only.",
                 max_tokens=150,
+                timeout=30,  # Prevent indefinite hangs
             )
 
             # Parse response using balanced brace matching
