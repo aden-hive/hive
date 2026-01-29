@@ -68,6 +68,12 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - [Python 3.11+](https://www.python.org/downloads/) for agent development
 - [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
 
+**First-time contributor notes**
+- Claude Code skills are optional unless you plan to build new agents.
+- It is normal if `exports/` is missing or empty initially (often gitignored); it gets populated when generating or adding agents.
+- Many local run commands below use `PYTHONPATH=core:exports`.
+
+
 ### Installation
 
 ```bash

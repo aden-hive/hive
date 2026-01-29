@@ -67,6 +67,12 @@ cd hive
 ./scripts/setup-python.sh
 ```
 
+**First-time contributor notes**
+- Claude Code skills are optional unless you plan to build new agents.
+- It is normal if `exports/` is missing or empty initially (often gitignored); it gets populated when generating or adding agents.
+- Many local run commands below use `PYTHONPATH=core:exports`.
+
+
 The setup script performs these actions:
 
 1. Checks Python version (3.11+)

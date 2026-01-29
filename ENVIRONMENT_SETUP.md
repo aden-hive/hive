@@ -9,6 +9,12 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ./scripts/setup-python.sh
 ```
 
+**First-time contributor notes**
+- Claude Code skills are optional unless you plan to build new agents.
+- It is normal if `exports/` is missing or empty initially (often gitignored); it gets populated when generating or adding agents.
+- Many local run commands below use `PYTHONPATH=core:exports`.
+
+
 > **Note for Windows Users:**  
 > Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.  
 > It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for a smoother setup experience.
