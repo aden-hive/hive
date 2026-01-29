@@ -85,6 +85,20 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: pip install litellm"
             )
 
+    async def close(self):
+        """Cleanup resources.
+
+        LiteLLM may use a global aiohttp handler for async operations.
+        If present, we attempt to close its underlying session.
+        """
+        # Check if litellm has a global aiohttp handler with a session
+        if litellm is not None:
+            handler = getattr(litellm, 'base_llm_aiohttp_handler', None)
+            if handler is not None:
+                session = getattr(handler, 'client_session', None)
+                if session is not None and not session.closed:
+                    await session.close()
+
     def complete(
         self,
         messages: list[dict[str, Any]],

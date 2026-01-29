@@ -35,6 +35,10 @@ class MockLLMProvider(LLMProvider):
         """
         self.model = model
 
+    async def close(self):
+        """Cleanup resources (no-op for mock)."""
+        pass
+
     def _extract_output_keys(self, system: str) -> list[str]:
         """
         Extract expected output keys from the system prompt.

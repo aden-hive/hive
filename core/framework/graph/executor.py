@@ -716,7 +716,7 @@ class GraphExecutor:
                                 f"✗ Cleaning failed, errors remain: {revalidation.errors}"
                             )
                             # Continue anyway if fallback_to_raw is True
-
+                            
                 # Map inputs (skip validation for processed LLM output)
                 mapped = edge.map_inputs(result.output, memory.read_all())
                 for key, value in mapped.items():

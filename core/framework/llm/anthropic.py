@@ -62,6 +62,10 @@ class AnthropicProvider(LLMProvider):
             api_key=self.api_key,
         )
 
+    async def close(self):
+        """Cleanup resources."""
+        await self._provider.close()
+
     def complete(
         self,
         messages: list[dict[str, Any]],
