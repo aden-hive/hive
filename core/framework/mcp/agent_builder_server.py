@@ -9,6 +9,7 @@ Usage:
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -30,6 +31,32 @@ mcp = FastMCP("agent-builder")
 # Session persistence directory
 SESSIONS_DIR = Path(".agent-builder-sessions")
 ACTIVE_SESSION_FILE = SESSIONS_DIR / ".active"
+
+
+def _sanitize_session_name(name: str) -> str:
+    """Sanitize session name to prevent path traversal attacks.
+
+    Args:
+        name: The session name to sanitize.
+
+    Returns:
+        A safe session name with path separators and traversal sequences removed.
+
+    Raises:
+        ValueError: If the name is empty or invalid after sanitization.
+    """
+    # Remove path separators and parent directory references
+    sanitized = re.sub(r'[/\\]', '_', name)
+    sanitized = sanitized.replace('..', '_')
+    # Remove any remaining potentially dangerous characters
+    sanitized = re.sub(r'[<>:"|?*]', '_', sanitized)
+    # Strip leading/trailing whitespace and dots
+    sanitized = sanitized.strip().strip('.')
+
+    if not sanitized:
+        raise ValueError("Invalid session name: name is empty after sanitization")
+
+    return sanitized
 
 
 # Session storage
@@ -1468,8 +1495,9 @@ def export_graph() -> str:
         export_data["goal"]["success_criteria"] = enriched_criteria
 
     # === WRITE FILES TO DISK ===
-    # Create exports directory
-    exports_dir = Path("exports") / session.name
+    # Create exports directory with sanitized session name to prevent path traversal
+    safe_name = _sanitize_session_name(session.name)
+    exports_dir = Path("exports") / safe_name
     exports_dir.mkdir(parents=True, exist_ok=True)
 
     # Write agent.json
