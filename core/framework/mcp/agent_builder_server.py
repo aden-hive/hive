@@ -17,6 +17,7 @@ from mcp.server import FastMCP
 
 from framework.graph import Constraint, EdgeCondition, EdgeSpec, Goal, NodeSpec, SuccessCriterion
 from framework.graph.plan import Plan
+from framework.blocks import BlockSpec, get_block, list_blocks as list_blocks_registry
 
 # Testing framework imports
 from framework.testing.prompts import (
@@ -514,6 +515,27 @@ def add_node(
     routes: Annotated[
         str, "JSON object mapping conditions to target node IDs for router nodes"
     ] = "{}",
+    max_retries: Annotated[
+        int, "Max retries on failure (default 3); 0 to disable"
+    ] = 3,
+    retry_on: Annotated[
+        str,
+        "JSON array of error type substrings to retry on (e.g. [\"timeout\", \"rate_limit\"])",
+    ] = "[]",
+    output_schema: Annotated[
+        str,
+        "JSON object schema for output validation: {key: {type, required?, description?}}",
+    ] = "{}",
+    max_validation_retries: Annotated[
+        int, "Retries when output validation fails (LLM feedback); default 2"
+    ] = 2,
+    pause_for_hitl: Annotated[
+        bool,
+        "If true, execution pauses at this node for human approval; resume via entry point",
+    ] = False,
+    approval_message: Annotated[
+        str, "Message shown when requesting approval (for pause/HITL nodes)"
+    ] = "",
 ) -> str:
     """Add a node to the agent graph. Nodes process inputs and produce outputs."""
     session = get_session()
@@ -524,6 +546,8 @@ def add_node(
         output_keys_list = json.loads(output_keys)
         tools_list = json.loads(tools)
         routes_dict = json.loads(routes)
+        retry_on_list = json.loads(retry_on) if retry_on else []
+        output_schema_dict = json.loads(output_schema) if output_schema else {}
     except json.JSONDecodeError as e:
         return json.dumps(
             {
@@ -552,6 +576,12 @@ def add_node(
         system_prompt=system_prompt or None,
         tools=tools_list,
         routes=routes_dict,
+        max_retries=max_retries,
+        retry_on=retry_on_list,
+        output_schema=output_schema_dict,
+        max_validation_retries=max_validation_retries,
+        pause_for_hitl=pause_for_hitl,
+        approval_message=approval_message or None,
     )
 
     session.nodes.append(node)
@@ -700,6 +730,24 @@ def update_node(
     system_prompt: Annotated[str, "Updated instructions for LLM nodes"] = "",
     tools: Annotated[str, "Updated JSON array of tool names"] = "",
     routes: Annotated[str, "Updated JSON object mapping conditions to target node IDs"] = "",
+    max_retries: Annotated[
+        int | None, "Max retries on failure; omit to leave unchanged"
+    ] = None,
+    retry_on: Annotated[
+        str | None, "JSON array of error substrings to retry on; omit to leave unchanged"
+    ] = None,
+    output_schema: Annotated[
+        str | None, "JSON object schema for output validation; omit to leave unchanged"
+    ] = None,
+    max_validation_retries: Annotated[
+        int | None, "Retries when output validation fails; omit to leave unchanged"
+    ] = None,
+    pause_for_hitl: Annotated[
+        bool | None, "If true, execution pauses at this node for approval; omit to leave unchanged"
+    ] = None,
+    approval_message: Annotated[
+        str | None, "Message when requesting approval (HITL nodes); omit to leave unchanged"
+    ] = None,
 ) -> str:
     """Update an existing node in the agent graph. Only provided fields will be updated."""
     session = get_session()
@@ -752,6 +800,18 @@ def update_node(
         node.tools = tools_list
     if routes_dict is not None:
         node.routes = routes_dict
+    if max_retries is not None:
+        node.max_retries = max_retries
+    if retry_on is not None:
+        node.retry_on = json.loads(retry_on)
+    if output_schema is not None:
+        node.output_schema = json.loads(output_schema)
+    if max_validation_retries is not None:
+        node.max_validation_retries = max_validation_retries
+    if pause_for_hitl is not None:
+        node.pause_for_hitl = pause_for_hitl
+    if approval_message is not None:
+        node.approval_message = approval_message or None
 
     # Validate
     errors = []
@@ -794,6 +854,116 @@ def update_node(
                     },
                 ],
             },
+        },
+        default=str,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Building blocks (retry, approval, validation presets)
+# -----------------------------------------------------------------------------
+
+# Keys that blocks can set on a node (NodeSpec fields or extra)
+_BLOCK_NODE_KEYS = frozenset({
+    "max_retries", "retry_on", "output_schema", "max_validation_retries",
+    "pause_for_hitl", "approval_message", "approval_timeout_seconds",
+})
+
+
+@mcp.tool()
+def list_blocks(
+    category: Annotated[
+        str | None,
+        "Filter by category: retry, approval, or validation; omit for all",
+    ] = None,
+) -> str:
+    """
+    List available building blocks (retry, approval, validation presets).
+
+    Use apply_block(block_id, target_node_id) to apply a block to a node.
+    """
+    blocks = list_blocks_registry(category=category)
+    return json.dumps(
+        {
+            "blocks": [
+                {
+                    "id": b.id,
+                    "name": b.name,
+                    "description": b.description,
+                    "category": b.category,
+                    "delta_keys": list(b.delta.keys()),
+                }
+                for b in blocks
+            ],
+            "count": len(blocks),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def apply_block(
+    block_id: Annotated[str, "ID of the block (from list_blocks)"],
+    target_node_id: Annotated[str, "ID of the node to apply the block to"],
+    overrides: Annotated[
+        str,
+        "Optional JSON object to override block values (e.g. {\"max_retries\": 5, \"approval_message\": \"...\"})",
+    ] = "{}",
+) -> str:
+    """
+    Apply a building block to a node.
+
+    Merges the block's delta (and optional overrides) into the node.
+    Use list_blocks() to see available blocks.
+    """
+    session = get_session()
+
+    block = get_block(block_id)
+    if not block:
+        return json.dumps({
+            "valid": False,
+            "error": f"Unknown block_id: {block_id}",
+            "hint": "Call list_blocks() to see available block IDs.",
+        })
+
+    node = None
+    for n in session.nodes:
+        if n.id == target_node_id:
+            node = n
+            break
+
+    if not node:
+        return json.dumps({
+            "valid": False,
+            "error": f"Node '{target_node_id}' not found",
+            "hint": "Use add_node first or check node ID.",
+        })
+
+    overrides_dict = json.loads(overrides) if overrides else {}
+
+    # Merge block delta and overrides into node (only allowed keys)
+    merged = {k: v for k, v in block.delta.items() if k in _BLOCK_NODE_KEYS}
+    for k, v in overrides_dict.items():
+        if k in _BLOCK_NODE_KEYS:
+            merged[k] = v
+
+    for key, value in merged.items():
+        if hasattr(node, key):
+            setattr(node, key, value)
+        else:
+            # NodeSpec has extra: allow; store metadata (e.g. approval_timeout_seconds)
+            setattr(node, key, value)
+
+    _save_session(session)
+
+    return json.dumps(
+        {
+            "valid": True,
+            "block_id": block_id,
+            "target_node_id": target_node_id,
+            "applied": list(merged.keys()),
+            "node": node.model_dump(),
+            "note": f"Block '{block.name}' applied. Use validate_graph to check.",
         },
         default=str,
     )
@@ -887,8 +1057,12 @@ def validate_graph() -> str:
         return json.dumps({"valid": False, "errors": errors})
 
     # === DETECT PAUSE/RESUME ARCHITECTURE ===
-    # Identify pause nodes (nodes marked as PAUSE in description)
-    pause_nodes = [n.id for n in session.nodes if "PAUSE" in n.description.upper()]
+    # Identify pause nodes: explicit pause_for_hitl or legacy "PAUSE" in description
+    pause_nodes = [
+        n.id
+        for n in session.nodes
+        if getattr(n, "pause_for_hitl", False) or "PAUSE" in (n.description or "").upper()
+    ]
 
     # Identify resume entry points (nodes marked as RESUME ENTRY POINT in description)
     resume_entry_points = [

@@ -272,6 +272,123 @@ The export will create:
 - `exports/web-research-agent/README.md` - Documentation
 - `exports/web-research-agent/mcp_servers.json` - **MCP server configuration** ✨
 
+## Building Blocks and Node Options
+
+You can configure retry, approval (HITL), and validation per node either by passing optional parameters to `add_node`/`update_node`, or by applying a **building block** with `apply_block`.
+
+### Optional add_node / update_node Parameters
+
+When adding or updating a node, you can set:
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `max_retries` | Max retries on failure (default 3); 0 to disable | `5` |
+| `retry_on` | JSON array of error substrings to retry on | `["timeout", "rate_limit"]` |
+| `output_schema` | JSON object schema for output validation | `{"result": {"type": "object"}}` |
+| `max_validation_retries` | Retries when output validation fails (default 2) | `3` |
+| `pause_for_hitl` | If true, execution pauses at this node for human approval | `true` |
+| `approval_message` | Message shown when requesting approval | `"Approve before sending"` |
+
+**Example: add a node with retry and HITL**
+
+```json
+{
+  "name": "add_node",
+  "arguments": {
+    "node_id": "review-step",
+    "name": "Human Review",
+    "description": "Pause for human approval before sending",
+    "node_type": "llm_generate",
+    "input_keys": "[\"draft\"]",
+    "output_keys": "[\"approved\"]",
+    "system_prompt": "Format the draft for approval.",
+    "pause_for_hitl": true,
+    "approval_message": "Please review and approve the message before sending."
+  }
+}
+```
+
+**Example: update a node with custom retry**
+
+```json
+{
+  "name": "update_node",
+  "arguments": {
+    "node_id": "web-searcher",
+    "max_retries": 5,
+    "retry_on": "[\"timeout\", \"rate_limit\"]"
+  }
+}
+```
+
+Nodes with `pause_for_hitl: true` are included in the graph's `pause_nodes` on export; the runner supports resume via entry points.
+
+### list_blocks
+
+List available building blocks (retry, approval, validation presets).
+
+**Parameters:**
+
+- `category` (string, optional): Filter by `retry`, `approval`, or `validation`; omit for all.
+
+**Example:**
+
+```json
+{
+  "name": "list_blocks",
+  "arguments": {}
+}
+```
+
+**Response:**
+
+```json
+{
+  "blocks": [
+    {
+      "id": "retry_default",
+      "name": "Retry with backoff (default)",
+      "description": "3 retries with exponential backoff; good for transient failures.",
+      "category": "retry",
+      "delta_keys": ["max_retries", "retry_on"]
+    },
+    {
+      "id": "approval_required",
+      "name": "Human approval required",
+      "description": "Execution pauses at this node for human approval; resume via entry point.",
+      "category": "approval",
+      "delta_keys": ["pause_for_hitl", "approval_message"]
+    }
+  ],
+  "count": 10
+}
+```
+
+### apply_block
+
+Apply a building block to an existing node. Merges the block's preset (and optional overrides) into the node.
+
+**Parameters:**
+
+- `block_id` (string, required): ID from `list_blocks` (e.g. `retry_default`, `approval_required`)
+- `target_node_id` (string, required): ID of the node to update
+- `overrides` (string, optional): JSON object to override block values (e.g. `{"max_retries": 5, "approval_message": "Custom message"}`)
+
+**Example:**
+
+```json
+{
+  "name": "apply_block",
+  "arguments": {
+    "block_id": "retry_aggressive",
+    "target_node_id": "web-searcher",
+    "overrides": "{}"
+  }
+}
+```
+
+Use `list_blocks()` to see available block IDs, then `apply_block(block_id, target_node_id)` to apply. You can also set retry/approval/validation directly via `add_node` or `update_node` parameters above.
+
 ## MCP Configuration File
 
 When you export an agent with registered MCP servers, an `mcp_servers.json` file is automatically created:

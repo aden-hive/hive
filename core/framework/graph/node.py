@@ -205,6 +205,20 @@ class NodeSpec(BaseModel):
     max_retries: int = Field(default=3)
     retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
 
+    # Human-in-the-loop (HITL): when True, execution pauses at this node for approval/resume
+    pause_for_hitl: bool = Field(
+        default=False,
+        description="If True, execution pauses at this node for human input; resume via entry_points",
+    )
+    approval_message: str | None = Field(
+        default=None,
+        description="Message to show when requesting approval (for pause/HITL nodes)",
+    )
+    approval_timeout_seconds: int | None = Field(
+        default=None,
+        description="Optional timeout for approval; for future escalation (runner/CLI)",
+    )
+
     # Pydantic model for output validation
     output_model: type[BaseModel] | None = Field(
         default=None,

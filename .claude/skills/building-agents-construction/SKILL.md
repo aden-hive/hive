@@ -100,6 +100,54 @@ bad_node = NodeSpec(
 | `router` | `tools=[]` | Conditional branching |
 | `function` | `tools=[]` | Python function execution |
 
+## Reusable Building Blocks (Retry, Approval, Validation)
+
+You can configure **retry**, **approval (HITL)**, and **validation** per node in two ways:
+
+1. **Optional params on add_node / update_node**: Pass `max_retries`, `retry_on`, `output_schema`, `max_validation_retries`, `pause_for_hitl`, `approval_message` when adding or updating a node.
+2. **Apply a block**: Use `list_blocks()` to see presets, then `apply_block(block_id, target_node_id, overrides?)` to apply a preset to an existing node.
+
+**Example: add a node with HITL (pause for approval)**
+
+```python
+mcp__agent-builder__add_node(
+    node_id="human-review",
+    name="Human Review",
+    description="Pause for human approval before sending",
+    node_type="llm_generate",
+    input_keys='["draft"]',
+    output_keys='["approved"]',
+    system_prompt="Format the draft for approval.",
+    pause_for_hitl=True,
+    approval_message="Please review and approve the message before sending."
+)
+```
+
+**Example: apply a retry preset to an existing node**
+
+```python
+# List available blocks (retry, approval, validation)
+mcp__agent-builder__list_blocks()
+
+# Apply "retry aggressive" (5 retries) to the web-searcher node
+mcp__agent-builder__apply_block(
+    block_id="retry_aggressive",
+    target_node_id="web-searcher",
+    overrides="{}"
+)
+
+# Or with overrides (e.g. custom approval message)
+mcp__agent-builder__apply_block(
+    block_id="approval_required",
+    target_node_id="human-review",
+    overrides='{"approval_message": "Approve before sending to customer."}'
+)
+```
+
+**Block categories:** `retry` (retry_default, retry_aggressive, retry_none, retry_on_network), `approval` (approval_required, approval_with_message, approval_with_timeout), `validation` (validation_default, validation_strict, validation_none). Use `list_blocks(category="retry")` to filter.
+
+Nodes with `pause_for_hitl=True` are exported as pause nodes; the runner supports resume via entry points (see HITL Pause/Resume Pattern below).
+
 ## CRITICAL: entry_points Format Reference
 
 **⚠️ Common Mistake Prevention:**
