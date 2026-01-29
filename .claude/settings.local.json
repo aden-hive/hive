@@ -26,5 +26,10 @@
       "mcp__agent-builder__list_mcp_tools",
       "mcp__agent-builder__add_mcp_server"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "agent-builder",
+    "tools"
+  ],
+  "enableAllProjectMcpServers": true
 }
