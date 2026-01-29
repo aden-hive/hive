@@ -132,7 +132,7 @@ class OutputCleaner:
 
     def validate_output(
         self,
-        output: dict[str, Any],
+        output: Any,
         source_node_id: str,
         target_node_spec: Any,  # NodeSpec
     ) -> ValidationResult:
@@ -144,6 +144,15 @@ class OutputCleaner:
         """
         errors = []
         warnings = []
+        
+        # Defensive: output must be a dict
+        if not isinstance(output, dict):
+            return ValidationResult(
+                valid=False,
+                errors=[f"Output must be dict, got {type(output).__name__}"],
+                warnings=[],
+        )
+
 
         # Check 1: Required input keys present
         for key in target_node_spec.input_keys:
@@ -294,8 +303,22 @@ Return ONLY valid JSON matching the expected schema. No explanations, no markdow
                 max_tokens=2048,  # Sufficient for cleaning most outputs
             )
 
-            # Parse cleaned output
-            cleaned_text = response.content.strip()
+            # Parse cleaned output safely (LLM providers may return None/empty)
+            cleaned_text = response.content
+
+            if cleaned_text is None or not isinstance(cleaned_text, str):
+                logger.error("✗ LLM returned empty or non-string response")
+                if self.config.fallback_to_raw:
+                    return output
+                raise ValueError("Empty cleaning response")
+
+            cleaned_text = cleaned_text.strip()
+            if not cleaned_text:
+                logger.error("✗ LLM returned whitespace-only response")
+                if self.config.fallback_to_raw:
+                    return output
+                raise ValueError("Whitespace-only cleaning response")
+
 
             # Apply heuristic repair to the LLM's output too (just in case)
             cleaned = _heuristic_repair(cleaned_text)
