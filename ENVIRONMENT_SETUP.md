@@ -1,3 +1,5 @@
+<!-- Windows + WSL setup improvements in progress -->
+
 # Agent Development Environment Setup
 
 Complete setup guide for building and running goal-driven agents with the Aden Agent Framework.
