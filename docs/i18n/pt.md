@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -253,7 +253,7 @@ Consulte [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instruções completa
 - **[Guia do Desenvolvedor](DEVELOPER.md)** - Guia abrangente para desenvolvedores
 - [Começando](docs/getting-started.md) - Instruções de configuração rápida
 - [Guia de Configuração](docs/configuration.md) - Todas as opções de configuração
-- [Visão Geral da Arquitetura](docs/architecture.md) - Design e estrutura do sistema
+- [Visão Geral da Arquitetura](docs/architecture/README.md) - Design e estrutura do sistema
 
 ## Roadmap
 
