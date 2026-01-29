@@ -146,6 +146,7 @@ class MCPClient:
 
         try:
             import threading
+
             from mcp import StdioServerParameters
 
             # Create server parameters
@@ -180,7 +181,8 @@ class MCPClient:
 
                         # Create persistent stdio client context
                         self._stdio_context = stdio_client(server_params)
-                        self._read_stream, self._write_stream = await self._stdio_context.__aenter__()
+                        streams = await self._stdio_context.__aenter__()
+                        self._read_stream, self._write_stream = streams
 
                         # Create persistent session
                         self._session = ClientSession(self._read_stream, self._write_stream)
@@ -215,7 +217,7 @@ class MCPClient:
 
             logger.info(f"Connected to MCP server '{self.config.name}' via STDIO (persistent)")
         except Exception as e:
-            raise RuntimeError(f"Failed to connect to MCP server: {e}")
+            raise RuntimeError(f"Failed to connect to MCP server: {e}") from e
 
     def _connect_http(self) -> None:
         """Connect to MCP server via HTTP transport."""
@@ -232,7 +234,9 @@ class MCPClient:
         try:
             response = self._http_client.get("/health")
             response.raise_for_status()
-            logger.info(f"Connected to MCP server '{self.config.name}' via HTTP at {self.config.url}")
+            logger.info(
+                f"Connected to MCP server '{self.config.name}' via HTTP at {self.config.url}"
+            )
         except Exception as e:
             logger.warning(f"Health check failed for MCP server '{self.config.name}': {e}")
             # Continue anyway, server might not have health endpoint
@@ -255,7 +259,10 @@ class MCPClient:
                 )
                 self._tools[tool.name] = tool
 
-            logger.info(f"Discovered {len(self._tools)} tools from '{self.config.name}': {list(self._tools.keys())}")
+            logger.info(
+                f"Discovered {len(self._tools)} tools from '{self.config.name}': "
+                f"{list(self._tools.keys())}"
+            )
         except Exception as e:
             logger.error(f"Failed to discover tools from '{self.config.name}': {e}")
             raise
@@ -303,7 +310,7 @@ class MCPClient:
 
             return data.get("result", {}).get("tools", [])
         except Exception as e:
-            raise RuntimeError(f"Failed to list tools via HTTP: {e}")
+            raise RuntimeError(f"Failed to list tools via HTTP: {e}") from e
 
     def list_tools(self) -> list[MCPTool]:
         """
@@ -353,9 +360,9 @@ class MCPClient:
             if len(result.content) > 0:
                 content_item = result.content[0]
                 # Check if it's a text content item
-                if hasattr(content_item, 'text'):
+                if hasattr(content_item, "text"):
                     return content_item.text
-                elif hasattr(content_item, 'data'):
+                elif hasattr(content_item, "data"):
                     return content_item.data
             return result.content
 
@@ -387,15 +394,14 @@ class MCPClient:
 
             return data.get("result", {}).get("content", [])
         except Exception as e:
-            raise RuntimeError(f"Failed to call tool via HTTP: {e}")
+            raise RuntimeError(f"Failed to call tool via HTTP: {e}") from e
 
-    # Cleanup timeout should match or exceed connection timeout (10 seconds in _connect_stdio)
-    _CLEANUP_TIMEOUT = 10  # seconds
-    _THREAD_JOIN_TIMEOUT = 12  # seconds - must be >= cleanup timeout to allow full cleanup plus buffer
+    _CLEANUP_TIMEOUT = 10
+    _THREAD_JOIN_TIMEOUT = 12
 
     async def _cleanup_stdio_async(self) -> None:
         """Async cleanup for STDIO session and context managers.
-        
+
         Cleanup order is critical:
         - The session must be closed BEFORE the stdio_context because the session
           depends on the streams provided by stdio_context.
@@ -409,33 +415,35 @@ class MCPClient:
             if self._session:
                 await self._session.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            # Coroutine was cancelled (e.g., during event loop teardown); best-effort cleanup
-            logger.warning("MCP session cleanup was cancelled; proceeding with best-effort shutdown")
+            logger.warning(
+                "MCP session cleanup was cancelled; proceeding with best-effort shutdown"
+            )
         except Exception as e:
             logger.warning(f"Error closing MCP session: {e}")
         finally:
-            self._session = None  # Always clear reference after cleanup attempt
-        
+            self._session = None
+
         # Second: close stdio_context (provides the underlying streams)
         try:
             if self._stdio_context:
                 await self._stdio_context.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            # Coroutine was cancelled (e.g., during event loop teardown); best-effort cleanup
-            logger.warning("STDIO context cleanup was cancelled; proceeding with best-effort shutdown")
+            logger.warning(
+                "STDIO context cleanup was cancelled; proceeding with best-effort shutdown"
+            )
         except Exception as e:
             logger.warning(f"Error closing STDIO context: {e}")
         finally:
-            self._stdio_context = None  # Always clear reference after cleanup attempt
+            self._stdio_context = None
 
     def disconnect(self) -> None:
         """Disconnect from the MCP server."""
         # Clean up persistent STDIO connection
         if self._loop is not None:
             cleanup_attempted = False
-            
+
             # Properly close session and context managers before stopping loop
-            # Note: There's an inherent race condition between checking is_running() 
+            # Note: There's an inherent race condition between checking is_running()
             # and calling run_coroutine_threadsafe(). We handle this by catching
             # any exceptions that may occur if the loop stops between these calls.
             if self._loop.is_running():
@@ -458,14 +466,14 @@ class MCPClient:
                     # Cleanup was attempted but failed (e.g., error in _cleanup_stdio_async())
                     cleanup_attempted = True
                     logger.warning(f"Error during async cleanup: {e}")
-                
+
                 # Now stop the event loop
                 try:
                     self._loop.call_soon_threadsafe(self._loop.stop)
                 except RuntimeError:
                     # Loop may have already stopped
                     pass
-            
+
             if not cleanup_attempted:
                 # Fallback: loop exists but is not running (e.g., crashed or stopped externally).
                 # At this point the loop and associated resources are in an undefined state.
@@ -482,8 +490,8 @@ class MCPClient:
                 self._loop_thread.join(timeout=self._THREAD_JOIN_TIMEOUT)
                 if self._loop_thread.is_alive():
                     logger.warning(
-                        "Event loop thread for STDIO MCP connection did not terminate within "
-                        f"{self._THREAD_JOIN_TIMEOUT} seconds; background thread may still be running."
+                        "Event loop thread for STDIO MCP connection did not terminate "
+                        f"within {self._THREAD_JOIN_TIMEOUT}s; thread may still be running."
                     )
 
             # Clear remaining references
