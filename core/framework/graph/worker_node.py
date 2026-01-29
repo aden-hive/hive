@@ -136,9 +136,9 @@ class WorkerNode:
         """
         self.runtime = runtime
         self.llm = llm
-        self.tools = tools or {}
+        self.tools = dict(tools) if tools else {}
         self.tool_executor = tool_executor
-        self.functions = functions or {}
+        self.functions = dict(functions) if functions else {}
         self.sub_graph_executor = sub_graph_executor
         self.sandbox = sandbox or CodeSandbox()
 

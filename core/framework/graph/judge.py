@@ -62,7 +62,7 @@ class HybridJudge:
             llm_confidence_threshold: Confidence below this triggers escalation
         """
         self.llm = llm
-        self.rules: list[EvaluationRule] = rules or []
+        self.rules: list[EvaluationRule] = list(rules) if rules else []
         self.llm_confidence_threshold = llm_confidence_threshold
 
         # Sort rules by priority (higher first)

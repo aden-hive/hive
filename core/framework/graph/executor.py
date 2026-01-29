@@ -88,9 +88,9 @@ class GraphExecutor:
         """
         self.runtime = runtime
         self.llm = llm
-        self.tools = tools or []
+        self.tools = list(tools) if tools else []
         self.tool_executor = tool_executor
-        self.node_registry = node_registry or {}
+        self.node_registry = dict(node_registry) if node_registry else {}
         self.approval_callback = approval_callback
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)

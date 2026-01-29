@@ -129,7 +129,7 @@ class AgentRuntime:
 
         # LLM and tools
         self._llm = llm
-        self._tools = tools or []
+        self._tools = list(tools) if tools else []
         self._tool_executor = tool_executor
 
         # Entry points and streams

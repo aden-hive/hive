@@ -135,7 +135,7 @@ class ExecutionStream:
         self._outcome_aggregator = outcome_aggregator
         self._event_bus = event_bus
         self._llm = llm
-        self._tools = tools or []
+        self._tools = list(tools) if tools else []
         self._tool_executor = tool_executor
         self._result_retention_max = result_retention_max
         self._result_retention_ttl_seconds = result_retention_ttl_seconds

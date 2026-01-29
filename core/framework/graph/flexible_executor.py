@@ -100,22 +100,22 @@ class FlexibleGraphExecutor:
         """
         self.runtime = runtime
         self.llm = llm
-        self.tools = tools or {}
+        self.tools = dict(tools) if tools else {}
         self.tool_executor = tool_executor
-        self.functions = functions or {}
+        self.functions = dict(functions) if functions else {}
         self.config = config or ExecutorConfig()
         self.approval_callback = approval_callback
 
         # Create judge
         self.judge = judge or create_default_judge(llm)
 
-        # Create worker
+        # Create worker (with defensive copies)
         self.worker = WorkerNode(
             runtime=runtime,
             llm=llm,
-            tools=tools,
+            tools=self.tools,
             tool_executor=tool_executor,
-            functions=functions,
+            functions=self.functions,
             sandbox=CodeSandbox(),
         )
 
