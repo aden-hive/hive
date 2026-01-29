@@ -122,7 +122,7 @@ class AgentRuntime:
             cache_ttl=self._config.cache_ttl,
             batch_interval=self._config.batch_interval,
         )
-
+        # Initialize shared components
         self._state_manager = SharedStateManager()
         self._event_bus = EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
