@@ -93,6 +93,7 @@ class BuildSession:
                     "on_success": EdgeCondition.ON_SUCCESS,
                     "on_failure": EdgeCondition.ON_FAILURE,
                     "conditional": EdgeCondition.CONDITIONAL,
+                    "llm_decide": EdgeCondition.LLM_DECIDE,
                 }
                 e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
             session.edges.append(EdgeSpec(**e))
@@ -518,10 +519,19 @@ def add_node(
     session = get_session()
 
     # Parse JSON inputs
-    input_keys_list = json.loads(input_keys)
-    output_keys_list = json.loads(output_keys)
-    tools_list = json.loads(tools)
-    routes_dict = json.loads(routes)
+    try:
+        input_keys_list = json.loads(input_keys)
+        output_keys_list = json.loads(output_keys)
+        tools_list = json.loads(tools)
+        routes_dict = json.loads(routes)
+    except json.JSONDecodeError as e:
+        return json.dumps(
+            {
+                "valid": False,
+                "errors": [f"Invalid JSON input: {e}"],
+                "warnings": [],
+            }
+        )
 
     # Validate credentials for tools BEFORE adding the node
     cred_error = _validate_tool_credentials(tools_list)
@@ -620,6 +630,7 @@ def add_edge(
         "on_success": EdgeCondition.ON_SUCCESS,
         "on_failure": EdgeCondition.ON_FAILURE,
         "conditional": EdgeCondition.CONDITIONAL,
+        "llm_decide": EdgeCondition.LLM_DECIDE,
     }
     edge_condition = condition_map.get(condition, EdgeCondition.ON_SUCCESS)
 
@@ -703,9 +714,23 @@ def update_node(
     if not node:
         return json.dumps({"valid": False, "errors": [f"Node '{node_id}' not found"]})
 
+    # Parse JSON inputs with error handling
+    try:
+        input_keys_list = json.loads(input_keys) if input_keys else None
+        output_keys_list = json.loads(output_keys) if output_keys else None
+        tools_list = json.loads(tools) if tools else None
+        routes_dict = json.loads(routes) if routes else None
+    except json.JSONDecodeError as e:
+        return json.dumps(
+            {
+                "valid": False,
+                "errors": [f"Invalid JSON input: {e}"],
+                "warnings": [],
+            }
+        )
+
     # Validate credentials for new tools BEFORE updating
-    if tools:
-        tools_list = json.loads(tools)
+    if tools_list:
         cred_error = _validate_tool_credentials(tools_list)
         if cred_error:
             return json.dumps(cred_error)
@@ -717,16 +742,16 @@ def update_node(
         node.description = description
     if node_type:
         node.node_type = node_type
-    if input_keys:
-        node.input_keys = json.loads(input_keys)
-    if output_keys:
-        node.output_keys = json.loads(output_keys)
+    if input_keys_list is not None:
+        node.input_keys = input_keys_list
+    if output_keys_list is not None:
+        node.output_keys = output_keys_list
     if system_prompt:
         node.system_prompt = system_prompt
-    if tools:
-        node.tools = json.loads(tools)
-    if routes:
-        node.routes = json.loads(routes)
+    if tools_list is not None:
+        node.tools = tools_list
+    if routes_dict is not None:
+        node.routes = routes_dict
 
     # Validate
     errors = []

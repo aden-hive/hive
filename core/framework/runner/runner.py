@@ -88,6 +88,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
             "on_success": EdgeCondition.ON_SUCCESS,
             "on_failure": EdgeCondition.ON_FAILURE,
             "conditional": EdgeCondition.CONDITIONAL,
+            "llm_decide": EdgeCondition.LLM_DECIDE,
         }
         edge = EdgeSpec(
             id=edge_data["id"],

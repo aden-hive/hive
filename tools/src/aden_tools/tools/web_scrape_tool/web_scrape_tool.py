@@ -59,10 +59,7 @@ def register_tools(mcp: FastMCP) -> None:
                 url = "https://" + url
 
             # Validate max_length
-            if max_length < 1000:
-                max_length = 1000
-            elif max_length > 500000:
-                max_length = 500000
+            max_length = max(1000, min(max_length, 500000))
 
             # Launch headless browser with stealth
             async with async_playwright() as p:
@@ -123,10 +120,7 @@ def register_tools(mcp: FastMCP) -> None:
                 tag.decompose()
 
             # Get title and description
-            title = ""
-            title_tag = soup.find("title")
-            if title_tag:
-                title = title_tag.get_text(strip=True)
+            title = soup.title.get_text(strip=True) if soup.title else ""
 
             description = ""
             meta_desc = soup.find("meta", attrs={"name": "description"})
@@ -168,11 +162,14 @@ def register_tools(mcp: FastMCP) -> None:
             # Extract links if requested
             if include_links:
                 links: list[dict[str, str]] = []
+                base_url = str(response.url)  # Use final URL after redirects
                 for a in soup.find_all("a", href=True)[:50]:
                     href = a["href"]
+                    # Convert relative URLs to absolute URLs
+                    absolute_href = urljoin(base_url, href)
                     link_text = a.get_text(strip=True)
-                    if link_text and href:
-                        links.append({"text": link_text, "href": href})
+                    if link_text and absolute_href:
+                        links.append({"text": link_text, "href": absolute_href})
                 result["links"] = links
 
             return result

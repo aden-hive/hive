@@ -36,7 +36,10 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
             if not os.path.exists(secure_path):
-                return {"error": f"Directory not found at {path}"}
+                return {"error": f"Path not found: {path}"}
+
+            if not os.path.isdir(secure_path):
+                return {"error": f"Path is not a directory: {path}"}
 
             items = os.listdir(secure_path)
             entries = []

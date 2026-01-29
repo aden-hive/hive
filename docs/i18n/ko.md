@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -264,7 +264,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[개발자 가이드](DEVELOPER.md)** - 개발자를 위한 종합 가이드
 - [시작하기](docs/getting-started.md) - 빠른 설정 방법
 - [설정 가이드](docs/configuration.md) - 모든 설정 옵션 안내
-- [아키텍처 개요](docs/architecture.md) - 시스템 설계 및 구조
+- [아키텍처 개요](docs/architecture/README.md) - 시스템 설계 및 구조
 
 ## 로드맵
 
@@ -352,7 +352,7 @@ Aden은 모니터링과 관측성을 위해 토큰 사용량, 지연 시간 메�
 
 **Q: Aden은 어떤 배포 방식을 지원하나요?**
 
-Aden은 기본적으로 Docker Compose 배포를 지원하며, 프로덕션 및 개발 환경 설정을 모두 제공합니다. Docker를 지원하는 모든 인프라에서 셀프 호스팅이 가능합니다. 클라우드 배포 옵션과 Kubernetes 대응 설정은 로드맵에 포함되어 있습니다.
+Aden은 Python 패키지를 통한 셀프 호스팅 배포를 지원합니다. 설치 방법은 [환경 설정 가이드](ENVIRONMENT_SETUP.md)를 참조하세요. 클라우드 배포 옵션과 Kubernetes 대응 설정은 로드맵에 포함되어 있습니다.
 
 **Q: Aden은 복잡한 프로덕션 규모의 사용 사례도 처리할 수 있나요?**
 

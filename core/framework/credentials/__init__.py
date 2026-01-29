@@ -31,6 +31,13 @@ Quick Start:
 For OAuth2 support:
     from core.framework.credentials.oauth2 import BaseOAuth2Provider, OAuth2Config
 
+For Aden server sync:
+    from core.framework.credentials.aden import (
+        AdenCredentialClient,
+        AdenClientConfig,
+        AdenSyncProvider,
+    )
+
 For Vault integration:
     from core.framework.credentials.vault import HashiCorpVaultStorage
 """
@@ -62,6 +69,21 @@ from .storage import (
 from .store import CredentialStore
 from .template import TemplateResolver
 
+# Aden sync components (lazy import to avoid httpx dependency when not needed)
+# Usage: from core.framework.credentials.aden import AdenSyncProvider
+# Or: from core.framework.credentials import AdenSyncProvider
+try:
+    from .aden import (
+        AdenCachedStorage,
+        AdenClientConfig,
+        AdenCredentialClient,
+        AdenSyncProvider,
+    )
+
+    _ADEN_AVAILABLE = True
+except ImportError:
+    _ADEN_AVAILABLE = False
+
 __all__ = [
     # Main store
     "CredentialStore",
@@ -89,4 +111,12 @@ __all__ = [
     "CredentialRefreshError",
     "CredentialValidationError",
     "CredentialDecryptionError",
+    # Aden sync (optional - requires httpx)
+    "AdenSyncProvider",
+    "AdenCredentialClient",
+    "AdenClientConfig",
+    "AdenCachedStorage",
 ]
+
+# Track Aden availability for runtime checks
+ADEN_AVAILABLE = _ADEN_AVAILABLE
