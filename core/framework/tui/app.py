@@ -60,9 +60,16 @@ class AdenTUI(App):
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
-        yield self.log_pane
-        yield self.graph_view
-        yield self.chat_repl
+
+        yield Horizontal(
+            Container(self.graph_view, id="left-pane"),
+            Vertical(
+                Container(self.log_pane, id="log-pane-container"),
+                Container(self.chat_repl, id="chat-repl-container"),
+                id="right-pane",
+            ),
+        )
+
         yield Footer()
 
     async def on_mount(self) -> None:
