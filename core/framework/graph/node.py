@@ -746,7 +746,7 @@ Keep the same JSON structure but with shorter content values.
                     system=system,
                     tools=ctx.available_tools,
                     tool_executor=executor,
-                    max_tokens=ctx.max_tokens,
+                    max_iterations=ctx.max_attempts,
                 )
             else:
                 # Use JSON mode for llm_generate nodes with output_keys
@@ -800,7 +800,7 @@ Keep the same JSON structure but with shorter content values.
                         system=system,
                         tools=ctx.available_tools,
                         tool_executor=executor,
-                        max_tokens=ctx.max_tokens,
+                        max_iterations=ctx.max_attempts,
                     )
                 else:
                     response = ctx.llm.complete(
@@ -889,7 +889,7 @@ Keep the same JSON structure but with shorter content values.
                                         system=system,
                                         tools=ctx.available_tools,
                                         tool_executor=executor,
-                                        max_tokens=ctx.max_tokens,
+                                        max_iterations=ctx.max_attempts,
                                     )
                                 else:
                                     response = ctx.llm.complete(
