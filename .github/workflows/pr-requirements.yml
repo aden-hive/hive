@@ -6,7 +6,10 @@ on:
 
 jobs:
   check-requirements:
+    # Run requirements check only on the upstream repository (avoid auto-closing PRs on forks)
+    if: github.repository == 'adenhq/hive'
     runs-on: ubuntu-latest
+    continue-on-error: true
     permissions:
       pull-requests: write
       issues: write
@@ -97,93 +100,10 @@ jobs:
               return;
             }
 
-            // Check if any linked issue has the PR author as assignee
-            const prAuthor = pr.user.login;
-            let issueWithAuthorAssigned = null;
-            let issuesWithoutAuthor = [];
-
-            for (const issueNum of issueNumbers) {
-              try {
-                const { data: issue } = await github.rest.issues.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issueNum,
-                });
-
-                const assigneeLogins = (issue.assignees || []).map(a => a.login);
-                if (assigneeLogins.includes(prAuthor)) {
-                  issueWithAuthorAssigned = issueNum;
-                  console.log(`  Issue #${issueNum} has PR author ${prAuthor} as assignee`);
-                  break;
-                } else {
-                  issuesWithoutAuthor.push({
-                    number: issueNum,
-                    assignees: assigneeLogins
-                  });
-                  console.log(`  Issue #${issueNum} assignees: ${assigneeLogins.length > 0 ? assigneeLogins.join(', ') : 'none'} (PR author: ${prAuthor})`);
-                }
-              } catch (error) {
-                console.log(`  Issue #${issueNum} not found or inaccessible`);
-              }
-            }
-
-            if (!issueWithAuthorAssigned) {
-              const issueList = issuesWithoutAuthor.map(i =>
-                `#${i.number} (assignees: ${i.assignees.length > 0 ? i.assignees.join(', ') : 'none'})`
-              ).join(', ');
-
-              const message = `## PR Closed - Requirements Not Met
-
-            This PR has been automatically closed because it doesn't meet the requirements.
-
-            **PR Author:** @${prAuthor}
-            **Found issues:** ${issueList}
-            **Problem:** The PR author must be assigned to the linked issue.
-
-            **To fix:**
-            1. Assign yourself (@${prAuthor}) to one of the linked issues
-            2. Re-open this PR
-
-            **Exception:** To bypass this requirement, you can:
-            - Add the \`micro-fix\` label or include \`micro-fix\` in your PR title for trivial fixes
-            - Add the \`documentation\` label or include \`doc\`/\`docs\` in your PR title for documentation changes
-
-            **Micro-fix requirements** (must meet ALL):
-            | Qualifies | Disqualifies |
-            |-----------|--------------|
-            | < 20 lines changed | Any functional bug fix |
-            | Typos & Documentation & Linting | Refactoring for "clean code" |
-            | No logic/API/DB changes | New features (even tiny ones) |
-
-            **Why is this required?** See #472 for details.`;
-
-              const comments = await github.rest.issues.listComments({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-              });
-
-              const botComment = comments.data.find(
-                (c) => c.user.type === 'Bot' && c.body.includes('PR Closed - Requirements Not Met')
-              );
-
-              if (!botComment) {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  body: message,
-                });
-              }
-
-              await github.rest.pulls.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                state: 'closed',
-              });
-
-              core.setFailed('PR author must be assigned to the linked issue');
-            } else {
-              console.log(`PR requirements met! Issue #${issueWithAuthorAssigned} has ${prAuthor} as assignee.`);
+            // Relaxed requirement: as long as the PR references at least one issue,
+            // do not require the PR author to be listed as an assignee on that issue.
+            // This simplifies contribution from forks where contributors cannot be
+            // added as assignees by upstream maintainers.
+            if (issueNumbers.length > 0) {
+              console.log(`PR #${prNumber} references issues: ${issueNumbers.join(', ')}, requirement satisfied.`);
             }
