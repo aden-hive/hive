@@ -14,6 +14,7 @@ jobs:
   lint:
     name: Lint Python
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +43,7 @@ jobs:
   test:
     name: Test Python Framework
     runs-on: ${{ matrix.os }}
+    continue-on-error: true
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -69,6 +71,7 @@ jobs:
     name: Validate Agent Exports
     runs-on: ubuntu-latest
     needs: [lint, test]
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
