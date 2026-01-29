@@ -555,7 +555,8 @@ class TestExecuteCommandTool:
     def test_execute_failing_command(self, execute_command_fn, mock_workspace, mock_secure_path):
         """Executing a failing command returns non-zero exit code."""
         result = execute_command_fn(
-            command='python -c "__import__(\"sys\").exit(1)"', **mock_workspace
+            command="""python -c '__import__("sys").exit(1)'""",
+            **mock_workspace,
         )
 
         assert result["success"] is True
@@ -566,7 +567,7 @@ class TestExecuteCommandTool:
     ):
         """Executing a command that writes to stderr captures it."""
         result = execute_command_fn(
-            command='python -c "__import__(\"sys\").stderr.write(\"error message\\n\")"',
+            command="""python -c '__import__("sys").stderr.write("error message\\n")'""",
             **mock_workspace,
         )
 
@@ -586,7 +587,9 @@ class TestExecuteCommandTool:
         assert result["return_code"] == 0
         assert "testfile.txt" in result["stdout"]
 
-    def test_execute_command_rejects_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
+    def test_execute_command_rejects_pipe(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
         """Shell operators (e.g. pipe) are rejected in safe mode."""
         result = execute_command_fn(
             command="echo 'hello world' | tr 'a-z' 'A-Z'", **mock_workspace
@@ -605,7 +608,9 @@ class TestExecuteCommandTool:
         assert "not allowed" in result["error"]
         assert "allowed_commands" in result
 
-    def test_execute_command_rejects_empty(self, execute_command_fn, mock_workspace, mock_secure_path):
+    def test_execute_command_rejects_empty(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
         """Empty command is rejected."""
         result = execute_command_fn(command="   ", **mock_workspace)
 
