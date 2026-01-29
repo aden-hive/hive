@@ -8,6 +8,7 @@ See: https://docs.litellm.ai/docs/providers
 """
 
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -17,6 +18,8 @@ except ImportError:
     litellm = None  # type: ignore[assignment]
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+
+logger = logging.getLogger(__name__)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -132,23 +135,32 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        # Make the call
-        response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+        # Make the call with error handling
+        try:
+            response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+        except Exception as e:
+            logger.error(f"LiteLLM completion failed: {type(e).__name__}: {e}")
+            raise RuntimeError(f"LLM API call failed: {type(e).__name__}: {e}") from e
 
-        # Extract content
-        content = response.choices[0].message.content or ""
+        # Extract content with safe access
+        if not response.choices:
+            logger.error("LLM response has no choices")
+            raise RuntimeError("LLM response has no choices")
+
+        choice = response.choices[0]
+        content = getattr(choice.message, "content", None) or ""
 
         # Get usage info
         usage = response.usage
-        input_tokens = usage.prompt_tokens if usage else 0
-        output_tokens = usage.completion_tokens if usage else 0
+        input_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+        output_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
 
         return LLMResponse(
             content=content,
             model=response.model or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            stop_reason=response.choices[0].finish_reason or "",
+            stop_reason=getattr(choice, "finish_reason", "") or "",
             raw_response=response,
         )
 
@@ -189,25 +201,34 @@ class LiteLLMProvider(LLMProvider):
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
-            response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+            try:
+                response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+            except Exception as e:
+                logger.error(f"LiteLLM completion with tools failed: {type(e).__name__}: {e}")
+                raise RuntimeError(f"LLM API call failed: {type(e).__name__}: {e}") from e
 
-            # Track tokens
+            # Track tokens with safe access
             usage = response.usage
             if usage:
-                total_input_tokens += usage.prompt_tokens
-                total_output_tokens += usage.completion_tokens
+                total_input_tokens += getattr(usage, "prompt_tokens", 0)
+                total_output_tokens += getattr(usage, "completion_tokens", 0)
+
+            # Validate response has choices
+            if not response.choices:
+                logger.error("LLM response has no choices in tool loop")
+                raise RuntimeError("LLM response has no choices")
 
             choice = response.choices[0]
             message = choice.message
 
             # Check if we're done (no tool calls)
-            if choice.finish_reason == "stop" or not message.tool_calls:
+            if getattr(choice, "finish_reason", "") == "stop" or not getattr(message, "tool_calls", None):
                 return LLMResponse(
-                    content=message.content or "",
+                    content=getattr(message, "content", "") or "",
                     model=response.model or self.model,
                     input_tokens=total_input_tokens,
                     output_tokens=total_output_tokens,
-                    stop_reason=choice.finish_reason or "stop",
+                    stop_reason=getattr(choice, "finish_reason", "") or "stop",
                     raw_response=response,
                 )
 
@@ -216,7 +237,7 @@ class LiteLLMProvider(LLMProvider):
             current_messages.append(
                 {
                     "role": "assistant",
-                    "content": message.content,
+                    "content": getattr(message, "content", None),
                     "tool_calls": [
                         {
                             "id": tc.id,
@@ -233,19 +254,32 @@ class LiteLLMProvider(LLMProvider):
 
             # Execute tools and add results.
             for tool_call in message.tool_calls:
-                # Parse arguments
+                # Parse arguments with safe access
                 try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
+                    arguments = getattr(tool_call.function, "arguments", "{}")
+                    if arguments is None:
+                        arguments = "{}"
+                    args = json.loads(arguments)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse tool arguments: {e}")
                     args = {}
 
                 tool_use = ToolUse(
                     id=tool_call.id,
-                    name=tool_call.function.name,
+                    name=getattr(tool_call.function, "name", "unknown"),
                     input=args,
                 )
 
-                result = tool_executor(tool_use)
+                # Execute tool with error handling
+                try:
+                    result = tool_executor(tool_use)
+                except Exception as e:
+                    logger.error(f"Tool execution failed for {tool_use.name}: {type(e).__name__}: {e}")
+                    result = ToolResult(
+                        tool_use_id=tool_use.id,
+                        content=f"Error executing tool: {type(e).__name__}: {e}",
+                        is_error=True,
+                    )
 
                 # Add tool result message
                 current_messages.append(

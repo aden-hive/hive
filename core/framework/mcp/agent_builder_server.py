@@ -8,10 +8,13 @@ Usage:
 """
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
+
+logger = logging.getLogger(__name__)
 
 from mcp.server import FastMCP
 
@@ -148,13 +151,13 @@ def _load_active_session() -> BuildSession | None:
         return None
 
     try:
-        with open(ACTIVE_SESSION_FILE) as f:
+        with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
             session_id = f.read().strip()
 
         if session_id:
             return _load_session(session_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to load active session: {type(e).__name__}: {e}")
 
     return None
 
@@ -202,7 +205,7 @@ def list_sessions() -> str:
     if SESSIONS_DIR.exists():
         for session_file in SESSIONS_DIR.glob("*.json"):
             try:
-                with open(session_file) as f:
+                with open(session_file, encoding="utf-8") as f:
                     data = json.load(f)
                     sessions.append(
                         {
@@ -215,17 +218,19 @@ def list_sessions() -> str:
                             "has_goal": data.get("goal") is not None,
                         }
                     )
-            except Exception:
-                pass  # Skip corrupted files
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Skipping corrupted session file {session_file}: {type(e).__name__}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error reading session file {session_file}: {type(e).__name__}: {e}")
 
     # Check which session is currently active
     active_id = None
     if ACTIVE_SESSION_FILE.exists():
         try:
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, encoding="utf-8") as f:
                 active_id = f.read().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to read active session file: {type(e).__name__}: {e}")
 
     return json.dumps(
         {
@@ -533,30 +538,7 @@ def add_node(
             }
         )
 
-    # Validate credentials for tools BEFORE adding the node
-    cred_error = _validate_tool_credentials(tools_list)
-    if cred_error:
-        return json.dumps(cred_error)
-
-    # Check for duplicate
-    if any(n.id == node_id for n in session.nodes):
-        return json.dumps({"valid": False, "errors": [f"Node '{node_id}' already exists"]})
-
-    node = NodeSpec(
-        id=node_id,
-        name=name,
-        description=description,
-        node_type=node_type,
-        input_keys=input_keys_list,
-        output_keys=output_keys_list,
-        system_prompt=system_prompt or None,
-        tools=tools_list,
-        routes=routes_dict,
-    )
-
-    session.nodes.append(node)
-
-    # Validate
+    # Validate BEFORE adding the node
     errors = []
     warnings = []
 
@@ -571,6 +553,39 @@ def add_node(
     if node_type in ("llm_generate", "llm_tool_use") and not system_prompt:
         warnings.append(f"LLM node '{node_id}' should have a system_prompt")
 
+    # Validate credentials for tools BEFORE adding the node
+    cred_error = _validate_tool_credentials(tools_list)
+    if cred_error:
+        return json.dumps(cred_error)
+
+    # Check for duplicate
+    if any(n.id == node_id for n in session.nodes):
+        return json.dumps({"valid": False, "errors": [f"Node '{node_id}' already exists"]})
+
+    # Return early if there are validation errors (don't add invalid node)
+    if errors:
+        return json.dumps(
+            {
+                "valid": False,
+                "errors": errors,
+                "warnings": warnings,
+            }
+        )
+
+    node = NodeSpec(
+        id=node_id,
+        name=name,
+        description=description,
+        node_type=node_type,
+        input_keys=input_keys_list,
+        output_keys=output_keys_list,
+        system_prompt=system_prompt or None,
+        tools=tools_list,
+        routes=routes_dict,
+    )
+
+    # Only append after validation passes
+    session.nodes.append(node)
     _save_session(session)  # Auto-save
 
     return json.dumps(
@@ -634,18 +649,7 @@ def add_edge(
     }
     edge_condition = condition_map.get(condition, EdgeCondition.ON_SUCCESS)
 
-    edge = EdgeSpec(
-        id=edge_id,
-        source=source,
-        target=target,
-        condition=edge_condition,
-        condition_expr=condition_expr or None,
-        priority=priority,
-    )
-
-    session.edges.append(edge)
-
-    # Validate
+    # Validate BEFORE adding the edge
     errors = []
 
     if not any(n.id == source for n in session.nodes):
@@ -655,6 +659,26 @@ def add_edge(
     if edge_condition == EdgeCondition.CONDITIONAL and not condition_expr:
         errors.append(f"Conditional edge '{edge_id}' needs condition_expr")
 
+    # Return early if there are validation errors (don't add invalid edge)
+    if errors:
+        return json.dumps(
+            {
+                "valid": False,
+                "errors": errors,
+            }
+        )
+
+    edge = EdgeSpec(
+        id=edge_id,
+        source=source,
+        target=target,
+        condition=edge_condition,
+        condition_expr=condition_expr or None,
+        priority=priority,
+    )
+
+    # Only append after validation passes
+    session.edges.append(edge)
     _save_session(session)  # Auto-save
 
     return json.dumps(

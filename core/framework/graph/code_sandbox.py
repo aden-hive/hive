@@ -15,6 +15,8 @@ Security measures:
 import ast
 import signal
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -213,12 +215,15 @@ class CodeSandbox:
 
     @contextmanager
     def _timeout_context(self, seconds: int):
-        """Context manager for timeout enforcement."""
+        """Context manager for timeout enforcement.
+
+        Works on both Unix (using SIGALRM) and Windows (using threading).
+        """
 
         def handler(signum, frame):
             raise TimeoutError(f"Code execution timed out after {seconds} seconds")
 
-        # Only works on Unix-like systems
+        # Unix-like systems: use SIGALRM
         if hasattr(signal, "SIGALRM"):
             old_handler = signal.signal(signal.SIGALRM, handler)
             signal.alarm(seconds)
@@ -228,8 +233,21 @@ class CodeSandbox:
                 signal.alarm(0)
                 signal.signal(signal.SIGALRM, old_handler)
         else:
-            # Windows: no timeout support, just execute
-            yield
+            # Windows: use threading-based timeout
+            # We use a sentinel to track if timeout occurred
+            timeout_occurred = threading.Event()
+            result_container = {"result": None, "exception": None}
+
+            yield  # For Windows, we handle timeout differently - see execute() method
+
+    def _execute_with_timeout_windows(self, func, timeout_seconds: int):
+        """Execute a function with timeout on Windows using ThreadPoolExecutor."""
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func)
+            try:
+                return future.result(timeout=timeout_seconds)
+            except FuturesTimeoutError:
+                raise TimeoutError(f"Code execution timed out after {timeout_seconds} seconds")
 
     def _create_namespace(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Create isolated namespace for code execution."""
@@ -285,10 +303,20 @@ class CodeSandbox:
         start_time = time.time()
 
         try:
-            with self._timeout_context(self.timeout_seconds):
-                # Compile and execute
-                compiled = compile(code, "<sandbox>", "exec")
-                exec(compiled, namespace)
+            # Compile code first (outside timeout)
+            compiled = compile(code, "<sandbox>", "exec")
+
+            # Execute with platform-appropriate timeout
+            if hasattr(signal, "SIGALRM"):
+                # Unix: use signal-based timeout
+                with self._timeout_context(self.timeout_seconds):
+                    exec(compiled, namespace)
+            else:
+                # Windows: use thread-based timeout
+                def run_code():
+                    exec(compiled, namespace)
+
+                self._execute_with_timeout_windows(run_code, self.timeout_seconds)
 
             execution_time_ms = int((time.time() - start_time) * 1000)
 
@@ -357,8 +385,20 @@ class CodeSandbox:
         namespace = self._create_namespace(inputs)
 
         try:
-            with self._timeout_context(self.timeout_seconds):
-                result = eval(expression, namespace)
+            # Execute with platform-appropriate timeout
+            if hasattr(signal, "SIGALRM"):
+                # Unix: use signal-based timeout
+                with self._timeout_context(self.timeout_seconds):
+                    result = eval(expression, namespace)
+            else:
+                # Windows: use thread-based timeout
+                result_container = {}
+
+                def run_eval():
+                    result_container["value"] = eval(expression, namespace)
+
+                self._execute_with_timeout_windows(run_eval, self.timeout_seconds)
+                result = result_container.get("value")
 
             return SandboxResult(success=True, result=result)
 
