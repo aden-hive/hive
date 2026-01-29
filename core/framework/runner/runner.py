@@ -584,18 +584,31 @@ class AgentRunner:
                 error=f"Input validation failed: {str(e)}"
             )
 
-        if self._uses_async_entry_points:
-            # Multi-entry-point mode: use AgentRuntime
-            return await self._run_with_agent_runtime(
-                input_data=input_data or {},
-                entry_point_id=entry_point_id,
+        # check recursion depth
+        from framework.context import execution_depth, MAX_RECURSION_DEPTH
+        current_depth = execution_depth.get()
+        if current_depth >= MAX_RECURSION_DEPTH:
+            raise RecursionError(
+                f"Maximum recursion depth ({MAX_RECURSION_DEPTH}) exceeded. "
+                "Agent is attempting to nest executions too deeply."
             )
-        else:
-            # Legacy single-entry-point mode
-            return await self._run_with_executor(
-                input_data=input_data or {},
-                session_state=session_state,
-            )
+        
+        token = execution_depth.set(current_depth + 1)
+        try:
+            if self._uses_async_entry_points:
+                # Multi-entry-point mode: use AgentRuntime
+                return await self._run_with_agent_runtime(
+                    input_data=input_data or {},
+                    entry_point_id=entry_point_id,
+                )
+            else:
+                # Legacy single-entry-point mode
+                return await self._run_with_executor(
+                    input_data=input_data or {},
+                    session_state=session_state,
+                )
+        finally:
+            execution_depth.reset(token)
 
     async def _run_with_executor(
         self,
