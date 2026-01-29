@@ -13,6 +13,8 @@ Each step requires validation and human approval before proceeding.
 You cannot skip steps or bypass validation.
 """
 
+import asyncio
+import threading
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
@@ -24,6 +26,41 @@ from pydantic import BaseModel, Field
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import NodeSpec
+
+
+def _run_coroutine_sync(coro):
+    """
+    Run an async coroutine from sync context, handling both cases:
+    - No event loop running: use asyncio.run()
+    - Event loop running: run in a separate thread with a new loop
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result = None
+    exception = None
+
+    def run_in_thread():
+        nonlocal result, exception
+        try:
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                result = new_loop.run_until_complete(coro)
+            finally:
+                new_loop.close()
+        except Exception as e:
+            exception = e
+
+    thread = threading.Thread(target=run_in_thread)
+    thread.start()
+    thread.join()
+
+    if exception:
+        raise exception
+    return result
 
 
 class BuildPhase(str, Enum):
@@ -443,14 +480,16 @@ class GraphBuilder:
         self.session.test_cases.append(test)
         self._save_session()
 
-    def run_test(
+    async def run_test_async(
         self,
         test: TestCase,
         executor_factory: Callable,
     ) -> TestResult:
         """
-        Run a single test case.
+        Run a single test case asynchronously.
 
+        Use this method when calling from an async context (Jupyter, async web servers, etc.).
+        For sync contexts, use run_test() which wraps this method.
         executor_factory should return a configured GraphExecutor.
         """
         self._require_phase([BuildPhase.ADDING_NODES, BuildPhase.ADDING_EDGES, BuildPhase.TESTING])
@@ -462,14 +501,10 @@ class GraphBuilder:
             executor = executor_factory()
 
             # Run the test
-            import asyncio
-
-            result = asyncio.run(
-                executor.execute(
-                    graph=graph,
-                    goal=self.session.goal,
-                    input_data=test.input,
-                )
+            result = await executor.execute(
+                graph=graph,
+                goal=self.session.goal,
+                input_data=test.input,
             )
 
             # Check result
@@ -499,13 +534,38 @@ class GraphBuilder:
 
         return test_result
 
-    def run_all_tests(self, executor_factory: Callable) -> list[TestResult]:
-        """Run all test cases."""
+    def run_test(
+        self,
+        test: TestCase,
+        executor_factory: Callable,
+    ) -> TestResult:
+        """
+        Run a single test case (sync wrapper).
+
+        Works in both sync and async contexts via bridge pattern.
+        executor_factory should return a configured GraphExecutor.
+        """
+        return _run_coroutine_sync(self.run_test_async(test, executor_factory))
+
+    async def run_all_tests_async(self, executor_factory: Callable) -> list[TestResult]:
+        """
+        Run all test cases asynchronously.
+
+        Use this method when calling from an async context.
+        """
         results = []
         for test in self.session.test_cases:
-            result = self.run_test(test, executor_factory)
+            result = await self.run_test_async(test, executor_factory)
             results.append(result)
         return results
+
+    def run_all_tests(self, executor_factory: Callable) -> list[TestResult]:
+        """
+        Run all test cases (sync wrapper).
+
+        Works in both sync and async contexts via bridge pattern.
+        """
+        return _run_coroutine_sync(self.run_all_tests_async(executor_factory))
 
     # =========================================================================
     # APPROVAL
