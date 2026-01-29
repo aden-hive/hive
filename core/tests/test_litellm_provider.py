@@ -12,6 +12,8 @@ For live tests (requires API keys):
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from framework.llm.anthropic import AnthropicProvider
 from framework.llm.litellm import LiteLLMProvider
 from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
@@ -152,7 +154,8 @@ class TestLiteLLMProviderToolUse:
     """Test LiteLLMProvider.complete_with_tools() method."""
 
     @patch("litellm.completion")
-    def test_complete_with_tools_single_iteration(self, mock_completion):
+    @pytest.mark.asyncio
+    async def test_complete_with_tools_single_iteration(self, mock_completion):
         """Test tool use with single iteration."""
         # First response: tool call
         tool_call_response = MagicMock()
@@ -197,7 +200,7 @@ class TestLiteLLMProviderToolUse:
         def tool_executor(tool_use: ToolUse) -> ToolResult:
             return ToolResult(tool_use_id=tool_use.id, content="Sunny, 22C", is_error=False)
 
-        result = provider.complete_with_tools(
+        result = await provider.complete_with_tools(
             messages=[{"role": "user", "content": "What's the weather in London?"}],
             system="You are a weather assistant.",
             tools=tools,
@@ -291,7 +294,8 @@ class TestAnthropicProviderBackwardCompatibility:
         assert call_kwargs["api_key"] == "test-key"
 
     @patch("litellm.completion")
-    def test_anthropic_provider_complete_with_tools(self, mock_completion):
+    @pytest.mark.asyncio
+    async def test_anthropic_provider_complete_with_tools(self, mock_completion):
         """Test AnthropicProvider.complete_with_tools() delegates to LiteLLM."""
         # Mock a simple response (no tool calls)
         mock_response = MagicMock()
@@ -317,7 +321,7 @@ class TestAnthropicProviderBackwardCompatibility:
         def tool_executor(tool_use: ToolUse) -> ToolResult:
             return ToolResult(tool_use_id=tool_use.id, content="3:00 PM", is_error=False)
 
-        result = provider.complete_with_tools(
+        result = await provider.complete_with_tools(
             messages=[{"role": "user", "content": "What time is it?"}],
             system="You are a time assistant.",
             tools=tools,

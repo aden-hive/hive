@@ -139,7 +139,7 @@ class MockLLMProvider(LLMProvider):
             stop_reason="mock_complete",
         )
 
-    def complete_with_tools(
+    async def complete_with_tools(
         self,
         messages: list[dict[str, Any]],
         system: str,

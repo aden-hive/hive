@@ -1,7 +1,7 @@
 """LLM Provider abstraction for pluggable LLM backends."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -86,23 +86,27 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    def complete_with_tools(
+    async def complete_with_tools(
         self,
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: Callable[["ToolUse"], "ToolResult"],
+        tool_executor: Callable[["ToolUse"], "ToolResult | Awaitable[ToolResult]"],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """
         Run a tool-use loop until the LLM produces a final response.
 
+        Tool calls within a single LLM response are executed in parallel
+        via asyncio.gather().
+
         Args:
             messages: Initial conversation
             system: System prompt
             tools: Available tools
-            tool_executor: Function to execute tools: (ToolUse) -> ToolResult
-            max_iterations: Max tool calls before stopping
+            tool_executor: Function to execute tools: (ToolUse) -> ToolResult.
+                Can be sync or async — async executors enable true parallel I/O.
+            max_iterations: Max tool call rounds before stopping
 
         Returns:
             Final LLMResponse after tool use completes

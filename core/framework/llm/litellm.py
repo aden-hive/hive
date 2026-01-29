@@ -7,6 +7,8 @@ Groq, and local models.
 See: https://docs.litellm.ai/docs/providers
 """
 
+import asyncio
+import inspect
 import json
 from collections.abc import Callable
 from typing import Any
@@ -152,7 +154,7 @@ class LiteLLMProvider(LLMProvider):
             raw_response=response,
         )
 
-    def complete_with_tools(
+    async def complete_with_tools(
         self,
         messages: list[dict[str, Any]],
         system: str,
@@ -161,7 +163,10 @@ class LiteLLMProvider(LLMProvider):
         max_iterations: int = 10,
         max_tokens: int = 4096,
     ) -> LLMResponse:
-        """Run a tool-use loop until the LLM produces a final response."""
+        """Run a tool-use loop until the LLM produces a final response.
+
+        Tool calls within a single LLM response are executed in parallel.
+        """
         # Prepare messages with system prompt
         current_messages = []
         if system:
@@ -173,6 +178,28 @@ class LiteLLMProvider(LLMProvider):
 
         # Convert tools to OpenAI format
         openai_tools = [self._tool_to_openai_format(t) for t in tools]
+
+        # Check once whether the executor is async or sync
+        executor_is_async = inspect.iscoroutinefunction(tool_executor)
+
+        async def _run_tool(tool_call: Any) -> ToolResult:
+            """Execute a single tool call, handling sync or async executors."""
+            try:
+                args = json.loads(tool_call.function.arguments)
+            except json.JSONDecodeError:
+                args = {}
+
+            tool_use = ToolUse(
+                id=tool_call.id,
+                name=tool_call.function.name,
+                input=args,
+            )
+
+            if executor_is_async:
+                return await tool_executor(tool_use)
+            else:
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, tool_executor, tool_use)
 
         for _ in range(max_iterations):
             # Build kwargs
@@ -211,8 +238,7 @@ class LiteLLMProvider(LLMProvider):
                     raw_response=response,
                 )
 
-            # Process tool calls.
-            # Add assistant message with tool calls.
+            # Add assistant message with tool calls
             current_messages.append(
                 {
                     "role": "assistant",
@@ -231,23 +257,12 @@ class LiteLLMProvider(LLMProvider):
                 }
             )
 
-            # Execute tools and add results.
-            for tool_call in message.tool_calls:
-                # Parse arguments
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
+            # Execute all tool calls in parallel
+            results = await asyncio.gather(
+                *[_run_tool(tc) for tc in message.tool_calls]
+            )
 
-                tool_use = ToolUse(
-                    id=tool_call.id,
-                    name=tool_call.function.name,
-                    input=args,
-                )
-
-                result = tool_executor(tool_use)
-
-                # Add tool result message
+            for result in results:
                 current_messages.append(
                     {
                         "role": "tool",

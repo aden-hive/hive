@@ -741,7 +741,7 @@ Keep the same JSON structure but with shorter content values.
                     logger.info(f"         ✓ Tool result: {result_str}")
                     return result
 
-                response = ctx.llm.complete_with_tools(
+                response = await ctx.llm.complete_with_tools(
                     messages=messages,
                     system=system,
                     tools=ctx.available_tools,
@@ -795,7 +795,7 @@ Keep the same JSON structure but with shorter content values.
 
                 # Retry the call with compaction instruction
                 if ctx.available_tools and self.tool_executor:
-                    response = ctx.llm.complete_with_tools(
+                    response = await ctx.llm.complete_with_tools(
                         messages=compaction_messages,
                         system=system,
                         tools=ctx.available_tools,
@@ -884,7 +884,7 @@ Keep the same JSON structure but with shorter content values.
 
                                 # Re-call LLM with feedback
                                 if ctx.available_tools and self.tool_executor:
-                                    response = ctx.llm.complete_with_tools(
+                                    response = await ctx.llm.complete_with_tools(
                                         messages=current_messages,
                                         system=system,
                                         tools=ctx.available_tools,
