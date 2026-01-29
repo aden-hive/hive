@@ -1613,9 +1613,21 @@ class FunctionNode(NodeProtocol):
             # Write to output keys
             output = {}
             if ctx.node_spec.output_keys:
-                key = ctx.node_spec.output_keys[0]
-                output[key] = result
-                ctx.memory.write(key, result)
+                if isinstance(result, dict):
+                    # Map dict fields to output keys when possible
+                    for key in ctx.node_spec.output_keys:
+                        if key in result:
+                            value = result[key]
+                        elif len(ctx.node_spec.output_keys) == 1:
+                            value = result
+                        else:
+                            value = None
+                        output[key] = value
+                        ctx.memory.write(key, value)
+                else:
+                    key = ctx.node_spec.output_keys[0]
+                    output[key] = result
+                    ctx.memory.write(key, result)
             else:
                 output = {"result": result}
 
