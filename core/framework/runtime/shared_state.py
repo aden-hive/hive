@@ -145,6 +145,11 @@ class SharedStateManager:
         """
         self._stream_state.pop(stream_id, None)
         self._stream_locks.pop(stream_id, None)
+        # Remove stream-scoped key locks so _key_locks does not grow unbounded
+        prefix = f"stream:{stream_id}:"
+        keys_to_remove = [k for k in self._key_locks if k.startswith(prefix)]
+        for k in keys_to_remove:
+            self._key_locks.pop(k, None)
         logger.debug(f"Cleaned up state for stream: {stream_id}")
 
     # === LOW-LEVEL STATE OPERATIONS ===
