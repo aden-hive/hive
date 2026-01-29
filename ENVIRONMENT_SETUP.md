@@ -17,6 +17,24 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
+## Windows Users (Important)
+
+If you are on Windows, note that the setup scripts (`.sh`) require a Unix-like shell.
+
+### Recommended options
+- **WSL (Windows Subsystem for Linux)** – preferred
+- **Git Bash** – works for most cases
+
+PowerShell and CMD do **not** support running `.sh` scripts directly.
+
+### Python & pip on Windows
+
+If `pip` does not point to Python 3.11, use:
+
+```bash
+python -m pip install -e .
+
+```
 ## Manual Setup (Alternative)
 
 If you prefer to set up manually or the script fails:
@@ -68,8 +86,13 @@ python -c "import litellm; print('✓ litellm OK')"
 
 For running agents with real LLMs:
 
+**Linux / macOS / WSL**
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
+```
+**Windows PowerShell**
+```bash
+$env:ANTHROPIC_API_KEY="your-key-here"
 ```
 
 ## Running Agents
