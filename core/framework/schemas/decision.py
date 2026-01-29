@@ -170,6 +170,38 @@ class Decision(BaseModel):
             return self.was_successful
         return self.evaluation.goal_aligned and self.evaluation.outcome_quality > 0.5
 
+def validate_invariants(self) -> None:
+        """
+        Validate core Decision invariants.
+        This must be called before a Decision is recorded or persisted.
+        """
+
+        if not self.options:
+            raise ValueError("Decision must contain at least one option")
+
+        option_ids = {opt.id for opt in self.options}
+        if self.chosen_option_id not in option_ids:
+            raise ValueError(
+                f"Chosen option '{self.chosen_option_id}' not found in options {option_ids}"
+            )
+
+        if self.outcome is None:
+            raise ValueError("Decision outcome must be set before recording")
+
+        if (
+            self.evaluation
+            and not self.outcome.success
+            and self.evaluation.outcome_quality > 0.8
+        ):
+            raise ValueError(
+                "Decision evaluation contradicts outcome: "
+                "failed outcome with high outcome_quality"
+            )
+
+
+
+
+
     def summary_for_builder(self) -> str:
         """Generate a one-line summary for Builder to quickly understand."""
         status = "✓" if self.was_successful else "✗"

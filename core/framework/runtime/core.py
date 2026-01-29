@@ -1,7 +1,7 @@
 """
 Runtime Core - The interface agents use to record their behavior.
 
-This is designed to make it EASY for agents to record decisions in a way
+This is designed to make it EASY for agents to record  in a way
 that Builder can analyze. The agent calls simple methods, and the runtime
 handles all the structured logging.
 """
@@ -187,7 +187,7 @@ class Runtime:
                 )
             )
 
-        # Create decision
+          # Create decision
         decision_id = f"dec_{len(self._current_run.decisions)}"
         decision = Decision(
             id=decision_id,
@@ -201,9 +201,11 @@ class Runtime:
             input_context=context or {},
         )
 
+        # Enforce decision invariants BEFORE recording
+        decision.validate_invariants()
+
         self._current_run.add_decision(decision)
         return decision_id
-
     def record_outcome(
         self,
         decision_id: str,
