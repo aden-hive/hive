@@ -65,6 +65,7 @@ class LLMProvider(ABC):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        timeout: float | None = None,
     ) -> LLMResponse:
         """
         Generate a completion from the LLM.
@@ -79,9 +80,7 @@ class LLMProvider(ABC):
                 - {"type": "json_schema", "json_schema": {"name": "...", "schema": {...}}}
                   for strict JSON schema enforcement
             json_mode: If True, request structured JSON output from the LLM
-
-        Returns:
-            LLMResponse with content and metadata
+            timeout: Optional timeout in seconds
         """
         pass
 
@@ -93,6 +92,7 @@ class LLMProvider(ABC):
         tools: list[Tool],
         tool_executor: Callable[["ToolUse"], "ToolResult"],
         max_iterations: int = 10,
+        timeout: float | None = None,
     ) -> LLMResponse:
         """
         Run a tool-use loop until the LLM produces a final response.
@@ -103,6 +103,7 @@ class LLMProvider(ABC):
             tools: Available tools
             tool_executor: Function to execute tools: (ToolUse) -> ToolResult
             max_iterations: Max tool calls before stopping
+            timeout: Optional timeout in seconds per completion call
 
         Returns:
             Final LLMResponse after tool use completes

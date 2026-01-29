@@ -93,6 +93,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        timeout: float | None = None,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
         # Prepare messages with system prompt
@@ -122,6 +123,8 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_key"] = self.api_key
         if self.api_base:
             kwargs["api_base"] = self.api_base
+        if timeout is not None:
+            kwargs["timeout"] = timeout
 
         # Add tools if provided
         if tools:
@@ -160,6 +163,7 @@ class LiteLLMProvider(LLMProvider):
         tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
         max_tokens: int = 4096,
+        timeout: float | None = None,
     ) -> LLMResponse:
         """Run a tool-use loop until the LLM produces a final response."""
         # Prepare messages with system prompt
@@ -188,6 +192,8 @@ class LiteLLMProvider(LLMProvider):
                 kwargs["api_key"] = self.api_key
             if self.api_base:
                 kwargs["api_base"] = self.api_base
+            if timeout is not None:
+                kwargs["timeout"] = timeout
 
             response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 

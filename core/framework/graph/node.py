@@ -165,7 +165,7 @@ class NodeSpec(BaseModel):
     )
     nullable_output_keys: list[str] = Field(
         default_factory=list,
-        description="Output keys that can be None without triggering validation errors"
+        description="Output keys that can be None without triggering validation errors",
     )
 
     # Optional schemas for validation and cleansing
@@ -216,6 +216,12 @@ class NodeSpec(BaseModel):
     max_validation_retries: int = Field(
         default=2,
         description="Maximum retries when Pydantic validation fails (with feedback to LLM)",
+    )
+
+    # Execution controls
+    timeout: float | None = Field(
+        default=None,
+        description="Max execution time in seconds for LLM calls",
     )
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
@@ -747,6 +753,7 @@ Keep the same JSON structure but with shorter content values.
                     tools=ctx.available_tools,
                     tool_executor=executor,
                     max_tokens=ctx.max_tokens,
+                    timeout=ctx.node_spec.timeout,
                 )
             else:
                 # Use JSON mode for llm_generate nodes with output_keys
@@ -766,6 +773,7 @@ Keep the same JSON structure but with shorter content values.
                     system=system,
                     json_mode=use_json_mode,
                     max_tokens=ctx.max_tokens,
+                    timeout=ctx.node_spec.timeout,
                 )
 
             # Check for truncation and retry with compaction if needed
@@ -801,6 +809,7 @@ Keep the same JSON structure but with shorter content values.
                         tools=ctx.available_tools,
                         tool_executor=executor,
                         max_tokens=ctx.max_tokens,
+                        timeout=ctx.node_spec.timeout,
                     )
                 else:
                     response = ctx.llm.complete(
@@ -808,6 +817,7 @@ Keep the same JSON structure but with shorter content values.
                         system=system,
                         json_mode=use_json_mode,
                         max_tokens=ctx.max_tokens,
+                        timeout=ctx.node_spec.timeout,
                     )
 
             if self._is_truncated(response) and expects_json:
@@ -1282,12 +1292,12 @@ Output ONLY the JSON object, nothing else."""
 
     def _build_messages(self, ctx: NodeContext) -> list[dict]:
         """Build the message list for the LLM."""
-        # Use Haiku to intelligently format inputs from memory
-        user_content = self._format_inputs_with_haiku(ctx)
+        # Use fast LLM to intelligently format inputs from memory
+        user_content = self._format_inputs_with_llm(ctx)
         return [{"role": "user", "content": user_content}]
 
-    def _format_inputs_with_haiku(self, ctx: NodeContext) -> str:
-        """Use Haiku to intelligently extract and format inputs from memory."""
+    def _format_inputs_with_llm(self, ctx: NodeContext) -> str:
+        """Use a fast LLM to intelligently extract and format inputs from memory."""
         if not ctx.node_spec.input_keys:
             return str(ctx.input_data)
 
@@ -1304,12 +1314,27 @@ Output ONLY the JSON object, nothing else."""
                     parts.append(f"{key}: {value}")
             return "\n".join(parts) if parts else str(ctx.input_data)
 
-        # Use Haiku to intelligently extract relevant data
-        import os
+        # Determine which fast LLM to use
+        # 1. Try runtime config
+        model = getattr(ctx.runtime.config, "fast_llm", None)
+        api_key = None
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            # Fallback to simple formatting if no API key
+        if not model:
+            # 2. Try environment variables
+            import os
+
+            if os.environ.get("CEREBRAS_API_KEY"):
+                model = "cerebras/llama-3.3-70b"
+                api_key = os.environ.get("CEREBRAS_API_KEY")
+            elif os.environ.get("OPENAI_API_KEY"):
+                model = "gpt-4o-mini"
+                api_key = os.environ.get("OPENAI_API_KEY")
+            elif os.environ.get("ANTHROPIC_API_KEY"):
+                model = "claude-3-5-haiku-20241022"
+                api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+        if not model:
+            # Fallback to simple formatting if no suitable provider found
             parts = []
             for key in ctx.node_spec.input_keys:
                 value = ctx.memory.read(key)
@@ -1317,7 +1342,7 @@ Output ONLY the JSON object, nothing else."""
                     parts.append(f"{key}: {value}")
             return "\n".join(parts)
 
-        # Build prompt for Haiku to extract clean values
+        # Build prompt for LLM to extract clean values
         import json
 
         # Smart truncation: truncate values rather than corrupting JSON
@@ -1340,17 +1365,17 @@ Output ONLY the JSON object, nothing else."""
         )
 
         try:
-            import anthropic
+            from framework.llm.litellm import LiteLLMProvider
 
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=1000,
+            llm = LiteLLMProvider(model=model, api_key=api_key, temperature=0.0)
+            result = llm.complete(
                 messages=[{"role": "user", "content": prompt}],
+                system="Extract JSON from text. Output only valid JSON.",
+                json_mode=True,
             )
 
-            # Parse Haiku's response
-            response_text = message.content[0].text.strip()
+            # Parse response
+            response_text = result.content.strip()
 
             # Try to extract JSON using balanced brace matching
             json_str = find_json_object(response_text)
@@ -1363,7 +1388,7 @@ Output ONLY the JSON object, nothing else."""
 
         except Exception as e:
             # Fallback to simple formatting on error
-            logger.warning(f"Haiku formatting failed: {e}, falling back to simple format")
+            logger.warning(f"Smart input formatting failed: {e}, falling back to simple format")
 
         # Fallback: simple key-value formatting
         parts = []
