@@ -195,12 +195,12 @@ Extract the answer for each question. Output JSON with question IDs as keys.
 Example format:
 {{"question-1": "answer here", "question-2": "answer here"}}"""
 
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=500,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            with anthropic.Anthropic(api_key=api_key) as client:
+                message = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=500,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
             # Parse Haiku's response
             import re
