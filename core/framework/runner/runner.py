@@ -209,6 +209,7 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str = "cerebras/zai-glm-4.7",
+        enable_tui: bool = False,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -220,13 +221,14 @@ class AgentRunner:
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to temp)
             model: Model to use - any LiteLLM-compatible model name
-                   (e.g., "claude-sonnet-4-20250514", "gpt-4o-mini", "gemini/gemini-pro")
+            enable_tui: If True, forces use of AgentRuntime with EventBus
         """
         self.agent_path = agent_path
         self.graph = graph
         self.goal = goal
         self.mock_mode = mock_mode
         self.model = model
+        self.enable_tui = enable_tui
 
         # Set up storage
         if storage_path:
@@ -268,6 +270,7 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str = "cerebras/zai-glm-4.7",
+        enable_tui: bool = False,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -298,6 +301,7 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+            enable_tui=enable_tui,
         )
 
     def register_tool(
@@ -444,8 +448,8 @@ class AgentRunner:
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
-        if self._uses_async_entry_points:
-            # Multi-entry-point mode: use AgentRuntime
+        if self._uses_async_entry_points or self.enable_tui:
+            # Multi-entry-point mode or TUI mode: use AgentRuntime
             self._setup_agent_runtime(tools, tool_executor)
         else:
             # Single-entry-point mode: use legacy GraphExecutor
@@ -514,6 +518,17 @@ class AgentRunner:
             )
             entry_points.append(ep)
 
+        # If TUI enabled but no entry points (single-entry agent), create default
+        if not entry_points and self.enable_tui and self.graph.entry_node:
+            logger.info("Creating default entry point for TUI")
+            entry_points.append(EntryPointSpec(
+                id="default",
+                name="Default",
+                entry_node=self.graph.entry_node,
+                trigger_type="manual",
+                isolation_level="shared",
+            ))
+
         # Create AgentRuntime with all entry points
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
@@ -546,7 +561,7 @@ class AgentRunner:
         Returns:
             ExecutionResult with output, path, and metrics
         """
-        if self._uses_async_entry_points:
+        if self._uses_async_entry_points or self.enable_tui:
             # Multi-entry-point mode: use AgentRuntime
             return await self._run_with_agent_runtime(
                 input_data=input_data or {},

@@ -56,6 +56,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
     )
+    run_parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Launch interactive terminal dashboard",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -211,6 +216,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             args.agent_path,
             mock_mode=args.mock,
             model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+            enable_tui=getattr(args, "tui", False),
         )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -235,8 +241,89 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("=" * 60)
         print()
 
-    # Run the agent
-    result = asyncio.run(runner.run(context))
+    # Run the agent (with TUI or standard)
+    if getattr(args, "tui", False):
+        from framework.tui.app import AdenTUI
+        
+        # Test Minimal App to isolate crash source
+        # from textual.app import App, ComposeResult
+        # from textual.widgets import Label, Header, Footer
+        
+        # class MinimalTUI(App):
+        #     CSS = "Screen { layout: vertical; }"
+        #     def compose(self) -> ComposeResult:
+        #         yield Header()
+        #         yield Label("Minimal TUI Mode - Debugging")
+        #         yield Footer()
+                
+        # We need to run inside the existing loop or use proper async handling
+        # Since cmd_run is called from sync main(), we need to use asyncio.run or similar
+        # But wait, result = asyncio.run(...) is below.
+        
+        pass  # Placeholder to indicate logic insertion point
+        
+        async def run_with_tui():
+            # Ensure runtime is ready
+            await runner.start()
+            
+            # Initialize TUI
+            # Initialize TUI app & Agent Task
+            agent_task = None
+            try:
+                # Access underlying runtime - ensure it exists
+                if runner._agent_runtime is None:
+                    # Force setup
+                    runner._setup()
+                    # Start again to be sure
+                    await runner.start()
+                    
+                app = AdenTUI(runner._agent_runtime)
+                # app = MinimalTUI()
+                # print("DEBUG: MinimalTUI initialized in cli.py")
+                
+                # Define agent task
+                async def run_agent_task():
+                    try:
+                        await runner.run(context)
+                    finally:
+                        # When agent finishes, we might want to keep TUI open or notify
+                        # No need to call the app, just let the task complete
+                        pass
+
+                # Run concurrently
+                agent_task = asyncio.create_task(run_agent_task())
+                
+                # Start TUI (blocks this coroutine until quit)
+                await app.run_async()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"TUI crashed during init/run: {e}")
+                logging.error(f"TUI Crash: {e}", exc_info=True)
+            
+            # Cleanup
+            if agent_task and not agent_task.done():
+                agent_task.cancel()
+                try:
+                    await agent_task
+                except asyncio.CancelledError:
+                    pass
+                    
+            # Return result if completed
+            if agent_task.done() and not agent_task.cancelled():
+                return agent_task.result()
+            return None
+
+        result = asyncio.run(run_with_tui())
+        
+        if result is None:
+            # TUI quit before completion or error
+            print("TUI session ended.")
+            runner.cleanup()
+            return 0
+    else:
+        # Standard execution
+        result = asyncio.run(runner.run(context))
 
     # Format output
     output = {
