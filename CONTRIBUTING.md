@@ -107,6 +107,12 @@ docs(readme): update installation instructions
 5. Update the CHANGELOG.md if applicable
 6. Request review from maintainers
 
+### Changelog Updates
+
+For user-facing changes (features, fixes, or behavior changes), contributors are encouraged to add a short entry under the `[Unreleased]` section of `CHANGELOG.md`.
+
+This helps improve project transparency and makes onboarding easier for new contributors.
+
 ### PR Title Format
 
 Follow the same convention as commits:

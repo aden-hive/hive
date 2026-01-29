@@ -70,3 +70,5 @@ exports/*
 .agent-builder-sessions/*
 
 .venv
+
+desktop.ini
