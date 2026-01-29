@@ -39,6 +39,15 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## Start Here
+
+New to Aden? Choose a starting point based on your goal:
+
+- **Build your first agent** → Follow the Quick Start section
+- **Evaluate the framework** → Read “Why Aden” and “How Aden Compares”
+- **Contribute to the framework** → Start with DEVELOPER.md and CONTRIBUTING.md
+
+
 ## What is Aden
 
 <p align="center">
