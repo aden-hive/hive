@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -253,7 +253,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[Руководство разработчика](DEVELOPER.md)** - Полное руководство для разработчиков
 - [Начало работы](docs/getting-started.md) - Инструкции по быстрой настройке
 - [Руководство по конфигурации](docs/configuration.md) - Все опции конфигурации
-- [Обзор архитектуры](docs/architecture.md) - Дизайн и структура системы
+- [Обзор архитектуры](docs/architecture/README.md) - Дизайн и структура системы
 
 ## Дорожная карта
 

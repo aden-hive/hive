@@ -151,7 +151,6 @@ hive/                                    # Repository root
 │       └── agent-workflow/              # Complete workflow 
 |           ├── SKILL.md
 │           └── examples
-orchestration
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
@@ -522,30 +521,7 @@ chore(deps): update React to 18.2.0
 
 ## Debugging
 
-### Frontend Debugging
 
-**React Developer Tools:**
-
-1. Install the [React DevTools browser extension](https://react.dev/learn/react-developer-tools)
-2. Open browser DevTools → React tab
-3. Inspect component tree, props, state, and hooks
-
-**VS Code Debugging:**
-
-1. Add Chrome debug configuration to `.vscode/launch.json`:
-
-```json
-{
-  "type": "chrome",
-  "request": "launch",
-  "name": "Debug Frontend",
-  "url": "http://localhost:3000",
-  "webRoot": "${workspaceFolder}/honeycomb/src"
-}
-```
-
-2. Start the dev server: `npm run dev -w honeycomb`
-3. Press F5 in VS Code
 
 ### Backend Debugging
 
@@ -720,14 +696,6 @@ kill -9 <PID>
 # Or change ports in config.yaml and regenerate
 ```
 
-### Node Modules Issues
-
-```bash
-# Clean everything and reinstall
-npm run clean
-rm -rf node_modules package-lock.json
-npm install
-```
 
 ### Docker Issues
 
@@ -739,15 +707,7 @@ docker compose build --no-cache
 docker compose up
 ```
 
-### TypeScript Errors After Pull
 
-```bash
-# Rebuild TypeScript
-npm run build
-
-# Or restart TS server in VS Code
-# Cmd/Ctrl + Shift + P → "TypeScript: Restart TS Server"
-```
 
 ### Environment Variables Not Loading
 
@@ -757,24 +717,12 @@ npm run generate:env
 
 # Verify files exist
 cat .env
-cat honeycomb/.env
 cat hive/.env
 
 # Restart dev servers after changing env
 ```
 
-### Tests Failing
 
-```bash
-# Run with verbose output
-npm run test -w honeycomb -- --reporter=verbose
-
-# Run single test file
-npm run test -w honeycomb -- src/components/Button.test.tsx
-
-# Clear test cache
-npm run test -w honeycomb -- --clearCache
-```
 
 ---
 
