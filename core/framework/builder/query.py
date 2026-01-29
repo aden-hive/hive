@@ -355,8 +355,7 @@ class BuilderQuery:
                     "target": goal_id,
                     "reason": f"Goal success rate is only {patterns.success_rate:.1%}",
                     "recommendation": (
-                        "Consider restructuring the agent graph "
-                        "or improving goal definition"
+                        "Consider restructuring the agent graph or improving goal definition"
                     ),
                     "priority": "high",
                 }
@@ -428,9 +427,7 @@ class BuilderQuery:
             # Check for constraint issues
             if decision.active_constraints:
                 constraints = ", ".join(decision.active_constraints)
-                suggestions.append(
-                    f"Review constraints: {constraints} - may be too restrictive"
-                )
+                suggestions.append(f"Review constraints: {constraints} - may be too restrictive")
 
         # Check for reported problems with suggestions
         for problem in run.problems:
