@@ -669,6 +669,16 @@ Keep the same JSON structure but with shorter content values.
             return match.group(1).strip()
         return content
 
+    def _create_output_model(self, name: str, keys: list[str]) -> type[BaseModel]:
+        """Dynamically create a Pydantic model for output validation."""
+        # Clean name to be a valid class identifier
+        clean_name = "".join(c for c in name if c.isalnum() or c == "_")
+        if not clean_name:
+            clean_name = "DynamicOutput"
+
+        fields = {key: (str, Field(..., description=f"Output for {key}")) for key in keys}
+        return create_model(clean_name, **fields)
+
     async def execute(self, ctx: NodeContext) -> NodeResult:
         """Execute the LLM node."""
         import time
@@ -684,6 +694,23 @@ Keep the same JSON structure but with shorter content values.
                 f"Declared tools: {ctx.node_spec.tools}. "
                 "Register tools via ToolRegistry before running the agent.",
             )
+
+        # --- Priority Logic: Explicit Model > Auto-generated > None ---
+        output_model = None
+        if ctx.node_spec.output_model:
+            output_model = ctx.node_spec.output_model
+        elif ctx.node_spec.output_keys and len(ctx.node_spec.output_keys) >= 1:
+            if ctx.node_spec.node_type in ("llm_generate", "llm_tool_use"):
+                try:
+                    output_model = self._create_output_model(
+                        f"{ctx.node_spec.name}_Output", ctx.node_spec.output_keys
+                    )
+                    logger.info(
+                        f"          Auto-generated structured output model for keys: "
+                        f"{ctx.node_spec.output_keys}"
+                    )
+                except Exception as e:
+                    logger.warning(f"          Failed to auto-generate output model: {e}")
 
         ctx.runtime.set_node(ctx.node_id)
 
@@ -703,6 +730,9 @@ Keep the same JSON structure but with shorter content values.
         )
 
         start = time.time()
+
+        # Initialize scope variable
+        use_json_mode = False
 
         try:
             # Build messages
@@ -749,21 +779,29 @@ Keep the same JSON structure but with shorter content values.
                     max_tokens=ctx.max_tokens,
                 )
             else:
-                # Check if we should use structured outputs
-                use_structured = (
-                    ctx.node_spec.node_type == "llm_generate"
+                # Use JSON mode for llm_generate nodes with output_keys
+                # rely on output_model if present, else fallback to JSON mode check
+                use_json_mode = (
+                    output_model is None
+                    and ctx.node_spec.node_type == "llm_generate"
                     and ctx.node_spec.output_keys
                     and len(ctx.node_spec.output_keys) >= 1
                 )
+
                 if use_json_mode:
                     logger.info(
                         f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}"
+                    )
+                elif output_model:
+                    logger.info(
+                        f"         📋 Enforcing Structured Output Schema: {output_model.__name__}"
                     )
 
                 response = ctx.llm.complete(
                     messages=messages,
                     system=system,
                     json_mode=use_json_mode,
+                    response_format=output_model,
                     max_tokens=ctx.max_tokens,
                 )
 
@@ -806,6 +844,7 @@ Keep the same JSON structure but with shorter content values.
                         messages=compaction_messages,
                         system=system,
                         json_mode=use_json_mode,
+                        response_format=output_model,
                         max_tokens=ctx.max_tokens,
                     )
 
@@ -816,9 +855,7 @@ Keep the same JSON structure but with shorter content values.
                 )
 
             # Phase 2: Validation retry loop for Pydantic models
-            max_validation_retries = (
-                ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
-            )
+            max_validation_retries = ctx.node_spec.max_validation_retries if output_model else 0
             validation_attempt = 0
             total_input_tokens = 0
             total_output_tokens = 0
@@ -837,26 +874,29 @@ Keep the same JSON structure but with shorter content values.
                 logger.info(f"      ← Response: {response_preview}")
 
                 # If no output_model, break immediately (no validation needed)
-                if ctx.node_spec.output_model is None:
+                if output_model is None:
                     break
 
                 # Try to parse and validate the response
                 try:
                     import json
 
-                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
+                    try:
+                        parsed = json.loads(response.content)
+                    except json.JSONDecodeError:
+                        parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
 
                     if isinstance(parsed, dict):
                         from framework.graph.validator import OutputValidator
 
                         validator = OutputValidator()
                         validation_result, validated_model = validator.validate_with_pydantic(
-                            parsed, ctx.node_spec.output_model
+                            parsed, output_model
                         )
 
                         if validation_result.success:
                             # Validation passed, break out of retry loop
-                            model_name = ctx.node_spec.output_model.__name__
+                            model_name = output_model.__name__
                             logger.info(f"      ✓ Pydantic validation passed for {model_name}")
                             break
                         else:
@@ -866,7 +906,7 @@ Keep the same JSON structure but with shorter content values.
                             if validation_attempt <= max_validation_retries:
                                 # Add validation feedback to messages and retry
                                 feedback = validator.format_validation_feedback(
-                                    validation_result, ctx.node_spec.output_model
+                                    validation_result, output_model
                                 )
                                 logger.warning(
                                     f"      ⚠ Pydantic validation failed "
@@ -895,6 +935,7 @@ Keep the same JSON structure but with shorter content values.
                                         messages=current_messages,
                                         system=system,
                                         json_mode=use_json_mode,
+                                        response_format=output_model,
                                         max_tokens=ctx.max_tokens,
                                     )
                                 continue  # Retry validation
@@ -952,61 +993,57 @@ Keep the same JSON structure but with shorter content values.
             ):
                 try:
                     import json
+
                     parsed = None
 
-                    # Try to extract JSON from response
-                    parsed = self._extract_json(
-                        response.content, ctx.node_spec.output_keys, self.cleanup_llm_model
-                    )
+                    try:
+                        parsed = json.loads(response.content)
+                    except json.JSONDecodeError:
+                        pass
+
+                    if parsed is None:
+                        parsed = self._extract_json(
+                            response.content, ctx.node_spec.output_keys, self.cleanup_llm_model
+                        )
 
                     # If parsed successfully, write each field to its corresponding output key
-                    # Use validate=False since LLM output legitimately contains text that
-                    # may trigger false positives (e.g., "from OpenAI" matches "from ")
                     if isinstance(parsed, dict):
-                        # If we have output_model, the validation already happened in the retry loop
-                        if ctx.node_spec.output_model is not None:
+                        if output_model is not None:
                             from framework.graph.validator import OutputValidator
 
                             validator = OutputValidator()
                             validation_result, validated_model = validator.validate_with_pydantic(
-                                parsed, ctx.node_spec.output_model
+                                parsed, output_model
                             )
-                            # Use validated model's dict representation
                             if validated_model:
                                 parsed = validated_model.model_dump()
 
                         for key in ctx.node_spec.output_keys:
                             if key in parsed:
                                 value = parsed[key]
-                                # Strip code block wrappers from string values
                                 if isinstance(value, str):
                                     value = self._strip_code_blocks(value)
                                 ctx.memory.write(key, value, validate=False)
                                 output[key] = value
                             elif key in ctx.input_data:
-                                # Key not in JSON but exists in input - pass through
                                 ctx.memory.write(key, ctx.input_data[key], validate=False)
                                 output[key] = ctx.input_data[key]
                             else:
-                                # Key not in JSON or input, write whole response (stripped)
                                 stripped_content = self._strip_code_blocks(response.content)
                                 ctx.memory.write(key, stripped_content, validate=False)
                                 output[key] = stripped_content
                     else:
-                        # Not a dict, fall back to writing entire response to all keys (stripped)
                         stripped_content = self._strip_code_blocks(response.content)
                         for key in ctx.node_spec.output_keys:
                             ctx.memory.write(key, stripped_content, validate=False)
                             output[key] = stripped_content
 
                 except (json.JSONDecodeError, Exception) as e:
-                    # JSON extraction failed - fail explicitly instead of polluting memory
                     logger.error(f"      ✗ Failed to extract structured output: {e}")
                     logger.error(
                         f"      Raw response (first 500 chars): {response.content[:500]}..."
                     )
 
-                    # Return failure instead of writing garbage to all keys
                     return NodeResult(
                         success=False,
                         error=(
@@ -1017,12 +1054,12 @@ Keep the same JSON structure but with shorter content values.
                         tokens_used=response.input_tokens + response.output_tokens,
                         latency_ms=latency_ms,
                     )
-                    # JSON extraction failed completely - still strip code blocks
-                    # logger.warning(f"      ⚠ Failed to extract JSON output: {e}")
-                    # stripped_content = self._strip_code_blocks(response.content)
-                    # for key in ctx.node_spec.output_keys:
-                    #     ctx.memory.write(key, stripped_content)
-                    #     output[key] = stripped_content
+                # JSON extraction failed completely - still strip code blocks
+                # logger.warning(f"      ⚠ Failed to extract JSON output: {e}")
+                # stripped_content = self._strip_code_blocks(response.content)
+                # for key in ctx.node_spec.output_keys:
+                #     ctx.memory.write(key, stripped_content)
+                #     output[key] = stripped_content
             else:
                 # For non-llm_generate or single output nodes, write entire response (stripped)
                 stripped_content = self._strip_code_blocks(response.content)
@@ -1056,10 +1093,7 @@ Keep the same JSON structure but with shorter content values.
 
         # All outputs are treated as strings by default for maximum flexibility
         # unless we extend NodeSpec to support typing.
-        fields = {
-            key: (str, Field(..., description=f"Output for {key}"))
-            for key in keys
-        }
+        fields = {key: (str, Field(..., description=f"Output for {key}")) for key in keys}
         return create_model(clean_name, **fields)
 
     def _parse_output(self, content: str, node_spec: NodeSpec) -> dict[str, Any]:
