@@ -8,12 +8,12 @@ This client fetches tokens and delegates refresh operations to Aden.
 Usage:
     # API key loaded from ADEN_API_KEY environment variable by default
     client = AdenCredentialClient(AdenClientConfig(
-        base_url="https://hive.adenhq.com",
+        base_url="https://staging-hive.adenhq.com",
     ))
 
     # Or explicitly provide the API key
     client = AdenCredentialClient(AdenClientConfig(
-        base_url="https://hive.adenhq.com",
+        base_url="https://staging-hive.adenhq.com",
         api_key="your-api-key",
     ))
 
@@ -85,7 +85,7 @@ class AdenClientConfig:
     """Configuration for Aden API client."""
 
     base_url: str
-    """Base URL of the Aden server (e.g., 'https://hive.adenhq.com')."""
+    """Base URL of the Aden server (e.g., 'https://staging-hive.adenhq.com')."""
 
     api_key: str | None = None
     """Agent's API key for authenticating with Aden.
@@ -199,7 +199,7 @@ class AdenCredentialClient:
     Usage:
         # API key loaded from ADEN_API_KEY environment variable
         config = AdenClientConfig(
-            base_url="https://hive.adenhq.com",
+            base_url="https://staging-hive.adenhq.com",
         )
 
         client = AdenCredentialClient(config)

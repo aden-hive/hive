@@ -224,19 +224,17 @@ declare -A PROVIDER_IDS=(
     ["MISTRAL_API_KEY"]="mistral"
     ["TOGETHER_API_KEY"]="together"
     ["DEEPSEEK_API_KEY"]="deepseek"
-    ["CLAUDE_CODE"]="anthropic"
 )
 
 declare -A DEFAULT_MODELS=(
-    ["anthropic"]="claude-sonnet-4-20250514"
+    ["anthropic"]="claude-sonnet-4-5-20250929"
     ["openai"]="gpt-4o"
-    ["gemini"]="gemini/gemini-2.0-flash"
-    ["google"]="gemini/gemini-2.0-flash"
-    ["groq"]="groq/llama-3.3-70b-versatile"
-    ["cerebras"]="cerebras/llama-3.3-70b"
-    ["mistral"]="mistral/mistral-large-latest"
-    ["together"]="together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo"
-    ["deepseek"]="deepseek/deepseek-chat"
+    ["gemini"]="gemini-3.0-flash-preview"
+    ["groq"]="moonshotai/kimi-k2-instruct-0905"
+    ["cerebras"]="zai-glm-4.7"
+    ["mistral"]="mistral-large-latest"
+    ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    ["deepseek"]="deepseek-chat"
 )
 
 # Configuration directory
@@ -280,33 +278,11 @@ if [ -f "$HOME/.env" ]; then
     set +a
 fi
 
-# Check for Claude Code subscription
-CLAUDE_CREDS_FILE="$HOME/.claude/.credentials.json"
-CLAUDE_TOKEN=""
-if [ -f "$CLAUDE_CREDS_FILE" ]; then
-    CLAUDE_TOKEN=$($PYTHON_CMD -c "
-import json
-try:
-    with open('$CLAUDE_CREDS_FILE') as f:
-        creds = json.load(f)
-    token = creds.get('claudeAiOauth', {}).get('accessToken', '')
-    if token:
-        print(token)
-except:
-    pass
-" 2>/dev/null)
-fi
-
 # Find all available API keys
 FOUND_PROVIDERS=()      # Display names for UI
 FOUND_ENV_VARS=()       # Corresponding env var names
 SELECTED_PROVIDER_ID="" # Will hold the chosen provider ID
 SELECTED_ENV_VAR=""     # Will hold the chosen env var
-
-if [ -n "$CLAUDE_TOKEN" ]; then
-    FOUND_PROVIDERS+=("Claude Code subscription")
-    FOUND_ENV_VARS+=("CLAUDE_CODE")
-fi
 
 for env_var in "${!PROVIDER_NAMES[@]}"; do
     value="${!env_var}"
@@ -330,12 +306,6 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
             SELECTED_ENV_VAR="${FOUND_ENV_VARS[0]}"
             SELECTED_PROVIDER_ID="${PROVIDER_IDS[$SELECTED_ENV_VAR]}"
 
-            # If Claude token, export it as ANTHROPIC_API_KEY
-            if [ "$SELECTED_ENV_VAR" = "CLAUDE_CODE" ]; then
-                export ANTHROPIC_API_KEY="$CLAUDE_TOKEN"
-                SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
-            fi
-
             echo ""
             echo -e "${GREEN}⬢${NC} Using ${FOUND_PROVIDERS[0]}"
         fi
@@ -358,12 +328,6 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
                 idx=$((choice - 1))
                 SELECTED_ENV_VAR="${FOUND_ENV_VARS[$idx]}"
                 SELECTED_PROVIDER_ID="${PROVIDER_IDS[$SELECTED_ENV_VAR]}"
-
-                # If Claude token, export it as ANTHROPIC_API_KEY
-                if [ "$SELECTED_ENV_VAR" = "CLAUDE_CODE" ]; then
-                    export ANTHROPIC_API_KEY="$CLAUDE_TOKEN"
-                    SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
-                fi
 
                 echo ""
                 echo -e "${GREEN}⬢${NC} Selected: ${FOUND_PROVIDERS[$idx]}"

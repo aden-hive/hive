@@ -457,14 +457,27 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         return None
 
     try:
-        from aden_tools.credentials import CredentialManager
+        from aden_tools.credentials import CREDENTIAL_SPECS
 
-        cred_manager = CredentialManager()
-        missing_creds = cred_manager.get_missing_for_tools(tools_list)
+        store = _get_credential_store()
 
-        if missing_creds:
-            cred_errors = []
-            for cred_name, spec in missing_creds:
+        # Build tool -> credential mapping
+        tool_to_cred: dict[str, str] = {}
+        for cred_name, spec in CREDENTIAL_SPECS.items():
+            for tool_name in spec.tools:
+                tool_to_cred[tool_name] = cred_name
+
+        # Find missing credentials
+        cred_errors = []
+        checked: set[str] = set()
+        for tool_name in tools_list:
+            cred_name = tool_to_cred.get(tool_name)
+            if cred_name is None or cred_name in checked:
+                continue
+            checked.add(cred_name)
+            spec = CREDENTIAL_SPECS[cred_name]
+            cred_id = spec.credential_id or cred_name
+            if spec.required and not store.is_available(cred_id):
                 affected_tools = [t for t in tools_list if t in spec.tools]
                 cred_errors.append(
                     {
@@ -476,15 +489,16 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
                     }
                 )
 
+        if cred_errors:
             return {
                 "valid": False,
                 "errors": [f"Missing credentials for tools: {[e['env_var'] for e in cred_errors]}"],
                 "missing_credentials": cred_errors,
-                "action_required": "Add the credentials to your .env file and retry",
+                "action_required": "Store credentials via store_credential and retry",
                 "example": f"Add to .env:\n{cred_errors[0]['env_var']}=your_key_here",
                 "message": (
                     "Cannot add node: missing API credentials. "
-                    "Add them to .env and retry this command."
+                    "Store them via store_credential and retry this command."
                 ),
             }
     except ImportError as e:
@@ -492,7 +506,7 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         return {
             "valid": True,
             "warnings": [
-                f"⚠️ Credential validation SKIPPED: aden_tools not available ({e}). "
+                f"Credential validation SKIPPED: aden_tools not available ({e}). "
                 "Tools may fail at runtime if credentials are missing. "
                 "Add tools/src to PYTHONPATH to enable validation."
             ],
@@ -3234,18 +3248,31 @@ def load_exported_plan(
 # =============================================================================
 
 
-def _get_credential_manager():
-    """Get a CredentialManager instance."""
-    from aden_tools.credentials import CredentialManager
-
-    return CredentialManager()
-
-
 def _get_credential_store():
-    """Get a CredentialStore with encrypted file storage at ~/.hive/credentials."""
-    from framework.credentials import CredentialStore
+    """Get a CredentialStore that checks encrypted files and env vars.
 
-    return CredentialStore.with_encrypted_storage()
+    Uses CompositeStorage: encrypted file storage (primary) with env var fallback.
+    This ensures credentials stored via `store_credential` AND env vars are both found.
+    """
+    from framework.credentials import CredentialStore
+    from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+
+    # Build env var mapping from CREDENTIAL_SPECS for the fallback
+    env_mapping: dict[str, str] = {}
+    try:
+        from aden_tools.credentials import CREDENTIAL_SPECS
+
+        for name, spec in CREDENTIAL_SPECS.items():
+            cred_id = spec.credential_id or name
+            env_mapping[cred_id] = spec.env_var
+    except ImportError:
+        pass
+
+    storage = CompositeStorage(
+        primary=EncryptedFileStorage(),
+        fallbacks=[EnvVarStorage(env_mapping=env_mapping)],
+    )
+    return CredentialStore(storage=storage)
 
 
 @mcp.tool()
@@ -3259,43 +3286,59 @@ def check_missing_credentials(
     Use this before running or testing an agent to identify what needs to be configured.
     """
     try:
+        from aden_tools.credentials import CREDENTIAL_SPECS
+
         from framework.runner import AgentRunner
 
         runner = AgentRunner.load(agent_path)
         runner.validate()
 
-        cred_manager = _get_credential_manager()
+        store = _get_credential_store()
         info = runner.info()
-
-        # Gather missing tool credentials
-        missing_tools = cred_manager.get_missing_for_tools(info.required_tools)
-
-        # Gather missing node-type credentials
         node_types = list({node.node_type for node in runner.graph.nodes})
-        missing_nodes = cred_manager.get_missing_for_node_types(node_types)
 
-        # Deduplicate
-        seen = set()
+        # Build reverse mappings: tool/node_type -> credential name
+        tool_to_cred: dict[str, str] = {}
+        node_type_to_cred: dict[str, str] = {}
+        for cred_name, spec in CREDENTIAL_SPECS.items():
+            for tool_name in spec.tools:
+                tool_to_cred[tool_name] = cred_name
+            for nt in spec.node_types:
+                node_type_to_cred[nt] = cred_name
+
+        # Gather missing credentials (tools + node types), deduplicated
+        seen: set[str] = set()
         all_missing = []
-        for name, spec in missing_tools + missing_nodes:
-            if spec.env_var not in seen:
-                seen.add(spec.env_var)
-                all_missing.append(
-                    {
-                        "credential_name": name,
-                        "env_var": spec.env_var,
-                        "description": spec.description,
-                        "help_url": spec.help_url,
-                        "tools": spec.tools,
-                    }
-                )
+
+        for name_list, mapping in [
+            (info.required_tools, tool_to_cred),
+            (node_types, node_type_to_cred),
+        ]:
+            for item_name in name_list:
+                cred_name = mapping.get(item_name)
+                if cred_name is None or cred_name in seen:
+                    continue
+                seen.add(cred_name)
+                spec = CREDENTIAL_SPECS[cred_name]
+                cred_id = spec.credential_id or cred_name
+                if spec.required and not store.is_available(cred_id):
+                    all_missing.append(
+                        {
+                            "credential_name": cred_name,
+                            "env_var": spec.env_var,
+                            "description": spec.description,
+                            "help_url": spec.help_url,
+                            "tools": spec.tools,
+                        }
+                    )
 
         # Also check what's already set
-        all_specs = cred_manager._specs
         available = []
-        for name, spec in all_specs.items():
-            if spec.env_var not in seen and cred_manager.is_available(name):
-                # Only include if relevant to this agent's tools/nodes
+        for name, spec in CREDENTIAL_SPECS.items():
+            if name in seen:
+                continue
+            cred_id = spec.credential_id or name
+            if store.is_available(cred_id):
                 relevant_tools = [t for t in spec.tools if t in info.required_tools]
                 relevant_nodes = [n for n in spec.node_types if n in node_types]
                 if relevant_tools or relevant_nodes:
@@ -3469,4 +3512,4 @@ def verify_credentials(
 # =============================================================================
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="stdio")

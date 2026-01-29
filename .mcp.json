@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "agent-builder": {
-      "command": "python",
+      "command": ".venv/bin/python",
       "args": ["-m", "framework.mcp.agent_builder_server"],
       "cwd": "core",
       "env": {
@@ -9,7 +9,7 @@
       }
     },
     "tools": {
-      "command": "python",
+      "command": ".venv/bin/python",
       "args": ["mcp_server.py", "--stdio"],
       "cwd": "tools",
       "env": {

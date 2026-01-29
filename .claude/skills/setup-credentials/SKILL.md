@@ -4,7 +4,7 @@ description: Set up and install credentials for an agent. Detects missing creden
 license: Apache-2.0
 metadata:
   author: hive
-  version: "2.0"
+  version: "2.1"
   type: utility
 ---
 
@@ -45,18 +45,32 @@ validation = runner.validate()
 # validation.warnings contains detailed messages with help URLs
 ```
 
-Alternatively, inspect manually:
+Alternatively, check the credential store directly:
 
 ```python
-from aden_tools.credentials import CredentialManager
+from core.framework.credentials import CredentialStore
 
-creds = CredentialManager()
+# Use encrypted storage (default: ~/.hive/credentials)
+store = CredentialStore.with_encrypted_storage()
 
-# For tool-based credentials
-missing_tools = creds.get_missing_for_tools(agent_tool_names)
+# Check what's available
+available = store.list_credentials()
+print(f"Available credentials: {available}")
 
-# For node-type credentials (e.g., LLM nodes need ANTHROPIC_API_KEY)
-missing_nodes = creds.get_missing_for_node_types(agent_node_types)
+# Check if specific credential exists
+if store.is_available("hubspot"):
+    print("HubSpot credential found")
+else:
+    print("HubSpot credential missing")
+```
+
+To see all known credential specs (for help URLs and setup instructions):
+
+```python
+from aden_tools.credentials import CREDENTIAL_SPECS
+
+for name, spec in CREDENTIAL_SPECS.items():
+    print(f"{name}: env_var={spec.env_var}, aden={spec.aden_supported}")
 ```
 
 ### Step 3: Present Auth Options for Each Missing Credential
@@ -64,11 +78,25 @@ missing_nodes = creds.get_missing_for_node_types(agent_node_types)
 For each missing credential, check what authentication methods are available:
 
 ```python
-from aden_tools.credentials import CredentialManager
+from aden_tools.credentials import CREDENTIAL_SPECS
 
-creds = CredentialManager()
-auth_options = creds.get_auth_options("hubspot")  # Returns: ['aden', 'direct', 'custom']
-setup_info = creds.get_setup_instructions("hubspot")
+spec = CREDENTIAL_SPECS.get("hubspot")
+if spec:
+    # Determine available auth options
+    auth_options = []
+    if spec.aden_supported:
+        auth_options.append("aden")
+    if spec.direct_api_key_supported:
+        auth_options.append("direct")
+    auth_options.append("custom")  # Always available
+
+    # Get setup info
+    setup_info = {
+        "env_var": spec.env_var,
+        "description": spec.description,
+        "help_url": spec.help_url,
+        "api_key_instructions": spec.api_key_instructions,
+    }
 ```
 
 Present the available options using AskUserQuestion:
@@ -98,6 +126,14 @@ Choose how to configure HUBSPOT_ACCESS_TOKEN:
 
 This is the recommended flow for supported integrations (HubSpot, etc.).
 
+**How Aden OAuth Works:**
+
+The ADEN_API_KEY represents a user who has already completed OAuth authorization on Aden's platform. When users sign up and connect integrations on Aden, those OAuth tokens are stored server-side. Having an ADEN_API_KEY means:
+
+1. User has an Aden account
+2. User has already authorized integrations (HubSpot, etc.) via OAuth on Aden
+3. We just need to sync those credentials down to the local credential store
+
 **4.1a. Check for ADEN_API_KEY**
 
 ```python
@@ -105,14 +141,17 @@ import os
 aden_key = os.environ.get("ADEN_API_KEY")
 ```
 
-If not set, guide user to get one:
+If not set, guide user to get one from Aden (this is where they do OAuth):
 
 ```python
 from aden_tools.credentials import open_browser, get_aden_setup_url
 
-# Open browser to get Aden API key
+# Open browser to Aden - user will sign up and connect integrations there
 url = get_aden_setup_url()  # https://integration.adenhq.com/setup
 success, msg = open_browser(url)
+
+print("Please sign in to Aden and connect your integrations (HubSpot, etc.).")
+print("Once done, copy your API key and return here.")
 ```
 
 Ask user to provide the ADEN_API_KEY they received.
@@ -155,49 +194,64 @@ config = json.loads(config_path.read_text()) if config_path.exists() else {}
 
 config["aden"] = {
     "api_key_configured": True,
-    "api_url": "https://hive.adenhq.com"
+    "api_url": "https://staging-hive.adenhq.com"
 }
 
 config_path.parent.mkdir(parents=True, exist_ok=True)
 config_path.write_text(json.dumps(config, indent=2))
 ```
 
-**4.1c. Open Browser for OAuth2 Authorization**
+**4.1c. Sync Credentials from Aden Server**
 
-```python
-from aden_tools.credentials import open_browser, get_aden_auth_url
-
-# Get integration ID from credential spec
-setup_info = creds.get_setup_instructions("hubspot")
-provider_name = setup_info["aden_provider_name"]  # "hubspot"
-
-auth_url = get_aden_auth_url(provider_name)  # https://integration.adenhq.com/connect/hubspot
-success, msg = open_browser(auth_url)
-
-print("Please complete the OAuth2 authorization in your browser.")
-print("Once done, return here to continue.")
-```
-
-Wait for user to confirm they've completed authorization.
-
-**4.1d. Sync Credentials from Aden Server**
+Since the user has already authorized integrations on Aden, use the one-liner factory method:
 
 ```python
 from core.framework.credentials import CredentialStore
-from core.framework.credentials.aden import AdenCredentialClient
 
-store = CredentialStore.with_encrypted_storage()
-aden_client = AdenCredentialClient(
-    api_url="https://hive.adenhq.com",
-    api_key=aden_api_key,
+# This single call handles everything:
+# - Creates encrypted local storage at ~/.hive/credentials
+# - Configures Aden client from ADEN_API_KEY env var
+# - Syncs all credentials from Aden server automatically
+store = CredentialStore.with_aden_sync(
+    base_url="https://staging-hive.adenhq.com",
+    auto_sync=True,  # Syncs on creation
 )
 
-# Sync credentials from Aden server
-synced = aden_client.sync_to_store(store)
-print(f"Synced {len(synced)} credentials from Aden")
+# Check what was synced
+synced = store.list_credentials()
+print(f"Synced credentials: {synced}")
+
+# If the required credential wasn't synced, the user hasn't authorized it on Aden yet
+if "hubspot" not in synced:
+    print("HubSpot not found in your Aden account.")
+    print("Please visit https://integration.adenhq.com to connect HubSpot, then try again.")
 ```
 
-**4.1e. Run Health Check**
+For more control over the sync process:
+
+```python
+from core.framework.credentials import CredentialStore
+from core.framework.credentials.aden import (
+    AdenCredentialClient,
+    AdenClientConfig,
+    AdenSyncProvider,
+)
+
+# Create client (API key loaded from ADEN_API_KEY env var)
+client = AdenCredentialClient(AdenClientConfig(
+    base_url="https://staging-hive.adenhq.com",
+))
+
+# Create provider and store
+provider = AdenSyncProvider(client=client)
+store = CredentialStore.with_encrypted_storage()
+
+# Manual sync
+synced_count = provider.sync_all(store)
+print(f"Synced {synced_count} credentials from Aden")
+```
+
+**4.1d. Run Health Check**
 
 ```python
 from aden_tools.credentials import check_credential_health
@@ -221,14 +275,20 @@ For users who prefer manual API key management.
 **4.2a. Show Setup Instructions**
 
 ```python
-setup_info = creds.get_setup_instructions("hubspot")
-print(setup_info["api_key_instructions"])
+from aden_tools.credentials import CREDENTIAL_SPECS
+
+spec = CREDENTIAL_SPECS.get("hubspot")
+if spec and spec.api_key_instructions:
+    print(spec.api_key_instructions)
 # Output:
 # To get a HubSpot Private App token:
 # 1. Go to HubSpot Settings > Integrations > Private Apps
 # 2. Click "Create a private app"
 # 3. Name your app (e.g., "Hive Agent")
 # ...
+
+if spec and spec.help_url:
+    print(f"More info: {spec.help_url}")
 ```
 
 **4.2b. Collect API Key from User**
@@ -394,9 +454,13 @@ All credential specs are defined in `tools/src/aden_tools/credentials/`:
 
 | File              | Category      | Credentials                                   | Aden Supported |
 | ----------------- | ------------- | --------------------------------------------- | -------------- |
-| `llm.py`          | LLM Providers | `anthropic`, `openai`, `cerebras`, `groq`     | No             |
+| `llm.py`          | LLM Providers | `anthropic`                                   | No             |
 | `search.py`       | Search Tools  | `brave_search`, `google_search`, `google_cse` | No             |
 | `integrations.py` | Integrations  | `hubspot`                                     | Yes            |
+
+**Note:** Additional LLM providers (Cerebras, Groq, OpenAI) are handled by LiteLLM via environment
+variables (`CEREBRAS_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`) but are not yet in CREDENTIAL_SPECS.
+Add them to `llm.py` as needed.
 
 To check what's registered:
 
@@ -404,6 +468,40 @@ To check what's registered:
 from aden_tools.credentials import CREDENTIAL_SPECS
 for name, spec in CREDENTIAL_SPECS.items():
     print(f"{name}: aden={spec.aden_supported}, direct={spec.direct_api_key_supported}")
+```
+
+## Migration: CredentialManager → CredentialStore
+
+**CredentialManager is deprecated.** Use CredentialStore instead.
+
+| Old (Deprecated)                              | New (Recommended)                                    |
+| --------------------------------------------- | ---------------------------------------------------- |
+| `CredentialManager()`                         | `CredentialStore.with_encrypted_storage()`           |
+| `creds.get("hubspot")`                        | `store.get("hubspot")` or `store.get_key("hubspot", "access_token")` |
+| `creds.validate_for_tools(tools)`             | Use `store.is_available(cred_id)` per credential     |
+| `creds.get_auth_options("hubspot")`           | Check `CREDENTIAL_SPECS["hubspot"].aden_supported`   |
+| `creds.get_setup_instructions("hubspot")`     | Access `CREDENTIAL_SPECS["hubspot"]` directly        |
+
+**Why migrate?**
+
+- **CredentialStore** supports encrypted storage, multi-key credentials, template resolution, and automatic token refresh
+- **CredentialManager** only reads from environment variables and .env files (no encryption, no refresh)
+- **CredentialStoreAdapter** exists for backward compatibility during migration
+
+```python
+# Old way (deprecated)
+from aden_tools.credentials import CredentialManager
+creds = CredentialManager()
+token = creds.get("hubspot")
+
+# New way (recommended)
+from core.framework.credentials import CredentialStore
+store = CredentialStore.with_encrypted_storage()
+token = store.get("hubspot")
+
+# With Aden sync (recommended for OAuth integrations)
+store = CredentialStore.with_aden_sync()
+token = store.get_key("hubspot", "access_token")
 ```
 
 ## Example Session
@@ -447,7 +545,10 @@ Agent: Great! Let me check if you have an Aden API key configured...
 [Checks for ADEN_API_KEY, not found]
 [Opens browser to integration.adenhq.com/setup]
 
-Agent: I've opened the Aden setup page. Please sign in and copy your API key.
+Agent: I've opened Aden's setup page. Please:
+  1. Sign in or create an account
+  2. Connect your HubSpot account (OAuth happens on Aden's site)
+  3. Copy the API key shown after setup
 
 [AskUserQuestion: "Please provide your Aden API key:"]
 [User provides key]
@@ -457,20 +558,15 @@ Agent: Would you like me to save this to your shell config (~/.zshrc) for future
 [User approves]
 [Saves to ~/.zshrc and ~/.hive/configuration.json]
 
-Agent: Now let's connect your HubSpot account.
+Agent: Let me sync your credentials from Aden...
 
-[Opens browser to integration.adenhq.com/connect/hubspot]
-
-Agent: Please complete the OAuth2 authorization in your browser, then return here.
-
-[User confirms completion]
-[Syncs credentials from Aden server]
+[Syncs credentials from Aden server - OAuth already done on Aden's side]
 [Runs health check]
 
 Agent: HubSpot credentials validated successfully!
 
 All credentials are now configured:
   - ANTHROPIC_API_KEY: Stored in encrypted credential store
-  - HUBSPOT_ACCESS_TOKEN: Connected via Aden OAuth2
+  - HUBSPOT_ACCESS_TOKEN: Synced from Aden (OAuth completed on Aden)
   - Validation passed - your agent is ready to run!
 ```
