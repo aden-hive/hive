@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 # Platform detection
@@ -65,10 +65,9 @@ def run_command(cmd: list, error_msg: str, cwd: str = None):
             check=True,
             cwd=cwd or os.getcwd(),
             shell=IS_WINDOWS,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             text=True,
-            encoding='utf-8'
+            encoding="utf-8"
         )
         return True
     except subprocess.CalledProcessError as e:
