@@ -1,53 +1,28 @@
 ---
-name: Bug Report
-about: Report a bug to help us improve
-title: '[Bug]: '
+name: 🐛 Bug Report
+about: Report a bug or unexpected behavior
+title: "[Bug] "
 labels: bug
-assignees: ''
 ---
 
-## Describe the Bug
-
+## Description
 A clear and concise description of what the bug is.
 
-## To Reproduce
-
-Steps to reproduce the behavior:
-
+## Steps to Reproduce
 1. Go to '...'
 2. Click on '...'
 3. See error
 
 ## Expected Behavior
+What you expected to happen.
 
-A clear and concise description of what you expected to happen.
-
-## Screenshots
-
-If applicable, add screenshots to help explain your problem.
+## Actual Behavior
+What actually happened.
 
 ## Environment
-
-- OS: [e.g., Ubuntu 22.04, macOS 14]
-- Python version: [e.g., 3.11.0]
-- Docker version (if applicable): [e.g., 24.0.0]
-
-## Configuration
-
-Relevant parts of your agent configuration or environment setup (remove any sensitive data):
-
-```yaml
-# paste here
-```
-
-## Logs
-
-Relevant log output:
-
-```
-paste logs here
-```
+- OS: [e.g., Windows 10, macOS, Ubuntu]
+- Python Version: [e.g., 3.8.0]
+- Hive Version: [e.g., 1.0.0]
 
 ## Additional Context
-
 Add any other context about the problem here.
