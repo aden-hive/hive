@@ -21,6 +21,15 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
+> [!CAUTION]
+> **Critical Requirement:** All agent commands require `PYTHONPATH=core:exports`:
+> ```bash
+> PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+> ```
+> **Missing this will cause:** `ModuleNotFoundError: No module named 'agent_name'`
+> 
+> See [Why PYTHONPATH is Required](#why-pythonpath-is-required) for details.
+
 ## Alpine Linux Setup
 
 If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
