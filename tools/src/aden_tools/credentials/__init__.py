@@ -47,14 +47,24 @@ To add a new credential:
 """
 
 from .base import CredentialError, CredentialManager, CredentialSpec
+from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
+from .health_check import HealthCheckResult, check_credential_health
+from .integrations import INTEGRATION_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
+from .shell_config import (
+    add_env_var_to_shell_config,
+    detect_shell,
+    get_shell_config_path,
+    get_shell_source_command,
+)
 from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
+    **INTEGRATION_CREDENTIALS,
 }
 
 __all__ = [
@@ -64,9 +74,22 @@ __all__ = [
     "CredentialError",
     # New credential store adapter
     "CredentialStoreAdapter",
+    # Health check utilities
+    "HealthCheckResult",
+    "check_credential_health",
+    # Browser utilities for OAuth2 flows
+    "open_browser",
+    "get_aden_auth_url",
+    "get_aden_setup_url",
+    # Shell config utilities
+    "detect_shell",
+    "get_shell_config_path",
+    "get_shell_source_command",
+    "add_env_var_to_shell_config",
     # Merged registry
     "CREDENTIAL_SPECS",
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
+    "INTEGRATION_CREDENTIALS",
 ]

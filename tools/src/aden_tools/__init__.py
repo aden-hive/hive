@@ -16,8 +16,7 @@ Usage:
 
 __version__ = "0.1.0"
 
-# Utilities
-# Credential management
+# Credential management (no external dependencies)
 from .credentials import (
     CREDENTIAL_SPECS,
     CredentialError,
@@ -25,9 +24,18 @@ from .credentials import (
     CredentialSpec,
 )
 
-# MCP registration
-from .tools import register_all_tools
+# Utilities (no external dependencies)
 from .utils import get_env_var
+
+
+def __getattr__(name: str):
+    """Lazy import for tools that require fastmcp."""
+    if name == "register_all_tools":
+        from .tools import register_all_tools
+
+        return register_all_tools
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # Version
@@ -39,6 +47,6 @@ __all__ = [
     "CredentialSpec",
     "CredentialError",
     "CREDENTIAL_SPECS",
-    # MCP registration
+    # MCP registration (lazy loaded)
     "register_all_tools",
 ]
