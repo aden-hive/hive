@@ -24,6 +24,7 @@ from framework.graph.node import (
     LLMNode,
     RouterNode,
     FunctionNode,
+    HumanInputNode,
 )
 from framework.graph.edge import GraphSpec
 from framework.graph.validator import OutputValidator
@@ -499,7 +500,7 @@ class GraphExecutor:
 
         if node_spec.node_type == "human_input":
             # Human input nodes are handled specially by HITL mechanism
-            return LLMNode(tool_executor=None, require_tools=False)
+            return HumanInputNode()
 
         # Should never reach here due to validation above
         raise RuntimeError(f"Unhandled node type: {node_spec.node_type}")

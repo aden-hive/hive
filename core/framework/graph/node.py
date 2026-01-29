@@ -1142,3 +1142,58 @@ class FunctionNode(NodeProtocol):
                 latency_ms=latency_ms,
             )
             return NodeResult(success=False, error=str(e), latency_ms=latency_ms)
+
+class HumanInputNode(NodeProtocol):
+    """
+    A node that pauses execution to request input from a human user.
+    """
+
+    async def execute(self, ctx: NodeContext) -> NodeResult:
+        """Execute the human input collection."""
+        import time
+        
+        # 1. Construct the prompt from description or name
+        prompt_text = ctx.node_spec.description or f"Input required for {ctx.node_spec.name}: "
+        
+        ctx.runtime.set_node(ctx.node_id)
+        
+        # 2. Log intent
+        decision_id = ctx.runtime.decide(
+            intent="Request human input",
+            options=[{"id": "wait", "description": "Wait for user input via CLI"}],
+            chosen="wait",
+            reasoning="Node type is human_input"
+        )
+        
+        start = time.time()
+        
+        # 3. Block and wait for input
+        print(f"\n [HUMAN INPUT REQUIRED] {prompt_text}")
+        try:
+            user_input = input("> ")
+        except EOFError:
+            # Handle case where input stream is closed
+            user_input = ""
+        
+        latency_ms = int((time.time() - start) * 1000)
+        
+        # 4. Save result
+        output = {}
+        # If output keys are defined, map input to the first key
+        if ctx.node_spec.output_keys:
+            key = ctx.node_spec.output_keys[0]
+            output[key] = user_input
+            ctx.memory.write(key, user_input)
+        else:
+            # Default fallback
+            output = {"user_input": user_input}
+            # We don't write to memory if no key is specified to avoid clutter
+            
+        ctx.runtime.record_outcome(
+            decision_id=decision_id, 
+            success=True, 
+            result=user_input,
+            latency_ms=latency_ms
+        )
+        
+        return NodeResult(success=True, output=output, latency_ms=latency_ms)
