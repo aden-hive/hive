@@ -6,6 +6,7 @@
   <a href="README.md">English</a> |
   <a href="docs/i18n/zh-CN.md">简体中文</a> |
   <a href="docs/i18n/es.md">Español</a> |
+  <a href="docs/i18n/hi.md">हिन्दी</a> |
   <a href="docs/i18n/pt.md">Português</a> |
   <a href="docs/i18n/ja.md">日本語</a> |
   <a href="docs/i18n/ru.md">Русский</a> |
