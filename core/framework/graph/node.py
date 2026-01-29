@@ -17,7 +17,7 @@ Protocol:
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
@@ -89,7 +89,7 @@ class NodeSpec(BaseModel):
     """
     id: str
     name: str
-    description: str
+    description: Optional[str] = None
 
     # Node behavior type
     node_type: str = Field(
