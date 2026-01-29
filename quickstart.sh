@@ -157,7 +157,7 @@ fi
 # Install MCP dependencies (in tools venv)
 echo "  Installing MCP dependencies..."
 TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
-uv pip install --python "$TOOLS_PYTHON" mcp fastmcp > /dev/null 2>&1
+uv pip install --python "$TOOLS_PYTHON" pydantic mcp fastmcp > /dev/null 2>&1
 echo -e "${GREEN}  ✓ MCP dependencies installed${NC}"
 
 # Fix openai version compatibility (in tools venv)

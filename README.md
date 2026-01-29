@@ -85,6 +85,12 @@ This installs:
 - All required dependencies
 - Claude Code skills for building agents
 
+### Running Examples
+If you encounter a `ModuleNotFoundError` when running examples, ensure your `PYTHONPATH` includes the `core` directory:
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)/core
+python3 core/examples/manual_agent.py
+
 ### Build Your First Agent
 
 ```bash
