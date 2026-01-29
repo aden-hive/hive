@@ -53,11 +53,13 @@ jobs:
       - name: Install dependencies
         run: |
           cd core
+          pip install --upgrade pip
           pip install -e .
           pip install -r requirements-dev.txt
       - name: Install tools dependencies
         run: |
           cd tools
+          pip install --upgrade pip
           pip install -e .
       - name: Run core tests
         run: cd core && python -m pytest tests/ -v
