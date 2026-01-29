@@ -5,12 +5,12 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ## Quick Setup
 
 ```bash
-# Run the automated setup script
-./scripts/setup-python.sh
+# Run the automated setup script (includes Claude Code skills)
+./quickstart.sh
 ```
 
-> **Note for Windows Users:**  
-> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.  
+> **Note for Windows Users:**
+> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.
 > It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for a smoother setup experience.
 
 This will:
@@ -18,8 +18,11 @@ This will:
 - Check Python version (requires 3.11+)
 - Install the core framework package (`framework`)
 - Install the tools package (`aden_tools`)
+- Install Claude Code skills for building agents
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
+
+> **Headless/Server Setup:** For Docker containers, CI/CD, or environments without Claude Code, use `./scripts/setup-python.sh` instead. This skips Claude skills installation.
 
 ## Alpine Linux Setup
 
@@ -36,10 +39,12 @@ python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip setuptools wheel
 ```
-3. Run the Quickstart Script:
+3. Run the Setup Script:
 ```
 ./quickstart.sh
 ```
+
+> **Note:** `quickstart.sh` calls `scripts/setup-python.sh` internally for Python environment setup, then adds Claude skills and additional configuration.
 
 ## Manual Setup (Alternative)
 
@@ -251,7 +256,7 @@ source .venv/bin/activate  # macOS/Linux
 # .venv\Scripts\activate   # Windows
 
 # Then run setup
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 Always activate the venv before running agents:
@@ -280,8 +285,10 @@ cd tools && pip install -e .
 Or run the setup script:
 
 ```bash
-./scripts/setup-python.sh
+./quickstart.sh
 ```
+
+> **Note:** `./quickstart.sh` is the primary setup script. It calls `./scripts/setup-python.sh` internally for Python environment setup, then installs Claude Code skills and performs additional verification. Use `./scripts/setup-python.sh` directly only for headless/server environments where Claude Code is not needed.
 
 ### "ModuleNotFoundError: No module named 'openai.\_models'"
 
