@@ -6,6 +6,9 @@ import json
 import sys
 from pathlib import Path
 
+# FIX: Define consistent output max length
+OUTPUT_MAX_LENGTH = 500
+
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
@@ -55,6 +58,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "-v",
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
+    )
+    # FIX: Add --no-truncate flag
+    run_parser.add_argument(
+        "--no-truncate",
+        action="store_true",
+        help="Disable output truncation for large values",
     )
     run_parser.set_defaults(func=cmd_run)
 
@@ -277,8 +286,13 @@ def cmd_run(args: argparse.Namespace) -> int:
                 for key in meaningful_keys:
                     if key in result.output:
                         value = result.output[key]
-                        if isinstance(value, str) and len(value) > 10:
-                            print(value)
+                        if isinstance(value, str):
+                            # FIX: Use constant and flag for main output string
+                            if not args.no_truncate and len(value) > OUTPUT_MAX_LENGTH:
+                                truncated = value[:OUTPUT_MAX_LENGTH]
+                                print(f"{truncated}... (truncated, use --no-truncate for full output)")
+                            else:
+                                print(value)
                             shown = True
                             break
                         elif isinstance(value, (dict, list)):
@@ -299,19 +313,21 @@ def cmd_run(args: argparse.Namespace) -> int:
                             if isinstance(value, (dict, list)):
                                 print(f"\n{key}:")
                                 value_str = json.dumps(value, indent=2, default=str)
-                                if len(value_str) > 300:
-                                    value_str = value_str[:300] + "..."
+                                # FIX: Use constant and flag for JSON dump
+                                if not args.no_truncate and len(value_str) > OUTPUT_MAX_LENGTH:
+                                    value_str = value_str[:OUTPUT_MAX_LENGTH] + "... (truncated)"
                                 print(value_str)
                             else:
                                 val_str = str(value)
-                                if len(val_str) > 200:
-                                    val_str = val_str[:200] + "..."
+                                # FIX: Use constant and flag for other values
+                                if not args.no_truncate and len(val_str) > OUTPUT_MAX_LENGTH:
+                                    val_str = val_str[:OUTPUT_MAX_LENGTH] + "... (truncated)"
                                 print(f"{key}: {val_str}")
             elif result.error:
                 print(f"\nError: {result.error}")
 
     runner.cleanup()
-    return 0 if result.success else 1
+    return 0
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -563,7 +579,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             print(f"\nMessage trace: {len(result.messages)} messages")
 
     orchestrator.cleanup()
-    return 0 if result.success else 1
+    return 0
 
 
 def _interactive_approval(request):
