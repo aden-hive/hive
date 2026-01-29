@@ -46,7 +46,7 @@ timeline
 - [ ] **[Worker Agent] Human-in-the-Loop**
     - [x] Worker Agents request with questions and options
     - [x] Callback Handler System to receive events throughout execution
-    - [ ] Tool-Based Intervention Points (tool to pause execution and request human input)
+    - [x] Tool-Based Intervention Points (tool to pause execution and request human input)
     - [x] Multiple entrypoint for different event source (e.g. Human input, webhook)
     - [ ] Streaming Interface for Real-time Monitoring
     - [ ] Request State Management
@@ -58,7 +58,7 @@ timeline
     - [x] LTM Layer Tool (RLM - long-term memory)
 - [ ] **Infrastructure Tools**
     - [x] Runtime Log Tool (logs for coding agent)
-    - [ ] Audit Trail Tool (decision timeline generation)
+    - [x] Audit Trail Tool (decision timeline generation)
     - [ ] Web Search
     - [ ] Web Scraper
     - [ ] Recipe for "Add your own tools"
@@ -75,10 +75,10 @@ timeline
 - [ ] User-driven log analysis (OSS approach)
 
 ### Data Validation
-- [ ] Natively Support data validation of LLMs output with Pydantic
+- [x] Natively Support data validation of LLMs output with Pydantic
 
 ### Developer Experience
-- [ ] **Debugging mode**
+- [x] **Debugging mode**
 - [ ] **Documentation**
     - [ ] Quick start guide
     - [ ] Goal creation guide
@@ -119,15 +119,15 @@ timeline
 - [ ] Integration as a tool (Credential Store & Support)
 - [ ] **Core Agent Tools**
     - [ ] Node Discovery Tool (find other agents in the graph)
-    - [ ] HITL Tool (pause execution for human approval)
-    - [ ] Wake-up Tool (resume agent tasks)
+    - [x] HITL Tool (pause execution for human approval)
+    - [x] Wake-up Tool (resume agent tasks)
 
 ### Deployment (Self-Hosted)
 - [ ] Docker container standardization
 - [ ] Headless backend execution
 - [ ] Exposed API for frontend attachment
 - [ ] Local monitoring & observability
-- [ ] Basic lifecycle APIs (Start, Stop, Pause, Resume)
+- [x] Basic lifecycle APIs (Start, Stop, Pause, Resume)
 
 ### Deployment (Cloud)
 - [ ] Cloud Service Options
