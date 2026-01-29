@@ -34,13 +34,13 @@ class Colors:
 
 def check(description: str) -> bool:
     """Print check description and return True to indicate check started.
-    
+
     This function logs the check description and flushes stdout.
     Use success(), warning(), or error() to report the check result.
-    
+
     Args:
         description: Brief description of what is being checked.
-        
+
     Returns:
         Always returns True (for legacy compatibility).
     """
