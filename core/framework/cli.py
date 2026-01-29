@@ -29,9 +29,9 @@ def _configure_paths():
     if it exists. This eliminates the need for manual PYTHONPATH configuration.
     """
     # Strategy 1: resolve relative to this file (works when installed via pip install -e core/)
-    framework_dir = Path(__file__).resolve().parent        # core/framework/
-    core_dir = framework_dir.parent                         # core/
-    project_root = core_dir.parent                          # project root
+    framework_dir = Path(__file__).resolve().parent  # core/framework/
+    core_dir = framework_dir.parent  # core/
+    project_root = core_dir.parent  # project root
 
     # Strategy 2: if project_root doesn't look right, fall back to CWD
     if not (project_root / "exports").is_dir() and not (project_root / "core").is_dir():
