@@ -25,16 +25,48 @@ echo "  Aden Agent Framework - Python Setup"
 echo "=================================================="
 echo ""
 
-# Check for Python
-if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
+# Check for Python, honoring $PYTHON even if it's not on PATH
+if [ -n "$PYTHON" ]; then
+    if [ ! -x "$PYTHON" ] && ! command -v "$PYTHON" &> /dev/null; then
+        echo -e "${RED}Error: PYTHON is set to '$PYTHON' but it was not found or not executable.${NC}"
+        echo "Example: PYTHON=/opt/python3.12/bin/python3.12 ./scripts/setup-python.sh"
+        exit 1
+    fi
+elif ! command -v python &> /dev/null \
+   && ! command -v python3 &> /dev/null \
+   && ! command -v python3.11 &> /dev/null \
+   && ! command -v python3.12 &> /dev/null; then
     echo -e "${RED}Error: Python is not installed.${NC}"
-    echo "Please install Python 3.11+ from https://python.org"
+    echo "Please install Python 3.11+ (recommended 3.12) from https://python.org"
     exit 1
 fi
 
-# Use python3 if available, otherwise python
-PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
+# Choose Python interpreter
+# Priority:
+#  1) $PYTHON env var override (e.g., PYTHON=python3.11)
+#  2) python3.12 if available
+#  3) python3.11 if available
+#  4) python3
+#  5) python
+PYTHON_CMD="${PYTHON:-}"
+
+if [ -n "$PYTHON_CMD" ]; then
+    if [ -x "$PYTHON_CMD" ]; then
+        : # absolute / explicit path provided and executable
+    elif command -v "$PYTHON_CMD" &> /dev/null; then
+        : # found on PATH
+    else
+        echo -e "${RED}Error: PYTHON is set to '$PYTHON_CMD' but it was not found in PATH or as an absolute path.${NC}"
+        echo "Example: PYTHON=/opt/python3.12/bin/python3.12 ./scripts/setup-python.sh"
+        exit 1
+    fi
+elif command -v python3.12 &> /dev/null; then
+    PYTHON_CMD="python3.12"
+elif command -v python3.11 &> /dev/null; then
+    PYTHON_CMD="python3.11"
+elif command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+else
     PYTHON_CMD="python"
 fi
 
@@ -43,18 +75,26 @@ PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{s
 PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)')
 PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
 
-echo -e "${BLUE}Detected Python:${NC} $PYTHON_VERSION"
+echo -e "${BLUE}Detected Python:${NC} $PYTHON_VERSION (binary: ${PYTHON_CMD})"
 
+# Require 3.11+
 if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
-    echo -e "${RED}Error: Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
-    echo "Please upgrade your Python installation"
-    exit 1
-fi
-
-if [ "$PYTHON_MINOR" -lt 11 ]; then
-    echo -e "${YELLOW}Warning: Python 3.11+ is recommended for best compatibility${NC}"
-    echo -e "${YELLOW}You have Python $PYTHON_VERSION which may work but is not officially supported${NC}"
+    echo -e "${RED}Error: Python 3.11+ is required (found $PYTHON_VERSION via '$PYTHON_CMD')${NC}"
     echo ""
+    echo "Fix options (Linux/macOS/WSL):"
+    echo "  • Ubuntu/Debian/Pop!_OS/WSL:"
+    echo "      sudo apt update && sudo apt install -y python3.11 python3.11-venv python3.11-dev"
+    echo "  • Fedora:"
+    echo "      sudo dnf install -y python3.11 python3.11-devel"
+    echo "  • Arch/Manjaro:"
+    echo "      sudo pacman -S python"
+    echo "  • macOS (Homebrew):"
+    echo "      brew install python@3.11"
+    echo ""
+    echo "Then re-run with an explicit interpreter if needed:"
+    echo "  PYTHON=python3.11 ./scripts/setup-python.sh"
+    echo ""
+    exit 1
 fi
 
 echo -e "${GREEN}✓${NC} Python version check passed"
@@ -191,14 +231,14 @@ echo ""
 echo "To run agents, use:"
 echo ""
 echo "  ${BLUE}# From project root:${NC}"
-echo "  PYTHONPATH=core:exports python -m agent_name validate"
-echo "  PYTHONPATH=core:exports python -m agent_name info"
-echo "  PYTHONPATH=core:exports python -m agent_name run --input '{...}'"
+echo "  PYTHONPATH=core:exports ${PYTHON_CMD} -m agent_name validate"
+echo "  PYTHONPATH=core:exports ${PYTHON_CMD} -m agent_name info"
+echo "  PYTHONPATH=core:exports ${PYTHON_CMD} -m agent_name run --input '{...}'"
 echo ""
 echo "Available commands for your new agent:"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent validate"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent info"
-echo "  PYTHONPATH=core:exports python -m support_ticket_agent run --input '{\"ticket_content\":\"...\",\"customer_id\":\"...\",\"ticket_id\":\"...\"}'"
+echo "  PYTHONPATH=core:exports ${PYTHON_CMD} -m support_ticket_agent validate"
+echo "  PYTHONPATH=core:exports ${PYTHON_CMD} -m support_ticket_agent info"
+echo "  PYTHONPATH=core:exports ${PYTHON_CMD} -m support_ticket_agent run --input '{\"ticket_content\":\"...\",\"customer_id\":\"...\",\"ticket_id\":\"...\"}'"
 echo ""
 echo "To build new agents, use Claude Code skills:"
 echo "  • /building-agents - Build a new agent"

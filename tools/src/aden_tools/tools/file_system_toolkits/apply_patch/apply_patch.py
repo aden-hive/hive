@@ -1,13 +1,18 @@
 import os
+
 import diff_match_patch as dmp_module
 from mcp.server.fastmcp import FastMCP
+
 from ..security import get_secure_path
+
 
 def register_tools(mcp: FastMCP) -> None:
     """Register patch application tools with the MCP server."""
 
     @mcp.tool()
-    def apply_patch(path: str, patch_text: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
+    def apply_patch(
+        path: str, patch_text: str, workspace_id: str, agent_id: str, session_id: str
+    ) -> dict:
         """
         Purpose
             Apply a scoped, line-level modification to an existing file.
@@ -44,7 +49,7 @@ def register_tools(mcp: FastMCP) -> None:
             dmp = dmp_module.diff_match_patch()
             patches = dmp.patch_fromText(patch_text)
 
-            with open(secure_path, "r", encoding="utf-8") as f:
+            with open(secure_path, encoding="utf-8") as f:
                 content = f.read()
 
             new_content, results = dmp.patch_apply(patches, content)
@@ -56,7 +61,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "success": True,
                     "path": path,
                     "patches_applied": len(patches),
-                    "all_successful": True
+                    "all_successful": True,
                 }
             else:
                 failed_count = sum(1 for r in results if not r)
@@ -65,7 +70,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "path": path,
                     "patches_applied": len([r for r in results if r]),
                     "patches_failed": failed_count,
-                    "error": f"Failed to apply {failed_count} of {len(patches)} patches"
+                    "error": f"Failed to apply {failed_count} of {len(patches)} patches",
                 }
         except Exception as e:
             return {"error": f"Failed to apply patch: {str(e)}"}

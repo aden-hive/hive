@@ -181,8 +181,10 @@ class MCPClient:
 
                         # Create persistent stdio client context
                         self._stdio_context = stdio_client(server_params)
-                        streams = await self._stdio_context.__aenter__()
-                        self._read_stream, self._write_stream = streams
+                        (
+                            self._read_stream,
+                            self._write_stream,
+                        ) = await self._stdio_context.__aenter__()
 
                         # Create persistent session
                         self._session = ClientSession(self._read_stream, self._write_stream)
@@ -259,9 +261,9 @@ class MCPClient:
                 )
                 self._tools[tool.name] = tool
 
+            tool_names = list(self._tools.keys())
             logger.info(
-                f"Discovered {len(self._tools)} tools from '{self.config.name}': "
-                f"{list(self._tools.keys())}"
+                f"Discovered {len(self._tools)} tools from '{self.config.name}': {tool_names}"
             )
         except Exception as e:
             logger.error(f"Failed to discover tools from '{self.config.name}': {e}")
@@ -278,11 +280,13 @@ class MCPClient:
         # Convert tools to dict format
         tools_list = []
         for tool in response.tools:
-            tools_list.append({
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": tool.inputSchema,
-            })
+            tools_list.append(
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.inputSchema,
+                }
+            )
 
         return tools_list
 

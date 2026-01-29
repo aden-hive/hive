@@ -1,4 +1,4 @@
-name: Claude Issue Triage
+name: Issue Triage
 
 on:
   issues:
@@ -7,9 +7,11 @@ on:
 jobs:
   triage:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       issues: write
+      id-token: write
 
     steps:
       - name: Checkout repository
@@ -17,52 +19,79 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Claude Issue Triage
-        id: claude-triage
+      - name: Triage and check for duplicates
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          allowed_non_write_users: '*'
+          allowed_non_write_users: "*"
           prompt: |
-            REPO: ${{ github.repository }}
-            ISSUE NUMBER: ${{ github.event.issue.number }}
-            TITLE: ${{ github.event.issue.title }}
-            BODY: ${{ github.event.issue.body }}
-            AUTHOR: ${{ github.event.issue.user.login }}
+            Analyze this new issue and perform triage tasks.
 
-            Analyze this new issue and perform the following:
+            Issue: #${{ github.event.issue.number }}
+            Repository: ${{ github.repository }}
 
-            1. **Categorize the issue type using ONLY these labels:**
-               - bug: Something isn't working
-               - enhancement: New feature or request
-               - question: Further information is requested
-               - documentation: Improvements or additions to documentation
-               - good first issue: Good for newcomers (if issue is well-defined and small scope)
-               - help wanted: Extra attention is needed (if issue needs community input)
-               - backlog: Tracked for the future, but not currently planned or prioritized
+            ## Your Tasks:
 
-            2. **Check for duplicates:**
-               Search for similar existing issues using:
-               `gh issue list --state all --search "<key terms from title/body>"`
+            ### 1. Get issue details
+            Use mcp__github__get_issue to get the full details of issue #${{ github.event.issue.number }}
 
-               If a duplicate exists:
-               - Add the "duplicate" label
-               - Comment mentioning the original issue number
+            ### 2. Check for duplicates
+            Search for similar existing issues using mcp__github__search_issues with relevant keywords from the issue title and body.
 
-            3. **Check for invalid issues:**
-               If the issue lacks sufficient information, is spam, or doesn't make sense:
-               - Add the "invalid" label
-               - Comment asking for clarification or explaining why it's invalid
+            Criteria for duplicates:
+            - Same bug or error being reported
+            - Same feature request (even if worded differently)
+            - Same question being asked
+            - Issues describing the same root problem
 
-            4. **Apply labels:**
-               Based on your analysis, add appropriate labels using:
-               `gh issue edit ${{ github.event.issue.number }} --add-label "label1,label2"`
+            If you find a duplicate:
+            - Add a comment using EXACTLY this format (required for auto-close to work):
+              "Found a possible duplicate of #<issue_number>: <brief explanation of why it's a duplicate>"
+            - Do NOT apply the "duplicate" label yet (the auto-close script will add it after 12 hours if no objections)
+            - Suggest the user react with a thumbs-down if they disagree
 
-               You may apply multiple labels if appropriate (e.g., "bug,help wanted").
+            ### 3. Check for Low-Quality / AI Spam
+            Analyze the issue quality. We are receiving many low-effort, AI-generated spam issues.
+            Flag the issue as INVALID if it matches these criteria:
+            - **Vague/Generic**: Title is "Fix bug" or "Error" without specific context.
+            - **Hallucinated**: Refers to files or features that do not exist in this repo.
+            - **Template Filler**: Body contains "Insert description here" or unrelated gibberish.
+            - **Low Effort**: No reproduction steps, no logs, only 1-2 sentences.
 
-            5. **Add a brief comment** summarizing your triage decision to help maintainers.
+            If identified as spam/low-quality:
+            - Add the "invalid" label.
+            - Add a comment:
+              "This issue has been automatically flagged as low-quality or potentially AI-generated spam. It lacks specific details (logs, reproduction steps, file references) required for us to help. Please open a new issue following the template exactly if this is a legitimate request."
+            - Do NOT proceed to other steps.
+
+            ### 4. Check for invalid issues (General)
+            If the issue is not spam but still lacks information:
+            - Add the "invalid" label
+            - Comment asking for clarification
+
+            ### 5. Categorize with labels (if NOT a duplicate or spam)
+            Apply appropriate labels based on the issue content. Use ONLY these labels:
+            - bug: Something isn't working
+            - enhancement: New feature or request
+            - question: Further information is requested
+            - documentation: Improvements or additions to documentation
+            - good first issue: Good for newcomers (if issue is well-defined and small scope)
+            - help wanted: Extra attention is needed (if issue needs community input)
+            - backlog: Tracked for the future, but not currently planned or prioritized
+
+            You may apply multiple labels if appropriate (e.g., "bug" and "help wanted").
+
+            ## Tools Available:
+            - mcp__github__get_issue: Get issue details
+            - mcp__github__search_issues: Search for similar issues
+            - mcp__github__list_issues: List recent issues if needed
+            - mcp__github__add_issue_comment: Add a comment
+            - mcp__github__update_issue: Add labels
+            - mcp__github__get_issue_comments: Get existing comments
+
+            Be thorough but efficient. Focus on accurate categorization and finding true duplicates.
 
           claude_args: |
-            --model claude-3-5-haiku-20241022
-            --allowedTools "Bash(gh issue:*),Bash(gh search:*)"
+            --model claude-haiku-4-5-20251001
+            --allowedTools "mcp__github__get_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__add_issue_comment,mcp__github__update_issue,mcp__github__get_issue_comments"
