@@ -209,8 +209,8 @@ get_skills_dir() {
         claude)   echo "$HOME/.claude/skills" ;;
         opencode) echo "$HOME/.opencode/skills" ;;
         codex)    echo "$HOME/.codex/skills" ;;
-        cursor)    echo "$HOME/.cursor/skills" ;;
-        gemini)    echo "$HOME/.gemini/skills" ;;
+        cursor)   echo "$HOME/.cursor/skills" ;;
+        gemini)   echo "$HOME/.gemini/skills" ;;
         github)   echo "$HOME/.github/skills" ;;
         *)        echo "" ;;
     esac
