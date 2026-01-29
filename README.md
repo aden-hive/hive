@@ -47,7 +47,7 @@ Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and
 
 Aden is a platform for building, deploying, operating, and adapting AI agents:
 
-- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
+- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) based on your goals using natural language
 - **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
 - **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
 - **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
@@ -78,26 +78,52 @@ cd hive
 # Run Python environment setup
 ./scripts/setup-python.sh
 ```
-
-This installs:
-- **framework** - Core agent runtime and graph executor
-- **aden_tools** - 19 MCP tools for agent capabilities
-- All required dependencies
+**This One-time setup installs:**
+- framework package (core runtime)
+- aden_tools package (19 MCP tools)
+- All dependencies
 
 ### Build Your First Agent
 
+**Step 1: Choose a One-time set up method** 
+**Option A: Claude code (recommended for beginners)** 
+
 ```bash
-# Install Claude Code skills (one-time)
+
 ./quickstart.sh
 
-# Build an agent using Claude Code
+```
+**Option B: Python only setup**
+
+```bash
+
+./scripts/setup-python.sh
+
+```
+If you have already completed the installation step above, you do not need to run this again.
+
+**Step 2: Build an agent using Claude Code**
+
+```text
+
 claude> /building-agents-construction
 
-# Test your agent
+```
+
+**Step 3: Test your agent**
+
+```text
+
 claude> /testing-agent
 
-# Run your agent
+```
+
+**Step 4: Run your agent**
+
+```bash
+
 PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
@@ -240,31 +266,6 @@ hive/
 ├── DEVELOPER.md            # Developer guide
 ├── CONTRIBUTING.md         # Contribution guidelines
 └── ROADMAP.md              # Product roadmap
-```
-
-## Development
-
-### Python Agent Development
-
-For building and running goal-driven agents with the framework:
-
-```bash
-# One-time setup
-./scripts/setup-python.sh
-
-# This installs:
-# - framework package (core runtime)
-# - aden_tools package (19 MCP tools)
-# - All dependencies
-
-# Build new agents using Claude Code skills
-claude> /building-agents-construction
-
-# Test agents
-claude> /testing-agent
-
-# Run agents
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 ```
 
 See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.
