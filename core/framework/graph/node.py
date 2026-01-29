@@ -532,12 +532,14 @@ class NodeResult:
                 "understand. Focus on the key information produced."
             )
 
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            # Use context manager to ensure the underlying httpx client
+            # is closed promptly and does not leak sockets.
+            with anthropic.Anthropic(api_key=api_key) as client:
+                message = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=200,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
             summary = message.content[0].text.strip()
             return f"✓ {summary}"
@@ -1342,12 +1344,14 @@ Output ONLY the JSON object, nothing else."""
         try:
             import anthropic
 
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            # Use context manager to ensure the underlying httpx client
+            # is closed promptly and does not leak sockets.
+            with anthropic.Anthropic(api_key=api_key) as client:
+                message = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=1000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
             # Parse Haiku's response
             response_text = message.content[0].text.strip()
