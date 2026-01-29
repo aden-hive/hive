@@ -140,20 +140,22 @@ class AdenCredentialResponse:
     """Additional integration-specific metadata."""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> AdenCredentialResponse:
+    def from_dict(
+        cls, data: dict[str, Any], integration_id: str | None = None
+    ) -> AdenCredentialResponse:
         """Create from API response dictionary."""
         expires_at = None
         if data.get("expires_at"):
             expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
 
         return cls(
-            integration_id=data["integration_id"],
-            integration_type=data["integration_type"],
+            integration_id=integration_id or data.get("alias", data.get("provider", "")),
+            integration_type=data.get("provider", ""),
             access_token=data["access_token"],
             token_type=data.get("token_type", "Bearer"),
             expires_at=expires_at,
             scopes=data.get("scopes", []),
-            metadata=data.get("metadata", {}),
+            metadata={"email": data.get("email")} if data.get("email") else {},
         )
 
 
@@ -335,7 +337,7 @@ class AdenCredentialClient:
         try:
             response = self._request_with_retry("GET", f"/v1/credentials/{integration_id}")
             data = response.json()
-            return AdenCredentialResponse.from_dict(data)
+            return AdenCredentialResponse.from_dict(data, integration_id=integration_id)
         except AdenNotFoundError:
             return None
 
@@ -360,7 +362,7 @@ class AdenCredentialClient:
         """
         response = self._request_with_retry("POST", f"/v1/credentials/{integration_id}/refresh")
         data = response.json()
-        return AdenCredentialResponse.from_dict(data)
+        return AdenCredentialResponse.from_dict(data, integration_id=integration_id)
 
     def list_integrations(self) -> list[AdenIntegrationInfo]:
         """
