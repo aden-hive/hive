@@ -101,10 +101,22 @@ class AgentRuntime:
         tool_executor: Callable | None = None,
         config: AgentRuntimeConfig | None = None,
     ):
+        """
+        Initialize agent runtime.
+
+        Args:
+            graph: Graph specification for this agent
+            goal: Goal driving execution
+            storage_path: Path for persistent storage
+            llm: LLM provider for nodes
+            tools: Available tools
+            tool_executor: Function to execute tools
+            config: Optional runtime configuration
+        """
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
-
+         # Initialize storage
         self._storage = ConcurrentStorage(
             base_path=storage_path,
             cache_ttl=self._config.cache_ttl,
@@ -114,28 +126,51 @@ class AgentRuntime:
         self._state_manager = SharedStateManager()
         self._event_bus = EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
-
+         # LLM and tools
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
-
+        # Entry points and streams
         self._entry_points: dict[str, EntryPointSpec] = {}
         self._streams: dict[str, ExecutionStream] = {}
-
+          # State
         self._running = False
         self._lock = asyncio.Lock()
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
+        """
+        Register a named entry point for the agent.
+
+        Args:
+            spec: Entry point specification
+
+        Raises:
+            ValueError: If entry point ID already registered
+            RuntimeError: If runtime is already running
+        """
         if self._running:
             raise RuntimeError("Cannot register entry points while runtime is running")
         if spec.id in self._entry_points:
             raise ValueError(f"Entry point '{spec.id}' already registered")
+        # Validate entry node exists in graph
         if self.graph.get_node(spec.entry_node) is None:
             raise ValueError(f"Entry node '{spec.entry_node}' not found in graph")
         self._entry_points[spec.id] = spec
         logger.info(f"Registered entry point: {spec.id} -> {spec.entry_node}")
 
     def unregister_entry_point(self, entry_point_id: str) -> bool:
+        """
+        Unregister an entry point.
+
+        Args:
+            entry_point_id: Entry point to remove
+
+        Returns:
+            True if removed, False if not found
+
+        Raises:
+            RuntimeError: If runtime is running
+        """
         if self._running:
             raise RuntimeError("Cannot unregister entry points while runtime is running")
         if entry_point_id in self._entry_points:
@@ -144,9 +179,11 @@ class AgentRuntime:
         return False
 
     async def start(self) -> None:
+        """Start the agent runtime and all registered entry points."""
         if self._running:
             return
         async with self._lock:
+             # Start storage
             await self._storage.start()
             for ep_id, spec in self._entry_points.items():
                 stream = ExecutionStream(
@@ -173,9 +210,11 @@ class AgentRuntime:
         if not self._running:
             return
         async with self._lock:
+             # Stop all streams
             for stream in self._streams.values():
                 await stream.stop()
             self._streams.clear()
+            # Stop storage
             await self._storage.stop()
             self._running = False
             logger.info("AgentRuntime stopped")
@@ -187,6 +226,24 @@ class AgentRuntime:
         correlation_id: str | None = None,
         session_state: dict[str, Any] | None = None,
     ) -> str:
+        """
+         Trigger execution at a specific entry point.
+
+         Non-blocking - returns immediately with execution ID.
+
+         Args:
+            entry_point_id: Which entry point to trigger
+            input_data: Input data for the execution
+            correlation_id: Optional ID to correlate related executions
+            session_state: Optional session state to resume from (with paused_at, memory)
+
+         Returns:
+            Execution ID for tracking
+
+         Raises:
+            ValueError: If entry point not found
+            RuntimeError: If runtime not running
+        """
         if not self._running:
             raise RuntimeError("AgentRuntime is not running")
         stream = self._streams.get(entry_point_id)
@@ -208,6 +265,19 @@ class AgentRuntime:
         timeout: float | None = None,
         session_state: dict[str, Any] | None = None,
     ) -> ExecutionResult | None:
+        """
+
+         Trigger execution and wait for completion.
+
+         Args:
+            entry_point_id: Which entry point to trigger
+            input_data: Input data for the execution
+            timeout: Maximum time to wait (seconds)
+            session_state: Optional session state to resume from (with paused_at, memory)
+
+         Returns:
+            ExecutionResult or None if timeout
+        """
         exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
         stream = self._streams.get(entry_point_id)
         if stream is None:
@@ -215,9 +285,26 @@ class AgentRuntime:
         return await stream.wait_for_completion(exec_id, timeout)
 
     async def get_goal_progress(self) -> dict[str, Any]:
+        """
+        Evaluate goal progress across all streams.
+
+        Returns:
+            Progress report including overall progress, criteria status,
+            constraint violations, and metrics.
+        """
         return await self._outcome_aggregator.evaluate_goal_progress()
 
     async def cancel_execution(self, entry_point_id: str, execution_id: str) -> bool:
+        """
+        Cancel a running execution.
+
+        Args:
+            entry_point_id: Stream containing the execution
+            execution_id: Execution to cancel
+
+        Returns:
+            True if cancelled, False if not found
+        """
         stream = self._streams.get(entry_point_id)
         if stream is None:
             return False
@@ -285,6 +372,37 @@ def create_agent_runtime(
     tool_executor: Callable | None = None,
     config: AgentRuntimeConfig | None = None,
 ) -> AgentRuntime:
+    """
+    Create and configure an AgentRuntime with entry points.
+
+    Convenience factory that creates runtime and registers entry points.
+
+    Args:
+        graph: Graph specification
+        goal: Goal driving execution
+        storage_path: Path for persistent storage
+        entry_points: Entry point specifications
+        llm: LLM provider
+        tools: Available tools
+        tool_executor: Tool executor function
+        config: Runtime configuration
+
+    Returns:
+        Configured AgentRuntime (not yet started)
+    """
+    runtime = AgentRuntime(
+        graph=graph,
+        goal=goal,
+        storage_path=storage_path,
+        llm=llm,
+        tools=tools,
+        tool_executor=tool_executor,
+        config=config,
+    )
+    for spec in entry_points:
+        runtime.register_entry_point(spec)
+    return runtime
+
     runtime = AgentRuntime(
         graph=graph,
         goal=goal,
