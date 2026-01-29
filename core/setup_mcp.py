@@ -21,11 +21,14 @@ logger = logging.getLogger(__name__)
 IS_WINDOWS = platform.system() == "Windows"
 SCRIPT_DIR = Path(__file__).parent.absolute()
 
+
 class Colors:
     """ANSI color codes for terminal output."""
+
     if IS_WINDOWS:
         try:
             import colorama
+
             colorama.init()
             GREEN = colorama.Fore.GREEN
             YELLOW = colorama.Fore.YELLOW
@@ -41,17 +44,21 @@ class Colors:
         BLUE = "\033[0;34m"
         NC = "\033[0m"
 
+
 def log_step(message: str):
     """Log a colored step message."""
     logger.info(f"{Colors.YELLOW}==> {message}{Colors.NC}")
+
 
 def log_success(message: str):
     """Log a success message."""
     logger.info(f"{Colors.GREEN}✓ {message}{Colors.NC}")
 
+
 def log_error(message: str):
     """Log an error message."""
     logger.error(f"{Colors.RED}✗ {message}{Colors.NC}")
+
 
 def run_command(cmd: list, error_msg: str, cwd: str = None):
     """Run a command with better error handling and cross-platform support."""
@@ -67,7 +74,7 @@ def run_command(cmd: list, error_msg: str, cwd: str = None):
             shell=IS_WINDOWS,
             capture_output=True,
             text=True,
-            encoding="utf-8"
+            encoding="utf-8",
         )
         return True
     except subprocess.CalledProcessError as e:
@@ -78,19 +85,20 @@ def run_command(cmd: list, error_msg: str, cwd: str = None):
         log_error(f"{error_msg}: {str(e)}")
         return False
 
+
 def setup_virtualenv(venv_dir: Path):
     """Set up a Python virtual environment."""
     if not venv_dir.exists():
         log_step("Creating virtual environment...")
         if not run_command(
-            [sys.executable, "-m", "venv", str(venv_dir)],
-            "Failed to create virtual environment"
+            [sys.executable, "-m", "venv", str(venv_dir)], "Failed to create virtual environment"
         ):
             return False
         log_success(f"Virtual environment created at {venv_dir}")
     else:
         log_success(f"Using existing virtual environment at {venv_dir}")
     return True
+
 
 def install_requirements(venv_dir: Path, requirements_path: Path):
     """Install Python requirements."""
@@ -104,12 +112,13 @@ def install_requirements(venv_dir: Path, requirements_path: Path):
     log_step("Installing requirements...")
     if not run_command(
         [str(pip_executable), "install", "-r", str(requirements_path)],
-        "Failed to install requirements"
+        "Failed to install requirements",
     ):
         return False
 
     log_success(f"Requirements installed from {requirements_path}")
     return True
+
 
 def setup_mcp_config(script_dir: Path):
     """Set up MCP configuration file."""
@@ -139,6 +148,7 @@ def setup_mcp_config(script_dir: Path):
         log_error(f"Failed to create MCP configuration: {str(e)}")
         return False
 
+
 def test_mcp_server():
     """Test if the MCP server module can be imported."""
     log_step("Testing MCP server module...")
@@ -154,6 +164,7 @@ def test_mcp_server():
     except subprocess.CalledProcessError as e:
         log_error(f"Failed to import MCP server module: {e.stderr}")
         return False
+
 
 def main():
     """Main setup function."""
@@ -206,8 +217,10 @@ def main():
         log_error(f"An unexpected error occurred: {str(e)}")
         if "--debug" in sys.argv:
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

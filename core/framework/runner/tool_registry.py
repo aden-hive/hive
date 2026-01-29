@@ -133,12 +133,7 @@ class ToolRegistry:
                 'errors': list[str] (if any)
             }
         """
-        result = {
-            "success": False,
-            "tools_registered": 0,
-            "module": str(module_path),
-            "errors": []
-        }
+        result = {"success": False, "tools_registered": 0, "module": str(module_path), "errors": []}
         if not module_path.exists():
             error_msg = f"Module file not found: {module_path}"
             logger.error(error_msg)
@@ -176,16 +171,16 @@ class ToolRegistry:
                             try:
                                 if not isinstance(name, str):
                                     error_msg = (
-                                f"Tool name must be a string, got {type(name).__name__}"
-                            )
+                                        f"Tool name must be a string, got {type(name).__name__}"
+                                    )
                                     errors.append(error_msg)
                                     continue
 
                                 if not isinstance(tool, Tool):
                                     error_msg = (
-                        f"Tool {name} is not an instance of Tool, "
-                        f"got {type(tool).__name__}"
-                    )
+                                        f"Tool {name} is not an instance of Tool, "
+                                        f"got {type(tool).__name__}"
+                                    )
                                     errors.append(error_msg)
                                     continue
 
@@ -200,28 +195,31 @@ class ToolRegistry:
                                                     input=inputs,
                                                 )
                                                 logger.debug(
-                        f"Executing tool '{tool_name}' with inputs: {inputs}"
-                    )
+                                                    f"Executing tool '{tool_name}' with inputs: {inputs}"
+                                                )
                                                 result = executor_func(tool_use)
 
                                                 if isinstance(result, ToolResult):
                                                     return (
-                                json.loads(result.content)
-                                if result.content
-                                else {}
-                            )
+                                                        json.loads(result.content)
+                                                        if result.content
+                                                        else {}
+                                                    )
                                                 return result
                                             except Exception as e:
                                                 import traceback
+
                                                 error_msg = (
                                                     f"Error in unified executor for tool "
                                                     f"'{tool_name}': {str(e)}"
                                                 )
-                                                logger.error(f"{error_msg}\n{traceback.format_exc()}")
+                                                logger.error(
+                                                    f"{error_msg}\n{traceback.format_exc()}"
+                                                )
                                                 return {
-                                "error": error_msg,
-                                "traceback": traceback.format_exc()
-                            }
+                                                    "error": error_msg,
+                                                    "traceback": traceback.format_exc(),
+                                                }
 
                                         return executor
 
@@ -229,20 +227,20 @@ class ToolRegistry:
                                 else:
                                     # Register tool without executor (will use mock)
                                     self.register(
-                                        name,
-                                        tool,
-                                        lambda inputs: {"mock": True, "inputs": inputs}
+                                        name, tool, lambda inputs: {"mock": True, "inputs": inputs}
                                     )
                                 count += 1
                                 logger.debug(f"Registered tool: {name}")
                             except Exception as e:
                                 import traceback
+
                                 error_msg = f"Failed to register tool '{name}': {str(e)}"
                                 logger.error(f"{error_msg}\n{traceback.format_exc()}")
                                 errors.append(error_msg)
 
                 except Exception as e:
                     import traceback
+
                     error_msg = f"Error processing TOOLS dict: {str(e)}"
                     logger.error(f"{error_msg}\n{traceback.format_exc()}")
                     errors.append(error_msg)
@@ -265,22 +263,26 @@ class ToolRegistry:
                             logger.debug(f"Registered @tool function: {tool_name}")
                         except Exception as e:
                             import traceback
+
                             error_msg = f"Failed to register @tool function '{tool_name}': {str(e)}"
                             logger.error(f"{error_msg}\n{traceback.format_exc()}")
                             errors.append(error_msg)
 
                 except Exception as e:
                     import traceback
+
                     error_msg = f"Error processing module member '{name}': {str(e)}"
                     logger.error(f"{error_msg}\n{traceback.format_exc()}")
                     errors.append(error_msg)
 
             # Update result
-            result.update({
-                "success": len(errors) == 0,
-                "tools_registered": count,
-                "errors": errors if errors else None
-            })
+            result.update(
+                {
+                    "success": len(errors) == 0,
+                    "tools_registered": count,
+                    "errors": errors if errors else None,
+                }
+            )
 
             logger.info(
                 f"Discovered {count} tools in {module_path}"
@@ -291,12 +293,11 @@ class ToolRegistry:
 
         except Exception as e:
             import traceback
+
             error_msg = f"Failed to load module {module_path}: {str(e)}"
             logger.error(f"{error_msg}\n{traceback.format_exc()}")
 
-            result.update({
-                "errors": [error_msg, traceback.format_exc()]
-            })
+            result.update({"errors": [error_msg, traceback.format_exc()]})
 
             return result
 
@@ -347,7 +348,7 @@ class ToolRegistry:
                     "context": {
                         "tool_registered": tool_use.name in self._tools,
                         "registered_tools": list(self._tools.keys()),
-                    }
+                    },
                 }
 
                 # Log the full error
@@ -415,7 +416,7 @@ class ToolRegistry:
             "success": False,
             "tools_registered": 0,
             "server_name": server_config.get("name", "unknown"),
-            "error": None
+            "error": None,
         }
 
         try:
@@ -435,7 +436,7 @@ class ToolRegistry:
                 cwd=server_config.get("cwd"),
                 url=server_config.get("url"),
                 headers=server_config.get("headers", {}),
-                description=server_config.get("description", "")
+                description=server_config.get("description", ""),
             )
 
             # Create and connect client
@@ -508,7 +509,7 @@ class ToolRegistry:
                                     "context": {
                                         "mcp_client_connected": is_connected,
                                         "input_keys": list(inputs.keys()) if inputs else [],
-                                    }
+                                    },
                                 }
 
                                 # Log the full error
@@ -519,6 +520,7 @@ class ToolRegistry:
                                 )
 
                                 return {"error": error_info}
+
                         return executor
 
                     # Register the tool with its executor
@@ -531,34 +533,34 @@ class ToolRegistry:
 
                 except Exception as e:
                     import traceback
+
                     tool_name = getattr(mcp_tool, "name", "unknown")
                     error_msg = f"Failed to register MCP tool '{tool_name}': {str(e)}"
                     logger.error(f"{error_msg}\n{traceback.format_exc()}")
                     registration_errors.append(error_msg)
 
             # Update result with success
-            result.update({
-                "success": len(registration_errors) == 0,
-                "tools_registered": count,
-                "error": "\n".join(registration_errors) if registration_errors else None
-            })
+            result.update(
+                {
+                    "success": len(registration_errors) == 0,
+                    "tools_registered": count,
+                    "error": "\n".join(registration_errors) if registration_errors else None,
+                }
+            )
 
             error_msg = f" with {len(registration_errors)} errors" if registration_errors else ""
-            logger.info(
-                f"Registered {count} tools from MCP server '{config.name}'{error_msg}"
-            )
+            logger.info(f"Registered {count} tools from MCP server '{config.name}'{error_msg}")
 
             return result
 
         except Exception as e:
             import traceback
+
             error_msg = f"Failed to register MCP server: {str(e)}"
             logger.error(f"{error_msg}\n{traceback.format_exc()}")
 
-            result.update({
-                "error": error_msg,
-                "traceback": traceback.format_exc()
-            })
+            result.update({"error": error_msg, "traceback": traceback.format_exc()})
+
     def _convert_mcp_tool_to_framework_tool(self, mcp_tool: Any) -> Tool:
         """Convert an MCP tool to a framework Tool.
 
