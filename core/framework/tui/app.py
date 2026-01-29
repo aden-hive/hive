@@ -53,27 +53,11 @@ class AdenTUI(App):
     def __init__(self, runtime: AgentRuntime):
         super().__init__()
         self.runtime = runtime
-        # Widgets will be created lazily in compose()
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
-
-        # Lazy-load widgets here to avoid initialization order issues
-        # Store as instance variables to prevent garbage collection
-        self.log_pane = LogPane()
-        self.graph_view = GraphOverview()
-        self.chat_repl = ChatRepl(self.runtime)
-
-        yield Horizontal(
-            Container(self.graph_view, id="left-pane"),
-            Vertical(
-                Container(self.log_pane, id="log-pane-container"),
-                Container(self.chat_repl, id="chat-repl-container"),
-                id="right-pane",
-            ),
-        )
-
+        yield Label("Aden TUI Dashboard - Agent Execution Monitor")
         yield Footer()
 
     async def on_mount(self) -> None:
