@@ -22,6 +22,9 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Run auto-close-duplicates tests
+        run: bun test scripts/auto-close-duplicates
+
       - name: Auto-close duplicate issues
         run: bun run scripts/auto-close-duplicates.ts
         env:

@@ -167,9 +167,9 @@ class TestWebScrapeToolLinkConversion:
         hrefs = {link["text"]: link["href"] for link in links}
 
         # Links should be resolved relative to FINAL URL, not requested URL
-        assert (
-            hrefs["Previous"] == "https://example.com/prev"
-        ), "Links should resolve relative to final URL after redirects"
+        assert hrefs["Previous"] == "https://example.com/prev", (
+            "Links should resolve relative to final URL after redirects"
+        )
         assert hrefs["Next"] == "https://example.com/new/next"
 
     @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.httpx.get")
