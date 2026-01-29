@@ -63,24 +63,42 @@ class ValidationResult:
 
 def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     """
-    Load GraphSpec and Goal from export_graph() output.
+    Load GraphSpec and Goal from export_graph() output with validation.
 
     Args:
         data: JSON string or dict from export_graph()
 
     Returns:
         Tuple of (GraphSpec, Goal)
+    
+    Raises:
+        ValueError: If required keys are missing from the agent configuration.
     """
     if isinstance(data, str):
         data = json.loads(data)
 
-    # Extract graph and goal
-    graph_data = data.get("graph", {})
+    # --- VALIDATION START ---
+    # Check if 'graph' exists and is not empty
+    graph_data = data.get("graph")
+    if not graph_data:
+        raise ValueError("Invalid agent.json: Missing or empty 'graph' key.")
+
+    # Validate 'nodes' exist and are not empty
+    nodes_data = graph_data.get("nodes")
+    if not nodes_data or not isinstance(nodes_data, list):
+        raise ValueError("Invalid agent.json: 'graph' must contain a non-empty 'nodes' list.")
+
+    # Validate 'entry_node' is specified
+    entry_node = graph_data.get("entry_node")
+    if not entry_node:
+        raise ValueError("Invalid agent.json: 'graph' must specify an 'entry_node'.")
+    # --- VALIDATION END ---
+
     goal_data = data.get("goal", {})
 
     # Build NodeSpec objects
     nodes = []
-    for node_data in graph_data.get("nodes", []):
+    for node_data in nodes_data:
         nodes.append(NodeSpec(**node_data))
 
     # Build EdgeSpec objects
@@ -126,11 +144,11 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         id=graph_data.get("id", "agent-graph"),
         goal_id=graph_data.get("goal_id", ""),
         version=graph_data.get("version", "1.0.0"),
-        entry_node=graph_data.get("entry_node", ""),
-        entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
-        async_entry_points=async_entry_points,  # Support multi-entry-point agents
+        entry_node=entry_node,
+        entry_points=graph_data.get("entry_points", {}),
+        async_entry_points=async_entry_points,
         terminal_nodes=graph_data.get("terminal_nodes", []),
-        pause_nodes=graph_data.get("pause_nodes", []),  # Support pause/resume architecture
+        pause_nodes=graph_data.get("pause_nodes", []),
         nodes=nodes,
         edges=edges,
         max_steps=graph_data.get("max_steps", 100),
