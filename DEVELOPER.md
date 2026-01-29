@@ -2,6 +2,31 @@
 
 This guide covers everything you need to know to develop with the Aden Agent Framework.
 
+
+## New Contributor Quick Orientation
+
+This project is suitable for developers with strong Python fundamentals. Prior experience with AI agent frameworks is helpful, but **not required** to start contributing.
+
+### Repository Overview
+**core/** – Core agent runtime, graph execution, and internal protocols
+**tools/** – MCP tools that extend agent capabilities (memory, budgets, web tools, etc.)
+**exports/** – Example and generated agents built on top of the framework
+**docs/** – Architecture, configuration, and usage documentation
+
+### What Success Looks Like
+After completing the setup and quickstart steps:
+Python environment installs successfully
+An example agent can be built and executed
+Agent execution logs are visible in the terminal
+
+### Common Onboarding Notes
+- Python **3.11+** is required
+- Some quickstart steps assume the Claude CLI is installed
+- MCP tools are installed automatically during setup
+
+New contributors are encouraged to start with documentation, developer experience, and small improvements before modifying core execution logic.
+
+
 ## Table of Contents
 
 1. [Repository Overview](#repository-overview)
