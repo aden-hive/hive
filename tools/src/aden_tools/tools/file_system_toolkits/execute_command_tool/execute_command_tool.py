@@ -17,7 +17,7 @@ ALLOWED_COMMANDS: Set[str] = {
     "git", "hg",
     
     # Build tools
-    "make", "cargo", "npm", "yarn", "pnpm", "docker",
+    "make", "cargo", "npm", "yarn", "pnpm",
     
     # File operations (safe read-only and basic operations)
     "ls", "dir", "find", "grep", "cat", "head", "tail", "wc", "sort",
