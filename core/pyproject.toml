@@ -18,6 +18,9 @@ dependencies = [
 
 # [project.optional-dependencies]
 
+[project.scripts]
+hive = "framework.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
