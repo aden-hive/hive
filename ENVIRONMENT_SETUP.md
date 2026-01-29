@@ -325,14 +325,14 @@ The Hive framework consists of three Python packages:
 hive/
 ├── core/                    # Core framework (runtime, graph executor, LLM providers)
 │   ├── framework/
-│   ├── pyproject.toml
-│   └── requirements.txt
+│   ├── .venv/              # Isolated virtual environment for core
+│   └── pyproject.toml
 │
 ├── tools/                   # Tools and MCP servers
 │   ├── src/
 │   │   └── aden_tools/     # Actual package location
-│   ├── pyproject.toml
-│   └── README.md
+│   ├── .venv/              # Isolated virtual environment for tools
+│   └── pyproject.toml
 │
 └── exports/                 # Agent packages (your agents go here)
     ├── support_ticket_agent/
@@ -340,6 +340,62 @@ hive/
     ├── outbound_sales_agent/
     └── personal_assistant_agent/
 ```
+
+## Separate Virtual Environments
+
+The project uses **separate virtual environments** for `core` and `tools` packages to:
+
+- Isolate dependencies and avoid conflicts
+- Allow independent development and testing of each package
+- Enable MCP servers to run with their specific dependencies
+
+### How It Works
+
+When you run `./quickstart.sh` or `uv sync` in each directory:
+
+1. **core/.venv/** - Contains the `framework` package and its dependencies (anthropic, litellm, mcp, etc.)
+2. **tools/.venv/** - Contains the `aden_tools` package and its dependencies (beautifulsoup4, pandas, etc.)
+
+### Cross-Package Imports
+
+The `core` and `tools` packages are **intentionally independent**:
+
+- **No cross-imports**: `framework` does not import `aden_tools` directly, and vice versa
+- **Communication via MCP**: Tools are exposed to agents through MCP servers, not direct Python imports
+- **Runtime integration**: The agent runner loads tools via the MCP protocol at runtime
+
+If you need to use both packages in a single script (e.g., for testing), you have two options:
+
+```bash
+# Option 1: Install both in a shared environment
+python -m venv .venv
+source .venv/bin/activate
+pip install -e core/ -e tools/
+
+# Option 2: Use PYTHONPATH (for quick testing)
+PYTHONPATH=core:tools/src python your_script.py
+```
+
+### MCP Server Configuration
+
+The `.mcp.json` at project root configures MCP servers to use their respective virtual environments:
+
+```json
+{
+  "mcpServers": {
+    "agent-builder": {
+      "command": "core/.venv/bin/python",
+      "args": ["-m", "framework.mcp.agent_builder_server"]
+    },
+    "tools": {
+      "command": "tools/.venv/bin/python",
+      "args": ["-m", "aden_tools.mcp_server", "--stdio"]
+    }
+  }
+}
+```
+
+This ensures each MCP server runs with its correct dependencies.
 
 ### Why PYTHONPATH is Required
 
