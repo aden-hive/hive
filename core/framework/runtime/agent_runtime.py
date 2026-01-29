@@ -1,21 +1,22 @@
 """
 Agent Runtime - Top-level orchestrator for multi-entry-point agents.
 
-Manages agent lifecycle, coordinates concurrent execution streams,
-and enforces runtime-wide safety guardrails.
+Manages agent lifecycle and coordinates multiple execution streams
+while preserving the goal-driven approach.
 """
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from framework.graph.executor import ExecutionResult
-from framework.runtime.shared_state import SharedStateManager
-from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import ExecutionStream, EntryPointSpec
+from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
+from framework.runtime.outcome_aggregator import OutcomeAggregator
+from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
 
 if TYPE_CHECKING:
@@ -33,17 +34,61 @@ class AgentRuntimeConfig:
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
     max_history: int = 1000
+    execution_result_max: int = 1000
+    execution_result_ttl_seconds: float | None = None
 
 
 class AgentRuntime:
     """
-    Top-level runtime responsible for orchestrating agent execution.
+    Top-level runtime that manages agent lifecycle and concurrent executions.
 
-    This layer intentionally owns:
-    - Entry point registration
-    - Execution stream lifecycle
-    - Shared state & outcome aggregation
-    - Runtime-wide safety guardrails (concurrency, idempotency)
+    Responsibilities:
+    - Register and manage multiple entry points
+    - Coordinate execution streams
+    - Manage shared state across streams
+    - Aggregate decisions/outcomes for goal evaluation
+    - Handle lifecycle events (start, stop)
+    - Enforce runtime guardrails (max concurrency, duplicate executions)
+
+    Example:
+        # Create runtime
+        runtime = AgentRuntime(
+            graph=support_agent_graph,
+            goal=support_agent_goal,
+            storage_path=Path("./storage"),
+            llm=llm_provider,
+        )
+
+        # Register entry points
+        runtime.register_entry_point(EntryPointSpec(
+            id="webhook",
+            name="Zendesk Webhook",
+            entry_node="process-webhook",
+            trigger_type="webhook",
+            isolation_level="shared",
+        ))
+
+        runtime.register_entry_point(EntryPointSpec(
+            id="api",
+            name="API Handler",
+            entry_node="process-request",
+            trigger_type="api",
+            isolation_level="shared",
+        ))
+
+        # Start runtime
+        await runtime.start()
+
+        # Trigger executions (non-blocking)
+        exec_1 = await runtime.trigger("webhook", {"ticket_id": "123"})
+        exec_2 = await runtime.trigger("api", {"query": "help"})
+
+        # Check goal progress
+        progress = await runtime.get_goal_progress()
+        print(f"Progress: {progress['overall_progress']:.1%}")
+
+        # Stop runtime
+        await runtime.stop()
     """
 
     def __init__(
@@ -60,51 +105,49 @@ class AgentRuntime:
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
 
-        # Persistent storage
         self._storage = ConcurrentStorage(
             base_path=storage_path,
             cache_ttl=self._config.cache_ttl,
             batch_interval=self._config.batch_interval,
         )
 
-        # Shared runtime components
         self._state_manager = SharedStateManager()
         self._event_bus = EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
 
-        # LLM and tools
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
 
-        # Entry points and execution streams
         self._entry_points: dict[str, EntryPointSpec] = {}
         self._streams: dict[str, ExecutionStream] = {}
 
-        # Runtime state
         self._running = False
         self._lock = asyncio.Lock()
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         if self._running:
             raise RuntimeError("Cannot register entry points while runtime is running")
-
         if spec.id in self._entry_points:
             raise ValueError(f"Entry point '{spec.id}' already registered")
-
         if self.graph.get_node(spec.entry_node) is None:
             raise ValueError(f"Entry node '{spec.entry_node}' not found in graph")
-
         self._entry_points[spec.id] = spec
         logger.info(f"Registered entry point: {spec.id} -> {spec.entry_node}")
+
+    def unregister_entry_point(self, entry_point_id: str) -> bool:
+        if self._running:
+            raise RuntimeError("Cannot unregister entry points while runtime is running")
+        if entry_point_id in self._entry_points:
+            del self._entry_points[entry_point_id]
+            return True
+        return False
 
     async def start(self) -> None:
         if self._running:
             return
-
         async with self._lock:
             await self._storage.start()
-
             for ep_id, spec in self._entry_points.items():
                 stream = ExecutionStream(
                     stream_id=ep_id,
@@ -118,21 +161,20 @@ class AgentRuntime:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    result_retention_max=self._config.execution_result_max,
+                    result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
-
             self._running = True
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")
 
     async def stop(self) -> None:
         if not self._running:
             return
-
         async with self._lock:
             for stream in self._streams.values():
                 await stream.stop()
-
             self._streams.clear()
             await self._storage.stop()
             self._running = False
@@ -145,36 +187,18 @@ class AgentRuntime:
         correlation_id: str | None = None,
         session_state: dict[str, Any] | None = None,
     ) -> str:
-        """
-        Trigger execution at a specific entry point.
-
-        Runtime-level guardrails are enforced here (not inside ExecutionStream)
-        to ensure global safety across all entry points before execution is scheduled.
-        """
         if not self._running:
             raise RuntimeError("AgentRuntime is not running")
-
         stream = self._streams.get(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
-
-        # --- RUNTIME GUARDRAIL: Max concurrent executions ---
-        active_executions = getattr(stream, "active_executions", {})
-        if len(active_executions) >= self._config.max_concurrent_executions:
-            raise RuntimeError(
-                f"Max concurrent executions reached for entry point '{entry_point_id}'"
-            )
-
-        # --- RUNTIME GUARDRAIL: Idempotency / duplicate execution prevention ---
-        # correlation_id is treated as an idempotency key. If an execution with the same
-        # correlation_id is already active, we avoid spawning a duplicate execution.
-        if correlation_id and correlation_id in active_executions:
-            logger.info(
-                "Duplicate execution prevented for correlation_id=%s",
-                correlation_id,
-            )
+        # RUNTIME GUARDRAILS
+        active_count = len(getattr(stream, "active_executions", {}))
+        if active_count >= self._config.max_concurrent_executions:
+            raise RuntimeError(f"Max concurrent executions reached for '{entry_point_id}'")
+        if correlation_id and correlation_id in getattr(stream, "active_executions", {}):
+            logger.info(f"Duplicate execution prevented for correlation_id: {correlation_id}")
             return correlation_id
-
         return await stream.execute(input_data, correlation_id, session_state)
 
     async def trigger_and_wait(
@@ -185,29 +209,54 @@ class AgentRuntime:
         session_state: dict[str, Any] | None = None,
     ) -> ExecutionResult | None:
         exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
-        stream = self._streams[entry_point_id]
+        stream = self._streams.get(entry_point_id)
+        if stream is None:
+            raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
 
-    # === QUERY OPERATIONS ===
+    async def get_goal_progress(self) -> dict[str, Any]:
+        return await self._outcome_aggregator.evaluate_goal_progress()
 
+    async def cancel_execution(self, entry_point_id: str, execution_id: str) -> bool:
+        stream = self._streams.get(entry_point_id)
+        if stream is None:
+            return False
+        return await stream.cancel_execution(execution_id)
+
+    # === QUERY OPERATIONS ===
     def get_entry_points(self) -> list[EntryPointSpec]:
         return list(self._entry_points.values())
 
     def get_stream(self, entry_point_id: str) -> ExecutionStream | None:
         return self._streams.get(entry_point_id)
 
-    def get_execution_result(
-        self,
-        entry_point_id: str,
-        execution_id: str,
-    ) -> ExecutionResult | None:
+    def get_execution_result(self, entry_point_id: str, execution_id: str) -> ExecutionResult | None:
         stream = self._streams.get(entry_point_id)
         if stream:
             return stream.get_result(execution_id)
         return None
 
-    # === PROPERTIES ===
+    # === EVENT SUBSCRIPTIONS ===
+    def subscribe_to_events(self, event_types: list, handler: Callable, filter_stream: str | None = None) -> str:
+        return self._event_bus.subscribe(event_types=event_types, handler=handler, filter_stream=filter_stream)
 
+    def unsubscribe_from_events(self, subscription_id: str) -> bool:
+        return self._event_bus.unsubscribe(subscription_id)
+
+    # === STATS AND MONITORING ===
+    def get_stats(self) -> dict:
+        stream_stats = {ep_id: stream.get_stats() for ep_id, stream in self._streams.items()}
+        return {
+            "running": self._running,
+            "entry_points": len(self._entry_points),
+            "streams": stream_stats,
+            "goal_id": self.goal.id,
+            "outcome_aggregator": self._outcome_aggregator.get_stats(),
+            "event_bus": self._event_bus.get_stats(),
+            "state_manager": self._state_manager.get_stats(),
+        }
+
+    # === PROPERTIES ===
     @property
     def state_manager(self) -> SharedStateManager:
         return self._state_manager
@@ -226,7 +275,6 @@ class AgentRuntime:
 
 
 # === CONVENIENCE FACTORY ===
-
 def create_agent_runtime(
     graph: "GraphSpec",
     goal: "Goal",
@@ -246,8 +294,6 @@ def create_agent_runtime(
         tool_executor=tool_executor,
         config=config,
     )
-
     for spec in entry_points:
         runtime.register_entry_point(spec)
-
     return runtime
