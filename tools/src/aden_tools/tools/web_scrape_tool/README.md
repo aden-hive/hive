@@ -8,12 +8,13 @@ Use when you need to read the content of a specific URL, extract data from a web
 
 ## Arguments
 
-| Argument | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `url` | str | Yes | - | URL of the webpage to scrape |
-| `selector` | str | No | `None` | CSS selector to target specific content (e.g., 'article', '.main-content') |
-| `include_links` | bool | No | `False` | Include extracted links in the response |
-| `max_length` | int | No | `50000` | Maximum length of extracted text (1000-500000) |
+| Argument             | Type | Required | Default | Description                                                                |
+| -------------------- | ---- | -------- | ------- | -------------------------------------------------------------------------- |
+| `url`                | str  | Yes      | -       | URL of the webpage to scrape                                               |
+| `selector`           | str  | No       | `None`  | CSS selector to target specific content (e.g., 'article', '.main-content') |
+| `include_links`      | bool | No       | `False` | Include extracted links in the response                                    |
+| `max_length`         | int  | No       | `50000` | Maximum length of extracted text (1000-500000)                             |
+| `respect_robots_txt` | bool | No       | `True`  | Whether to respect robots.txt rules for ethical scraping                   |
 
 ## Environment Variables
 
@@ -22,6 +23,7 @@ This tool does not require any environment variables.
 ## Error Handling
 
 Returns error dicts for common issues:
+
 - `HTTP <status>: Failed to fetch URL` - Server returned error status
 - `No elements found matching selector: <selector>` - CSS selector matched nothing
 - `Request timed out` - Request exceeded 30s timeout
@@ -34,3 +36,5 @@ Returns error dicts for common issues:
 - Follows redirects automatically
 - Removes script, style, nav, footer, header, aside, noscript, and iframe elements
 - Auto-detects main content using article, main, or common content class selectors
+- Respects robots.txt by default for ethical web scraping (can be disabled with `respect_robots_txt=False`)
+- Returns `blocked_by_robots_txt: True` in error dict if scraping is blocked by robots.txt
