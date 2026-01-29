@@ -11,6 +11,8 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 try:
@@ -26,6 +28,58 @@ logger = logging.getLogger(__name__)
 
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
+
+# Directory for dumping failed requests
+FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
+
+
+def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
+    """Estimate token count for messages. Returns (token_count, method)."""
+    # Try litellm's token counter first
+    if litellm is not None:
+        try:
+            count = litellm.token_counter(model=model, messages=messages)
+            return count, "litellm"
+        except Exception:
+            pass
+
+    # Fallback: rough estimate based on character count (~4 chars per token)
+    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    return total_chars // 4, "estimate"
+
+
+def _dump_failed_request(
+    model: str,
+    kwargs: dict[str, Any],
+    error_type: str,
+    attempt: int,
+) -> str:
+    """Dump failed request to a file for debugging. Returns the file path."""
+    FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    filename = f"{error_type}_{model.replace('/', '_')}_{timestamp}.json"
+    filepath = FAILED_REQUESTS_DIR / filename
+
+    # Build dump data
+    messages = kwargs.get("messages", [])
+    dump_data = {
+        "timestamp": datetime.now().isoformat(),
+        "model": model,
+        "error_type": error_type,
+        "attempt": attempt,
+        "estimated_tokens": _estimate_tokens(model, messages),
+        "num_messages": len(messages),
+        "messages": messages,
+        "tools": kwargs.get("tools"),
+        "max_tokens": kwargs.get("max_tokens"),
+        "temperature": kwargs.get("temperature"),
+    }
+
+    with open(filepath, "w") as f:
+        json.dump(dump_data, f, indent=2, default=str)
+
+    return str(filepath)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -110,6 +164,21 @@ class LiteLLMProvider(LLMProvider):
                     finish_reason = (
                         response.choices[0].finish_reason if response.choices else "unknown"
                     )
+                    # Dump full request to file for debugging
+                    messages = kwargs.get("messages", [])
+                    token_count, token_method = _estimate_tokens(model, messages)
+                    dump_path = _dump_failed_request(
+                        model=model,
+                        kwargs=kwargs,
+                        error_type="empty_response",
+                        attempt=attempt,
+                    )
+                    logger.warning(
+                        f"[retry] Empty response - {len(messages)} messages, "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+
                     if attempt == RATE_LIMIT_MAX_RETRIES:
                         logger.error(
                             f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
@@ -132,15 +201,28 @@ class LiteLLMProvider(LLMProvider):
 
                 return response
             except RateLimitError as e:
+                # Dump full request to file for debugging
+                messages = kwargs.get("messages", [])
+                token_count, token_method = _estimate_tokens(model, messages)
+                dump_path = _dump_failed_request(
+                    model=model,
+                    kwargs=kwargs,
+                    error_type="rate_limit",
+                    attempt=attempt,
+                )
                 if attempt == RATE_LIMIT_MAX_RETRIES:
                     logger.error(
                         f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
-                        f"attempts — rate limit error: {e!s}"
+                        f"attempts — rate limit error: {e!s}. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
                     )
                     raise
                 wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
                 logger.warning(
                     f"[retry] {model} rate limited (429): {e!s}. "
+                    f"~{token_count} tokens ({token_method}). "
+                    f"Full request dumped to: {dump_path}. "
                     f"Retrying in {wait}s "
                     f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
                 )

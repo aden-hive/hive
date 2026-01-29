@@ -11,12 +11,16 @@ Usage:
     register_all_tools(mcp, credentials=credentials)
 """
 
-from typing import TYPE_CHECKING, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from aden_tools.credentials import CredentialManager
+    from aden_tools.credentials import CredentialManager, CredentialStoreAdapter
+
+    CredentialProvider = CredentialManager | CredentialStoreAdapter
 
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
@@ -43,14 +47,14 @@ from .web_search_tool import register_tools as register_web_search
 
 def register_all_tools(
     mcp: FastMCP,
-    credentials: Optional["CredentialManager"] = None,
+    credentials: CredentialProvider | None = None,
 ) -> list[str]:
     """
     Register all tools with a FastMCP server.
 
     Args:
         mcp: FastMCP server instance
-        credentials: Optional CredentialManager for centralized credential access.
+        credentials: Optional credential provider (CredentialManager or CredentialStoreAdapter).
                      If not provided, tools fall back to direct os.getenv() calls.
 
     Returns:

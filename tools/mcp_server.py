@@ -65,11 +65,23 @@ from fastmcp import FastMCP  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import PlainTextResponse  # noqa: E402
 
-from aden_tools.credentials import CredentialError, CredentialManager  # noqa: E402
+from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
 from aden_tools.tools import register_all_tools  # noqa: E402
 
-# Create credential manager
-credentials = CredentialManager()
+# Create credential manager with access to both env vars AND encrypted store
+# This allows using Aden-synced credentials from ~/.hive/credentials
+try:
+    from framework.credentials import CredentialStore
+
+    store = CredentialStore.with_encrypted_storage()  # ~/.hive/credentials
+    credentials = CredentialStoreAdapter(store)
+    logger.info("Using CredentialStoreAdapter with encrypted storage")
+except Exception as e:
+    # Fall back to env-only adapter if encrypted storage fails
+    from aden_tools.credentials import CredentialManager
+
+    credentials = CredentialManager()
+    logger.warning(f"Falling back to CredentialManager: {e}")
 
 # Tier 1: Validate startup-required credentials (if any)
 try:
