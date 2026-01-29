@@ -314,10 +314,39 @@ class WorkerNode:
 
             messages = [{"role": "user", "content": prompt}]
 
-            response = self.llm.complete(
-                messages=messages,
-                system=action.system_prompt,
-            )
+            streaming_enabled = getattr(action, "streaming_enabled", False)
+
+            if streaming_enabled:
+                logger.info("      🌊 Streaming worker response...")
+                full_content = ""
+                stream_input_tokens = 0
+                stream_output_tokens = 0
+
+                # We could support a callback here too if passed in execute()
+                stream = self.llm.stream_complete(
+                    messages=messages,
+                    system=action.system_prompt,
+                )
+
+                async for chunk in stream:
+                    full_content += chunk.content
+                    stream_input_tokens = chunk.input_tokens
+                    stream_output_tokens = chunk.output_tokens
+                    # Handle progress updates via runtime eventually
+
+                from framework.llm.provider import LLMResponse
+
+                response = LLMResponse(
+                    content=full_content,
+                    model=self.llm.model if hasattr(self.llm, "model") else "unknown",
+                    input_tokens=stream_input_tokens,
+                    output_tokens=stream_output_tokens,
+                )
+            else:
+                response = self.llm.complete(
+                    messages=messages,
+                    system=action.system_prompt,
+                )
 
             # Try to parse JSON from LLM response
             # LLMs often return JSON wrapped in markdown code blocks

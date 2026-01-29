@@ -56,7 +56,32 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
     )
+
     run_parser.set_defaults(func=cmd_run)
+
+    # debug command
+    debug_parser = subparsers.add_parser(
+        "debug",
+        help="Debug an agent interactively",
+        description="Run an agent in interactive debug mode with breakpoints and state inspection.",
+    )
+    debug_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder",
+    )
+    debug_parser.add_argument(
+        "--input",
+        "-i",
+        type=str,
+        help="Input context as JSON string",
+    )
+    debug_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Run in mock mode (no real LLM calls)",
+    )
+    debug_parser.set_defaults(func=cmd_debug)
 
     # info command
     info_parser = subparsers.add_parser(
@@ -1067,4 +1092,77 @@ def _interactive_multi(agents_dir: Path) -> int:
         print()
 
     orchestrator.cleanup()
+    return 0
+
+
+def cmd_debug(args: argparse.Namespace) -> int:
+    """Run an agent in debug mode."""
+    import logging
+
+    from framework.debugger.cli_interface import DebugCLI
+    from framework.debugger.session import DebugSession
+    from framework.runner import AgentRunner
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    # Load input context
+    context = {}
+    if args.input:
+        try:
+            context = json.loads(args.input)
+        except json.JSONDecodeError as e:
+            print(f"Error parsing --input JSON: {e}", file=sys.stderr)
+            return 1
+
+    try:
+        runner = AgentRunner.load(args.agent_path, mock_mode=getattr(args, "mock", False))
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    # Initialize debugger
+    class ExecutorShim:
+        def __init__(self):
+            self.debug_hook = None
+
+        def set_debug_hook(self, hook):
+            self.debug_hook = hook
+
+    shim = ExecutorShim()
+    debug_session = DebugSession(shim)  # type: ignore
+    debug_cli = DebugCLI(debug_session)
+
+    def debug_hook_callback(node_id, node_spec, context, memory):
+        """Bridge between Executor hook and DebugSession logic."""
+        action = debug_session.on_step(node_id, node_spec, context, memory)
+        if action == "break":
+            # Enter interactive CLI loop
+            print(f"\n⏸  Paused at node: {node_spec.name} ({node_id})")
+            debug_cli.cmdloop()
+
+    # Set the hook on the runner
+    runner.set_debug_hook(debug_hook_callback)
+
+    print(f"🐞 Starting Debugger for agent: {runner.info().name}")
+    print("   Type 'help' for commands.")
+
+    # Run the agent
+    try:
+        result = asyncio.run(runner.run(context))
+
+        if result.success:
+            print("\n🎉 Execution completed successfully!")
+            print("Final Output:")
+            print(json.dumps(result.output, indent=2, default=str))
+        else:
+            print(f"\n💥 Execution failed: {result.error}")
+
+    except KeyboardInterrupt:
+        print("\n\nDebugger interrupted.")
+        return 1
+    except Exception as e:
+        print(f"\nError running agent: {e}")
+        return 1
+
     return 0

@@ -16,7 +16,7 @@ try:
 except ImportError:
     litellm = None  # type: ignore[assignment]
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, StreamChunk, Tool, ToolResult, ToolUse
 
 
 class LiteLLMProvider(LLMProvider):
@@ -151,6 +151,86 @@ class LiteLLMProvider(LLMProvider):
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
         )
+
+    async def stream_complete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        callback: Callable[[StreamChunk], None] | None = None,
+    ):
+        """Stream a completion using LiteLLM."""
+        # Prepare messages with system prompt
+        full_messages = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        # Add JSON mode via prompt engineering
+        if json_mode:
+            json_instruction = "\n\nPlease respond with a valid JSON object."
+            if full_messages and full_messages[0]["role"] == "system":
+                full_messages[0]["content"] += json_instruction
+            else:
+                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+
+        # Build kwargs for async streaming
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": full_messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+            **self.extra_kwargs,
+        }
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if tools:
+            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        # Track usage locally (streaming responses often don't include final usage)
+        input_tokens = 0
+        output_tokens = 0
+
+        # Estimate input tokens
+        # (This is rough; ideally we'd use a tokenizer, but we start with 0 or estimate)
+        # For now we'll rely on what the provider sends if any, or 0.
+
+        # Make the call
+        response_stream = await litellm.acompletion(**kwargs)
+
+        async for chunk in response_stream:
+            # Extract content delta
+            delta = chunk.choices[0].delta
+            content = delta.content or ""
+            stop_reason = chunk.choices[0].finish_reason or ""
+
+            # Simple token estimation for output (1 chunk ~ 1 token usually, but not always)
+            # litellm/providers often stream usage in the last chunk or not at all.
+            # We'll just auto-increment for now if usage info is missing.
+            if content:
+                output_tokens += 1
+
+            stream_chunk = StreamChunk(
+                content=content,
+                is_complete=bool(stop_reason),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model=chunk.model or self.model,
+                stop_reason=stop_reason,
+            )
+
+            if callback:
+                callback(stream_chunk)
+
+            yield stream_chunk
 
     def complete_with_tools(
         self,

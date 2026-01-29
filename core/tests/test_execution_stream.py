@@ -29,6 +29,9 @@ class DummyLLMProvider(LLMProvider):
     ) -> LLMResponse:
         return LLMResponse(content=json.dumps({"result": "ok"}), model="dummy")
 
+    async def stream_complete(self, *args, **kwargs):
+        raise NotImplementedError("Streaming not supported in DummyLLMProvider")
+
     def complete_with_tools(
         self,
         messages: list[dict[str, object]],

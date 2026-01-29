@@ -190,6 +190,9 @@ class NodeSpec(BaseModel):
     model: str | None = Field(
         default=None, description="Specific model to use (defaults to graph default)"
     )
+    streaming_enabled: bool = Field(
+        default=False, description="Enable real-time token streaming for this node"
+    )
 
     # For function nodes
     function: str | None = Field(
@@ -761,177 +764,173 @@ Keep the same JSON structure but with shorter content values.
                         f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}"
                     )
 
-                response = ctx.llm.complete(
-                    messages=messages,
-                    system=system,
-                    json_mode=use_json_mode,
-                    max_tokens=ctx.max_tokens,
+                # Check if streaming is enabled
+                streaming_enabled = getattr(ctx.node_spec, "streaming_enabled", False)
+
+                # Phase 3: Auto-generate JSON schema from Pydantic model
+                response_format = None
+                if ctx.node_spec.output_model is not None:
+                    json_schema = ctx.node_spec.output_model.model_json_schema()
+                    response_format = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": ctx.node_spec.output_model.__name__,
+                            "schema": json_schema,
+                            "strict": True,
+                        },
+                    }
+                    model_name = ctx.node_spec.output_model.__name__
+                    logger.info(f"         📐 Using JSON schema from Pydantic model: {model_name}")
+
+                # Phase 2: Retry loop for Pydantic validation
+                max_validation_retries = (
+                    ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
                 )
+                validation_attempt = 0
+                total_input_tokens = 0
+                total_output_tokens = 0
+                current_messages = messages.copy()
 
-            # Check for truncation and retry with compaction if needed
-            expects_json = (
-                ctx.node_spec.node_type in ("llm_generate", "llm_tool_use")
-                and ctx.node_spec.output_keys
-                and len(ctx.node_spec.output_keys) >= 1
-            )
+                while True:
+                    if streaming_enabled:
+                        # Streaming execution
+                        logger.info("      🌊 Streaming response...")
+                        full_content = ""
+                        stream_input_tokens = 0
+                        stream_output_tokens = 0
+                        stop_reason = ""
 
-            compaction_attempt = 0
-            while (
-                self._is_truncated(response)
-                and expects_json
-                and compaction_attempt < self.max_compaction_retries
-            ):
-                compaction_attempt += 1
-                logger.warning(
-                    f"      ⚠ Response truncated (stop_reason: {response.stop_reason}), "
-                    f"retrying with compaction ({compaction_attempt}/{self.max_compaction_retries})"
-                )
+                        # Define callback for runtime events (optional)
+                        def on_token(chunk):
+                            # In future, hook this to runtime event bus
+                            pass
 
-                # Add compaction instruction to messages
-                compaction_messages = messages + [
-                    {"role": "assistant", "content": response.content},
-                    {"role": "user", "content": self.COMPACTION_INSTRUCTION},
-                ]
-
-                # Retry the call with compaction instruction
-                if ctx.available_tools and self.tool_executor:
-                    response = ctx.llm.complete_with_tools(
-                        messages=compaction_messages,
-                        system=system,
-                        tools=ctx.available_tools,
-                        tool_executor=executor,
-                        max_tokens=ctx.max_tokens,
-                    )
-                else:
-                    response = ctx.llm.complete(
-                        messages=compaction_messages,
-                        system=system,
-                        json_mode=use_json_mode,
-                        max_tokens=ctx.max_tokens,
-                    )
-
-            if self._is_truncated(response) and expects_json:
-                logger.warning(
-                    f"      ⚠ Response still truncated after "
-                    f"{compaction_attempt} compaction attempts"
-                )
-
-            # Phase 2: Validation retry loop for Pydantic models
-            max_validation_retries = (
-                ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
-            )
-            validation_attempt = 0
-            total_input_tokens = 0
-            total_output_tokens = 0
-            current_messages = messages.copy()
-
-            while True:
-                total_input_tokens += response.input_tokens
-                total_output_tokens += response.output_tokens
-
-                # Log the response
-                response_preview = (
-                    response.content[:200] if len(response.content) > 200 else response.content
-                )
-                if len(response.content) > 200:
-                    response_preview += "..."
-                logger.info(f"      ← Response: {response_preview}")
-
-                # If no output_model, break immediately (no validation needed)
-                if ctx.node_spec.output_model is None:
-                    break
-
-                # Try to parse and validate the response
-                try:
-                    import json
-
-                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
-
-                    if isinstance(parsed, dict):
-                        from framework.graph.validator import OutputValidator
-
-                        validator = OutputValidator()
-                        validation_result, validated_model = validator.validate_with_pydantic(
-                            parsed, ctx.node_spec.output_model
+                        stream = ctx.llm.stream_complete(
+                            messages=current_messages,
+                            system=system,
+                            json_mode=use_json_mode,
+                            response_format=response_format,
+                            callback=on_token,
                         )
 
-                        if validation_result.success:
-                            # Validation passed, break out of retry loop
-                            model_name = ctx.node_spec.output_model.__name__
-                            logger.info(f"      ✓ Pydantic validation passed for {model_name}")
-                            break
-                        else:
-                            # Validation failed
-                            validation_attempt += 1
+                        # Iterate and aggregate
+                        async for chunk in stream:
+                            full_content += chunk.content
+                            stream_input_tokens = chunk.input_tokens
+                            stream_output_tokens = chunk.output_tokens
+                            stop_reason = chunk.stop_reason or stop_reason
 
-                            if validation_attempt <= max_validation_retries:
-                                # Add validation feedback to messages and retry
-                                feedback = validator.format_validation_feedback(
-                                    validation_result, ctx.node_spec.output_model
-                                )
-                                logger.warning(
-                                    f"      ⚠ Pydantic validation failed "
-                                    f"(attempt {validation_attempt}/{max_validation_retries}): "
-                                    f"{validation_result.error}"
-                                )
-                                logger.info("      🔄 Retrying with validation feedback...")
+                        # Construct response object from aggregated data
+                        from framework.llm.provider import LLMResponse
 
-                                # Add the assistant's failed response and feedback
-                                current_messages.append(
-                                    {"role": "assistant", "content": response.content}
-                                )
-                                current_messages.append({"role": "user", "content": feedback})
-
-                                # Re-call LLM with feedback
-                                if ctx.available_tools and self.tool_executor:
-                                    response = ctx.llm.complete_with_tools(
-                                        messages=current_messages,
-                                        system=system,
-                                        tools=ctx.available_tools,
-                                        tool_executor=executor,
-                                        max_tokens=ctx.max_tokens,
-                                    )
-                                else:
-                                    response = ctx.llm.complete(
-                                        messages=current_messages,
-                                        system=system,
-                                        json_mode=use_json_mode,
-                                        max_tokens=ctx.max_tokens,
-                                    )
-                                continue  # Retry validation
-                            else:
-                                # Max retries exceeded
-                                latency_ms = int((time.time() - start) * 1000)
-                                err = validation_result.error
-                                logger.error(
-                                    f"      ✗ Pydantic validation failed after "
-                                    f"{max_validation_retries} retries: {err}"
-                                )
-                                ctx.runtime.record_outcome(
-                                    decision_id=decision_id,
-                                    success=False,
-                                    error=f"Validation failed: {validation_result.error}",
-                                    tokens_used=total_input_tokens + total_output_tokens,
-                                    latency_ms=latency_ms,
-                                )
-                                error_msg = (
-                                    f"Pydantic validation failed after "
-                                    f"{max_validation_retries} retries: {err}"
-                                )
-                                return NodeResult(
-                                    success=False,
-                                    error=error_msg,
-                                    output=parsed,
-                                    tokens_used=total_input_tokens + total_output_tokens,
-                                    latency_ms=latency_ms,
-                                    validation_errors=validation_result.errors,
-                                )
+                        response = LLMResponse(
+                            content=full_content,
+                            model=ctx.llm.model if hasattr(ctx.llm, "model") else "unknown",
+                            input_tokens=stream_input_tokens,
+                            output_tokens=stream_output_tokens,
+                            stop_reason=stop_reason,
+                        )
                     else:
-                        # Not a dict, can't validate - break and let downstream handle
+                        # Standard execution
+                        response = ctx.llm.complete(
+                            messages=current_messages,
+                            system=system,
+                            json_mode=use_json_mode,
+                            response_format=response_format,
+                        )
+
+                    total_input_tokens += response.input_tokens
+                    total_output_tokens += response.output_tokens
+
+                    # Log the response (preview)
+                    response_preview = (
+                        response.content[:200] if len(response.content) > 200 else response.content
+                    )
+                    if len(response.content) > 200:
+                        response_preview += "..."
+                    logger.info(f"      ← Response: {response_preview}")
+
+                    # If no output_model, break immediately (no validation needed)
+                    if ctx.node_spec.output_model is None:
                         break
-                except Exception:
-                    # JSON extraction failed - break and let downstream handle
-                    break
+
+                    # Try to parse and validate the response
+                    try:
+                        import json
+
+                        parsed = self._extract_json(
+                            response.content, ctx.node_spec.output_keys, self.cleanup_llm_model
+                        )
+
+                        if isinstance(parsed, dict):
+                            from framework.graph.validator import OutputValidator
+
+                            validator = OutputValidator()
+                            (
+                                validation_result,
+                                validated_model,
+                            ) = validator.validate_with_pydantic(parsed, ctx.node_spec.output_model)
+
+                            if validation_result.success:
+                                # Validation passed, break out of retry loop
+                                model_name = ctx.node_spec.output_model.__name__
+                                logger.info(f"      ✓ Pydantic validation passed for {model_name}")
+                                break
+                            else:
+                                # Validation failed
+                                validation_attempt += 1
+
+                                if validation_attempt <= max_validation_retries:
+                                    # Add validation feedback to messages and retry
+                                    feedback = validator.format_validation_feedback(
+                                        validation_result, ctx.node_spec.output_model
+                                    )
+                                    logger.warning(
+                                        f"      ⚠ Pydantic validation failed "
+                                        f"(attempt {validation_attempt}/{max_validation_retries}): "
+                                        f"{validation_result.error}"
+                                    )
+                                    logger.info("      🔄 Retrying with validation feedback...")
+
+                                    # Add the assistant's failed response and feedback
+                                    current_messages.append(
+                                        {"role": "assistant", "content": response.content}
+                                    )
+                                    current_messages.append({"role": "user", "content": feedback})
+                                    continue  # Retry the LLM call
+                                else:
+                                    # Max retries exceeded
+                                    latency_ms = int((time.time() - start) * 1000)
+                                    err = validation_result.error
+                                    logger.error(
+                                        f"      ✗ Pydantic validation failed after "
+                                        f"{max_validation_retries} retries: {err}"
+                                    )
+                                    ctx.runtime.record_outcome(
+                                        decision_id=decision_id,
+                                        success=False,
+                                        error=f"Validation failed: {validation_result.error}",
+                                        tokens_used=total_input_tokens + total_output_tokens,
+                                        latency_ms=latency_ms,
+                                    )
+                                    error_msg = (
+                                        f"Pydantic validation failed after "
+                                        f"{max_validation_retries} retries: {err}"
+                                    )
+                                    return NodeResult(
+                                        success=False,
+                                        error=error_msg,
+                                        output=parsed,
+                                        tokens_used=total_input_tokens + total_output_tokens,
+                                        latency_ms=latency_ms,
+                                        validation_errors=validation_result.errors,
+                                    )
+                        else:
+                            # Not a dict, can't validate - break and let downstream handle
+                            break
+                    except Exception:
+                        # JSON extraction failed - break and let downstream handle
+                        break
 
             latency_ms = int((time.time() - start) * 1000)
 
