@@ -43,27 +43,38 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Use python3 if available, otherwise python
-PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
-    PYTHON_CMD="python"
+# Prefer a Python >= 3.11 if multiple are installed (common on macOS).
+PYTHON_CMD=""
+for CANDIDATE in python3.13 python3.12 python3.11 python3 python; do
+    if command -v "$CANDIDATE" &> /dev/null; then
+        PYTHON_MAJOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.major)')
+        PYTHON_MINOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.minor)')
+        if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 11 ]; then
+            PYTHON_CMD="$CANDIDATE"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    # Fall back to python3/python just for a helpful detected version in the error message.
+    PYTHON_CMD="python3"
+    if ! command -v python3 &> /dev/null; then
+        PYTHON_CMD="python"
+    fi
 fi
 
-# Check Python version
+# Check Python version (for logging/error messages)
 PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)')
 PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
 
-echo -e "  Detected Python: ${GREEN}$PYTHON_VERSION${NC}"
+echo -e "  Detected Python: ${GREEN}$PYTHON_VERSION${NC} (${PYTHON_CMD})"
 
 if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
-    echo -e "${RED}Error: Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
-    echo "Please upgrade your Python installation"
+    echo -e "${RED}Error: Python 3.11+ is required (found $PYTHON_VERSION via ${PYTHON_CMD})${NC}"
+    echo "Please upgrade your Python installation or ensure python3.11+ is on your PATH"
     exit 1
-fi
-
-if [ "$PYTHON_MINOR" -lt 11 ]; then
-    echo -e "${YELLOW}  Warning: Python 3.11+ is recommended for best compatibility${NC}"
 fi
 
 echo -e "${GREEN}  ✓ Python version OK${NC}"
@@ -79,11 +90,24 @@ fi
 echo -e "${GREEN}  ✓ pip detected${NC}"
 echo ""
 
-# Check for uv
+# Check for uv (install automatically if missing)
 if ! command -v uv &> /dev/null; then
-    echo -e "${RED}Error: uv is not installed${NC}"
-    echo "Please install uv from https://astral.sh/uv/"
-    exit 1
+    echo -e "${YELLOW}  uv not found. Installing...${NC}"
+    if ! command -v curl &> /dev/null; then
+        echo -e "${RED}Error: curl is not installed (needed to install uv)${NC}"
+        echo "Please install curl or install uv manually from https://astral.sh/uv/"
+        exit 1
+    fi
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+
+    if ! command -v uv &> /dev/null; then
+        echo -e "${RED}Error: uv installation failed${NC}"
+        echo "Please install uv manually from https://astral.sh/uv/"
+        exit 1
+    fi
+    echo -e "${GREEN}  ✓ uv installed successfully${NC}"
 fi
 
 UV_VERSION=$(uv --version)
