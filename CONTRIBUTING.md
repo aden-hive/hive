@@ -6,10 +6,6 @@ Thank you for your interest in contributing to the Aden Agent Framework! This do
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Contributor License Agreement
-
-By submitting a Pull Request, you agree that your contributions will be licensed under the Aden Agent Framework license.
-
 ## Issue Assignment Policy
 
 To prevent duplicate work and respect contributors' time, we require issue assignment before submitting PRs.
@@ -18,14 +14,10 @@ To prevent duplicate work and respect contributors' time, we require issue assig
 
 1. **Find an Issue:** Browse existing issues or create a new one
 2. **Claim It:** Leave a comment (e.g., *"I'd like to work on this!"*)
-3. **Wait for Assignment:** A maintainer will assign you within 24 hours
+3. **Wait for Assignment:** A maintainer will assign you within 24 hours. Issues with reproducible steps or proposals are prioritized.
 4. **Submit Your PR:** Once assigned, you're ready to contribute
 
 > **Note:** PRs for unassigned issues may be delayed or closed if someone else was already assigned.
-
-### The 5-Day Momentum Rule
-
-To keep the project moving, issues with **no activity for 5 days** (no PR or status update) will be unassigned. If you need more time, just drop a quick comment!
 
 ### Exceptions (No Assignment Needed)
 
@@ -39,8 +31,6 @@ You may submit PRs without prior assignment for:
   | Typos & Documentation & Linting | Refactoring for "clean code" |
   | No logic/API/DB changes | New features (even tiny ones) |
 
-If a high-quality PR is submitted for a "stale" assigned issue (no activity for 7+ days), we may proceed with the submitted code.
-
 ## Getting Started
 
 1. Fork the repository
@@ -49,8 +39,8 @@ If a high-quality PR is submitted for a "stale" assigned issue (no activity for 
 4. Make your changes
 5. Run checks and tests:
    ```bash
-   make check                              # Lint and format checks
-   cd core && python -m pytest tests/ -v   # Core tests
+   make check    # Lint and format checks (ruff check + ruff format --check on core/ and tools/)
+   make test     # Core tests (cd core && pytest tests/ -v)
    ```
 6. Commit your changes following our commit conventions
 7. Push to your fork and submit a Pull Request
@@ -60,9 +50,6 @@ If a high-quality PR is submitted for a "stale" assigned issue (no activity for 
 ```bash
 # Install Python packages and verify setup
 ./quickstart.sh
-
-# Verify installation manually (optional)
-python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
 > **Windows Users:**  
@@ -104,7 +91,7 @@ docs(readme): update installation instructions
 1. **Get assigned to the issue first** (see [Issue Assignment Policy](#issue-assignment-policy))
 2. Update documentation if needed
 3. Add tests for new functionality
-4. Ensure `make check` and core tests pass (`cd core && python -m pytest tests/ -v`)
+4. Ensure `make check` and `make test` pass
 5. Update the CHANGELOG.md if applicable
 6. Request review from maintainers
 
@@ -142,15 +129,24 @@ feat(component): add new feature description
 > ```
 
 ```bash
-# Run all tests for the framework
-cd core && python -m pytest
+# Run lint and format checks (mirrors CI lint job)
+make check
 
-# Run all tests for tools
-cd tools && python -m pytest
+# Run core framework tests (mirrors CI test job)
+make test
+
+# Or run tests directly
+cd core && pytest tests/ -v
 
 # Run tests for a specific agent
 PYTHONPATH=core:exports python -m agent_name test
 ```
+
+> **CI also validates** that all exported agent JSON files (`exports/*/agent.json`) are well-formed JSON. Ensure your agent exports are valid before submitting.
+
+## Contributor License Agreement
+
+By submitting a Pull Request, you agree that your contributions will be licensed under the Aden Agent Framework license.
 
 ## Questions?
 

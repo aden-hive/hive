@@ -173,59 +173,7 @@ flowchart LR
 2. **Coding Agent Generates** → Creates the agent graph, connection code, and test cases
 3. **Workers Execute** → SDK-wrapped nodes run with full observability and tool access
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
-5. **Self-Improve** → On failure, the system evolves the graph and redeploys automatically
-
-## How Aden Compares
-
-Aden takes a fundamentally different approach to agent development. While most frameworks require you to hardcode workflows or manually define agent graphs, Aden uses a **coding agent to generate your entire agent system** from natural language goals. When agents fail, the framework doesn't just log errors—it **automatically evolves the agent graph** and redeploys.
-
-### Comparison Table
-
-| Framework                           | Category                  | Approach                                                        | Aden Difference                                           |
-| ----------------------------------- | ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------- |
-| **LangChain, LlamaIndex, Haystack** | Component Libraries       | Predefined components for RAG/LLM apps; manual connection logic | Generates entire graph and connection code upfront        |
-| **CrewAI, AutoGen, Swarm**          | Multi-Agent Orchestration | Role-based agents with predefined collaboration patterns        | Dynamically creates agents/connections; adapts on failure |
-| **PydanticAI, Mastra, Agno**        | Type-Safe Frameworks      | Structured outputs and validation for known workflows           | Evolving workflows; structure emerges through iteration   |
-| **Agent Zero, Letta**               | Personal AI Assistants    | Memory and learning; OS-as-tool or stateful memory focus        | Production multi-agent systems with self-healing          |
-| **CAMEL**                           | Research Framework        | Emergent behavior in large-scale simulations (up to 1M agents)  | Production-oriented with reliable execution and recovery  |
-| **TEN Framework, Genkit**           | Infrastructure Frameworks | Real-time multimodal (TEN) or full-stack AI (Genkit)            | Higher abstraction—generates and evolves agent logic      |
-| **GPT Engineer, Motia**             | Code Generation           | Code from specs (GPT Engineer) or "Step" primitive (Motia)      | Self-adapting graphs with automatic failure recovery      |
-| **Trading Agents**                  | Domain-Specific           | Hardcoded trading firm roles on LangGraph                       | Domain-agnostic; generates structures for any use case    |
-
-### When to Choose Aden
-
-Choose Aden when you need:
-
-- Agents that **self-improve from failures** without manual intervention
-- **Goal-driven development** where you describe outcomes, not workflows
-- **Production reliability** with automatic recovery and redeployment
-- **Rapid iteration** on agent architectures without rewriting code
-- **Full observability** with real-time monitoring and human oversight
-
-Choose other frameworks when you need:
-
-- **Type-safe, predictable workflows** (PydanticAI, Mastra)
-- **RAG and document processing** (LlamaIndex, Haystack)
-- **Research on agent emergence** (CAMEL)
-- **Real-time voice/multimodal** (TEN Framework)
-- **Simple component chaining** (LangChain, Swarm)
-
-## Project Structure
-
-```
-hive/
-├── core/                   # Core framework - Agent runtime, graph executor, protocols
-├── tools/                  # MCP Tools Package - tools for agent capabilities
-├── exports/                # Agent packages (user-created, gitignored)
-├── docs/                   # Documentation and guides
-├── scripts/                # Build and utility scripts
-├── .claude/                # Claude Code skills for building agents
-├── .cursor/                # Cursor IDE skills (symlinks to .claude/skills)
-├── ENVIRONMENT_SETUP.md    # Python setup guide for agent development
-├── DEVELOPER.md            # Developer guide
-├── CONTRIBUTING.md         # Contribution guidelines
-└── ROADMAP.md              # Product roadmap
-```
+5. **Adaptiveness** → On failure, the system evolves the graph and redeploys automatically
 
 ## Development
 
@@ -268,19 +216,92 @@ Aden Agent Framework aims to help developers build outcome oriented, self-adapti
 [ROADMAP.md](ROADMAP.md)
 
 ```mermaid
-timeline
-    title Aden Agent Framework Roadmap
-    section Foundation
-        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
-        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
-        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
-        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
-        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
-    section Expansion
-        Intelligence : Guardrails : Streaming Mode : Semantic Search
-        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
-        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
-        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
+flowchart TD
+subgraph Foundation
+    direction LR
+    subgraph arch["Architecture"]
+        a1["Node-Based Architecture"]:::done
+        a2["Python SDK"]:::done
+        a3["LLM Integration"]:::done
+        a4["Communication Protocol"]:::done
+    end
+    subgraph ca["Coding Agent"]
+        b1["Goal Creation Session"]:::done
+        b2["Worker Agent Creation"]
+        b3["MCP Tools"]:::done
+    end
+    subgraph wa["Worker Agent"]
+        c1["Human-in-the-Loop"]:::done
+        c2["Callback Handlers"]:::done
+        c3["Intervention Points"]:::done
+        c4["Streaming Interface"]
+    end
+    subgraph cred["Credentials"]
+        d1["Setup Process"]:::done
+        d2["Pluggable Sources"]:::done
+        d3["Enterprise Secrets"]
+        d4["Integration Tools"]:::done
+    end
+    subgraph tools["Tools"]
+        e1["File Use"]:::done
+        e2["Memory STM/LTM"]:::done
+        e3["Web Search/Scraper"]:::done
+        e4["CSV/PDF"]:::done
+        e5["Excel/Email"]
+    end
+    subgraph core["Core"]
+        f1["Eval System"]
+        f2["Pydantic Validation"]:::done
+        f3["Documentation"]:::done
+        f4["Adaptiveness"]
+        f5["Sample Agents"]
+    end
+end
+
+subgraph Expansion
+    direction LR
+    subgraph intel["Intelligence"]
+        g1["Guardrails"]
+        g2["Streaming Mode"]
+        g3["Image Generation"]
+        g4["Semantic Search"]
+    end
+    subgraph mem["Memory Iteration"]
+        h1["Message Model & Sessions"]
+        h2["Storage Migration"]
+        h3["Context Building"]
+        h4["Proactive Compaction"]
+        h5["Token Tracking"]
+    end
+    subgraph evt["Event System"]
+        i1["Event Bus for Nodes"]
+    end
+    subgraph cas["Coding Agent Support"]
+        j1["Claude Code"]
+        j2["Cursor"]
+        j3["Opencode"]
+        j4["Antigravity"]
+    end
+    subgraph plat["Platform"]
+        k1["JavaScript/TypeScript SDK"]
+        k2["Custom Tool Integrator"]
+        k3["Windows Support"]
+    end
+    subgraph dep["Deployment"]
+        l1["Self-Hosted"]
+        l2["Cloud Services"]
+        l3["CI/CD Pipeline"]
+    end
+    subgraph tmpl["Templates"]
+        m1["Sales Agent"]
+        m2["Marketing Agent"]
+        m3["Analytics Agent"]
+        m4["Training Agent"]
+        m5["Smart Form Agent"]
+    end
+end
+
+classDef done fill:#9e9e9e,color:#fff,stroke:#757575
 ```
 
 ## Community & Support
@@ -295,7 +316,7 @@ We use [Discord](https://discord.com/invite/MXE49hrKDk) for support, feature req
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-**Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you within 24 hours. This helps prevent duplicate work.
+**Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you. Issues with reproducible steps and proposals are prioritized. This helps prevent duplicate work. 
 
 1. Find or create an issue and get assigned
 2. Fork the repository
