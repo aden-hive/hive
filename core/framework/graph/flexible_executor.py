@@ -139,7 +139,7 @@ class FlexibleGraphExecutor:
             PlanExecutionResult with status and feedback
         """
         context = context or {}
-        context.update(plan.context)  # Merge plan's accumulated context
+        context.update(plan.context).copy() # Merge plan's accumulated context
 
         # Start run
         _run_id = self.runtime.start_run(
