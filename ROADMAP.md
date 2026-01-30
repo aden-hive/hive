@@ -3,23 +3,92 @@
 Aden Agent Framework aims to help developers build outcome oriented, self-adaptive agents. Please find our roadmap here
 
 ```mermaid
-timeline
-    title Aden Agent Framework Roadmap
-    section Foundation
-        Architecture : Node-Based Architecture (done) : Python SDK (done) : LLM Integration (done) : Communication Protocol (done)
-        Coding Agent : Goal Creation Session (done) : Worker Agent Creation : MCP Tools (done)
-        Worker Agent : Human-in-the-Loop (done) : Callback Handlers (done) : Intervention Points (done) : Streaming Interface
-        Credentials : Setup Process (done) : Pluggable Sources : Enterprise Secrets : Integration Tools (done)
-        Tools : File Use (done) : Memory STM/LTM (done) : Web Search/Scraper (done) : CSV/PDF (done) : Excel/Email
-        Core : Eval System : Pydantic Validation (done) : Documentation (done) : Adaptiveness : Sample Agents
-    section Expansion
-        Intelligence : Guardrails : Streaming Mode : Image Generation : Semantic Search
-        Memory Iteration : Message Model & Sessions : Storage Migration : Context Building : Proactive Compaction : Token Tracking
-        Event System : Event Bus for Nodes
-        Coding Agent Support : Claude Code : Cursor : Opencode : Antigravity
-        Platform : JavaScript/TypeScript SDK : Custom Tool Integrator : Windows Support
-        Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
-        Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
+flowchart TD
+subgraph Foundation
+    direction LR
+    subgraph arch["Architecture"]
+        a1["Node-Based Architecture"]:::done
+        a2["Python SDK"]:::done
+        a3["LLM Integration"]:::done
+        a4["Communication Protocol"]:::done
+    end
+    subgraph ca["Coding Agent"]
+        b1["Goal Creation Session"]:::done
+        b2["Worker Agent Creation"]
+        b3["MCP Tools"]:::done
+    end
+    subgraph wa["Worker Agent"]
+        c1["Human-in-the-Loop"]:::done
+        c2["Callback Handlers"]:::done
+        c3["Intervention Points"]:::done
+        c4["Streaming Interface"]
+    end
+    subgraph cred["Credentials"]
+        d1["Setup Process"]:::done
+        d2["Pluggable Sources"]:::done
+        d3["Enterprise Secrets"]
+        d4["Integration Tools"]:::done
+    end
+    subgraph tools["Tools"]
+        e1["File Use"]:::done
+        e2["Memory STM/LTM"]:::done
+        e3["Web Search/Scraper"]:::done
+        e4["CSV/PDF"]:::done
+        e5["Excel/Email"]
+    end
+    subgraph core["Core"]
+        f1["Eval System"]
+        f2["Pydantic Validation"]:::done
+        f3["Documentation"]:::done
+        f4["Adaptiveness"]
+        f5["Sample Agents"]
+    end
+end
+
+subgraph Expansion
+    direction LR
+    subgraph intel["Intelligence"]
+        g1["Guardrails"]
+        g2["Streaming Mode"]
+        g3["Image Generation"]
+        g4["Semantic Search"]
+    end
+    subgraph mem["Memory Iteration"]
+        h1["Message Model & Sessions"]
+        h2["Storage Migration"]
+        h3["Context Building"]
+        h4["Proactive Compaction"]
+        h5["Token Tracking"]
+    end
+    subgraph evt["Event System"]
+        i1["Event Bus for Nodes"]
+    end
+    subgraph cas["Coding Agent Support"]
+        j1["Claude Code"]
+        j2["Cursor"]
+        j3["Opencode"]
+        j4["Antigravity"]
+    end
+    subgraph plat["Platform"]
+        k1["JavaScript/TypeScript SDK"]
+        k2["Custom Tool Integrator"]
+        k3["Windows Support"]
+    end
+    subgraph dep["Deployment"]
+        l1["Self-Hosted"]
+        l2["Cloud Services"]
+        l3["CI/CD Pipeline"]
+    end
+    subgraph tmpl["Templates"]
+        m1["Sales Agent"]
+        m2["Marketing Agent"]
+        m3["Analytics Agent"]
+        m4["Training Agent"]
+        m5["Smart Form Agent"]
+    end
+end
+
+classDef done fill:#9e9e9e,color:#fff,stroke:#757575
 ```
 
 ---
