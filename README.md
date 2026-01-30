@@ -178,7 +178,7 @@ flowchart LR
 ## Run pre-built Agents (Coming Soon)
 
 ### Run a sample agent
-Aden provides a list of featured agents that you can use and build on top of.
+Aden Hive provides a list of featured agents that you can use and build on top of.
 
 ### Run an agent shared by others
 Put the agent in `exports/` and run `PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'`
@@ -216,7 +216,7 @@ See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions
 
 ## Roadmap
 
-Aden Agent Framework aims to help developers build outcome-oriented, self-adaptive agents. See [ROADMAP.md](ROADMAP.md) for details.
+Aden Hive Agent Framework aims to help developers build outcome-oriented, self-adaptive agents. See [ROADMAP.md](ROADMAP.md) for details.
 
 ```mermaid
 flowchart TD
@@ -343,47 +343,47 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Frequently Asked Questions (FAQ)
 
-**Q: Does Aden depend on LangChain or other agent frameworks?**
+**Q: Does Hive depend on LangChain or other agent frameworks?**
 
-No. Aden is built from the ground up with no dependencies on LangChain, CrewAI, or other agent frameworks. The framework is designed to be lean and flexible, generating agent graphs dynamically rather than relying on predefined components.
+No. Hive is built from the ground up with no dependencies on LangChain, CrewAI, or other agent frameworks. The framework is designed to be lean and flexible, generating agent graphs dynamically rather than relying on predefined components.
 
-**Q: What LLM providers does Aden support?**
+**Q: What LLM providers does Hive support?**
 
-Aden supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
+Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
 
-**Q: Can I use Aden with local AI models like Ollama?**
+**Q: Can I use Hive with local AI models like Ollama?**
 
-Yes! Aden supports local models through LiteLLM. Simply use the model name format `ollama/model-name` (e.g., `ollama/llama3`, `ollama/mistral`) and ensure Ollama is running locally.
+Yes! Hive supports local models through LiteLLM. Simply use the model name format `ollama/model-name` (e.g., `ollama/llama3`, `ollama/mistral`) and ensure Ollama is running locally.
 
-**Q: What makes Aden different from other agent frameworks?**
+**Q: What makes Hive different from other agent frameworks?**
 
-Aden generates your entire agent system from natural language goals using a coding agent—you don't hardcode workflows or manually define graphs. When agents fail, the framework automatically captures failure data, evolves the agent graph, and redeploys. This self-improving loop is unique to Aden.
+Hive generates your entire agent system from natural language goals using a coding agent—you don't hardcode workflows or manually define graphs. When agents fail, the framework automatically captures failure data, evolves the agent graph, and redeploys. This self-improving loop is unique to Aden.
 
-**Q: Is Aden open-source?**
+**Q: Is Hive open-source?**
 
-Yes, Aden is fully open-source under the Apache License 2.0. We actively encourage community contributions and collaboration.
+Yes, Hive is fully open-source under the Apache License 2.0. We actively encourage community contributions and collaboration.
 
-**Q: Does Aden collect data from users?**
+**Q: Does Hive collect data from users?**
 
-Aden collects telemetry data for monitoring and observability purposes, including token usage, latency metrics, and cost tracking. Content capture (prompts and responses) is configurable and stored with team-scoped data isolation. All data stays within your infrastructure when self-hosted.
+Hive collects telemetry data for monitoring and observability purposes, including token usage, latency metrics, and cost tracking. Content capture (prompts and responses) is configurable and stored with team-scoped data isolation. All data stays within your infrastructure when self-hosted.
 
-**Q: What deployment options does Aden support?**
+**Q: What deployment options does Hive support?**
 
-Aden supports self-hosted deployments via Python packages. See the [Environment Setup Guide](ENVIRONMENT_SETUP.md) for installation instructions. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
+Hive supports self-hosted deployments via Python packages. See the [Environment Setup Guide](ENVIRONMENT_SETUP.md) for installation instructions. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
 
-**Q: Can Aden handle complex, production-scale use cases?**
+**Q: Can Hive handle complex, production-scale use cases?**
 
-Yes. Aden is explicitly designed for production environments with features like automatic failure recovery, real-time observability, cost controls, and horizontal scaling support. The framework handles both simple automations and complex multi-agent workflows.
+Yes. Hive is explicitly designed for production environments with features like automatic failure recovery, real-time observability, cost controls, and horizontal scaling support. The framework handles both simple automations and complex multi-agent workflows.
 
-**Q: Does Aden support human-in-the-loop workflows?**
+**Q: Does Hive support human-in-the-loop workflows?**
 
-Yes, Aden fully supports human-in-the-loop workflows through intervention nodes that pause execution for human input. These include configurable timeouts and escalation policies, allowing seamless collaboration between human experts and AI agents.
+Yes, Hive fully supports human-in-the-loop workflows through intervention nodes that pause execution for human input. These include configurable timeouts and escalation policies, allowing seamless collaboration between human experts and AI agents.
 
-**Q: What monitoring and debugging tools does Aden provide?**
+**Q: What monitoring and debugging tools does Hive provide?**
 
-Aden includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and MCP tools for agent execution, including file operations, web search, data processing, and more.
+Hive includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and MCP tools for agent execution, including file operations, web search, data processing, and more.
 
-**Q: What programming languages does Aden support?**
+**Q: What programming languages does Hive support?**
 
 The Hive framework is built in Python. A JavaScript/TypeScript SDK is on the roadmap.
 
@@ -391,9 +391,9 @@ The Hive framework is built in Python. A JavaScript/TypeScript SDK is on the roa
 
 Yes. Aden's SDK-wrapped nodes provide built-in tool access, and the framework supports flexible tool ecosystems. Agents can integrate with external APIs, databases, and services through the node architecture.
 
-**Q: How does cost control work in Aden?**
+**Q: How does cost control work in Hive?**
 
-Aden provides granular budget controls including spending limits, throttles, and automatic model degradation policies. You can set budgets at the team, agent, or workflow level, with real-time cost tracking and alerts.
+Hive provides granular budget controls including spending limits, throttles, and automatic model degradation policies. You can set budgets at the team, agent, or workflow level, with real-time cost tracking and alerts.
 
 **Q: Where can I find examples and documentation?**
 
