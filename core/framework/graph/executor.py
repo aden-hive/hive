@@ -49,7 +49,7 @@ class ExecutionResult:
 
     # Execution quality metrics
     total_retries: int = 0  # Total number of retries across all nodes
-    nodes_with_failures: list[str] = field(default_factory=list)  # Node IDs that failed but recovered
+    nodes_with_failures: list[str] = field(default_factory=list)  # Failed but recovered
     retry_details: dict[str, int] = field(default_factory=dict)  # {node_id: retry_count}
     had_partial_failures: bool = False  # True if any node failed but eventually succeeded
     execution_quality: str = "clean"  # "clean", "degraded", or "failed"
@@ -572,12 +572,16 @@ class GraphExecutor:
             # Update narrative to reflect execution quality
             quality_suffix = ""
             if exec_quality == "degraded":
-                quality_suffix = f" (⚠️  {total_retries_count} retries across {len(nodes_failed)} nodes)"
+                retries = total_retries_count
+                failed = len(nodes_failed)
+                quality_suffix = f" ({retries} retries across {failed} nodes)"
 
             self.runtime.end_run(
                 success=True,
                 output_data=output,
-                narrative=f"Executed {steps} steps through path: {' -> '.join(path)}{quality_suffix}",
+                narrative=(
+                    f"Executed {steps} steps through path: {' -> '.join(path)}{quality_suffix}"
+                ),
             )
 
             return ExecutionResult(

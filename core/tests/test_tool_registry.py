@@ -6,10 +6,9 @@ ToolResult instances. Historically, invalid JSON in ToolResult.content
 could cause a json.JSONDecodeError and crash execution.
 """
 
-from pathlib import Path
 import textwrap
+from pathlib import Path
 
-from framework.llm.provider import Tool, ToolResult
 from framework.runner.tool_registry import ToolRegistry
 
 
@@ -92,4 +91,3 @@ def test_discover_from_module_handles_empty_content(tmp_path):
     result = registered.executor({})
     assert isinstance(result, dict)
     assert result == {}
-

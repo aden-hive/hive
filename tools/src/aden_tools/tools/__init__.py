@@ -11,7 +11,9 @@ Usage:
     register_all_tools(mcp, credentials=credentials)
 """
 
-from typing import TYPE_CHECKING, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
@@ -36,6 +38,7 @@ from .file_system_toolkits.replace_file_content import (
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
+from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
@@ -43,14 +46,14 @@ from .web_search_tool import register_tools as register_web_search
 
 def register_all_tools(
     mcp: FastMCP,
-    credentials: Optional["CredentialStoreAdapter"] = None,
+    credentials: CredentialStoreAdapter | None = None,
 ) -> list[str]:
     """
     Register all tools with a FastMCP server.
 
     Args:
         mcp: FastMCP server instance
-        credentials: Optional CredentialManager for centralized credential access.
+        credentials: Optional CredentialStoreAdapter instance.
                      If not provided, tools fall back to direct os.getenv() calls.
 
     Returns:
@@ -66,6 +69,7 @@ def register_all_tools(
     register_web_search(mcp, credentials=credentials)
     # email supports multiple providers (Resend) with auto-detection
     register_email(mcp, credentials=credentials)
+    register_hubspot(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -98,6 +102,18 @@ def register_all_tools(
         "csv_sql",
         "send_email",
         "send_budget_alert_email",
+        "hubspot_search_contacts",
+        "hubspot_get_contact",
+        "hubspot_create_contact",
+        "hubspot_update_contact",
+        "hubspot_search_companies",
+        "hubspot_get_company",
+        "hubspot_create_company",
+        "hubspot_update_company",
+        "hubspot_search_deals",
+        "hubspot_get_deal",
+        "hubspot_create_deal",
+        "hubspot_update_deal",
     ]
 
 

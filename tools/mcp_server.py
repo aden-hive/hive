@@ -73,7 +73,7 @@ from aden_tools.tools import register_all_tools  # noqa: E402
 try:
     from framework.credentials import CredentialStore
 
-    store = CredentialStore.with_encrypted_storage("~/.hive/credentials")
+    store = CredentialStore.with_encrypted_storage()  # ~/.hive/credentials
     credentials = CredentialStoreAdapter(store)
     logger.info("Using CredentialStoreAdapter with encrypted storage")
 except Exception as e:
@@ -91,7 +91,7 @@ except CredentialError as e:
 
 mcp = FastMCP("tools")
 
-# Register all tools with the MCP server, passing credential manager
+# Register all tools with the MCP server, passing credential store
 tools = register_all_tools(mcp, credentials=credentials)
 # Only print to stdout in HTTP mode (STDIO mode requires clean stdout for JSON-RPC)
 if "--stdio" not in sys.argv:
