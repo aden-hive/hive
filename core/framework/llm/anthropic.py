@@ -1,10 +1,11 @@
 """Anthropic Claude LLM provider - backward compatible wrapper around LiteLLM."""
 
 import os
+from collections.abc import Callable
 from typing import Any
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.litellm import LiteLLMProvider
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
 
 def _get_api_key_from_credential_manager() -> str | None:
@@ -55,7 +56,7 @@ class AnthropicProvider(LLMProvider):
             )
 
         self.model = model
-        
+
         self._provider = LiteLLMProvider(
             model=model,
             api_key=self.api_key,
@@ -85,7 +86,7 @@ class AnthropicProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """Run a tool-use loop until Claude produces a final response (via LiteLLM)."""

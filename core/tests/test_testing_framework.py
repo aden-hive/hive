@@ -9,24 +9,24 @@ Tests cover:
 
 import pytest
 
-from framework.testing.test_case import (
-    Test,
-    TestType,
-    ApprovalStatus,
-)
-from framework.testing.test_result import (
-    TestResult,
-    TestSuiteResult,
-    ErrorCategory,
-)
-from framework.testing.test_storage import TestStorage
 from framework.testing.categorizer import ErrorCategorizer
 from framework.testing.debug_tool import DebugTool
-
+from framework.testing.test_case import (
+    ApprovalStatus,
+    Test,
+    TestType,
+)
+from framework.testing.test_result import (
+    ErrorCategory,
+    TestResult,
+    TestSuiteResult,
+)
+from framework.testing.test_storage import TestStorage
 
 # ============================================================================
 # Test Schema Tests
 # ============================================================================
+
 
 class TestTestCaseSchema:
     """Tests for Test schema."""
@@ -189,8 +189,12 @@ class TestTestSuiteResult:
         results = [
             TestResult(test_id="t1", passed=True, duration_ms=100),
             TestResult(test_id="t2", passed=True, duration_ms=50),
-            TestResult(test_id="t3", passed=False, duration_ms=75,
-                       error_category=ErrorCategory.IMPLEMENTATION_ERROR),
+            TestResult(
+                test_id="t3",
+                passed=False,
+                duration_ms=75,
+                error_category=ErrorCategory.IMPLEMENTATION_ERROR,
+            ),
         ]
 
         suite = TestSuiteResult(
@@ -203,18 +207,30 @@ class TestTestSuiteResult:
         )
 
         assert not suite.all_passed
-        assert suite.pass_rate == pytest.approx(2/3)
+        assert suite.pass_rate == pytest.approx(2 / 3)
         assert len(suite.get_failed_results()) == 1
 
     def test_get_results_by_category(self):
         """Test filtering results by error category."""
         results = [
-            TestResult(test_id="t1", passed=False, duration_ms=100,
-                       error_category=ErrorCategory.LOGIC_ERROR),
-            TestResult(test_id="t2", passed=False, duration_ms=50,
-                       error_category=ErrorCategory.IMPLEMENTATION_ERROR),
-            TestResult(test_id="t3", passed=False, duration_ms=75,
-                       error_category=ErrorCategory.IMPLEMENTATION_ERROR),
+            TestResult(
+                test_id="t1",
+                passed=False,
+                duration_ms=100,
+                error_category=ErrorCategory.LOGIC_ERROR,
+            ),
+            TestResult(
+                test_id="t2",
+                passed=False,
+                duration_ms=50,
+                error_category=ErrorCategory.IMPLEMENTATION_ERROR,
+            ),
+            TestResult(
+                test_id="t3",
+                passed=False,
+                duration_ms=75,
+                error_category=ErrorCategory.IMPLEMENTATION_ERROR,
+            ),
         ]
 
         suite = TestSuiteResult(
@@ -232,6 +248,7 @@ class TestTestSuiteResult:
 # ============================================================================
 # Storage Tests
 # ============================================================================
+
 
 class TestTestStorage:
     """Tests for TestStorage."""
@@ -389,6 +406,7 @@ class TestTestStorage:
 # Error Categorizer Tests
 # ============================================================================
 
+
 class TestErrorCategorizer:
     """Tests for ErrorCategorizer."""
 
@@ -462,6 +480,7 @@ class TestErrorCategorizer:
 # ============================================================================
 # Debug Tool Tests
 # ============================================================================
+
 
 class TestDebugTool:
     """Tests for DebugTool."""

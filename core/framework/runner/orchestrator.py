@@ -75,6 +75,7 @@ class AgentOrchestrator:
         # Auto-create LLM - LiteLLM auto-detects provider and API key from model name
         if self._llm is None:
             from framework.llm.litellm import LiteLLMProvider
+
             self._llm = LiteLLMProvider(model=self._model)
 
     def register(
@@ -208,7 +209,7 @@ class AgentOrchestrator:
 
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for agent_name, response in zip(routing.selected_agents, responses):
+            for agent_name, response in zip(routing.selected_agents, responses, strict=False):
                 if isinstance(response, Exception):
                     results[agent_name] = {"error": str(response)}
                 else:
@@ -329,7 +330,7 @@ class AgentOrchestrator:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for name, result in zip(agent_names, results):
+        for name, result in zip(agent_names, results, strict=False):
             if isinstance(result, Exception):
                 responses[name] = AgentMessage(
                     type=MessageType.RESPONSE,
@@ -358,7 +359,7 @@ class AgentOrchestrator:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         capabilities = {}
-        for name, result in zip(agent_names, results):
+        for name, result in zip(agent_names, results, strict=False):
             if isinstance(result, Exception):
                 capabilities[name] = CapabilityResponse(
                     agent_name=name,
@@ -432,8 +433,7 @@ class AgentOrchestrator:
         """Use LLM to decide routing when multiple agents are capable."""
 
         agents_info = "\n".join(
-            f"- {name}: {cap.reasoning} (confidence: {cap.confidence:.2f})"
-            for name, cap in capable
+            f"- {name}: {cap.reasoning} (confidence: {cap.confidence:.2f})" for name, cap in capable
         )
 
         prompt = f"""Multiple agents can handle this request. Decide the best routing.
@@ -466,7 +466,8 @@ Respond with JSON only:
             )
 
             import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 selected = data.get("selected", [])
