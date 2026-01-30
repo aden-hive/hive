@@ -94,19 +94,22 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 
 ```json
 {
-  "servers": {
+  "mcpServers": {
+    "agent-builder": {
+      "command": "core/.venv/bin/python",
+      "args": ["-m", "framework.mcp.agent_builder_server"],
+      "cwd": "."
+    },
     "tools": {
-      "command": "python",
-      "args": ["tools/mcp_server.py"],
-      "env": {
-        "BRAVE_SEARCH_API_KEY": "..."
-      }
+      "command": "tools/.venv/bin/python",
+      "args": ["-m", "aden_tools.mcp_server", "--stdio"],
+      "cwd": "."
     }
   }
 }
 ```
 
-The tools MCP server exposes 19 tools including web search, PDF reading, CSV processing, and file system operations.
+The tools MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
 
 ## Storage
 
@@ -148,7 +151,7 @@ Add to `.vscode/settings.json`:
 ## Security Best Practices
 
 1. **Never commit API keys** - Use environment variables or `.env` files
-2. **`.env` is git-ignored** - Copy from `.env.example` and fill in your values
+2. **`.env` is git-ignored** - Copy `.env.example` to `.env` at the project root and fill in your values
 3. **Mock mode for testing** - Set `MOCK_MODE=1` to avoid LLM calls during development
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 
