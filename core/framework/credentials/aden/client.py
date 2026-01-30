@@ -254,9 +254,6 @@ class AdenCredentialClient:
     ) -> httpx.Response:
         """Make a request with retry logic."""
         client = self._get_client()
-        print(client.base_url)
-        print(client.headers)
-        print(method, path, kwargs)
         last_error: Exception | None = None
 
         for attempt in range(self.config.retry_attempts):
