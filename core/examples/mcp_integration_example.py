@@ -99,10 +99,10 @@ async def example_4_custom_agent_with_mcp_tools():
     """Example 4: Build custom agent that uses MCP tools"""
     print("\n=== Example 4: Custom Agent with MCP Tools ===\n")
 
-    from framework.builder.workflow import WorkflowBuilder
+    from framework.builder.workflow import GraphBuilder
 
     # Create a workflow builder
-    builder = WorkflowBuilder()
+    builder = GraphBuilder()
 
     # Define goal
     builder.set_goal(

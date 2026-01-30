@@ -3,8 +3,9 @@
 from pathlib import Path
 
 import pytest
-from aden_tools.credentials import CredentialManager
 from fastmcp import FastMCP
+
+from aden_tools.credentials import CredentialManager
 
 
 @pytest.fixture

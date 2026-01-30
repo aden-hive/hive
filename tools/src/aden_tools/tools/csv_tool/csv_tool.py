@@ -63,7 +63,8 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Get total row count (re-read for accurate count)
             with open(secure_path, encoding="utf-8", newline="") as f:
-                total_rows = sum(1 for _ in f) - 1  # Subtract header
+                reader = csv.reader(f)
+                total_rows = sum(1 for row in reader if any(row)) - 1
 
             return {
                 "success": True,
@@ -189,7 +190,8 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Get new total row count
             with open(secure_path, encoding="utf-8", newline="") as f:
-                total_rows = sum(1 for _ in f) - 1  # Subtract header
+                reader = csv.reader(f)
+                total_rows = sum(1 for row in reader if any(row)) - 1  # Subtract header
 
             return {
                 "success": True,

@@ -520,8 +520,9 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     directory = Path(args.directory)
     if not directory.exists():
-        print(f"Directory not found: {directory}", file=sys.stderr)
-        return 1
+        # FIX: Handle missing directory gracefully on fresh install
+        print(f"No agents found in {directory}")
+        return 0
 
     agents = []
     for path in directory.iterdir():
@@ -1034,7 +1035,10 @@ def _select_agent(agents_dir: Path) -> str | None:
     """Let user select an agent from available agents."""
     if not agents_dir.exists():
         print(f"Directory not found: {agents_dir}", file=sys.stderr)
-        return None
+        # fixes issue #696, creates an exports folder if it does not exist
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Created directory: {agents_dir}", file=sys.stderr)
+        # return None
 
     agents = []
     for path in agents_dir.iterdir():

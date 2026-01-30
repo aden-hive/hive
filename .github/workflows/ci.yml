@@ -31,17 +31,20 @@ jobs:
 
       - name: Ruff lint
         run: |
-          cd core && ruff check .
-          cd tools && ruff check .
+          ruff check core/
+          ruff check tools/
 
       - name: Ruff format
         run: |
-          cd core && ruff format --check .
-          cd tools && ruff format --check .
+          ruff format --check core/
+          ruff format --check tools/
 
   test:
     name: Test Python Framework
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
