@@ -99,7 +99,7 @@ class CodeSandboxError(Exception):
     pass
 
 
-class TimeoutError(CodeSandboxError):
+class SandboxTimeoutError(CodeSandboxError):
     """Code execution timed out."""
 
     pass
@@ -216,7 +216,7 @@ class CodeSandbox:
         """Context manager for timeout enforcement."""
 
         def handler(signum, frame):
-            raise TimeoutError(f"Code execution timed out after {seconds} seconds")
+            raise SandboxTimeoutError(f"Code execution timed out after {seconds} seconds")
 
         # Only works on Unix-like systems
         if hasattr(signal, "SIGALRM"):
@@ -311,7 +311,7 @@ class CodeSandbox:
                 execution_time_ms=execution_time_ms,
             )
 
-        except TimeoutError as e:
+        except SandboxTimeoutError as e:
             return SandboxResult(
                 success=False,
                 error=str(e),

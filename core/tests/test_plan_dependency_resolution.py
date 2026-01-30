@@ -57,11 +57,11 @@ class TestStepStatusTerminal:
 class TestPlanStepIsReady:
     """Tests for PlanStep.is_ready() with terminal states."""
 
-    def _make_step(self, id: str, deps: list[str] = None, status: StepStatus = StepStatus.PENDING):
+    def _make_step(self, step_id: str, deps: list[str] = None, status: StepStatus = StepStatus.PENDING):
         """Helper to create a step."""
         return PlanStep(
-            id=id,
-            description=f"Step {id}",
+            id=step_id,
+            description=f"Step {step_id}",
             action=ActionSpec(action_type=ActionType.FUNCTION, function_name="test"),
             dependencies=deps or [],
             status=status,
@@ -121,11 +121,11 @@ class TestPlanGetReadySteps:
             steps=steps,
         )
 
-    def _make_step(self, id: str, deps: list[str] = None, status: StepStatus = StepStatus.PENDING):
+    def _make_step(self, step_id: str, deps: list[str] = None, status: StepStatus = StepStatus.PENDING):
         """Helper to create a step."""
         return PlanStep(
-            id=id,
-            description=f"Step {id}",
+            id=step_id,
+            description=f"Step {step_id}",
             action=ActionSpec(action_type=ActionType.FUNCTION, function_name="test"),
             dependencies=deps or [],
             status=status,
@@ -215,11 +215,11 @@ class TestPlanCompletion:
             steps=steps,
         )
 
-    def _make_step(self, id: str, status: StepStatus = StepStatus.PENDING):
+    def _make_step(self, step_id: str, status: StepStatus = StepStatus.PENDING):
         """Helper to create a step."""
         return PlanStep(
-            id=id,
-            description=f"Step {id}",
+            id=step_id,
+            description=f"Step {step_id}",
             action=ActionSpec(action_type=ActionType.FUNCTION, function_name="test"),
             status=status,
         )
@@ -323,11 +323,11 @@ class TestPlanCompletion:
 class TestBugScenario:
     """Test the specific bug scenario that was fixed."""
 
-    def _make_step(self, id: str, deps: list[str] = None, status: StepStatus = StepStatus.PENDING):
+    def _make_step(self, step_id: str, deps: list[str] = None, status: StepStatus = StepStatus.PENDING):
         """Helper to create a step."""
         return PlanStep(
-            id=id,
-            description=f"Step {id}",
+            id=step_id,
+            description=f"Step {step_id}",
             action=ActionSpec(action_type=ActionType.FUNCTION, function_name="test"),
             dependencies=deps or [],
             status=status,

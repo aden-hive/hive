@@ -51,11 +51,11 @@ class AgentMessage:
         self,
         from_agent: str,
         content: dict,
-        type: MessageType = MessageType.RESPONSE,
+        msg_type: MessageType = MessageType.RESPONSE,
     ) -> "AgentMessage":
         """Create a reply to this message."""
         return AgentMessage(
-            type=type,
+            type=msg_type,
             from_agent=from_agent,
             to_agent=self.from_agent,
             intent=f"Reply to: {self.intent}",
