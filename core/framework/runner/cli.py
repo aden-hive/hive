@@ -263,34 +263,50 @@ def cmd_run(args: argparse.Namespace) -> int:
         pass  # Placeholder to indicate logic insertion point
         
         async def run_with_tui():
-            # Ensure runtime is ready
-            await runner.start()
-            
             # Initialize TUI
-            # Initialize TUI app & Agent Task
-            agent_task = None
+            from textual.app import App, ComposeResult
+            from textual.widgets import Label, Header, Footer
+            
             try:
-                # Access underlying runtime - ensure it exists
+                # Load runner FRESH inside the loop to ensure strict loop affinity
+                print("DEBUG: Loading AgentRunner inside TUI loop...")
+                try:
+                    runner = AgentRunner.load(
+                        args.agent_path,
+                        mock_mode=args.mock,
+                        model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+                        enable_tui=getattr(args, "tui", False),
+                    )
+                except Exception as e:
+                    print(f"Error loading agent: {e}")
+                    return
+
+                # Force setup inside the loop
                 if runner._agent_runtime is None:
-                    # Force setup
                     runner._setup()
-                    # Start again to be sure
-                    await runner.start()
+                    print("DEBUG: AgentRuntime setup forced inside TUI loop")
                     
-                app = AdenTUI(runner._agent_runtime)
-                # app = MinimalTUI()
-                # print("DEBUG: MinimalTUI initialized in cli.py")
                 
+                app = AdenTUI(runner._agent_runtime)
+                print("DEBUG: AdenTUI initialized with runtime in cli.py")
+                
+                # Define agent task
                 # Define agent task
                 async def run_agent_task():
                     try:
+                        # Give TUI a moment to take over stdout/screen
+                        await asyncio.sleep(3.0)
                         await runner.run(context)
+                    except Exception as e:
+                        # Log error to TUI if possible
+                        if hasattr(app, "log_handler"):
+                             import logging
+                             logging.error(f"Agent Execution Failed: {e}", exc_info=True)
                     finally:
-                        # When agent finishes, we might want to keep TUI open or notify
-                        # No need to call the app, just let the task complete
+                        # Don't auto-exit, let user inspect result
                         pass
-
-                # Run concurrently
+                
+                # Start agent task in background
                 agent_task = asyncio.create_task(run_agent_task())
                 
                 # Start TUI (blocks this coroutine until quit)
@@ -302,16 +318,16 @@ def cmd_run(args: argparse.Namespace) -> int:
                 logging.error(f"TUI Crash: {e}", exc_info=True)
             
             # Cleanup
-            if agent_task and not agent_task.done():
-                agent_task.cancel()
-                try:
-                    await agent_task
-                except asyncio.CancelledError:
-                    pass
+            # if agent_task and not agent_task.done():
+            #     agent_task.cancel()
+            #     try:
+            #         await agent_task
+            #     except asyncio.CancelledError:
+            #         pass
                     
             # Return result if completed
-            if agent_task.done() and not agent_task.cancelled():
-                return agent_task.result()
+            # if agent_task.done() and not agent_task.cancelled():
+            #     return agent_task.result()
             return None
 
         result = asyncio.run(run_with_tui())
