@@ -30,6 +30,11 @@ import argparse
 import logging
 import os
 import sys
+import time
+import httpx
+from mcp.server.fastmcp import FastMCP
+from zeep import Client
+
 
 logger = logging.getLogger(__name__)
 
@@ -139,5 +144,72 @@ def main() -> None:
         mcp.run(transport="http", host=args.host, port=args.port)
 
 
+mcp = FastMCP("BusinessSearch")
+
+# --- In-Memory Cache Configuration ---
+CACHE_TTL = 3600  # 1 hour in seconds
+search_cache = {}
+
+def get_cached_result(key: str):
+    """Retrieves result if it exists and hasn't expired."""
+    if key in search_cache:
+        data, timestamp = search_cache[key]
+        if time.time() - timestamp < CACHE_TTL:
+            return data
+    return None
+
+# --- API Providers ---
+
+async def search_google(query: str):
+    # Standard REST API
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = {"q": query, "key": os.getenv("GOOGLE_API_KEY"), "cx": os.getenv("GOOGLE_CX")}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, params=params)
+        return resp.json().get("items", [])
+
+async def search_bing(query: str):
+    # Standard REST API
+    url = "https://api.bing.microsoft.com/v7.0/search"
+    headers = {"Ocp-Apim-Subscription-Key": os.getenv("BING_API_KEY")}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, headers=headers, params={"q": query})
+        return resp.json().get("webPages", {}).get("value", [])
+
+# --- Main Tool with Centralized Caching ---
+
+@mcp.tool()
+async def internal_web_search(query: str, provider: str = "google") -> dict:
+    """
+    Search business data via Google, Bing, or X with internal caching.
+    """
+    cache_key = f"{provider}:{query}"
+    
+    # 1. Check Cache
+    cached_data = get_cached_result(cache_key)
+    if cached_data:
+        return {"source": "cache", "data": cached_data}
+
+    # 2. Fetch from External API
+    try:
+        if provider == "google":
+            results = await search_google(query)
+        elif provider == "bing":
+            results = await search_bing(query)
+        else:
+            return {"error": "Unsupported provider"}
+
+        # 3. Store in Cache
+        search_cache[cache_key] = (results, time.time())
+        return {"source": "live", "data": results}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+def search_internal_soap(query: str):
+    client = Client('http://internal-biz.com/search?wsdl')
+    return client.service.Search(Query=query)
+        
+        
 if __name__ == "__main__":
     main()
