@@ -303,18 +303,9 @@ end
 
 classDef done fill:#9e9e9e,color:#fff,stroke:#757575
 ```
-
-## Community & Support
-
-We use [Discord](https://discord.com/invite/MXE49hrKDk) for support, feature requests, and community discussions.
-
-- Discord - [Join our community](https://discord.com/invite/MXE49hrKDk)
-- Twitter/X - [@adenhq](https://x.com/aden_hq)
-- LinkedIn - [Company Page](https://www.linkedin.com/company/teamaden/)
-
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions from the community! We’re especially looking for help building tools, integrations, and example agents for the framework (check #2805). If you’re interested in extending its functionality, this is the perfect place to start. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 **Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you. Issues with reproducible steps and proposals are prioritized. This helps prevent duplicate work. 
 
@@ -324,6 +315,14 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 4. Commit your changes (`git commit -m 'Add amazing feature'`)
 5. Push to the branch (`git push origin feature/amazing-feature`)
 6. Open a Pull Request
+
+## Community & Support
+
+We use [Discord](https://discord.com/invite/MXE49hrKDk) for support, feature requests, and community discussions.
+
+- Discord - [Join our community](https://discord.com/invite/MXE49hrKDk)
+- Twitter/X - [@adenhq](https://x.com/aden_hq)
+- LinkedIn - [Company Page](https://www.linkedin.com/company/teamaden/)
 
 ## Join Our Team
 
