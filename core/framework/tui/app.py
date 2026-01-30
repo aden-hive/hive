@@ -27,6 +27,7 @@ class StaticHeader(Container):
 
 class AdenTUI(App):
     TITLE = "Aden TUI Dashboard"
+    COMMAND_PALETTE_BINDING = "ctrl+o"
     CSS = """
     Screen {
         layout: vertical;
@@ -117,6 +118,7 @@ class AdenTUI(App):
     
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("ctrl+s", "screenshot", "Screenshot (SVG)", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
     ]
@@ -305,6 +307,69 @@ class AdenTUI(App):
             import traceback
             with open("tui_debug.log", "a") as f:
                 f.write(f"{traceback.format_exc()}\n")
+    
+    def save_png_screenshot(self, filename: str | None = None) -> str:
+        """Save a screenshot of the current screen as SVG (viewable in browsers).
+        
+        Note: Saves as SVG format since PNG conversion requires system libraries.
+        SVG files can be opened in any web browser or converted to PNG using online tools.
+        
+        Args:
+            filename: Optional filename for the screenshot. If None, generates timestamp-based name.
+            
+        Returns:
+            Path to the saved SVG file.
+        """
+        from datetime import datetime
+        from pathlib import Path
+        
+        # Create screenshots directory
+        screenshots_dir = Path("screenshots")
+        screenshots_dir.mkdir(exist_ok=True)
+        
+        # Generate filename if not provided
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"tui_screenshot_{timestamp}.svg"
+        
+        # Ensure .svg extension
+        if not filename.endswith('.svg'):
+            filename += '.svg'
+        
+        # Full path
+        filepath = screenshots_dir / filename
+        
+        # Temporarily hide borders for cleaner screenshot
+        chat_container = self.query_one("#chat-repl-container")
+        original_chat_border = chat_container.styles.border_left
+        chat_container.styles.border_left = ("none", "transparent")
+        
+        # Hide all Input widget borders
+        input_widgets = self.query("Input")
+        original_input_borders = []
+        for input_widget in input_widgets:
+            original_input_borders.append(input_widget.styles.border)
+            input_widget.styles.border = ("none", "transparent")
+        
+        try:
+            # Get SVG data from Textual and save it
+            svg_data = self.export_screenshot()
+            filepath.write_text(svg_data, encoding='utf-8')
+        finally:
+            # Restore the original borders
+            chat_container.styles.border_left = original_chat_border
+            for i, input_widget in enumerate(input_widgets):
+                input_widget.styles.border = original_input_borders[i]
+        
+        return str(filepath)
+    
+    def action_screenshot(self) -> None:
+        """Take a screenshot (bound to Ctrl+S)."""
+        try:
+            filepath = self.save_png_screenshot()
+            self.notify(f"Screenshot saved: {filepath} (SVG - open in browser)", severity="information", timeout=5)
+        except Exception as e:
+            self.notify(f"Screenshot failed: {e}", severity="error", timeout=5)
 
     async def on_unmount(self) -> None:
         """Cleanup on app shutdown."""
