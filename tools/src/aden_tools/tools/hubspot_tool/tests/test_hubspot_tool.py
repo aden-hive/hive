@@ -4,7 +4,7 @@ Tests for HubSpot CRM tool and OAuth2 provider.
 Covers:
 - _HubSpotClient methods (search, get, create, update)
 - Error handling (401, 403, 404, 429, 500, timeout)
-- Credential retrieval (CredentialManager vs env var)
+- Credential retrieval (CredentialStoreAdapter vs env var)
 - All 12 MCP tool functions
 - HubSpotOAuth2Provider configuration
 """

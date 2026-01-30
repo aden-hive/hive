@@ -17,14 +17,12 @@ import httpx
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from aden_tools.credentials import CredentialManager, CredentialStoreAdapter
-
-    CredentialProvider = CredentialManager | CredentialStoreAdapter
+    from aden_tools.credentials import CredentialStoreAdapter
 
 
 def register_tools(
     mcp: FastMCP,
-    credentials: CredentialProvider | None = None,
+    credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register web search tools with the MCP server."""
 

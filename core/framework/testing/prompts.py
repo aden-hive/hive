@@ -20,11 +20,11 @@ from {agent_module} import default_agent
 
 
 def _get_api_key():
-    """Get API key from CredentialManager (Anthropic) or environment (Any)."""
-    # 1. Try CredentialManager for Anthropic (the only provider it currently supports)
+    """Get API key from CredentialStoreAdapter or environment."""
+    # 1. Try CredentialStoreAdapter for Anthropic
     try:
-        from aden_tools.credentials import CredentialManager
-        creds = CredentialManager()
+        from aden_tools.credentials import CredentialStoreAdapter
+        creds = CredentialStoreAdapter.with_env_storage()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
     except (ImportError, KeyError):
@@ -54,10 +54,10 @@ import pytest
 
 
 def _get_api_key():
-    """Get API key from CredentialManager (Anthropic) or environment (Any)."""
+    """Get API key from CredentialStoreAdapter or environment."""
     try:
-        from aden_tools.credentials import CredentialManager
-        creds = CredentialManager()
+        from aden_tools.credentials import CredentialStoreAdapter
+        creds = CredentialStoreAdapter.with_env_storage()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
     except (ImportError, KeyError):

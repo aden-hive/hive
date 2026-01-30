@@ -4,10 +4,10 @@ Aden Tools - Tool implementations for FastMCP.
 Usage:
     from fastmcp import FastMCP
     from aden_tools.tools import register_all_tools
-    from aden_tools.credentials import CredentialManager
+    from aden_tools.credentials import CredentialStoreAdapter
 
     mcp = FastMCP("my-server")
-    credentials = CredentialManager()
+    credentials = CredentialStoreAdapter.with_env_storage()
     register_all_tools(mcp, credentials=credentials)
 """
 
@@ -18,9 +18,7 @@ from typing import TYPE_CHECKING
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from aden_tools.credentials import CredentialManager, CredentialStoreAdapter
-
-    CredentialProvider = CredentialManager | CredentialStoreAdapter
+    from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
@@ -47,14 +45,14 @@ from .web_search_tool import register_tools as register_web_search
 
 def register_all_tools(
     mcp: FastMCP,
-    credentials: CredentialProvider | None = None,
+    credentials: CredentialStoreAdapter | None = None,
 ) -> list[str]:
     """
     Register all tools with a FastMCP server.
 
     Args:
         mcp: FastMCP server instance
-        credentials: Optional credential provider (CredentialManager or CredentialStoreAdapter).
+        credentials: Optional CredentialStoreAdapter instance.
                      If not provided, tools fall back to direct os.getenv() calls.
 
     Returns:

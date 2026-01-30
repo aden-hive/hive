@@ -8,9 +8,15 @@ Philosophy: Google Strictness + Apple UX
 - Guided error messages with clear next steps
 
 Usage:
-    # In mcp_server.py (startup validation)
-    credentials = CredentialManager()
-    credentials.validate_startup()
+    from aden_tools.credentials import CredentialStoreAdapter
+    from core.framework.credentials import CredentialStore
+
+    # With encrypted storage (production)
+    store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
+    credentials = CredentialStoreAdapter(store)
+
+    # With env vars only (simple setup)
+    credentials = CredentialStoreAdapter.with_env_storage()
 
     # In agent runner (validate at agent load time)
     credentials.validate_for_tools(["web_search", "file_read"])
@@ -19,19 +25,9 @@ Usage:
     api_key = credentials.get("brave_search")
 
     # In tests
-    creds = CredentialManager.for_testing({"brave_search": "test-key"})
+    creds = CredentialStoreAdapter.for_testing({"brave_search": "test-key"})
 
-For advanced usage with the new credential store:
-    from aden_tools.credentials import CredentialStoreAdapter
-    from core.framework.credentials import CredentialStore
-
-    store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
-    credentials = CredentialStoreAdapter(store)
-
-    # Existing API works unchanged
-    api_key = credentials.get("brave_search")
-
-    # New features available
+    # Template resolution
     headers = credentials.resolve_headers({
         "Authorization": "Bearer {{github_oauth.access_token}}"
     })
@@ -47,7 +43,7 @@ To add a new credential:
 3. If new category, import and merge it in this __init__.py
 """
 
-from .base import CredentialError, CredentialManager, CredentialSpec
+from .base import CredentialError, CredentialSpec
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .health_check import HealthCheckResult, check_credential_health
 from .integrations import INTEGRATION_CREDENTIALS
@@ -71,9 +67,8 @@ CREDENTIAL_SPECS = {
 __all__ = [
     # Core classes
     "CredentialSpec",
-    "CredentialManager",
     "CredentialError",
-    # New credential store adapter
+    # Credential store adapter (replaces deprecated CredentialManager)
     "CredentialStoreAdapter",
     # Health check utilities
     "HealthCheckResult",
