@@ -23,8 +23,8 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 | Package       | Directory  | Description                             | Tech Stack   |
 | ------------- | ---------- | --------------------------------------- | ------------ |
 | **framework** | `/core`    | Core runtime, graph executor, protocols | Python 3.11+ |
-| **tools**     | `/tools`   | 19 MCP tools for agent capabilities     | Python 3.11+ |
-| **exports**   | `/exports` | Agent packages and examples             | Python 3.11+ |
+| **tools**     | `/tools`   | MCP tools for agent capabilities        | Python 3.11+ |
+| **exports**   | `/exports` | Agent packages (user-created, gitignored) | Python 3.11+ |
 | **skills**    | `.claude`  | Claude Code skills for building/testing | Markdown     |
 
 ### Key Principles
@@ -63,8 +63,8 @@ git --version       # Any recent version
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# 2. Run automated Python setup
-./scripts/setup-python.sh
+# 2. Run automated setup
+./quickstart.sh
 ```
 
 The setup script performs these actions:
@@ -99,10 +99,13 @@ Get API keys:
 ./quickstart.sh
 ```
 
-This installs:
+This installs agent-related Claude Code skills:
 
-- `/building-agents` - Build new goal-driven agents
-- `/testing-agent` - Test agents with evaluation framework
+- `/building-agents-core` - Fundamental agent concepts
+- `/building-agents-construction` - Step-by-step agent building
+- `/building-agents-patterns` - Best practices and design patterns
+- `/testing-agent` - Test and validate agents
+- `/agent-workflow` - End-to-end guided workflow
 
 ### Verify Setup
 
@@ -112,8 +115,8 @@ python -c "import framework; print('✓ framework OK')"
 python -c "import aden_tools; print('✓ aden_tools OK')"
 python -c "import litellm; print('✓ litellm OK')"
 
-# Run an example agent
-PYTHONPATH=core:exports python -m support_ticket_agent validate
+# Run an agent (after building one via /building-agents-construction)
+PYTHONPATH=core:exports python -m your_agent_name validate
 ```
 
 ---
@@ -132,24 +135,35 @@ hive/                                    # Repository root
 │   └── CODEOWNERS                       # Auto-assign reviewers
 │
 ├── .claude/                             # Claude Code Skills
-│   └── skills/
-│       ├── building-agents/             # Skills for building agents
-│       │   ├── SKILL.md                 # Main skill definition
-│       │   ├── building-agents-core/
-│       │   ├── building-agents-patterns/
-│       │   └── building-agents-construction/
+│   └── skills/                          # Skills for building
+│       ├── building-agents-core/
+|       |   ├── SKILL.md                 # Main skill definition
+│       |   └── examples
+│       ├── building-agents-patterns/
+|       |   ├── SKILL.md
+│       |   └── examples
+│       ├── building-agents-construction/
+|       |   ├── SKILL.md
+│       |   └── examples
 │       ├── testing-agent/               # Skills for testing agents
-│       │   └── SKILL.md
-│       └── agent-workflow/              # Complete workflow orchestration
+│       │   ├── SKILL.md
+│       |   └── examples
+│       └── agent-workflow/              # Complete workflow 
+|           ├── SKILL.md
+│           └── examples
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
-│   │   ├── runner/                      # AgentRunner - loads and runs agents
-│   │   ├── executor/                    # GraphExecutor - executes node graphs
-│   │   ├── protocols/                   # Standard protocols (hooks, tracing, etc.)
+│   │   ├── builder/                     # Agent builder utilities
+│   │   ├── credentials/                 # Credential management
+│   │   ├── graph/                       # GraphExecutor - executes node graphs
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
-│   │   ├── memory/                      # Memory systems (STM, LTM/RLM)
-│   │   ├── tools/                       # Tool registry and management
+│   │   ├── mcp/                         # MCP server integration
+│   │   ├── runner/                      # AgentRunner - loads and runs agents
+│   │   ├── runtime/                     # Runtime environment
+│   │   ├── schemas/                     # Data schemas
+│   │   ├── storage/                     # File-based persistence
+│   │   ├── testing/                     # Testing utilities
 │   │   └── __init__.py
 │   ├── pyproject.toml                   # Package metadata and dependencies
 │   ├── requirements.txt                 # Python dependencies
@@ -157,26 +171,22 @@ hive/                                    # Repository root
 │   ├── MCP_INTEGRATION_GUIDE.md         # MCP server integration guide
 │   └── docs/                            # Protocol documentation
 │
-├── tools/                               # TOOLS PACKAGE (19 MCP tools)
+├── tools/                               # TOOLS PACKAGE (MCP tools)
 │   ├── src/
 │   │   └── aden_tools/
 │   │       ├── tools/                   # Individual tool implementations
 │   │       │   ├── web_search_tool/
 │   │       │   ├── web_scrape_tool/
 │   │       │   ├── file_system_toolkits/
-│   │       │   └── ...                  # 19 tools total
+│   │       │   └── ...                  # Additional tools
 │   │       ├── mcp_server.py            # HTTP MCP server
 │   │       └── __init__.py
 │   ├── pyproject.toml                   # Package metadata
 │   ├── requirements.txt                 # Python dependencies
 │   └── README.md                        # Tools documentation
 │
-├── exports/                             # AGENT PACKAGES
-│   ├── support_ticket_agent/            # Example: Support ticket handler
-│   ├── market_research_agent/           # Example: Market research
-│   ├── outbound_sales_agent/            # Example: Sales outreach
-│   ├── personal_assistant_agent/        # Example: Personal assistant
-│   └── ...                              # More agent examples
+├── exports/                             # AGENT PACKAGES (user-created, gitignored)
+│   └── your_agent_name/                 # Created via /building-agents-construction
 │
 ├── docs/                                # Documentation
 │   ├── getting-started.md               # Quick start guide
@@ -213,7 +223,7 @@ The fastest way to build agents is using the Claude Code skills:
 ./quickstart.sh
 
 # Build a new agent
-claude> /building-agents
+claude> /building-agents-construction
 
 # Test the agent
 claude> /testing-agent
@@ -224,7 +234,7 @@ claude> /testing-agent
 1. **Define Your Goal**
 
    ```
-   claude> /building-agents
+   claude> /building-agents-construction
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
@@ -499,8 +509,8 @@ chore(deps): update React to 18.2.0
 
 1. Create a feature branch from `main`
 2. Make your changes with clear commits
-3. Run tests locally: `npm run test`
-4. Run linting: `npm run lint`
+3. Run tests locally: `PYTHONPATH=core:exports python -m pytest`
+4. Run linting: `black --check .`
 5. Push and create a PR
 6. Fill out the PR template
 7. Request review from CODEOWNERS
@@ -508,66 +518,6 @@ chore(deps): update React to 18.2.0
 9. Squash and merge when approved
 
 ---
-
-## Debugging
-
-### Frontend Debugging
-
-**React Developer Tools:**
-
-1. Install the [React DevTools browser extension](https://react.dev/learn/react-developer-tools)
-2. Open browser DevTools → React tab
-3. Inspect component tree, props, state, and hooks
-
-**VS Code Debugging:**
-
-1. Add Chrome debug configuration to `.vscode/launch.json`:
-
-```json
-{
-  "type": "chrome",
-  "request": "launch",
-  "name": "Debug Frontend",
-  "url": "http://localhost:3000",
-  "webRoot": "${workspaceFolder}/honeycomb/src"
-}
-```
-
-2. Start the dev server: `npm run dev -w honeycomb`
-3. Press F5 in VS Code
-
-### Backend Debugging
-
-**VS Code Debugging:**
-
-1. Add Node debug configuration:
-
-```json
-{
-  "type": "node",
-  "request": "launch",
-  "name": "Debug Backend",
-  "runtimeExecutable": "npm",
-  "runtimeArgs": ["run", "dev"],
-  "cwd": "${workspaceFolder}/hive",
-  "console": "integratedTerminal"
-}
-```
-
-2. Set breakpoints in your code
-3. Press F5 to start debugging
-
-**Logging:**
-
-```typescript
-import { logger } from "../utils/logger";
-
-// Add debug logs
-logger.debug("Processing request", {
-  userId: req.user.id,
-  body: req.body,
-});
-```
 
 ---
 
@@ -594,12 +544,13 @@ pip install -e .
 
 ```bash
 # Option 1: Use Claude Code skill (recommended)
-claude> /building-agents
+claude> /building-agents-construction
 
-# Option 2: Copy from example
-cp -r exports/support_ticket_agent exports/my_new_agent
+# Option 2: Create manually
+# Note: exports/ is initially empty (gitignored). Create your agent directory:
+mkdir -p exports/my_new_agent
 cd exports/my_new_agent
-# Edit agent.json, tools.py, README.md
+# Create agent.json, tools.py, README.md (see Agent Package Structure below)
 
 # Option 3: Use the agent builder MCP tools (advanced)
 # See core/MCP_BUILDER_TOOLS_GUIDE.md
@@ -708,61 +659,23 @@ kill -9 <PID>
 # Or change ports in config.yaml and regenerate
 ```
 
-### Node Modules Issues
 
-```bash
-# Clean everything and reinstall
-npm run clean
-rm -rf node_modules package-lock.json
-npm install
-```
-
-### Docker Issues
-
-```bash
-# Reset Docker state
-docker compose down -v
-docker system prune -f
-docker compose build --no-cache
-docker compose up
-```
-
-### TypeScript Errors After Pull
-
-```bash
-# Rebuild TypeScript
-npm run build
-
-# Or restart TS server in VS Code
-# Cmd/Ctrl + Shift + P → "TypeScript: Restart TS Server"
-```
 
 ### Environment Variables Not Loading
 
 ```bash
-# Regenerate from config.yaml
-npm run generate:env
-
-# Verify files exist
+# Verify .env file exists at project root
 cat .env
-cat honeycomb/.env
-cat hive/.env
 
-# Restart dev servers after changing env
+# Or check shell environment
+echo $ANTHROPIC_API_KEY
+
+# Copy from .env.example if needed
+cp .env.example .env
+# Then edit .env with your API keys
 ```
 
-### Tests Failing
 
-```bash
-# Run with verbose output
-npm run test -w honeycomb -- --reporter=verbose
-
-# Run single test file
-npm run test -w honeycomb -- src/components/Button.test.tsx
-
-# Clear test cache
-npm run test -w honeycomb -- --clearCache
-```
 
 ---
 

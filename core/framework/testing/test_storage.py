@@ -6,10 +6,10 @@ storing tests as JSON files with indexes for efficient querying.
 """
 
 import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
-from framework.testing.test_case import Test, ApprovalStatus, TestType
+from framework.testing.test_case import ApprovalStatus, Test, TestType
 from framework.testing.test_result import TestResult
 
 
@@ -34,6 +34,7 @@ class TestStorage:
       suites/
         {goal_id}_suite.json       # Test suite metadata
     """
+
     __test__ = False  # Not a pytest test class
 
     def __init__(self, base_path: str | Path):
@@ -64,7 +65,7 @@ class TestStorage:
 
         # Save full test
         test_path = goal_dir / f"{test.id}.json"
-        with open(test_path, "w") as f:
+        with open(test_path, "w", encoding="utf-8") as f:
             f.write(test.model_dump_json(indent=2))
 
         # Update indexes
@@ -78,7 +79,7 @@ class TestStorage:
         test_path = self.base_path / "tests" / goal_id / f"{test_id}.json"
         if not test_path.exists():
             return None
-        with open(test_path) as f:
+        with open(test_path, encoding="utf-8") as f:
             return Test.model_validate_json(f.read())
 
     def delete_test(self, goal_id: str, test_id: str) -> bool:
@@ -174,12 +175,12 @@ class TestStorage:
         # Save with timestamp
         timestamp = result.timestamp.strftime("%Y%m%d_%H%M%S")
         result_path = results_dir / f"{timestamp}.json"
-        with open(result_path, "w") as f:
+        with open(result_path, "w", encoding="utf-8") as f:
             f.write(result.model_dump_json(indent=2))
 
         # Update latest
         latest_path = results_dir / "latest.json"
-        with open(latest_path, "w") as f:
+        with open(latest_path, "w", encoding="utf-8") as f:
             f.write(result.model_dump_json(indent=2))
 
     def get_latest_result(self, test_id: str) -> TestResult | None:
@@ -187,7 +188,7 @@ class TestStorage:
         latest_path = self.base_path / "results" / test_id / "latest.json"
         if not latest_path.exists():
             return None
-        with open(latest_path) as f:
+        with open(latest_path, encoding="utf-8") as f:
             return TestResult.model_validate_json(f.read())
 
     def get_result_history(self, test_id: str, limit: int = 10) -> list[TestResult]:
@@ -198,13 +199,12 @@ class TestStorage:
 
         # Get all result files except latest.json
         result_files = sorted(
-            [f for f in results_dir.glob("*.json") if f.name != "latest.json"],
-            reverse=True
+            [f for f in results_dir.glob("*.json") if f.name != "latest.json"], reverse=True
         )[:limit]
 
         results = []
         for f in result_files:
-            with open(f) as file:
+            with open(f, encoding="utf-8") as file:
                 results.append(TestResult.model_validate_json(file.read()))
 
         return results
@@ -216,7 +216,7 @@ class TestStorage:
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
         if not index_path.exists():
             return []
-        with open(index_path) as f:
+        with open(index_path, encoding="utf-8") as f:
             return json.load(f)
 
     def _add_to_index(self, index_type: str, key: str, value: str) -> None:
@@ -225,7 +225,7 @@ class TestStorage:
         values = self._get_index(index_type, key)
         if value not in values:
             values.append(value)
-            with open(index_path, "w") as f:
+            with open(index_path, "w", encoding="utf-8") as f:
                 json.dump(values, f)
 
     def _remove_from_index(self, index_type: str, key: str, value: str) -> None:
@@ -234,7 +234,7 @@ class TestStorage:
         values = self._get_index(index_type, key)
         if value in values:
             values.remove(value)
-            with open(index_path, "w") as f:
+            with open(index_path, "w", encoding="utf-8") as f:
                 json.dump(values, f)
 
     # === UTILITY ===

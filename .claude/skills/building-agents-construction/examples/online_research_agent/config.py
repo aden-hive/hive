@@ -1,4 +1,5 @@
 """Runtime configuration."""
+
 from dataclasses import dataclass
 
 
@@ -7,9 +8,12 @@ class RuntimeConfig:
     model: str = "groq/moonshotai/kimi-k2-instruct-0905"
     temperature: float = 0.7
     max_tokens: int = 16384
+    api_key: str | None = None
+    api_base: str | None = None
 
 
 default_config = RuntimeConfig()
+
 
 # Agent metadata
 @dataclass

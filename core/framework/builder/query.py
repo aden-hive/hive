@@ -8,12 +8,12 @@ This is designed around the questions I need to answer:
 4. What should we change? (suggestions)
 """
 
-from typing import Any
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 from framework.schemas.decision import Decision
-from framework.schemas.run import Run, RunSummary, RunStatus
+from framework.schemas.run import Run, RunStatus, RunSummary
 from framework.storage.backend import FileStorage
 
 
@@ -196,10 +196,7 @@ class BuilderQuery:
                 break
 
         # Extract problems
-        problems = [
-            f"[{p.severity}] {p.description}"
-            for p in run.problems
-        ]
+        problems = [f"[{p.severity}] {p.description}" for p in run.problems]
 
         # Generate suggestions based on the failure
         suggestions = self._generate_suggestions(run, failed_decisions)
@@ -253,11 +250,7 @@ class BuilderQuery:
                     error = decision.outcome.error or "Unknown error"
                     failure_counts[error] += 1
 
-        common_failures = sorted(
-            failure_counts.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:5]
+        common_failures = sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
         # Find problematic nodes
         node_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "failed": 0})
@@ -328,34 +321,45 @@ class BuilderQuery:
 
         # Suggestion: Fix problematic nodes
         for node_id, failure_rate in patterns.problematic_nodes:
-            suggestions.append({
-                "type": "node_improvement",
-                "target": node_id,
-                "reason": f"Node has {failure_rate:.1%} failure rate",
-                "recommendation": f"Review and improve node '{node_id}' - high failure rate suggests prompt or tool issues",
-                "priority": "high" if failure_rate > 0.3 else "medium",
-            })
+            suggestions.append(
+                {
+                    "type": "node_improvement",
+                    "target": node_id,
+                    "reason": f"Node has {failure_rate:.1%} failure rate",
+                    "recommendation": (
+                        f"Review and improve node '{node_id}' - "
+                        "high failure rate suggests prompt or tool issues"
+                    ),
+                    "priority": "high" if failure_rate > 0.3 else "medium",
+                }
+            )
 
         # Suggestion: Address common failures
         for failure, count in patterns.common_failures:
             if count >= 2:
-                suggestions.append({
-                    "type": "error_handling",
-                    "target": failure,
-                    "reason": f"Error occurred {count} times",
-                    "recommendation": f"Add handling for: {failure}",
-                    "priority": "high" if count >= 5 else "medium",
-                })
+                suggestions.append(
+                    {
+                        "type": "error_handling",
+                        "target": failure,
+                        "reason": f"Error occurred {count} times",
+                        "recommendation": f"Add handling for: {failure}",
+                        "priority": "high" if count >= 5 else "medium",
+                    }
+                )
 
         # Suggestion: Overall success rate
         if patterns.success_rate < 0.8:
-            suggestions.append({
-                "type": "architecture",
-                "target": goal_id,
-                "reason": f"Goal success rate is only {patterns.success_rate:.1%}",
-                "recommendation": "Consider restructuring the agent graph or improving goal definition",
-                "priority": "high",
-            })
+            suggestions.append(
+                {
+                    "type": "architecture",
+                    "target": goal_id,
+                    "reason": f"Goal success rate is only {patterns.success_rate:.1%}",
+                    "recommendation": (
+                        "Consider restructuring the agent graph or improving goal definition"
+                    ),
+                    "priority": "high",
+                }
+            )
 
         return suggestions
 
@@ -408,21 +412,22 @@ class BuilderQuery:
                 alternatives = [o for o in decision.options if o.id != decision.chosen_option_id]
                 if alternatives:
                     alt_desc = alternatives[0].description
+                    chosen_desc = chosen.description if chosen else "unknown"
                     suggestions.append(
-                        f"Consider alternative: '{alt_desc}' instead of '{chosen.description if chosen else 'unknown'}'"
+                        f"Consider alternative: '{alt_desc}' instead of '{chosen_desc}'"
                     )
 
             # Check for missing context
             if not decision.input_context:
                 suggestions.append(
-                    f"Decision '{decision.intent}' had no input context - ensure relevant data is passed"
+                    f"Decision '{decision.intent}' had no input context - "
+                    "ensure relevant data is passed"
                 )
 
             # Check for constraint issues
             if decision.active_constraints:
-                suggestions.append(
-                    f"Review constraints: {', '.join(decision.active_constraints)} - may be too restrictive"
-                )
+                constraints = ", ".join(decision.active_constraints)
+                suggestions.append(f"Review constraints: {constraints} - may be too restrictive")
 
         # Check for reported problems with suggestions
         for problem in run.problems:
@@ -471,15 +476,14 @@ class BuilderQuery:
 
         # Decision count difference
         if len(run1.decisions) != len(run2.decisions):
-            differences.append(
-                f"Decision count: {len(run1.decisions)} vs {len(run2.decisions)}"
-            )
+            differences.append(f"Decision count: {len(run1.decisions)} vs {len(run2.decisions)}")
 
         # Find first divergence point
-        for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions)):
+        for i, (d1, d2) in enumerate(zip(run1.decisions, run2.decisions, strict=False)):
             if d1.chosen_option_id != d2.chosen_option_id:
                 differences.append(
-                    f"Diverged at decision {i}: chose '{d1.chosen_option_id}' vs '{d2.chosen_option_id}'"
+                    f"Diverged at decision {i}: "
+                    f"chose '{d1.chosen_option_id}' vs '{d2.chosen_option_id}'"
                 )
                 break
 

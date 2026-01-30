@@ -1,6 +1,9 @@
 import os
+
 from mcp.server.fastmcp import FastMCP
+
 from ..security import get_secure_path
+
 
 def register_tools(mcp: FastMCP) -> None:
     """Register directory listing tools with the MCP server."""
@@ -33,7 +36,10 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
             if not os.path.exists(secure_path):
-                return {"error": f"Directory not found at {path}"}
+                return {"error": f"Path not found: {path}"}
+
+            if not os.path.isdir(secure_path):
+                return {"error": f"Path is not a directory: {path}"}
 
             items = os.listdir(secure_path)
             entries = []
@@ -43,15 +49,10 @@ def register_tools(mcp: FastMCP) -> None:
                 entry = {
                     "name": item,
                     "type": "directory" if is_dir else "file",
-                    "size_bytes": os.path.getsize(full_path) if not is_dir else None
+                    "size_bytes": os.path.getsize(full_path) if not is_dir else None,
                 }
                 entries.append(entry)
 
-            return {
-                "success": True,
-                "path": path,
-                "entries": entries,
-                "total_count": len(entries)
-            }
+            return {"success": True, "path": path, "entries": entries, "total_count": len(entries)}
         except Exception as e:
             return {"error": f"Failed to list directory: {str(e)}"}

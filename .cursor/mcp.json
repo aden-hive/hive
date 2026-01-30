@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "agent-builder": {
+      "command": "python",
+      "args": ["-m", "framework.mcp.agent_builder_server"],
+      "cwd": "core",
+      "env": {
+        "PYTHONPATH": "../tools/src"
+      }
+    },
+    "tools": {
+      "command": "python",
+      "args": ["mcp_server.py", "--stdio"],
+      "cwd": "tools",
+      "env": {
+        "PYTHONPATH": "src"
+      }
+    }
+  }
+}

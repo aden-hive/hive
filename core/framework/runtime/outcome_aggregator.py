@@ -9,7 +9,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from framework.schemas.decision import Decision, Outcome
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CriterionStatus:
     """Status of a success criterion."""
+
     criterion_id: str
     description: str
     met: bool
@@ -34,6 +35,7 @@ class CriterionStatus:
 @dataclass
 class ConstraintCheck:
     """Result of a constraint check."""
+
     constraint_id: str
     description: str
     violated: bool
@@ -46,6 +48,7 @@ class ConstraintCheck:
 @dataclass
 class DecisionRecord:
     """Record of a decision for aggregation."""
+
     stream_id: str
     execution_id: str
     decision: Decision
@@ -284,10 +287,11 @@ class OutcomeAggregator:
                 "successful_outcomes": self._successful_outcomes,
                 "failed_outcomes": self._failed_outcomes,
                 "success_rate": (
-                    self._successful_outcomes / max(1, self._successful_outcomes + self._failed_outcomes)
+                    self._successful_outcomes
+                    / max(1, self._successful_outcomes + self._failed_outcomes)
                 ),
-                "streams_active": len(set(d.stream_id for d in self._decisions)),
-                "executions_total": len(set((d.stream_id, d.execution_id) for d in self._decisions)),
+                "streams_active": len({d.stream_id for d in self._decisions}),
+                "executions_total": len({(d.stream_id, d.execution_id) for d in self._decisions}),
             }
 
             # Determine recommendation
@@ -296,7 +300,7 @@ class OutcomeAggregator:
             # Publish progress event
             if self._event_bus:
                 # Get any stream ID for the event
-                stream_ids = set(d.stream_id for d in self._decisions)
+                stream_ids = {d.stream_id for d in self._decisions}
                 if stream_ids:
                     await self._event_bus.emit_goal_progress(
                         stream_id=list(stream_ids)[0],
@@ -323,7 +327,8 @@ class OutcomeAggregator:
 
         # Get relevant decisions (those mentioning this criterion or related intents)
         relevant_decisions = [
-            d for d in self._decisions
+            d
+            for d in self._decisions
             if criterion.id in str(d.decision.active_constraints)
             or self._is_related_to_criterion(d.decision, criterion)
         ]
@@ -341,7 +346,9 @@ class OutcomeAggregator:
             # Add evidence
             for d in relevant_decisions[:5]:  # Limit evidence
                 if d.outcome:
-                    evidence = f"{d.decision.intent}: {'success' if d.outcome.success else 'failed'}"
+                    evidence = (
+                        f"{d.decision.intent}: {'success' if d.outcome.success else 'failed'}"
+                    )
                     status.evidence.append(evidence)
 
         # Check if criterion is met based on target
@@ -373,10 +380,7 @@ class OutcomeAggregator:
         violations = result["constraint_violations"]
 
         # Check for hard constraint violations
-        hard_violations = [
-            v for v in violations
-            if self._is_hard_constraint(v["constraint_id"])
-        ]
+        hard_violations = [v for v in violations if self._is_hard_constraint(v["constraint_id"])]
 
         if hard_violations:
             return "adjust"  # Must address violations
@@ -409,7 +413,8 @@ class OutcomeAggregator:
     ) -> list[DecisionRecord]:
         """Get all decisions from a specific execution."""
         return [
-            d for d in self._decisions
+            d
+            for d in self._decisions
             if d.stream_id == stream_id and d.execution_id == execution_id
         ]
 
@@ -429,7 +434,7 @@ class OutcomeAggregator:
             "failed_outcomes": self._failed_outcomes,
             "constraint_violations": len(self._constraint_violations),
             "criteria_tracked": len(self._criterion_status),
-            "streams_seen": len(set(d.stream_id for d in self._decisions)),
+            "streams_seen": len({d.stream_id for d in self._decisions}),
         }
 
     # === RESET OPERATIONS ===

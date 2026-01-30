@@ -9,11 +9,11 @@ Allows streams to:
 
 import asyncio
 import logging
-import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ class EventType(str, Enum):
 @dataclass
 class AgentEvent:
     """An event in the agent system."""
+
     type: EventType
     stream_id: str
     execution_id: str | None = None
@@ -74,6 +75,7 @@ EventHandler = Callable[[AgentEvent], Awaitable[None]]
 @dataclass
 class Subscription:
     """A subscription to events."""
+
     id: str
     event_types: set[EventType]
     handler: EventHandler
@@ -193,7 +195,7 @@ class EventBus:
         async with self._lock:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
-                self._event_history = self._event_history[-self._max_history:]
+                self._event_history = self._event_history[-self._max_history :]
 
         # Find matching subscriptions
         matching_handlers: list[EventHandler] = []
@@ -249,13 +251,15 @@ class EventBus:
         correlation_id: str | None = None,
     ) -> None:
         """Emit execution started event."""
-        await self.publish(AgentEvent(
-            type=EventType.EXECUTION_STARTED,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={"input": input_data or {}},
-            correlation_id=correlation_id,
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={"input": input_data or {}},
+                correlation_id=correlation_id,
+            )
+        )
 
     async def emit_execution_completed(
         self,
@@ -265,13 +269,15 @@ class EventBus:
         correlation_id: str | None = None,
     ) -> None:
         """Emit execution completed event."""
-        await self.publish(AgentEvent(
-            type=EventType.EXECUTION_COMPLETED,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={"output": output or {}},
-            correlation_id=correlation_id,
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_COMPLETED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={"output": output or {}},
+                correlation_id=correlation_id,
+            )
+        )
 
     async def emit_execution_failed(
         self,
@@ -281,13 +287,15 @@ class EventBus:
         correlation_id: str | None = None,
     ) -> None:
         """Emit execution failed event."""
-        await self.publish(AgentEvent(
-            type=EventType.EXECUTION_FAILED,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={"error": error},
-            correlation_id=correlation_id,
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_FAILED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={"error": error},
+                correlation_id=correlation_id,
+            )
+        )
 
     async def emit_goal_progress(
         self,
@@ -296,14 +304,16 @@ class EventBus:
         criteria_status: dict[str, Any],
     ) -> None:
         """Emit goal progress event."""
-        await self.publish(AgentEvent(
-            type=EventType.GOAL_PROGRESS,
-            stream_id=stream_id,
-            data={
-                "progress": progress,
-                "criteria_status": criteria_status,
-            },
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.GOAL_PROGRESS,
+                stream_id=stream_id,
+                data={
+                    "progress": progress,
+                    "criteria_status": criteria_status,
+                },
+            )
+        )
 
     async def emit_constraint_violation(
         self,
@@ -313,15 +323,17 @@ class EventBus:
         description: str,
     ) -> None:
         """Emit constraint violation event."""
-        await self.publish(AgentEvent(
-            type=EventType.CONSTRAINT_VIOLATION,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={
-                "constraint_id": constraint_id,
-                "description": description,
-            },
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.CONSTRAINT_VIOLATION,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={
+                    "constraint_id": constraint_id,
+                    "description": description,
+                },
+            )
+        )
 
     async def emit_state_changed(
         self,
@@ -333,17 +345,19 @@ class EventBus:
         scope: str,
     ) -> None:
         """Emit state changed event."""
-        await self.publish(AgentEvent(
-            type=EventType.STATE_CHANGED,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={
-                "key": key,
-                "old_value": old_value,
-                "new_value": new_value,
-                "scope": scope,
-            },
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.STATE_CHANGED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={
+                    "key": key,
+                    "old_value": old_value,
+                    "new_value": new_value,
+                    "scope": scope,
+                },
+            )
+        )
 
     # === QUERY OPERATIONS ===
 
@@ -432,7 +446,7 @@ class EventBus:
             if timeout:
                 try:
                     await asyncio.wait_for(event_received.wait(), timeout=timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     return None
             else:
                 await event_received.wait()
