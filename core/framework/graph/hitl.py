@@ -195,7 +195,6 @@ Extract the answer for each question. Output JSON with question IDs as keys.
 Example format:
 {{"question-1": "answer here", "question-2": "answer here"}}"""
 
-            # Direct SDK call — this is a framework utility, not an agent node.
             with anthropic.Anthropic(api_key=api_key) as client:
                 message = client.messages.create(
                     model="claude-3-5-haiku-20241022",
