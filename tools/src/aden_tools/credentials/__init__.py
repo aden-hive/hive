@@ -9,7 +9,7 @@ Philosophy: Google Strictness + Apple UX
 
 Usage:
     # In mcp_server.py (startup validation)
-    credentials = CredentialManager()
+    credentials = CredentialStoreAdapter.with_env_storage()
     credentials.validate_startup()
 
     # In agent runner (validate at agent load time)
@@ -19,7 +19,7 @@ Usage:
     api_key = credentials.get("brave_search")
 
     # In tests
-    creds = CredentialManager.for_testing({"brave_search": "test-key"})
+    creds = CredentialStoreAdapter.for_testing({"brave_search": "test-key"})
 
 For advanced usage with the new credential store:
     from aden_tools.credentials import CredentialStoreAdapter
@@ -46,7 +46,7 @@ To add a new credential:
 3. If new category, import and merge it in this __init__.py
 """
 
-from .base import CredentialError, CredentialManager, CredentialSpec
+from .base import CredentialError, CredentialSpec
 from .email import EMAIL_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
@@ -62,7 +62,7 @@ CREDENTIAL_SPECS = {
 __all__ = [
     # Core classes
     "CredentialSpec",
-    "CredentialManager",
+    "CredentialStoreAdapter",
     "CredentialError",
     # New credential store adapter
     "CredentialStoreAdapter",
