@@ -6,14 +6,18 @@ Aden Agent Framework aims to help developers build outcome oriented, self-adapti
 timeline
     title Aden Agent Framework Roadmap
     section Foundation
-        Architecture : Node-Based Architecture : Python SDK : LLM Integration (OpenAI, Anthropic, Google) : Communication Protocol
-        Coding Agent : Goal Creation Session : Worker Agent Creation : MCP Tools Integration
-        Worker Agent : Human-in-the-Loop : Callback Handlers : Intervention Points : Streaming Interface
-        Tools : File Use : Memory (STM/LTM) : Web Search : Web Scraper : Audit Trail
-        Core : Eval System : Pydantic Validation : Docker Deployment : Documentation : Sample Agents
+        Architecture : Node-Based Architecture (done) : Python SDK (done) : LLM Integration (done) : Communication Protocol (done)
+        Coding Agent : Goal Creation Session (done) : Worker Agent Creation : MCP Tools (done)
+        Worker Agent : Human-in-the-Loop (done) : Callback Handlers (done) : Intervention Points (done) : Streaming Interface
+        Credentials : Setup Process (done) : Pluggable Sources : Enterprise Secrets : Integration Tools (done)
+        Tools : File Use (done) : Memory STM/LTM (done) : Web Search/Scraper (done) : CSV/PDF (done) : Excel/Email
+        Core : Eval System : Pydantic Validation (done) : Documentation (done) : Adaptiveness : Sample Agents
     section Expansion
-        Intelligence : Guardrails : Streaming Mode : Semantic Search
-        Platform : JavaScript SDK : Custom Tool Integrator : Credential Store
+        Intelligence : Guardrails : Streaming Mode : Image Generation : Semantic Search
+        Memory Iteration : Message Model & Sessions : Storage Migration : Context Building : Proactive Compaction : Token Tracking
+        Event System : Event Bus for Nodes
+        Coding Agent Support : Claude Code : Cursor : Opencode : Antigravity
+        Platform : JavaScript/TypeScript SDK : Custom Tool Integrator : Windows Support
         Deployment : Self-Hosted : Cloud Services : CI/CD Pipeline
         Templates : Sales Agent : Marketing Agent : Analytics Agent : Training Agent : Smart Form Agent
 ```
