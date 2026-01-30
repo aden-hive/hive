@@ -49,8 +49,8 @@ If a high-quality PR is submitted for a "stale" assigned issue (no activity for 
 4. Make your changes
 5. Run checks and tests:
    ```bash
-   make check                              # Lint and format checks
-   cd core && python -m pytest tests/ -v   # Core tests
+   make check                        # Lint and format checks
+   PYTHONPATH=core pytest core -v    # Core tests (from repo root)
    ```
 6. Commit your changes following our commit conventions
 7. Push to your fork and submit a Pull Request
@@ -104,7 +104,7 @@ docs(readme): update installation instructions
 1. **Get assigned to the issue first** (see [Issue Assignment Policy](#issue-assignment-policy))
 2. Update documentation if needed
 3. Add tests for new functionality
-4. Ensure `make check` and core tests pass (`cd core && python -m pytest tests/ -v`)
+4. Ensure `make check` and core tests pass (`PYTHONPATH=core pytest core -v`)
 5. Update the CHANGELOG.md if applicable
 6. Request review from maintainers
 
@@ -135,20 +135,17 @@ feat(component): add new feature description
 
 ## Testing
 
-> **Note:** When testing agents in `exports/`, always set PYTHONPATH:
->
-> ```bash
-> PYTHONPATH=core:exports python -m agent_name test
-> ```
+> **Note:** Hive uses a multi-package layout. Tests require `PYTHONPATH` to be set
+> so Python can locate the `core` and `exports` modules.
 
 ```bash
-# Run all tests for the framework
-cd core && python -m pytest
+# Run all core framework tests (from repo root)
+PYTHONPATH=core pytest core
 
-# Run all tests for tools
+# Run all tools tests
 cd tools && python -m pytest
 
-# Run tests for a specific agent
+# Run tests for a specific agent in exports/
 PYTHONPATH=core:exports python -m agent_name test
 ```
 
