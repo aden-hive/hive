@@ -83,6 +83,7 @@ For running agents with real LLMs:
 # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"        # Optional
+export GEMINI_API_KEY="your-key-here"        # Optional, for Gemini models
 export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search tool
 ```
 
@@ -91,6 +92,7 @@ Get API keys:
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
+- **Google Gemini**: [aistudio.google.com](https://aistudio.google.com/apikey)
 
 ### Install Claude Code Skills
 

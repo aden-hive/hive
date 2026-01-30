@@ -98,6 +98,8 @@ For running agents with real LLMs:
 
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-key-here"        # Optional
+export GEMINI_API_KEY="your-key-here"        # Optional, for Gemini models
 ```
 
 ## Running Agents

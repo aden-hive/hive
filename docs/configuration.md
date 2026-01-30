@@ -22,6 +22,9 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # OpenAI (optional, for GPT models via LiteLLM)
 export OPENAI_API_KEY="sk-..."
 
+# Google Gemini (optional, for Gemini models via LiteLLM)
+export GEMINI_API_KEY="..."
+
 # Cerebras (optional, used by output cleaner and some nodes)
 export CEREBRAS_API_KEY="..."
 
