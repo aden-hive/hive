@@ -24,7 +24,11 @@
       "Bash(done)",
       "Bash(xargs cat:*)",
       "mcp__agent-builder__list_mcp_tools",
-      "mcp__agent-builder__add_mcp_server"
+      "mcp__agent-builder__add_mcp_server",
+      "Bash(gh issue list:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(git checkout:*)",
+      "Bash(PYTHONPATH=core python -m pytest:*)"
     ]
   }
 }

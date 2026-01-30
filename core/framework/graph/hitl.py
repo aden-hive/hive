@@ -198,13 +198,13 @@ Example format:
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            # Parse Haiku's response
-            import re
+            # Parse Haiku's response using proper nested JSON extraction
+            from framework.graph.node import find_json_object
             response_text = message.content[0].text.strip()
-            json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+            json_str = find_json_object(response_text)
 
-            if json_match:
-                parsed = json.loads(json_match.group())
+            if json_str:
+                parsed = json.loads(json_str)
                 response.answers = parsed
 
         except Exception:
