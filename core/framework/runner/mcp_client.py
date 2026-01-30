@@ -86,10 +86,14 @@ class MCPClient:
         """
         # If we have a persistent loop (for STDIO), use it
         if self._loop is not None:
-            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-            return future.result()
+            # Check if loop is running AND not closed
+            if self._loop.is_running() and not self._loop.is_closed():
+                future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+                return future.result()
+            # else: fall through to the standard approach below
+            # This handles the case when STDIO loop exists but is stopped/closed
 
-        # Otherwise, use the standard approach
+        # Standard approach: handle both sync and async contexts
         try:
             # Try to get the current event loop
             asyncio.get_running_loop()
