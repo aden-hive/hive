@@ -37,6 +37,7 @@ from .file_system_toolkits.replace_file_content import (
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
+from .google_sheets_tool import register_tools as register_google_sheets
 from .hubspot_tool import register_tools as register_hubspot
 from .jira_tool import register_tools as register_jira
 from .pdf_read_tool import register_tools as register_pdf_read
@@ -67,6 +68,7 @@ def register_all_tools(
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
+    register_google_sheets(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_jira(mcp, credentials=credentials)
 
@@ -99,6 +101,16 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "google_sheets_get_spreadsheet",
+        "google_sheets_create_spreadsheet",
+        "google_sheets_get_values",
+        "google_sheets_update_values",
+        "google_sheets_append_values",
+        "google_sheets_clear_values",
+        "google_sheets_batch_update_values",
+        "google_sheets_batch_clear_values",
+        "google_sheets_add_sheet",
+        "google_sheets_delete_sheet",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",
