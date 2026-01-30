@@ -1,13 +1,15 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from datetime import datetime, timedelta, UTC
 from pydantic import SecretStr
 
-from framework.credentials.models import CredentialObject, CredentialType, CredentialKey
-from framework.credentials.provider import (
-    StaticProvider,
-    BearerTokenProvider,
+from framework.credentials.models import (
+    CredentialObject,
+    CredentialType,
+    CredentialKey,
     CredentialRefreshError,
 )
+from framework.credentials.provider import StaticProvider, BearerTokenProvider
 
 
 class TestStaticProvider:
