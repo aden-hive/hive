@@ -457,7 +457,7 @@ class ExecutionStream:
             self._prune_execution_results()
             return self._execution_results.get(execution_id)
 
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return None
 
     def get_result(self, execution_id: str) -> ExecutionResult | None:
