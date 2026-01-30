@@ -11,6 +11,7 @@ metadata:
     - building-agents-construction
     - building-agents-patterns
     - testing-agent
+    - setup-credentials
 ---
 
 # Agent Development Workflow
@@ -21,10 +22,11 @@ Complete Standard Operating Procedure (SOP) for building production-ready goal-d
 
 This workflow orchestrates specialized skills to take you from initial concept to production-ready agent:
 
-1. **Understand Concepts** (5-10 min) → `/building-agents-core` (optional)
-2. **Build Structure** (15-30 min) → `/building-agents-construction`
-3. **Optimize Design** (10-15 min) → `/building-agents-patterns` (optional)
-4. **Test & Validate** (20-40 min) → `/testing-agent`
+1. **Understand Concepts** → `/building-agents-core` (optional)
+2. **Build Structure** → `/building-agents-construction`
+3. **Optimize Design** → `/building-agents-patterns` (optional)
+4. **Setup Credentials** → `/setup-credentials` (if agent uses tools requiring API keys)
+5. **Test & Validate** → `/testing-agent`
 
 ## When to Use This Workflow
 
@@ -44,6 +46,7 @@ Use this meta-skill when:
 "Need to understand agent concepts" → building-agents-core
 "Build a new agent" → building-agents-construction
 "Optimize my agent design" → building-agents-patterns
+"Set up API keys for my agent" → setup-credentials
 "Test my agent" → testing-agent
 "Not sure what I need" → Read phases below, then decide
 "Agent has structure but needs implementation" → See agent directory STATUS.md

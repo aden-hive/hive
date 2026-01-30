@@ -751,7 +751,7 @@ class CredentialStore:
 
     Usage:
         store = CredentialStore(
-            storage=EncryptedFileStorage("/path/to/creds"),
+            storage=EncryptedFileStorage("~/.hive/credentials"),
             providers=[OAuth2Provider(), StaticProvider()]
         )
 
@@ -1514,7 +1514,7 @@ from framework.credentials.storage import EncryptedFileStorage
 
 # Create store with encrypted storage
 store = CredentialStore(
-    storage=EncryptedFileStorage("/var/hive/credentials")
+    storage=EncryptedFileStorage("~/.hive/credentials")
 )
 
 # Tool specifies how to use credentials (bipartisan model)
