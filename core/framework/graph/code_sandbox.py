@@ -56,7 +56,7 @@ SAFE_BUILTINS = {
     "next": next,
     "oct": oct,
     "ord": ord,
-    "pow": pow,
+    # pow intentionally excluded - enables resource exhaustion DoS (see issue #2686)
     "range": range,
     "repr": repr,
     "reversed": reversed,
