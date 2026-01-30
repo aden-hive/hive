@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## Обзор
@@ -76,7 +76,7 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Запустить настройку окружения Python
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 Это установит:
@@ -229,7 +229,7 @@ hive/
 
 ```bash
 # Одноразовая настройка
-./scripts/setup-python.sh
+./quickstart.sh
 
 # Это установит:
 # - пакет framework (основная среда выполнения)
@@ -253,7 +253,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[Руководство разработчика](DEVELOPER.md)** - Полное руководство для разработчиков
 - [Начало работы](docs/getting-started.md) - Инструкции по быстрой настройке
 - [Руководство по конфигурации](docs/configuration.md) - Все опции конфигурации
-- [Обзор архитектуры](docs/architecture.md) - Дизайн и структура системы
+- [Обзор архитектуры](docs/architecture/README.md) - Дизайн и структура системы
 
 ## Дорожная карта
 

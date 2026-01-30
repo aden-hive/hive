@@ -58,6 +58,13 @@ jobs:
             - Add the \`micro-fix\` label or include \`micro-fix\` in your PR title for trivial fixes
             - Add the \`documentation\` label or include \`doc\`/\`docs\` in your PR title for documentation changes
 
+            **Micro-fix requirements** (must meet ALL):
+            | Qualifies | Disqualifies |
+            |-----------|--------------|
+            | < 20 lines changed | Any functional bug fix |
+            | Typos & Documentation & Linting | Refactoring for "clean code" |
+            | No logic/API/DB changes | New features (even tiny ones) |
+
             **Why is this required?** See #472 for details.`;
 
               const comments = await github.rest.issues.listComments({
@@ -140,6 +147,13 @@ jobs:
             **Exception:** To bypass this requirement, you can:
             - Add the \`micro-fix\` label or include \`micro-fix\` in your PR title for trivial fixes
             - Add the \`documentation\` label or include \`doc\`/\`docs\` in your PR title for documentation changes
+
+            **Micro-fix requirements** (must meet ALL):
+            | Qualifies | Disqualifies |
+            |-----------|--------------|
+            | < 20 lines changed | Any functional bug fix |
+            | Typos & Documentation & Linting | Refactoring for "clean code" |
+            | No logic/API/DB changes | New features (even tiny ones) |
 
             **Why is this required?** See #472 for details.`;
 

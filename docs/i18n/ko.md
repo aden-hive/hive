@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## 개요
@@ -76,7 +76,7 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Python 환경 설정 실행
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 다음 요소들이 설치됩니다:
@@ -240,7 +240,7 @@ hive/
 
 ```bash
 # 최초 1회 설정
-./scripts/setup-python.sh
+./quickstart.sh
 
 # 다음 항목들이 설치됨:
 # - framework 패키지 (핵심 런타임)
@@ -264,7 +264,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[개발자 가이드](DEVELOPER.md)** - 개발자를 위한 종합 가이드
 - [시작하기](docs/getting-started.md) - 빠른 설정 방법
 - [설정 가이드](docs/configuration.md) - 모든 설정 옵션 안내
-- [아키텍처 개요](docs/architecture.md) - 시스템 설계 및 구조
+- [아키텍처 개요](docs/architecture/README.md) - 시스템 설계 및 구조
 
 ## 로드맵
 

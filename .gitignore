@@ -70,4 +70,3 @@ exports/*
 .agent-builder-sessions/*
 
 .venv
-agent_logs/

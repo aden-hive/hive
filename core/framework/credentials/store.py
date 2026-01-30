@@ -612,3 +612,97 @@ class CredentialStore:
             providers=providers,
             **kwargs,
         )
+
+    @classmethod
+    def with_aden_sync(
+        cls,
+        base_url: str = "https://hive.adenhq.com",
+        cache_ttl_seconds: int = 300,
+        local_path: str | None = None,
+        auto_sync: bool = True,
+        **kwargs: Any,
+    ) -> CredentialStore:
+        """
+        Create a credential store with Aden server sync.
+
+        Automatically syncs OAuth2 tokens from the Aden authentication server.
+        Falls back to local-only storage if ADEN_API_KEY is not set or Aden
+        is unreachable.
+
+        Args:
+            base_url: Aden server URL (default: https://hive.adenhq.com)
+            cache_ttl_seconds: How long to cache credentials locally (default: 5 min)
+            local_path: Path for local credential storage (default: ~/.hive/credentials)
+            auto_sync: Whether to sync all credentials on startup (default: True)
+            **kwargs: Additional arguments passed to CredentialStore
+
+        Returns:
+            CredentialStore configured with Aden sync
+
+        Example:
+            # Simple usage - just set ADEN_API_KEY env var
+            store = CredentialStore.with_aden_sync()
+
+            # Get HubSpot token (auto-refreshed via Aden)
+            token = store.get_key("hubspot", "access_token")
+        """
+        import os
+        from pathlib import Path
+
+        from .storage import EncryptedFileStorage
+
+        # Determine local storage path
+        if local_path is None:
+            local_path = str(Path.home() / ".hive" / "credentials")
+
+        local_storage = EncryptedFileStorage(base_path=local_path)
+
+        # Check if Aden is configured
+        api_key = os.environ.get("ADEN_API_KEY")
+        if not api_key:
+            logger.info("ADEN_API_KEY not set, using local-only credential storage")
+            return cls(storage=local_storage, **kwargs)
+
+        # Try to setup Aden sync
+        try:
+            from .aden import (
+                AdenCachedStorage,
+                AdenClientConfig,
+                AdenCredentialClient,
+                AdenSyncProvider,
+            )
+
+            # Create Aden client
+            client = AdenCredentialClient(AdenClientConfig(base_url=base_url))
+
+            # Create sync provider
+            provider = AdenSyncProvider(client=client)
+
+            # Use cached storage for offline resilience
+            cached_storage = AdenCachedStorage(
+                local_storage=local_storage,
+                aden_provider=provider,
+                cache_ttl_seconds=cache_ttl_seconds,
+            )
+
+            store = cls(
+                storage=cached_storage,
+                providers=[provider],
+                auto_refresh=True,
+                **kwargs,
+            )
+
+            # Initial sync
+            if auto_sync:
+                synced = provider.sync_all(store)
+                logger.info(f"Synced {synced} credentials from Aden server")
+
+            return store
+
+        except ImportError:
+            logger.warning("Aden components not available, using local storage")
+            return cls(storage=local_storage, **kwargs)
+
+        except Exception as e:
+            logger.warning(f"Failed to setup Aden sync: {e}. Using local storage.")
+            return cls(storage=local_storage, **kwargs)
