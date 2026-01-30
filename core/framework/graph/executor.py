@@ -580,7 +580,7 @@ class GraphExecutor:
                 success=True,
                 output_data=output,
                 narrative=(
-                    f"Executed {steps} steps through path: " f"{' -> '.join(path)}{quality_suffix}"
+                    f"Executed {steps} steps through path: {' -> '.join(path)}{quality_suffix}"
                 ),
             )
 

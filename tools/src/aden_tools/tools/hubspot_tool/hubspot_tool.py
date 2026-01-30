@@ -138,8 +138,7 @@ def register_tools(
             # Defensive check: ensure we get a string, not a complex object
             if token is not None and not isinstance(token, str):
                 raise TypeError(
-                    f"Expected string from credentials.get('hubspot'), "
-                    f"got {type(token).__name__}"
+                    f"Expected string from credentials.get('hubspot'), got {type(token).__name__}"
                 )
             return token
         return os.getenv("HUBSPOT_ACCESS_TOKEN")
