@@ -263,6 +263,7 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str = "cerebras/zai-glm-4.7",
+        version: str | None = None,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -272,13 +273,33 @@ class AgentRunner:
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to temp)
             model: LLM model to use (any LiteLLM-compatible model name)
+            version: Optional, specific version to load (e.g., "1.2.0")
 
         Returns:
             AgentRunner instance ready to run
         """
         agent_path = Path(agent_path)
 
-        # Load agent.json
+        if version:
+            from framework.runner.versioning import AgentVersionManager
+
+            versions_dir = Path(".aden/versions")
+            manager = AgentVersionManager(versions_dir)
+            agent_id = agent_path.name if agent_path.is_dir() else agent_path.stem
+
+            agent_version = manager.load_version(agent_id, version)
+            graph = GraphSpec(**agent_version.graph_data)
+            goal = Goal(**agent_version.goal_data)
+
+            return cls(
+                agent_path=agent_path,
+                graph=graph,
+                goal=goal,
+                mock_mode=mock_mode,
+                storage_path=storage_path,
+                model=model,
+            )
+
         agent_json_path = agent_path / "agent.json"
         if not agent_json_path.exists():
             raise FileNotFoundError(f"agent.json not found in {agent_path}")
@@ -293,6 +314,34 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+        )
+
+    @classmethod
+    def load_by_tag(
+        cls,
+        agent_id: str,
+        tag: str,
+        agent_path: str | Path | None = None,
+        mock_mode: bool = False,
+        storage_path: Path | None = None,
+        model: str = "cerebras/zai-glm-4.7",
+    ) -> "AgentRunner":
+        from framework.runner.versioning import AgentVersionManager
+
+        versions_dir = Path(".aden/versions")
+        manager = AgentVersionManager(versions_dir)
+
+        version = manager.get_version_by_tag(agent_id, tag)
+
+        if agent_path is None:
+            agent_path = Path("exports") / agent_id
+
+        return cls.load(
+            agent_path=agent_path,
+            mock_mode=mock_mode,
+            storage_path=storage_path,
+            model=model,
+            version=version,
         )
 
     def register_tool(
