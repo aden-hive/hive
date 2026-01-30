@@ -1,7 +1,7 @@
 #!/bin/bash
 # Legacy Web Application Setup Script
 # NOTE: This script is for the archived honeycomb/hive web application.
-# For agent development, use: ./scripts/setup-python.sh
+# For agent development, use: ./quickstart.sh
 
 set -e
 
@@ -13,7 +13,7 @@ echo "  Legacy Web App Setup (Archived)"
 echo "==================================="
 echo ""
 echo "⚠️  This script is for the archived web application."
-echo "    For agent development, use: ./scripts/setup-python.sh"
+echo "    For agent development, use: ./quickstart.sh"
 echo ""
 
 # Check for Node.js
@@ -73,7 +73,7 @@ echo ""
 echo "⚠️  NOTE: The honeycomb/hive web application has been archived."
 echo ""
 echo "For agent development, please use:"
-echo "  ./scripts/setup-python.sh"
+echo "  ./quickstart.sh"
 echo ""
 echo "See ENVIRONMENT_SETUP.md for complete agent development guide."
 echo ""
