@@ -31,18 +31,23 @@ def register_tools(
         subject: str,
         html: str,
         from_email: str,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
     ) -> dict:
         """Send email using Resend API."""
         resend.api_key = api_key
         try:
-            email = resend.Emails.send(
-                {
-                    "from": from_email,
-                    "to": to,
-                    "subject": subject,
-                    "html": html,
-                }
-            )
+            payload: dict = {
+                "from": from_email,
+                "to": to,
+                "subject": subject,
+                "html": html,
+            }
+            if cc:
+                payload["cc"] = cc
+            if bcc:
+                payload["bcc"] = bcc
+            email = resend.Emails.send(payload)
             return {
                 "success": True,
                 "provider": "resend",
@@ -69,12 +74,25 @@ def register_tools(
             return from_email
         return os.getenv("EMAIL_FROM")
 
+    def _normalize_recipients(
+        value: str | list[str] | None,
+    ) -> list[str] | None:
+        """Normalize a recipient value to a list or None."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return [value] if value.strip() else None
+        filtered = [v for v in value if isinstance(v, str) and v.strip()]
+        return filtered if filtered else None
+
     def _send_email_impl(
         to: str | list[str],
         subject: str,
         html: str,
         from_email: str | None = None,
         provider: Literal["auto", "resend"] = "auto",
+        cc: str | list[str] | None = None,
+        bcc: str | list[str] | None = None,
     ) -> dict:
         """Core email sending logic, callable by other tools."""
         from_email = _resolve_from_email(from_email)
@@ -84,15 +102,16 @@ def register_tools(
                 "help": "Pass from_email or set EMAIL_FROM environment variable",
             }
 
-        if isinstance(to, str):
-            to = [to]
-
-        if not to or not any(t.strip() for t in to):
+        to_list = _normalize_recipients(to)
+        if not to_list:
             return {"error": "At least one recipient email is required"}
         if not subject or len(subject) > 998:
             return {"error": "Subject must be 1-998 characters"}
         if not html:
             return {"error": "Email body (html) is required"}
+
+        cc_list = _normalize_recipients(cc)
+        bcc_list = _normalize_recipients(bcc)
 
         creds = _get_credentials()
         resend_available = bool(creds["resend_api_key"])
@@ -105,11 +124,15 @@ def register_tools(
                         "help": "Set RESEND_API_KEY environment variable. "
                         "Get a key at https://resend.com/api-keys",
                     }
-                return _send_via_resend(creds["resend_api_key"], to, subject, html, from_email)
+                return _send_via_resend(
+                    creds["resend_api_key"], to_list, subject, html, from_email, cc_list, bcc_list
+                )
 
             # auto
             if resend_available:
-                return _send_via_resend(creds["resend_api_key"], to, subject, html, from_email)
+                return _send_via_resend(
+                    creds["resend_api_key"], to_list, subject, html, from_email, cc_list, bcc_list
+                )
 
             return {
                 "error": "No email credentials configured",
@@ -126,6 +149,8 @@ def register_tools(
         html: str,
         from_email: str | None = None,
         provider: Literal["auto", "resend"] = "auto",
+        cc: str | list[str] | None = None,
+        bcc: str | list[str] | None = None,
     ) -> dict:
         """
         Send an email.
@@ -140,12 +165,14 @@ def register_tools(
             html: Email body as HTML string.
             from_email: Sender email address. Falls back to EMAIL_FROM env var if not provided.
             provider: Email provider to use ("auto" or "resend").
+            cc: CC recipient(s). Single string or list of strings. Optional.
+            bcc: BCC recipient(s). Single string or list of strings. Optional.
 
         Returns:
             Dict with send result including provider used and message ID,
             or error dict with "error" and optional "help" keys.
         """
-        return _send_email_impl(to, subject, html, from_email, provider)
+        return _send_email_impl(to, subject, html, from_email, provider, cc, bcc)
 
     @mcp.tool()
     def send_budget_alert_email(
@@ -156,6 +183,8 @@ def register_tools(
         currency: str = "USD",
         from_email: str | None = None,
         provider: Literal["auto", "resend"] = "auto",
+        cc: str | list[str] | None = None,
+        bcc: str | list[str] | None = None,
     ) -> dict:
         """
         Send a budget alert email notification.
@@ -171,6 +200,8 @@ def register_tools(
             currency: Currency code (default: "USD").
             from_email: Sender email address. Falls back to EMAIL_FROM env var if not provided.
             provider: Email provider to use ("auto" or "resend").
+            cc: CC recipient(s). Single string or list of strings. Optional.
+            bcc: BCC recipient(s). Single string or list of strings. Optional.
 
         Returns:
             Dict with send result or error dict.
@@ -208,4 +239,6 @@ def register_tools(
             html=html,
             from_email=from_email,
             provider=provider,
+            cc=cc,
+            bcc=bcc,
         )

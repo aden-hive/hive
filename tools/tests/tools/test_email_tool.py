@@ -155,6 +155,149 @@ class TestSendEmail:
         assert result["success"] is True
         assert result["to"] == ["a@example.com", "b@example.com"]
 
+    def test_cc_string_passed_to_provider(self, send_email_fn, monkeypatch):
+        """Single CC string is passed to the provider."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_cc"}
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                cc="cc@example.com",
+            )
+
+        assert result["success"] is True
+        call_args = mock_send.call_args[0][0]
+        assert call_args["cc"] == ["cc@example.com"]
+
+    def test_bcc_string_passed_to_provider(self, send_email_fn, monkeypatch):
+        """Single BCC string is passed to the provider."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_bcc"}
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                bcc="bcc@example.com",
+            )
+
+        assert result["success"] is True
+        call_args = mock_send.call_args[0][0]
+        assert call_args["bcc"] == ["bcc@example.com"]
+
+    def test_cc_and_bcc_lists_passed_to_provider(self, send_email_fn, monkeypatch):
+        """CC and BCC lists are passed to the provider."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_cc_bcc"}
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                cc=["cc1@example.com", "cc2@example.com"],
+                bcc=["bcc1@example.com"],
+            )
+
+        assert result["success"] is True
+        call_args = mock_send.call_args[0][0]
+        assert call_args["cc"] == ["cc1@example.com", "cc2@example.com"]
+        assert call_args["bcc"] == ["bcc1@example.com"]
+
+    def test_none_cc_bcc_not_included_in_payload(self, send_email_fn, monkeypatch):
+        """None cc/bcc are not included in the API payload."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_no_cc"}
+            send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
+
+        call_args = mock_send.call_args[0][0]
+        assert "cc" not in call_args
+        assert "bcc" not in call_args
+
+    def test_empty_string_cc_not_included(self, send_email_fn, monkeypatch):
+        """Empty string cc is treated as None and not included."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_empty_cc"}
+            send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>", cc="", bcc="")
+
+        call_args = mock_send.call_args[0][0]
+        assert "cc" not in call_args
+        assert "bcc" not in call_args
+
+    def test_whitespace_cc_not_included(self, send_email_fn, monkeypatch):
+        """Whitespace-only cc is treated as None."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_ws_cc"}
+            send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>", cc="   ")
+
+        call_args = mock_send.call_args[0][0]
+        assert "cc" not in call_args
+
+    def test_empty_list_cc_not_included(self, send_email_fn, monkeypatch):
+        """Empty list cc is treated as None."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_empty_list"}
+            send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>", cc=[], bcc=[])
+
+        call_args = mock_send.call_args[0][0]
+        assert "cc" not in call_args
+        assert "bcc" not in call_args
+
+    def test_list_with_empty_strings_filtered(self, send_email_fn, monkeypatch):
+        """List containing empty strings filters them out."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_filtered"}
+            send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                cc=["", "valid@example.com", "  "],
+            )
+
+        call_args = mock_send.call_args[0][0]
+        assert call_args["cc"] == ["valid@example.com"]
+
+    def test_list_of_only_empty_strings_not_included(self, send_email_fn, monkeypatch):
+        """List of only empty/whitespace strings is treated as None."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_all_empty"}
+            send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                cc=["", "  "],
+                bcc=[""],
+            )
+
+        call_args = mock_send.call_args[0][0]
+        assert "cc" not in call_args
+        assert "bcc" not in call_args
+
 
 class TestResendProvider:
     """Tests for Resend email provider."""
