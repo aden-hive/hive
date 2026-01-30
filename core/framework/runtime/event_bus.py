@@ -446,7 +446,7 @@ class EventBus:
             if timeout:
                 try:
                     await asyncio.wait_for(event_received.wait(), timeout=timeout)
-                except TimeoutError:
+                except asyncio.TimeoutError:
                     return None
             else:
                 await event_received.wait()
