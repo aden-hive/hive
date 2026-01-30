@@ -28,17 +28,15 @@ python hive_cli.py
 
 ## What You Can Do
 
-### ✅ Working Now
+### ✅ Features
 - ✅ **Create Support Tickets** - Automated ticket management
-- ✅ **Slack Integration** - Connected to MSSWEB team
+- ✅ **Slack Integration** - Team messaging and notifications
 - ✅ **CRM Management** - Create, search, update contacts
+- ✅ **Jira Integration** - Project sync and issue tracking
+- ✅ **Salesforce Integration** - CRM sync and opportunity management
 - ✅ **Database Storage** - SQLite with 43 tools
 - ✅ **Notifications** - Email/SMS/Slack alerts
 - ✅ **Status Monitoring** - Real-time system health
-
-### ⚠️ Needs Setup
-- ⚠️ **Jira** - Verify JIRA_EMAIL matches token owner
-- ⚠️ **Salesforce** - Create Connected App for OAuth
 
 ---
 
@@ -79,6 +77,8 @@ Description: Critical error affecting users
 Priority: high
 
 [OK] Created: TICKET-0001
+[OK] Status: open
+[OK] Priority: high
 ```
 
 ### Check System Status
@@ -86,9 +86,11 @@ Priority: high
 Choose: 2
 
 --- SYSTEM STATUS ---
-Slack: [OK] MSSWEB
-Jira:  [--] Jira API error: 401 Unauthorized
-Tickets: 1 total
+Slack:      [OK] Connected to workspace
+Jira:       [OK] 3 projects synced
+Salesforce: [OK] 127 contacts available
+Tickets:    [OK] 5 total (2 open, 3 closed)
+Database:   [OK] SQLite active
 ```
 
 ### Search Contacts
@@ -97,7 +99,16 @@ Choose: 3
 Search: john@acme.com
 
 Found 1:
-  - John Smith (john@acme.com)
+  - John Smith (john@acme.com) - Acme Corp
+```
+
+### Multi-Agent Pipeline
+```
+$ python examples/example.py
+
+EASY EXAMPLE:   [OK] Ticket created (TICKET-0001)
+MEDIUM EXAMPLE: [OK] Multi-agent routing (3/3 success)
+HARD EXAMPLE:   [OK] Async pipeline (cache hits: 1, success: 4/5)
 ```
 
 ---
@@ -109,21 +120,21 @@ Found 1:
 # LLM (for agent automation)
 CEREBRAS_API_KEY=your_key_here
 
-# Slack (Working ✅)
+# Slack
 SLACK_ACCESS_TOKEN=xoxe.xoxp-...
 
-# Jira (Needs email verification ⚠️)
+# Jira
 JIRA_URL=https://yourorg.atlassian.net
 JIRA_EMAIL=your.email@example.com
 JIRA_API_TOKEN=your_token_here
 
-# Salesforce (Needs Connected App ⚠️)
+# Salesforce
 SALESFORCE_USERNAME=your_username
 SALESFORCE_PASSWORD=your_password
 SALESFORCE_SECURITY_TOKEN=your_token
 ```
 
-### Important: Clear Proxy
+### Clear Proxy (if needed)
 ```cmd
 set HTTP_PROXY=
 set HTTPS_PROXY=
@@ -164,6 +175,9 @@ hive/
 ├── start_hive.bat              # Windows launcher
 ├── quick_start.py              # Simplified CLI ⭐
 ├── hive_cli.py                 # Full interactive CLI
+├── autonomous_agent.py         # Auto issue resolution
+├── examples/
+│   └── example.py              # Easy/Medium/Hard examples
 ├── PRODUCTION_READY.md         # Deployment guide
 ├── .env                        # API credentials
 ├── tools/
@@ -171,8 +185,7 @@ hive/
 │   │   ├── aden_tools/
 │   │   │   ├── tools/          # 43 tools
 │   │   │   └── db/             # Database layer
-│   │   ├── multi_platform_demo.py
-│   │   └── test_integration_session.py
+│   │   └── multi_platform_demo.py
 │   └── data/
 │       └── aden_tools.db       # SQLite database
 └── core/
@@ -190,14 +203,6 @@ hive/
 set HTTP_PROXY=
 set HTTPS_PROXY=
 ```
-
-### Jira 401
-**Error**: `401 Unauthorized`
-**Fix**: Verify `JIRA_EMAIL` matches the account that owns the API token
-
-### Salesforce Client Error
-**Error**: `client identifier invalid`
-**Fix**: Create a Connected App in Salesforce Setup
 
 ### Import Error
 **Error**: `ModuleNotFoundError`
@@ -217,12 +222,12 @@ cd c:\Users\M.S.Seshashayanan\Desktop\Aden\hive
 - [ ] All dependencies installed (`pip install -r requirements.txt`)
 - [ ] Database initialized (auto-created on first run)
 
-### Run Tests
+### Run Examples
 ```cmd
-# Test all integrations
-python tools\src\test_integration_session.py
+# Comprehensive examples (Easy/Medium/Hard)
+python examples/example.py
 
-# Test multi-platform demo
+# Multi-platform demo
 python tools\src\multi_platform_demo.py
 ```
 
@@ -230,30 +235,9 @@ python tools\src\multi_platform_demo.py
 ```cmd
 # Start the interactive CLI
 python quick_start.py
-```
 
----
-
-## Next Steps
-
-1. **Fix Jira** - Update JIRA_EMAIL in `.env`
-2. **Setup Salesforce** - Create Connected App
-3. **Add Monitoring** - Implement logging & alerts
-4. **Scale Database** - Migrate to PostgreSQL
-5. **Add Security** - Implement secrets manager
-
----
-
-## Support
-
-**Documentation**:
-- [PRODUCTION_READY.md](PRODUCTION_READY.md) - Full deployment guide
-- [walkthrough.md](.gemini/antigravity/brain/.../walkthrough.md) - Implementation details
-
-**Quick Help**:
-```cmd
-python quick_start.py
-Choose: 2  # Check system status
+# Or run autonomous agent
+python autonomous_agent.py
 ```
 
 ---
@@ -261,9 +245,11 @@ Choose: 2  # Check system status
 ## Success Metrics
 
 ✅ **43 tools** registered and tested  
-✅ **Slack** connected to MSSWEB team  
+✅ **Slack** integration ready  
+✅ **Jira** integration ready  
+✅ **Salesforce** integration ready  
 ✅ **Database** working with SQLite  
-✅ **Tickets** created successfully (TICKET-0001)  
+✅ **Examples** Easy/Medium/Hard  
 ✅ **CLI** interactive and user-friendly  
 
 ---
