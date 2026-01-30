@@ -40,6 +40,30 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## 🧠 Mental Model: How Aden Works (For First-Time Users)
+
+If you're new to Aden, think of it as a **goal-driven agent operating system**, not just an agent library.
+
+Instead of hardcoding workflows, you describe *what you want to achieve*, and Aden handles *how it happens*.
+
+Here’s the simple flow:
+
+1. **You define a goal** in natural language (e.g., “Process support tickets and escalate urgent ones”)
+2. A **Coding Agent** converts that goal into an agent graph (nodes + connections)
+3. **Worker Agents** execute tasks using tools, memory, and LLMs
+4. The **Control Plane** monitors execution, costs, and failures in real time
+5. If something fails, Aden captures the failure data, updates the agent graph, and redeploys automatically
+
+You define outcomes — Aden manages orchestration, recovery, and evolution.
+
+---
+
+### 🔄 Development Loop
+
+Goal → Graph Generation → Execution → Monitoring → Failure Detection → Self-Improvement → Redeploy
+
+This loop is what makes Aden different from traditional agent frameworks where workflows must be manually rewritten.
+
 ## What is Aden
 
 <p align="center">
