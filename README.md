@@ -122,7 +122,7 @@ Skills are also available in Cursor. To enable:
 
 ## Why Aden
 
-Traditional agent frameworks require you to manually design workflows, define agent interactions, and handle failures reactively. Aden flips this paradigm—**you describe outcomes, and the system builds itself**.
+Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe outcomes, and the system builds itself**—delivering an outcome-driven, adaptive experience with an easy-to-use set of tools and integrations.
 
 ```mermaid
 flowchart LR
@@ -162,7 +162,7 @@ flowchart LR
 | -------------------------- | -------------------------------------- |
 | Hardcode agent workflows   | Describe goals in natural language     |
 | Manual graph definition    | Auto-generated agent graphs            |
-| Reactive error handling    | Proactive self-evolution               |
+| Reactive error handling    | Outcome-evaluation and adaptiveness               |
 | Static tool configurations | Dynamic SDK-wrapped nodes              |
 | Separate monitoring setup  | Built-in real-time observability       |
 | DIY budget management      | Integrated cost controls & degradation |
@@ -402,6 +402,14 @@ Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API refer
 **Q: How can I contribute to Aden?**
 
 Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+**Q: When will my team start seeing results from Aden's adaptive agents?**
+
+Aden's adaptation loop begins working from the first execution. When an agent fails, the framework captures the failure data, helping developers evolve the agent graph through the coding agent. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your goal definitions, and the volume of executions generating feedback.
+
+**Q: How does Hive compare to other agent frameworks?**
+
+Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
 
 **Q: Does Aden offer enterprise support?**
 
