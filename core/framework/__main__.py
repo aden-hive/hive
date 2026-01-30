@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 """Allow running as python -m framework"""
 
 from framework.cli import main

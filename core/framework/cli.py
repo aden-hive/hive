@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 """
 Command-line interface for Goal Agent.
 
