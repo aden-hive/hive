@@ -69,6 +69,15 @@ from .storage import (
 from .store import CredentialStore
 from .template import TemplateResolver
 
+    # Exceptions
+    "CredentialError",
+    "CredentialNotFoundError",
+    "CredentialKeyNotFoundError",
+    "CredentialRefreshError",
+    "CredentialValidationError",
+    "CredentialDecryptionError",
+]
+
 # Aden sync components (lazy import to avoid httpx dependency when not needed)
 # Usage: from core.framework.credentials.aden import AdenSyncProvider
 # Or: from core.framework.credentials import AdenSyncProvider
@@ -81,42 +90,14 @@ try:
     )
 
     _ADEN_AVAILABLE = True
+    __all__.extend([
+        "AdenSyncProvider",
+        "AdenCredentialClient",
+        "AdenClientConfig",
+        "AdenCachedStorage",
+    ])
 except ImportError:
     _ADEN_AVAILABLE = False
-
-__all__ = [
-    # Main store
-    "CredentialStore",
-    # Models
-    "CredentialObject",
-    "CredentialKey",
-    "CredentialType",
-    "CredentialUsageSpec",
-    # Providers
-    "CredentialProvider",
-    "StaticProvider",
-    "BearerTokenProvider",
-    # Storage backends
-    "CredentialStorage",
-    "EncryptedFileStorage",
-    "EnvVarStorage",
-    "InMemoryStorage",
-    "CompositeStorage",
-    # Template resolution
-    "TemplateResolver",
-    # Exceptions
-    "CredentialError",
-    "CredentialNotFoundError",
-    "CredentialKeyNotFoundError",
-    "CredentialRefreshError",
-    "CredentialValidationError",
-    "CredentialDecryptionError",
-    # Aden sync (optional - requires httpx)
-    "AdenSyncProvider",
-    "AdenCredentialClient",
-    "AdenClientConfig",
-    "AdenCachedStorage",
-]
 
 # Track Aden availability for runtime checks
 ADEN_AVAILABLE = _ADEN_AVAILABLE
