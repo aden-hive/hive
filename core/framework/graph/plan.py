@@ -9,6 +9,7 @@ The Plan is the contract between the external planner and the executor:
 - Executor runs steps and judges results
 - If replanning needed, returns feedback to external planner
 """
+from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
@@ -276,7 +277,7 @@ class Plan(BaseModel):
     model_config = {"extra": "allow"}
 
     @classmethod
-    def from_json(cls, data: str | dict) -> "Plan":
+    def from_json(cls, data: str | dict) -> Plan:
         """
         Load a Plan from exported JSON.
 

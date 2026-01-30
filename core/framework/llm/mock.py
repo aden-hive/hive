@@ -146,6 +146,7 @@ class MockLLMProvider(LLMProvider):
         tools: list[Tool],
         tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
+        max_tokens: int = 4096,
     ) -> LLMResponse:
         """
         Generate a mock completion without tool use.
@@ -158,6 +159,7 @@ class MockLLMProvider(LLMProvider):
             tools: Available tools (ignored in mock mode)
             tool_executor: Tool executor function (ignored in mock mode)
             max_iterations: Max iterations (ignored in mock mode)
+            max_tokens: Max tokens (ignored in mock mode)
 
         Returns:
             LLMResponse with mock content

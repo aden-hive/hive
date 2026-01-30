@@ -93,6 +93,7 @@ class LLMProvider(ABC):
         tools: list[Tool],
         tool_executor: Callable[["ToolUse"], "ToolResult"],
         max_iterations: int = 10,
+        max_tokens: int = 4096,
     ) -> LLMResponse:
         """
         Run a tool-use loop until the LLM produces a final response.
@@ -103,6 +104,7 @@ class LLMProvider(ABC):
             tools: Available tools
             tool_executor: Function to execute tools: (ToolUse) -> ToolResult
             max_iterations: Max tool calls before stopping
+            max_tokens: Maximum tokens to generate per call
 
         Returns:
             Final LLMResponse after tool use completes

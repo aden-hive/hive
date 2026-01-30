@@ -186,7 +186,7 @@ class BuilderQuery:
         else:
             first_failure = failed_decisions[0]
             failure_point = first_failure.summary_for_builder()
-            root_cause = first_failure.outcome.error if first_failure.outcome else "Unknown"
+            root_cause = first_failure.outcome.error if first_failure.outcome and first_failure.outcome.error else "Unknown"
 
         # Build the decision chain leading to failure
         decision_chain = []
