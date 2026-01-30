@@ -25,16 +25,22 @@
       "Bash(xargs cat:*)",
       "mcp__agent-builder__list_mcp_tools",
       "mcp__agent-builder__add_mcp_server",
-      "mcp__agent-builder__check_missing_credentials",
-      "mcp__agent-builder__store_credential",
-      "mcp__agent-builder__list_stored_credentials",
-      "mcp__agent-builder__delete_stored_credential",
-      "mcp__agent-builder__verify_credentials",
-      "Bash(PYTHONPATH=/home/timothy/oss/hive/core:/home/timothy/oss/hive/exports python:*)",
-      "Bash(PYTHONPATH=core:exports:tools/src python -m hubspot_input:*)",
-      "mcp__agent-builder__export_graph"
+      "Bash(gh issue list:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat\\(tools\\): Add Excel tool for spreadsheet operations\n\nAdds a new Excel tool for reading and manipulating .xlsx/.xlsm files:\n- excel_read: Read Excel files with pagination and sheet selection\n- excel_write: Create new Excel files with data\n- excel_append: Append rows to existing files\n- excel_info: Get metadata about Excel files \\(sheets, columns, row counts\\)\n- excel_sheet_list: List all sheets in a workbook\n\nIncludes comprehensive test coverage \\(37 tests\\) and documentation.\n\nReferences #2805\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(git merge:*)"
     ]
   },
-  "enabledMcpjsonServers": ["agent-builder", "tools"],
-  "enableAllProjectMcpServers": true
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "agent-builder",
+    "tools"
+  ]
 }
