@@ -46,9 +46,10 @@ mcp__agent-builder__add_mcp_server(
     cwd="tools",  # Relative to project root
     description="Hive tools MCP server with web search, file operations, etc."
 )
-# Returns: 12 tools available including web_search, web_scrape, pdf_read,
+# Returns: 14 tools available including web_search, web_scrape, pdf_read,
 # view_file, write_to_file, list_dir, replace_file_content, apply_diff,
-# apply_patch, grep_search, execute_command_tool, example_tool
+# apply_patch, grep_search, execute_command_tool, example_tool,
+# send_email, send_budget_alert_email
 ```
 
 **Then discover what tools are available:**
@@ -56,7 +57,7 @@ mcp__agent-builder__add_mcp_server(
 ```python
 # After registering, verify tools are available
 mcp__agent-builder__list_mcp_servers()  # Should show hive-tools
-mcp__agent-builder__list_mcp_tools()    # Should show 12 tools
+mcp__agent-builder__list_mcp_tools()    # Should show 14 tools
 ```
 
 ## CRITICAL: Discover Available Tools
