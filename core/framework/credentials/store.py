@@ -616,7 +616,7 @@ class CredentialStore:
     @classmethod
     def with_aden_sync(
         cls,
-        base_url: str = "https://staging-hive.adenhq.com",
+        base_url: str = "https://api.adenhq.com",
         cache_ttl_seconds: int = 300,
         local_path: str | None = None,
         auto_sync: bool = True,
@@ -630,7 +630,7 @@ class CredentialStore:
         is unreachable.
 
         Args:
-            base_url: Aden server URL (default: https://staging-hive.adenhq.com)
+            base_url: Aden server URL (default: https://api.adenhq.com)
             cache_ttl_seconds: How long to cache credentials locally (default: 5 min)
             local_path: Path for local credential storage (default: ~/.hive/credentials)
             auto_sync: Whether to sync all credentials on startup (default: True)

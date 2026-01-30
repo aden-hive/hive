@@ -194,7 +194,7 @@ config = json.loads(config_path.read_text()) if config_path.exists() else {}
 
 config["aden"] = {
     "api_key_configured": True,
-    "api_url": "https://staging-hive.adenhq.com"
+    "api_url": "https://api.adenhq.com"
 }
 
 config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -213,7 +213,7 @@ from core.framework.credentials import CredentialStore
 # - Configures Aden client from ADEN_API_KEY env var
 # - Syncs all credentials from Aden server automatically
 store = CredentialStore.with_aden_sync(
-    base_url="https://staging-hive.adenhq.com",
+    base_url="https://api.adenhq.com",
     auto_sync=True,  # Syncs on creation
 )
 
@@ -239,7 +239,7 @@ from core.framework.credentials.aden import (
 
 # Create client (API key loaded from ADEN_API_KEY env var)
 client = AdenCredentialClient(AdenClientConfig(
-    base_url="https://staging-hive.adenhq.com",
+    base_url="https://api.adenhq.com",
 ))
 
 # Create provider and store
@@ -474,13 +474,13 @@ for name, spec in CREDENTIAL_SPECS.items():
 
 **CredentialManager is deprecated.** Use CredentialStore instead.
 
-| Old (Deprecated)                              | New (Recommended)                                    |
-| --------------------------------------------- | ---------------------------------------------------- |
-| `CredentialManager()`                         | `CredentialStore.with_encrypted_storage()`           |
-| `creds.get("hubspot")`                        | `store.get("hubspot")` or `store.get_key("hubspot", "access_token")` |
-| `creds.validate_for_tools(tools)`             | Use `store.is_available(cred_id)` per credential     |
-| `creds.get_auth_options("hubspot")`           | Check `CREDENTIAL_SPECS["hubspot"].aden_supported`   |
-| `creds.get_setup_instructions("hubspot")`     | Access `CREDENTIAL_SPECS["hubspot"]` directly        |
+| Old (Deprecated)                          | New (Recommended)                                                    |
+| ----------------------------------------- | -------------------------------------------------------------------- |
+| `CredentialManager()`                     | `CredentialStore.with_encrypted_storage()`                           |
+| `creds.get("hubspot")`                    | `store.get("hubspot")` or `store.get_key("hubspot", "access_token")` |
+| `creds.validate_for_tools(tools)`         | Use `store.is_available(cred_id)` per credential                     |
+| `creds.get_auth_options("hubspot")`       | Check `CREDENTIAL_SPECS["hubspot"].aden_supported`                   |
+| `creds.get_setup_instructions("hubspot")` | Access `CREDENTIAL_SPECS["hubspot"]` directly                        |
 
 **Why migrate?**
 
