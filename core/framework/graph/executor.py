@@ -47,6 +47,23 @@ class ExecutionResult:
     paused_at: str | None = None  # Node ID where execution paused for HITL
     session_state: dict[str, Any] = field(default_factory=dict)  # State to resume from
 
+    # Execution quality metrics
+    total_retries: int = 0  # Total number of retries across all nodes
+    nodes_with_failures: list[str] = field(default_factory=list)  # Node IDs that failed but recovered
+    retry_details: dict[str, int] = field(default_factory=dict)  # {node_id: retry_count}
+    had_partial_failures: bool = False  # True if any node failed but eventually succeeded
+    execution_quality: str = "clean"  # "clean", "degraded", or "failed"
+
+    @property
+    def is_clean_success(self) -> bool:
+        """True only if execution succeeded with no retries or failures."""
+        return self.success and self.execution_quality == "clean"
+
+    @property
+    def is_degraded_success(self) -> bool:
+        """True if execution succeeded but had retries or partial failures."""
+        return self.success and self.execution_quality == "degraded"
+
 
 @dataclass
 class ParallelBranch:
@@ -399,6 +416,11 @@ class GraphExecutor:
                                 f"{max_retries} retries: {result.error}"
                             ),
                         )
+
+                        # Calculate quality metrics
+                        total_retries_count = sum(node_retry_counts.values())
+                        nodes_failed = list(node_retry_counts.keys())
+
                         return ExecutionResult(
                             success=False,
                             error=(
@@ -410,6 +432,11 @@ class GraphExecutor:
                             total_tokens=total_tokens,
                             total_latency_ms=total_latency,
                             path=path,
+                            total_retries=total_retries_count,
+                            nodes_with_failures=nodes_failed,
+                            retry_details=dict(node_retry_counts),
+                            had_partial_failures=len(nodes_failed) > 0,
+                            execution_quality="failed",
                         )
 
                 # Check if we just executed a pause node - if so, save state and return
@@ -430,6 +457,11 @@ class GraphExecutor:
                         narrative=f"Paused at {node_spec.name} after {steps} steps",
                     )
 
+                    # Calculate quality metrics
+                    total_retries_count = sum(node_retry_counts.values())
+                    nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
+                    exec_quality = "degraded" if total_retries_count > 0 else "clean"
+
                     return ExecutionResult(
                         success=True,
                         output=saved_memory,
@@ -439,6 +471,11 @@ class GraphExecutor:
                         path=path,
                         paused_at=node_spec.id,
                         session_state=session_state_out,
+                        total_retries=total_retries_count,
+                        nodes_with_failures=nodes_failed,
+                        retry_details=dict(node_retry_counts),
+                        had_partial_failures=len(nodes_failed) > 0,
+                        execution_quality=exec_quality,
                     )
 
                 # Check if this is a terminal node - if so, we're done
@@ -527,10 +564,20 @@ class GraphExecutor:
             self.logger.info(f"   Total tokens: {total_tokens}")
             self.logger.info(f"   Total latency: {total_latency}ms")
 
+            # Calculate execution quality metrics
+            total_retries_count = sum(node_retry_counts.values())
+            nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
+            exec_quality = "degraded" if total_retries_count > 0 else "clean"
+
+            # Update narrative to reflect execution quality
+            quality_suffix = ""
+            if exec_quality == "degraded":
+                quality_suffix = f" (⚠️  {total_retries_count} retries across {len(nodes_failed)} nodes)"
+
             self.runtime.end_run(
                 success=True,
                 output_data=output,
-                narrative=f"Executed {steps} steps through path: {' -> '.join(path)}",
+                narrative=f"Executed {steps} steps through path: {' -> '.join(path)}{quality_suffix}",
             )
 
             return ExecutionResult(
@@ -540,6 +587,11 @@ class GraphExecutor:
                 total_tokens=total_tokens,
                 total_latency_ms=total_latency,
                 path=path,
+                total_retries=total_retries_count,
+                nodes_with_failures=nodes_failed,
+                retry_details=dict(node_retry_counts),
+                had_partial_failures=len(nodes_failed) > 0,
+                execution_quality=exec_quality,
             )
 
         except Exception as e:
@@ -551,11 +603,21 @@ class GraphExecutor:
                 success=False,
                 narrative=f"Failed at step {steps}: {e}",
             )
+
+            # Calculate quality metrics even for exceptions
+            total_retries_count = sum(node_retry_counts.values())
+            nodes_failed = list(node_retry_counts.keys())
+
             return ExecutionResult(
                 success=False,
                 error=str(e),
                 steps_executed=steps,
                 path=path,
+                total_retries=total_retries_count,
+                nodes_with_failures=nodes_failed,
+                retry_details=dict(node_retry_counts),
+                had_partial_failures=len(nodes_failed) > 0,
+                execution_quality="failed",
             )
 
     def _build_context(
