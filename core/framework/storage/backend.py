@@ -8,7 +8,7 @@ Uses Pydantic's built-in serialization.
 import json
 from pathlib import Path
 
-from framework.schemas.run import Run, RunSummary, RunStatus
+from framework.schemas.run import Run, RunStatus, RunSummary
 
 
 class FileStorage:
@@ -46,19 +46,53 @@ class FileStorage:
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
 
+    def _validate_key(self, key: str) -> None:
+        """
+        Validate key to prevent path traversal attacks.
+
+        Args:
+            key: The key to validate
+
+        Raises:
+            ValueError: If key contains path traversal or dangerous patterns
+        """
+        if not key or key.strip() == "":
+            raise ValueError("Key cannot be empty")
+
+        # Block path separators
+        if "/" in key or "\\" in key:
+            raise ValueError(f"Invalid key format: path separators not allowed in '{key}'")
+
+        # Block parent directory references
+        if ".." in key or key.startswith("."):
+            raise ValueError(f"Invalid key format: path traversal detected in '{key}'")
+
+        # Block absolute paths
+        if key.startswith("/") or (len(key) > 1 and key[1] == ":"):
+            raise ValueError(f"Invalid key format: absolute paths not allowed in '{key}'")
+
+        # Block null bytes (Unix path injection)
+        if "\x00" in key:
+            raise ValueError("Invalid key format: null bytes not allowed")
+
+        # Block other dangerous special characters
+        dangerous_chars = {"<", ">", "|", "&", "$", "`", "'", '"'}
+        if any(char in key for char in dangerous_chars):
+            raise ValueError(f"Invalid key format: contains dangerous characters in '{key}'")
+
     # === RUN OPERATIONS ===
 
     def save_run(self, run: Run) -> None:
         """Save a run to storage."""
         # Save full run using Pydantic's model_dump_json
         run_path = self.base_path / "runs" / f"{run.id}.json"
-        with open(run_path, "w") as f:
+        with open(run_path, "w", encoding="utf-8") as f:
             f.write(run.model_dump_json(indent=2))
 
         # Save summary
         summary = RunSummary.from_run(run)
         summary_path = self.base_path / "summaries" / f"{run.id}.json"
-        with open(summary_path, "w") as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             f.write(summary.model_dump_json(indent=2))
 
         # Update indexes
@@ -72,7 +106,7 @@ class FileStorage:
         run_path = self.base_path / "runs" / f"{run_id}.json"
         if not run_path.exists():
             return None
-        with open(run_path) as f:
+        with open(run_path, encoding="utf-8") as f:
             return Run.model_validate_json(f.read())
 
     def load_summary(self, run_id: str) -> RunSummary | None:
@@ -85,7 +119,7 @@ class FileStorage:
                 return RunSummary.from_run(run)
             return None
 
-        with open(summary_path) as f:
+        with open(summary_path, encoding="utf-8") as f:
             return RunSummary.model_validate_json(f.read())
 
     def delete_run(self, run_id: str) -> bool:
@@ -140,28 +174,31 @@ class FileStorage:
 
     def _get_index(self, index_type: str, key: str) -> list[str]:
         """Get values from an index."""
+        self._validate_key(key)  # Prevent path traversal
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
         if not index_path.exists():
             return []
-        with open(index_path) as f:
+        with open(index_path, encoding="utf-8") as f:
             return json.load(f)
 
     def _add_to_index(self, index_type: str, key: str, value: str) -> None:
         """Add a value to an index."""
+        self._validate_key(key)  # Prevent path traversal
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
-        values = self._get_index(index_type, key)
+        values = self._get_index(index_type, key)  # Already validated in _get_index
         if value not in values:
             values.append(value)
-            with open(index_path, "w") as f:
+            with open(index_path, "w", encoding="utf-8") as f:
                 json.dump(values, f)
 
     def _remove_from_index(self, index_type: str, key: str, value: str) -> None:
         """Remove a value from an index."""
+        self._validate_key(key)  # Prevent path traversal
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
-        values = self._get_index(index_type, key)
+        values = self._get_index(index_type, key)  # Already validated in _get_index
         if value in values:
             values.remove(value)
-            with open(index_path, "w") as f:
+            with open(index_path, "w", encoding="utf-8") as f:
                 json.dump(values, f)
 
     # === UTILITY ===

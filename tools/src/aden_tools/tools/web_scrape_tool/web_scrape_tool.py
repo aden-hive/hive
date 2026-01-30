@@ -5,10 +5,11 @@ Uses httpx for requests and BeautifulSoup for HTML parsing.
 Returns clean text content from web pages.
 Respect robots.txt by default for ethical scraping.
 """
+
 from __future__ import annotations
 
-from typing import Any, List
-from urllib.parse import urlparse
+from typing import Any
+from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -22,26 +23,30 @@ _robots_cache: dict[str, RobotFileParser | None] = {}
 USER_AGENT = "AdenBot/1.0 (https://adenhq.com; web scraping tool)"
 
 # Browser-like User-Agent for actual page requests
-BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 def _get_robots_parser(base_url: str, timeout: float = 10.0) -> RobotFileParser | None:
     """
     Fetch and parse robots.txt for a domain.
-    
+
     Args:
         base_url: Base URL of the domain (e.g., 'https://example.com')
         timeout: Timeout for fetching robots.txt
-        
+
     Returns:
         RobotFileParser if robots.txt exists and was parsed, None otherwise
     """
     if base_url in _robots_cache:
         return _robots_cache[base_url]
-    
+
     robots_url = f"{base_url}/robots.txt"
     parser = RobotFileParser()
-    
+
     try:
         response = httpx.get(
             robots_url,
@@ -65,23 +70,23 @@ def _get_robots_parser(base_url: str, timeout: float = 10.0) -> RobotFileParser 
 def _is_allowed_by_robots(url: str) -> tuple[bool, str]:
     """
     Check if URL is allowed by robots.txt.
-    
+
     Args:
         url: Full URL to check
-        
+
     Returns:
         Tuple of (allowed: bool, reason: str)
     """
     parsed = urlparse(url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
     path = parsed.path or "/"
-    
+
     parser = _get_robots_parser(base_url)
-    
+
     if parser is None:
         # No robots.txt found or couldn't fetch - all paths allowed
         return True, "No robots.txt found or not accessible"
-    
+
     # Check both our bot user-agent and wildcard
     if parser.can_fetch(USER_AGENT, path) and parser.can_fetch("*", path):
         return True, "Allowed by robots.txt"
@@ -132,10 +137,7 @@ def register_tools(mcp: FastMCP) -> None:
                     }
 
             # Validate max_length
-            if max_length < 1000:
-                max_length = 1000
-            elif max_length > 500000:
-                max_length = 500000
+            max_length = max(1000, min(max_length, 500000))
 
             # Make request
             response = httpx.get(
@@ -152,18 +154,26 @@ def register_tools(mcp: FastMCP) -> None:
             if response.status_code != 200:
                 return {"error": f"HTTP {response.status_code}: Failed to fetch URL"}
 
+            # Check content type
+            content_type = response.headers.get("content-type", "").lower()
+            if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
+                return {
+                    "error": f"Skipping non-HTML content (Content-Type: {content_type})",
+                    "url": url,
+                    "skipped": True,
+                }
+
             # Parse HTML
             soup = BeautifulSoup(response.text, "html.parser")
 
             # Remove noise elements
-            for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]):
+            for tag in soup(
+                ["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]
+            ):
                 tag.decompose()
 
             # Get title and description
-            title = ""
-            title_tag = soup.find("title")
-            if title_tag:
-                title = title_tag.get_text(strip=True)
+            title = soup.title.get_text(strip=True) if soup.title else ""
 
             description = ""
             meta_desc = soup.find("meta", attrs={"name": "description"})
@@ -205,12 +215,15 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Extract links if requested
             if include_links:
-                links: List[dict[str, str]] = []
+                links: list[dict[str, str]] = []
+                base_url = str(response.url)  # Use final URL after redirects
                 for a in soup.find_all("a", href=True)[:50]:
                     href = a["href"]
+                    # Convert relative URLs to absolute URLs
+                    absolute_href = urljoin(base_url, href)
                     link_text = a.get_text(strip=True)
-                    if link_text and href:
-                        links.append({"text": link_text, "href": href})
+                    if link_text and absolute_href:
+                        links.append({"text": link_text, "href": absolute_href})
                 result["links"] = links
 
             return result
