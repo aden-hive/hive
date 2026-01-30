@@ -21,6 +21,23 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
+### Windows (Git Bash) – Verified Setup
+
+Hive can be successfully set up on Windows using **Git Bash (MINGW64)** without WSL.
+
+#### Notes
+- On Windows, `python3` may not be available. The setup script automatically falls back to `python`.
+- During setup, you may see warnings about pip scripts (e.g. `wheel.exe`, `pip.exe`) not being on PATH. These warnings are safe to ignore for local development.
+- Python App Execution Aliases do not affect Git Bash if Python is correctly installed and added to PATH.
+
+#### Verified Environment
+- Windows 10 / 11
+- Git Bash (MINGW64)
+- Python 3.11
+- Command: `bash ./scripts/setup-python.sh`
+
+> **Note:** WSL is still **strongly recommended** for smoother setup experience, but Git Bash works fine.
+
 ## Alpine Linux Setup
 
 If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
