@@ -9,6 +9,7 @@ Usage:
 
 import json
 import os
+from tempfile import NamedTemporaryFile
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -111,6 +112,29 @@ _session: BuildSession | None = None
 def _ensure_sessions_dir():
     """Ensure sessions directory exists."""
     SESSIONS_DIR.mkdir(exist_ok=True)
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write text to a file atomically to avoid partial writes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(
+        "w",
+        delete=False,
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        encoding="utf-8",
+    ) as tmp:
+        tmp.write(content)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+
+
+def _atomic_write_json(path: Path, data: object, *, indent: int = 2) -> None:
+    """Write JSON to a file atomically to avoid partial writes."""
+    _atomic_write_text(path, json.dumps(data, indent=indent, default=str))
 
 
 def _save_session(session: BuildSession):
@@ -1488,14 +1512,12 @@ def export_graph() -> str:
 
     # Write agent.json
     agent_json_path = exports_dir / "agent.json"
-    with open(agent_json_path, "w") as f:
-        json.dump(export_data, f, indent=2, default=str)
+    _atomic_write_json(agent_json_path, export_data)
 
     # Generate README.md
     readme_content = _generate_readme(session, export_data, all_tools)
     readme_path = exports_dir / "README.md"
-    with open(readme_path, "w") as f:
-        f.write(readme_content)
+    _atomic_write_text(readme_path, readme_content)
 
     # Write mcp_servers.json if MCP servers are configured
     mcp_servers_path = None
@@ -1503,8 +1525,7 @@ def export_graph() -> str:
     if session.mcp_servers:
         mcp_config = {"servers": session.mcp_servers}
         mcp_servers_path = exports_dir / "mcp_servers.json"
-        with open(mcp_servers_path, "w") as f:
-            json.dump(mcp_config, f, indent=2)
+        _atomic_write_json(mcp_servers_path, mcp_config)
         mcp_servers_size = mcp_servers_path.stat().st_size
 
     # Get file sizes
