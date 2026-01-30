@@ -84,16 +84,26 @@ class FileStorage:
 
     def save_run(self, run: Run) -> None:
         """Save a run to storage."""
-        # Save full run using Pydantic's model_dump_json
+        # Save full run using atomic write pattern
         run_path = self.base_path / "runs" / f"{run.id}.json"
-        with open(run_path, "w", encoding="utf-8") as f:
+        run_tmp = run_path.with_suffix(".tmp")
+        
+        with open(run_tmp, "w", encoding="utf-8") as f:
             f.write(run.model_dump_json(indent=2))
+        
+        # Atomic rename
+        run_tmp.replace(run_path)
 
-        # Save summary
+        # Save summary using atomic write pattern
         summary = RunSummary.from_run(run)
         summary_path = self.base_path / "summaries" / f"{run.id}.json"
-        with open(summary_path, "w", encoding="utf-8") as f:
+        summary_tmp = summary_path.with_suffix(".tmp")
+        
+        with open(summary_tmp, "w", encoding="utf-8") as f:
             f.write(summary.model_dump_json(indent=2))
+            
+        # Atomic rename
+        summary_tmp.replace(summary_path)
 
         # Update indexes
         self._add_to_index("by_goal", run.goal_id, run.id)

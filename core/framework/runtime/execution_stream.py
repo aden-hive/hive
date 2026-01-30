@@ -193,6 +193,7 @@ class ExecutionStream:
 
     def _prune_execution_results(self) -> None:
         """Prune completed results based on TTL and max retention."""
+        # Note: This method should be called under lock or in a synchronized context
         if self._result_retention_ttl_seconds is not None:
             cutoff = time.time() - self._result_retention_ttl_seconds
             for exec_id, recorded_at in list(self._execution_result_times.items()):
