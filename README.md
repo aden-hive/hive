@@ -98,6 +98,27 @@ claude> /testing-agent
 PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 ```
 
+### Testing Without API Keys (Mock Mode)
+
+Test agents without consuming API credits using mock mode:
+
+```bash
+# Run agent with mock LLM responses
+PYTHONPATH=core:exports python -m your_agent_name run --input '{...}' --mock
+
+# Test with mock mode
+PYTHONPATH=core:exports python -m your_agent_name test --mock
+
+# Validate agent structure (always free)
+PYTHONPATH=core:exports python -m your_agent_name validate
+```
+
+Mock mode returns simulated LLM responses, perfect for:
+- Testing agent graph structure
+- Debugging node connections
+- CI/CD pipelines without API keys
+- Development without costs
+
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
 
 ### Cursor IDE Support
