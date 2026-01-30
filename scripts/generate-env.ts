@@ -12,6 +12,22 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { parse } from 'yaml';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { DecideRequestSchema } from "./schema";
+
+export class Runtime {
+  static decide(input: unknown) {
+    // BUG FIX: Parse and validate input before object construction
+    const result = DecideRequestSchema.safeParse(input);
+
+    if (!result.success) {
+      console.error("[Runtime Security] Malformed decision blocked.");
+      throw new Error(`Invalid decision data: ${result.error.message}`);
+    }
+
+    const { options, reasoning } = result.data;
+    // Execution continues with sanitized data only...
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
