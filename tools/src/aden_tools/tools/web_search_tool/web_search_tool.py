@@ -74,11 +74,11 @@ def register_tools(
             "total": len(results),
             "provider": "google",
         }
-        
+
         # Warn if results were capped due to API limit
         if num_results > 10:
             result["warning"] = f"Google API limited results to 10 (requested {num_results})"
-        
+
         return result
 
     def _search_brave(
