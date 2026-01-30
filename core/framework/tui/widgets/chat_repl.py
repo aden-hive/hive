@@ -15,18 +15,29 @@ class ChatRepl(Vertical):
     ChatRepl {
         width: 100%;
         height: 100%;
+        layout: vertical;
     }
     
     ChatRepl > TextArea {
         width: 100%;
         height: 1fr;
-        border: solid $accent;
+        background: $surface;
+        border: none;
+        scrollbar-background: $panel;
+        scrollbar-color: $primary;
     }
     
     ChatRepl > Input {
         width: 100%;
         height: auto;
         dock: bottom;
+        background: $surface;
+        border: tall $primary;
+        margin-top: 1;
+    }
+    
+    ChatRepl > Input:focus {
+        border: tall $accent;
     }
     """
 

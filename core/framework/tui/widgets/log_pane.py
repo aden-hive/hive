@@ -1,13 +1,13 @@
 """
-Log Pane Widget.
+Log Pane Widget - Uses RichLog for reliable rendering.
 """
 
-from textual.widgets import TextArea
+from textual.widgets import RichLog
 from textual.app import ComposeResult
 from textual.containers import Container
 
 class LogPane(Container):
-    """Widget to display logs with text selection support."""
+    """Widget to display logs with reliable rendering."""
     
     DEFAULT_CSS = """
     LogPane {
@@ -15,43 +15,42 @@ class LogPane(Container):
         height: 100%;
     }
     
-    LogPane > TextArea {
+    LogPane > RichLog {
         width: 100%;
         height: 100%;
-        border: solid $accent;
-    }
-    
-    LogPane > TextArea:focus {
-        border: solid $accent-lighten-2;
+        background: $surface;
+        border: none;
+        scrollbar-background: $panel;
+        scrollbar-color: $primary;
     }
     """
 
     def compose(self) -> ComposeResult:
-        # TextArea supports text selection and copying
-        text_area = TextArea(
+        # RichLog is designed for log display and doesn't have TextArea's rendering issues
+        yield RichLog(
             id="main-log",
-            read_only=True,
-            show_line_numbers=False,
-            language="text"
+            highlight=True,
+            markup=True,
+            auto_scroll=True
         )
-        text_area.cursor_blink = False  # Disable cursor blinking for read-only
-        yield text_area
 
     def write_log(self, message: str) -> None:
         """Write a log message to the log pane."""
         try:
-            text_area = self.query_one("#main-log", TextArea)
-            # Append message with newline
-            current_text = text_area.text
-            if current_text:
-                text_area.text = current_text + "\n" + message
-            else:
-                text_area.text = message
+            # Check if widget is mounted
+            if not self.is_mounted:
+                return
+                
+            log = self.query_one("#main-log", RichLog)
             
-            # Auto-scroll to bottom
-            text_area.scroll_end(animate=False)
+            # Check if log is mounted
+            if not log.is_mounted:
+                return
+            
+            # Write message - RichLog handles rendering correctly
+            log.write(message)
+            
         except Exception as e:
             # Widget might not be ready
             with open("tui_debug.log", "a") as f:
                 f.write(f"ERROR in write_log: {e}\n")
-

@@ -8,37 +8,110 @@ from framework.tui.widgets.graph_view import GraphOverview
 from framework.tui.widgets.chat_repl import ChatRepl
 import logging
 
+class StaticHeader(Container):
+    """Custom static header that replaces standard Header widget."""
+    
+    DEFAULT_CSS = """
+    StaticHeader {
+        dock: top;
+        height: 1;
+        background: $primary;
+        color: $text;
+        text-style: bold;
+        align: center middle;
+    }
+    """
+    
+    def compose(self) -> ComposeResult:
+        yield Label(self.app.title)
+
 class AdenTUI(App):
+    TITLE = "Aden TUI Dashboard"
     CSS = """
     Screen {
         layout: vertical;
+        background: $surface;
     }
 
     #left-pane {
         width: 60%;
         height: 100%;
         layout: vertical;
+        background: $surface;
     }
     
     #graph-overview-container {
         height: 40%;
-        border: solid green;
+        background: $panel;
+        padding: 0;
     }
 
     #log-pane-container {
         height: 60%;
-        border: solid blue;
+        background: $surface;
+        padding: 0;
+        margin-bottom: 1;
     }
 
     #chat-repl-container {
         width: 40%;
         height: 100%;
-        border: solid yellow;
+        background: $panel;
+        border-left: tall $primary;
+        padding: 0;
     }
     
     #chat-history {
         height: 1fr;
         width: 100%;
+        background: $surface;
+        border: none;
+        scrollbar-background: $panel;
+        scrollbar-color: $primary;
+    }
+    
+    TextArea {
+        background: $surface;
+        border: none;
+        scrollbar-background: $panel;
+        scrollbar-color: $primary;
+    }
+    
+    Input {
+        background: $surface;
+        border: tall $primary;
+        margin-top: 1;
+    }
+    
+    Input:focus {
+        border: tall $accent;
+    }
+    
+    StaticHeader {
+        background: $primary;
+        color: $text;
+        text-style: bold;
+        height: 1;
+    }
+    
+    /* Force height 1 even if tall class is added (prevents expansion) */
+    StaticHeader.-tall {
+        height: 1;
+    }
+    
+    StaticHeader > .header--title {
+        text-style: bold;
+    }
+    
+    /* Hide the clock icon and top-left icon/button */
+    Header .header--clock, StaticHeader .header--clock,
+    Header .header--icon, StaticHeader .header--icon {
+        display: none !important;
+    }
+    
+    Footer {
+        background: $panel;
+        color: $text-muted;
     }
     """
     
@@ -57,7 +130,7 @@ class AdenTUI(App):
         
         self.runtime = runtime
         self.log_pane = LogPane()
-        self.graph_view = GraphOverview()
+        self.graph_view = GraphOverview(runtime)
         self.chat_repl = ChatRepl(runtime)
         self.is_ready = False
         
@@ -68,7 +141,7 @@ class AdenTUI(App):
         with open("tui_debug.log", "a") as f:
             f.write("DEBUG: compose() called\n")
         
-        yield Header()
+        yield StaticHeader()
         
         yield Horizontal(
             Vertical(
@@ -90,17 +163,23 @@ class AdenTUI(App):
             f.write("DEBUG: on_mount() called\n")
         
         self.title = "Aden TUI Dashboard"
-        self.is_ready = True
         
         # Add logging setup
         self._setup_logging_queue()
         
+        # Set ready immediately so _poll_logs can process messages
+        self.is_ready = True
+        
         # Add event subscription with delay to ensure TUI is fully initialized
         self.call_later(self._init_runtime_connection)
         
-        # Add a test log message
-        logging.info("TUI Dashboard initialized successfully")
-        logging.info("Waiting for agent execution to start...")
+        # Delay initial log messages until layout is fully rendered
+        def write_initial_logs():
+            logging.info("TUI Dashboard initialized successfully")
+            logging.info("Waiting for agent execution to start...")
+        
+        # Wait for layout to be fully rendered before writing logs
+        self.set_timer(0.2, write_initial_logs)
         
         with open("tui_debug.log", "a") as f:
             f.write("DEBUG: on_mount() complete\n")
@@ -115,10 +194,22 @@ class AdenTUI(App):
             self.queue_handler = QueueHandler(self.log_queue)
             self.queue_handler.setLevel(logging.INFO)
             
-            # Add to root logger
+            # Get root logger
             root_logger = logging.getLogger()
-            if self.queue_handler not in root_logger.handlers:
-                root_logger.addHandler(self.queue_handler)
+            
+            # Remove ALL existing handlers to prevent stdout output
+            # This is critical - StreamHandlers cause text to appear in header
+            for handler in root_logger.handlers[:]:
+                root_logger.removeHandler(handler)
+            
+            # Add ONLY our queue handler
+            root_logger.addHandler(self.queue_handler)
+            root_logger.setLevel(logging.INFO)
+            
+            # Suppress LiteLLM logging completely
+            litellm_logger = logging.getLogger("LiteLLM")
+            litellm_logger.setLevel(logging.CRITICAL)  # Only show critical errors
+            litellm_logger.propagate = False  # Don't propagate to root logger
                 
             # Start polling
             self.set_interval(0.1, self._poll_logs)
@@ -138,7 +229,8 @@ class AdenTUI(App):
             count = 0
             while not self.log_queue.empty():
                 record = self.log_queue.get_nowait()
-                if record.name.startswith("textual"):
+                # Filter out framework/library logs
+                if record.name.startswith(("textual", "LiteLLM", "litellm")):
                     continue
                 
                 msg = logging.Formatter().format(record)
@@ -202,7 +294,7 @@ class AdenTUI(App):
                     with open("tui_debug.log", "a") as f:
                         f.write(f"DEBUG: Event type value: {event_type}\n")
                         
-                    if event_type.startswith("execution_"):
+                    if event_type.startswith(("execution_", "node_")):
                         self.graph_view.update_execution(event)
                         
                         with open("tui_debug.log", "a") as f:
