@@ -40,11 +40,17 @@ If a high-quality PR is submitted for a "stale" assigned issue (no activity for 
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/hive.git`
-3. Create a feature branch: `git checkout -b feature/your-feature-name`
-4. Make your changes
-5. Run tests: `PYTHONPATH=core:exports python -m pytest`
-6. Commit your changes following our commit conventions
-7. Push to your fork and submit a Pull Request
+3. Sync your fork with the upstream repository:
+   ```bash
+   git remote add upstream https://github.com/adenhq/hive.git
+   git fetch upstream
+   git checkout main
+   git merge upstream/main
+4. Create a feature branch: `git checkout -b feature/your-feature-name`
+5. Make your changes
+6. Run tests: `PYTHONPATH=core:exports python -m pytest`
+7. Commit your changes following our commit conventions
+8. Push to your fork and submit a Pull Request
 
 ## Development Setup
 
