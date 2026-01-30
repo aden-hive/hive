@@ -26,19 +26,19 @@ timeline
 - [ ] **Node-Based Architecture (Agent as a node)**
     - [x] Object schema definition
     - [x] Node wrapper SDK
-    - [ ] Shared memory access
+    - [x] Shared memory access
     - [ ] Default monitoring hooks
-    - [ ] Tool access layer
+    - [x] Tool access layer
     - [x] LLM integration layer (Natively supports all mainstream LLMs through LiteLLM)
         - [x] Anthropic
         - [x] OpenAI
         - [x] Google
-- [ ] **Communication protocol between nodes**
-- [ ] **[Coding Agent] Goal Creation Session** (separate from coding session)
-    - [ ] Instruction back and forth
+- [x] **Communication protocol between nodes**
+- [x] **[Coding Agent] Goal Creation Session** (separate from coding session)
+    - [x] Instruction back and forth
     - [x] Goal Object schema definition
-    - [ ] Being able to generate the test cases
-    - [ ] Test case validation for worker agent (Outcome driven)
+    - [x] Being able to generate the test cases
+    - [x] Test case validation for worker agent (Outcome driven)
 - [ ] **[Coding Agent] Worker Agent Creation**
     - [x] Coding Agent tools
     - [ ] Use Template Agent as a start
@@ -46,21 +46,62 @@ timeline
 - [ ] **[Worker Agent] Human-in-the-Loop**
     - [x] Worker Agents request with questions and options
     - [x] Callback Handler System to receive events throughout execution
-    - [ ] Tool-Based Intervention Points (tool to pause execution and request human input)
+    - [x] Tool-Based Intervention Points (tool to pause execution and request human input)
     - [x] Multiple entrypoint for different event source (e.g. Human input, webhook)
     - [ ] Streaming Interface for Real-time Monitoring
-    - [ ] Request State Management
+    - [x] Request State Management
+
+### Credential Management
+- [x] **Credentials Setup Process**
+    - [x] Install Credential MCP
+- [x] **Pluggable Credential Sources**
+    - [x] **Abstraction & Local Sources**
+        - [x] Introduce `CredentialSource` base class
+        - [x] Refactor existing logic into `EnvVarSource`
+        - [x] Implementation of Source Priority Chain mechanism
+        - [ ] Foundation unit tests
+    - [ ] **Enterprise Secret Managers**
+        - [x] `VaultSource` (HashiCorp Vault)
+        - [ ] `AWSSecretsSource` (AWS Secrets Manager)
+        - [ ] `AzureKeyVaultSource` (Azure Key Vault)
+        - [ ] Management of optional provider dependencies
+    - [ ] **Advanced Features**
+        - [x] Credential expiration and auto-refresh
+        - [ ] Audit logging for compliance/tracking
+        - [ ] Per-environment configuration support
+    - [ ] **Documentation & DX**
+        - [ ] Comprehensive source documentation
+        - [ ] Example configurations for all providers
+    - [x] **Integration as tools coverage**
+        - [x] Gsuite Tools
+        - [x] Social Media
+            - [ ] Twitter(X)
+            - [x] Github
+            - [ ] Instagram
+        - [ ] SAAS
+            - [ ] Hubspot
+            - [ ] Slack
+            - [ ] Teams
+            - [ ] Zoom
+            - [ ] Stripe
+            - [ ] Salesforce
+
+> [!IMPORTANT]
+> **Community Contribution Wanted**: We appreciate help from the community to expand the "Integration as tools" capability. Leave an issue of the integration you want to support via Hive!
 
 ### Essential Tools
 - [x] **File Use Tool Kit**
-- [ ] **Memory Tools**
+- [X] **Memory Tools**
     - [x] STM Layer Tool (state-based short-term memory)
     - [x] LTM Layer Tool (RLM - long-term memory)
 - [ ] **Infrastructure Tools**
     - [x] Runtime Log Tool (logs for coding agent)
-    - [ ] Audit Trail Tool (decision timeline generation)
-    - [ ] Web Search
-    - [ ] Web Scraper
+    - [x] Web Search
+    - [x] Web Scraper
+    - [x] CSV tools
+    - [x] PDF tools
+    - [ ] Excel tools
+    - [ ] Email Tools
     - [ ] Recipe for "Add your own tools"
 
 ### Memory & File System
@@ -75,20 +116,25 @@ timeline
 - [ ] User-driven log analysis (OSS approach)
 
 ### Data Validation
-- [ ] Natively Support data validation of LLMs output with Pydantic
+- [x] Natively Support data validation of LLMs output with Pydantic
 
 ### Developer Experience
-- [ ] **Debugging mode**
-- [ ] **Documentation**
-    - [ ] Quick start guide
-    - [ ] Goal creation guide
-    - [ ] Agent creation guide
-    - [ ] GitHub Page setup
-    - [ ] README with examples
-    - [ ] Contributing guidelines
-- [ ] **Distribution**
-    - [ ] PyPI package
-    - [ ] Docker image on Docker Hub
+- [ ] **MVP Features**
+    - [ ] Debugging mode
+    - [ ] CLI tools for memory management
+    - [ ] CLI tools for credential management
+- [ ] **MVP Resources & Documentation**
+    - [x] Quick start guide
+    - [x] Goal creation guide
+    - [x] Agent creation guide
+    - [x] GitHub Page setup
+    - [x] README with examples
+    - [x] Contributing guidelines
+    - [ ] Introduction Video
+
+### Adaptiveness
+- [ ] Runtime data feedback loop
+- [ ] Instant Developer Feedback for improvement
 
 ### Sample Agents
 - [ ] Knowledge Agent
@@ -106,9 +152,35 @@ timeline
 
 ### Agent Capability
 - [ ] Streaming mode support
+- [ ] Image Generation support
+- [ ] Take end user input Image and flatfile understand capability
 
-### Cross-Platform
-- [ ] JavaScript / TypeScript Version SDK
+### Event-loop For Nodes (Opencode-style)
+- [ ] **Event bus**
+
+### Memory System Iteration
+- [ ] **Message Model & Session Management**
+    - [ ] Introduce `Message` class with structured content types
+    - [ ] Implement `Session` classes for conversation state
+- [ ] **Storage Migration**
+    - [ ] Implement granular per-message file persistence (`/message/[agentID]/...`)
+    - [ ] Migrate from monolithic run storage
+- [ ] **Context Building & Conversation Loop**
+    - [ ] Implement `Message.stream(sessionID)`
+    - [ ] Update `LLMNode.execute()` for full context building
+    - [ ] Implement `Message.toModelMessages()` conversion
+- [ ] **Proactive Compaction**
+    - [ ] Implement proactive overflow detection
+    - [ ] Develop backward-scanning pruning strategy (e.g., clearing old tool outputs)
+- [ ] **Enhanced Token Tracking**
+    - [ ] Extend `LLMResponse` to track reasoning and cache tokens
+    - [ ] Integrate granular token metrics into compaction logic
+
+### Coding Agent Support
+- [ ] Claude Code
+- [ ] Cursor
+- [ ] Opencode
+- [ ] Antigravity
 
 ### File System Enhancement
 - [ ] Semantic Search integration
@@ -148,3 +220,7 @@ timeline
 - [ ] Analytics Agent
 - [ ] Training Agent
 - [ ] Smart Entry / Form Agent (self-evolution emphasis)
+
+### Cross-Platform
+- [ ] JavaScript / TypeScript Version SDK
+- [ ] Better windows support
