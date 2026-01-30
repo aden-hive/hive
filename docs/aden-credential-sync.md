@@ -120,7 +120,7 @@ Response 400 Bad Request:
   "error": "refresh_failed",
   "message": "Refresh token is invalid or revoked. User must re-authorize.",
   "requires_reauthorization": true,
-  "reauthorization_url": "https://hive.adenhq.com/integrations/hubspot/connect"
+  "reauthorization_url": "https://api.adenhq.com/integrations/hubspot/connect"
 }
 
 Response 429 Too Many Requests:
@@ -196,7 +196,7 @@ Response 200 OK (needs reauth):
   "valid": false,
   "reason": "refresh_token_revoked",
   "requires_reauthorization": true,
-  "reauthorization_url": "https://hive.adenhq.com/integrations/hubspot/connect"
+  "reauthorization_url": "https://api.adenhq.com/integrations/hubspot/connect"
 }
 ```
 
@@ -266,7 +266,7 @@ HTTP client for communicating with the Aden server.
 @dataclass
 class AdenClientConfig:
     """Configuration for Aden API client."""
-    base_url: str                    # e.g., "https://hive.adenhq.com"
+    base_url: str                    # e.g., "https://api.adenhq.com"
     api_key: str | None = None       # Loaded from ADEN_API_KEY env var if not provided
     tenant_id: str | None = None     # For multi-tenant
     timeout: float = 30.0
@@ -322,7 +322,7 @@ class AdenSyncProvider(CredentialProvider):
     Usage:
         # API key loaded from ADEN_API_KEY env var by default
         client = AdenCredentialClient(AdenClientConfig(
-            base_url="https://hive.adenhq.com",
+            base_url="https://api.adenhq.com",
         ))
 
         provider = AdenSyncProvider(client=client)
@@ -573,7 +573,7 @@ provider = HubSpotOAuth2Provider(
 # After: Delegate to Aden
 provider = AdenSyncProvider(
     client=AdenCredentialClient(AdenClientConfig(
-        base_url="https://hive.adenhq.com",
+        base_url="https://api.adenhq.com",
         api_key="...",
     ))
 )

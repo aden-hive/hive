@@ -169,6 +169,25 @@ else
 fi
 echo ""
 
+# Install Playwright browser for web scraping
+echo "=================================================="
+echo "Installing Playwright Browser"
+echo "=================================================="
+echo ""
+
+if $PYTHON_CMD -c "import playwright" > /dev/null 2>&1; then
+    echo "Installing Chromium browser for web scraping..."
+    if $PYTHON_CMD -m playwright install chromium > /dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} Playwright Chromium installed"
+    else
+        echo -e "${YELLOW}⚠${NC} Playwright browser install failed (web_scrape tool may not work)"
+        echo "  Run manually: python -m playwright install chromium"
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} Playwright not found, skipping browser install"
+fi
+echo ""
+
 # Fix openai version compatibility with litellm
 echo "=================================================="
 echo "Fixing Package Compatibility"

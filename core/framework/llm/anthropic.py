@@ -8,17 +8,17 @@ from framework.llm.litellm import LiteLLMProvider
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
 
-def _get_api_key_from_credential_manager() -> str | None:
-    """Get API key from CredentialManager or environment.
+def _get_api_key_from_credential_store() -> str | None:
+    """Get API key from CredentialStoreAdapter or environment.
 
     Priority:
-    1. CredentialManager (supports .env hot-reload)
+    1. CredentialStoreAdapter (supports encrypted storage + env vars)
     2. os.environ fallback
     """
     try:
-        from aden_tools.credentials import CredentialManager
+        from aden_tools.credentials import CredentialStoreAdapter
 
-        creds = CredentialManager()
+        creds = CredentialStoreAdapter.with_env_storage()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
     except ImportError:
@@ -44,12 +44,12 @@ class AnthropicProvider(LLMProvider):
         Initialize the Anthropic provider.
 
         Args:
-            api_key: Anthropic API key. If not provided, uses CredentialManager
+            api_key: Anthropic API key. If not provided, uses CredentialStoreAdapter
                      or ANTHROPIC_API_KEY env var.
             model: Model to use (default: claude-haiku-4-5-20251001)
         """
         # Delegate to LiteLLMProvider internally.
-        self.api_key = api_key or _get_api_key_from_credential_manager()
+        self.api_key = api_key or _get_api_key_from_credential_store()
         if not self.api_key:
             raise ValueError(
                 "Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key."
