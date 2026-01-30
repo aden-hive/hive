@@ -26,17 +26,22 @@ This will:
 If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
 
 1. Install System Dependencies:
+
 ```bash
 apk update
 apk add bash git python3 py3-pip nodejs npm curl build-base python3-dev linux-headers libffi-dev
 ```
+
 2. Set up Virtual Environment (Required for Python 3.12+):
+
 ```
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip setuptools wheel
 ```
+
 3. Run the Quickstart Script:
+
 ```
 ./quickstart.sh
 ```
@@ -197,6 +202,7 @@ This step helps optimize agent design before final testing.
 ```
 claude> /testing-agent
 ```
+
 Follow the prompts to:
 
 1. Generate test guidelines for constraints and success criteria
@@ -239,6 +245,14 @@ source .venv/bin/activate  # macOS/Linux
 
 # Then run setup
 ./quickstart.sh
+
+# Test successful installation
+cd core && source .venv/bin/activate
+python -c "import framework; print('✓ framework OK')"
+
+cd tools && source .venv/bin/activate
+python -c "import aden_tools; print('✓ aden_tools OK')"
+python -c "import litellm; print('✓ litellm OK')"
 ```
 
 Always activate the venv before running agents:
