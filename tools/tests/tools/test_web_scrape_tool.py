@@ -64,6 +64,7 @@ class TestWebScrapeToolLinkConversion:
         mock_response.status_code = 200
         mock_response.text = html_content
         mock_response.url = final_url
+        mock_response.headers = {"content-type": "text/html; charset=utf-8"}
         return mock_response
 
     @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.httpx.get")

@@ -1,20 +1,14 @@
 {
   "mcpServers": {
     "agent-builder": {
-      "command": "python",
+      "command": "core/.venv/bin/python",
       "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core",
-      "env": {
-        "PYTHONPATH": "../tools/src"
-      }
+      "cwd": "."
     },
     "tools": {
-      "command": "python",
-      "args": ["mcp_server.py", "--stdio"],
-      "cwd": "tools",
-      "env": {
-        "PYTHONPATH": "src"
-      }
+      "command": "tools/.venv/bin/python",
+      "args": ["-m", "aden_tools.mcp_server", "--stdio"],
+      "cwd": "."
     }
   }
 }
