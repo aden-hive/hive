@@ -206,3 +206,4 @@ pip uninstall -y framework tools
 - **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
 - **Build Agents**: Use `/building-agents` skill to create agents
+// issue solved
