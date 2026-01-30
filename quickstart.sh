@@ -212,11 +212,18 @@ else
     IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
 fi
 
+# Test litellm import (from core venv)
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import litellm" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ litellm imports OK (core)${NC}"
+else
+    echo -e "${YELLOW}  ⚠ litellm import issues in core (may be OK)${NC}"
+fi
+
 # Test litellm import (from tools venv)
 if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import litellm" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ litellm imports OK${NC}"
+    echo -e "${GREEN}  ✓ litellm imports OK (tools)${NC}"
 else
-    echo -e "${YELLOW}  ⚠ litellm import issues (may be OK)${NC}"
+    echo -e "${YELLOW}  ⚠ litellm import issues in tools (may be OK)${NC}"
 fi
 
 # Test MCP server module (from core venv)

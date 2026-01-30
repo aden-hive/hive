@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## Обзор
@@ -76,7 +76,7 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Запустить настройку окружения Python
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 Это установит:
@@ -229,7 +229,7 @@ hive/
 
 ```bash
 # Одноразовая настройка
-./scripts/setup-python.sh
+./quickstart.sh
 
 # Это установит:
 # - пакет framework (основная среда выполнения)

@@ -459,7 +459,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"  {agent['name']}")
             print(f"    Path: {agent['path']}")
             print(f"    Description: {agent['description']}")
-            print(f"    Steps: {agent['steps']}, Tools: {agent['tools']}")
+            print(f"    Nodes: {agent['nodes']}, Tools: {agent['tools']}")
             print()
 
     return 0

@@ -2,8 +2,11 @@
 #
 # setup-python.sh - Python Environment Setup for Aden Agent Framework
 #
-# This script sets up the Python environment with all required packages
-# for building and running goal-driven agents.
+# DEPRECATED: Use ./quickstart.sh instead. It does everything this script
+# does plus verifies MCP configuration, Claude Code skills, and API keys.
+#
+# This script is kept for CI/headless environments where the extra
+# verification steps in quickstart.sh are not needed.
 #
 
 set -e
@@ -36,6 +39,8 @@ echo ""
 echo "=================================================="
 echo "  Aden Agent Framework - Python Setup"
 echo "=================================================="
+echo ""
+echo -e "${YELLOW}NOTE: Consider using ./quickstart.sh instead for a complete setup.${NC}"
 echo ""
 
 # Available Python interpreter

@@ -26,6 +26,7 @@ dependencies = [
   "fastmcp>=2.0.0",
   "diff-match-patch>=20230430",
   "python-dotenv>=1.0.0",
+  "litellm>=1.81.0",
 ]
 
 [project.optional-dependencies]

@@ -47,21 +47,22 @@ If a high-quality PR is submitted for a "stale" assigned issue (no activity for 
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/hive.git`
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
 4. Make your changes
-5. Run tests: `PYTHONPATH=core:exports python -m pytest`
+5. Run checks and tests:
+   ```bash
+   make check                              # Lint and format checks
+   cd core && python -m pytest tests/ -v   # Core tests
+   ```
 6. Commit your changes following our commit conventions
 7. Push to your fork and submit a Pull Request
 
 ## Development Setup
 
 ```bash
-# Install Python packages
-./scripts/setup-python.sh
-
-# Verify installation
-python -c "import framework; import aden_tools; print('✓ Setup complete')"
-
-# Install Claude Code skills (optional)
+# Install Python packages and verify setup
 ./quickstart.sh
+
+# Verify installation manually (optional)
+python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
 > **Windows Users:**  
@@ -103,7 +104,7 @@ docs(readme): update installation instructions
 1. **Get assigned to the issue first** (see [Issue Assignment Policy](#issue-assignment-policy))
 2. Update documentation if needed
 3. Add tests for new functionality
-4. Ensure all tests pass
+4. Ensure `make check` and core tests pass (`cd core && python -m pytest tests/ -v`)
 5. Update the CHANGELOG.md if applicable
 6. Request review from maintainers
 
@@ -117,7 +118,7 @@ feat(component): add new feature description
 ## Project Structure
 
 - `core/` - Core framework (agent runtime, graph executor, protocols)
-- `tools/` - MCP Tools Package (19 tools for agent capabilities)
+- `tools/` - MCP Tools Package (tools for agent capabilities)
 - `exports/` - Agent packages and examples
 - `docs/` - Documentation
 - `scripts/` - Build and utility scripts
