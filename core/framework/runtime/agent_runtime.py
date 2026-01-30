@@ -16,6 +16,7 @@ from framework.runtime.shared_state import SharedStateManager
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import ExecutionStream, EntryPointSpec
+from framework.runtime.cost_tracker import CostTracker, create_cost_tracker
 from framework.storage.concurrent import ConcurrentStorage
 
 if TYPE_CHECKING:
@@ -33,6 +34,11 @@ class AgentRuntimeConfig:
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
     max_history: int = 1000
+    # Cost management settings
+    enable_cost_tracking: bool = True
+    agent_budget: float | None = None  # Maximum budget in dollars
+    warn_at_budget_percent: float = 0.8  # Warn when reaching this % of budget
+    throttle_at_budget_percent: float = 0.95  # Throttle when reaching this %
 
 
 class AgentRuntime:
@@ -124,6 +130,20 @@ class AgentRuntime:
         self._state_manager = SharedStateManager()
         self._event_bus = EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
+
+        # Initialize cost tracking
+        self._cost_tracker: CostTracker | None = None
+        if self._config.enable_cost_tracking:
+            self._cost_tracker = create_cost_tracker(
+                event_bus=self._event_bus,
+                agent_budget=self._config.agent_budget,
+            )
+            if self._config.agent_budget:
+                self._cost_tracker.set_agent_budget(
+                    max_budget=self._config.agent_budget,
+                    warn_at_percent=self._config.warn_at_budget_percent,
+                    throttle_at_percent=self._config.throttle_at_budget_percent,
+                )
 
         # LLM and tools
         self._llm = llm
@@ -376,7 +396,7 @@ class AgentRuntime:
         for ep_id, stream in self._streams.items():
             stream_stats[ep_id] = stream.get_stats()
 
-        return {
+        stats = {
             "running": self._running,
             "entry_points": len(self._entry_points),
             "streams": stream_stats,
@@ -385,6 +405,12 @@ class AgentRuntime:
             "event_bus": self._event_bus.get_stats(),
             "state_manager": self._state_manager.get_stats(),
         }
+
+        # Include cost tracking stats if enabled
+        if self._cost_tracker:
+            stats["cost_tracker"] = self._cost_tracker.get_stats()
+
+        return stats
 
     # === PROPERTIES ===
 
@@ -407,6 +433,82 @@ class AgentRuntime:
     def is_running(self) -> bool:
         """Check if runtime is running."""
         return self._running
+
+    @property
+    def cost_tracker(self) -> CostTracker | None:
+        """Access the cost tracker (if enabled)."""
+        return self._cost_tracker
+
+    # === COST MANAGEMENT METHODS ===
+
+    def set_budget(
+        self,
+        max_budget: float,
+        warn_at_percent: float = 0.8,
+        throttle_at_percent: float = 0.95,
+    ) -> None:
+        """
+        Set or update the agent budget.
+
+        Args:
+            max_budget: Maximum budget in dollars
+            warn_at_percent: Percentage at which to warn
+            throttle_at_percent: Percentage at which to throttle
+        """
+        if self._cost_tracker:
+            self._cost_tracker.set_agent_budget(
+                max_budget=max_budget,
+                warn_at_percent=warn_at_percent,
+                throttle_at_percent=throttle_at_percent,
+            )
+        else:
+            logger.warning("Cost tracking is not enabled")
+
+    def set_stream_budget(self, stream_id: str, max_budget: float) -> None:
+        """
+        Set budget limit for a specific stream/entry point.
+
+        Args:
+            stream_id: Entry point ID to set budget for
+            max_budget: Maximum budget in dollars
+        """
+        if self._cost_tracker:
+            self._cost_tracker.set_stream_budget(stream_id, max_budget)
+        else:
+            logger.warning("Cost tracking is not enabled")
+
+    def get_cost_summary(self) -> dict | None:
+        """
+        Get current cost summary.
+
+        Returns:
+            Cost summary dict or None if cost tracking disabled
+        """
+        if self._cost_tracker:
+            return self._cost_tracker.get_summary().to_dict()
+        return None
+
+    def can_execute_within_budget(
+        self,
+        stream_id: str | None = None,
+    ) -> bool:
+        """
+        Check if execution is allowed within budget constraints.
+
+        Args:
+            stream_id: Optional stream to check
+
+        Returns:
+            True if execution allowed, False if budget exceeded
+        """
+        if not self._cost_tracker:
+            return True
+        return self._cost_tracker.can_execute(stream_id)
+
+    def reset_cost_tracking(self) -> None:
+        """Reset cost tracking data and circuit breaker."""
+        if self._cost_tracker:
+            self._cost_tracker.reset()
 
 
 # === CONVENIENCE FACTORY ===

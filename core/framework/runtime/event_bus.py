@@ -41,6 +41,13 @@ class EventType(str, Enum):
     STREAM_STARTED = "stream_started"
     STREAM_STOPPED = "stream_stopped"
 
+    # Cost tracking
+    COST_RECORDED = "cost_recorded"
+    COST_WARNING = "cost_warning"
+    COST_THROTTLE = "cost_throttle"
+    COST_HALT = "cost_halt"
+    BUDGET_UPDATED = "budget_updated"
+
     # Custom events
     CUSTOM = "custom"
 
@@ -342,6 +349,78 @@ class EventBus:
                 "old_value": old_value,
                 "new_value": new_value,
                 "scope": scope,
+            },
+        ))
+
+    async def emit_cost_alert(
+        self,
+        stream_id: str,
+        execution_id: str,
+        alert_type: str,
+        current_cost: float,
+        threshold: float,
+        policy_id: str | None = None,
+    ) -> None:
+        """
+        Emit cost-related alert event.
+
+        Args:
+            stream_id: Stream that triggered the alert
+            execution_id: Execution that triggered the alert
+            alert_type: Type of alert ("warning", "throttle", "halt")
+            current_cost: Current total cost
+            threshold: Threshold that was reached
+            policy_id: Optional policy ID that triggered
+        """
+        event_type_map = {
+            "warning": EventType.COST_WARNING,
+            "throttle": EventType.COST_THROTTLE,
+            "halt": EventType.COST_HALT,
+        }
+        event_type = event_type_map.get(alert_type, EventType.COST_WARNING)
+
+        await self.publish(AgentEvent(
+            type=event_type,
+            stream_id=stream_id,
+            execution_id=execution_id,
+            data={
+                "alert_type": alert_type,
+                "current_cost": current_cost,
+                "threshold": threshold,
+                "policy_id": policy_id,
+                "percentage": (current_cost / threshold * 100) if threshold > 0 else 0,
+            },
+        ))
+
+    async def emit_cost_recorded(
+        self,
+        stream_id: str,
+        execution_id: str,
+        amount: float,
+        category: str,
+        model_id: str | None = None,
+        cumulative_cost: float = 0.0,
+    ) -> None:
+        """
+        Emit cost recorded event.
+
+        Args:
+            stream_id: Stream that incurred the cost
+            execution_id: Execution that incurred the cost
+            amount: Cost amount
+            category: Cost category
+            model_id: Optional model ID
+            cumulative_cost: Running total cost
+        """
+        await self.publish(AgentEvent(
+            type=EventType.COST_RECORDED,
+            stream_id=stream_id,
+            execution_id=execution_id,
+            data={
+                "amount": amount,
+                "category": category,
+                "model_id": model_id,
+                "cumulative_cost": cumulative_cost,
             },
         ))
 
