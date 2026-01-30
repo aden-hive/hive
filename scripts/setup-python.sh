@@ -195,6 +195,24 @@ else
 fi
 echo ""
 
+# Ensure exports directory exists
+echo "=================================================="
+echo "Checking Directory Structure"
+echo "=================================================="
+echo ""
+
+if [ ! -d "$PROJECT_ROOT/exports" ]; then
+    echo "Creating exports directory..."
+    mkdir -p "$PROJECT_ROOT/exports"
+    echo "# Agent Exports" > "$PROJECT_ROOT/exports/README.md"
+    echo "" >> "$PROJECT_ROOT/exports/README.md"
+    echo "This directory is the default location for generated agent packages." >> "$PROJECT_ROOT/exports/README.md"
+    echo -e "${GREEN}✓${NC} Created exports directory"
+else
+    echo -e "${GREEN}✓${NC} exports directory exists"
+fi
+echo ""
+
 # Verify installations
 echo "=================================================="
 echo "Verifying Installation"
