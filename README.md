@@ -6,6 +6,7 @@
   <a href="README.md">English</a> |
   <a href="docs/i18n/zh-CN.md">简体中文</a> |
   <a href="docs/i18n/es.md">Español</a> |
+  <a href="docs/i18n/hi.md">हिन्दी</a> |
   <a href="docs/i18n/pt.md">Português</a> |
   <a href="docs/i18n/ja.md">日本語</a> |
   <a href="docs/i18n/ru.md">Русский</a> |
@@ -66,7 +67,7 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 ### Prerequisites
 
 - [Python 3.11+](https://www.python.org/downloads/) for agent development
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Optional, for containerized tools
+- Claude Code or Cursor for utilizing agent skills
 
 ### Installation
 
@@ -75,21 +76,18 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# Run Python environment setup
-./scripts/setup-python.sh
+# Run quickstart setup
+./quickstart.sh
 ```
 
-This installs:
-- **framework** - Core agent runtime and graph executor
-- **aden_tools** - 19 MCP tools for agent capabilities
-- All required dependencies
+This sets up:
+- **framework** - Core agent runtime and graph executor (in `core/.venv`)
+- **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
+- All required Python dependencies
 
 ### Build Your First Agent
 
 ```bash
-# Install Claude Code skills (one-time)
-./quickstart.sh
-
 # Build an agent using Claude Code
 claude> /building-agents-construction
 
@@ -128,47 +126,34 @@ Traditional agent frameworks require you to manually design workflows, define ag
 
 ```mermaid
 flowchart LR
-    subgraph BUILD["🏗️ BUILD"]
-        GOAL["Define Goal<br/>+ Success Criteria"] --> NODES["Add Nodes<br/>LLM/Router/Function"]
-        NODES --> EDGES["Connect Edges<br/>on_success/failure/conditional"]
-        EDGES --> TEST["Test & Validate"] --> APPROVE["Approve & Export"]
-    end
+    GOAL["Define Goal"] --> GEN["Auto-Generate Graph"]
+    GEN --> EXEC["Execute Agents"]
+    EXEC --> MON["Monitor & Observe"]
+    MON --> CHECK{{"Pass?"}}
+    CHECK -- "Yes" --> DONE["Deliver Result"]
+    CHECK -- "No" --> EVOLVE["Evolve Graph"]
+    EVOLVE --> EXEC
 
-    subgraph EXPORT["📦 EXPORT"]
-        direction TB
-        JSON["agent.json<br/>(GraphSpec)"]
-        TOOLS["tools.py<br/>(Functions)"]
-        MCP["mcp_servers.json<br/>(Integrations)"]
-    end
+    GOAL -.- V1["Natural Language"]
+    GEN -.- V2["Instant Architecture"]
+    EXEC -.- V3["Easy Integrations"]
+    MON -.- V4["Full visibility"]
+    EVOLVE -.- V5["Adaptability"]
+    DONE -.- V6["Reliable outcomes"]
 
-    subgraph RUN["🚀 RUNTIME"]
-        LOAD["AgentRunner<br/>Load + Parse"] --> SETUP["Setup Runtime<br/>+ ToolRegistry"]
-        SETUP --> EXEC["GraphExecutor<br/>Execute Nodes"]
-
-        subgraph DECISION["Decision Recording"]
-            DEC1["runtime.decide()<br/>intent → options → choice"]
-            DEC2["runtime.record_outcome()<br/>success, result, metrics"]
-        end
-    end
-
-    subgraph INFRA["⚙️ INFRASTRUCTURE"]
-        CTX["NodeContext<br/>memory • llm • tools"]
-        STORE[("FileStorage<br/>Runs & Decisions")]
-    end
-
-    APPROVE --> EXPORT
-    EXPORT --> LOAD
-    EXEC --> DECISION
-    EXEC --> CTX
-    DECISION --> STORE
-    STORE -.->|"Analyze & Improve"| NODES
-
-    style BUILD fill:#ffbe42,stroke:#cc5d00,stroke-width:3px,color:#333
-    style EXPORT fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
-    style RUN fill:#ffb100,stroke:#cc5d00,stroke-width:3px,color:#333
-    style DECISION fill:#ffcc80,stroke:#ed8c00,stroke-width:2px,color:#333
-    style INFRA fill:#e8763d,stroke:#cc5d00,stroke-width:3px,color:#fff
-    style STORE fill:#ed8c00,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style GOAL fill:#ffbe42,stroke:#cc5d00,stroke-width:2px,color:#333
+    style GEN fill:#ffb100,stroke:#cc5d00,stroke-width:2px,color:#333
+    style EXEC fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style MON fill:#ff9800,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style CHECK fill:#fff59d,stroke:#ed8c00,stroke-width:2px,color:#333
+    style DONE fill:#4caf50,stroke:#2e7d32,stroke-width:2px,color:#fff
+    style EVOLVE fill:#e8763d,stroke:#cc5d00,stroke-width:2px,color:#fff
+    style V1 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
+    style V2 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
+    style V3 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
+    style V4 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
+    style V5 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
+    style V6 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
 ```
 
 ### The Aden Advantage
@@ -230,8 +215,8 @@ Choose other frameworks when you need:
 ```
 hive/
 ├── core/                   # Core framework - Agent runtime, graph executor, protocols
-├── tools/                  # MCP Tools Package - 19 tools for agent capabilities
-├── exports/                # Agent packages - Pre-built agents and examples
+├── tools/                  # MCP Tools Package - tools for agent capabilities
+├── exports/                # Agent packages (user-created, gitignored)
 ├── docs/                   # Documentation and guides
 ├── scripts/                # Build and utility scripts
 ├── .claude/                # Claude Code skills for building agents
@@ -250,12 +235,12 @@ For building and running goal-driven agents with the framework:
 
 ```bash
 # One-time setup
-./scripts/setup-python.sh
+./quickstart.sh
 
-# This installs:
+# This sets up:
 # - framework package (core runtime)
-# - aden_tools package (19 MCP tools)
-# - All dependencies
+# - aden_tools package (MCP tools)
+# - All Python dependencies
 
 # Build new agents using Claude Code skills
 claude> /building-agents-construction
@@ -373,11 +358,11 @@ Yes, Aden fully supports human-in-the-loop workflows through intervention nodes 
 
 **Q: What monitoring and debugging tools does Aden provide?**
 
-Aden includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and 19 MCP tools for budget management, agent status, and policy control.
+Aden includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and MCP tools for agent execution, including file operations, web search, data processing, and more.
 
 **Q: What programming languages does Aden support?**
 
-Aden provides SDKs for both Python and JavaScript/TypeScript. The Python SDK includes integration templates for LangGraph, LangFlow, and LiveKit. The backend is Node.js/TypeScript, and the frontend is React/TypeScript.
+The Hive framework is built in Python. A JavaScript/TypeScript SDK is on the roadmap.
 
 **Q: Can Aden agents interact with external tools and APIs?**
 

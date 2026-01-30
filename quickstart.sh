@@ -104,13 +104,28 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Use python3 if available, otherwise python
-PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
-    PYTHON_CMD="python"
+# Prefer a Python >= 3.11 if multiple are installed (common on macOS).
+PYTHON_CMD=""
+for CANDIDATE in python3.13 python3.12 python3.11 python3 python; do
+    if command -v "$CANDIDATE" &> /dev/null; then
+        PYTHON_MAJOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.major)')
+        PYTHON_MINOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.minor)')
+        if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 11 ]; then
+            PYTHON_CMD="$CANDIDATE"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    # Fall back to python3/python just for a helpful detected version in the error message.
+    PYTHON_CMD="python3"
+    if ! command -v python3 &> /dev/null; then
+        PYTHON_CMD="python"
+    fi
 fi
 
-# Check Python version
+# Check Python version (for logging/error messages)
 PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)')
 PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
@@ -123,6 +138,30 @@ if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" 
 fi
 
 echo -e "${GREEN}⬢${NC} Python $PYTHON_VERSION"
+echo ""
+
+# Check for uv (install automatically if missing)
+if ! command -v uv &> /dev/null; then
+    echo -e "${YELLOW}  uv not found. Installing...${NC}"
+    if ! command -v curl &> /dev/null; then
+        echo -e "${RED}Error: curl is not installed (needed to install uv)${NC}"
+        echo "Please install curl or install uv manually from https://astral.sh/uv/"
+        exit 1
+    fi
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+
+    if ! command -v uv &> /dev/null; then
+        echo -e "${RED}Error: uv installation failed${NC}"
+        echo "Please install uv manually from https://astral.sh/uv/"
+        exit 1
+    fi
+    echo -e "${GREEN}  ✓ uv installed successfully${NC}"
+fi
+
+UV_VERSION=$(uv --version)
+echo -e "${GREEN}  ✓ uv detected: $UV_VERSION${NC}"
 echo ""
 
 # ============================================================
@@ -143,9 +182,14 @@ echo -e "${GREEN}ok${NC}"
 # Install framework package from core/
 echo -n "  Installing framework... "
 cd "$SCRIPT_DIR/core"
+
 if [ -f "pyproject.toml" ]; then
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
-    echo -e "${GREEN}ok${NC}"
+    uv sync > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}  ✓ framework package installed${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ framework installation had issues (may be OK)${NC}"
+    fi
 else
     echo -e "${RED}failed (no pyproject.toml)${NC}"
     exit 1
@@ -154,9 +198,15 @@ fi
 # Install aden_tools package from tools/
 echo -n "  Installing tools... "
 cd "$SCRIPT_DIR/tools"
+
 if [ -f "pyproject.toml" ]; then
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
-    echo -e "${GREEN}ok${NC}"
+    uv sync > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}  ✓ aden_tools package installed${NC}"
+    else
+        echo -e "${RED}  ✗ aden_tools installation failed${NC}"
+        exit 1
+    fi
 else
     echo -e "${RED}failed${NC}"
     exit 1
@@ -199,6 +249,99 @@ echo ""
 # ============================================================
 
 echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Configuring LLM provider...${NC}"
+# Install MCP dependencies (in tools venv)
+echo "  Installing MCP dependencies..."
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+uv pip install --python "$TOOLS_PYTHON" mcp fastmcp > /dev/null 2>&1
+echo -e "${GREEN}  ✓ MCP dependencies installed${NC}"
+
+# Fix openai version compatibility (in tools venv)
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+OPENAI_VERSION=$($TOOLS_PYTHON -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
+if [ "$OPENAI_VERSION" = "not_installed" ]; then
+    echo "  Installing openai package..."
+    uv pip install --python "$TOOLS_PYTHON" "openai>=1.0.0" > /dev/null 2>&1
+    echo -e "${GREEN}  ✓ openai installed${NC}"
+elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
+    echo "  Upgrading openai to 1.x+ for litellm compatibility..."
+    uv pip install --python "$TOOLS_PYTHON" --upgrade "openai>=1.0.0" > /dev/null 2>&1
+    echo -e "${GREEN}  ✓ openai upgraded${NC}"
+else
+    echo -e "${GREEN}  ✓ openai $OPENAI_VERSION is compatible${NC}"
+fi
+
+# Install click for CLI (in tools venv)
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+uv pip install --python "$TOOLS_PYTHON" click > /dev/null 2>&1
+echo -e "${GREEN}  ✓ click installed${NC}"
+
+cd "$SCRIPT_DIR"
+echo ""
+
+# ============================================================
+# Step 3: Verify Python Imports
+# ============================================================
+
+echo -e "${BLUE}Step 3: Verifying Python imports...${NC}"
+echo ""
+
+IMPORT_ERRORS=0
+
+# Test imports using their respective venvs
+CORE_PYTHON="$SCRIPT_DIR/core/.venv/bin/python"
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+
+# Test framework import (from core venv)
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import framework" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ framework imports OK${NC}"
+else
+    echo -e "${RED}  ✗ framework import failed${NC}"
+    IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
+fi
+
+# Test aden_tools import (from tools venv)
+if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import aden_tools" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ aden_tools imports OK${NC}"
+else
+    echo -e "${RED}  ✗ aden_tools import failed${NC}"
+    IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
+fi
+
+# Test litellm import (from core venv)
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import litellm" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ litellm imports OK (core)${NC}"
+else
+    echo -e "${YELLOW}  ⚠ litellm import issues in core (may be OK)${NC}"
+fi
+
+# Test litellm import (from tools venv)
+if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import litellm" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ litellm imports OK (tools)${NC}"
+else
+    echo -e "${YELLOW}  ⚠ litellm import issues in tools (may be OK)${NC}"
+fi
+
+# Test MCP server module (from core venv)
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ MCP server module OK${NC}"
+else
+    echo -e "${RED}  ✗ MCP server module failed${NC}"
+    IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
+fi
+
+if [ $IMPORT_ERRORS -gt 0 ]; then
+    echo ""
+    echo -e "${RED}Error: $IMPORT_ERRORS import(s) failed. Please check the errors above.${NC}"
+    exit 1
+fi
+
+echo ""
+
+# ============================================================
+# Step 4: Verify Claude Code Skills
+# ============================================================
+
+echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
 echo ""
 
 # Define supported providers (env_var -> display_name, litellm_provider, default_model)

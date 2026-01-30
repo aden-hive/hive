@@ -23,6 +23,7 @@ When this skill is loaded, IMMEDIATELY begin executing Step 1. Do not explain wh
 **EXECUTE THESE TOOL CALLS NOW:**
 
 1. Register the hive-tools MCP server:
+
 ```
 mcp__agent-builder__add_mcp_server(
     name="hive-tools",
@@ -35,22 +36,27 @@ mcp__agent-builder__add_mcp_server(
 ```
 
 2. Create a build session (replace AGENT_NAME with the user's requested agent name in snake_case):
+
 ```
 mcp__agent-builder__create_session(name="AGENT_NAME")
 ```
 
 3. Discover available tools:
+
 ```
 mcp__agent-builder__list_mcp_tools()
 ```
 
 4. Create the package directory:
+
 ```
 mkdir -p exports/AGENT_NAME/nodes
 ```
 
 **AFTER completing these calls**, tell the user:
+
 > ✅ Build environment initialized
+>
 > - Session created
 > - Available tools: [list the tools from step 3]
 >
@@ -63,6 +69,7 @@ mkdir -p exports/AGENT_NAME/nodes
 ## STEP 2: Define and Approve Goal
 
 **PROPOSE a goal to the user.** Based on what they asked for, propose:
+
 - Goal ID (kebab-case)
 - Goal name
 - Goal description
@@ -76,16 +83,19 @@ mkdir -p exports/AGENT_NAME/nodes
 > [Description]
 >
 > **Success Criteria:**
+>
 > 1. [criterion 1]
 > 2. [criterion 2]
-> ...
+>    ...
 >
 > **Constraints:**
+>
 > 1. [constraint 1]
 > 2. [constraint 2]
-> ...
+>    ...
 
 **THEN call AskUserQuestion:**
+
 ```
 AskUserQuestion(questions=[{
     "question": "Do you approve this goal definition?",
@@ -110,6 +120,7 @@ AskUserQuestion(questions=[{
 **BEFORE designing nodes**, review the available tools from Step 1. Nodes can ONLY use tools that exist.
 
 **DESIGN the workflow** as a series of nodes. For each node, determine:
+
 - node_id (kebab-case)
 - name
 - description
@@ -124,6 +135,7 @@ AskUserQuestion(questions=[{
 > **Proposed Workflow: [N] nodes**
 >
 > 1. **[node-id]** - [description]
+>
 >    - Type: [llm_generate/llm_tool_use]
 >    - Input: [keys]
 >    - Output: [keys]
@@ -135,6 +147,7 @@ AskUserQuestion(questions=[{
 > **Flow:** node1 → node2 → node3 → ...
 
 **THEN call AskUserQuestion:**
+
 ```
 AskUserQuestion(questions=[{
     "question": "Do you approve this workflow design?",
@@ -159,10 +172,12 @@ AskUserQuestion(questions=[{
 **FOR EACH node in the approved workflow:**
 
 1. **Call** `mcp__agent-builder__add_node(...)` with the node details
+
    - input_keys and output_keys must be JSON strings: `'["key1", "key2"]'`
    - tools must be a JSON string: `'["tool1"]'` or `'[]'`
 
 2. **Call** `mcp__agent-builder__test_node(...)` to validate:
+
 ```
 mcp__agent-builder__test_node(
     node_id="the-node-id",
@@ -172,13 +187,16 @@ mcp__agent-builder__test_node(
 ```
 
 3. **Check result:**
+
    - If valid: Tell user "✅ Node [id] validated" and continue to next node
    - If invalid: Show errors, fix the node, re-validate
 
 4. **Show progress** after each node:
+
 ```
 mcp__agent-builder__get_session_status()
 ```
+
 > ✅ Node [X] of [Y] complete: [node-id]
 
 **AFTER all nodes are added and validated**, proceed to STEP 5.
@@ -188,6 +206,7 @@ mcp__agent-builder__get_session_status()
 ## STEP 5: Connect Edges
 
 **DETERMINE the edges** based on the workflow flow. For each connection:
+
 - edge_id (kebab-case)
 - source (node that outputs)
 - target (node that receives)
@@ -196,6 +215,7 @@ mcp__agent-builder__get_session_status()
 - priority (integer, lower = higher priority)
 
 **FOR EACH edge, call:**
+
 ```
 mcp__agent-builder__add_edge(
     edge_id="source-to-target",
@@ -208,6 +228,7 @@ mcp__agent-builder__add_edge(
 ```
 
 **AFTER all edges are added, validate the graph:**
+
 ```
 mcp__agent-builder__validate_graph()
 ```
@@ -220,6 +241,7 @@ mcp__agent-builder__validate_graph()
 ## STEP 6: Generate Agent Package
 
 **EXPORT the graph data:**
+
 ```
 mcp__agent-builder__export_graph()
 ```
@@ -237,8 +259,9 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 7. `README.md` - Usage documentation
 
 **IMPORTANT entry_points format:**
+
 - MUST be: `{"start": "first-node-id"}`
-- NOT: `{"first-node-id": ["input_keys"]}`  (WRONG)
+- NOT: `{"first-node-id": ["input_keys"]}` (WRONG)
 - NOT: `{"first-node-id"}` (WRONG - this is a set)
 
 **Use the example agent** at `.claude/skills/building-agents-construction/examples/online_research_agent/` as a template for file structure and patterns.
@@ -248,6 +271,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 > ✅ Agent package created: `exports/AGENT_NAME/`
 >
 > **Files generated:**
+>
 > - `__init__.py` - Package exports
 > - `agent.py` - Goal, nodes, edges, agent class
 > - `config.py` - Runtime configuration
@@ -257,6 +281,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 > - `README.md` - Usage documentation
 >
 > **Test your agent:**
+>
 > ```bash
 > cd /home/timothy/oss/hive
 > PYTHONPATH=core:exports python -m AGENT_NAME validate
@@ -268,6 +293,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 ## STEP 7: Verify and Test
 
 **RUN validation:**
+
 ```bash
 cd /home/timothy/oss/hive && PYTHONPATH=core:exports python -m AGENT_NAME validate
 ```
@@ -276,11 +302,13 @@ cd /home/timothy/oss/hive && PYTHONPATH=core:exports python -m AGENT_NAME valida
 - If errors: Fix the issues and re-run
 
 **SHOW final session summary:**
+
 ```
 mcp__agent-builder__get_session_status()
 ```
 
 **TELL the user the agent is ready** and suggest next steps:
+
 - Run with mock mode to test without API calls
 - Use `/testing-agent` skill for comprehensive testing
 - Use `/setup-credentials` if the agent needs API keys
@@ -289,20 +317,20 @@ mcp__agent-builder__get_session_status()
 
 ## REFERENCE: Node Types
 
-| Type | tools param | Use when |
-|------|-------------|----------|
-| `llm_generate` | `'[]'` | Pure reasoning, JSON output, no external calls |
-| `llm_tool_use` | `'["tool1", "tool2"]'` | Needs to call MCP tools |
+| Type           | tools param            | Use when                                       |
+| -------------- | ---------------------- | ---------------------------------------------- |
+| `llm_generate` | `'[]'`                 | Pure reasoning, JSON output, no external calls |
+| `llm_tool_use` | `'["tool1", "tool2"]'` | Needs to call MCP tools                        |
 
 ---
 
 ## REFERENCE: Edge Conditions
 
-| Condition | When edge is followed |
-|-----------|----------------------|
-| `on_success` | Source node completed successfully |
-| `on_failure` | Source node failed |
-| `always` | Always, regardless of success/failure |
+| Condition     | When edge is followed                 |
+| ------------- | ------------------------------------- |
+| `on_success`  | Source node completed successfully    |
+| `on_failure`  | Source node failed                    |
+| `always`      | Always, regardless of success/failure |
 | `conditional` | When condition_expr evaluates to True |
 
 ---

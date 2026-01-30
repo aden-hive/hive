@@ -158,7 +158,26 @@ class ToolRegistry:
                             )
                             result = executor_func(tool_use)
                             if isinstance(result, ToolResult):
-                                return json.loads(result.content) if result.content else {}
+                                # ToolResult.content is expected to be JSON, but tools may
+                                # sometimes return invalid JSON. Guard against crashes here
+                                # and surface a structured error instead.
+                                if not result.content:
+                                    return {}
+                                try:
+                                    return json.loads(result.content)
+                                except json.JSONDecodeError as e:
+                                    logger.warning(
+                                        "Tool '%s' returned invalid JSON: %s",
+                                        tool_name,
+                                        str(e),
+                                    )
+                                    return {
+                                        "error": (
+                                            f"Invalid JSON response from tool '{tool_name}': "
+                                            f"{str(e)}"
+                                        ),
+                                        "raw_content": result.content,
+                                    }
                             return result
 
                         return executor

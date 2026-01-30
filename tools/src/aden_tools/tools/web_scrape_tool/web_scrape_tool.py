@@ -9,6 +9,7 @@ Uses BeautifulSoup for HTML parsing and content extraction.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 from fastmcp import FastMCP

@@ -1,6 +1,7 @@
 """Agent Runner - loads and runs exported agents."""
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -22,6 +23,8 @@ from framework.runtime.execution_stream import EntryPointSpec
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
 
+
+logger = logging.getLogger(__name__)
 
 # Configuration paths
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
@@ -424,9 +427,9 @@ class AgentRunner:
                     self._tool_registry.register_mcp_server(server_config)
                 except Exception as e:
                     server_name = server_config.get("name", "unknown")
-                    print(f"Warning: Failed to register MCP server '{server_name}': {e}")
+                    logger.warning(f"Failed to register MCP server '{server_name}': {e}")
         except Exception as e:
-            print(f"Warning: Failed to load MCP servers config from {config_path}: {e}")
+            logger.warning(f"Failed to load MCP servers config from {config_path}: {e}")
 
     def set_approval_callback(self, callback: Callable) -> None:
         """

@@ -6,7 +6,7 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 
 ```bash
 # Run the automated setup script
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 > **Note for Windows Users:**  
@@ -109,37 +109,24 @@ All agent commands must be run from the project root with `PYTHONPATH` set:
 PYTHONPATH=core:exports python -m agent_name COMMAND
 ```
 
-### Example: Support Ticket Agent
+### Example Commands
+
+After building an agent via `/building-agents-construction`, use these commands:
 
 ```bash
 # Validate agent structure
-PYTHONPATH=core:exports python -m support_ticket_agent validate
+PYTHONPATH=core:exports python -m your_agent_name validate
 
 # Show agent information
-PYTHONPATH=core:exports python -m support_ticket_agent info
+PYTHONPATH=core:exports python -m your_agent_name info
 
 # Run agent with input
-PYTHONPATH=core:exports python -m support_ticket_agent run --input '{
-  "ticket_content": "My login is broken. Error 401.",
-  "customer_id": "CUST-123",
-  "ticket_id": "TKT-456"
+PYTHONPATH=core:exports python -m your_agent_name run --input '{
+  "task": "Your input here"
 }'
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=core:exports python -m support_ticket_agent run --mock --input '{...}'
-```
-
-### Example: Other Agents
-
-```bash
-# Market Research Agent
-PYTHONPATH=core:exports python -m market_research_agent info
-
-# Outbound Sales Agent
-PYTHONPATH=core:exports python -m outbound_sales_agent validate
-
-# Personal Assistant Agent
-PYTHONPATH=core:exports python -m personal_assistant_agent run --input '{...}'
+PYTHONPATH=core:exports python -m your_agent_name run --mock --input '{...}'
 ```
 
 ## Building New Agents and Run Flow
@@ -152,7 +139,7 @@ Build and run an agent using Claude Code CLI with the agent building skills:
 ./quickstart.sh
 ```
 
-This installs agent-related Claude Code skills:
+This verifies agent-related Claude Code skills are available:
 
 - `/building-agents-construction` - Step-by-step build guide
 - `/building-agents-core` - Fundamental concepts
@@ -251,7 +238,7 @@ source .venv/bin/activate  # macOS/Linux
 # .venv\Scripts\activate   # Windows
 
 # Then run setup
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 Always activate the venv before running agents:
@@ -280,7 +267,7 @@ cd tools && pip install -e .
 Or run the setup script:
 
 ```bash
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 ### "ModuleNotFoundError: No module named 'openai.\_models'"
@@ -293,14 +280,14 @@ Or run the setup script:
 pip install --upgrade "openai>=1.0.0"
 ```
 
-### "No module named 'support_ticket_agent'"
+### "No module named 'your_agent_name'"
 
-**Cause:** Not running from project root or missing PYTHONPATH
+**Cause:** Not running from project root, missing PYTHONPATH, or agent not yet created
 
-**Solution:** Ensure you're in the project root directory and use:
+**Solution:** Ensure you're in the project root directory, have built an agent, and use:
 
 ```bash
-PYTHONPATH=core:exports python -m support_ticket_agent validate
+PYTHONPATH=core:exports python -m your_agent_name validate
 ```
 
 ### Agent imports fail with "broken installation"
@@ -314,7 +301,7 @@ PYTHONPATH=core:exports python -m support_ticket_agent validate
 pip uninstall -y framework tools
 
 # Reinstall correctly
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 ## Package Structure
@@ -325,21 +312,74 @@ The Hive framework consists of three Python packages:
 hive/
 ├── core/                    # Core framework (runtime, graph executor, LLM providers)
 │   ├── framework/
-│   ├── pyproject.toml
-│   └── requirements.txt
+│   ├── .venv/              # Created by quickstart.sh
+│   └── pyproject.toml
 │
 ├── tools/                   # Tools and MCP servers
 │   ├── src/
 │   │   └── aden_tools/     # Actual package location
-│   ├── pyproject.toml
-│   └── README.md
+│   ├── .venv/              # Created by quickstart.sh
+│   └── pyproject.toml
 │
-└── exports/                 # Agent packages (your agents go here)
-    ├── support_ticket_agent/
-    ├── market_research_agent/
-    ├── outbound_sales_agent/
-    └── personal_assistant_agent/
+└── exports/                 # Agent packages (user-created, gitignored)
+    └── your_agent_name/     # Created via /building-agents-construction
 ```
+
+## Separate Virtual Environments
+
+The project uses **separate virtual environments** for `core` and `tools` packages to:
+
+- Isolate dependencies and avoid conflicts
+- Allow independent development and testing of each package
+- Enable MCP servers to run with their specific dependencies
+
+### How It Works
+
+When you run `./quickstart.sh` or `uv sync` in each directory:
+
+1. **core/.venv/** - Contains the `framework` package and its dependencies (anthropic, litellm, mcp, etc.)
+2. **tools/.venv/** - Contains the `aden_tools` package and its dependencies (beautifulsoup4, pandas, etc.)
+
+### Cross-Package Imports
+
+The `core` and `tools` packages are **intentionally independent**:
+
+- **No cross-imports**: `framework` does not import `aden_tools` directly, and vice versa
+- **Communication via MCP**: Tools are exposed to agents through MCP servers, not direct Python imports
+- **Runtime integration**: The agent runner loads tools via the MCP protocol at runtime
+
+If you need to use both packages in a single script (e.g., for testing), you have two options:
+
+```bash
+# Option 1: Install both in a shared environment
+python -m venv .venv
+source .venv/bin/activate
+pip install -e core/ -e tools/
+
+# Option 2: Use PYTHONPATH (for quick testing)
+PYTHONPATH=core:tools/src python your_script.py
+```
+
+### MCP Server Configuration
+
+The `.mcp.json` at project root configures MCP servers to use their respective virtual environments:
+
+```json
+{
+  "mcpServers": {
+    "agent-builder": {
+      "command": "core/.venv/bin/python",
+      "args": ["-m", "framework.mcp.agent_builder_server"]
+    },
+    "tools": {
+      "command": "tools/.venv/bin/python",
+      "args": ["-m", "aden_tools.mcp_server", "--stdio"]
+    }
+  }
+}
+```
+
+This ensures each MCP server runs with its correct dependencies.
 
 ### Why PYTHONPATH is Required
 
@@ -359,7 +399,7 @@ This design allows agents in `exports/` to be:
 ### 1. Setup (Once)
 
 ```bash
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 ### 2. Build Agent (Claude Code)
@@ -372,7 +412,7 @@ Enter goal: "Build an agent that processes customer support tickets"
 ### 3. Validate Agent
 
 ```bash
-PYTHONPATH=core:exports python -m support_ticket_agent validate
+PYTHONPATH=core:exports python -m your_agent_name validate
 ```
 
 ### 4. Test Agent
@@ -384,7 +424,7 @@ claude> /testing-agent
 ### 5. Run Agent
 
 ```bash
-PYTHONPATH=core:exports python -m support_ticket_agent run --input '{...}'
+PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
 ```
 
 ## IDE Setup
