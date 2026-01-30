@@ -41,6 +41,28 @@ class EventType(str, Enum):
     STREAM_STARTED = "stream_started"
     STREAM_STOPPED = "stream_stopped"
 
+    # Node event-loop lifecycle
+    NODE_LOOP_STARTED = "node_loop_started"
+    NODE_LOOP_ITERATION = "node_loop_iteration"
+    NODE_LOOP_COMPLETED = "node_loop_completed"
+
+    # LLM streaming observability
+    LLM_TEXT_DELTA = "llm_text_delta"
+    LLM_REASONING_DELTA = "llm_reasoning_delta"
+
+    # Tool lifecycle
+    TOOL_CALL_STARTED = "tool_call_started"
+    TOOL_CALL_COMPLETED = "tool_call_completed"
+
+    # Client I/O (client_facing=True nodes only)
+    CLIENT_OUTPUT_DELTA = "client_output_delta"
+    CLIENT_INPUT_REQUESTED = "client_input_requested"
+
+    # Internal node observability (client_facing=False nodes)
+    NODE_INTERNAL_OUTPUT = "node_internal_output"
+    NODE_INPUT_BLOCKED = "node_input_blocked"
+    NODE_STALLED = "node_stalled"
+
     # Custom events
     CUSTOM = "custom"
 
@@ -51,6 +73,7 @@ class AgentEvent:
 
     type: EventType
     stream_id: str
+    node_id: str | None = None  # Which node emitted this event
     execution_id: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
@@ -61,6 +84,7 @@ class AgentEvent:
         return {
             "type": self.type.value,
             "stream_id": self.stream_id,
+            "node_id": self.node_id,
             "execution_id": self.execution_id,
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
@@ -80,6 +104,7 @@ class Subscription:
     event_types: set[EventType]
     handler: EventHandler
     filter_stream: str | None = None  # Only receive events from this stream
+    filter_node: str | None = None  # Only receive events from this node
     filter_execution: str | None = None  # Only receive events from this execution
 
 
@@ -138,6 +163,7 @@ class EventBus:
         event_types: list[EventType],
         handler: EventHandler,
         filter_stream: str | None = None,
+        filter_node: str | None = None,
         filter_execution: str | None = None,
     ) -> str:
         """
@@ -147,6 +173,7 @@ class EventBus:
             event_types: Types of events to receive
             handler: Async function to call when event occurs
             filter_stream: Only receive events from this stream
+            filter_node: Only receive events from this node
             filter_execution: Only receive events from this execution
 
         Returns:
@@ -160,6 +187,7 @@ class EventBus:
             event_types=set(event_types),
             handler=handler,
             filter_stream=filter_stream,
+            filter_node=filter_node,
             filter_execution=filter_execution,
         )
 
@@ -216,6 +244,10 @@ class EventBus:
 
         # Check stream filter
         if subscription.filter_stream and subscription.filter_stream != event.stream_id:
+            return False
+
+        # Check node filter
+        if subscription.filter_node and subscription.filter_node != event.node_id:
             return False
 
         # Check execution filter
@@ -410,6 +442,7 @@ class EventBus:
         self,
         event_type: EventType,
         stream_id: str | None = None,
+        node_id: str | None = None,
         execution_id: str | None = None,
         timeout: float | None = None,
     ) -> AgentEvent | None:
@@ -419,6 +452,7 @@ class EventBus:
         Args:
             event_type: Type of event to wait for
             stream_id: Filter by stream
+            node_id: Filter by node
             execution_id: Filter by execution
             timeout: Maximum time to wait (seconds)
 
@@ -438,6 +472,7 @@ class EventBus:
             event_types=[event_type],
             handler=handler,
             filter_stream=stream_id,
+            filter_node=node_id,
             filter_execution=execution_id,
         )
 
