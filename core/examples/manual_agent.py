@@ -24,9 +24,11 @@ def greet(name: str) -> str:
     """Generate a simple greeting."""
     return f"Hello, {name}!"
 
+
 def uppercase(greeting: str) -> str:
     """Convert text to uppercase."""
     return greeting.upper()
+
 
 async def main():
     print("🚀 Setting up Manual Agent...")
@@ -42,9 +44,9 @@ async def main():
                 "id": "greeting_generated",
                 "description": "Greeting produced",
                 "metric": "custom",
-                "target": "any"
+                "target": "any",
             }
-        ]
+        ],
     )
 
     # 3. Define Nodes
@@ -56,7 +58,7 @@ async def main():
         node_type="function",
         function="greet",  # Matches the registered function name
         input_keys=["name"],
-        output_keys=["greeting"]
+        output_keys=["greeting"],
     )
 
     node2 = NodeSpec(
@@ -66,7 +68,7 @@ async def main():
         node_type="function",
         function="uppercase",
         input_keys=["greeting"],
-        output_keys=["final_greeting"]
+        output_keys=["final_greeting"],
     )
 
     # 4. Define Edges
@@ -75,7 +77,7 @@ async def main():
         id="greet-to-upper",
         source="greeter",
         target="uppercaser",
-        condition=EdgeCondition.ON_SUCCESS
+        condition=EdgeCondition.ON_SUCCESS,
     )
 
     # 5. Create Graph
@@ -92,6 +94,7 @@ async def main():
     # 6. Initialize Runtime & Executor
     # Runtime handles state/memory; Executor runs the graph
     from pathlib import Path
+
     runtime = Runtime(storage_path=Path("./agent_logs"))
     executor = GraphExecutor(runtime=runtime)
 
@@ -103,11 +106,7 @@ async def main():
     # 8. Execute Agent
     print("▶ Executing agent with input: name='Alice'...")
 
-    result = await executor.execute(
-        graph=graph,
-        goal=goal,
-        input_data={"name": "Alice"}
-    )
+    result = await executor.execute(graph=graph, goal=goal, input_data={"name": "Alice"})
 
     # 9. Verify Results
     if result.success:
@@ -116,6 +115,7 @@ async def main():
         print(f"Final output: {result.output.get('final_greeting')}")
     else:
         print(f"\n❌ Failed: {result.error}")
+
 
 if __name__ == "__main__":
     # Optional: Enable logging to see internal decision flow
