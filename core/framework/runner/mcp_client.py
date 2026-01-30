@@ -457,8 +457,7 @@ class MCPClient:
             if self._loop.is_running():
                 try:
                     cleanup_future = asyncio.run_coroutine_threadsafe(
-                        self._cleanup_stdio_async(),
-                        self._loop
+                        self._cleanup_stdio_async(), self._loop
                     )
                     cleanup_future.result(timeout=self._CLEANUP_TIMEOUT)
                     cleanup_attempted = True
