@@ -947,7 +947,7 @@ class GraphExecutor:
 
         # Handle failures based on config
         if failed_branches:
-            failed_names = [graph.get_node(b.node_id).name for b in failed_branches]
+            failed_names = [n.name for b in failed_branches if (n := graph.get_node(b.node_id))]
             if self._parallel_config.on_branch_failure == "fail_all":
                 raise RuntimeError(f"Parallel execution failed: branches {failed_names} failed")
             elif self._parallel_config.on_branch_failure == "continue_others":

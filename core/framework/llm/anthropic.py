@@ -88,6 +88,7 @@ class AnthropicProvider(LLMProvider):
         tools: list[Tool],
         tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
+        max_tokens: int = 4096,
     ) -> LLMResponse:
         """Run a tool-use loop until Claude produces a final response (via LiteLLM)."""
         return self._provider.complete_with_tools(
@@ -96,4 +97,5 @@ class AnthropicProvider(LLMProvider):
             tools=tools,
             tool_executor=tool_executor,
             max_iterations=max_iterations,
+            max_tokens=max_tokens,
         )

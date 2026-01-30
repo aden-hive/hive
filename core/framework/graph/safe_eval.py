@@ -222,7 +222,12 @@ class SafeEvalVisitor(ast.NodeVisitor):
             raise ValueError("Call to function/method is not allowed")
 
         args = [self.visit(arg) for arg in node.args]
-        keywords = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+        # Filter out None keys (can occur with **kwargs patterns)
+        keywords = {
+            kw.arg: self.visit(kw.value)
+            for kw in node.keywords
+            if kw.arg is not None
+        }
 
         return func(*args, **keywords)
 

@@ -21,6 +21,12 @@ The llm_decide condition is particularly powerful for goal-driven agents,
 allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # Import only for type checkers
+    from framework.graph.node import NodeSpec  # Avoids circular import
 
 from enum import Enum
 from typing import Any
@@ -397,7 +403,7 @@ class GraphSpec(BaseModel):
     )
 
     # Components
-    nodes: list[Any] = Field(  # NodeSpec, but avoiding circular import
+    nodes: list[NodeSpec] = Field(
         default_factory=list, description="All node specifications"
     )
     edges: list[EdgeSpec] = Field(default_factory=list, description="All edge specifications")
@@ -426,7 +432,7 @@ class GraphSpec(BaseModel):
 
     model_config = {"extra": "allow"}
 
-    def get_node(self, node_id: str) -> Any | None:
+    def get_node(self, node_id: str) -> NodeSpec | None:
         """Get a node by ID."""
         for node in self.nodes:
             if node.id == node_id:
@@ -610,3 +616,13 @@ class GraphSpec(BaseModel):
                 errors.append(f"Node '{node.id}' is unreachable from entry")
 
         return errors
+
+
+# Resolve forward references for Pydantic v2
+# This must be called after both GraphSpec and NodeSpec are importable
+def _rebuild_models() -> None:
+    from framework.graph.node import NodeSpec  # noqa: F401
+    GraphSpec.model_rebuild()
+
+
+_rebuild_models()
