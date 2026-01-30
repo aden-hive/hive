@@ -7,13 +7,17 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
+import signal
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.graph.executor import ExecutionResult
-from framework.runtime.event_bus import EventBus
+from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
@@ -25,6 +29,29 @@ if TYPE_CHECKING:
     from framework.llm.provider import LLMProvider, Tool
 
 logger = logging.getLogger(__name__)
+
+
+class AgentState(str, Enum):
+    """
+    Lifecycle states for an agent runtime.
+
+    State transitions:
+        INITIALIZING -> READY -> RUNNING <-> PAUSED
+                                    |
+                                    v
+                               DRAINING -> STOPPED
+                                    |
+                                    v
+                                  ERROR
+    """
+
+    INITIALIZING = "initializing"  # Starting up, loading config
+    READY = "ready"  # Can accept new executions, none running
+    RUNNING = "running"  # Actively executing goals
+    PAUSED = "paused"  # Temporarily suspended, state preserved
+    DRAINING = "draining"  # Finishing current work, rejecting new
+    STOPPED = "stopped"  # Fully stopped
+    ERROR = "error"  # Unrecoverable error state
 
 
 @dataclass
@@ -138,9 +165,15 @@ class AgentRuntime:
         self._entry_points: dict[str, EntryPointSpec] = {}
         self._streams: dict[str, ExecutionStream] = {}
 
-        # State
+        # Lifecycle state
+        self._state = AgentState.INITIALIZING
+        self._started_at: datetime | None = None
         self._running = False
+        self._paused = False
+        self._draining = False
         self._lock = asyncio.Lock()
+        self._drain_event: asyncio.Event | None = None
+        self._signal_handlers_installed = False
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
@@ -193,6 +226,9 @@ class AgentRuntime:
             return
 
         async with self._lock:
+            # Emit starting event
+            await self._emit_lifecycle_event(EventType.AGENT_STARTING)
+
             # Start storage
             await self._storage.start()
 
@@ -217,6 +253,11 @@ class AgentRuntime:
                 self._streams[ep_id] = stream
 
             self._running = True
+            self._started_at = datetime.now()
+            self._state = AgentState.READY
+            self._install_signal_handlers()
+
+            await self._emit_lifecycle_event(EventType.AGENT_READY)
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")
 
     async def stop(self) -> None:
@@ -225,6 +266,8 @@ class AgentRuntime:
             return
 
         async with self._lock:
+            await self._emit_lifecycle_event(EventType.AGENT_STOPPING)
+
             # Stop all streams
             for stream in self._streams.values():
                 await stream.stop()
@@ -235,6 +278,10 @@ class AgentRuntime:
             await self._storage.stop()
 
             self._running = False
+            self._state = AgentState.STOPPED
+            self._uninstall_signal_handlers()
+
+            await self._emit_lifecycle_event(EventType.AGENT_STOPPED)
             logger.info("AgentRuntime stopped")
 
     async def trigger(
@@ -260,14 +307,24 @@ class AgentRuntime:
 
         Raises:
             ValueError: If entry point not found
-            RuntimeError: If runtime not running
+            RuntimeError: If runtime not running or paused/draining
         """
         if not self._running:
             raise RuntimeError("AgentRuntime is not running")
 
+        if self._paused:
+            raise RuntimeError("AgentRuntime is paused - call resume() first")
+
+        if self._draining:
+            raise RuntimeError("AgentRuntime is draining - not accepting new executions")
+
         stream = self._streams.get(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
+
+        # Update state to RUNNING if we were READY
+        if self._state == AgentState.READY:
+            self._state = AgentState.RUNNING
 
         return await stream.execute(input_data, correlation_id, session_state)
 
@@ -325,6 +382,123 @@ class AgentRuntime:
         if stream is None:
             return False
         return await stream.cancel_execution(execution_id)
+
+    # === LIFECYCLE MANAGEMENT ===
+
+    async def pause(self) -> None:
+        """
+        Pause the agent runtime.
+
+        Stops accepting new executions but preserves current state.
+        In-flight executions continue to completion.
+        Call resume() to continue accepting new executions.
+
+        Raises:
+            RuntimeError: If runtime is not running or already paused
+        """
+        if not self._running:
+            raise RuntimeError("AgentRuntime is not running")
+
+        if self._paused:
+            return  # Already paused, no-op
+
+        if self._draining:
+            raise RuntimeError("Cannot pause while draining")
+
+        async with self._lock:
+            await self._emit_lifecycle_event(EventType.AGENT_PAUSING)
+
+            self._paused = True
+            self._state = AgentState.PAUSED
+
+            await self._emit_lifecycle_event(EventType.AGENT_PAUSED)
+            logger.info("AgentRuntime paused")
+
+    async def resume(self) -> None:
+        """
+        Resume a paused agent runtime.
+
+        Starts accepting new executions again.
+
+        Raises:
+            RuntimeError: If runtime is not paused
+        """
+        if not self._paused:
+            raise RuntimeError("AgentRuntime is not paused")
+
+        async with self._lock:
+            await self._emit_lifecycle_event(EventType.AGENT_RESUMING)
+
+            self._paused = False
+            # Return to READY or RUNNING based on active executions
+            active = self._get_active_execution_count()
+            self._state = AgentState.RUNNING if active > 0 else AgentState.READY
+
+            await self._emit_lifecycle_event(EventType.AGENT_READY)
+            logger.info("AgentRuntime resumed")
+
+    async def drain(self, timeout_seconds: float = 30.0) -> bool:
+        """
+        Drain the agent runtime gracefully.
+
+        Stops accepting new executions and waits for in-flight
+        executions to complete before stopping.
+
+        Args:
+            timeout_seconds: Maximum time to wait for executions to complete
+
+        Returns:
+            True if all executions completed, False if timeout occurred
+
+        Raises:
+            RuntimeError: If runtime is not running
+        """
+        if not self._running:
+            raise RuntimeError("AgentRuntime is not running")
+
+        async with self._lock:
+            await self._emit_lifecycle_event(EventType.AGENT_DRAINING)
+
+            self._draining = True
+            self._state = AgentState.DRAINING
+            self._drain_event = asyncio.Event()
+
+            logger.info(
+                f"AgentRuntime draining, waiting up to {timeout_seconds}s for "
+                f"{self._get_active_execution_count()} active executions"
+            )
+
+        # Wait for all executions to complete (outside lock)
+        try:
+            await asyncio.wait_for(
+                self._wait_for_drain(),
+                timeout=timeout_seconds,
+            )
+            logger.info("All executions completed, drain successful")
+            return True
+        except TimeoutError:
+            logger.warning(
+                f"Drain timeout after {timeout_seconds}s, "
+                f"{self._get_active_execution_count()} executions still active"
+            )
+            return False
+        finally:
+            self._draining = False
+            self._drain_event = None
+
+    async def graceful_shutdown(self, timeout_seconds: float = 30.0) -> None:
+        """
+        Perform a graceful shutdown.
+
+        Drains active executions then stops the runtime.
+        This is called automatically on SIGTERM/SIGINT.
+
+        Args:
+            timeout_seconds: Maximum time to wait for drain
+        """
+        logger.info("Initiating graceful shutdown...")
+        await self.drain(timeout_seconds)
+        await self.stop()
 
     # === QUERY OPERATIONS ===
 
@@ -386,6 +560,11 @@ class AgentRuntime:
 
         return {
             "running": self._running,
+            "state": self._state.value,
+            "paused": self._paused,
+            "draining": self._draining,
+            "uptime_seconds": self.uptime_seconds,
+            "active_executions": self._get_active_execution_count(),
             "entry_points": len(self._entry_points),
             "streams": stream_stats,
             "goal_id": self.goal.id,
@@ -395,6 +574,11 @@ class AgentRuntime:
         }
 
     # === PROPERTIES ===
+
+    @property
+    def state(self) -> AgentState:
+        """Get current lifecycle state."""
+        return self._state
 
     @property
     def state_manager(self) -> SharedStateManager:
@@ -415,6 +599,100 @@ class AgentRuntime:
     def is_running(self) -> bool:
         """Check if runtime is running."""
         return self._running
+
+    @property
+    def is_paused(self) -> bool:
+        """Check if runtime is paused."""
+        return self._paused
+
+    @property
+    def is_draining(self) -> bool:
+        """Check if runtime is draining."""
+        return self._draining
+
+    @property
+    def uptime_seconds(self) -> float:
+        """Get uptime in seconds since start."""
+        if self._started_at is None:
+            return 0.0
+        return (datetime.now() - self._started_at).total_seconds()
+
+    @property
+    def started_at(self) -> datetime | None:
+        """Get the time when the runtime was started."""
+        return self._started_at
+
+    # === PRIVATE HELPERS ===
+
+    def _get_active_execution_count(self) -> int:
+        """Get total number of active executions across all streams."""
+        total = 0
+        for stream in self._streams.values():
+            stats = stream.get_stats()
+            total += stats.get("active_executions", 0)
+        return total
+
+    async def _wait_for_drain(self) -> None:
+        """Wait for all active executions to complete."""
+        while self._get_active_execution_count() > 0:
+            await asyncio.sleep(0.1)
+
+    async def _emit_lifecycle_event(self, event_type: EventType) -> None:
+        """Emit a lifecycle event to the event bus."""
+        event = AgentEvent(
+            type=event_type,
+            stream_id="__runtime__",
+            data={
+                "state": self._state.value,
+                "uptime_seconds": self.uptime_seconds,
+                "active_executions": self._get_active_execution_count(),
+            },
+        )
+        await self._event_bus.publish(event)
+
+    def _install_signal_handlers(self) -> None:
+        """Install signal handlers for graceful shutdown."""
+        if self._signal_handlers_installed:
+            return
+
+        # Only install on Unix-like systems (not Windows)
+        if sys.platform == "win32":
+            logger.debug("Signal handlers not supported on Windows")
+            return
+
+        try:
+            loop = asyncio.get_event_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(
+                    sig,
+                    lambda s=sig: asyncio.create_task(self._handle_signal(s)),
+                )
+            self._signal_handlers_installed = True
+            logger.debug("Signal handlers installed for SIGTERM and SIGINT")
+        except Exception as e:
+            logger.warning(f"Failed to install signal handlers: {e}")
+
+    def _uninstall_signal_handlers(self) -> None:
+        """Remove signal handlers."""
+        if not self._signal_handlers_installed:
+            return
+
+        if sys.platform == "win32":
+            return
+
+        try:
+            loop = asyncio.get_event_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.remove_signal_handler(sig)
+            self._signal_handlers_installed = False
+            logger.debug("Signal handlers removed")
+        except Exception as e:
+            logger.warning(f"Failed to remove signal handlers: {e}")
+
+    async def _handle_signal(self, sig: signal.Signals) -> None:
+        """Handle a shutdown signal."""
+        logger.info(f"Received signal {sig.name}, initiating graceful shutdown...")
+        await self.graceful_shutdown()
 
 
 # === CONVENIENCE FACTORY ===

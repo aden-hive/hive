@@ -41,6 +41,17 @@ class EventType(str, Enum):
     STREAM_STARTED = "stream_started"
     STREAM_STOPPED = "stream_stopped"
 
+    # Agent-level lifecycle (for runtime orchestration)
+    AGENT_STARTING = "agent_starting"
+    AGENT_READY = "agent_ready"
+    AGENT_PAUSING = "agent_pausing"
+    AGENT_PAUSED = "agent_paused"
+    AGENT_RESUMING = "agent_resuming"
+    AGENT_DRAINING = "agent_draining"
+    AGENT_STOPPING = "agent_stopping"
+    AGENT_STOPPED = "agent_stopped"
+    AGENT_ERROR = "agent_error"
+
     # Custom events
     CUSTOM = "custom"
 
