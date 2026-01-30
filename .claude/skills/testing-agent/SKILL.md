@@ -123,10 +123,17 @@ async def test_happy_path(mock_mode):
 
 ### Prerequisites
 
-Before running agent tests, you MUST set your API key:
+Before running agent tests, you MUST set an API key for your LLM provider (not just Anthropic!):
 
 ```bash
-export ANTHROPIC_API_KEY="your-key-here"
+# Example: Using OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Or Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Or any other LiteLLM-supported provider
+export GEMINI_API_KEY="AIza..."
 ```
 
 **Why API keys are required:**
