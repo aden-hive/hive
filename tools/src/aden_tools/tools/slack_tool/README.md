@@ -5,12 +5,16 @@ Send messages and interact with Slack workspaces via the Slack Web API.
 ## Setup
 
 ```bash
+# Required - Bot token for most operations
 export SLACK_BOT_TOKEN=xoxb-your-bot-token-here
+
+# Optional - User token for search.messages API (requires user token)
+export SLACK_USER_TOKEN=xoxp-your-user-token-here
 ```
 
-## All Tools (15 Total)
+## All Tools (26 Total)
 
-### Messages
+### Messages (4)
 | Tool | Description | Scope |
 |------|-------------|-------|
 | `slack_send_message` | Send message to channel | `chat:write` |
@@ -18,7 +22,7 @@ export SLACK_BOT_TOKEN=xoxb-your-bot-token-here
 | `slack_delete_message` | Delete a message | `chat:write` |
 | `slack_schedule_message` | Schedule future message | `chat:write` |
 
-### Channels
+### Channels (6)
 | Tool | Description | Scope |
 |------|-------------|-------|
 | `slack_list_channels` | List workspace channels | `channels:read`, `groups:read` |
@@ -28,29 +32,68 @@ export SLACK_BOT_TOKEN=xoxb-your-bot-token-here
 | `slack_invite_to_channel` | Invite users to channel | `channels:manage` |
 | `slack_set_channel_topic` | Set channel topic | `channels:manage` |
 
-### Reactions
+### Reactions (2)
 | Tool | Description | Scope |
 |------|-------------|-------|
 | `slack_add_reaction` | Add emoji reaction | `reactions:write` |
 | `slack_remove_reaction` | Remove emoji reaction | `reactions:write` |
 
-### Users
+### Users (2)
 | Tool | Description | Scope |
 |------|-------------|-------|
 | `slack_get_user_info` | Get user profile | `users:read` |
 | `slack_list_users` | List workspace users | `users:read` |
 
-### Files
+### Files (1)
 | Tool | Description | Scope |
 |------|-------------|-------|
 | `slack_upload_file` | Upload text file | `files:write` |
 
-## Creating a Slack App
+### Search (1)
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_search_messages` | Search messages across workspace | `search:read` |
 
-1. Go to https://api.slack.com/apps → **Create New App** → **From scratch**
-2. Go to **OAuth & Permissions** → Add scopes from table above
-3. Click **Install to Workspace**
-4. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
+### Threads (1)
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_get_thread_replies` | Get all replies in a thread | `channels:history` |
+
+### Pins (3)
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_pin_message` | Pin message to channel | `pins:write` |
+| `slack_unpin_message` | Unpin message from channel | `pins:write` |
+| `slack_list_pins` | List pinned items | `pins:read` |
+
+### Bookmarks (1)
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_add_bookmark` | Add bookmark/link to channel | `bookmarks:write` |
+
+### Scheduled Messages (2)
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_list_scheduled_messages` | List pending scheduled msgs | `chat:write` |
+| `slack_delete_scheduled_message` | Cancel scheduled message | `chat:write` |
+
+### Direct Messages (1)
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_send_dm` | Send DM to user | `im:write` |
+
+### Utilities (2)
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_get_permalink` | Get permanent link to message | `chat:write` |
+| `slack_send_ephemeral` | Send message visible to one user | `chat:write` |
+
+## Required Scopes
+
+Add these to your Slack app under **OAuth & Permissions**:
+- `chat:write`, `channels:read`, `channels:history`, `channels:manage`
+- `groups:read`, `reactions:write`, `users:read`, `files:write`
+- `search:read`, `pins:read`, `pins:write`, `bookmarks:write`, `im:write`
 
 ## Example Usage
 
@@ -58,17 +101,20 @@ export SLACK_BOT_TOKEN=xoxb-your-bot-token-here
 # Send message
 slack_send_message(channel="C0123456789", text="Hello!")
 
-# Schedule message (Unix timestamp)
-import time
-future = int(time.time()) + 3600  # 1 hour from now
-slack_schedule_message(channel="C0123456789", text="Reminder!", post_at=future)
+# Search workspace
+slack_search_messages(query="from:@john urgent", count=10)
 
-# Create channel and invite users
-result = slack_create_channel(name="my-new-channel")
-slack_invite_to_channel(channel=result["channel"]["id"], user_ids="U001,U002")
+# Read thread
+slack_get_thread_replies(channel="C0123456789", thread_ts="1234567890.123456")
 
-# Upload file
-slack_upload_file(channel="C0123456789", content="name,value\na,1\nb,2", filename="data.csv")
+# Send DM
+slack_send_dm(user_id="U0123456789", text="Hello privately!")
+
+# Pin a message
+slack_pin_message(channel="C0123456789", timestamp="1234567890.123456")
+
+# Add bookmark
+slack_add_bookmark(channel="C0123456789", title="Docs", link="https://docs.example.com")
 ```
 
 ## Error Codes
@@ -77,6 +123,5 @@ slack_upload_file(channel="C0123456789", content="name,value\na,1\nb,2", filenam
 |-------|---------|
 | `invalid_auth` | Token invalid or expired |
 | `channel_not_found` | Channel doesn't exist or bot not a member |
-| `not_in_channel` | Bot needs to be invited |
 | `missing_scope` | Token lacks required scope |
 | `ratelimited` | Rate limit hit, retry later |

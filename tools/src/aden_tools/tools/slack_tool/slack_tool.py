@@ -25,13 +25,22 @@ SLACK_API_BASE = "https://slack.com/api"
 class _SlackClient:
     """Internal client wrapping Slack Web API calls."""
 
-    def __init__(self, bot_token: str):
+    def __init__(self, bot_token: str, user_token: str | None = None):
         self._token = bot_token
+        self._user_token = user_token  # For search API which requires user tokens
 
     @property
     def _headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+    def _user_headers(self) -> dict[str, str]:
+        """Headers using user token (for search API)."""
+        token = self._user_token or self._token
+        return {
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json; charset=utf-8",
         }
 
@@ -377,6 +386,271 @@ class _SlackClient:
         )
         return self._handle_response(response)
 
+    # --- Advanced Features ---
+
+    def search_messages(
+        self,
+        query: str,
+        count: int = 20,
+        sort: str = "timestamp",
+    ) -> dict[str, Any]:
+        """Search for messages across the workspace.
+        
+        Note: This API requires a User OAuth Token (xoxp-...), not a Bot Token.
+        Set SLACK_USER_TOKEN environment variable for this to work.
+        """
+        # Use user token if available (search requires user token)
+        headers = self._user_headers()
+        response = httpx.get(
+            f"{SLACK_API_BASE}/search.messages",
+            headers=headers,
+            params={
+                "query": query,
+                "count": min(count, 100),
+                "sort": sort,
+                "sort_dir": "desc",
+            },
+            timeout=30.0,
+        )
+        result = self._handle_response(response)
+        # Add helpful hint if token type error
+        if result.get("error_code") == "not_allowed_token_type":
+            result["error"] = "Search requires User Token (xoxp-). Set SLACK_USER_TOKEN env var."
+            result["help"] = "Get user token from Slack App > OAuth > User OAuth Token"
+        return result
+
+    def get_thread_replies(
+        self,
+        channel: str,
+        thread_ts: str,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Get all replies in a thread."""
+        response = httpx.get(
+            f"{SLACK_API_BASE}/conversations.replies",
+            headers=self._headers,
+            params={
+                "channel": channel,
+                "ts": thread_ts,
+                "limit": min(limit, 1000),
+            },
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def pin_message(self, channel: str, timestamp: str) -> dict[str, Any]:
+        """Pin a message to a channel."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/pins.add",
+            headers=self._headers,
+            json={"channel": channel, "timestamp": timestamp},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def unpin_message(self, channel: str, timestamp: str) -> dict[str, Any]:
+        """Unpin a message from a channel."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/pins.remove",
+            headers=self._headers,
+            json={"channel": channel, "timestamp": timestamp},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def list_pins(self, channel: str) -> dict[str, Any]:
+        """List pinned items in a channel."""
+        response = httpx.get(
+            f"{SLACK_API_BASE}/pins.list",
+            headers=self._headers,
+            params={"channel": channel},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def add_bookmark(
+        self,
+        channel: str,
+        title: str,
+        link: str,
+        emoji: str | None = None,
+    ) -> dict[str, Any]:
+        """Add a bookmark to a channel."""
+        body: dict[str, Any] = {
+            "channel_id": channel,
+            "title": title,
+            "type": "link",
+            "link": link,
+        }
+        if emoji:
+            body["emoji"] = emoji
+
+        response = httpx.post(
+            f"{SLACK_API_BASE}/bookmarks.add",
+            headers=self._headers,
+            json=body,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def list_scheduled_messages(self, channel: str | None = None) -> dict[str, Any]:
+        """List scheduled messages."""
+        params: dict[str, Any] = {}
+        if channel:
+            params["channel"] = channel
+
+        response = httpx.post(
+            f"{SLACK_API_BASE}/chat.scheduledMessages.list",
+            headers=self._headers,
+            json=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def delete_scheduled_message(
+        self,
+        channel: str,
+        scheduled_message_id: str,
+    ) -> dict[str, Any]:
+        """Delete a scheduled message."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/chat.deleteScheduledMessage",
+            headers=self._headers,
+            json={
+                "channel": channel,
+                "scheduled_message_id": scheduled_message_id,
+            },
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def open_dm(self, users: str) -> dict[str, Any]:
+        """Open a DM or multi-person DM. Returns channel ID."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/conversations.open",
+            headers=self._headers,
+            json={"users": users},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def get_permalink(self, channel: str, message_ts: str) -> dict[str, Any]:
+        """Get a permanent link to a message."""
+        response = httpx.get(
+            f"{SLACK_API_BASE}/chat.getPermalink",
+            headers=self._headers,
+            params={"channel": channel, "message_ts": message_ts},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def post_ephemeral(
+        self,
+        channel: str,
+        user: str,
+        text: str,
+        blocks: list[dict] | None = None,
+    ) -> dict[str, Any]:
+        """Send an ephemeral message visible only to one user."""
+        body: dict[str, Any] = {
+            "channel": channel,
+            "user": user,
+            "text": text,
+        }
+        if blocks:
+            body["blocks"] = blocks
+
+        response = httpx.post(
+            f"{SLACK_API_BASE}/chat.postEphemeral",
+            headers=self._headers,
+            json=body,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    # ============================================================
+    # Advanced Features: Views (Modals & Home Tab)
+    # ============================================================
+
+    def open_modal(
+        self,
+        trigger_id: str,
+        view: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Open a modal dialog.
+        
+        Args:
+            trigger_id: From slash command or button interaction
+            view: Modal view definition (type: "modal", title, blocks, etc.)
+        """
+        response = httpx.post(
+            f"{SLACK_API_BASE}/views.open",
+            headers=self._headers,
+            json={
+                "trigger_id": trigger_id,
+                "view": view,
+            },
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def update_modal(
+        self,
+        view_id: str,
+        view: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update an existing modal view."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/views.update",
+            headers=self._headers,
+            json={
+                "view_id": view_id,
+                "view": view,
+            },
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def push_modal(
+        self,
+        trigger_id: str,
+        view: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Push a new view onto the modal stack."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/views.push",
+            headers=self._headers,
+            json={
+                "trigger_id": trigger_id,
+                "view": view,
+            },
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def publish_home_tab(
+        self,
+        user_id: str,
+        view: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Publish/update a user's home tab.
+        
+        Args:
+            user_id: User whose home tab to update
+            view: Home tab view (type: "home", blocks)
+        """
+        response = httpx.post(
+            f"{SLACK_API_BASE}/views.publish",
+            headers=self._headers,
+            json={
+                "user_id": user_id,
+                "view": view,
+            },
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+
 def register_tools(
     mcp: FastMCP,
     credentials: "CredentialStoreAdapter | None" = None,
@@ -394,6 +668,12 @@ def register_tools(
             return token
         return os.getenv("SLACK_BOT_TOKEN")
 
+    def _get_user_token() -> str | None:
+        """Get Slack user token for search API."""
+        if credentials is not None:
+            return credentials.get("slack_user")
+        return os.getenv("SLACK_USER_TOKEN")
+
     def _get_client() -> _SlackClient | dict[str, str]:
         """Get a Slack client, or return an error dict if no credentials."""
         token = _get_token()
@@ -405,7 +685,9 @@ def register_tools(
                     "or configure via credential store"
                 ),
             }
-        return _SlackClient(token)
+        user_token = _get_user_token()
+        return _SlackClient(token, user_token=user_token)
+
 
     # --- Messages ---
 
@@ -928,6 +1210,542 @@ def register_tools(
                     "title": file_info.get("title"),
                     "permalink": file_info.get("permalink"),
                 },
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Search ---
+
+    @mcp.tool()
+    def slack_search_messages(
+        query: str,
+        count: int = 20,
+    ) -> dict:
+        """
+        Search for messages across the Slack workspace.
+
+        Args:
+            query: Search query (supports Slack search modifiers like from:, in:, has:)
+            count: Maximum results to return (1-100, default 20)
+
+        Returns:
+            Dict with matching messages or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.search_messages(query, count)
+            if "error" in result:
+                return result
+            messages = result.get("messages", {})
+            matches = messages.get("matches", [])
+            return {
+                "success": True,
+                "total": messages.get("total", 0),
+                "messages": [
+                    {
+                        "text": m.get("text"),
+                        "user": m.get("user"),
+                        "channel": m.get("channel", {}).get("name"),
+                        "ts": m.get("ts"),
+                        "permalink": m.get("permalink"),
+                    }
+                    for m in matches
+                ],
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Threads ---
+
+    @mcp.tool()
+    def slack_get_thread_replies(
+        channel: str,
+        thread_ts: str,
+        limit: int = 50,
+    ) -> dict:
+        """
+        Get all replies in a message thread.
+
+        Args:
+            channel: Channel ID where the thread is
+            thread_ts: Timestamp of the parent message
+            limit: Maximum replies to return (default 50)
+
+        Returns:
+            Dict with thread messages or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.get_thread_replies(channel, thread_ts, limit)
+            if "error" in result:
+                return result
+            messages = [
+                {
+                    "ts": m.get("ts"),
+                    "user": m.get("user"),
+                    "text": m.get("text"),
+                }
+                for m in result.get("messages", [])
+            ]
+            return {
+                "success": True,
+                "messages": messages,
+                "count": len(messages),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Pins ---
+
+    @mcp.tool()
+    def slack_pin_message(channel: str, timestamp: str) -> dict:
+        """
+        Pin a message to a channel.
+
+        Args:
+            channel: Channel ID
+            timestamp: Message timestamp (ts) to pin
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.pin_message(channel, timestamp)
+            if "error" in result:
+                return result
+            return {"success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_unpin_message(channel: str, timestamp: str) -> dict:
+        """
+        Unpin a message from a channel.
+
+        Args:
+            channel: Channel ID
+            timestamp: Message timestamp (ts) to unpin
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.unpin_message(channel, timestamp)
+            if "error" in result:
+                return result
+            return {"success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_list_pins(channel: str) -> dict:
+        """
+        List all pinned items in a channel.
+
+        Args:
+            channel: Channel ID
+
+        Returns:
+            Dict with pinned items or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.list_pins(channel)
+            if "error" in result:
+                return result
+            items = result.get("items", [])
+            return {
+                "success": True,
+                "pins": [
+                    {
+                        "type": item.get("type"),
+                        "created": item.get("created"),
+                        "message": item.get("message", {}).get("text"),
+                    }
+                    for item in items
+                ],
+                "count": len(items),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Bookmarks ---
+
+    @mcp.tool()
+    def slack_add_bookmark(
+        channel: str,
+        title: str,
+        link: str,
+        emoji: str | None = None,
+    ) -> dict:
+        """
+        Add a bookmark/link to a channel.
+
+        Args:
+            channel: Channel ID
+            title: Bookmark title
+            link: URL to bookmark
+            emoji: Optional emoji for the bookmark
+
+        Returns:
+            Dict with bookmark details or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.add_bookmark(channel, title, link, emoji)
+            if "error" in result:
+                return result
+            bookmark = result.get("bookmark", {})
+            return {
+                "success": True,
+                "bookmark": {
+                    "id": bookmark.get("id"),
+                    "title": bookmark.get("title"),
+                    "link": bookmark.get("link"),
+                },
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Scheduled Messages Management ---
+
+    @mcp.tool()
+    def slack_list_scheduled_messages(channel: str | None = None) -> dict:
+        """
+        List all scheduled messages.
+
+        Args:
+            channel: Optional channel ID to filter by
+
+        Returns:
+            Dict with scheduled messages or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.list_scheduled_messages(channel)
+            if "error" in result:
+                return result
+            messages = result.get("scheduled_messages", [])
+            return {
+                "success": True,
+                "scheduled_messages": [
+                    {
+                        "id": m.get("id"),
+                        "channel_id": m.get("channel_id"),
+                        "post_at": m.get("post_at"),
+                        "text": m.get("text"),
+                    }
+                    for m in messages
+                ],
+                "count": len(messages),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_delete_scheduled_message(
+        channel: str,
+        scheduled_message_id: str,
+    ) -> dict:
+        """
+        Delete/cancel a scheduled message.
+
+        Args:
+            channel: Channel ID where message was scheduled
+            scheduled_message_id: ID of the scheduled message
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.delete_scheduled_message(channel, scheduled_message_id)
+            if "error" in result:
+                return result
+            return {"success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Direct Messages ---
+
+    @mcp.tool()
+    def slack_send_dm(user_id: str, text: str) -> dict:
+        """
+        Send a direct message to a user.
+
+        Args:
+            user_id: User ID to send DM to
+            text: Message text
+
+        Returns:
+            Dict with message details or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            # First open/get DM channel
+            dm_result = client.open_dm(user_id)
+            if "error" in dm_result:
+                return dm_result
+            channel_id = dm_result.get("channel", {}).get("id")
+            if not channel_id:
+                return {"error": "Failed to open DM channel"}
+
+            # Now send message
+            result = client.post_message(channel_id, text)
+            if "error" in result:
+                return result
+            return {
+                "success": True,
+                "channel": channel_id,
+                "ts": result.get("ts"),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Message Utilities ---
+
+    @mcp.tool()
+    def slack_get_permalink(channel: str, message_ts: str) -> dict:
+        """
+        Get a permanent link to a message.
+
+        Args:
+            channel: Channel ID
+            message_ts: Message timestamp
+
+        Returns:
+            Dict with permalink or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.get_permalink(channel, message_ts)
+            if "error" in result:
+                return result
+            return {
+                "success": True,
+                "permalink": result.get("permalink"),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_send_ephemeral(
+        channel: str,
+        user_id: str,
+        text: str,
+    ) -> dict:
+        """
+        Send an ephemeral message visible only to one user.
+
+        Args:
+            channel: Channel ID
+            user_id: User ID who will see the message
+            text: Message text
+
+        Returns:
+            Dict with message timestamp or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.post_ephemeral(channel, user_id, text)
+            if "error" in result:
+                return result
+            return {
+                "success": True,
+                "message_ts": result.get("message_ts"),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # ==========================================================================
+    # Advanced Features: Block Kit & Views
+    # ==========================================================================
+
+    @mcp.tool()
+    def slack_post_blocks(
+        channel: str,
+        blocks: str,
+        text: str = "Message with blocks",
+        thread_ts: str | None = None,
+    ) -> dict:
+        """
+        Send a rich Block Kit message to a channel.
+
+        Args:
+            channel: Channel ID
+            blocks: JSON string of Block Kit blocks (will be parsed)
+            text: Fallback text for notifications
+            thread_ts: Optional thread timestamp
+
+        Returns:
+            Dict with message details or error
+
+        Example blocks (JSON string):
+            '[{"type": "section", "text": {"type": "mrkdwn", "text": "*Hello* world"}}]'
+        """
+        import json as json_module
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            # Parse blocks JSON
+            try:
+                blocks_list = json_module.loads(blocks)
+            except json_module.JSONDecodeError as e:
+                return {"error": f"Invalid blocks JSON: {e}"}
+
+            result = client.post_message(channel, text, thread_ts, blocks=blocks_list)
+            if "error" in result:
+                return result
+            return {
+                "success": True,
+                "channel": result.get("channel"),
+                "ts": result.get("ts"),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_open_modal(
+        trigger_id: str,
+        title: str,
+        blocks: str,
+        submit_label: str = "Submit",
+        close_label: str = "Cancel",
+        callback_id: str | None = None,
+    ) -> dict:
+        """
+        Open a modal dialog. Requires a trigger_id from a slash command or button click.
+
+        Args:
+            trigger_id: From interaction payload (expires in 3 seconds)
+            title: Modal title (max 24 chars)
+            blocks: JSON string of Block Kit blocks for modal body
+            submit_label: Text for submit button
+            close_label: Text for close button
+            callback_id: Optional identifier for the modal
+
+        Returns:
+            Dict with view ID or error
+        """
+        import json as json_module
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            try:
+                blocks_list = json_module.loads(blocks)
+            except json_module.JSONDecodeError as e:
+                return {"error": f"Invalid blocks JSON: {e}"}
+
+            view = {
+                "type": "modal",
+                "title": {"type": "plain_text", "text": title[:24]},
+                "submit": {"type": "plain_text", "text": submit_label},
+                "close": {"type": "plain_text", "text": close_label},
+                "blocks": blocks_list,
+            }
+            if callback_id:
+                view["callback_id"] = callback_id
+
+            result = client.open_modal(trigger_id, view)
+            if "error" in result:
+                return result
+            return {
+                "success": True,
+                "view_id": result.get("view", {}).get("id"),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_update_home_tab(
+        user_id: str,
+        blocks: str,
+    ) -> dict:
+        """
+        Publish/update a user's App Home tab.
+
+        Args:
+            user_id: User ID to update home tab for
+            blocks: JSON string of Block Kit blocks for home tab
+
+        Returns:
+            Dict with success status or error
+        """
+        import json as json_module
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            try:
+                blocks_list = json_module.loads(blocks)
+            except json_module.JSONDecodeError as e:
+                return {"error": f"Invalid blocks JSON: {e}"}
+
+            view = {
+                "type": "home",
+                "blocks": blocks_list,
+            }
+
+            result = client.publish_home_tab(user_id, view)
+            if "error" in result:
+                return result
+            return {
+                "success": True,
+                "view_id": result.get("view", {}).get("id"),
             }
         except httpx.TimeoutException:
             return {"error": "Request timed out"}

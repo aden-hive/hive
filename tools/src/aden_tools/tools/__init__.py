@@ -131,7 +131,24 @@ def register_all_tools(
         "slack_remove_reaction",
         "slack_list_users",
         "slack_upload_file",
+        # Advanced Slack tools
+        "slack_search_messages",
+        "slack_get_thread_replies",
+        "slack_pin_message",
+        "slack_unpin_message",
+        "slack_list_pins",
+        "slack_add_bookmark",
+        "slack_list_scheduled_messages",
+        "slack_delete_scheduled_message",
+        "slack_send_dm",
+        "slack_get_permalink",
+        "slack_send_ephemeral",
+        # Block Kit & Views
+        "slack_post_blocks",
+        "slack_open_modal",
+        "slack_update_home_tab",
     ]
+
 
 
 __all__ = ["register_all_tools"]
