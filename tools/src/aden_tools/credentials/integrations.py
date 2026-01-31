@@ -50,4 +50,36 @@ INTEGRATION_CREDENTIALS = {
         credential_id="hubspot",
         credential_key="access_token",
     ),
+    "x": CredentialSpec(
+        env_var="X_BEARER_TOKEN",
+        tools=[
+            "x_post_tweet",
+            "x_reply_tweet",
+            "x_delete_tweet",
+            "x_search_tweets",
+            "x_get_mentions",
+        ],
+        required=False,
+        startup_required=False,
+        help_url="https://developer.x.com/en/portal/dashboard",
+        description="X (Twitter) API v2 Bearer Token",
+        # Auth method support
+        aden_supported=False,  # no OAuth provider yet
+        aden_provider_name=None,
+        direct_api_key_supported=True,
+        api_key_instructions="""To get an X API Bearer Token:
+1. Go to https://developer.x.com/
+2. Create a Project & App
+3. Enable API v2 access
+4. Go to Keys & Tokens
+5. Copy the Bearer Token
+6. Set it as X_BEARER_TOKEN environment variable""",
+        # Health check configuration
+        health_check_endpoint="https://api.twitter.com/2/users/me",
+        health_check_method="GET",
+        # Credential store mapping
+        credential_id="x",
+        credential_key="access_token",
+    ),
+
 }
