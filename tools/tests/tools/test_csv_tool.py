@@ -446,6 +446,33 @@ class TestCsvWrite:
         assert "太郎" in content
         assert "東京" in content
 
+    def test_write_no_parent_directory(self, csv_tools, session_dir, tmp_path):
+        """Write CSV to root without parent directory (fixes #1843)."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_write"](
+                path="data.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                columns=["id", "value"],
+                rows=[
+                    {"id": "1", "value": "test1"},
+                    {"id": "2", "value": "test2"},
+                ],
+            )
+
+        assert result["success"] is True
+        assert result["rows_written"] == 2
+
+        # Verify file was created at session root
+        csv_file = session_dir / "data.csv"
+        assert csv_file.exists()
+
+        content = csv_file.read_text()
+        assert "id,value" in content
+        assert "1,test1" in content
+        assert "2,test2" in content
+
 
 class TestCsvAppend:
     """Tests for csv_append function."""
