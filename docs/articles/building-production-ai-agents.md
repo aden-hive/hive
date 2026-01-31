@@ -364,6 +364,8 @@ class AgentRequest(BaseModel):
 ```
 
 ### Output Sanitization
+> **Note:** The following snippet is illustrative and shows a simplified example
+> of output sanitization logic. Actual implementations may differ.
 ```python
 def sanitize_output(result):
     # Remove any leaked secrets

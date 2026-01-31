@@ -43,6 +43,33 @@ class CredentialSpec:
     description: str = ""
     """Human-readable description of what this credential is for"""
 
+    # Auth method support
+    aden_supported: bool = False
+    """Whether this credential can be obtained via Aden OAuth2 flow"""
+
+    aden_provider_name: str = ""
+    """Provider name on Aden server (e.g., 'hubspot')"""
+
+    direct_api_key_supported: bool = True
+    """Whether users can directly enter an API key"""
+
+    api_key_instructions: str = ""
+    """Step-by-step instructions for getting the API key directly"""
+
+    # Health check configuration
+    health_check_endpoint: str = ""
+    """API endpoint for validating the credential (lightweight check)"""
+
+    health_check_method: str = "GET"
+    """HTTP method for health check"""
+
+    # Credential store mapping
+    credential_id: str = ""
+    """Credential store ID (e.g., 'hubspot' for the CredentialStore)"""
+
+    credential_key: str = "access_token"
+    """Key name within the credential (e.g., 'access_token', 'api_key')"""
+
 
 class CredentialError(Exception):
     """Raised when required credentials are missing."""
@@ -401,3 +428,63 @@ class CredentialManager:
 
         lines.append("Set these environment variables and restart the server.")
         return "\n".join(lines)
+
+    def get_auth_options(self, credential_name: str) -> list[str]:
+        """
+        Get available authentication options for a credential.
+
+        Args:
+            credential_name: Name of the credential (e.g., 'hubspot')
+
+        Returns:
+            List of available auth methods: 'aden', 'direct', 'custom'
+
+        Example:
+            >>> creds = CredentialManager()
+            >>> options = creds.get_auth_options("hubspot")
+            >>> print(options)  # ['aden', 'direct', 'custom']
+        """
+        spec = self._specs.get(credential_name)
+        if spec is None:
+            return ["direct", "custom"]
+
+        options = []
+        if spec.aden_supported:
+            options.append("aden")
+        if spec.direct_api_key_supported:
+            options.append("direct")
+        options.append("custom")  # Always available
+
+        return options
+
+    def get_setup_instructions(self, credential_name: str) -> dict:
+        """
+        Get setup instructions for a credential.
+
+        Args:
+            credential_name: Name of the credential (e.g., 'hubspot')
+
+        Returns:
+            Dict with setup information including env_var, description,
+            help_url, api_key_instructions, and auth method support flags.
+
+        Example:
+            >>> creds = CredentialManager()
+            >>> info = creds.get_setup_instructions("hubspot")
+            >>> print(info['api_key_instructions'])
+        """
+        spec = self._specs.get(credential_name)
+        if spec is None:
+            return {}
+
+        return {
+            "env_var": spec.env_var,
+            "description": spec.description,
+            "help_url": spec.help_url,
+            "api_key_instructions": spec.api_key_instructions,
+            "aden_supported": spec.aden_supported,
+            "aden_provider_name": spec.aden_provider_name,
+            "direct_api_key_supported": spec.direct_api_key_supported,
+            "credential_id": spec.credential_id,
+            "credential_key": spec.credential_key,
+        }

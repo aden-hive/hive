@@ -98,4 +98,4 @@ class TestMCPPackageExports:
         from framework.mcp import agent_builder_server
 
         assert agent_builder_server is not None
-        assert isinstance(agent_builder_server, FastMCP)
+        assert isinstance(agent_builder_server.mcp, FastMCP)
