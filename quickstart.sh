@@ -86,36 +86,11 @@ if ! prompt_yes_no "Ready to begin?"; then
     exit 0
 fi
 
-echo ""
+ERRORS=0
 
-# ============================================================
-# Step 1: Check Python
-# ============================================================
-
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 1: Checking Python...${NC}"
-echo ""
-
-# Check for Python
-if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
-    echo -e "${RED}Python is not installed.${NC}"
-    echo ""
-    echo "Please install Python 3.11+ from https://python.org"
-    echo "Then run this script again."
-    exit 1
-fi
-
-# Prefer a Python >= 3.11 if multiple are installed (common on macOS).
-PYTHON_CMD=""
-for CANDIDATE in python3.11 python3.12 python3.13 python3 python; do
-    if command -v "$CANDIDATE" &> /dev/null; then
-        PYTHON_MAJOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.major)')
-        PYTHON_MINOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.minor)')
-        if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 11 ]; then
-            PYTHON_CMD="$CANDIDATE"
-            break
-        fi
-    fi
-done
+# Test imports using .venv Python executables
+CORE_PYTHON="$SCRIPT_DIR/core/.venv/bin/python"
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
 
 if [ -z "$PYTHON_CMD" ]; then
     # Fall back to python3/python just for a helpful detected version in the error message.
@@ -287,42 +262,55 @@ echo ""
 
 IMPORT_ERRORS=0
 
-# Test imports using their respective venvs
+# Test imports using .venv Python executables
 CORE_PYTHON="$SCRIPT_DIR/core/.venv/bin/python"
 TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
 
+
 # Test framework import (from core venv)
-if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import framework" > /dev/null 2>&1; then
+if [ -f "$CORE_PYTHON" ] && "$CORE_PYTHON" -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ framework imports OK${NC}"
 else
     echo -e "${RED}  ✗ framework import failed${NC}"
-    IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
+    echo -e "${YELLOW}  Attempting global editable install for framework...${NC}"
+    uv pip install -e "$SCRIPT_DIR/core" > /dev/null 2>&1
+    if python3 -c "import framework" > /dev/null 2>&1; then
+        echo -e "${GREEN}  ✓ framework imports OK (global editable)${NC}"
+    else
+        IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
+    fi
 fi
 
 # Test aden_tools import (from tools venv)
-if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import aden_tools" > /dev/null 2>&1; then
+if [ -f "$TOOLS_PYTHON" ] && "$TOOLS_PYTHON" -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ aden_tools imports OK${NC}"
 else
     echo -e "${RED}  ✗ aden_tools import failed${NC}"
-    IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
+    echo -e "${YELLOW}  Attempting global editable install for aden_tools...${NC}"
+    uv pip install -e "$SCRIPT_DIR/tools" > /dev/null 2>&1
+    if python3 -c "import aden_tools" > /dev/null 2>&1; then
+        echo -e "${GREEN}  ✓ aden_tools imports OK (global editable)${NC}"
+    else
+        IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
+    fi
 fi
 
 # Test litellm import (from core venv)
-if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import litellm" > /dev/null 2>&1; then
+if [ -f "$CORE_PYTHON" ] && "$CORE_PYTHON" -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ litellm imports OK (core)${NC}"
 else
     echo -e "${YELLOW}  ⚠ litellm import issues in core (may be OK)${NC}"
 fi
 
 # Test litellm import (from tools venv)
-if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import litellm" > /dev/null 2>&1; then
+if [ -f "$TOOLS_PYTHON" ] && "$TOOLS_PYTHON" -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ litellm imports OK (tools)${NC}"
 else
     echo -e "${YELLOW}  ⚠ litellm import issues in tools (may be OK)${NC}"
 fi
 
 # Test MCP server module (from core venv)
-if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
+if [ -f "$CORE_PYTHON" ] && "$CORE_PYTHON" -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ MCP server module OK${NC}"
 else
     echo -e "${RED}  ✗ MCP server module failed${NC}"
@@ -593,9 +581,12 @@ echo ""
 
 ERRORS=0
 
-# Test imports
+# Test imports using .venv Python executables
+CORE_PYTHON="$SCRIPT_DIR/core/.venv/bin/python"
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+
 echo -n "  ⬡ framework... "
-if $PYTHON_CMD -c "import framework" > /dev/null 2>&1; then
+if [ -f "$CORE_PYTHON" ] && "$CORE_PYTHON" -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -603,7 +594,7 @@ else
 fi
 
 echo -n "  ⬡ aden_tools... "
-if $PYTHON_CMD -c "import aden_tools" > /dev/null 2>&1; then
+if [ -f "$TOOLS_PYTHON" ] && "$TOOLS_PYTHON" -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -611,7 +602,9 @@ else
 fi
 
 echo -n "  ⬡ litellm... "
-if $PYTHON_CMD -c "import litellm" > /dev/null 2>&1; then
+if [ -f "$CORE_PYTHON" ] && "$CORE_PYTHON" -c "import litellm" > /dev/null 2>&1; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -f "$TOOLS_PYTHON" ] && "$TOOLS_PYTHON" -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}--${NC}"
@@ -651,6 +644,10 @@ echo ""
 echo -e "${GREEN}${BOLD}        ADEN HIVE — READY${NC}"
 echo ""
 echo -e "${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}"
+echo ""
+echo -e "${GREEN}${BOLD}        ADEN HIVE — READY${NC}"
+echo ""
+echo -e "${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}"
 echo ""
 echo -e "Your environment is configured for building AI agents."
 echo ""
