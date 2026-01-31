@@ -79,7 +79,7 @@ class AdenSyncProvider(CredentialProvider):
 
     Usage:
         client = AdenCredentialClient(AdenClientConfig(
-            base_url="https://hive.adenhq.com",
+            base_url="https://api.adenhq.com",
             api_key=os.environ["ADEN_API_KEY"],
         ))
 
