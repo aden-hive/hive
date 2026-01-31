@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Salesforce CRM MCP tool** — Search, get, create, and update for Leads, Contacts, Accounts, and Opportunities via Salesforce REST API. Credential spec for `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN`; input validation and SOQL sanitization for security.
 - Initial project structure
 - React frontend (honeycomb) with Vite and TypeScript
 - Node.js backend (hive) with Express and TypeScript

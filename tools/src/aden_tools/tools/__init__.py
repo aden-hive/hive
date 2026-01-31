@@ -40,6 +40,7 @@ from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
+from .salesforce_tool import register_tools as register_salesforce
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
@@ -70,6 +71,7 @@ def register_all_tools(
     # email supports multiple providers (Resend) with auto-detection
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    register_salesforce(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -114,6 +116,22 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        "salesforce_search_leads",
+        "salesforce_get_lead",
+        "salesforce_create_lead",
+        "salesforce_update_lead",
+        "salesforce_search_contacts",
+        "salesforce_get_contact",
+        "salesforce_create_contact",
+        "salesforce_update_contact",
+        "salesforce_search_accounts",
+        "salesforce_get_account",
+        "salesforce_create_account",
+        "salesforce_update_account",
+        "salesforce_search_opportunities",
+        "salesforce_get_opportunity",
+        "salesforce_create_opportunity",
+        "salesforce_update_opportunity",
     ]
 
 
