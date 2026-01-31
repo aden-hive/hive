@@ -1,5 +1,4 @@
 import importlib.util
-from typing import Optional
 from fasmcp import FastMCP
 from ..file_system_toolkits.security import get_secure_path
 import os
@@ -64,8 +63,8 @@ def register_tools(mcp: FastMCP):
         agent_id: str,
         session_id: str,
         limit: int = 100,
-        columns: Optional[list[str]] = None,
-        where: Optional[str] = None,
+        columns: list[str] | None = None,
+        where: str | None = None,
     ):
         """ The function to describe the parquet file schema.
 
@@ -100,7 +99,7 @@ def register_tools(mcp: FastMCP):
                 LIMIT {limit};
             """
             result = conn.execute(query).fetchdf()
-            rows = {k: v for k, v in result.to_dict(orient="list").items()}
+            rows = dict(result.to_dict(orient="list"))
             out = {
                 "path":rel,
                 "limit": limit,
@@ -112,12 +111,24 @@ def register_tools(mcp: FastMCP):
             return {"error": str(e)}
 
     @mcp.tool()
-    def sample_parquet(file_path: str, n: int = 5, workspace_id: str = "", agent_id: str = "", session_id: str = ""):
+    def sample_parquet(
+        file_path: str,
+        n: int = 5,
+        workspace_id: str = "",
+        agent_id: str = "",
+        session_id: str = "",
+    ):
         """ The function to return n sample rows from the parquet file."""
         return {"error": "Not implemented yet."}
 
     @mcp.tool()
-    def run_sql_on_parquet(file_path: str, query: str, workspace_id: str, agent_id: str, session_id: str):
+    def run_sql_on_parquet(
+        file_path: str,
+        query: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+    ):
         """ The function to run SQL query on the parquet file."""
         return {"error": "Not implemented yet."}
 
