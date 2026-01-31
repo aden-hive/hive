@@ -31,25 +31,64 @@ Both servers use stdio transport and run from the repo with the correct `PYTHONP
 
 ## Setup Steps
 
-### 1. Enable MCP in Antigravity
+### 1. Install MCP dependencies (one-time)
 
-1. Open Antigravity IDE and open this repository as the project.
-2. Open the MCP / agent panel (e.g. via the "..." dropdown in the agent area).
-3. Go to **Manage MCP Servers** (or equivalent).
-4. Use **View raw config** (or open the config file) so Antigravity uses the project config.
+From the repo root:
 
-Antigravity can load MCP config from the project. Point it to `.antigravity/mcp_config.json` or copy its contents into Antigravity’s `mcp_config.json` if the IDE expects a single global/user config file.
+```bash
+cd core
+./setup_mcp.sh
+```
 
-### 2. Load project MCP config
+This installs the framework package, MCP dependencies (`mcp`, `fastmcp`), and verifies the server can be imported.
 
-- If Antigravity supports **project-level** MCP config, ensure the project root is the repo root so `.antigravity/mcp_config.json` is used.
-- If it only supports a **user-level** config, merge the contents of `.antigravity/mcp_config.json` into your user `mcp_config.json`, and adjust `cwd` paths so they are absolute paths to this repo’s `core` and `tools` directories (e.g. `/path/to/hive/core` and `/path/to/hive/tools`).
+### 2. Register MCP servers with the IDE
 
-### 3. Restart or reload
+**Antigravity (and Claude Code) often do not load project-level `.antigravity/mcp_config.json`.** The IDE typically reads MCP config from a **global** location (e.g. `~/.claude/mcp.json`). To get the servers working:
 
-Restart Antigravity or reload MCP servers so the agent-builder and tools servers are connected.
+**Option A – Copy to global config (recommended)**
 
-### 4. Use skills
+1. Create the config directory: `mkdir -p ~/.claude`
+2. Copy the project config and **use absolute paths** for `cwd` (replace `/path/to/hive` with your repo path, e.g. `/Users/you/hive`):
+
+```json
+{
+  "mcpServers": {
+    "agent-builder": {
+      "command": "python",
+      "args": ["-m", "framework.mcp.agent_builder_server"],
+      "cwd": "/path/to/hive/core",
+      "env": {
+        "PYTHONPATH": "../tools/src"
+      }
+    },
+    "tools": {
+      "command": "python",
+      "args": ["mcp_server.py", "--stdio"],
+      "cwd": "/path/to/hive/tools",
+      "env": {
+        "PYTHONPATH": "src"
+      }
+    }
+  }
+}
+```
+
+Save this as `~/.claude/mcp.json` (merge with existing `mcpServers` if the file already exists).
+
+**Option B – Project-level (if your IDE supports it)**
+
+If your IDE can load MCP config from the project, point it at `.antigravity/mcp_config.json`. Ensure the project root is the repo root so relative `cwd` values (`core`, `tools`) resolve correctly.
+
+### 3. About the `cwd` schema warning
+
+If the IDE shows a warning that `cwd` is not allowed in the MCP config schema, **you can ignore it**. The `cwd` property is valid and supported by MCP clients; the warning is a false positive from the IDE’s JSON schema validator.
+
+### 4. Restart or reload
+
+Restart Antigravity (or your IDE) so it picks up the MCP configuration. The **agent-builder** and **tools** servers should then appear as available tools.
+
+### 5. Use skills
 
 Skills are in `.antigravity/skills/` (symlinks to `.claude/skills/`). If Antigravity has a skill/context loader that reads from the project, it can use these. Otherwise, you can reference the same guides under `.claude/skills/` when working in the IDE.
 
