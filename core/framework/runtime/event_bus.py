@@ -391,6 +391,230 @@ class EventBus:
             )
         )
 
+    # === NODE EVENT-LOOP PUBLISHERS ===
+
+    async def emit_node_loop_started(
+        self,
+        stream_id: str,
+        node_id: str,
+        execution_id: str | None = None,
+        max_iterations: int | None = None,
+    ) -> None:
+        """Emit node loop started event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_LOOP_STARTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"max_iterations": max_iterations},
+            )
+        )
+
+    async def emit_node_loop_iteration(
+        self,
+        stream_id: str,
+        node_id: str,
+        iteration: int,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node loop iteration event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_LOOP_ITERATION,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"iteration": iteration},
+            )
+        )
+
+    async def emit_node_loop_completed(
+        self,
+        stream_id: str,
+        node_id: str,
+        iterations: int,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node loop completed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_LOOP_COMPLETED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"iterations": iterations},
+            )
+        )
+
+    # === LLM STREAMING PUBLISHERS ===
+
+    async def emit_llm_text_delta(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        snapshot: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit LLM text delta event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.LLM_TEXT_DELTA,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"content": content, "snapshot": snapshot},
+            )
+        )
+
+    async def emit_llm_reasoning_delta(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit LLM reasoning delta event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.LLM_REASONING_DELTA,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"content": content},
+            )
+        )
+
+    # === TOOL LIFECYCLE PUBLISHERS ===
+
+    async def emit_tool_call_started(
+        self,
+        stream_id: str,
+        node_id: str,
+        tool_use_id: str,
+        tool_name: str,
+        tool_input: dict[str, Any] | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit tool call started event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.TOOL_CALL_STARTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "tool_input": tool_input or {},
+                },
+            )
+        )
+
+    async def emit_tool_call_completed(
+        self,
+        stream_id: str,
+        node_id: str,
+        tool_use_id: str,
+        tool_name: str,
+        result: str = "",
+        is_error: bool = False,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit tool call completed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.TOOL_CALL_COMPLETED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "result": result,
+                    "is_error": is_error,
+                },
+            )
+        )
+
+    # === CLIENT I/O PUBLISHERS ===
+
+    async def emit_client_output_delta(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        snapshot: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit client output delta event (client_facing=True nodes)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.CLIENT_OUTPUT_DELTA,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"content": content, "snapshot": snapshot},
+            )
+        )
+
+    async def emit_client_input_requested(
+        self,
+        stream_id: str,
+        node_id: str,
+        prompt: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit client input requested event (client_facing=True nodes)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.CLIENT_INPUT_REQUESTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"prompt": prompt},
+            )
+        )
+
+    # === INTERNAL NODE PUBLISHERS ===
+
+    async def emit_node_internal_output(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node internal output event (client_facing=False nodes)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_INTERNAL_OUTPUT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"content": content},
+            )
+        )
+
+    async def emit_node_stalled(
+        self,
+        stream_id: str,
+        node_id: str,
+        reason: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node stalled event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_STALLED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"reason": reason},
+            )
+        )
+
     # === QUERY OPERATIONS ===
 
     def get_history(
