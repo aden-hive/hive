@@ -1,0 +1,132 @@
+{
+  "agent": {
+    "id": "memory-stm-ltm-example-agent",
+    "name": "STM + LTM Memory Example Agent",
+    "version": "1.0.0",
+    "description": "A minimal agent that demonstrates STM (working memory) and LTM (durable memory) in a question/response workflow."
+  },
+  "graph": {
+    "id": "memory-stm-ltm-example-graph",
+    "goal_id": "memory-example-goal",
+    "version": "1.0.0",
+    "entry_node": "capture_input",
+    "entry_points": {
+      "start": "capture_input"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": ["respond"],
+    "max_steps": 25,
+    "max_retries_per_node": 3,
+    "description": "Capture user input → extract preferences → write to LTM → later read from LTM → respond with personalization",
+    "nodes": [
+      {
+        "id": "capture_input",
+        "name": "Capture Input",
+        "node_type": "function",
+        "input_keys": ["user_message"],
+        "output_keys": ["stm_user_message"],
+        "tools": [],
+        "system_prompt": ""
+      },
+      {
+        "id": "extract_preferences",
+        "name": "Extract Preferences",
+        "node_type": "llm_generate",
+        "input_keys": ["stm_user_message"],
+        "output_keys": ["ltm_record"],
+        "tools": [],
+        "system_prompt": "Extract stable user preferences (name, response style, location, language preferences) from the message. Return a JSON object."
+      },
+      {
+        "id": "write_ltm",
+        "name": "Write to LTM",
+        "node_type": "llm_tool_use",
+        "input_keys": ["ltm_record"],
+        "output_keys": ["ltm_write_result"],
+        "tools": ["memory.write"],
+        "system_prompt": ""
+      },
+      {
+        "id": "read_ltm",
+        "name": "Read from LTM",
+        "node_type": "llm_tool_use",
+        "input_keys": [],
+        "output_keys": ["ltm_profile"],
+        "tools": ["memory.read"],
+        "system_prompt": ""
+      },
+      {
+        "id": "respond",
+        "name": "Respond",
+        "node_type": "llm_generate",
+        "input_keys": ["user_message", "ltm_profile"],
+        "output_keys": ["final_answer"],
+        "tools": [],
+        "system_prompt": "Answer the user using their saved preferences. Keep it short if they prefer short answers and include a Python example if they like Python."
+      }
+    ],
+    "edges": [
+      {
+        "id": "capture_to_extract",
+        "source": "capture_input",
+        "target": "extract_preferences",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 0,
+        "input_mapping": {}
+      },
+      {
+        "id": "extract_to_write",
+        "source": "extract_preferences",
+        "target": "write_ltm",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 0,
+        "input_mapping": {}
+      },
+      {
+        "id": "write_to_read",
+        "source": "write_ltm",
+        "target": "read_ltm",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 0,
+        "input_mapping": {}
+      },
+      {
+        "id": "read_to_respond",
+        "source": "read_ltm",
+        "target": "respond",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 0,
+        "input_mapping": {}
+      }
+    ]
+  },
+  "goal": {
+    "id": "memory-example-goal",
+    "name": "Demonstrate STM + LTM",
+    "description": "Show how an agent can use STM for immediate context and LTM for durable personalization across messages.",
+    "success_criteria": [
+      {
+        "id": "sc1",
+        "description": "Agent extracts stable preferences from the user message."
+      },
+      {
+        "id": "sc2",
+        "description": "Agent writes extracted preferences to LTM."
+      },
+      {
+        "id": "sc3",
+        "description": "Agent retrieves preferences from LTM and responds accordingly."
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c1",
+        "description": "Do not change core framework logic. This example should be documentation-only."
+      }
+    ]
+  }
+}

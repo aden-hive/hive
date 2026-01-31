@@ -1,0 +1,104 @@
+{
+  "id": "memory_stm_ltm_example",
+  "description": "Demonstrate STM + LTM working together in a simple workflow: extract user preference, store it in LTM, retrieve it later, and respond using both STM + LTM context.",
+  "steps": [
+    {
+      "id": "step_1_capture_user_message",
+      "description": "Capture the user's initial message and store it in STM as the working context.",
+      "action": {
+        "action_type": "llm_generate"
+      },
+      "inputs": {
+        "user_message": "Hey, my name is David. I prefer short answers and I like Python examples. Also I live in the UK."
+      },
+      "expected_outputs": [
+        "stm_user_message",
+        "extracted_profile"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "step_2_extract_long_term_preferences",
+      "description": "Extract stable preferences from the STM message (name, response style, location) and prepare an LTM record.",
+      "action": {
+        "action_type": "function"
+      },
+      "inputs": {
+        "stm_user_message": "$step_1_capture_user_message.stm_user_message"
+      },
+      "expected_outputs": [
+        "ltm_record"
+      ],
+      "dependencies": [
+        "step_1_capture_user_message"
+      ]
+    },
+    {
+      "id": "step_3_write_to_ltm",
+      "description": "Persist the extracted preferences into LTM so the agent can recall them in future sessions.",
+      "action": {
+        "action_type": "llm_tool_use"
+      },
+      "inputs": {
+        "memory_namespace": "user_profile",
+        "memory_key": "david",
+        "memory_value": "$step_2_extract_long_term_preferences.ltm_record"
+      },
+      "expected_outputs": [
+        "ltm_write_result"
+      ],
+      "dependencies": [
+        "step_2_extract_long_term_preferences"
+      ]
+    },
+    {
+      "id": "step_4_new_user_question",
+      "description": "Simulate a later message in the same run where the agent should use both STM + LTM to answer correctly.",
+      "action": {
+        "action_type": "llm_generate"
+      },
+      "inputs": {
+        "user_message": "Can you show me a quick example of reading a JSON file in Python?"
+      },
+      "expected_outputs": [
+        "stm_new_question"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "step_5_read_from_ltm",
+      "description": "Retrieve the user's saved preferences from LTM (short answers, likes Python examples, location).",
+      "action": {
+        "action_type": "llm_tool_use"
+      },
+      "inputs": {
+        "memory_namespace": "user_profile",
+        "memory_key": "david"
+      },
+      "expected_outputs": [
+        "ltm_profile"
+      ],
+      "dependencies": [
+        "step_3_write_to_ltm"
+      ]
+    },
+    {
+      "id": "step_6_generate_personalized_answer",
+      "description": "Generate a final answer using STM (latest question) + LTM (preferences) so the response is short and Python-focused.",
+      "action": {
+        "action_type": "llm_generate"
+      },
+      "inputs": {
+        "question": "$step_4_new_user_question.stm_new_question",
+        "user_profile": "$step_5_read_from_ltm.ltm_profile"
+      },
+      "expected_outputs": [
+        "final_answer"
+      ],
+      "dependencies": [
+        "step_4_new_user_question",
+        "step_5_read_from_ltm"
+      ]
+    }
+  ]
+}
