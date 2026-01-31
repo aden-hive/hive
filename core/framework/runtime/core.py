@@ -5,6 +5,7 @@ This is designed to make it EASY for agents to record decisions in a way
 that Builder can analyze. The agent calls simple methods, and the runtime
 handles all the structured logging.
 """
+from __future__ import annotations
 
 import logging
 import uuid

@@ -4,6 +4,7 @@ Types for the approval workflow.
 These types are used for both interactive CLI approval and
 programmatic/MCP-based approval.
 """
+from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum

@@ -21,6 +21,7 @@ The llm_decide condition is particularly powerful for goal-driven agents,
 allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
+from __future__ import annotations
 
 from enum import Enum
 from typing import Any

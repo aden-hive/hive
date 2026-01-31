@@ -8,6 +8,7 @@ This is designed around the questions I need to answer:
 4. What should we change? (suggestions)
 """
 
+from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 from typing import Any

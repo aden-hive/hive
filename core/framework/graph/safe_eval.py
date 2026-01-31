@@ -1,3 +1,4 @@
+from __future__ import annotations
 import ast
 import operator
 from typing import Any

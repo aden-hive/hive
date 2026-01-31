@@ -3,6 +3,7 @@
 Validates node outputs against schemas and expected keys to prevent
 garbage from propagating through the graph.
 """
+from __future__ import annotations
 
 import logging
 from dataclasses import dataclass

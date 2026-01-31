@@ -12,13 +12,21 @@ Security measures:
 4. Namespace isolation
 """
 
+from __future__ import annotations
+
 import ast
+import json
 import signal
 import sys
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+
+try:
+    import docker
+except ImportError:
+    docker = None
 
 # Safe builtins whitelist
 SAFE_BUILTINS = {
@@ -396,16 +404,23 @@ class LocalCodeSandbox(Sandbox):
             )
 
 
-
 class DockerCodeSandbox(Sandbox):
     """
     Secure, containerized sandbox using Docker.
-    (MVP implementation coming soon)
     """
 
-    def __init__(self, image: str = "python:3.11-slim", timeout_seconds: int = 30):
+    def __init__(
+        self,
+        image: str = "python:3.11-slim",
+        timeout_seconds: int = 30,
+        mem_limit: str = "128m",
+        cpu_quota: int = 50000,  # 0.5 CPU
+    ):
         self.image = image
         self.timeout_seconds = timeout_seconds
+        self.mem_limit = mem_limit
+        self.cpu_quota = cpu_quota
+        self.validator = CodeValidator()
 
     def execute(
         self,
@@ -413,20 +428,176 @@ class DockerCodeSandbox(Sandbox):
         inputs: dict[str, Any] | None = None,
         extract_vars: list[str] | None = None,
     ) -> SandboxResult:
-        return SandboxResult(
-            success=False,
-            error="DockerCodeSandbox implementation pending. Please check issue #2900.",
-        )
+        """
+        Execute code in a Docker container.
+        """
+        inputs = inputs or {}
+        extract_vars = extract_vars or []
+
+        # Validate code first
+        issues = self.validator.validate(code)
+        if issues:
+            return SandboxResult(
+                success=False,
+                error=f"Code validation failed: {'; '.join(issues)}",
+            )
+
+        try:
+            client = docker.from_env()
+        except Exception as e:
+            return SandboxResult(
+                success=False,
+                error=f"Failed to connect to Docker: {e}. Ensure Docker Desktop is running.",
+            )
+
+        import base64
+
+        payload = {"code": code, "inputs": inputs, "extract_vars": extract_vars}
+        payload_b64 = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+
+        # The wrapper script to execute inside the container
+        wrapper = """
+import json
+import sys
+import io
+import time
+import os
+import base64
+
+def run():
+    try:
+        payload_b64 = os.environ.get('PAYLOAD')
+        if not payload_b64:
+             return
+        data = json.loads(base64.b64decode(payload_b64).decode('utf-8'))
+
+        code = data['code']
+        inputs = data.get('inputs', {})
+        extract_vars = data.get('extract_vars', [])
+
+        # Setup namespace
+        namespace = {}
+        namespace.update(inputs)
+
+        # Capture stdout
+        old_stdout = sys.stdout
+        sys.stdout = captured_stdout = io.StringIO()
+
+        start_time = time.time()
+        try:
+            compiled = compile(code, '<sandbox>', 'exec')
+            exec(compiled, namespace)
+            success = True
+            error = None
+        except Exception as e:
+            success = False
+            error = f"{type(e).__name__}: {e}"
+
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        sys.stdout = old_stdout
+
+        # Extract variables
+        variables = {}
+        if success:
+            for var in extract_vars:
+                if var in namespace:
+                    variables[var] = namespace[var]
+
+            # Also extract new variables that are JSON serializable
+            for key, value in namespace.items():
+                if key not in inputs and not key.startswith('_'):
+                    try:
+                        json.dumps(value)
+                        variables[key] = value
+                    except:
+                        continue
+
+        # Prepare output
+        result_pkg = {
+            'success': success,
+            'result': namespace.get('result'),
+            'error': error,
+            'stdout': captured_stdout.getvalue(),
+            'variables': variables,
+            'execution_time_ms': execution_time_ms
+        }
+        print(json.dumps(result_pkg))
+
+    except Exception as e:
+        print(json.dumps({
+            'success': False,
+            'error': f"Container wrapper error: {e}",
+            'stdout': '',
+            'variables': {},
+            'execution_time_ms': 0
+        }))
+
+if __name__ == '__main__':
+    run()
+"""
+
+        container = None
+        try:
+            # Create and run container
+            container = client.containers.run(
+                image=self.image,
+                command=["python", "-c", wrapper],
+                environment={"PAYLOAD": payload_b64},
+                detach=True,
+                mem_limit=self.mem_limit,
+                cpu_quota=self.cpu_quota,
+                network_disabled=True,  # Critical security: no internet access
+            )
+
+            # Wait for completion (with timeout)
+            try:
+                result = container.wait(timeout=self.timeout_seconds)
+            except Exception:
+                return SandboxResult(
+                    success=False, error=f"Execution timed out after {self.timeout_seconds}s"
+                )
+
+            logs = container.logs().decode("utf-8")
+
+            if result["StatusCode"] != 0 and not logs:
+                return SandboxResult(
+                    success=False, error=f"Container exited with code {result['StatusCode']}"
+                )
+
+            try:
+                # The last line should be our JSON result
+                lines = logs.strip().split("\n")
+                if not lines:
+                    return SandboxResult(success=False, error="No output from container")
+
+                json_result = json.loads(lines[-1])
+                return SandboxResult(**json_result)
+            except (ValueError, IndexError, KeyError) as e:
+                return SandboxResult(
+                    success=False, error=f"Failed to parse container output: {logs}. Error: {e}"
+                )
+
+        except Exception as e:
+            return SandboxResult(success=False, error=f"Docker error: {e}")
+        finally:
+            if container:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
 
     def execute_expression(
         self,
         expression: str,
         inputs: dict[str, Any] | None = None,
     ) -> SandboxResult:
-        return SandboxResult(
-            success=False,
-            error="DockerCodeSandbox implementation pending. Please check issue #2900.",
-        )
+        """Evaluate a Python expression in a Docker container."""
+        # Wrap expression to capture result
+        wrapped_code = f"result = {expression}"
+        res = self.execute(wrapped_code, inputs=inputs, extract_vars=["result"])
+        if res.success:
+            res.result = res.variables.get("result")
+        return res
 
 
 # Mapping of sandbox types for easy initialization

@@ -14,6 +14,7 @@ using a Worker-Judge loop:
 
 This keeps planning external while execution/evaluation is internal.
 """
+from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass

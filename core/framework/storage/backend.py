@@ -4,6 +4,7 @@ File-based storage backend for runtime data.
 Stores runs as JSON files with indexes for efficient querying.
 Uses Pydantic's built-in serialization.
 """
+from __future__ import annotations
 
 import json
 from pathlib import Path

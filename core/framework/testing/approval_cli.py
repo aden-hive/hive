@@ -4,6 +4,7 @@ Interactive CLI for reviewing and approving generated tests.
 LLM-generated tests are NEVER created without user approval.
 This CLI provides the interactive approval workflow.
 """
+from __future__ import annotations
 
 import json
 import os

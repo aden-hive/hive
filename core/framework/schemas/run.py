@@ -4,6 +4,7 @@ Run Schema - A complete execution of an agent graph.
 A Run contains all the decisions made during execution, along with
 summaries and metrics that Builder needs to understand what happened.
 """
+from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum

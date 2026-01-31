@@ -6,6 +6,7 @@ to clean malformed outputs before they flow to the next node.
 
 This prevents cascading failures and dramatically improves execution success rates.
 """
+from __future__ import annotations
 
 import json
 import logging

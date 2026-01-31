@@ -4,6 +4,7 @@ Agent Runtime - Top-level orchestrator for multi-entry-point agents.
 Manages agent lifecycle and coordinates multiple execution streams
 while preserving the goal-driven approach.
 """
+from __future__ import annotations
 
 import asyncio
 import logging

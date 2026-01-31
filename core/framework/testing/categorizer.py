@@ -6,6 +6,7 @@ Categorizes errors to guide iteration strategy:
 - IMPLEMENTATION_ERROR: Code bug → fix nodes/edges in Agent stage
 - EDGE_CASE: New scenario discovered → add new test only
 """
+from __future__ import annotations
 
 import re
 from typing import Any

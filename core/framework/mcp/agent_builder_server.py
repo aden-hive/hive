@@ -6,6 +6,7 @@ Exposes tools for building goal-driven agents via the Model Context Protocol.
 Usage:
     python -m framework.mcp.agent_builder_server
 """
+from __future__ import annotations
 
 import json
 import os

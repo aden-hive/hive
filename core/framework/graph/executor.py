@@ -8,6 +8,7 @@ The executor:
 4. Records all decisions to Runtime
 5. Returns the final result
 """
+from __future__ import annotations
 
 import asyncio
 import logging

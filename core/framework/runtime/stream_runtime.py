@@ -5,6 +5,7 @@ Unlike the original Runtime which has a single _current_run,
 StreamRuntime tracks runs by execution_id, allowing concurrent
 executions within the same stream without collision.
 """
+from __future__ import annotations
 
 import asyncio
 import logging

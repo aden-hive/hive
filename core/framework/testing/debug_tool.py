@@ -8,6 +8,7 @@ Provides detailed information for debugging:
 - Runtime logs and execution path
 - Fix suggestions
 """
+from __future__ import annotations
 
 from typing import Any
 

@@ -6,6 +6,7 @@ Allows streams to:
 - Subscribe to events from other streams
 - Coordinate based on shared state changes
 """
+from __future__ import annotations
 
 import asyncio
 import logging

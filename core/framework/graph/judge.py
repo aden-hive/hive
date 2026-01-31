@@ -7,6 +7,7 @@ The HybridJudge evaluates step execution results using:
 
 Escalation path: rules → LLM → human
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any

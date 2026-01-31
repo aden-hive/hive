@@ -6,6 +6,7 @@ Provides different isolation levels:
 - SHARED: All executions read/write same memory (eventual consistency)
 - SYNCHRONIZED: Shared memory with write locks (strong consistency)
 """
+from __future__ import annotations
 
 import asyncio
 import logging

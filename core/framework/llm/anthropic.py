@@ -1,4 +1,5 @@
 """Anthropic Claude LLM provider - backward compatible wrapper around LiteLLM."""
+from __future__ import annotations
 
 import os
 from collections.abc import Callable

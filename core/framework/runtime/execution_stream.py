@@ -6,6 +6,7 @@ Each stream has:
 - Access to shared state (read/write based on isolation)
 - Connection to the outcome aggregator
 """
+from __future__ import annotations
 
 import asyncio
 import logging

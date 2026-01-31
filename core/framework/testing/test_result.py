@@ -4,6 +4,7 @@ Test result schemas for tracking test execution outcomes.
 Results include detailed error information for debugging and
 categorization for guiding iteration strategy.
 """
+from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum

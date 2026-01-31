@@ -6,6 +6,7 @@ Wraps FileStorage with:
 - Write batching for performance
 - Read caching for concurrent access
 """
+from __future__ import annotations
 
 import asyncio
 import logging

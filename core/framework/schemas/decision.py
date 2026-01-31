@@ -9,6 +9,7 @@ This is MORE important than actions because:
 4. It's what we need to improve
 """
 
+from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from typing import Any

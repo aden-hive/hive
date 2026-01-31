@@ -1,4 +1,5 @@
 """Agent Runner - loads and runs exported agents."""
+from __future__ import annotations
 
 import json
 import logging

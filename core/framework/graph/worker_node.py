@@ -9,6 +9,7 @@ appropriate executor based on action type:
 - Function calls
 - Code execution (sandboxed)
 """
+from __future__ import annotations
 
 import json
 import logging

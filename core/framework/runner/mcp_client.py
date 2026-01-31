@@ -3,6 +3,7 @@
 This module provides a client for connecting to MCP servers and invoking their tools.
 Supports both STDIO and HTTP transports using the official MCP Python SDK.
 """
+from __future__ import annotations
 
 import asyncio
 import logging

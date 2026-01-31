@@ -4,6 +4,7 @@ Outcome Aggregator - Aggregates outcomes across streams for goal evaluation.
 The goal-driven nature of Hive means we need to track whether
 concurrent executions collectively achieve the goal.
 """
+from __future__ import annotations
 
 import asyncio
 import logging

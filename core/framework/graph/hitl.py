@@ -4,6 +4,7 @@ Standardized HITL (Human-In-The-Loop) Protocol
 This module defines the formal structure for pause/resume interactions
 where agents need to gather input from humans.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum

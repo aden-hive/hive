@@ -12,6 +12,7 @@ The build process:
 Each step requires validation and human approval before proceeding.
 You cannot skip steps or bypass validation.
 """
+from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime

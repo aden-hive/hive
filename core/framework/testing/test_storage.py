@@ -4,6 +4,7 @@ File-based storage backend for test data.
 Follows the same pattern as framework/storage/backend.py (FileStorage),
 storing tests as JSON files with indexes for efficient querying.
 """
+from __future__ import annotations
 
 import json
 from datetime import datetime

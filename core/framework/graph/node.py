@@ -14,6 +14,7 @@ Protocol:
     Every node must implement the NodeProtocol interface.
     The framework provides NodeContext with everything the node needs.
 """
+from __future__ import annotations
 
 import asyncio
 import logging

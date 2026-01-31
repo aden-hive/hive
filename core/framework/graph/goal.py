@@ -10,6 +10,7 @@ Goals are:
 - Constrained: Boundaries the agent must respect
 - Versionable: Can evolve based on runtime feedback
 """
+from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum

@@ -1,4 +1,5 @@
 """Message protocol for multi-agent communication."""
+from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field

@@ -1,4 +1,5 @@
 """Mock LLM Provider for testing and structural validation without real LLM calls."""
+from __future__ import annotations
 
 import json
 import re
