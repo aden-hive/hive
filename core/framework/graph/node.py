@@ -1577,18 +1577,36 @@ class FunctionNode(NodeProtocol):
     def __init__(self, func: Callable):
         self.func = func
 
+    def _resolve_inputs(self, ctx: NodeContext) -> dict[str, Any]:
+        """Build function kwargs from input_data, falling back to shared memory."""
+        if not ctx.node_spec.input_keys:
+            return dict(ctx.input_data)
+
+        resolved: dict[str, Any] = {}
+        for key in ctx.node_spec.input_keys:
+            if key in ctx.input_data:
+                resolved[key] = ctx.input_data[key]
+                continue
+
+            value = ctx.memory.read(key)
+            if value is not None:
+                resolved[key] = value
+
+        return resolved
+
     async def execute(self, ctx: NodeContext) -> NodeResult:
         """Execute the function."""
         import time
 
         ctx.runtime.set_node(ctx.node_id)
 
+        inputs = self._resolve_inputs(ctx)
         decision_id = ctx.runtime.decide(
             intent=f"Execute function {ctx.node_spec.function or 'unknown'}",
             options=[
                 {
                     "id": "execute",
-                    "description": f"Run function with inputs: {list(ctx.input_data.keys())}",
+                    "description": f"Run function with inputs: {list(inputs.keys())}",
                 }
             ],
             chosen="execute",
@@ -1599,7 +1617,7 @@ class FunctionNode(NodeProtocol):
 
         try:
             # Call the function
-            result = self.func(**ctx.input_data)
+            result = self.func(**inputs)
 
             latency_ms = int((time.time() - start) * 1000)
 
@@ -1612,10 +1630,26 @@ class FunctionNode(NodeProtocol):
 
             # Write to output keys
             output = {}
-            if ctx.node_spec.output_keys:
-                key = ctx.node_spec.output_keys[0]
-                output[key] = result
-                ctx.memory.write(key, result)
+            output_keys = ctx.node_spec.output_keys
+            if output_keys:
+                if isinstance(result, dict):
+                    output = {key: result[key] for key in output_keys if key in result}
+                elif len(output_keys) == 1:
+                    output = {output_keys[0]: result}
+                elif isinstance(result, (list, tuple)):
+                    if len(result) != len(output_keys):
+                        raise ValueError(
+                            "Function output length does not match output_keys length"
+                        )
+                    output = dict(zip(output_keys, result))
+                else:
+                    raise ValueError(
+                        "Function output must be a dict, list/tuple, or single value "
+                        "when multiple output_keys are defined"
+                    )
+
+                for key, value in output.items():
+                    ctx.memory.write(key, value)
             else:
                 output = {"result": result}
 

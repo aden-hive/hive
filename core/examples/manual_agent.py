@@ -16,21 +16,34 @@ import asyncio
 
 from framework.graph import EdgeCondition, EdgeSpec, Goal, GraphSpec, NodeSpec
 from framework.graph.executor import GraphExecutor
+from framework.runtime.console import configure_console_output
 from framework.runtime.core import Runtime
 
 
 # 1. Define Node Logic (Pure Python Functions)
-def greet(name: str) -> str:
-    """Generate a simple greeting."""
-    return f"Hello, {name}!"
+def greet(name: str, style: str = "upper") -> dict[str, str]:
+    """Generate a simple greeting and pass through the style."""
+    return {"greeting": f"Hello, {name}!", "style": style}
 
 
-def uppercase(greeting: str) -> str:
-    """Convert text to uppercase."""
-    return greeting.upper()
+def stylize(greeting: str, style: str = "upper") -> str:
+    """Apply a simple style transform to a greeting."""
+    style = (style or "").strip().lower()
+    if style in {"upper", "uppercase"}:
+        return greeting.upper()
+    if style in {"lower", "lowercase"}:
+        return greeting.lower()
+    if style in {"title", "titlecase"}:
+        return greeting.title()
+    if style in {"reverse", "reversed"}:
+        return greeting[::-1]
+    if style in {"spaced", "space"}:
+        return " ".join(list(greeting))
+    return greeting
 
 
 async def main():
+    configure_console_output()
     print("🚀 Setting up Manual Agent...")
 
     # 2. Define the Goal
@@ -38,7 +51,7 @@ async def main():
     goal = Goal(
         id="greet-user",
         name="Greet User",
-        description="Generate a friendly uppercase greeting",
+        description="Generate a friendly greeting with a selectable style",
         success_criteria=[
             {
                 "id": "greeting_generated",
@@ -54,29 +67,29 @@ async def main():
     node1 = NodeSpec(
         id="greeter",
         name="Greeter",
-        description="Generates a simple greeting",
+        description="Generates a simple greeting and forwards style",
         node_type="function",
         function="greet",  # Matches the registered function name
-        input_keys=["name"],
-        output_keys=["greeting"],
+        input_keys=["name", "style"],
+        output_keys=["greeting", "style"],
     )
 
     node2 = NodeSpec(
-        id="uppercaser",
-        name="Uppercaser",
-        description="Converts greeting to uppercase",
+        id="stylizer",
+        name="Stylizer",
+        description="Transforms greeting based on style input",
         node_type="function",
-        function="uppercase",
-        input_keys=["greeting"],
+        function="stylize",
+        input_keys=["greeting", "style"],
         output_keys=["final_greeting"],
     )
 
     # 4. Define Edges
     # Edges define the flow between nodes
     edge1 = EdgeSpec(
-        id="greet-to-upper",
+        id="greet-to-style",
         source="greeter",
-        target="uppercaser",
+        target="stylizer",
         condition=EdgeCondition.ON_SUCCESS,
     )
 
@@ -86,7 +99,7 @@ async def main():
         id="greeting-agent",
         goal_id="greet-user",
         entry_node="greeter",
-        terminal_nodes=["uppercaser"],
+        terminal_nodes=["stylizer"],
         nodes=[node1, node2],
         edges=[edge1],
     )
@@ -101,12 +114,19 @@ async def main():
     # 7. Register Function Implementations
     # Connect string names in NodeSpecs to actual Python functions
     executor.register_function("greeter", greet)
-    executor.register_function("uppercaser", uppercase)
+    executor.register_function("stylizer", stylize)
 
     # 8. Execute Agent
     print("▶ Executing agent with input: name='Alice'...")
 
-    result = await executor.execute(graph=graph, goal=goal, input_data={"name": "Alice"})
+    style = "reverse"
+    print(f"Style: {style}")
+
+    result = await executor.execute(
+        graph=graph,
+        goal=goal,
+        input_data={"name": "Alice", "style": style},
+    )
 
     # 9. Verify Results
     if result.success:

@@ -1,0 +1,127 @@
+{
+  "id": "run_20260129_100820_5e89e7a3",
+  "goal_id": "greet-user",
+  "started_at": "2026-01-29T10:08:20.134745",
+  "status": "completed",
+  "completed_at": "2026-01-29T10:08:20.136140",
+  "decisions": [
+    {
+      "id": "dec_0",
+      "timestamp": "2026-01-29T10:08:20.135244",
+      "node_id": "greeter",
+      "intent": "Execute function greet",
+      "decision_type": "custom",
+      "options": [
+        {
+          "id": "execute",
+          "description": "Run function with inputs: ['name', 'style']",
+          "action_type": "unknown",
+          "action_params": {},
+          "pros": [],
+          "cons": [],
+          "confidence": 0.5
+        }
+      ],
+      "chosen_option_id": "execute",
+      "reasoning": "Deterministic function execution",
+      "active_constraints": [],
+      "input_context": {},
+      "outcome": {
+        "success": true,
+        "result": {
+          "greeting": "Hello, Alice!",
+          "style": "reverse"
+        },
+        "error": null,
+        "state_changes": {},
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "summary": "",
+        "timestamp": "2026-01-29T10:08:20.135598"
+      },
+      "evaluation": null,
+      "chosen_option": {
+        "id": "execute",
+        "description": "Run function with inputs: ['name', 'style']",
+        "action_type": "unknown",
+        "action_params": {},
+        "pros": [],
+        "cons": [],
+        "confidence": 0.5
+      },
+      "was_successful": true,
+      "was_good_decision": true
+    },
+    {
+      "id": "dec_1",
+      "timestamp": "2026-01-29T10:08:20.135801",
+      "node_id": "stylizer",
+      "intent": "Execute function stylize",
+      "decision_type": "custom",
+      "options": [
+        {
+          "id": "execute",
+          "description": "Run function with inputs: ['greeting', 'style']",
+          "action_type": "unknown",
+          "action_params": {},
+          "pros": [],
+          "cons": [],
+          "confidence": 0.5
+        }
+      ],
+      "chosen_option_id": "execute",
+      "reasoning": "Deterministic function execution",
+      "active_constraints": [],
+      "input_context": {},
+      "outcome": {
+        "success": true,
+        "result": "!ecilA ,olleH",
+        "error": null,
+        "state_changes": {},
+        "tokens_used": 0,
+        "latency_ms": 0,
+        "summary": "",
+        "timestamp": "2026-01-29T10:08:20.135822"
+      },
+      "evaluation": null,
+      "chosen_option": {
+        "id": "execute",
+        "description": "Run function with inputs: ['greeting', 'style']",
+        "action_type": "unknown",
+        "action_params": {},
+        "pros": [],
+        "cons": [],
+        "confidence": 0.5
+      },
+      "was_successful": true,
+      "was_good_decision": true
+    }
+  ],
+  "problems": [],
+  "metrics": {
+    "total_decisions": 2,
+    "successful_decisions": 2,
+    "failed_decisions": 0,
+    "total_tokens": 0,
+    "total_latency_ms": 0,
+    "nodes_executed": [
+      "greeter",
+      "stylizer"
+    ],
+    "edges_traversed": [],
+    "success_rate": 1.0
+  },
+  "narrative": "Executed 2 steps through path: greeter -> stylizer",
+  "goal_description": "Generate a friendly greeting with a selectable style",
+  "input_data": {
+    "name": "Alice",
+    "style": "reverse"
+  },
+  "output_data": {
+    "name": "Alice",
+    "style": "reverse",
+    "greeting": "Hello, Alice!",
+    "final_greeting": "!ecilA ,olleH"
+  },
+  "duration_ms": 1
+}

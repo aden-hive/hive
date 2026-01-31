@@ -20,6 +20,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from framework.runtime.console import configure_console_output
 
 def _configure_paths():
     """Auto-configure sys.path so agents in exports/ are discoverable.
@@ -51,6 +52,7 @@ def _configure_paths():
 
 
 def main():
+    configure_console_output()
     _configure_paths()
 
     parser = argparse.ArgumentParser(
