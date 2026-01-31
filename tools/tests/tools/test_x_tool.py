@@ -1,11 +1,10 @@
 import unittest
 from unittest.mock import patch
+
 import httpx
 
 from aden_tools.tools.x_tool.x_tool import (
-    X_API_BASE,
     _XClient,
-    register_tools,
 )
 
 
