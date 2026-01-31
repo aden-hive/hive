@@ -140,6 +140,17 @@ fi
 echo -e "${GREEN}⬢${NC} Python $PYTHON_VERSION"
 echo ""
 
+# Create a virtual environment for the wizard and shared tools
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo -e "${YELLOW}  Creating virtual environment...${NC}"
+    $PYTHON_CMD -m venv "$VENV_DIR"
+    echo -e "${GREEN}  ✓ Created .venv${NC}"
+fi
+
+# Use the virtual environment python for all subsequent commands
+PYTHON_CMD="$VENV_DIR/bin/python"
+
 # Check for uv (install automatically if missing)
 if ! command -v uv &> /dev/null; then
     echo -e "${YELLOW}  uv not found. Installing...${NC}"
@@ -595,7 +606,8 @@ ERRORS=0
 
 # Test imports
 echo -n "  ⬡ framework... "
-if $PYTHON_CMD -c "import framework" > /dev/null 2>&1; then
+CORE_PYTHON="$SCRIPT_DIR/core/.venv/bin/python"
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -603,7 +615,8 @@ else
 fi
 
 echo -n "  ⬡ aden_tools... "
-if $PYTHON_CMD -c "import aden_tools" > /dev/null 2>&1; then
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
