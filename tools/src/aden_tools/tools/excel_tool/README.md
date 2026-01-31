@@ -223,6 +223,113 @@ for sheet in result['sheet_names']:
     print(f"Found sheet: {sheet}")
 ```
 
+### `excel_sql`
+
+Query an Excel file using SQL (powered by DuckDB). Each sheet is available as a table.
+
+**Parameters:**
+- `path` (str): Path to the Excel file
+- `workspace_id` (str): Workspace identifier
+- `agent_id` (str): Agent identifier
+- `session_id` (str): Session identifier
+- `query` (str): SQL query. Use 'data' for the target sheet, or sheet names (with spaces as underscores) to query/join multiple sheets.
+- `sheet` (str, optional): Sheet to use as 'data' table (default: first sheet)
+
+**Returns:**
+```python
+{
+    "success": True,
+    "path": "sales.xlsx",
+    "target_sheet": "Q4",
+    "query": "SELECT * FROM data WHERE amount > 100",
+    "columns": ["product", "amount"],
+    "column_count": 2,
+    "rows": [{"product": "Widget", "amount": 150}],
+    "row_count": 1
+}
+```
+
+**Examples:**
+```python
+# Simple query on default sheet
+result = excel_sql(
+    path="data.xlsx",
+    workspace_id="ws-123",
+    agent_id="agent-456",
+    session_id="session-789",
+    query="SELECT * FROM data WHERE price > 100"
+)
+
+# Aggregate data
+result = excel_sql(
+    path="sales.xlsx",
+    query="SELECT category, SUM(amount) as total FROM data GROUP BY category",
+    ...
+)
+
+# Join multiple sheets (sheets: 'Sales', 'Products')
+result = excel_sql(
+    path="workbook.xlsx",
+    query="SELECT s.*, p.name FROM Sales s JOIN Products p ON s.product_id = p.id",
+    ...
+)
+```
+
+**Note:** Only SELECT queries are allowed for security. Sheet names with spaces become underscores in SQL.
+
+### `excel_search`
+
+Search for values across Excel sheets.
+
+**Parameters:**
+- `path` (str): Path to the Excel file
+- `workspace_id` (str): Workspace identifier
+- `agent_id` (str): Agent identifier
+- `session_id` (str): Session identifier
+- `search_term` (str): Text to search for
+- `sheet` (str, optional): Specific sheet to search (default: all sheets)
+- `case_sensitive` (bool, optional): Whether search is case-sensitive (default: False)
+- `match_type` (str, optional): 'contains', 'exact', 'starts_with', or 'ends_with' (default: 'contains')
+
+**Returns:**
+```python
+{
+    "success": True,
+    "path": "data.xlsx",
+    "search_term": "Alice",
+    "match_type": "contains",
+    "case_sensitive": False,
+    "sheets_searched": ["Sheet1", "Sheet2"],
+    "matches": [
+        {"sheet": "Sheet1", "row": 2, "column": "name", "column_index": 1, "value": "Alice"},
+        {"sheet": "Sheet2", "row": 5, "column": "author", "column_index": 3, "value": "Alice Smith"}
+    ],
+    "match_count": 2
+}
+```
+
+**Example:**
+```python
+# Search for "error" across all sheets (case-insensitive)
+result = excel_search(
+    path="logs.xlsx",
+    workspace_id="ws-123",
+    agent_id="agent-456",
+    session_id="session-789",
+    search_term="error"
+)
+
+# Exact match, case-sensitive, specific sheet
+result = excel_search(
+    path="employees.xlsx",
+    search_term="John",
+    sheet="Active",
+    case_sensitive=True,
+    match_type="exact",
+    ...
+)
+```
+
 ## Error Handling
 
 All functions return a dict with an `error` key if something goes wrong:
