@@ -95,6 +95,54 @@ Skills are symlinked so updates in `.claude/skills/` are reflected in Antigravit
 
 - Antigravity may not have a built-in “skills” UI like Cursor. Use the content under `.claude/skills/` (or `.antigravity/skills/`) as reference documentation while using the MCP tools in the IDE.
 
+## How to verify (check by yourself)
+
+You can confirm the integration without Antigravity IDE installed:
+
+### 1. Check files exist
+
+From the repo root:
+
+```bash
+# MCP config
+test -f .antigravity/mcp_config.json && echo "OK: mcp_config.json" || echo "MISSING"
+
+# Skills symlinks (all should resolve)
+for s in agent-workflow building-agents-core building-agents-construction building-agents-patterns testing-agent; do
+  test -L .antigravity/skills/$s && test -d .antigravity/skills/$s && echo "OK: $s" || echo "BROKEN: $s"
+done
+```
+
+### 2. Validate MCP config JSON
+
+```bash
+python3 -c "import json; json.load(open('.antigravity/mcp_config.json')); print('OK: valid JSON')"
+```
+
+### 3. Verify MCP servers can start (optional)
+
+From repo root, in two terminals:
+
+```bash
+# Terminal 1 – agent-builder (Ctrl+C to stop)
+cd core && PYTHONPATH=../tools/src python -m framework.mcp.agent_builder_server
+
+# Terminal 2 – tools server (Ctrl+C to stop)
+cd tools && PYTHONPATH=src python mcp_server.py --stdio
+```
+
+If both start without import/runtime errors, the config is correct.
+
+### 4. Confirm symlinks match Cursor
+
+```bash
+# Same 5 skills as .cursor (if present) and .claude/skills
+ls -la .antigravity/skills/
+# Each should show -> ../../.claude/skills/<name>
+```
+
+---
+
 ## See also
 
 - [Cursor IDE support](../README.md#cursor-ide-support) – Same MCP servers and skills for Cursor
