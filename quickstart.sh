@@ -11,6 +11,13 @@
 
 set -e
 
+# Detect Bash version for compatibility
+BASH_MAJOR_VERSION="${BASH_VERSINFO[0]}"
+USE_ASSOC_ARRAYS=false
+if [ "$BASH_MAJOR_VERSION" -ge 4 ]; then
+    USE_ASSOC_ARRAYS=true
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -344,53 +351,105 @@ echo ""
 echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
 echo ""
 
-# Provider data as parallel indexed arrays (Bash 3.2 compatible — no declare -A)
-PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
-PROVIDER_ID_LIST=(anthropic openai gemini google groq cerebras mistral together deepseek)
+# Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
+if [ "$USE_ASSOC_ARRAYS" = true ]; then
+    # Bash 4+ - use associative arrays (cleaner and more efficient)
+    declare -A PROVIDER_NAMES=(
+        ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
+        ["OPENAI_API_KEY"]="OpenAI (GPT)"
+        ["GEMINI_API_KEY"]="Google Gemini"
+        ["GOOGLE_API_KEY"]="Google AI"
+        ["GROQ_API_KEY"]="Groq"
+        ["CEREBRAS_API_KEY"]="Cerebras"
+        ["MISTRAL_API_KEY"]="Mistral"
+        ["TOGETHER_API_KEY"]="Together AI"
+        ["DEEPSEEK_API_KEY"]="DeepSeek"
+    )
 
-# Default models by provider id (parallel arrays)
-MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
-MODEL_DEFAULTS=("claude-sonnet-4-5-20250929" "gpt-4o" "gemini-3.0-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    declare -A PROVIDER_IDS=(
+        ["ANTHROPIC_API_KEY"]="anthropic"
+        ["OPENAI_API_KEY"]="openai"
+        ["GEMINI_API_KEY"]="gemini"
+        ["GOOGLE_API_KEY"]="google"
+        ["GROQ_API_KEY"]="groq"
+        ["CEREBRAS_API_KEY"]="cerebras"
+        ["MISTRAL_API_KEY"]="mistral"
+        ["TOGETHER_API_KEY"]="together"
+        ["DEEPSEEK_API_KEY"]="deepseek"
+    )
 
-# Helper: get provider display name for an env var
-get_provider_name() {
-    local env_var="$1"
-    local i=0
-    while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
-        if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
-            echo "${PROVIDER_DISPLAY_NAMES[$i]}"
-            return
-        fi
-        i=$((i + 1))
-    done
-}
+    declare -A DEFAULT_MODELS=(
+        ["anthropic"]="claude-sonnet-4-5-20250929"
+        ["openai"]="gpt-4o"
+        ["gemini"]="gemini-3.0-flash-preview"
+        ["groq"]="moonshotai/kimi-k2-instruct-0905"
+        ["cerebras"]="zai-glm-4.7"
+        ["mistral"]="mistral-large-latest"
+        ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
+        ["deepseek"]="deepseek-chat"
+    )
 
-# Helper: get provider id for an env var
-get_provider_id() {
-    local env_var="$1"
-    local i=0
-    while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
-        if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
-            echo "${PROVIDER_ID_LIST[$i]}"
-            return
-        fi
-        i=$((i + 1))
-    done
-}
+    # Helper functions for Bash 4+
+    get_provider_name() {
+        echo "${PROVIDER_NAMES[$1]}"
+    }
 
-# Helper: get default model for a provider id
-get_default_model() {
-    local provider_id="$1"
-    local i=0
-    while [ $i -lt ${#MODEL_PROVIDER_IDS[@]} ]; do
-        if [ "${MODEL_PROVIDER_IDS[$i]}" = "$provider_id" ]; then
-            echo "${MODEL_DEFAULTS[$i]}"
-            return
-        fi
-        i=$((i + 1))
-    done
-}
+    get_provider_id() {
+        echo "${PROVIDER_IDS[$1]}"
+    }
+
+    get_default_model() {
+        echo "${DEFAULT_MODELS[$1]}"
+    }
+else
+    # Bash 3.2 - use parallel indexed arrays
+    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
+    PROVIDER_ID_LIST=(anthropic openai gemini google groq cerebras mistral together deepseek)
+
+    # Default models by provider id (parallel arrays)
+    MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
+    MODEL_DEFAULTS=("claude-sonnet-4-5-20250929" "gpt-4o" "gemini-3.0-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+
+    # Helper: get provider display name for an env var
+    get_provider_name() {
+        local env_var="$1"
+        local i=0
+        while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
+            if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
+                echo "${PROVIDER_DISPLAY_NAMES[$i]}"
+                return
+            fi
+            i=$((i + 1))
+        done
+    }
+
+    # Helper: get provider id for an env var
+    get_provider_id() {
+        local env_var="$1"
+        local i=0
+        while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
+            if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
+                echo "${PROVIDER_ID_LIST[$i]}"
+                return
+            fi
+            i=$((i + 1))
+        done
+    }
+
+    # Helper: get default model for a provider id
+    get_default_model() {
+        local provider_id="$1"
+        local i=0
+        while [ $i -lt ${#MODEL_PROVIDER_IDS[@]} ]; do
+            if [ "${MODEL_PROVIDER_IDS[$i]}" = "$provider_id" ]; then
+                echo "${MODEL_DEFAULTS[$i]}"
+                return
+            fi
+            i=$((i + 1))
+        done
+    }
+fi
 
 # Configuration directory
 HIVE_CONFIG_DIR="$HOME/.hive"
@@ -442,13 +501,25 @@ FOUND_ENV_VARS=()       # Corresponding env var names
 SELECTED_PROVIDER_ID="" # Will hold the chosen provider ID
 SELECTED_ENV_VAR=""     # Will hold the chosen env var
 
-for env_var in "${PROVIDER_ENV_VARS[@]}"; do
-    value="${!env_var}"
-    if [ -n "$value" ]; then
-        FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
-        FOUND_ENV_VARS+=("$env_var")
-    fi
-done
+if [ "$USE_ASSOC_ARRAYS" = true ]; then
+    # Bash 4+ - iterate over associative array keys
+    for env_var in "${!PROVIDER_NAMES[@]}"; do
+        value="${!env_var}"
+        if [ -n "$value" ]; then
+            FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
+            FOUND_ENV_VARS+=("$env_var")
+        fi
+    done
+else
+    # Bash 3.2 - iterate over indexed array
+    for env_var in "${PROVIDER_ENV_VARS[@]}"; do
+        value="${!env_var}"
+        if [ -n "$value" ]; then
+            FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
+            FOUND_ENV_VARS+=("$env_var")
+        fi
+    done
+fi
 
 if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
     echo "Found API keys:"
