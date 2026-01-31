@@ -572,7 +572,7 @@ def cmd_clean(args: argparse.Namespace) -> int:
 
     deleted = storage.cleanup_old_runs(args.days)
 
-    print(f"✓ Deleted {deleted} old runs")
+    print(f"[OK] Deleted {deleted} old runs")
     return 0
 
 
