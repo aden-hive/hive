@@ -176,8 +176,16 @@ echo ""
 
 # Upgrade pip, setuptools, and wheel
 echo -n "  Upgrading pip... "
-$PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
-echo -e "${GREEN}ok${NC}"
+if ! $PYTHON_CMD -m pip --version >/dev/null 2>&1; then
+  if $PYTHON_CMD -m ensurepip --upgrade >/dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ pip installed${NC}"
+  else
+    echo -e "${RED}  ✗ failed to install pip${NC}"
+    exit 1
+  fi
+else
+  echo -e "${GREEN}  ✓ pip already installed${NC}"
+fi
 
 # Install framework package from core/
 echo -n "  Installing framework... "
@@ -212,10 +220,13 @@ else
     exit 1
 fi
 
-# Install MCP dependencies
 echo -n "  Installing MCP... "
-$PYTHON_CMD -m pip install mcp fastmcp > /dev/null 2>&1
-echo -e "${GREEN}ok${NC}"
+if output=$($PYTHON_CMD -m pip install mcp fastmcp 2>&1); then
+  echo -e "${GREEN}ok${NC}"
+else
+  echo -e "\n${RED}✗ MCP install failed:${NC}\n${RED}$output${NC}"
+  exit 1
+fi
 
 # Fix openai version compatibility
 echo -n "  Checking openai... "
