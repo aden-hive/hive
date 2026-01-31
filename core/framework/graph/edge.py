@@ -22,12 +22,17 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
+from __future__ import annotations
+
 from enum import Enum
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from framework.graph.safe_eval import safe_eval
+
+if TYPE_CHECKING:
+    from framework.graph.node import NodeSpec
 
 
 class EdgeCondition(str, Enum):
@@ -397,7 +402,7 @@ class GraphSpec(BaseModel):
     )
 
     # Components
-    nodes: list[Any] = Field(  # NodeSpec, but avoiding circular import
+    nodes: list[NodeSpec] = Field(
         default_factory=list, description="All node specifications"
     )
     edges: list[EdgeSpec] = Field(default_factory=list, description="All edge specifications")
