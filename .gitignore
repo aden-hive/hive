@@ -70,3 +70,6 @@ exports/*
 .agent-builder-sessions/*
 
 .venv
+
+docs/github-issues/*
+core/tests/*
