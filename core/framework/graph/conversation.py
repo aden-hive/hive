@@ -267,12 +267,12 @@ class NodeConversation:
                 pass
 
         # 3. Colon format: key: value
-        match = re.search(rf'\b{re.escape(key)}\s*:\s*(.+)', content)
+        match = re.search(rf"\b{re.escape(key)}\s*:\s*(.+)", content)
         if match:
             return match.group(1).strip()
 
         # 4. Equals format: key = value
-        match = re.search(rf'\b{re.escape(key)}\s*=\s*(.+)', content)
+        match = re.search(rf"\b{re.escape(key)}\s*=\s*(.+)", content)
         if match:
             return match.group(1).strip()
 

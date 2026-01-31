@@ -9,7 +9,6 @@ import pytest
 from framework.graph.conversation import Message, NodeConversation
 from framework.storage.conversation_store import FileConversationStore
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -89,9 +88,7 @@ class TestMessage:
         assert d == {"role": "tool", "tool_call_id": "call_1", "content": "sunny"}
 
     def test_tool_error_to_llm_dict(self):
-        m = Message(
-            seq=0, role="tool", content="not found", tool_use_id="call_1", is_error=True
-        )
+        m = Message(seq=0, role="tool", content="not found", tool_use_id="call_1", is_error=True)
         d = m.to_llm_dict()
         assert d["content"] == "ERROR: not found"
         assert d["tool_call_id"] == "call_1"
@@ -252,9 +249,9 @@ class TestNodeConversation:
     async def test_compact_seq_arithmetic_with_keep_recent(self):
         """Summary seq = recent[0].seq - 1 when keeping recent messages."""
         conv = NodeConversation()
-        await conv.add_user_message("m1")      # seq=0
+        await conv.add_user_message("m1")  # seq=0
         await conv.add_assistant_message("m2")  # seq=1
-        await conv.add_user_message("m3")       # seq=2
+        await conv.add_user_message("m3")  # seq=2
         await conv.add_assistant_message("m4")  # seq=3
 
         await conv.compact("summary", keep_recent=2)
@@ -322,9 +319,7 @@ class TestExtractProtectedValues:
     async def test_extract_json_format(self):
         conv = NodeConversation(output_keys=["meetings"])
         await conv.add_assistant_message('{"meetings": ["standup", "retro"]}')
-        assert conv._extract_protected_values(conv.messages) == {
-            "meetings": '["standup", "retro"]'
-        }
+        assert conv._extract_protected_values(conv.messages) == {"meetings": '["standup", "retro"]'}
 
     @pytest.mark.asyncio
     async def test_extract_equals_format(self):
