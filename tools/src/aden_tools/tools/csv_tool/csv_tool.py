@@ -34,6 +34,8 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             dict with success status, data, and metadata
         """
+        if offset < 0 or (limit is not None and limit < 0):
+            return {"error": "offset and limit must be non-negative"}
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
@@ -118,7 +120,9 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": "columns cannot be empty"}
 
             # Create parent directories if needed
-            os.makedirs(os.path.dirname(secure_path), exist_ok=True)
+            parent_dir = os.path.dirname(secure_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
 
             # Write CSV
             with open(secure_path, "w", encoding="utf-8", newline="") as f:
