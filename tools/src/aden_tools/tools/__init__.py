@@ -121,7 +121,6 @@ def register_all_tools(
         "x_delete_tweet",
         "x_search_tweets",
         "x_get_mentions",
-
     ]
 
 

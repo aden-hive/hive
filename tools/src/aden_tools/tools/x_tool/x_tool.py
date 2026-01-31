@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 X_API_BASE = "https://api.twitter.com/2"
 
+
 # Internal Client
 class _XClient:
     """Internal client wrapping X API v2 calls."""
@@ -64,6 +65,7 @@ class _XClient:
         )
         return self._handle_response(response)
 
+
 # Tool Registration
 def register_tools(
     mcp: FastMCP,
@@ -87,7 +89,6 @@ def register_tools(
                 "help": "Set X_BEARER_TOKEN or configure via credential store",
             }
         return _XClient(token)
-
 
     # Tools
 

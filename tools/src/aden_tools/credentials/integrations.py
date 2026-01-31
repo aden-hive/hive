@@ -81,5 +81,4 @@ INTEGRATION_CREDENTIALS = {
         credential_id="x",
         credential_key="access_token",
     ),
-
 }
