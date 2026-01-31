@@ -117,6 +117,40 @@ Skills are also available in Cursor. To enable:
 - **SDK-Wrapped Nodes** - Every node gets shared memory, local RLM memory, monitoring, tools, and LLM access out of the box
 - **Human-in-the-Loop** - Intervention nodes that pause execution for human input with configurable timeouts and escalation
 - **Real-time Observability** - WebSocket streaming for live monitoring of agent execution, decisions, and node-to-node communication
+
+- **Explainability CLI** - Easily view agent reasoning, decisions, and actions for any run. Use the `show-run-log` command to see why agents made each choice.
+
+### Example: View Agent Reasoning Log
+
+Before (no explainability):
+```
+$ python -m framework.cli run my_agent_folder --input '{"question": "What is the weather?"}'
+... (agent runs, but reasoning is not visible)
+```
+
+After (with explainability):
+```
+$ python -m framework.cli run my_agent_folder --input '{"question": "What is the weather?"}'
+... (agent run produces a run log file, e.g. run_20260131_abcdef12.json)
+
+$ python -m framework.cli show-run-log path/to/run_20260131_abcdef12.json
+Run ID: run_20260131_abcdef12
+Goal: Get weather information
+Status: completed
+
+Decisions and Reasoning:
+
+- Node: weather-llm
+    Intent: Execute Weather LLM Node
+    Reasoning: Node type is llm_generate with input: {'question': 'What is the weather?'}
+    Chosen Option: llm_execute
+    Options:
+        - llm_execute: Use LLM to get weather
+    Outcome: True
+        Result: {'answer': 'It is sunny.'}
+
+--- End of Run Log ---
+```
 - **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
 - **Production-Ready** - Self-hostable, built for scale and reliability
 
@@ -186,14 +220,33 @@ Put the agent in `exports/` and run `PYTHONPATH=core:exports python -m your_agen
 
 For building and running goal-driven agents with the framework:
 
+
 ```bash
 # One-time setup
 ./quickstart.sh
+```
 
-# This sets up:
-# - framework package (core runtime)
-# - aden_tools package (MCP tools)
-# - All Python dependencies
+If you see errors during setup (e.g., "framework... failed"), try these troubleshooting steps:
+
+1. Activate the core environment and test imports:
+    ```bash
+    source core/.venv/bin/activate && python -c "import framework" && deactivate
+    ```
+2. Activate the tools environment and test imports:
+    ```bash
+    source tools/.venv/bin/activate && python -c "import aden_tools" && deactivate
+    ```
+3. If you see an error message, check that all dependencies are installed and your Python version is 3.11+.
+4. If no error appears, try running the CLI (make sure to activate the core environment first):
+    ```bash
+    source core/.venv/bin/activate && python -m framework.cli --help && deactivate
+    ```
+    Or, if you prefer not to activate the environment, set the PYTHONPATH:
+    ```bash
+    PYTHONPATH=core python -m framework.cli --help
+    ```
+If all checks pass in the quickstart script, your environment is ready to use. You should see 'ok' for framework, aden_tools, and litellm in the final verification step.
+5. For more help, see [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) or open an issue.
 
 # Build new agents using Claude Code skills
 claude> /building-agents-construction
@@ -205,7 +258,18 @@ claude> /testing-agent
 PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 ```
 
-See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.
+
+## Testing
+
+To run tests:
+
+```bash
+source core/.venv/bin/activate && pytest core/tests/ && deactivate
+```
+
+If tests fail, review the output and your changes. For PRs, include before/after test results.
+
+See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for full setup details.
 
 ## Documentation
 

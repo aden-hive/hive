@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Agent Explainability Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; background: #f8f9fa; }
+        h1 { color: #333; }
+        .log-list { margin-top: 2em; }
+        .log-list li { margin-bottom: 0.5em; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .empty { color: #888; }
+    </style>
+</head>
+<body>
+    <h1>Agent Explainability Dashboard</h1>
+    <div class="log-list">
+        <h2>Available Run Logs</h2>
+        <input type="text" id="search-input" placeholder="Search logs by filename..." style="width: 250px; padding: 0.25em 0.5em; margin-bottom: 1em; font-size: 0.95em;">
+        <ul id="log-list">
+            {% if files %}
+                {% for file in files %}
+                    <li>
+                        <a href="/log/{{ file }}">{{ file }}</a>
+                        (<a href="/logs/{{ file }}" download>Download</a>)
+                    </li>
+                {% endfor %}
+            {% else %}
+                <li class="empty">No run logs found.</li>
+            {% endif %}
+        </ul>
+    </div>
+    <script src="/static/search.js"></script>
+</body>
+</html>

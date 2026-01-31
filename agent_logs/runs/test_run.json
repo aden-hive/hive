@@ -1,0 +1,6 @@
+{
+  "success": false,
+  "steps_executed": 0,
+  "output": {},
+  "error": "Invalid graph: [\"Entry node '' not found\", \"Edge 'start_to_echo' references missing source 'START'\", \"Node 'echo' is unreachable from entry\"]"
+}

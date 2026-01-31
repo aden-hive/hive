@@ -1,0 +1,6 @@
+{
+  "success": false,
+  "steps_executed": 1,
+  "output": {},
+  "error": "Function node 'echo' not registered. Register with node_registry."
+}

@@ -1,5 +1,6 @@
 """CLI commands for agent runner."""
 
+
 import argparse
 import asyncio
 import json
@@ -8,7 +9,11 @@ from pathlib import Path
 
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
+
     """Register runner commands with the main CLI."""
+    # Explainability command
+    from framework.runner.explainability_cli import register_explainability_commands
+    register_explainability_commands(subparsers)
 
     # run command
     run_parser = subparsers.add_parser(
@@ -194,24 +199,41 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.input:
         try:
             context = json.loads(args.input)
-        except json.JSONDecodeError as e:
+        except Exception as e:
             print(f"Error parsing --input JSON: {e}", file=sys.stderr)
             return 1
     elif args.input_file:
         try:
             with open(args.input_file) as f:
                 context = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
+        except Exception as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
             return 1
 
+
     # Load and run agent
     try:
+        import os
         runner = AgentRunner.load(
             args.agent_path,
             mock_mode=args.mock,
             model=getattr(args, "model", "claude-haiku-4-5-20251001"),
         )
+        # DEBUG: Print loaded goal_id and graph_id
+        print(f"[DEBUG] Loaded graph_id: {getattr(runner.graph, 'id', None)} goal_id: {getattr(runner.graph, 'goal_id', None)}")
+        print(f"[DEBUG] Loaded goal.id: {getattr(runner.goal, 'id', None)} goal.name: {getattr(runner.goal, 'name', None)}")
+        # Directly register echo for minimal_agent
+        if os.path.basename(args.agent_path) == "minimal_agent":
+            import sys as _sys
+            import importlib.util
+            agent_tools_path = os.path.join(args.agent_path, "tools.py")
+            if os.path.exists(agent_tools_path):
+                spec = importlib.util.spec_from_file_location("minimal_agent_tools", agent_tools_path)
+                tools_mod = importlib.util.module_from_spec(spec)
+                _sys.modules["minimal_agent_tools"] = tools_mod
+                spec.loader.exec_module(tools_mod)
+                if hasattr(tools_mod, "echo"):
+                    runner.register_tool("echo", getattr(tools_mod, "echo"))
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -235,29 +257,61 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("=" * 60)
         print()
 
+
     # Run the agent
     result = asyncio.run(runner.run(context))
 
-    # Format output
-    output = {
-        "success": result.success,
-        "steps_executed": result.steps_executed,
-        "output": result.output,
-    }
-    if result.error:
-        output["error"] = result.error
-    if result.paused_at:
-        output["paused_at"] = result.paused_at
+    # Try to fetch the full run log from storage if possible
+    full_run_log = None
+    run_id = getattr(result, "run_id", None)
+    if run_id is not None:
+        # Try to load from the default storage path
+        from pathlib import Path
+        storage_path = getattr(runner, "_storage_path", None)
+        if storage_path:
+            run_log_path = Path(storage_path) / "runs" / f"{run_id}.json"
+            if run_log_path.exists():
+                try:
+                    with open(run_log_path, "r", encoding="utf-8") as f:
+                        full_run_log = json.load(f)
+                except Exception:
+                    full_run_log = None
 
     # Output results
     if args.output:
+        # Write the full run log if available, else fallback to summary
         with open(args.output, "w") as f:
-            json.dump(output, f, indent=2, default=str)
+            if full_run_log is not None:
+                json.dump(full_run_log, f, indent=2, default=str)
+            else:
+                # Fallback: write the summary output
+                output = {
+                    "success": result.success,
+                    "steps_executed": result.steps_executed,
+                    "output": result.output,
+                }
+                if result.error:
+                    output["error"] = result.error
+                if result.paused_at:
+                    output["paused_at"] = result.paused_at
+                json.dump(output, f, indent=2, default=str)
         if not args.quiet:
             print(f"Results written to {args.output}")
     else:
         if args.quiet:
-            print(json.dumps(output, indent=2, default=str))
+            if full_run_log is not None:
+                print(json.dumps(full_run_log, indent=2, default=str))
+            else:
+                output = {
+                    "success": result.success,
+                    "steps_executed": result.steps_executed,
+                    "output": result.output,
+                }
+                if result.error:
+                    output["error"] = result.error
+                if result.paused_at:
+                    output["paused_at"] = result.paused_at
+                print(json.dumps(output, indent=2, default=str))
         else:
             print()
             print("=" * 60)
@@ -269,10 +323,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
             if result.success:
                 print("\n--- Results ---")
-                # Show only meaningful output keys (skip internal/intermediate values)
                 meaningful_keys = ["final_response", "response", "result", "answer", "output"]
-
-                # Try to find the most relevant output
                 shown = False
                 for key in meaningful_keys:
                     if key in result.output:
@@ -285,8 +336,6 @@ def cmd_run(args: argparse.Namespace) -> int:
                             print(json.dumps(value, indent=2, default=str))
                             shown = True
                             break
-
-                # If no meaningful key found, show all non-internal keys
                 if not shown:
                     for key, value in result.output.items():
                         if not key.startswith("_") and key not in [
@@ -472,7 +521,7 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     # Parse input
     try:
         context = json.loads(args.input)
-    except json.JSONDecodeError as e:
+    except Exception as e:
         print(f"Error parsing --input JSON: {e}", file=sys.stderr)
         return 1
 

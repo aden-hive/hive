@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Run Log: {{ filename }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; background: #f8f9fa; }
+        h1 { color: #333; }
+        .back { margin-bottom: 1em; }
+        .section { margin-bottom: 2em; }
+        .decision { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 1em; margin-bottom: 1em; }
+        .decision h3 { margin-top: 0; }
+        .meta { color: #666; font-size: 0.95em; }
+        .outcome { margin-top: 0.5em; }
+        pre { background: #f4f4f4; padding: 0.5em; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="back"><a href="/">&larr; Back to log list</a></div>
+    <h1>Run Log: {{ filename }}</h1>
+    <div class="section">
+        <strong>Run ID:</strong> {{ run.get('id', 'unknown') }}<br>
+        <strong>Goal:</strong> {{ run.get('goal_description', '') }}<br>
+        <strong>Status:</strong> {{ run.get('status', '') }}
+    </div>
+    <div class="section">
+        <h2>Decisions and Reasoning</h2>
+        {% if run.get('decisions') %}
+            {% for dec in run['decisions'] %}
+                <div class="decision">
+                    <h3>Node: {{ dec.get('node_id', 'unknown') }}</h3>
+                    <div class="meta">
+                        <strong>Intent:</strong> {{ dec.get('intent', '') }}<br>
+                        <strong>Reasoning:</strong> {{ dec.get('reasoning', '') }}<br>
+                        <strong>Chosen Option:</strong> {{ dec.get('chosen_option_id', '') }}
+                    </div>
+                    {% if dec.get('options') %}
+                        <div class="meta"><strong>Options:</strong>
+                            <ul>
+                                {% for opt in dec['options'] %}
+                                    <li>{{ opt.get('id', '') }}: {{ opt.get('description', '') }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endif %}
+                    {% if dec.get('outcome') %}
+                        <div class="outcome">
+                            <strong>Outcome:</strong> {{ dec['outcome'].get('success', '') }}<br>
+                            {% if dec['outcome'].get('result') %}
+                                <strong>Result:</strong>
+                                <pre>{{ dec['outcome']['result'] | tojson(indent=2) }}</pre>
+                            {% endif %}
+                            {% if dec['outcome'].get('error') %}
+                                <strong>Error:</strong> <pre>{{ dec['outcome']['error'] }}</pre>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="meta">No decisions or reasoning found in this run log.</div>
+        {% endif %}
+    </div>
+</body>
+</html>

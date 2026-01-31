@@ -1,0 +1,32 @@
+{
+  "graph": {
+    "id": "minimal_agent",
+    "goal_id": "test_goal",
+    "entry_node": "echo",
+    "nodes": [
+      {
+        "id": "echo",
+        "node_id": "echo",
+        "name": "Echo Node",
+        "description": "Echoes the input question as the answer.",
+        "node_type": "function",
+        "function": "echo",
+        "input_keys": ["question"],
+        "output_keys": ["answer"]
+      }
+    ],
+    "edges": []
+  },
+  "goal": {
+    "id": "test_goal",
+    "goal_id": "test_goal",
+    "name": "Test Goal",
+    "description": "A minimal agent for testing explainability.",
+    "success_criteria": [
+      {
+        "id": "node_executed",
+        "description": "Node executed"
+      }
+    ]
+  }
+}
