@@ -47,7 +47,7 @@ class FileConversationStore:
         if not path.exists():
             return None
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, ValueError):
             return None
@@ -106,6 +106,7 @@ class FileConversationStore:
 
     async def destroy(self) -> None:
         """Delete the entire base directory and all persisted data."""
+
         def _destroy() -> None:
             if self._base.exists():
                 shutil.rmtree(self._base)
