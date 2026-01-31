@@ -298,10 +298,23 @@ class GraphExecutor:
 
                 # Handle failure
                 if not result.success:
+                    # Check if we SHOULD retry based on error type
+                    should_retry = True
+                    
+                    # If specific exceptions are listed, check if the error matches one of them
+                    if node_spec.retry_on:
+                        error_msg = str(result.error)
+                        # Retry only if the error message contains one of the allowed types
+                        if not any(e_type in error_msg for e_type in node_spec.retry_on):
+                            should_retry = False
+                            self.logger.warning(
+                                f"   ⚠ Not retrying: Error '{result.error}' does not match allowed retry types: {node_spec.retry_on}"
+                            )
+
                     # Track retries per node
                     node_retry_counts[current_node_id] = node_retry_counts.get(current_node_id, 0) + 1
 
-                    if node_retry_counts[current_node_id] < node_spec.max_retries:
+                    if should_retry and node_retry_counts[current_node_id] <= node_spec.max_retries:
                         # Retry - don't increment steps for retries
                         steps -= 1
                         self.logger.info(f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{node_spec.max_retries})...")
