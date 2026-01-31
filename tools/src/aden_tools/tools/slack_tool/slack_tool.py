@@ -173,6 +173,209 @@ class _SlackClient:
         )
         return self._handle_response(response)
 
+    def update_message(
+        self,
+        channel: str,
+        ts: str,
+        text: str,
+        blocks: list[dict] | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing message."""
+        body: dict[str, Any] = {
+            "channel": channel,
+            "ts": ts,
+            "text": text,
+        }
+        if blocks:
+            body["blocks"] = blocks
+
+        response = httpx.post(
+            f"{SLACK_API_BASE}/chat.update",
+            headers=self._headers,
+            json=body,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def delete_message(self, channel: str, ts: str) -> dict[str, Any]:
+        """Delete a message."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/chat.delete",
+            headers=self._headers,
+            json={"channel": channel, "ts": ts},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def schedule_message(
+        self,
+        channel: str,
+        text: str,
+        post_at: int,
+        thread_ts: str | None = None,
+    ) -> dict[str, Any]:
+        """Schedule a message for future delivery."""
+        body: dict[str, Any] = {
+            "channel": channel,
+            "text": text,
+            "post_at": post_at,
+        }
+        if thread_ts:
+            body["thread_ts"] = thread_ts
+
+        response = httpx.post(
+            f"{SLACK_API_BASE}/chat.scheduleMessage",
+            headers=self._headers,
+            json=body,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def create_channel(
+        self,
+        name: str,
+        is_private: bool = False,
+    ) -> dict[str, Any]:
+        """Create a new channel."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/conversations.create",
+            headers=self._headers,
+            json={"name": name, "is_private": is_private},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def archive_channel(self, channel: str) -> dict[str, Any]:
+        """Archive a channel."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/conversations.archive",
+            headers=self._headers,
+            json={"channel": channel},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def invite_to_channel(self, channel: str, users: str) -> dict[str, Any]:
+        """Invite users to a channel (comma-separated user IDs)."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/conversations.invite",
+            headers=self._headers,
+            json={"channel": channel, "users": users},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def remove_reaction(
+        self,
+        channel: str,
+        timestamp: str,
+        name: str,
+    ) -> dict[str, Any]:
+        """Remove a reaction emoji from a message."""
+        body = {
+            "channel": channel,
+            "timestamp": timestamp,
+            "name": name.strip(":"),
+        }
+        response = httpx.post(
+            f"{SLACK_API_BASE}/reactions.remove",
+            headers=self._headers,
+            json=body,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def list_users(self, limit: int = 100) -> dict[str, Any]:
+        """List users in the workspace."""
+        response = httpx.get(
+            f"{SLACK_API_BASE}/users.list",
+            headers=self._headers,
+            params={"limit": min(limit, 1000)},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def upload_file(
+        self,
+        channels: str,
+        content: str,
+        filename: str,
+        title: str | None = None,
+        initial_comment: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload a text file to channels using the new API (files.getUploadURLExternal).
+        
+        Note: The old files.upload API was deprecated in March 2024.
+        """
+        content_bytes = content.encode('utf-8')
+        length = len(content_bytes)
+        
+        # Step 1: Get upload URL
+        params = {
+            "filename": filename,
+            "length": length,
+        }
+        url_response = httpx.get(
+            f"{SLACK_API_BASE}/files.getUploadURLExternal",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        url_result = self._handle_response(url_response)
+        if "error" in url_result:
+            return url_result
+        
+        upload_url = url_result.get("upload_url")
+        file_id = url_result.get("file_id")
+        
+        if not upload_url or not file_id:
+            return {"error": "Failed to get upload URL from Slack"}
+        
+        # Step 2: Upload file content to the URL
+        upload_response = httpx.post(
+            upload_url,
+            content=content_bytes,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=60.0,
+        )
+        if upload_response.status_code != 200:
+            return {"error": f"File upload failed: {upload_response.status_code}"}
+        
+        # Step 3: Complete the upload
+        complete_body: dict[str, Any] = {
+            "files": [{"id": file_id, "title": title or filename}],
+        }
+        if channels:
+            complete_body["channel_id"] = channels
+        if initial_comment:
+            complete_body["initial_comment"] = initial_comment
+            
+        complete_response = httpx.post(
+            f"{SLACK_API_BASE}/files.completeUploadExternal",
+            headers=self._headers,
+            json=complete_body,
+            timeout=30.0,
+        )
+        result = self._handle_response(complete_response)
+        if "error" in result:
+            return result
+            
+        # Return in same format as old API for compatibility
+        files = result.get("files", [])
+        if files:
+            return {"ok": True, "file": files[0]}
+        return {"ok": True}
+
+
+    def set_channel_topic(self, channel: str, topic: str) -> dict[str, Any]:
+        """Set the topic for a channel."""
+        response = httpx.post(
+            f"{SLACK_API_BASE}/conversations.setTopic",
+            headers=self._headers,
+            json={"channel": channel, "topic": topic},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
 
 def register_tools(
     mcp: FastMCP,
@@ -401,3 +604,333 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    # --- Update/Delete Messages ---
+
+    @mcp.tool()
+    def slack_update_message(
+        channel: str,
+        ts: str,
+        text: str,
+    ) -> dict:
+        """
+        Update an existing Slack message.
+
+        Args:
+            channel: Channel ID where the message is
+            ts: Message timestamp (ts) to update
+            text: New message text
+
+        Returns:
+            Dict with updated message details or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.update_message(channel, ts, text)
+            if "error" in result:
+                return result
+            return {
+                "success": True,
+                "channel": result.get("channel"),
+                "ts": result.get("ts"),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_delete_message(channel: str, ts: str) -> dict:
+        """
+        Delete a Slack message.
+
+        Args:
+            channel: Channel ID where the message is
+            ts: Message timestamp (ts) to delete
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.delete_message(channel, ts)
+            if "error" in result:
+                return result
+            return {"success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Scheduled Messages ---
+
+    @mcp.tool()
+    def slack_schedule_message(
+        channel: str,
+        text: str,
+        post_at: int,
+        thread_ts: str | None = None,
+    ) -> dict:
+        """
+        Schedule a message for future delivery.
+
+        Args:
+            channel: Channel ID to post to
+            text: Message text
+            post_at: Unix timestamp when to post (must be in the future)
+            thread_ts: Optional thread timestamp to reply in a thread
+
+        Returns:
+            Dict with scheduled message ID or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.schedule_message(channel, text, post_at, thread_ts)
+            if "error" in result:
+                return result
+            return {
+                "success": True,
+                "scheduled_message_id": result.get("scheduled_message_id"),
+                "post_at": result.get("post_at"),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Channel Management ---
+
+    @mcp.tool()
+    def slack_create_channel(
+        name: str,
+        is_private: bool = False,
+    ) -> dict:
+        """
+        Create a new Slack channel.
+
+        Args:
+            name: Channel name (lowercase, no spaces, use hyphens)
+            is_private: If True, create a private channel
+
+        Returns:
+            Dict with new channel details or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.create_channel(name, is_private)
+            if "error" in result:
+                return result
+            channel = result.get("channel", {})
+            return {
+                "success": True,
+                "channel": {
+                    "id": channel.get("id"),
+                    "name": channel.get("name"),
+                    "is_private": channel.get("is_private", False),
+                },
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_archive_channel(channel: str) -> dict:
+        """
+        Archive a Slack channel.
+
+        Args:
+            channel: Channel ID to archive
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.archive_channel(channel)
+            if "error" in result:
+                return result
+            return {"success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_invite_to_channel(channel: str, user_ids: str) -> dict:
+        """
+        Invite users to a Slack channel.
+
+        Args:
+            channel: Channel ID
+            user_ids: Comma-separated user IDs (e.g., 'U001,U002')
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.invite_to_channel(channel, user_ids)
+            if "error" in result:
+                return result
+            return {"success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_set_channel_topic(channel: str, topic: str) -> dict:
+        """
+        Set the topic for a Slack channel.
+
+        Args:
+            channel: Channel ID
+            topic: New topic text
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.set_channel_topic(channel, topic)
+            if "error" in result:
+                return result
+            return {"success": True, "topic": result.get("topic")}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Reactions ---
+
+    @mcp.tool()
+    def slack_remove_reaction(
+        channel: str,
+        timestamp: str,
+        emoji: str,
+    ) -> dict:
+        """
+        Remove an emoji reaction from a message.
+
+        Args:
+            channel: Channel ID where the message is
+            timestamp: Message timestamp (ts)
+            emoji: Emoji name without colons (e.g., 'thumbsup')
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.remove_reaction(channel, timestamp, emoji)
+            if "error" in result:
+                return result
+            return {"success": True}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Users ---
+
+    @mcp.tool()
+    def slack_list_users(limit: int = 100) -> dict:
+        """
+        List users in the Slack workspace.
+
+        Args:
+            limit: Maximum number of users to return (1-1000, default 100)
+
+        Returns:
+            Dict with list of users or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.list_users(limit)
+            if "error" in result:
+                return result
+            users = [
+                {
+                    "id": u.get("id"),
+                    "name": u.get("name"),
+                    "real_name": u.get("real_name"),
+                    "is_admin": u.get("is_admin", False),
+                    "is_bot": u.get("is_bot", False),
+                }
+                for u in result.get("members", [])
+                if not u.get("deleted", False)
+            ]
+            return {
+                "success": True,
+                "users": users,
+                "count": len(users),
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Files ---
+
+    @mcp.tool()
+    def slack_upload_file(
+        channel: str,
+        content: str,
+        filename: str,
+        title: str | None = None,
+        comment: str | None = None,
+    ) -> dict:
+        """
+        Upload a text file to a Slack channel.
+
+        Args:
+            channel: Channel ID to upload to
+            content: Text content of the file
+            filename: Filename (e.g., 'report.txt', 'data.csv')
+            title: Optional title for the file
+            comment: Optional comment to post with the file
+
+        Returns:
+            Dict with file details or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.upload_file(channel, content, filename, title, comment)
+            if "error" in result:
+                return result
+            file_info = result.get("file", {})
+            return {
+                "success": True,
+                "file": {
+                    "id": file_info.get("id"),
+                    "name": file_info.get("name"),
+                    "title": file_info.get("title"),
+                    "permalink": file_info.get("permalink"),
+                },
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+

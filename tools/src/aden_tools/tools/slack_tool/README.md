@@ -2,74 +2,81 @@
 
 Send messages and interact with Slack workspaces via the Slack Web API.
 
-## Tools
-
-### `slack_send_message`
-Send a message to a Slack channel.
-
-**Parameters:**
-- `channel` (str) - Channel ID (e.g., 'C0123456789') or name (e.g., '#general')
-- `text` (str) - Message text (supports Slack mrkdwn)
-- `thread_ts` (str, optional) - Reply in thread
-
-### `slack_list_channels`
-List channels in the workspace.
-
-**Parameters:**
-- `types` (str) - Channel types: `public_channel,private_channel,mpim,im`
-- `limit` (int) - Max results (1-1000, default 100)
-
-### `slack_get_channel_history`
-Get recent messages from a channel.
-
-**Parameters:**
-- `channel` (str) - Channel ID
-- `limit` (int) - Max messages (1-1000, default 20)
-
-### `slack_add_reaction`
-Add an emoji reaction to a message.
-
-**Parameters:**
-- `channel` (str) - Channel ID
-- `timestamp` (str) - Message timestamp (ts)
-- `emoji` (str) - Emoji name without colons (e.g., 'thumbsup')
-
-### `slack_get_user_info`
-Get information about a Slack user.
-
-**Parameters:**
-- `user_id` (str) - User ID (e.g., 'U0123456789')
-
 ## Setup
 
 ```bash
 export SLACK_BOT_TOKEN=xoxb-your-bot-token-here
 ```
 
-### Required Bot Token Scopes
+## All Tools (15 Total)
 
-| Tool | Required Scopes |
-|------|----------------|
-| `slack_send_message` | `chat:write` |
-| `slack_list_channels` | `channels:read`, `groups:read` |
-| `slack_get_channel_history` | `channels:history`, `groups:history` |
-| `slack_add_reaction` | `reactions:write` |
-| `slack_get_user_info` | `users:read` |
+### Messages
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_send_message` | Send message to channel | `chat:write` |
+| `slack_update_message` | Edit existing message | `chat:write` |
+| `slack_delete_message` | Delete a message | `chat:write` |
+| `slack_schedule_message` | Schedule future message | `chat:write` |
+
+### Channels
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_list_channels` | List workspace channels | `channels:read`, `groups:read` |
+| `slack_get_channel_history` | Read channel messages | `channels:history` |
+| `slack_create_channel` | Create new channel | `channels:manage` |
+| `slack_archive_channel` | Archive a channel | `channels:manage` |
+| `slack_invite_to_channel` | Invite users to channel | `channels:manage` |
+| `slack_set_channel_topic` | Set channel topic | `channels:manage` |
+
+### Reactions
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_add_reaction` | Add emoji reaction | `reactions:write` |
+| `slack_remove_reaction` | Remove emoji reaction | `reactions:write` |
+
+### Users
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_get_user_info` | Get user profile | `users:read` |
+| `slack_list_users` | List workspace users | `users:read` |
+
+### Files
+| Tool | Description | Scope |
+|------|-------------|-------|
+| `slack_upload_file` | Upload text file | `files:write` |
 
 ## Creating a Slack App
 
-1. Go to https://api.slack.com/apps and click "Create New App"
-2. Choose "From scratch", name your app, select workspace
-3. Go to "OAuth & Permissions" → "Bot Token Scopes"
-4. Add the scopes listed above
-5. Click "Install to Workspace"
-6. Copy the "Bot User OAuth Token" (starts with `xoxb-`)
+1. Go to https://api.slack.com/apps → **Create New App** → **From scratch**
+2. Go to **OAuth & Permissions** → Add scopes from table above
+3. Click **Install to Workspace**
+4. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
 
-## Error Handling
+## Example Usage
 
-Common errors:
-- `invalid_auth` - Invalid or expired token
-- `channel_not_found` - Channel doesn't exist or bot not a member
-- `not_in_channel` - Bot needs to be invited to the channel
-- `missing_scope` - Token lacks required scope
-- `ratelimited` - Rate limit exceeded, retry later
+```python
+# Send message
+slack_send_message(channel="C0123456789", text="Hello!")
+
+# Schedule message (Unix timestamp)
+import time
+future = int(time.time()) + 3600  # 1 hour from now
+slack_schedule_message(channel="C0123456789", text="Reminder!", post_at=future)
+
+# Create channel and invite users
+result = slack_create_channel(name="my-new-channel")
+slack_invite_to_channel(channel=result["channel"]["id"], user_ids="U001,U002")
+
+# Upload file
+slack_upload_file(channel="C0123456789", content="name,value\na,1\nb,2", filename="data.csv")
+```
+
+## Error Codes
+
+| Error | Meaning |
+|-------|---------|
+| `invalid_auth` | Token invalid or expired |
+| `channel_not_found` | Channel doesn't exist or bot not a member |
+| `not_in_channel` | Bot needs to be invited |
+| `missing_scope` | Token lacks required scope |
+| `ratelimited` | Rate limit hit, retry later |

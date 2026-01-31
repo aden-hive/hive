@@ -121,6 +121,16 @@ def register_all_tools(
         "slack_get_channel_history",
         "slack_add_reaction",
         "slack_get_user_info",
+        "slack_update_message",
+        "slack_delete_message",
+        "slack_schedule_message",
+        "slack_create_channel",
+        "slack_archive_channel",
+        "slack_invite_to_channel",
+        "slack_set_channel_topic",
+        "slack_remove_reaction",
+        "slack_list_users",
+        "slack_upload_file",
     ]
 
 
