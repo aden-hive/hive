@@ -559,6 +559,27 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
             SELECTED_PROVIDER_ID=""
         fi
     fi
+
+    if [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTED_ENV_VAR}" ]; then
+        echo ""
+        echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
+        echo ""
+        read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
+
+        if [ -n "$API_KEY" ]; then
+            # Save to .env
+            echo "" >> "$SCRIPT_DIR/.env"
+            echo "$SELECTED_ENV_VAR=$API_KEY" >> "$SCRIPT_DIR/.env"
+            export "$SELECTED_ENV_VAR=$API_KEY"
+            echo ""
+            echo -e "${GREEN}⬢${NC} API key saved to .env"
+        else
+            echo ""
+            echo -e "${YELLOW}Skipped.${NC} Add your API key to .env when ready."
+            SELECTED_ENV_VAR=""
+            SELECTED_PROVIDER_ID=""
+        fi
+    fi
 fi
 
 # Save configuration if a provider was selected

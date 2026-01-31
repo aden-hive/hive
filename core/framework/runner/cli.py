@@ -56,6 +56,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
     )
+    run_parser.add_argument(
+        "--model",
+        type=str,
+        help="LLM model to use (e.g., gpt-4o, claude-3-opus, etc.)",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -210,7 +215,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         runner = AgentRunner.load(
             args.agent_path,
             mock_mode=args.mock,
-            model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+            model=getattr(args, "model", None) or "gpt-4o",
         )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -635,7 +640,7 @@ def _interactive_approval(request):
 
 
 def _format_natural_language_to_json(
-    user_input: str, input_keys: list[str], agent_description: str, session_context: dict = None
+    user_input: str, input_keys: list[str], agent_description: str, session_context: dict | None = None
 ) -> dict:
     """Use Haiku to convert natural language input to JSON based on agent's input schema."""
     import os
@@ -677,7 +682,13 @@ Output ONLY valid JSON, no explanation:"""
             messages=[{"role": "user", "content": prompt}],
         )
 
-        json_str = message.content[0].text.strip()
+        # Some block types may not have .text; use .to_string() or str() fallback
+        block = message.content[0]
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            json_str = text.strip()
+        else:
+            json_str = str(block).strip()
         # Remove markdown code blocks if present
         if json_str.startswith("```"):
             json_str = json_str.split("```")[1]
