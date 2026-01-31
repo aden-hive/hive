@@ -361,7 +361,7 @@ class TestNodeTypeValidation:
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
 
         # Should not raise - anthropic is optional
-        creds.validate_for_node_types(["llm_generate"])
+            creds.validate_for_node_types(["llm_generate"])
 
     def test_validate_for_node_types_passes_when_present(self, monkeypatch):
         """validate_for_node_types() passes when credentials present."""
@@ -383,7 +383,7 @@ class TestStartupValidation:
         creds = CredentialManager(dotenv_path=tmp_path / ".env")
 
         # Should not raise - anthropic is not startup required
-        creds.validate_startup()
+            creds.validate_startup()
 
     def test_validate_startup_passes_when_present(self, monkeypatch):
         """validate_startup() passes when all startup creds are set."""
