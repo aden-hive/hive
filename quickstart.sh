@@ -106,7 +106,7 @@ fi
 
 # Prefer a Python >= 3.11 if multiple are installed (common on macOS).
 PYTHON_CMD=""
-for CANDIDATE in python3.13 python3.12 python3.11 python3 python; do
+for CANDIDATE in python3.11 python3.12 python3.13 python3 python; do
     if command -v "$CANDIDATE" &> /dev/null; then
         PYTHON_MAJOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.major)')
         PYTHON_MINOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.minor)')
@@ -344,41 +344,53 @@ echo ""
 echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
 echo ""
 
-# Define supported providers (env_var -> display_name, litellm_provider, default_model)
-declare -A PROVIDER_NAMES=(
-    ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
-    ["OPENAI_API_KEY"]="OpenAI (GPT)"
-    ["GEMINI_API_KEY"]="Google Gemini"
-    ["GOOGLE_API_KEY"]="Google AI"
-    ["GROQ_API_KEY"]="Groq"
-    ["CEREBRAS_API_KEY"]="Cerebras"
-    ["MISTRAL_API_KEY"]="Mistral"
-    ["TOGETHER_API_KEY"]="Together AI"
-    ["DEEPSEEK_API_KEY"]="DeepSeek"
-)
+# Provider data as parallel indexed arrays (Bash 3.2 compatible — no declare -A)
+PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
+PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
+PROVIDER_ID_LIST=(anthropic openai gemini google groq cerebras mistral together deepseek)
 
-declare -A PROVIDER_IDS=(
-    ["ANTHROPIC_API_KEY"]="anthropic"
-    ["OPENAI_API_KEY"]="openai"
-    ["GEMINI_API_KEY"]="gemini"
-    ["GOOGLE_API_KEY"]="google"
-    ["GROQ_API_KEY"]="groq"
-    ["CEREBRAS_API_KEY"]="cerebras"
-    ["MISTRAL_API_KEY"]="mistral"
-    ["TOGETHER_API_KEY"]="together"
-    ["DEEPSEEK_API_KEY"]="deepseek"
-)
+# Default models by provider id (parallel arrays)
+MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
+MODEL_DEFAULTS=("claude-sonnet-4-5-20250929" "gpt-4o" "gemini-3.0-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
-declare -A DEFAULT_MODELS=(
-    ["anthropic"]="claude-sonnet-4-5-20250929"
-    ["openai"]="gpt-4o"
-    ["gemini"]="gemini-3.0-flash-preview"
-    ["groq"]="moonshotai/kimi-k2-instruct-0905"
-    ["cerebras"]="zai-glm-4.7"
-    ["mistral"]="mistral-large-latest"
-    ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
-    ["deepseek"]="deepseek-chat"
-)
+# Helper: get provider display name for an env var
+get_provider_name() {
+    local env_var="$1"
+    local i=0
+    while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
+        if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
+            echo "${PROVIDER_DISPLAY_NAMES[$i]}"
+            return
+        fi
+        i=$((i + 1))
+    done
+}
+
+# Helper: get provider id for an env var
+get_provider_id() {
+    local env_var="$1"
+    local i=0
+    while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
+        if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
+            echo "${PROVIDER_ID_LIST[$i]}"
+            return
+        fi
+        i=$((i + 1))
+    done
+}
+
+# Helper: get default model for a provider id
+get_default_model() {
+    local provider_id="$1"
+    local i=0
+    while [ $i -lt ${#MODEL_PROVIDER_IDS[@]} ]; do
+        if [ "${MODEL_PROVIDER_IDS[$i]}" = "$provider_id" ]; then
+            echo "${MODEL_DEFAULTS[$i]}"
+            return
+        fi
+        i=$((i + 1))
+    done
+}
 
 # Configuration directory
 HIVE_CONFIG_DIR="$HOME/.hive"
@@ -388,7 +400,8 @@ HIVE_CONFIG_FILE="$HIVE_CONFIG_DIR/configuration.json"
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
-    local model="${DEFAULT_MODELS[$provider_id]}"
+    local model
+    model="$(get_default_model "$provider_id")"
 
     mkdir -p "$HIVE_CONFIG_DIR"
 
@@ -408,18 +421,20 @@ print(json.dumps(config, indent=2))
 " 2>/dev/null
 }
 
-# Check for .env files
+# Check for .env files (temporarily disable set -e for robustness on Bash 3.2)
+set +e
 if [ -f "$SCRIPT_DIR/.env" ]; then
     set -a
-    source "$SCRIPT_DIR/.env" 2>/dev/null || true
+    source "$SCRIPT_DIR/.env" 2>/dev/null
     set +a
 fi
 
 if [ -f "$HOME/.env" ]; then
     set -a
-    source "$HOME/.env" 2>/dev/null || true
+    source "$HOME/.env" 2>/dev/null
     set +a
 fi
+set -e
 
 # Find all available API keys
 FOUND_PROVIDERS=()      # Display names for UI
@@ -427,10 +442,10 @@ FOUND_ENV_VARS=()       # Corresponding env var names
 SELECTED_PROVIDER_ID="" # Will hold the chosen provider ID
 SELECTED_ENV_VAR=""     # Will hold the chosen env var
 
-for env_var in "${!PROVIDER_NAMES[@]}"; do
+for env_var in "${PROVIDER_ENV_VARS[@]}"; do
     value="${!env_var}"
     if [ -n "$value" ]; then
-        FOUND_PROVIDERS+=("${PROVIDER_NAMES[$env_var]}")
+        FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
         FOUND_ENV_VARS+=("$env_var")
     fi
 done
@@ -447,7 +462,7 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
         # Only one provider found, use it automatically
         if prompt_yes_no "Use this key?"; then
             SELECTED_ENV_VAR="${FOUND_ENV_VARS[0]}"
-            SELECTED_PROVIDER_ID="${PROVIDER_IDS[$SELECTED_ENV_VAR]}"
+            SELECTED_PROVIDER_ID="$(get_provider_id "$SELECTED_ENV_VAR")"
 
             echo ""
             echo -e "${GREEN}⬢${NC} Using ${FOUND_PROVIDERS[0]}"
@@ -470,7 +485,7 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
             if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#FOUND_PROVIDERS[@]}" ]; then
                 idx=$((choice - 1))
                 SELECTED_ENV_VAR="${FOUND_ENV_VARS[$idx]}"
-                SELECTED_PROVIDER_ID="${PROVIDER_IDS[$SELECTED_ENV_VAR]}"
+                SELECTED_PROVIDER_ID="$(get_provider_id "$SELECTED_ENV_VAR")"
 
                 echo ""
                 echo -e "${GREEN}⬢${NC} Selected: ${FOUND_PROVIDERS[$idx]}"
@@ -642,7 +657,7 @@ echo ""
 
 # Show configured provider
 if [ -n "$SELECTED_PROVIDER_ID" ]; then
-    SELECTED_MODEL="${DEFAULT_MODELS[$SELECTED_PROVIDER_ID]}"
+    SELECTED_MODEL="$(get_default_model "$SELECTED_PROVIDER_ID")"
     echo -e "${BOLD}Default LLM:${NC}"
     echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     echo ""
