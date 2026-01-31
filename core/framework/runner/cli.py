@@ -104,6 +104,26 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     list_parser.set_defaults(func=cmd_list)
 
+    # search command
+    search_parser = subparsers.add_parser(
+        "search",
+        help="Search for agents",
+        description="Search for agents by name or description keywords.",
+    )
+    search_parser.add_argument(
+        "query",
+        type=str,
+        help="Keyword to search for",
+    )
+    search_parser.add_argument(
+        "directory",
+        type=str,
+        nargs="?",
+        default="exports",
+        help="Directory to search (default: exports)",
+    )
+    search_parser.set_defaults(func=cmd_search)
+
     # dispatch command (multi-agent)
     dispatch_parser = subparsers.add_parser(
         "dispatch",
@@ -173,6 +193,28 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Disable human-in-the-loop approval (auto-approve all steps)",
     )
     shell_parser.set_defaults(func=cmd_shell)
+
+    # clean command
+    clean_parser = subparsers.add_parser(
+        "clean",
+        help="Clean up old run data",
+        description="Delete run data older than a specified number of days.",
+    )
+    clean_parser.add_argument(
+        "--days",
+        "-d",
+        type=int,
+        default=30,
+        help="Retention period in days (default: 30)",
+    )
+    clean_parser.add_argument(
+        "--storage",
+        "-s",
+        type=str,
+        default=".hive/storage",
+        help="Path to storage directory (default: .hive/storage)",
+    )
+    clean_parser.set_defaults(func=cmd_clean)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -462,6 +504,75 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"    Nodes: {agent['nodes']}, Tools: {agent['tools']}")
             print()
 
+    return 0
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    """Search for agents by keyword."""
+    from framework.runner import AgentRunner
+
+    directory = Path(args.directory)
+    if not directory.exists():
+        print(f"Directory not found: {directory}")
+        return 1
+
+    query = args.query.lower()
+    matches = []
+
+    for path in directory.iterdir():
+        if path.is_dir() and (path / "agent.json").exists():
+            try:
+                runner = AgentRunner.load(path)
+                info = runner.info()
+
+                # Search in name and description
+                if query in info.name.lower() or query in info.description.lower():
+                    matches.append(
+                        {
+                            "path": str(path),
+                            "name": info.name,
+                            "description": info.description,
+                            "nodes": info.node_count,
+                            "tools": len(info.required_tools),
+                        }
+                    )
+                runner.cleanup()
+            except Exception:
+                continue
+
+    if not matches:
+        print(f"No agents matching '{args.query}' found in {directory}")
+        return 0
+
+    print(f"Found {len(matches)} agents matching '{args.query}':\n")
+    for agent in matches:
+        print(f"  {agent['name']}")
+        print(f"    Path: {agent['path']}")
+        desc = agent["description"]
+        if len(desc) > 100:
+            desc = desc[:97] + "..."
+        print(f"    Description: {desc}")
+        print(f"    Nodes: {agent['nodes']}, Tools: {agent['tools']}")
+        print()
+
+    return 0
+
+
+def cmd_clean(args: argparse.Namespace) -> int:
+    """Clean up old run data."""
+    from framework.storage.backend import FileStorage
+
+    storage_path = Path(args.storage)
+    if not storage_path.exists():
+        print(f"Storage directory not found: {storage_path}")
+        return 1
+
+    storage = FileStorage(storage_path)
+    print(f"Cleaning up runs older than {args.days} days in {storage_path}...")
+
+    deleted = storage.cleanup_old_runs(args.days)
+
+    print(f"✓ Deleted {deleted} old runs")
     return 0
 
 

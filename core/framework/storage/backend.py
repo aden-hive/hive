@@ -210,3 +210,28 @@ class FileStorage:
             "total_goals": len(self.list_all_goals()),
             "storage_path": str(self.base_path),
         }
+
+    def cleanup_old_runs(self, days: int) -> int:
+        """
+        Delete runs older than the specified number of days.
+
+        Args:
+            days: Retention period in days
+
+        Returns:
+            Number of runs deleted
+        """
+        import time
+
+        now = time.time()
+        max_age = days * 24 * 60 * 60
+        runs_dir = self.base_path / "runs"
+        deleted_count = 0
+
+        for run_path in runs_dir.glob("*.json"):
+            if now - run_path.stat().st_mtime > max_age:
+                run_id = run_path.stem
+                if self.delete_run(run_id):
+                    deleted_count += 1
+
+        return deleted_count
