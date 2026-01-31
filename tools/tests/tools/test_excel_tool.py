@@ -35,6 +35,8 @@ def excel_tools(mcp: FastMCP, tmp_path: Path):
             "excel_append": mcp._tool_manager._tools["excel_append"].fn,
             "excel_info": mcp._tool_manager._tools["excel_info"].fn,
             "excel_sheet_list": mcp._tool_manager._tools["excel_sheet_list"].fn,
+            "excel_sql": mcp._tool_manager._tools["excel_sql"].fn,
+            "excel_search": mcp._tool_manager._tools["excel_search"].fn,
         }
 
 
@@ -789,3 +791,301 @@ class TestExcelIntegration:
         assert read_result["row_count"] == 4
         assert read_result["rows"][2]["id"] == 3
         assert read_result["rows"][3]["value"] == "D"
+
+
+# Check if duckdb is available for SQL tests
+duckdb_available = importlib.util.find_spec("duckdb") is not None
+
+
+@pytest.mark.skipif(not duckdb_available, reason="duckdb not installed")
+class TestExcelSql:
+    """Tests for excel_sql function."""
+
+    def test_sql_basic_query(self, excel_tools, basic_xlsx, tmp_path):
+        """Run basic SQL query on Excel file."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data",
+            )
+
+        assert result["success"] is True
+        assert result["row_count"] == 3
+        assert "name" in result["columns"]
+
+    def test_sql_with_filter(self, excel_tools, basic_xlsx, tmp_path):
+        """Run SQL query with WHERE clause."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data WHERE age > 25",
+            )
+
+        assert result["success"] is True
+        assert result["row_count"] == 2  # Alice (30) and Charlie (35)
+
+    def test_sql_with_aggregation(self, excel_tools, basic_xlsx, tmp_path):
+        """Run SQL query with aggregation."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT COUNT(*) as count, AVG(age) as avg_age FROM data",
+            )
+
+        assert result["success"] is True
+        assert result["row_count"] == 1
+        assert result["rows"][0]["count"] == 3
+
+    def test_sql_specific_sheet(self, excel_tools, multi_sheet_xlsx, tmp_path):
+        """Run SQL query on specific sheet."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="multi_sheet.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data WHERE price > 100",
+                sheet="Products",
+            )
+
+        assert result["success"] is True
+        assert result["target_sheet"] == "Products"
+        assert result["row_count"] == 1  # Gadget at 149.99
+
+    def test_sql_join_sheets(self, excel_tools, multi_sheet_xlsx, tmp_path):
+        """Join data across multiple sheets."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="multi_sheet.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT e.name, p.name as product FROM Employees e, Products p",
+            )
+
+        assert result["success"] is True
+        # Cross join: 2 employees x 2 products = 4 rows
+        assert result["row_count"] == 4
+
+    def test_sql_empty_query_error(self, excel_tools, basic_xlsx, tmp_path):
+        """Return error for empty query."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="",
+            )
+
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+
+    def test_sql_non_select_rejected(self, excel_tools, basic_xlsx, tmp_path):
+        """Reject non-SELECT queries for security."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="DELETE FROM data",
+            )
+
+        assert "error" in result
+        assert "SELECT" in result["error"]
+
+    def test_sql_file_not_found(self, excel_tools, session_dir, tmp_path):
+        """Return error when file doesn't exist."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="nonexistent.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data",
+            )
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+
+class TestExcelSearch:
+    """Tests for excel_search function."""
+
+    def test_search_basic_contains(self, excel_tools, basic_xlsx, tmp_path):
+        """Search for text containing a term."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="Alice",
+            )
+
+        assert result["success"] is True
+        assert result["match_count"] >= 1
+        assert any(m["value"] == "Alice" for m in result["matches"])
+
+    def test_search_case_insensitive(self, excel_tools, basic_xlsx, tmp_path):
+        """Search is case-insensitive by default."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="alice",
+                case_sensitive=False,
+            )
+
+        assert result["success"] is True
+        assert result["match_count"] >= 1
+
+    def test_search_case_sensitive(self, excel_tools, basic_xlsx, tmp_path):
+        """Case-sensitive search."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="alice",
+                case_sensitive=True,
+            )
+
+        # "alice" (lowercase) won't match "Alice"
+        assert result["success"] is True
+        assert result["match_count"] == 0
+
+    def test_search_exact_match(self, excel_tools, basic_xlsx, tmp_path):
+        """Search with exact match."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="NYC",
+                match_type="exact",
+            )
+
+        assert result["success"] is True
+        assert result["match_count"] == 1
+        assert result["matches"][0]["value"] == "NYC"
+
+    def test_search_starts_with(self, excel_tools, basic_xlsx, tmp_path):
+        """Search with starts_with match."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="Ch",
+                match_type="starts_with",
+            )
+
+        assert result["success"] is True
+        # Should match "Charlie" and "Chicago"
+        assert result["match_count"] == 2
+
+    def test_search_across_sheets(self, excel_tools, multi_sheet_xlsx, tmp_path):
+        """Search across all sheets."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="multi_sheet.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="Alice",
+            )
+
+        assert result["success"] is True
+        assert result["match_count"] >= 1
+        # Should search all sheets
+        assert len(result["sheets_searched"]) == 3
+
+    def test_search_specific_sheet(self, excel_tools, multi_sheet_xlsx, tmp_path):
+        """Search in specific sheet only."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="multi_sheet.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="Widget",
+                sheet="Products",
+            )
+
+        assert result["success"] is True
+        assert result["sheets_searched"] == ["Products"]
+        assert result["match_count"] >= 1
+
+    def test_search_no_matches(self, excel_tools, basic_xlsx, tmp_path):
+        """Search returns empty when no matches."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="ZZZZNOTFOUND",
+            )
+
+        assert result["success"] is True
+        assert result["match_count"] == 0
+        assert result["matches"] == []
+
+    def test_search_empty_term_error(self, excel_tools, basic_xlsx, tmp_path):
+        """Return error for empty search term."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="",
+            )
+
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+
+    def test_search_invalid_match_type(self, excel_tools, basic_xlsx, tmp_path):
+        """Return error for invalid match_type."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="test",
+                match_type="invalid",
+            )
+
+        assert "error" in result
+        assert "match_type" in result["error"]
+
+    def test_search_file_not_found(self, excel_tools, session_dir, tmp_path):
+        """Return error when file doesn't exist."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="nonexistent.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="test",
+            )
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()

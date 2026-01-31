@@ -110,15 +110,24 @@ def register_tools(mcp: FastMCP) -> None:
                 for row in data_rows:
                     row_dict = {}
                     for i, value in enumerate(row):
-                        col_name = columns[i] if i < len(columns) and columns[i] else f"Column_{i+1}"
+                        if i < len(columns) and columns[i]:
+                            col_name = columns[i]
+                        else:
+                            col_name = f"Column_{i+1}"
                         row_dict[str(col_name)] = value
                     rows_as_dicts.append(row_dict)
+
+                # Format column names
+                formatted_columns = [
+                    str(c) if c is not None else f"Column_{i+1}"
+                    for i, c in enumerate(columns)
+                ]
 
                 return {
                     "success": True,
                     "path": path,
                     "sheet_name": ws.title,
-                    "columns": [str(c) if c is not None else f"Column_{i+1}" for i, c in enumerate(columns)],
+                    "columns": formatted_columns,
                     "column_count": len(columns),
                     "rows": rows_as_dicts,
                     "row_count": len(rows_as_dicts),
@@ -367,7 +376,10 @@ def register_tools(mcp: FastMCP) -> None:
                     columns = []
                     first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
                     if first_row:
-                        columns = [str(c) if c is not None else f"Column_{i+1}" for i, c in enumerate(first_row)]
+                        columns = [
+                            str(c) if c is not None else f"Column_{i+1}"
+                            for i, c in enumerate(first_row)
+                        ]
 
                     # Count rows (excluding header)
                     row_count = 0
@@ -449,6 +461,331 @@ def register_tools(mcp: FastMCP) -> None:
 
         except Exception as e:
             return {"error": f"Failed to list sheets: {str(e)}"}
+
+    @mcp.tool()
+    def excel_sql(
+        path: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+        query: str,
+        sheet: str | None = None,
+    ) -> dict:
+        """
+        Query an Excel file using SQL (powered by DuckDB).
+
+        Each sheet is available as a table with its sheet name (spaces replaced
+        with underscores). Use 'data' as alias for the specified/active sheet.
+
+        Args:
+            path: Path to the Excel file (relative to session sandbox)
+            workspace_id: Workspace identifier
+            agent_id: Agent identifier
+            session_id: Session identifier
+            query: SQL query. Use 'data' for the target sheet, or sheet names
+                   (with spaces as underscores) to query/join multiple sheets.
+            sheet: Sheet to use as 'data' table (default: first sheet)
+
+        Returns:
+            dict with query results, columns, and row count
+
+        Examples:
+            # Simple query on default sheet
+            query="SELECT * FROM data WHERE price > 100"
+
+            # Aggregate data
+            query="SELECT category, SUM(amount) as total FROM data GROUP BY category"
+
+            # Join multiple sheets (sheet names: 'Sales', 'Products')
+            query="SELECT s.*, p.name FROM Sales s JOIN Products p ON s.product_id = p.id"
+        """
+        try:
+            import duckdb
+        except ImportError:
+            return {
+                "error": (
+                    "DuckDB not installed. Install with: "
+                    "pip install duckdb  or  pip install tools[sql]"
+                )
+            }
+
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            return {
+                "error": (
+                    "openpyxl not installed. Install with: "
+                    "pip install openpyxl  or  pip install tools[excel]"
+                )
+            }
+
+        try:
+            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+
+            if not os.path.exists(secure_path):
+                return {"error": f"File not found: {path}"}
+
+            if not path.lower().endswith((".xlsx", ".xlsm")):
+                return {"error": "File must have .xlsx or .xlsm extension"}
+
+            if not query or not query.strip():
+                return {"error": "query cannot be empty"}
+
+            # Security: only allow SELECT statements
+            query_upper = query.strip().upper()
+            if not query_upper.startswith("SELECT"):
+                return {"error": "Only SELECT queries are allowed for security reasons"}
+
+            # Disallowed keywords
+            disallowed = [
+                "INSERT", "UPDATE", "DELETE", "DROP", "CREATE",
+                "ALTER", "TRUNCATE", "EXEC", "EXECUTE",
+            ]
+            for keyword in disallowed:
+                if keyword in query_upper:
+                    return {"error": f"'{keyword}' is not allowed in queries"}
+
+            # Load workbook
+            wb = load_workbook(secure_path, read_only=True, data_only=True)
+
+            try:
+                # Determine target sheet for 'data' alias
+                if sheet:
+                    if sheet not in wb.sheetnames:
+                        wb.close()
+                        return {
+                            "error": f"Sheet '{sheet}' not found. "
+                            f"Available: {wb.sheetnames}"
+                        }
+                    target_sheet = sheet
+                else:
+                    target_sheet = wb.sheetnames[0]
+
+                # Load all sheets into DuckDB
+                con = duckdb.connect(":memory:")
+
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    rows = list(ws.iter_rows(values_only=True))
+
+                    if not rows:
+                        continue
+
+                    # Headers from first row
+                    headers = [
+                        str(c) if c is not None else f"Column_{i+1}"
+                        for i, c in enumerate(rows[0])
+                    ]
+
+                    # Data rows
+                    records = []
+                    for row in rows[1:]:
+                        record = {}
+                        for i, val in enumerate(row):
+                            col = headers[i] if i < len(headers) else f"Column_{i+1}"
+                            record[col] = _convert_cell_value(val)
+                        records.append(record)
+
+                    # Create table (sanitize name: spaces -> underscores)
+                    table_name = sheet_name.replace(" ", "_").replace("-", "_")
+                    if records:
+                        import pandas as pd
+                        df = pd.DataFrame(records)
+                        con.register(f"temp_{table_name}", df)
+                        con.execute(
+                            f'CREATE TABLE "{table_name}" AS SELECT * FROM temp_{table_name}'
+                        )
+                    else:
+                        # Empty table
+                        cols_sql = ", ".join(f'"{h}" VARCHAR' for h in headers)
+                        con.execute(f'CREATE TABLE "{table_name}" ({cols_sql})')
+
+                    # Create 'data' alias for target sheet
+                    if sheet_name == target_sheet:
+                        con.execute(
+                            f'CREATE VIEW data AS SELECT * FROM "{table_name}"'
+                        )
+
+                wb.close()
+
+                # Execute query
+                result = con.execute(query)
+                columns = [desc[0] for desc in result.description]
+                rows = result.fetchall()
+                con.close()
+
+                # Convert to dicts
+                rows_as_dicts = [
+                    dict(zip(columns, row, strict=False)) for row in rows
+                ]
+
+                return {
+                    "success": True,
+                    "path": path,
+                    "target_sheet": target_sheet,
+                    "available_sheets": wb.sheetnames if hasattr(wb, "sheetnames") else [],
+                    "query": query,
+                    "columns": columns,
+                    "column_count": len(columns),
+                    "rows": rows_as_dicts,
+                    "row_count": len(rows_as_dicts),
+                }
+
+            except Exception as e:
+                wb.close()
+                raise e
+
+        except Exception as e:
+            error_msg = str(e)
+            if "Catalog Error" in error_msg or "Table" in error_msg:
+                return {
+                    "error": f"SQL error: {error_msg}. "
+                    "Use 'data' for target sheet or sheet names with underscores."
+                }
+            return {"error": f"Query failed: {error_msg}"}
+
+    @mcp.tool()
+    def excel_search(
+        path: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+        search_term: str,
+        sheet: str | None = None,
+        case_sensitive: bool = False,
+        match_type: str = "contains",
+    ) -> dict:
+        """
+        Search for values across Excel sheets.
+
+        Args:
+            path: Path to the Excel file (relative to session sandbox)
+            workspace_id: Workspace identifier
+            agent_id: Agent identifier
+            session_id: Session identifier
+            search_term: Text to search for
+            sheet: Specific sheet to search (default: search all sheets)
+            case_sensitive: Whether search is case-sensitive (default: False)
+            match_type: 'contains', 'exact', 'starts_with', or 'ends_with'
+
+        Returns:
+            dict with list of matches containing sheet, row, column, and value
+        """
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            return {
+                "error": (
+                    "openpyxl not installed. Install with: "
+                    "pip install openpyxl  or  pip install tools[excel]"
+                )
+            }
+
+        try:
+            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+
+            if not os.path.exists(secure_path):
+                return {"error": f"File not found: {path}"}
+
+            if not path.lower().endswith((".xlsx", ".xlsm")):
+                return {"error": "File must have .xlsx or .xlsm extension"}
+
+            if not search_term:
+                return {"error": "search_term cannot be empty"}
+
+            if match_type not in ("contains", "exact", "starts_with", "ends_with"):
+                return {
+                    "error": "match_type must be 'contains', 'exact', "
+                    "'starts_with', or 'ends_with'"
+                }
+
+            # Prepare search term
+            term = search_term if case_sensitive else search_term.lower()
+
+            # Load workbook
+            wb = load_workbook(secure_path, read_only=True, data_only=True)
+
+            try:
+                sheets_to_search = (
+                    [sheet] if sheet else wb.sheetnames
+                )
+
+                if sheet and sheet not in wb.sheetnames:
+                    return {
+                        "error": f"Sheet '{sheet}' not found. "
+                        f"Available: {wb.sheetnames}"
+                    }
+
+                matches = []
+                for sheet_name in sheets_to_search:
+                    ws = wb[sheet_name]
+
+                    # Get headers for column names
+                    headers = []
+                    first_row = next(
+                        ws.iter_rows(min_row=1, max_row=1, values_only=True), None
+                    )
+                    if first_row:
+                        headers = [
+                            str(c) if c is not None else f"Column_{i+1}"
+                            for i, c in enumerate(first_row)
+                        ]
+
+                    # Search all cells
+                    for row_idx, row in enumerate(
+                        ws.iter_rows(values_only=True), start=1
+                    ):
+                        for col_idx, cell_value in enumerate(row):
+                            if cell_value is None:
+                                continue
+
+                            # Convert to string for comparison
+                            cell_str = str(cell_value)
+                            compare_val = (
+                                cell_str if case_sensitive else cell_str.lower()
+                            )
+
+                            # Check match
+                            is_match = False
+                            if match_type == "contains":
+                                is_match = term in compare_val
+                            elif match_type == "exact":
+                                is_match = term == compare_val
+                            elif match_type == "starts_with":
+                                is_match = compare_val.startswith(term)
+                            elif match_type == "ends_with":
+                                is_match = compare_val.endswith(term)
+
+                            if is_match:
+                                col_name = (
+                                    headers[col_idx]
+                                    if col_idx < len(headers)
+                                    else f"Column_{col_idx+1}"
+                                )
+                                matches.append({
+                                    "sheet": sheet_name,
+                                    "row": row_idx,
+                                    "column": col_name,
+                                    "column_index": col_idx + 1,
+                                    "value": _convert_cell_value(cell_value),
+                                })
+
+                return {
+                    "success": True,
+                    "path": path,
+                    "search_term": search_term,
+                    "match_type": match_type,
+                    "case_sensitive": case_sensitive,
+                    "sheets_searched": sheets_to_search,
+                    "matches": matches,
+                    "match_count": len(matches),
+                }
+
+            finally:
+                wb.close()
+
+        except Exception as e:
+            return {"error": f"Search failed: {str(e)}"}
 
 
 def _convert_cell_value(value: Any) -> Any:

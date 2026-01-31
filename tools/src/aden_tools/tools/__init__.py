@@ -104,6 +104,8 @@ def register_all_tools(
         "excel_append",
         "excel_info",
         "excel_sheet_list",
+        "excel_sql",
+        "excel_search",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",
