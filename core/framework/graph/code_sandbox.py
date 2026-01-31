@@ -15,9 +15,10 @@ Security measures:
 import ast
 import signal
 import sys
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 # Safe builtins whitelist
 SAFE_BUILTINS = {
@@ -185,7 +186,33 @@ class CodeValidator:
         return issues
 
 
-class CodeSandbox:
+@runtime_checkable
+class Sandbox(Protocol):
+    """
+    Interface for code sandboxes.
+    """
+
+    @abstractmethod
+    def execute(
+        self,
+        code: str,
+        inputs: dict[str, Any] | None = None,
+        extract_vars: list[str] | None = None,
+    ) -> SandboxResult:
+        """Execute Python code in a sandboxed environment."""
+        ...
+
+    @abstractmethod
+    def execute_expression(
+        self,
+        expression: str,
+        inputs: dict[str, Any] | None = None,
+    ) -> SandboxResult:
+        """Evaluate a Python expression in a sandboxed environment."""
+        ...
+
+
+class LocalCodeSandbox(Sandbox):
     """
     Sandboxed environment for executing dynamic code.
 
@@ -369,8 +396,50 @@ class CodeSandbox:
             )
 
 
+
+class DockerCodeSandbox(Sandbox):
+    """
+    Secure, containerized sandbox using Docker.
+    (MVP implementation coming soon)
+    """
+
+    def __init__(self, image: str = "python:3.11-slim", timeout_seconds: int = 30):
+        self.image = image
+        self.timeout_seconds = timeout_seconds
+
+    def execute(
+        self,
+        code: str,
+        inputs: dict[str, Any] | None = None,
+        extract_vars: list[str] | None = None,
+    ) -> SandboxResult:
+        return SandboxResult(
+            success=False,
+            error="DockerCodeSandbox implementation pending. Please check issue #2900.",
+        )
+
+    def execute_expression(
+        self,
+        expression: str,
+        inputs: dict[str, Any] | None = None,
+    ) -> SandboxResult:
+        return SandboxResult(
+            success=False,
+            error="DockerCodeSandbox implementation pending. Please check issue #2900.",
+        )
+
+
+# Mapping of sandbox types for easy initialization
+SANDBOX_TYPES = {
+    "local": LocalCodeSandbox,
+    "docker": DockerCodeSandbox,
+}
+
+# Legacy alias for backward compatibility
+CodeSandbox = LocalCodeSandbox
+
 # Singleton instance with default settings
-default_sandbox = CodeSandbox()
+default_sandbox = LocalCodeSandbox()
 
 
 def safe_exec(
