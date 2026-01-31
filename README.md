@@ -133,6 +133,18 @@ The agent has access to all Hive skills and can scaffold agents, add tools, and 
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
 
+### Antigravity IDE Support
+
+Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). To enable:
+
+1. Open the project in Antigravity IDE (repo root as project root)
+2. In the agent panel, open **Manage MCP Servers** and use **View raw config**
+3. Point Antigravity to `.antigravity/mcp_config.json` (or merge its contents into your user `mcp_config.json` and set `cwd` to your repo paths)
+4. Restart or reload MCP so the **agent-builder** and **tools** servers connect
+5. Skills are available under `.antigravity/skills/` (symlinks to `.claude/skills/`)
+
+See [docs/antigravity-setup.md](docs/antigravity-setup.md) for full setup and troubleshooting.
+
 ## Features
 
 - **[Goal-Driven Development](docs/key_concepts/goals_outcome.md)** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
