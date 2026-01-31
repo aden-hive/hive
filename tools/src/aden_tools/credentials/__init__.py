@@ -45,6 +45,7 @@ To add a new credential:
 
 from .base import CredentialError, CredentialSpec
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
+from .email import EMAIL_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
 from .integrations import INTEGRATION_CREDENTIALS
 from .llm import LLM_CREDENTIALS
@@ -61,12 +62,14 @@ from .store_adapter import CredentialStoreAdapter
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
+    **EMAIL_CREDENTIALS,
     **INTEGRATION_CREDENTIALS,
 }
 
 __all__ = [
     # Core classes
     "CredentialSpec",
+    "CredentialStoreAdapter",
     "CredentialError",
     # Credential store adapter (replaces deprecated CredentialManager)
     "CredentialStoreAdapter",
@@ -87,5 +90,6 @@ __all__ = [
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
+    "EMAIL_CREDENTIALS",
     "INTEGRATION_CREDENTIALS",
 ]
