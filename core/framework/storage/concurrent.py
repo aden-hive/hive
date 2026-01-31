@@ -5,6 +5,38 @@ Wraps FileStorage with:
 - Async file locking for atomic writes
 - Write batching for performance
 - Read caching for concurrent access
+- Index reconciliation for consistency (fixes stale index entries)
+
+Index Consistency Fix:
+    The storage layer uses index files (by_goal, by_status, by_node) for fast queries.
+    However, partial failures (crash, disk error, manual file removal) can cause indexes
+    to reference run IDs that no longer exist on disk.
+
+    This module provides several mechanisms to handle index inconsistency:
+
+    1. validate parameter (lazy validation on query):
+       - Pass validate=True to get_runs_by_* methods
+       - Filters out run IDs where the run file doesn't exist
+       - Adds extra disk I/O but guarantees valid results
+
+    2. self_healing mode (auto-correct on read):
+       - Set self_healing=True in constructor
+       - Automatically removes stale entries from indexes when detected
+       - Good for production where you want automatic recovery
+
+    3. integrity_check_on_init (startup reconciliation):
+       - Set integrity_check_on_init=True in constructor
+       - Runs reconcile_indexes() during initialization
+       - Ensures clean state at startup (adds startup latency)
+
+    4. reconcile_indexes() method (manual reconciliation):
+       - Call explicitly to scan and fix all indexes
+       - Use dry_run=True to report without modifying
+       - Good for maintenance scripts
+
+    5. rebuild_indexes() method (full rebuild):
+       - Clears all indexes and rebuilds from run files
+       - Use when indexes are severely corrupted
 """
 
 import asyncio
@@ -63,6 +95,8 @@ class ConcurrentStorage:
         batch_interval: float = 0.1,
         max_batch_size: int = 100,
         max_locks: int = 1000,
+        self_healing: bool = False,
+        integrity_check_on_init: bool = False,
     ):
         """
         Initialize concurrent storage.
@@ -73,9 +107,15 @@ class ConcurrentStorage:
             batch_interval: Interval between batch flushes
             max_batch_size: Maximum items before forcing flush
             max_locks: Maximum number of active file locks to track strongly
+            self_healing: If True, automatically correct stale index entries on read
+            integrity_check_on_init: If True, run reconcile_indexes() on initialization
         """
         self.base_path = Path(base_path)
-        self._base_storage = FileStorage(base_path)
+        self._base_storage = FileStorage(
+            base_path,
+            self_healing=self_healing,
+            integrity_check_on_init=integrity_check_on_init,
+        )
 
         # Caching
         self._cache: dict[str, CacheEntry] = {}
@@ -281,25 +321,63 @@ class ConcurrentStorage:
 
     # === QUERY OPERATIONS (Async, with Locking) ===
 
-    async def get_runs_by_goal(self, goal_id: str) -> list[str]:
-        """Get all run IDs for a goal."""
+    async def get_runs_by_goal(self, goal_id: str, validate: bool = False) -> list[str]:
+        """
+        Get all run IDs for a goal.
+
+        Args:
+            goal_id: The goal ID to query.
+            validate: If True, filter out run IDs where run file doesn't exist.
+                     Note: This adds extra disk I/O to verify each run file exists.
+
+        Returns:
+            List of run IDs for the goal.
+        """
         async with await self._get_lock(f"index:by_goal:{goal_id}"):
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._base_storage.get_runs_by_goal, goal_id)
+            return await loop.run_in_executor(
+                None, self._base_storage.get_runs_by_goal, goal_id, validate
+            )
 
-    async def get_runs_by_status(self, status: str | RunStatus) -> list[str]:
-        """Get all run IDs with a status."""
+    async def get_runs_by_status(
+        self, status: str | RunStatus, validate: bool = False
+    ) -> list[str]:
+        """
+        Get all run IDs with a status.
+
+        Args:
+            status: The status to query (RunStatus enum or string value).
+            validate: If True, filter out run IDs where run file doesn't exist.
+                     Note: This adds extra disk I/O to verify each run file exists.
+
+        Returns:
+            List of run IDs with the given status.
+        """
         if isinstance(status, RunStatus):
             status = status.value
         async with await self._get_lock(f"index:by_status:{status}"):
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._base_storage.get_runs_by_status, status)
+            return await loop.run_in_executor(
+                None, self._base_storage.get_runs_by_status, status, validate
+            )
 
-    async def get_runs_by_node(self, node_id: str) -> list[str]:
-        """Get all run IDs that executed a node."""
+    async def get_runs_by_node(self, node_id: str, validate: bool = False) -> list[str]:
+        """
+        Get all run IDs that executed a node.
+
+        Args:
+            node_id: The node ID to query.
+            validate: If True, filter out run IDs where run file doesn't exist.
+                     Note: This adds extra disk I/O to verify each run file exists.
+
+        Returns:
+            List of run IDs that executed the given node.
+        """
         async with await self._get_lock(f"index:by_node:{node_id}"):
             loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._base_storage.get_runs_by_node, node_id)
+            return await loop.run_in_executor(
+                None, self._base_storage.get_runs_by_node, node_id, validate
+            )
 
     async def list_all_runs(self) -> list[str]:
         """List all run IDs."""
@@ -310,6 +388,76 @@ class ConcurrentStorage:
         """List all goal IDs that have runs."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._base_storage.list_all_goals)
+
+    # === INDEX RECONCILIATION OPERATIONS ===
+
+    async def reconcile_indexes(self, dry_run: bool = False) -> dict[str, list[str]]:
+        """
+        Reconcile indexes against actual run files on disk.
+
+        Acquires all index locks to prevent concurrent modification during reconciliation.
+
+        Args:
+            dry_run: If True, only report inconsistencies without modifying.
+
+        Returns:
+            Dict mapping index type to list of removed invalid run IDs.
+        """
+        # Collect all existing index keys to lock
+        index_locks = []
+
+        for index_type in ("by_goal", "by_status", "by_node"):
+            index_dir = self.base_path / "indexes" / index_type
+            if index_dir.exists():
+                for index_file in index_dir.glob("*.json"):
+                    key = index_file.stem
+                    lock = await self._get_lock(f"index:{index_type}:{key}")
+                    index_locks.append(lock)
+
+        # Recursive lock acquisition helper
+        async def with_locks(locks: list, callback):
+            if not locks:
+                return await callback()
+            async with locks[0]:
+                return await with_locks(locks[1:], callback)
+
+        async def perform_reconcile():
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None, self._base_storage.reconcile_indexes, dry_run
+            )
+
+        return await with_locks(index_locks, perform_reconcile)
+
+    async def rebuild_indexes(self) -> None:
+        """
+        Rebuild all indexes from scratch using run files as source of truth.
+
+        Acquires all index locks during rebuild to prevent concurrent modification.
+        """
+        # Collect all existing index keys to lock
+        index_locks = []
+
+        for index_type in ("by_goal", "by_status", "by_node"):
+            index_dir = self.base_path / "indexes" / index_type
+            if index_dir.exists():
+                for index_file in index_dir.glob("*.json"):
+                    key = index_file.stem
+                    lock = await self._get_lock(f"index:{index_type}:{key}")
+                    index_locks.append(lock)
+
+        # Recursive lock acquisition helper
+        async def with_locks(locks: list, callback):
+            if not locks:
+                return await callback()
+            async with locks[0]:
+                return await with_locks(locks[1:], callback)
+
+        async def perform_rebuild():
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self._base_storage.rebuild_indexes)
+
+        await with_locks(index_locks, perform_rebuild)
 
     # === BATCH OPERATIONS ===
 

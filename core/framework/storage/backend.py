@@ -31,9 +31,18 @@ class FileStorage:
         {run_id}.json           # Run summary (for quick loading)
     """
 
-    def __init__(self, base_path: str | Path):
+    def __init__(
+        self,
+        base_path: str | Path,
+        self_healing: bool = False,
+        integrity_check_on_init: bool = False,
+    ):
         self.base_path = Path(base_path)
+        self.self_healing = self_healing
         self._ensure_dirs()
+
+        if integrity_check_on_init:
+            self.reconcile_indexes()
 
     def _ensure_dirs(self) -> None:
         """Create directory structure if it doesn't exist."""
@@ -147,19 +156,21 @@ class FileStorage:
 
     # === QUERY OPERATIONS ===
 
-    def get_runs_by_goal(self, goal_id: str) -> list[str]:
+    def get_runs_by_goal(self, goal_id: str, validate: bool = False) -> list[str]:
         """Get all run IDs for a goal."""
-        return self._get_index("by_goal", goal_id)
+        return self._get_index("by_goal", goal_id, validate=validate)
 
-    def get_runs_by_status(self, status: str | RunStatus) -> list[str]:
+    def get_runs_by_status(
+        self, status: str | RunStatus, validate: bool = False
+    ) -> list[str]:
         """Get all run IDs with a status."""
         if isinstance(status, RunStatus):
             status = status.value
-        return self._get_index("by_status", status)
+        return self._get_index("by_status", status, validate=validate)
 
-    def get_runs_by_node(self, node_id: str) -> list[str]:
+    def get_runs_by_node(self, node_id: str, validate: bool = False) -> list[str]:
         """Get all run IDs that executed a node."""
-        return self._get_index("by_node", node_id)
+        return self._get_index("by_node", node_id, validate=validate)
 
     def list_all_runs(self) -> list[str]:
         """List all run IDs."""
@@ -173,14 +184,41 @@ class FileStorage:
 
     # === INDEX OPERATIONS ===
 
-    def _get_index(self, index_type: str, key: str) -> list[str]:
+    def _get_index(
+        self, index_type: str, key: str, validate: bool = False
+    ) -> list[str]:
         """Get values from an index."""
         self._validate_key(key)  # Prevent path traversal
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
         if not index_path.exists():
             return []
         with open(index_path, encoding="utf-8") as f:
-            return json.load(f)
+            values = json.load(f)
+
+        # Validate against actual run files if requested or if self-healing is on
+        if validate or self.self_healing:
+            str_values = [str(v) for v in values]
+            valid_values = []
+            needs_update = False
+
+            runs_dir = self.base_path / "runs"
+            for value in str_values:
+                # Check if run file exists
+                if (runs_dir / f"{value}.json").exists():
+                    valid_values.append(value)
+                else:
+                    needs_update = True
+
+            if needs_update and self.self_healing:
+                # Self-heal: update the index file immediately
+                with atomic_write(index_path) as f:
+                    json.dump(valid_values, f, indent=2)
+                return valid_values
+            elif needs_update and validate:
+                # Just return valid values without updating file
+                return valid_values
+            
+        return values
 
     def _add_to_index(self, index_type: str, key: str, value: str) -> None:
         """Add a value to an index."""
@@ -211,3 +249,69 @@ class FileStorage:
             "total_goals": len(self.list_all_goals()),
             "storage_path": str(self.base_path),
         }
+
+    def reconcile_indexes(self, dry_run: bool = False) -> dict[str, list[str]]:
+        """
+        Reconcile indexes against actual run files on disk.
+
+        Removes any run IDs from indexes that don't have corresponding
+        run files, ensuring query APIs return only valid IDs.
+
+        Args:
+            dry_run: If True, only report inconsistencies without modifying.
+
+        Returns:
+            Dict mapping index type to list of removed invalid run IDs.
+        """
+        # Get authoritative set of existing run IDs
+        runs_dir = self.base_path / "runs"
+        valid_run_ids = {f.stem for f in runs_dir.glob("*.json")}
+        
+        removed: dict[str, list[str]] = {"by_goal": [], "by_status": [], "by_node": []}
+
+        for index_type in ("by_goal", "by_status", "by_node"):
+            index_dir = self.base_path / "indexes" / index_type
+            if not index_dir.exists():
+                continue
+                
+            for index_file in index_dir.glob("*.json"):
+                key = index_file.stem
+                
+                # Use base load logic to avoid recursion/validation loop
+                with open(index_file, encoding="utf-8") as f:
+                    current_ids = json.load(f)
+                
+                invalid_ids = [rid for rid in current_ids if rid not in valid_run_ids]
+
+                if invalid_ids:
+                    removed[index_type].extend(invalid_ids)
+                    if not dry_run:
+                        valid_ids = [rid for rid in current_ids if rid in valid_run_ids]
+                        # If index becomes empty, we could delete it, but keeping empty list is also fine
+                        with atomic_write(index_file) as f:
+                            json.dump(valid_ids, f, indent=2)
+
+        return removed
+
+    def rebuild_indexes(self) -> None:
+        """
+        Rebuild all indexes from scratch using run files as source of truth.
+
+        Clears existing indexes and re-populates from actual run data.
+        Use when indexes are severely corrupted or after bulk operations.
+        """
+        # Clear all existing indexes
+        for index_type in ("by_goal", "by_status", "by_node"):
+            index_dir = self.base_path / "indexes" / index_type
+            if index_dir.exists():
+                for index_file in index_dir.glob("*.json"):
+                    index_file.unlink()
+
+        # Rebuild from run files
+        for run_id in self.list_all_runs():
+            run = self.load_run(run_id)
+            if run:
+                self._add_to_index("by_goal", run.goal_id, run.id)
+                self._add_to_index("by_status", run.status.value, run.id)
+                for node_id in run.metrics.nodes_executed:
+                    self._add_to_index("by_node", node_id, run.id)
