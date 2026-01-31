@@ -12,14 +12,7 @@ from pathlib import Path
 from framework.schemas.run import Run, RunStatus, RunSummary
 
 
-def atomic_write_text(path: Path, write_fn) -> None:
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        write_fn(f)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp_path.replace(path)
-
+from framework.utils.io import atomic_write
 
 class FileStorage:
     """
@@ -96,12 +89,15 @@ class FileStorage:
         """Save a run to storage."""
         # Save full run using Pydantic's model_dump_json
         run_path = self.base_path / "runs" / f"{run.id}.json"
-        atomic_write_text(run_path, lambda f: f.write(run.model_dump_json(indent=2)))
+        with atomic_write(run_path) as f:
+           f.write(run.model_dump_json(indent=2))
+
 
         # Save summary
         summary = RunSummary.from_run(run)
         summary_path = self.base_path / "summaries" / f"{run.id}.json"
-        atomic_write_text(summary_path, lambda f: f.write(summary.model_dump_json(indent=2)))
+        with atomic_write(summary_path) as f:
+           f.write(summary.model_dump_json(indent=2))
 
         # Update indexes
         self._add_to_index("by_goal", run.goal_id, run.id)
@@ -196,7 +192,9 @@ class FileStorage:
         values = self._get_index(index_type, key)  # Already validated in _get_index
         if value not in values:
             values.append(value)
-            atomic_write_text(index_path, lambda f: json.dump(values, f, indent=2))
+            with atomic_write(index_path) as f:
+               json.dump(values, f, indent=2)
+
 
     def _remove_from_index(self, index_type: str, key: str, value: str) -> None:
         """Remove a value from an index."""
@@ -205,7 +203,8 @@ class FileStorage:
         values = self._get_index(index_type, key)  # Already validated in _get_index
         if value in values:
             values.remove(value)
-            atomic_write_text(index_path, lambda f: json.dump(values, f, indent=2))
+            with atomic_write(index_path) as f:
+               json.dump(values, f, indent=2)
 
     # === UTILITY ===
 
