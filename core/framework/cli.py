@@ -14,6 +14,13 @@ Testing commands:
     hive test-debug <goal_id> <test_id>
     hive test-list <goal_id>
     hive test-stats <goal_id>
+
+Memory commands:
+    hive memory-list --agent <agent_name>
+    hive memory-inspect <run_id> --agent <agent_name>
+    hive memory-stats --agent <agent_name>
+    hive memory-delete <run_id> --agent <agent_name>
+    hive memory-clear --agent <agent_name>
 """
 
 import argparse
@@ -74,6 +81,11 @@ def main():
     from framework.testing.cli import register_testing_commands
 
     register_testing_commands(subparsers)
+
+    # Register memory commands (memory-list, memory-inspect, memory-stats, memory-delete, memory-clear)
+    from framework.memory.cli import register_memory_commands
+
+    register_memory_commands(subparsers)
 
     args = parser.parse_args()
 
