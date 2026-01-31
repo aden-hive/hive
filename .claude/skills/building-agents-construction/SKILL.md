@@ -359,3 +359,36 @@ Return this exact structure:
 3. **Skipping validation** - Always validate nodes and graph before proceeding
 4. **Not waiting for approval** - Always ask user before major steps
 5. **Displaying this file** - Execute the steps, don't show documentation
+
+---
+
+## REFERENCE: Available Tools
+
+Common tools available via the hive-tools MCP server:
+
+### Excel Tools (Spreadsheet Operations)
+| Tool | Description |
+|------|-------------|
+| `excel_read` | Read data from Excel files with pagination |
+| `excel_write` | Create new Excel files |
+| `excel_append` | Append rows to existing Excel files |
+| `excel_info` | Get file metadata (sheets, columns, rows) |
+| `excel_sheet_list` | List sheet names in a file |
+| `excel_sql` | Query Excel with SQL (DuckDB), multi-sheet support |
+| `excel_search` | Search values across sheets with match options |
+
+### Web Tools
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web |
+| `web_scrape` | Scrape webpage content |
+| `pdf_read` | Read PDF files |
+
+### CSV Tools
+| Tool | Description |
+|------|-------------|
+| `csv_read` | Read CSV files |
+| `csv_write` | Write CSV files |
+| `csv_sql` | Query CSV with SQL |
+
+**Note:** Always verify tool availability with `mcp__agent-builder__list_mcp_tools()` before using.
