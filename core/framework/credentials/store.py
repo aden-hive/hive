@@ -45,7 +45,7 @@ class CredentialStore:
     Usage:
         # Basic usage
         store = CredentialStore(
-            storage=EncryptedFileStorage("/path/to/creds"),
+            storage=EncryptedFileStorage("~/.hive/credentials"),
             providers=[OAuth2Provider(), StaticProvider()]
         )
 
@@ -566,7 +566,7 @@ class CredentialStore:
     @classmethod
     def with_encrypted_storage(
         cls,
-        base_path: str,
+        base_path: str | None = None,
         providers: list[CredentialProvider] | None = None,
         **kwargs: Any,
     ) -> CredentialStore:
@@ -574,7 +574,7 @@ class CredentialStore:
         Create a credential store with encrypted file storage.
 
         Args:
-            base_path: Directory for credential files
+            base_path: Directory for credential files. Defaults to ~/.hive/credentials.
             providers: List of credential providers
             **kwargs: Additional arguments passed to CredentialStore
 
@@ -616,7 +616,7 @@ class CredentialStore:
     @classmethod
     def with_aden_sync(
         cls,
-        base_url: str = "https://hive.adenhq.com",
+        base_url: str = "https://api.adenhq.com",
         cache_ttl_seconds: int = 300,
         local_path: str | None = None,
         auto_sync: bool = True,
@@ -630,7 +630,7 @@ class CredentialStore:
         is unreachable.
 
         Args:
-            base_url: Aden server URL (default: https://hive.adenhq.com)
+            base_url: Aden server URL (default: https://api.adenhq.com)
             cache_ttl_seconds: How long to cache credentials locally (default: 5 min)
             local_path: Path for local credential storage (default: ~/.hive/credentials)
             auto_sync: Whether to sync all credentials on startup (default: True)

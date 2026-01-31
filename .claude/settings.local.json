@@ -24,12 +24,17 @@
       "Bash(done)",
       "Bash(xargs cat:*)",
       "mcp__agent-builder__list_mcp_tools",
-      "mcp__agent-builder__add_mcp_server"
+      "mcp__agent-builder__add_mcp_server",
+      "mcp__agent-builder__check_missing_credentials",
+      "mcp__agent-builder__store_credential",
+      "mcp__agent-builder__list_stored_credentials",
+      "mcp__agent-builder__delete_stored_credential",
+      "mcp__agent-builder__verify_credentials",
+      "Bash(PYTHONPATH=/home/timothy/oss/hive/core:/home/timothy/oss/hive/exports python:*)",
+      "Bash(PYTHONPATH=core:exports:tools/src python -m hubspot_input:*)",
+      "mcp__agent-builder__export_graph"
     ]
   },
-  "enabledMcpjsonServers": [
-    "agent-builder",
-    "tools"
-  ],
+  "enabledMcpjsonServers": ["agent-builder", "tools"],
   "enableAllProjectMcpServers": true
 }
