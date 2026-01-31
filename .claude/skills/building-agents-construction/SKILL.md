@@ -359,3 +359,19 @@ Return this exact structure:
 3. **Skipping validation** - Always validate nodes and graph before proceeding
 4. **Not waiting for approval** - Always ask user before major steps
 5. **Displaying this file** - Execute the steps, don't show documentation
+
+---
+
+## REFERENCE: Available Tools - CSV
+
+CSV tools for reading, writing, and querying CSV files.
+
+| Tool | Description |
+|------|-------------|
+| `csv_read` | Read data from CSV files with pagination |
+| `csv_write` | Create new CSV files |
+| `csv_append` | Append rows to existing CSV files |
+| `csv_info` | Get file metadata (columns, row count) |
+| `csv_sql` | Query CSV files with SQL (DuckDB) |
+
+**Note:** Always verify tool availability with `mcp__agent-builder__list_mcp_tools()` before using.
