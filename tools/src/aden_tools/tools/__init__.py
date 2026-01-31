@@ -37,6 +37,7 @@ from .file_system_toolkits.replace_file_content import (
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
+from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
@@ -66,6 +67,7 @@ def register_all_tools(
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
+    register_github(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
 
     # Register file system toolkits
@@ -97,6 +99,19 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "github_list_repos",
+        "github_get_repo",
+        "github_search_repos",
+        "github_list_issues",
+        "github_get_issue",
+        "github_create_issue",
+        "github_update_issue",
+        "github_list_pull_requests",
+        "github_get_pull_request",
+        "github_create_pull_request",
+        "github_search_code",
+        "github_list_branches",
+        "github_get_branch",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",

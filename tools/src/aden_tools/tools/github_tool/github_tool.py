@@ -22,6 +22,47 @@ if TYPE_CHECKING:
 GITHUB_API_BASE = "https://api.github.com"
 
 
+def _sanitize_path_param(param: str, param_name: str = "parameter") -> str:
+    """
+    Sanitize URL path parameters to prevent path traversal.
+
+    Args:
+        param: The parameter value to sanitize
+        param_name: Name of the parameter (for error messages)
+
+    Returns:
+        The sanitized parameter
+
+    Raises:
+        ValueError: If parameter contains invalid characters
+    """
+    if "/" in param or ".." in param:
+        raise ValueError(
+            f"Invalid {param_name}: cannot contain '/' or '..'"
+        )
+    return param
+
+
+def _sanitize_error_message(error: Exception) -> str:
+    """
+    Sanitize error messages to prevent token leaks.
+
+    httpx.RequestError can include headers in the exception message,
+    which may expose the Bearer token.
+
+    Args:
+        error: The exception to sanitize
+
+    Returns:
+        A safe error message without sensitive information
+    """
+    error_str = str(error)
+    # Remove any Authorization headers or Bearer tokens
+    if "Authorization" in error_str or "Bearer" in error_str:
+        return "Network error occurred"
+    return f"Network error: {error_str}"
+
+
 class _GitHubClient:
     """Internal client wrapping GitHub REST API v3 calls."""
 
@@ -73,6 +114,7 @@ class _GitHubClient:
     ) -> dict[str, Any]:
         """List repositories for a user or authenticated user."""
         if username:
+            username = _sanitize_path_param(username, "username")
             url = f"{GITHUB_API_BASE}/users/{username}/repos"
         else:
             url = f"{GITHUB_API_BASE}/user/repos"
@@ -97,6 +139,8 @@ class _GitHubClient:
         repo: str,
     ) -> dict[str, Any]:
         """Get repository information."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         response = httpx.get(
             f"{GITHUB_API_BASE}/repos/{owner}/{repo}",
             headers=self._headers,
@@ -136,6 +180,8 @@ class _GitHubClient:
         limit: int = 30,
     ) -> dict[str, Any]:
         """List issues for a repository."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         params = {
             "state": state,
             "per_page": min(limit, 100),
@@ -156,6 +202,8 @@ class _GitHubClient:
         issue_number: int,
     ) -> dict[str, Any]:
         """Get a specific issue."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         response = httpx.get(
             f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}",
             headers=self._headers,
@@ -173,6 +221,8 @@ class _GitHubClient:
         assignees: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a new issue."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         payload: dict[str, Any] = {"title": title}
         if body:
             payload["body"] = body
@@ -200,6 +250,8 @@ class _GitHubClient:
         labels: list[str] | None = None,
     ) -> dict[str, Any]:
         """Update an existing issue."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         payload: dict[str, Any] = {}
         if title:
             payload["title"] = title
@@ -228,6 +280,8 @@ class _GitHubClient:
         limit: int = 30,
     ) -> dict[str, Any]:
         """List pull requests for a repository."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         params = {
             "state": state,
             "per_page": min(limit, 100),
@@ -248,6 +302,8 @@ class _GitHubClient:
         pull_number: int,
     ) -> dict[str, Any]:
         """Get a specific pull request."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         response = httpx.get(
             f"{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pull_number}",
             headers=self._headers,
@@ -266,6 +322,8 @@ class _GitHubClient:
         draft: bool = False,
     ) -> dict[str, Any]:
         """Create a new pull request."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         payload: dict[str, Any] = {
             "title": title,
             "head": head,
@@ -313,6 +371,8 @@ class _GitHubClient:
         limit: int = 30,
     ) -> dict[str, Any]:
         """List branches for a repository."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
         params = {
             "per_page": min(limit, 100),
         }
@@ -332,6 +392,9 @@ class _GitHubClient:
         branch: str,
     ) -> dict[str, Any]:
         """Get a specific branch."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        branch = _sanitize_path_param(branch, "branch")
         response = httpx.get(
             f"{GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{branch}",
             headers=self._headers,
@@ -400,7 +463,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     @mcp.tool()
     def github_get_repo(
@@ -425,7 +488,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     @mcp.tool()
     def github_search_repos(
@@ -452,7 +515,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     # --- Issues ---
 
@@ -483,7 +546,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     @mcp.tool()
     def github_get_issue(
@@ -510,7 +573,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     @mcp.tool()
     def github_create_issue(
@@ -543,7 +606,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     @mcp.tool()
     def github_update_issue(
@@ -578,7 +641,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     # --- Pull Requests ---
 
@@ -609,7 +672,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     @mcp.tool()
     def github_get_pull_request(
@@ -636,7 +699,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     @mcp.tool()
     def github_create_pull_request(
@@ -671,7 +734,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     # --- Search ---
 
@@ -698,7 +761,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     # --- Branches ---
 
@@ -727,7 +790,7 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
 
     @mcp.tool()
     def github_get_branch(
@@ -754,4 +817,4 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            return {"error": _sanitize_error_message(e)}
