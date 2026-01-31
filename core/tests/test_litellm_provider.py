@@ -16,37 +16,6 @@ from framework.llm.anthropic import AnthropicProvider
 from framework.llm.litellm import LiteLLMProvider
 from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
 
-class FakeFunction:
-    def __init__(self, name, arguments):
-        self.name = name
-        self.arguments = arguments
-
-
-class FakeToolCall:
-    def __init__(self, id, name, arguments):
-        self.id = id
-        self.function = FakeFunction(name, arguments)
-
-
-class FakeMessage:
-    def __init__(self, tool_calls):
-        self.content = None
-        self.tool_calls = tool_calls
-
-
-class FakeChoice:
-    def __init__(self, message):
-        self.message = message
-        self.finish_reason = "tool_calls"
-
-
-class FakeResponse:
-    def __init__(self, tool_calls):
-        self.choices = [FakeChoice(FakeMessage(tool_calls))]
-        self.usage = None
-        self.model = "test-model"
-
-
 
 class TestLiteLLMProviderInit:
     """Test LiteLLMProvider initialization."""
@@ -239,7 +208,7 @@ class TestLiteLLMProviderToolUse:
         assert result.input_tokens == 50  # 20 + 30
         assert result.output_tokens == 25  # 15 + 10
         assert mock_completion.call_count == 2
-    
+
     @patch("litellm.completion")
     def test_complete_with_tools_invalid_json_arguments_are_handled(self, mock_completion):
         """Test that invalid JSON tool arguments do not execute the tool."""
@@ -274,7 +243,7 @@ class TestLiteLLMProviderToolUse:
             Tool(
                 name="test_tool",
                 description="Test tool",
-                parameters={"properties": {}, "required": []}
+                parameters={"properties": {}, "required": []},
             )
         ]
 
@@ -283,16 +252,14 @@ class TestLiteLLMProviderToolUse:
         def tool_executor(tool_use: ToolUse) -> ToolResult:
             called["value"] = True
             return ToolResult(
-                tool_use_id=tool_use.id,
-                content="should not be called",
-                is_error=False
+                tool_use_id=tool_use.id, content="should not be called", is_error=False
             )
 
         result = provider.complete_with_tools(
             messages=[{"role": "user", "content": "Run tool"}],
             system="You are a test assistant.",
             tools=tools,
-            tool_executor=tool_executor
+            tool_executor=tool_executor,
         )
 
         assert called["value"] is False
@@ -327,7 +294,7 @@ class TestToolConversion:
 class TestAnthropicProviderBackwardCompatibility:
     """Test AnthropicProvider backward compatibility with LiteLLM backend."""
 
-    def test_anthropic_provider_is_llm_provider(self):  
+    def test_anthropic_provider_is_llm_provider(self):
         """Test that AnthropicProvider implements LLMProvider interface."""
         provider = AnthropicProvider(api_key="test-key")
         assert isinstance(provider, LLMProvider)

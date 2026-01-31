@@ -237,11 +237,13 @@ class LiteLLMProvider(LLMProvider):
                     args = json.loads(tool_call.function.arguments)
                 except json.JSONDecodeError:
                     # Surface error to LLM and skip tool execution
-                    current_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": "Invalid JSON arguments provided to tool.",
-                    })
+                    current_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": "Invalid JSON arguments provided to tool.",
+                        }
+                    )
                     continue
 
                 tool_use = ToolUse(
@@ -251,7 +253,7 @@ class LiteLLMProvider(LLMProvider):
                 )
 
                 result = tool_executor(tool_use)
-                
+
                 # Add tool result message
                 current_messages.append(
                     {

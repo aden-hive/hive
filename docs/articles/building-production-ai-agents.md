@@ -362,10 +362,7 @@ class AgentRequest(BaseModel):
             raise ValueError('max_tokens too high')
         return v
 ```
-
 ### Output Sanitization
-> **Note:** The following snippet is illustrative and shows a simplified example
-> of output sanitization logic. Actual implementations may differ.
 ```python
 def sanitize_output(result):
     # Remove any leaked secrets
