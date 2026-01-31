@@ -274,3 +274,152 @@ class TestGetSecurePath:
         # However, realpath reveals the escape - callers should check this
         real_path = os.path.realpath(result)
         assert os.path.commonpath([real_path, str(session_dir)]) != str(session_dir)
+
+    # ========================================================================
+    # Windows Path Security Tests (Path Traversal Vulnerability Fix)
+    # ========================================================================
+
+    def test_windows_absolute_path_with_forward_slash_blocked(self, ids):
+        """Windows absolute paths with forward slashes are blocked (CVE fix)."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path("C:/Windows/System32", **ids)
+
+    def test_windows_absolute_path_with_backslash_blocked(self, ids):
+        """Windows absolute paths with backslashes are blocked (CVE fix)."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path("C:\\Windows\\System32", **ids)
+
+    def test_different_drive_blocked(self, ids):
+        """Paths on different drives are blocked (CVE fix)."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path("D:/data/file.txt", **ids)
+
+    @pytest.mark.parametrize(
+        "malicious_path",
+        [
+            "C:/Windows/System32/config/SAM",
+            "D:/sensitive/data.txt",
+            "C:\\Users\\Administrator\\.ssh\\id_rsa",
+            "E:\\secrets.txt",
+            "F:/Program Files/sensitive.dat",
+            "Z:\\network\\share\\file.txt",
+        ],
+    )
+    def test_all_windows_drive_letters_blocked(self, malicious_path, ids):
+        """All Windows drive letters (A-Z) are blocked (CVE fix)."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path(malicious_path, **ids)
+
+    def test_windows_path_traversal_with_backslashes_blocked(self, ids):
+        """Windows-style path traversal with backslashes is blocked."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="outside the session sandbox"):
+            get_secure_path("..\\..\\..\\Windows\\System32", **ids)
+
+    def test_mixed_separators_normalized(self, ids):
+        """Mixed path separators (/ and \\) are normalized correctly."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        result = get_secure_path("folder\\subfolder/file.txt", **ids)
+
+        # Should contain both folder and subfolder
+        assert "folder" in result and "subfolder" in result and "file.txt" in result
+        # Should be within sandbox
+        session_dir = str(self.workspaces_dir / "test-workspace" / "test-agent" / "test-session")
+        assert result.startswith(session_dir)
+
+    def test_multiple_leading_slashes_handled(self, ids):
+        """Multiple leading slashes are handled correctly."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        result = get_secure_path("///etc/passwd", **ids)
+
+        expected = (
+            self.workspaces_dir
+            / "test-workspace"
+            / "test-agent"
+            / "test-session"
+            / "etc"
+            / "passwd"
+        )
+        assert result == str(expected)
+
+    def test_unc_path_blocked(self, ids):
+        """UNC paths (\\\\server\\share) are blocked."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        # UNC paths start with \\\\ which gets normalized
+        # The double backslash at start should be stripped
+        # But if it somehow forms a drive-like pattern, it should be blocked
+        result = get_secure_path("\\\\server\\share\\file.txt", **ids)
+
+        # Should be treated as relative path within sandbox
+        session_dir = str(self.workspaces_dir / "test-workspace" / "test-agent" / "test-session")
+        assert result.startswith(session_dir)
+
+    def test_case_sensitivity_in_drive_detection(self, ids):
+        """Drive letter detection is case-insensitive."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        # Lowercase drive letters should also be blocked
+        with pytest.raises(ValueError, match="drive letters are not allowed"):
+            get_secure_path("c:/windows/system32", **ids)
+
+    def test_path_normalization_consistency(self, ids):
+        """Equivalent paths normalize to the same result."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        path1 = get_secure_path("folder/file.txt", **ids)
+        path2 = get_secure_path("folder\\file.txt", **ids)
+        path3 = get_secure_path("./folder/file.txt", **ids)
+
+        # All should resolve to the same normalized path
+        assert os.path.normpath(path1) == os.path.normpath(path2)
+        assert os.path.normpath(path1) == os.path.normpath(path3)
+
+    def test_unicode_in_path_handled(self, ids):
+        """Unicode characters in paths are handled correctly."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        result = get_secure_path("folder/文件.txt", **ids)
+
+        assert "folder" in result
+        session_dir = str(self.workspaces_dir / "test-workspace" / "test-agent" / "test-session")
+        assert result.startswith(session_dir)
+
+    def test_long_path_handled(self, ids):
+        """Very long paths are handled correctly."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        long_path = "/".join(["folder"] * 50) + "/file.txt"
+        result = get_secure_path(long_path, **ids)
+
+        assert "folder" in result and "file.txt" in result
+        session_dir = str(self.workspaces_dir / "test-workspace" / "test-agent" / "test-session")
+        assert result.startswith(session_dir)
+
+    @pytest.mark.parametrize(
+        "traversal_path",
+        [
+            "../../../etc/passwd",
+            "folder/../../../../../../etc/passwd",
+            "..\\..\\..\\Windows\\System32",
+            "folder\\..\\..\\..\\..\\Windows",
+            "valid/../../../etc/passwd",
+        ],
+    )
+    def test_various_traversal_attempts_blocked(self, traversal_path, ids):
+        """Various path traversal attempts are blocked."""
+        from aden_tools.tools.file_system_toolkits.security import get_secure_path
+
+        with pytest.raises(ValueError, match="outside the session sandbox"):
+            get_secure_path(traversal_path, **ids)
