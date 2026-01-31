@@ -22,7 +22,6 @@
   <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
-
 <p align="center">
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
@@ -135,15 +134,13 @@ The agent has access to all Hive skills and can scaffold agents, add tools, and 
 
 ### Antigravity IDE Support
 
-Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). To enable:
+Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). **Easiest:** open a terminal in the hive repo folder and run (use `./` — the script is inside the repo):
 
-1. Open the project in Antigravity IDE (repo root as project root)
-2. In the agent panel, open **Manage MCP Servers** and use **View raw config**
-3. Point Antigravity to `.antigravity/mcp_config.json` (or merge its contents into your user `mcp_config.json` and set `cwd` to your repo paths)
-4. Restart or reload MCP so the **agent-builder** and **tools** servers connect
-5. Skills are available under `.antigravity/skills/` (symlinks to `.claude/skills/`)
+```bash
+./scripts/setup-antigravity-mcp.sh
+```
 
-See [docs/antigravity-setup.md](docs/antigravity-setup.md) for full setup and troubleshooting.
+Then restart Antigravity; **agent-builder** and **tools** MCP servers should connect. Skills are under `.antigravity/skills/` (symlinks to `.claude/skills/`). See [docs/antigravity-setup.md](docs/antigravity-setup.md) for manual setup and troubleshooting.
 
 ## Features
 
