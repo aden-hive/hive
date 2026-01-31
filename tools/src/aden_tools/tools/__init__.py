@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
+from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
@@ -69,6 +70,8 @@ def register_all_tools(
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
     register_google_sheets(mcp, credentials=credentials)
+    # email supports multiple providers (Resend) with auto-detection
+    register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_jira(mcp, credentials=credentials)
 
@@ -111,6 +114,8 @@ def register_all_tools(
         "google_sheets_batch_clear_values",
         "google_sheets_add_sheet",
         "google_sheets_delete_sheet",
+        "send_email",
+        "send_budget_alert_email",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",
