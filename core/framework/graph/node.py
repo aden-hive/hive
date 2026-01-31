@@ -476,7 +476,7 @@ class NodeProtocol(ABC):
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
         """
-        Validate that required inputs are present.
+        Validate that required inputs are present and match schema.
 
         Override to add custom validation.
 
@@ -484,9 +484,56 @@ class NodeProtocol(ABC):
             List of validation error messages (empty if valid)
         """
         errors = []
+        
+        # 1. Check for missing keys (basic checks)
         for key in ctx.node_spec.input_keys:
+            # Check both input_data (direct inputs) and memory (shared state)
             if key not in ctx.input_data and ctx.memory.read(key) is None:
                 errors.append(f"Missing required input: {key}")
+
+        # 2. Check schema validation if schema exists
+        if ctx.node_spec.input_schema:
+            for key, rules in ctx.node_spec.input_schema.items():
+                # Get value from input_data or memory
+                value = ctx.input_data.get(key)
+                if value is None:
+                    value = ctx.memory.read(key)
+
+                # Check required
+                is_required = rules.get("required", True)  # Default to required
+                if value is None:
+                    if is_required:
+                        # Already caught by step 1 if in input_keys, but good for completeness
+                        if f"Missing required input: {key}" not in errors:
+                            errors.append(f"Missing required input: {key}")
+                    continue
+
+                # Check type
+                type_name = rules.get("type")
+                if type_name:
+                    valid_type = False
+                    if type_name == "string":
+                        valid_type = isinstance(value, str)
+                    elif type_name == "int" or type_name == "integer":
+                        valid_type = isinstance(value, int)
+                    elif type_name == "float" or type_name == "number":
+                        valid_type = isinstance(value, (int, float))
+                    elif type_name == "bool" or type_name == "boolean":
+                        valid_type = isinstance(value, bool)
+                    elif type_name == "dict" or type_name == "object":
+                        valid_type = isinstance(value, dict)
+                    elif type_name == "list" or type_name == "array":
+                        valid_type = isinstance(value, list)
+                    else:
+                        # Unknown type, skip validation or warn? For safe subset, we skip.
+                        valid_type = True
+                    
+                    if not valid_type:
+                        errors.append(
+                            f"Input '{key}' has wrong type: expected {type_name}, "
+                            f"got {type(value).__name__}"
+                        )
+
         return errors
 
 
