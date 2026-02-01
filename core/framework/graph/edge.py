@@ -11,7 +11,6 @@ our edges can be created dynamically by a Builder agent based on the goal.
 
 Edge Types:
 - always: Always traverse after source completes
-- always: Always traverse after source completes
 - on_success: Traverse only if source succeeds
 - on_failure: Traverse only if source fails
 - conditional: Traverse based on expression evaluation (SAFE SUBSET ONLY)
