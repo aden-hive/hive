@@ -205,6 +205,23 @@ claude> /testing-agent
 PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 ```
 
+
+## Troubleshooting Setup Issues
+
+If you see errors during setup (e.g., "framework... failed"), try these troubleshooting steps:
+
+1. Activate the core environment and test imports:
+    ```bash
+    source core/.venv/bin/activate && python -c "import framework" && deactivate
+    ```
+2. Activate the tools environment and test imports:
+    ```bash
+    source tools/.venv/bin/activate && python -c "import aden_tools" && deactivate
+    ```
+3. If you see an error message, check that all dependencies are installed and your Python version is 3.11+.
+
+If you still have issues, see [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) or open an issue on GitHub.
+
 See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.
 
 ## Documentation
