@@ -12,6 +12,8 @@ For live tests (requires API keys):
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from framework.llm.anthropic import AnthropicProvider
 from framework.llm.litellm import LiteLLMProvider
 from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
@@ -58,6 +60,18 @@ class TestLiteLLMProviderInit:
             # Should not raise.
             provider = LiteLLMProvider(model="ollama/llama3")
             assert provider.model == "ollama/llama3"
+
+    def test_complete_without_api_key_raises_error(self):
+        with patch.dict(os.environ, {}, clear=True):
+            provider = LiteLLMProvider(model="gpt-4o-mini")
+
+            with pytest.raises(Exception) as excinfo:
+                provider.complete(messages=[{"role": "user", "content": "Hello"}])
+
+            assert (
+                "api key" in str(excinfo.value).lower()
+                or "authentication" in str(excinfo.value).lower()
+            )
 
 
 class TestLiteLLMProviderComplete:
