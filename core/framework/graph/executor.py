@@ -333,11 +333,24 @@ class GraphExecutor:
                 if node_spec.id in graph.pause_nodes:
                     self.logger.info("💾 Saving session state after pause node")
                     saved_memory = memory.read_all()
+                    # Compute next node so resume continues from there instead of entry_node
+                    next_node_id = (
+                        result.next_node
+                        if result.next_node
+                        else self._follow_edges(
+                            graph=graph,
+                            goal=goal,
+                            current_node_id=current_node_id,
+                            current_node_spec=node_spec,
+                            result=result,
+                            memory=memory,
+                        )
+                    )
                     session_state_out = {
                         "paused_at": node_spec.id,
                         "resume_from": f"{node_spec.id}_resume",  # Resume key
                         "memory": saved_memory,
-                        "next_node": None,  # Will resume from entry point
+                        "next_node": next_node_id,  # Resume from this node (None if no edge)
                     }
 
                     self.runtime.end_run(

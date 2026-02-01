@@ -469,6 +469,11 @@ class GraphSpec(BaseModel):
         if not session_state:
             return self.entry_node
 
+        # If resuming and we have the next node to run (stored when pausing), use it
+        next_node = session_state.get("next_node")
+        if next_node and self.get_node(next_node):
+            return next_node
+
         # Check if resuming from a pause node
         paused_at = session_state.get("paused_at")
         if paused_at and paused_at in self.pause_nodes:
