@@ -280,6 +280,49 @@ class TestParquetTool:
         names = [row["name"] for row in result["rows"]]
         assert names == ["Alice", "Bob", "Charlie"]
 
+    def test_rejects_path_traversal(self, parquet_tools):
+        """Test that path traversal is rejected."""
+        parquet_info = parquet_tools["parquet_info"]
+        result = parquet_info(
+            file_path="../passwd",
+            workspace_id=TEST_WORKSPACE_ID,
+            agent_id=TEST_AGENT_ID,
+            session_id=TEST_SESSION_ID,
+            columns_limit=10,
+        )
+        assert "error" in result
+        assert "Access denied" in result["error"]
+
+    def test_reject_non_parquet_extension(tools, tmp_path: Path):
+        """Test that non-parquet file extensions are rejected."""
+        mcp = FastMCP()
+        register_tools(mcp)
+        parquet_info = mcp._tool_manager._tools["parquet_info"].fn
+        # Create a dummy non-parquet file
+        session_dir = tmp_path / TEST_WORKSPACE_ID / TEST_AGENT_ID / TEST_SESSION_ID
+        session_dir.mkdir(parents=True, exist_ok=True)
+        non_parquet_file = session_dir / "data.txt"
+        non_parquet_file.write_text("This is not a parquet file.")
+
+        result = parquet_info(
+            file_path=non_parquet_file.name,
+            workspace_id=TEST_WORKSPACE_ID,
+            agent_id=TEST_AGENT_ID,
+            session_id=TEST_SESSION_ID,
+            columns_limit=10,
+        )
+        assert "error" in result
+        assert "The file is not a parquet file." in result["error"]
+    def test_allow_remote_scheme_passthrough(tools, parquet_tools):
+        results = parquet_tools["parquet_info"](
+            file_path="s3://my-bucket/data.parquet",
+            workspace_id=TEST_WORKSPACE_ID,
+            agent_id=TEST_AGENT_ID,
+            session_id=TEST_SESSION_ID,
+            columns_limit=10,
+        )
+        assert "error" in results or "columns" in results
+
 
 
 

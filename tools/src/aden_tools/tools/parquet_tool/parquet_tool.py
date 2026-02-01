@@ -1,6 +1,6 @@
 import importlib.util
 import os
-from typing import Any
+from typing import Any, Iterable, Tuple
 
 import duckdb
 from fastmcp import FastMCP
@@ -10,22 +10,43 @@ from ..file_system_toolkits.security import get_secure_path
 def register_tools(mcp: FastMCP):
     """Register Parquet Tool with the MCP server."""
 
-    # @mcp.tool()
-    def secure_parquet_path(file_path: str, workspace_id, agent_id, session_id) -> str:
+    def secure_parquet_path(
+        file_path: str,
+        workspace_id: str,
+        agent_id: str,
+        session_id: str
+        ) -> str:
         """ Get the secure path for the parquet file."""
+        allowed_schema = ("s3://", "gs://", "https://")
+        if file_path.startswith(allowed_schema):
+            return file_path  # rely on DuckDB to handle security for remote files
         return get_secure_path(file_path, workspace_id, agent_id, session_id,)
 
-    # @mcp.tool()
-    def _connect_to_duckdb(file_path: str) -> duckdb.DuckDBPyConnection:
+    def _connect_to_duckdb(
+            file_path: str
+            ) -> duckdb.DuckDBPyConnection:
         """ Connect to DuckDB with optimized settings."""
         conn = duckdb.connect(database=":memory:")
         conn.execute("SET enable_progress_bar=false;")
         conn.execute("SET memory_limit='1GB';")
         conn.execute("SET threads=2;")
+        # Enable remote access for HTTP/HTTPS files
+        conn.execute("INSTALL httpfs;")
+        conn.execute("LOAD httpfs;")
+        # Optional: pull creds/region from env
+        if os.getenv("AWS_ACCESS_KEY_ID"):
+            conn.execute("SET s3_access_key_id=?", [os.getenv("AWS_ACCESS_KEY_ID")])
+            conn.execute("SET s3_secret_access_key=?", [os.getenv("AWS_SECRET_ACCESS_KEY")])
+        if os.getenv("AWS_SESSION_TOKEN"):
+            conn.execute("SET s3_session_token=?", [os.getenv("AWS_SESSION_TOKEN")])
+        if os.getenv("AWS_REGION"):
+            conn.execute("SET s3_region=?", [os.getenv("AWS_REGION")])
         return conn
 
-    # @mcp.tool()
-    def _limit_sql_query(query: str, limit: int) -> tuple[str, int]:
+    def _limit_sql_query(
+            query: str,
+            limit: int
+            ) -> tuple[str, int]:
         """ Add a LIMIT clause to the SQL query if not present."""
         limit = int(limit)
         if limit <= 0:
@@ -58,7 +79,8 @@ def register_tools(mcp: FastMCP):
                     "pip install duckdb  or  pip install tools[sql]"}
         try:
             file_path = secure_parquet_path(file_path, workspace_id, agent_id, session_id)
-
+            if not file_path.endswith(".parquet"):
+                return {"error": "The file is not a parquet file."}
             con = _connect_to_duckdb(file_path)
             rel = str(file_path)
 
@@ -175,7 +197,7 @@ def register_tools(mcp: FastMCP):
         agent_id: str,
         session_id: str,
         selected_columns: list[str] | None = None,
-        filters: dict[str, Any] | None = None,
+        filters: Iterable[Tuple[str, str, Any]] | None = None,
         group_by: list[str] | None = None,
         order_by: list[str] | None = None,
         limit: int | None = None,
@@ -205,7 +227,7 @@ def register_tools(mcp: FastMCP):
             # selected_clause = ", ".join([f'"{c}"' for c in cols])
 
             # Build WHERE clause from filters
-            allowed_ops = {"=", "!=", "<", "<=", ">", ">="}
+            allowed_ops = {"=", "!=", "<", "<=", ">", ">=", "IN", "LIKE"}
             where_parts, params = [], []
             for col, op, val in filters or []:
                 if op not in allowed_ops:
