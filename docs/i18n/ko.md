@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## 개요
@@ -76,7 +76,7 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Python 환경 설정 실행
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 다음 요소들이 설치됩니다:
@@ -240,7 +240,7 @@ hive/
 
 ```bash
 # 최초 1회 설정
-./scripts/setup-python.sh
+./quickstart.sh
 
 # 다음 항목들이 설치됨:
 # - framework 패키지 (핵심 런타임)

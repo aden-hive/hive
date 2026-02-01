@@ -86,10 +86,14 @@ class MCPClient:
         """
         # If we have a persistent loop (for STDIO), use it
         if self._loop is not None:
-            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-            return future.result()
+            # Check if loop is running AND not closed
+            if self._loop.is_running() and not self._loop.is_closed():
+                future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+                return future.result()
+            # else: fall through to the standard approach below
+            # This handles the case when STDIO loop exists but is stopped/closed
 
-        # Otherwise, use the standard approach
+        # Standard approach: handle both sync and async contexts
         try:
             # Try to get the current event loop
             asyncio.get_running_loop()
@@ -400,19 +404,110 @@ class MCPClient:
         except Exception as e:
             raise RuntimeError(f"Failed to call tool via HTTP: {e}") from e
 
+    _CLEANUP_TIMEOUT = 10
+    _THREAD_JOIN_TIMEOUT = 12
+
+    async def _cleanup_stdio_async(self) -> None:
+        """Async cleanup for STDIO session and context managers.
+
+        Cleanup order is critical:
+        - The session must be closed BEFORE the stdio_context because the session
+          depends on the streams provided by stdio_context.
+        - This mirrors the initialization order in _connect_stdio(), where
+          stdio_context is entered first (providing streams), then the session is
+          created with those streams and entered.
+        - Do not change this ordering without carefully considering these dependencies.
+        """
+        # First: close session (depends on stdio_context streams)
+        try:
+            if self._session:
+                await self._session.__aexit__(None, None, None)
+        except asyncio.CancelledError:
+            logger.warning(
+                "MCP session cleanup was cancelled; proceeding with best-effort shutdown"
+            )
+        except Exception as e:
+            logger.warning(f"Error closing MCP session: {e}")
+        finally:
+            self._session = None
+
+        # Second: close stdio_context (provides the underlying streams)
+        try:
+            if self._stdio_context:
+                await self._stdio_context.__aexit__(None, None, None)
+        except asyncio.CancelledError:
+            logger.warning(
+                "STDIO context cleanup was cancelled; proceeding with best-effort shutdown"
+            )
+        except Exception as e:
+            logger.warning(f"Error closing STDIO context: {e}")
+        finally:
+            self._stdio_context = None
+
     def disconnect(self) -> None:
         """Disconnect from the MCP server."""
         # Clean up persistent STDIO connection
         if self._loop is not None:
-            # Stop event loop - this will cause context managers to clean up naturally
-            if self._loop and self._loop.is_running():
-                self._loop.call_soon_threadsafe(self._loop.stop)
+            cleanup_attempted = False
 
-            # Wait for thread to finish
+            # Properly close session and context managers before stopping loop
+            # Note: There's an inherent race condition between checking is_running()
+            # and calling run_coroutine_threadsafe(). We handle this by catching
+            # any exceptions that may occur if the loop stops between these calls.
+            if self._loop.is_running():
+                try:
+                    cleanup_future = asyncio.run_coroutine_threadsafe(
+                        self._cleanup_stdio_async(), self._loop
+                    )
+                    cleanup_future.result(timeout=self._CLEANUP_TIMEOUT)
+                    cleanup_attempted = True
+                except TimeoutError:
+                    # Cleanup took too long - may indicate stuck resources or slow MCP server
+                    cleanup_attempted = True
+                    logger.warning(f"Async cleanup timed out after {self._CLEANUP_TIMEOUT} seconds")
+                except RuntimeError as e:
+                    # Likely: loop stopped between is_running() check and run_coroutine_threadsafe()
+                    cleanup_attempted = True
+                    logger.debug(f"Event loop stopped during async cleanup: {e}")
+                except Exception as e:
+                    # Cleanup was attempted but failed (e.g., error in _cleanup_stdio_async())
+                    cleanup_attempted = True
+                    logger.warning(f"Error during async cleanup: {e}")
+
+                # Now stop the event loop
+                try:
+                    self._loop.call_soon_threadsafe(self._loop.stop)
+                except RuntimeError:
+                    # Loop may have already stopped
+                    pass
+
+            if not cleanup_attempted:
+                # Fallback: loop exists but is not running (e.g., crashed or stopped externally).
+                # At this point the loop and associated resources are in an undefined state.
+                # The context managers (_session, _stdio_context) were created in the loop's
+                # thread and may not be safely cleanable from here. Just log and proceed
+                # with reference clearing - the OS will reclaim resources on process exit.
+                logger.warning(
+                    "Event loop for STDIO MCP connection exists but is not running; "
+                    "skipping async cleanup. Resources may not be fully released."
+                )
+
+            # Wait for thread to finish (timeout proportional to cleanup timeout)
             if self._loop_thread and self._loop_thread.is_alive():
-                self._loop_thread.join(timeout=2)
+                self._loop_thread.join(timeout=self._THREAD_JOIN_TIMEOUT)
+                if self._loop_thread.is_alive():
+                    logger.warning(
+                        "Event loop thread for STDIO MCP connection did not terminate "
+                        f"within {self._THREAD_JOIN_TIMEOUT}s; thread may still be running."
+                    )
 
-            # Clear references
+            # Clear remaining references
+            # Note: _session and _stdio_context may already be None if _cleanup_stdio_async()
+            # succeeded. This redundant assignment is intentional for safety in cases where:
+            # 1. Cleanup timed out or failed
+            # 2. Cleanup was skipped (loop not running)
+            # 3. CancelledError interrupted cleanup
+            # Setting None to None is safe and ensures clean state.
             self._session = None
             self._stdio_context = None
             self._read_stream = None
