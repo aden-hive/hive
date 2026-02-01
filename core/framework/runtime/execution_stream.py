@@ -105,6 +105,7 @@ class ExecutionStream:
         llm: "LLMProvider | None" = None,
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
+        node_registry: dict[str, Any] | None = None,
     ):
         """
         Initialize execution stream.
@@ -121,6 +122,7 @@ class ExecutionStream:
             llm: LLM provider for nodes
             tools: Available tools
             tool_executor: Function to execute tools
+            node_registry: Optional node_id -> implementation for function nodes
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -133,6 +135,7 @@ class ExecutionStream:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
+        self._node_registry = node_registry or {}
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -283,6 +286,7 @@ class ExecutionStream:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    node_registry=self._node_registry,
                 )
 
                 # Create modified graph with entry point

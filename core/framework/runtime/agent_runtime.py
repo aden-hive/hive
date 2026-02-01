@@ -96,6 +96,7 @@ class AgentRuntime:
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
         config: AgentRuntimeConfig | None = None,
+        node_registry: dict[str, Any] | None = None,
     ):
         """
         Initialize agent runtime.
@@ -108,6 +109,7 @@ class AgentRuntime:
             tools: Available tools
             tool_executor: Function to execute tools
             config: Optional runtime configuration
+            node_registry: Optional node_id -> implementation for function nodes
         """
         self.graph = graph
         self.goal = goal
@@ -129,6 +131,7 @@ class AgentRuntime:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
+        self._node_registry = node_registry or {}
 
         # Entry points and streams
         self._entry_points: dict[str, EntryPointSpec] = {}
@@ -206,6 +209,7 @@ class AgentRuntime:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    node_registry=self._node_registry,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -420,6 +424,7 @@ def create_agent_runtime(
     tools: list["Tool"] | None = None,
     tool_executor: Callable | None = None,
     config: AgentRuntimeConfig | None = None,
+    node_registry: dict[str, Any] | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -435,6 +440,7 @@ def create_agent_runtime(
         tools: Available tools
         tool_executor: Tool executor function
         config: Runtime configuration
+        node_registry: Optional node_id -> implementation for function nodes
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -447,6 +453,7 @@ def create_agent_runtime(
         tools=tools,
         tool_executor=tool_executor,
         config=config,
+        node_registry=node_registry,
     )
 
     for spec in entry_points:

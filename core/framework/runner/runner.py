@@ -1,14 +1,16 @@
 """Agent Runner - loads and runs exported agents."""
 
+import importlib.util
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Any
 
 from framework.graph import Goal
 from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition, AsyncEntryPointSpec
-from framework.graph.node import NodeSpec
+from framework.graph.node import NodeSpec, FunctionNode
 from framework.graph.executor import GraphExecutor, ExecutionResult
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
@@ -464,10 +466,62 @@ class AgentRunner:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
 
+    def _build_function_node_registry(self) -> dict:
+        """
+        Load tools.py from the agent path and build a node_registry for function-type nodes.
+        Returns dict mapping node_id -> callable for each function node in the graph.
+        """
+        registry: dict = {}
+        tools_path = self.agent_path / "tools.py"
+        if not tools_path.exists():
+            return registry
+
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "agent_tools",
+                tools_path,
+                submodule_search_locations=[str(self.agent_path)],
+            )
+            if spec is None or spec.loader is None:
+                return registry
+            module = importlib.util.module_from_spec(spec)
+            # Ensure agent path is on sys.path so tools.py can import from same dir
+            agent_path_str = str(self.agent_path)
+            inserted_path = agent_path_str not in sys.path
+            if inserted_path:
+                sys.path.insert(0, agent_path_str)
+            try:
+                spec.loader.exec_module(module)
+            finally:
+                if inserted_path and agent_path_str in sys.path:
+                    sys.path.remove(agent_path_str)
+
+            for node in self.graph.nodes:
+                if getattr(node, "node_type", None) != "function":
+                    continue
+                func_name = getattr(node, "function", None)
+                if not func_name:
+                    continue
+                if not hasattr(module, func_name):
+                    continue
+                obj = getattr(module, func_name)
+                if callable(obj):
+                    registry[node.id] = FunctionNode(obj)
+        except Exception as e:
+            # Log but do not fail setup; function nodes will fail at runtime if missing
+            import logging
+            logging.getLogger(__name__).warning(
+                "Could not load function nodes from tools.py: %s", e
+            )
+        return registry
+
     def _setup_legacy_executor(self, tools: list, tool_executor: Callable | None) -> None:
         """Set up legacy single-entry-point execution using GraphExecutor."""
         # Create runtime
         self._runtime = Runtime(storage_path=self._storage_path)
+
+        # Build function node registry from agent's tools.py so function-type nodes work
+        node_registry = self._build_function_node_registry()
 
         # Create executor
         self._executor = GraphExecutor(
@@ -475,6 +529,7 @@ class AgentRunner:
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
+            node_registry=node_registry,
             approval_callback=self._approval_callback,
         )
 
@@ -495,6 +550,9 @@ class AgentRunner:
             )
             entry_points.append(ep)
 
+        # Build function node registry so function-type nodes work in multi-entry-point mode
+        node_registry = self._build_function_node_registry()
+
         # Create AgentRuntime with all entry points
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
@@ -504,6 +562,7 @@ class AgentRunner:
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
+            node_registry=node_registry,
         )
 
     async def run(
