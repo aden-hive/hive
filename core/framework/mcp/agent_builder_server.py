@@ -7,11 +7,14 @@ Usage:
     python -m framework.mcp.agent_builder_server
 """
 
+import ipaddress
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
 from mcp.server import FastMCP
 
@@ -31,13 +34,178 @@ mcp = FastMCP("agent-builder")
 SESSIONS_DIR = Path(".agent-builder-sessions")
 ACTIVE_SESSION_FILE = SESSIONS_DIR / ".active"
 
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_MCP_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+_WINDOWS_INVALID_CHARS = set('<>:"/\\|?*')
+
+
+def _validate_agent_dir_name(name: str) -> None:
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("Invalid agent name")
+    if any(sep and sep in name for sep in ["/", "\\", os.sep, os.altsep] if sep):
+        raise ValueError("Invalid agent name: path separators are not allowed")
+    if ":" in name:
+        raise ValueError("Invalid agent name: ':' is not allowed")
+    if any(ch in _WINDOWS_INVALID_CHARS for ch in name):
+        raise ValueError("Invalid agent name: contains invalid filename characters")
+    if name[-1] in {" ", "."}:
+        raise ValueError("Invalid agent name: cannot end with '.' or space")
+    if any(ord(ch) < 32 for ch in name):
+        raise ValueError("Invalid agent name: contains control characters")
+    if name in {".", ".."} or ".." in name:
+        raise ValueError("Invalid agent name: '..' is not allowed")
+    base = name.split(".", 1)[0].strip().upper()
+    if base in _WINDOWS_RESERVED_NAMES:
+        raise ValueError(f"Invalid agent name: reserved name '{base}'")
+
+
+def _exports_root() -> Path:
+    return Path("exports").resolve()
+
+
+def _core_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_agent_export_dir(agent_path: str) -> tuple[str, Path]:
+    if not isinstance(agent_path, str) or not agent_path.strip():
+        raise ValueError("agent_path is required")
+
+    path = Path(agent_path)
+    if path.is_absolute():
+        raise ValueError("agent_path must be a relative path under exports/")
+
+    parts = path.parts
+    if parts and parts[0] == "exports":
+        rel = Path(*parts[1:])
+    else:
+        rel = path
+
+    if len(rel.parts) != 1:
+        raise ValueError("agent_path must be 'exports/<agent-name>'")
+
+    agent_dir_name = rel.parts[0]
+    _validate_agent_dir_name(agent_dir_name)
+
+    exports_root = _exports_root()
+    agent_dir = (exports_root / agent_dir_name).resolve()
+    if agent_dir == exports_root or exports_root not in agent_dir.parents:
+        raise ValueError("agent_path must resolve under exports/")
+
+    return f"exports/{agent_dir_name}", agent_dir
+
+
+def _validate_session_id(session_id: str) -> None:
+    if not isinstance(session_id, str) or not _SESSION_ID_RE.fullmatch(session_id):
+        raise ValueError("Invalid session_id")
+
+
+def _session_file_path(session_id: str) -> Path:
+    _validate_session_id(session_id)
+    return SESSIONS_DIR / f"{session_id}.json"
+
+
+def _validate_mcp_server_name(name: str) -> None:
+    if not isinstance(name, str) or not _MCP_SERVER_NAME_RE.fullmatch(name):
+        raise ValueError("Invalid MCP server name")
+
+
+def _validate_headers_or_env(data: object, field_name: str) -> dict:
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+
+    total_bytes = 0
+    out: dict[str, str] = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise ValueError(f"{field_name} keys and values must be strings")
+        total_bytes += len(k.encode("utf-8")) + len(v.encode("utf-8"))
+        if total_bytes > 64_000:
+            raise ValueError(f"{field_name} is too large")
+        out[k] = v
+    return out
+
+
+def _validate_args_list(data: object) -> list[str]:
+    if data is None:
+        return []
+    if not isinstance(data, list):
+        raise ValueError("args must be a JSON array")
+    if len(data) > 128:
+        raise ValueError("args list is too large")
+    out: list[str] = []
+    for item in data:
+        if not isinstance(item, str):
+            raise ValueError("args items must be strings")
+        out.append(item)
+    return out
+
+
+def _validate_http_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Invalid url: must be http or https")
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Invalid url: missing host")
+
+    allow_remote = os.environ.get("HIVE_MCP_ALLOW_REMOTE_HTTP", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if allow_remote:
+        return
+
+    host_l = host.lower()
+    if host_l == "localhost":
+        return
+    try:
+        ip = ipaddress.ip_address(host_l)
+        if ip.is_loopback:
+            return
+    except ValueError:
+        pass
+
+    raise ValueError("Remote HTTP MCP servers are disabled (set HIVE_MCP_ALLOW_REMOTE_HTTP=1)")
+
+
+def _resolve_stdio_cwd(cwd: str) -> str | None:
+    if not cwd:
+        return None
+
+    cwd_path = Path(cwd)
+    if cwd_path.is_absolute():
+        raise ValueError("cwd must be a relative path")
+    if ".." in cwd_path.parts:
+        raise ValueError("cwd must not contain '..'")
+
+    core_root = _core_root()
+    resolved = (core_root / cwd_path).resolve()
+    if resolved == core_root or core_root not in resolved.parents:
+        raise ValueError("cwd must resolve under the core directory")
+    return str(resolved)
+
+
+
 
 # Session storage
 class BuildSession:
     """Build session with persistence support."""
 
     def __init__(self, name: str, session_id: str | None = None):
-        self.id = session_id or f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.id = session_id or f"build_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         self.name = name
         self.goal: Goal | None = None
         self.nodes: list[NodeSpec] = []
@@ -117,11 +285,13 @@ def _save_session(session: BuildSession):
     """Save session to disk."""
     _ensure_sessions_dir()
 
+    _validate_session_id(session.id)
+
     # Update last modified
     session.last_modified = datetime.now().isoformat()
 
     # Save session file
-    session_file = SESSIONS_DIR / f"{session.id}.json"
+    session_file = _session_file_path(session.id)
     with open(session_file, "w") as f:
         json.dump(session.to_dict(), f, indent=2, default=str)
 
@@ -132,7 +302,7 @@ def _save_session(session: BuildSession):
 
 def _load_session(session_id: str) -> BuildSession:
     """Load session from disk."""
-    session_file = SESSIONS_DIR / f"{session_id}.json"
+    session_file = _session_file_path(session_id)
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
@@ -181,10 +351,15 @@ def get_session() -> BuildSession:
 def create_session(name: Annotated[str, "Name for the agent being built"]) -> str:
     """Create a new agent building session. Call this first before building an agent."""
     global _session
+    try:
+        _validate_agent_dir_name(name)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
     _session = BuildSession(name)
     _save_session(_session)  # Auto-save
     return json.dumps(
         {
+            "success": True,
             "session_id": _session.id,
             "name": name,
             "status": "created",
@@ -243,6 +418,7 @@ def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) 
     global _session
 
     try:
+        _validate_session_id(session_id)
         _session = _load_session(session_id)
 
         # Update active session pointer
@@ -271,7 +447,10 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
     """Delete a saved agent building session."""
     global _session
 
-    session_file = SESSIONS_DIR / f"{session_id}.json"
+    try:
+        session_file = _session_file_path(session_id)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
     if not session_file.exists():
         return json.dumps({"success": False, "error": f"Session '{session_id}' not found"})
 
@@ -1327,6 +1506,10 @@ def export_graph() -> str:
     from pathlib import Path
 
     session = get_session()
+    try:
+        _validate_agent_dir_name(session.name)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
     # Validate first
     validation = json.loads(validate_graph())
@@ -1590,6 +1773,11 @@ def add_mcp_server(
     """
     session = get_session()
 
+    try:
+        _validate_mcp_server_name(name)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
     # Validate transport
     if transport not in ["stdio", "http"]:
         return json.dumps(
@@ -1605,11 +1793,13 @@ def add_mcp_server(
 
     # Parse JSON inputs
     try:
-        args_list = json.loads(args)
-        env_dict = json.loads(env)
-        headers_dict = json.loads(headers)
+        args_list = _validate_args_list(json.loads(args))
+        env_dict = _validate_headers_or_env(json.loads(env), "env")
+        headers_dict = _validate_headers_or_env(json.loads(headers), "headers")
     except json.JSONDecodeError as e:
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
     # Validate required fields
     errors = []
@@ -1620,6 +1810,30 @@ def add_mcp_server(
 
     if errors:
         return json.dumps({"success": False, "errors": errors})
+
+    if transport == "stdio":
+        allow_stdio = os.environ.get("HIVE_MCP_ALLOW_STDIO", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if not allow_stdio:
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "Stdio MCP servers are disabled (set HIVE_MCP_ALLOW_STDIO=1)",
+                }
+            )
+    else:
+        try:
+            _validate_http_url(url)
+        except Exception as e:
+            return json.dumps({"success": False, "error": str(e)})
+
+    try:
+        resolved_cwd = _resolve_stdio_cwd(cwd) if transport == "stdio" else None
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
     # Build server config
     server_config = {
@@ -1650,7 +1864,7 @@ def add_mcp_server(
             command=command if transport == "stdio" else None,
             args=args_list if transport == "stdio" else [],
             env=env_dict,
-            cwd=cwd if cwd else None,
+            cwd=resolved_cwd,
             url=url if transport == "http" else None,
             headers=headers_dict,
             description=description,
@@ -2467,8 +2681,8 @@ def simulate_plan_execution(
 
 def _get_agent_module_from_path(agent_path: str) -> str:
     """Extract agent module name from path like 'exports/my_agent' -> 'my_agent'."""
-    path = Path(agent_path)
-    return path.name
+    _, agent_dir = _resolve_agent_export_dir(agent_path)
+    return agent_dir.name
 
 
 def _format_constraint(constraint: Constraint) -> str:
@@ -2584,7 +2798,12 @@ def generate_constraint_tests(
     if not agent_path:
         return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
 
-    agent_module = _get_agent_module_from_path(agent_path)
+    try:
+        normalized_agent_path, _ = _resolve_agent_export_dir(agent_path)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+    agent_module = _get_agent_module_from_path(normalized_agent_path)
 
     # Format constraints for display
     constraints_formatted = (
@@ -2603,9 +2822,9 @@ def generate_constraint_tests(
     return json.dumps(
         {
             "goal_id": goal_id,
-            "agent_path": agent_path,
+            "agent_path": normalized_agent_path,
             "agent_module": agent_module,
-            "output_file": f"{agent_path}/tests/test_constraints.py",
+            "output_file": f"{normalized_agent_path}/tests/test_constraints.py",
             "constraints": [c.model_dump() for c in goal.constraints] if goal.constraints else [],
             "constraints_formatted": constraints_formatted,
             "test_guidelines": {
@@ -2664,7 +2883,12 @@ def generate_success_tests(
     if not agent_path:
         return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
 
-    agent_module = _get_agent_module_from_path(agent_path)
+    try:
+        normalized_agent_path, _ = _resolve_agent_export_dir(agent_path)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+    agent_module = _get_agent_module_from_path(normalized_agent_path)
 
     # Parse node/tool names for context
     nodes = [n.strip() for n in node_names.split(",") if n.strip()]
@@ -2689,9 +2913,9 @@ def generate_success_tests(
     return json.dumps(
         {
             "goal_id": goal_id,
-            "agent_path": agent_path,
+            "agent_path": normalized_agent_path,
             "agent_module": agent_module,
-            "output_file": f"{agent_path}/tests/test_success_criteria.py",
+            "output_file": f"{normalized_agent_path}/tests/test_success_criteria.py",
             "success_criteria": [c.model_dump() for c in goal.success_criteria]
             if goal.success_criteria
             else [],
@@ -2750,7 +2974,12 @@ def run_tests(
     import re
     import subprocess
 
-    tests_dir = Path(agent_path) / "tests"
+    try:
+        _, agent_dir = _resolve_agent_export_dir(agent_path)
+    except Exception as e:
+        return json.dumps({"goal_id": goal_id, "error": str(e)})
+
+    tests_dir = agent_dir / "tests"
 
     if not tests_dir.exists():
         return json.dumps(
@@ -2808,7 +3037,9 @@ def run_tests(
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
-    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+    env["PYTHONPATH"] = (
+        f"{project_root}{os.pathsep}{pythonpath}" if pythonpath else f"{project_root}"
+    )
 
     # Run pytest
     try:
@@ -2870,7 +3101,9 @@ def run_tests(
     # Extract individual test results
     test_results = []
     # Match lines like: "test_constraints.py::test_constraint_foo PASSED"
-    test_pattern = re.compile(r"([\w/]+\.py)::(\w+)\s+(PASSED|FAILED|SKIPPED|ERROR)")
+    test_pattern = re.compile(
+        r"([A-Za-z0-9_./\\-]+\.py)::(\w+)\s+(PASSED|FAILED|SKIPPED|ERROR)"
+    )
     for match in test_pattern.finditer(output):
         test_results.append(
             {
@@ -2944,7 +3177,12 @@ def debug_test(
     if not agent_path:
         return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
 
-    tests_dir = Path(agent_path) / "tests"
+    try:
+        _, agent_dir = _resolve_agent_export_dir(agent_path)
+    except Exception as e:
+        return json.dumps({"goal_id": goal_id, "test_name": test_name, "error": str(e)})
+
+    tests_dir = agent_dir / "tests"
 
     if not tests_dir.exists():
         return json.dumps(
@@ -2983,7 +3221,9 @@ def debug_test(
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
-    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+    env["PYTHONPATH"] = (
+        f"{project_root}{os.pathsep}{pythonpath}" if pythonpath else f"{project_root}"
+    )
 
     try:
         result = subprocess.run(
@@ -3088,7 +3328,12 @@ def list_tests(
     if not agent_path:
         return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
 
-    tests_dir = Path(agent_path) / "tests"
+    try:
+        _, agent_dir = _resolve_agent_export_dir(agent_path)
+    except Exception as e:
+        return json.dumps({"goal_id": goal_id, "agent_path": agent_path, "error": str(e)})
+
+    tests_dir = agent_dir / "tests"
 
     if not tests_dir.exists():
         return json.dumps(
