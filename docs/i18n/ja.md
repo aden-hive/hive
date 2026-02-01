@@ -3,12 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh-CN.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.ru.md">Русский</a>
+  <a href="../../README.md">English</a> |
+  <a href="zh-CN.md">简体中文</a> |
+  <a href="es.md">Español</a> |
+  <a href="pt.md">Português</a> |
+  <a href="ja.md">日本語</a> |
+  <a href="ru.md">Русский</a> |
+  <a href="ko.md">한국어</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
@@ -29,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## 概要
@@ -75,7 +76,7 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Python環境セットアップを実行
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 これにより以下がインストールされます：
@@ -90,7 +91,7 @@ cd hive
 ./quickstart.sh
 
 # Claude Codeを使用してエージェントを構築
-claude> /building-agents
+claude> /building-agents-construction
 
 # エージェントをテスト
 claude> /testing-agent
@@ -228,7 +229,7 @@ hive/
 
 ```bash
 # 1回限りのセットアップ
-./scripts/setup-python.sh
+./quickstart.sh
 
 # これにより以下がインストールされます：
 # - frameworkパッケージ（コアランタイム）
@@ -236,7 +237,7 @@ hive/
 # - すべての依存関係
 
 # Claude Codeスキルを使用して新しいエージェントを構築
-claude> /building-agents
+claude> /building-agents-construction
 
 # エージェントをテスト
 claude> /testing-agent
@@ -252,7 +253,7 @@ PYTHONPATH=core:exports python -m agent_name run --input '{...}'
 - **[開発者ガイド](DEVELOPER.md)** - 開発者向け総合ガイド
 - [はじめに](docs/getting-started.md) - クイックセットアップ手順
 - [設定ガイド](docs/configuration.md) - すべての設定オプション
-- [アーキテクチャ概要](docs/architecture.md) - システム設計と構造
+- [アーキテクチャ概要](docs/architecture/README.md) - システム設計と構造
 
 ## ロードマップ
 
@@ -288,11 +289,14 @@ timeline
 
 貢献を歓迎します！ガイドラインについては[CONTRIBUTING.md](CONTRIBUTING.md)をご覧ください。
 
-1. リポジトリをフォーク
-2. 機能ブランチを作成 (`git checkout -b feature/amazing-feature`)
-3. 変更をコミット (`git commit -m 'Add amazing feature'`)
-4. ブランチにプッシュ (`git push origin feature/amazing-feature`)
-5. プルリクエストを開く
+**重要：** PRを提出する前に、まずIssueにアサインされてください。Issueにコメントして担当を申請すると、メンテナーが24時間以内にアサインします。これにより重複作業を防ぐことができます。
+
+1. Issueを見つけるか作成し、アサインを受ける
+2. リポジトリをフォーク
+3. 機能ブランチを作成 (`git checkout -b feature/amazing-feature`)
+4. 変更をコミット (`git commit -m 'Add amazing feature'`)
+5. ブランチにプッシュ (`git push origin feature/amazing-feature`)
+6. プルリクエストを開く
 
 ## チームに参加
 

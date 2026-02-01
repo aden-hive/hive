@@ -1,0 +1,13 @@
+# MCP Server
+fastmcp
+
+# Tool dependencies
+diff-match-patch
+pypdf
+beautifulsoup4
+lxml
+playwright
+playwright-stealth
+requests
+
+# Note: After installing, run `playwright install` to download browser binaries

@@ -4,11 +4,12 @@ import importlib.util
 import inspect
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from framework.llm.provider import Tool, ToolUse, ToolResult
+from framework.llm.provider import Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ class ToolRegistry:
 
         # Check for TOOLS dict
         if hasattr(module, "TOOLS"):
-            tools_dict = getattr(module, "TOOLS")
+            tools_dict = module.TOOLS
             executor_func = getattr(module, "tool_executor", None)
 
             for name, tool in tools_dict.items():
@@ -157,7 +158,26 @@ class ToolRegistry:
                             )
                             result = executor_func(tool_use)
                             if isinstance(result, ToolResult):
-                                return json.loads(result.content) if result.content else {}
+                                # ToolResult.content is expected to be JSON, but tools may
+                                # sometimes return invalid JSON. Guard against crashes here
+                                # and surface a structured error instead.
+                                if not result.content:
+                                    return {}
+                                try:
+                                    return json.loads(result.content)
+                                except json.JSONDecodeError as e:
+                                    logger.warning(
+                                        "Tool '%s' returned invalid JSON: %s",
+                                        tool_name,
+                                        str(e),
+                                    )
+                                    return {
+                                        "error": (
+                                            f"Invalid JSON response from tool '{tool_name}': "
+                                            f"{str(e)}"
+                                        ),
+                                        "raw_content": result.content,
+                                    }
                             return result
 
                         return executor
