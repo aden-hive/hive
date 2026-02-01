@@ -352,6 +352,40 @@ Return this exact structure:
 
 ---
 
+## REFERENCE: CSV Tools
+
+The following CSV tools are available for agents that need to work with CSV data:
+
+| Tool         | Description                                          | Key Parameters                    |
+| ------------ | ---------------------------------------------------- | --------------------------------- |
+| `csv_read`   | Read a CSV file and return its contents              | `path`, `limit`, `offset`         |
+| `csv_write`  | Create a new CSV file with specified data            | `path`, `columns`, `rows`         |
+| `csv_append` | Append rows to an existing CSV file                  | `path`, `rows`                    |
+| `csv_info`   | Get file metadata (columns, row count, size)         | `path`                            |
+| `csv_sql`    | Query a CSV file using SQL syntax (powered by DuckDB) | `path`, `query`                   |
+
+**Example Usage:**
+
+```python
+# Read first 100 rows of a CSV
+csv_read(path="data/products.csv", limit=100)
+
+# Write new CSV file
+csv_write(
+    path="output/results.csv",
+    columns=["name", "price", "category"],
+    rows=[{"name": "Widget", "price": 10.99, "category": "tools"}]
+)
+
+# Query with SQL
+csv_sql(
+    path="data/products.csv",
+    query="SELECT category, COUNT(*) as count FROM data GROUP BY category"
+)
+```
+
+---
+
 ## COMMON MISTAKES TO AVOID
 
 1. **Using tools that don't exist** - Always check `mcp__agent-builder__list_mcp_tools()` first
