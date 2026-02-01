@@ -111,6 +111,8 @@ def register_tools(mcp: FastMCP):
 
             where_clause = f"WHERE {where}" if where else ""
 
+            limit = max(1, min(int(limit), 100))
+
             query = f"""
                 SELECT {select_cols}
                 FROM read_parquet(?)
@@ -222,11 +224,18 @@ def register_tools(mcp: FastMCP):
 
             # Build ORDER BY clause
             order_by_clause = []
-            for col, direction in order_by or []:
+            for item in order_by or []:
+                if isinstance(item, str):
+                    parts = item.strip().split()
+                    if len(parts) != 2:
+                        raise ValueError(f"Order by must be 'col ASC|DESC', got: {item}")
+                    col, direction = parts
+                else:
+                    col, direction = item
                 direction = direction.lower()
                 if direction not in {"asc", "desc"}:
                     raise ValueError(f"Order direction not allowed: {direction}")
-                order_by_clause.append(f"{col} {direction}")
+                order_by_clause.append(f'"{col}" {direction}')
             order_by_clause = f"ORDER BY {', '.join(order_by_clause)}" if order_by_clause else ""
 
             # Limit clause
@@ -251,16 +260,6 @@ def register_tools(mcp: FastMCP):
                 "limit": limit,
                 "rows": rows
             }
-
-            # sql_limited, _ = _limit_sql_query(query, 100)
-            # result = conn.execute(sql_limited).fetchdf()
-            # rows = [dict(rec)for rec in result.to_dict(orient="records")]
-            # out = {
-            #     "path": rel,
-            #     "columns": list(result.columns),
-            #     "rows": rows
-            # }
-            # return out
         except Exception as e:
             return {"error": str(e)}
 # ------------------------

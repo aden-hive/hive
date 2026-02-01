@@ -194,22 +194,22 @@ class TestParquetTool:
         names = [row["name"] for row in result["rows"]]
         assert names == ["Alice", "Bob"]
 
-    # def test_run_sql_on_parquet_with_order_by(self, parquet_tools, sample_parquet_data):
-    #     """Test run_sql_on_parquet with order_by parameter."""
-    #     run_sql_on_parquet = parquet_tools["run_sql_on_parquet"]
-    #     result = run_sql_on_parquet(
-    #         file_path=sample_parquet_data.name,
-    #         query="",
-    #         workspace_id=TEST_WORKSPACE_ID,
-    #         agent_id=TEST_AGENT_ID,
-    #         session_id=TEST_SESSION_ID,
-    #         selected_columns=["name", "age"],
-    #         order_by=["age DESC"],
-    #     )
-    #     assert "rows" in result
-    #     assert len(result["rows"]) == 3
-    #     names = [row["name"] for row in result["rows"]]
-    #     assert names == ["Charlie", "Alice", "Bob"]
+    def test_run_sql_on_parquet_with_order_by(self, parquet_tools, sample_parquet_data):
+        """Test run_sql_on_parquet with order_by parameter."""
+        run_sql_on_parquet = parquet_tools["run_sql_on_parquet"]
+        result = run_sql_on_parquet(
+            file_path=sample_parquet_data.name,
+            query="",
+            workspace_id=TEST_WORKSPACE_ID,
+            agent_id=TEST_AGENT_ID,
+            session_id=TEST_SESSION_ID,
+            selected_columns=["name", "age"],
+            order_by=["age DESC"],
+        )
+        assert "rows" in result
+        assert len(result["rows"]) == 3
+        names = [row["name"] for row in result["rows"]]
+        assert names == ["Charlie", "Alice", "Bob"]
 
     def test_run_sql_on_parquet_with_group_by(self, parquet_tools, sample_parquet_data):
         """Test run_sql_on_parquet with group_by parameter."""
@@ -227,18 +227,19 @@ class TestParquetTool:
         ages = sorted([row["age"] for row in result["rows"]])
         assert ages == [25, 30, 35]
 
-    # def test_parquet_preview_zero_limit(self, parquet_tools, sample_parquet_data):
-    #     """Test parquet_preview with zero limit."""
-    #     parquet_preview = parquet_tools["parquet_preview"]
-    #     result = parquet_preview(
-    #         file_path=sample_parquet_data.name,
-    #         workspace_id=TEST_WORKSPACE_ID,
-    #         agent_id=TEST_AGENT_ID,
-    #         session_id=TEST_SESSION_ID,
-    #         limit=0,
-    #     )
-    #     assert "rows" in result
-    #     assert len(result["rows"]) == 1  # Should return at least 1 row
+    def test_parquet_preview_zero_limit(self, parquet_tools, sample_parquet_data):
+        """Test parquet_preview with zero limit."""
+        parquet_preview = parquet_tools["parquet_preview"]
+        result = parquet_preview(
+            file_path=sample_parquet_data.name,
+            workspace_id=TEST_WORKSPACE_ID,
+            agent_id=TEST_AGENT_ID,
+            session_id=TEST_SESSION_ID,
+            limit=0,
+        )
+        assert "rows" in result
+        assert len(result["rows"]) == 1  # Should return at least 1 row
+        #
 
     def test_parquet_preview_excessive_limit(self, parquet_tools, sample_parquet_data):
         """Test parquet_preview with excessive limit."""
@@ -252,6 +253,32 @@ class TestParquetTool:
         )
         assert "rows" in result
         assert len(result["rows"]) == 3  # Should cap at available rows
+    def test_sample_parquet_excessive_n(self, parquet_tools, sample_parquet_data):
+        """Test sample_parquet with excessive n."""
+        sample_parquet = parquet_tools["sample_parquet"]
+        result = sample_parquet(
+            file_path=sample_parquet_data.name,
+            n=1000,
+            workspace_id=TEST_WORKSPACE_ID,
+            agent_id=TEST_AGENT_ID,
+            session_id=TEST_SESSION_ID,
+        )
+        assert "rows" in result
+        assert len(result["rows"]) == 3  # Should cap at available rows
+    def test_run_sql_on_parquet_no_selected_columns(self, parquet_tools, sample_parquet_data):
+        """Test run_sql_on_parquet with no selected_columns parameter."""
+        run_sql_on_parquet = parquet_tools["run_sql_on_parquet"]
+        result = run_sql_on_parquet(
+            file_path=sample_parquet_data.name,
+            query="",
+            workspace_id=TEST_WORKSPACE_ID,
+            agent_id=TEST_AGENT_ID,
+            session_id=TEST_SESSION_ID,
+        )
+        assert "rows" in result
+        assert len(result["rows"]) == 3
+        names = [row["name"] for row in result["rows"]]
+        assert names == ["Alice", "Bob", "Charlie"]
 
 
 
