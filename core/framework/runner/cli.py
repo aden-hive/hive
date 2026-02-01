@@ -9,7 +9,7 @@ from pathlib import Path
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
-    
+
     # create command
     create_parser = subparsers.add_parser(
         "create",
@@ -22,7 +22,7 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Name of the agent (folder name)",
     )
     create_parser.set_defaults(func=cmd_create)
-    
+
     # run command
     run_parser = subparsers.add_parser(
         "run",
@@ -1088,11 +1088,18 @@ def _interactive_multi(agents_dir: Path) -> int:
 def cmd_create(args: argparse.Namespace) -> int:
     # <--- NOTE: This line starts with 4 SPACES
     """Create a new agent scaffold."""
-    import json
+    import re
+    import shutil
     
-    # 1. Setup paths
+    # 1. Setup paths and Validate Name (Security Fix)
     base_dir = Path("exports")
     agent_name = args.name
+
+    # Validate that name only contains safe characters (alphanumeric, -, _)
+    if not re.match(r"^[a-zA-Z0-9_-]+$", agent_name):
+        print(f"Error: Invalid agent name '{agent_name}'. Use letters, numbers, underscores, and dashes only.", file=sys.stderr)
+        return 1
+        
     agent_dir = base_dir / agent_name
 
     # 2. Check if it already exists
@@ -1101,34 +1108,64 @@ def cmd_create(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        # 3. Create the directory
-        agent_dir.mkdir(parents=True, exist_ok=True)
+        # 3. Ensure exports directory exists (Robustness Fix)
+        if not base_dir.exists():
+            base_dir.mkdir(parents=True, exist_ok=True)
+
+        # 4. Create the directory (Logic Fix: exist_ok=False)
+        agent_dir.mkdir(parents=True, exist_ok=False)
         print(f"Created directory: {agent_dir}")
 
-        # 4. Create the default agent.json
+        # 5. Create the CORRECT nested agent.json (Schema Fix)
+        # The runner requires "agent", "goal", and "graph" objects.
+        human_name = agent_name.replace("-", " ").replace("_", " ").title()
+        agent_id = agent_name
+        goal_id = f"{agent_name}-goal"
+        graph_id = f"{agent_name}-graph"
+        
         default_config = {
-            "name": agent_name.replace("-", " ").replace("_", " ").title(),
-            "description": "A new agent created via CLI.",
-            "goal_name": "Solve a task",
-            "goal_description": "Describe the goal here.",
-            "nodes": [],
-            "edges": [],
-            "success_criteria": [],
-            "constraints": [],
-            "required_tools": []
+            "agent": {
+                "id": agent_id,
+                "name": human_name,
+                "version": "1.0.0",
+                "description": "A new agent created via CLI.",
+            },
+            "goal": {
+                "id": goal_id,
+                "name": "Solve a task",
+                "description": "Describe the goal here.",
+                "success_criteria": [],
+                "constraints": [],
+            },
+            "graph": {
+                "id": graph_id,
+                "goal_id": goal_id,
+                "version": "1.0.0",
+                "entry_node": None,
+                "terminal_nodes": [],
+                "nodes": [],
+                "edges": [],
+            },
+            "required_tools": [],
         }
 
         json_path = agent_dir / "agent.json"
         with open(json_path, "w") as f:
             json.dump(default_config, f, indent=2)
 
-        # 5. Success Message
+        # 6. Better Success Message (UX Fix)
         print(f"Created configuration: {json_path}")
         print()
         print("✅ Agent created successfully!")
-        print(f"To run it: hive list")
+        print("You can now:")
+        print(f"  - Run it: hive run {agent_dir}")
+        print(f"  - Validate it: hive validate {agent_dir}")
         return 0
 
     except Exception as e:
+        # Cleanup: If JSON writing fails, delete the empty folder so we don't leave junk
+        if agent_dir.exists():
+            shutil.rmtree(agent_dir, ignore_errors=True)
+            
         print(f"Error creating agent: {e}", file=sys.stderr)
         return 1
