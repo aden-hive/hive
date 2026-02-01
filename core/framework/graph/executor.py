@@ -387,6 +387,33 @@ class GraphExecutor:
                 # Update input_data for next node
                 input_data = result.output
 
+            # Check if we exited because of the step limit
+            if steps >= graph.max_steps:
+                error_msg = f"Max steps exceeded ({graph.max_steps}). Agent failed to reach a conclusion."
+                self.logger.error(f"❌ {error_msg}")
+                
+                self.runtime.report_problem(
+                    severity="error",
+                    description=error_msg,
+                )
+                
+                output = memory.read_all()
+                self.runtime.end_run(
+                    success=False,
+                    output_data=output,
+                    narrative=error_msg,
+                )
+                
+                return ExecutionResult(
+                    success=False,
+                    error=error_msg,
+                    output=output,
+                    steps_executed=steps,
+                    total_tokens=total_tokens,
+                    total_latency_ms=total_latency,
+                    path=path,
+                )
+            
             # Collect output
             output = memory.read_all()
 
