@@ -9,7 +9,20 @@ from pathlib import Path
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
-
+    
+    # create command
+    create_parser = subparsers.add_parser(
+        "create",
+        help="Create a new agent",
+        description="Scaffold a new agent directory and configuration.",
+    )
+    create_parser.add_argument(
+        "name",
+        type=str,
+        help="Name of the agent (folder name)",
+    )
+    create_parser.set_defaults(func=cmd_create)
+    
     # run command
     run_parser = subparsers.add_parser(
         "run",
@@ -1071,3 +1084,51 @@ def _interactive_multi(agents_dir: Path) -> int:
 
     orchestrator.cleanup()
     return 0
+
+def cmd_create(args: argparse.Namespace) -> int:
+    # <--- NOTE: This line starts with 4 SPACES
+    """Create a new agent scaffold."""
+    import json
+    
+    # 1. Setup paths
+    base_dir = Path("exports")
+    agent_name = args.name
+    agent_dir = base_dir / agent_name
+
+    # 2. Check if it already exists
+    if agent_dir.exists():
+        print(f"Error: Directory already exists: {agent_dir}", file=sys.stderr)
+        return 1
+
+    try:
+        # 3. Create the directory
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Created directory: {agent_dir}")
+
+        # 4. Create the default agent.json
+        default_config = {
+            "name": agent_name.replace("-", " ").replace("_", " ").title(),
+            "description": "A new agent created via CLI.",
+            "goal_name": "Solve a task",
+            "goal_description": "Describe the goal here.",
+            "nodes": [],
+            "edges": [],
+            "success_criteria": [],
+            "constraints": [],
+            "required_tools": []
+        }
+
+        json_path = agent_dir / "agent.json"
+        with open(json_path, "w") as f:
+            json.dump(default_config, f, indent=2)
+
+        # 5. Success Message
+        print(f"Created configuration: {json_path}")
+        print()
+        print("✅ Agent created successfully!")
+        print(f"To run it: hive list")
+        return 0
+
+    except Exception as e:
+        print(f"Error creating agent: {e}", file=sys.stderr)
+        return 1
