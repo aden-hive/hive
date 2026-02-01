@@ -40,6 +40,31 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## Who Is Hive For?
+
+Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
+
+Hive is a good fit if you:
+
+- Want AI agents that **execute real business processes**, not demos
+- Prefer **goal-driven development** over hardcoded workflows
+- Need **self-healing and adaptive agents** that improve over time
+- Require **human-in-the-loop control**, observability, and cost limits
+- Plan to run agents in **production environments**
+
+Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
+
+## When Should You Use Hive?
+
+Use Hive when you need:
+
+- Long-running, autonomous agents
+- Multi-agent coordination
+- Continuous improvement based on failures
+- Strong monitoring, safety, and budget controls
+- A framework that evolves with your goals
+
+
 ## What is Aden
 
 <p align="center">
