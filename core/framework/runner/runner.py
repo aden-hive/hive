@@ -573,13 +573,15 @@ class AgentRunner:
         # If TUI enabled but no entry points (single-entry agent), create default
         if not entry_points and self.enable_tui and self.graph.entry_node:
             logger.info("Creating default entry point for TUI")
-            entry_points.append(EntryPointSpec(
-                id="default",
-                name="Default",
-                entry_node=self.graph.entry_node,
-                trigger_type="manual",
-                isolation_level="shared",
-            ))
+            entry_points.append(
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=self.graph.entry_node,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                )
+            )
 
         # Create AgentRuntime with all entry points
         self._agent_runtime = create_agent_runtime(
