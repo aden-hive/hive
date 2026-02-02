@@ -35,45 +35,46 @@ def register_tools(
         cse_id: str,
     ) -> dict:
         """Execute search using Google Custom Search API."""
-        response = httpx.get(
-            "https://www.googleapis.com/customsearch/v1",
-            params={
-                "key": api_key,
-                "cx": cse_id,
-                "q": query,
-                "num": min(num_results, 10),
-                "lr": f"lang_{language}",
-                "gl": country,
-            },
-            timeout=30.0,
-        )
-
-        if response.status_code == 401:
-            return {"error": "Invalid Google API key"}
-        elif response.status_code == 403:
-            return {"error": "Google API key not authorized or quota exceeded"}
-        elif response.status_code == 429:
-            return {"error": "Google rate limit exceeded. Try again later."}
-        elif response.status_code != 200:
-            return {"error": f"Google API request failed: HTTP {response.status_code}"}
-
-        data = response.json()
-        results = []
-        for item in data.get("items", [])[:num_results]:
-            results.append(
-                {
-                    "title": item.get("title", ""),
-                    "url": item.get("link", ""),
-                    "snippet": item.get("snippet", ""),
-                }
+        with httpx.Client() as client:
+            response = client.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={
+                    "key": api_key,
+                    "cx": cse_id,
+                    "q": query,
+                    "num": min(num_results, 10),
+                    "lr": f"lang_{language}",
+                    "gl": country,
+                },
+                timeout=30.0,
             )
 
-        return {
-            "query": query,
-            "results": results,
-            "total": len(results),
-            "provider": "google",
-        }
+            if response.status_code == 401:
+                return {"error": "Invalid Google API key"}
+            elif response.status_code == 403:
+                return {"error": "Google API key not authorized or quota exceeded"}
+            elif response.status_code == 429:
+                return {"error": "Google rate limit exceeded. Try again later."}
+            elif response.status_code != 200:
+                return {"error": f"Google API request failed: HTTP {response.status_code}"}
+
+            data = response.json()
+            results = []
+            for item in data.get("items", [])[:num_results]:
+                results.append(
+                    {
+                        "title": item.get("title", ""),
+                        "url": item.get("link", ""),
+                        "snippet": item.get("snippet", ""),
+                    }
+                )
+
+            return {
+                "query": query,
+                "results": results,
+                "total": len(results),
+                "provider": "google",
+            }
 
     def _search_brave(
         query: str,
@@ -82,44 +83,45 @@ def register_tools(
         api_key: str,
     ) -> dict:
         """Execute search using Brave Search API."""
-        response = httpx.get(
-            "https://api.search.brave.com/res/v1/web/search",
-            params={
-                "q": query,
-                "count": min(num_results, 20),
-                "country": country,
-            },
-            headers={
-                "X-Subscription-Token": api_key,
-                "Accept": "application/json",
-            },
-            timeout=30.0,
-        )
-
-        if response.status_code == 401:
-            return {"error": "Invalid Brave API key"}
-        elif response.status_code == 429:
-            return {"error": "Brave rate limit exceeded. Try again later."}
-        elif response.status_code != 200:
-            return {"error": f"Brave API request failed: HTTP {response.status_code}"}
-
-        data = response.json()
-        results = []
-        for item in data.get("web", {}).get("results", [])[:num_results]:
-            results.append(
-                {
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "snippet": item.get("description", ""),
-                }
+        with httpx.Client() as client:
+            response = client.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={
+                    "q": query,
+                    "count": min(num_results, 20),
+                    "country": country,
+                },
+                headers={
+                    "X-Subscription-Token": api_key,
+                    "Accept": "application/json",
+                },
+                timeout=30.0,
             )
 
-        return {
-            "query": query,
-            "results": results,
-            "total": len(results),
-            "provider": "brave",
-        }
+            if response.status_code == 401:
+                return {"error": "Invalid Brave API key"}
+            elif response.status_code == 429:
+                return {"error": "Brave rate limit exceeded. Try again later."}
+            elif response.status_code != 200:
+                return {"error": f"Brave API request failed: HTTP {response.status_code}"}
+
+            data = response.json()
+            results = []
+            for item in data.get("web", {}).get("results", [])[:num_results]:
+                results.append(
+                    {
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "snippet": item.get("description", ""),
+                    }
+                )
+
+            return {
+                "query": query,
+                "results": results,
+                "total": len(results),
+                "provider": "brave",
+            }
 
     def _get_credentials() -> dict:
         """Get available search credentials."""

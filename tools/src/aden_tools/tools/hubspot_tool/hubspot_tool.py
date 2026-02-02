@@ -27,6 +27,13 @@ class _HubSpotClient:
 
     def __init__(self, access_token: str):
         self._token = access_token
+        self._client = httpx.Client()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._client.close()
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -68,7 +75,7 @@ class _HubSpotClient:
         if properties:
             body["properties"] = properties
 
-        response = httpx.post(
+        response = self._client.post(
             f"{HUBSPOT_API_BASE}/crm/v3/objects/{object_type}/search",
             headers=self._headers,
             json=body,
@@ -87,7 +94,7 @@ class _HubSpotClient:
         if properties:
             params["properties"] = ",".join(properties)
 
-        response = httpx.get(
+        response = self._client.get(
             f"{HUBSPOT_API_BASE}/crm/v3/objects/{object_type}/{object_id}",
             headers=self._headers,
             params=params,
@@ -101,7 +108,7 @@ class _HubSpotClient:
         properties: dict[str, str],
     ) -> dict[str, Any]:
         """Create a CRM object."""
-        response = httpx.post(
+        response = self._client.post(
             f"{HUBSPOT_API_BASE}/crm/v3/objects/{object_type}",
             headers=self._headers,
             json={"properties": properties},
@@ -116,7 +123,7 @@ class _HubSpotClient:
         properties: dict[str, str],
     ) -> dict[str, Any]:
         """Update a CRM object."""
-        response = httpx.patch(
+        response = self._client.patch(
             f"{HUBSPOT_API_BASE}/crm/v3/objects/{object_type}/{object_id}",
             headers=self._headers,
             json={"properties": properties},
@@ -180,9 +187,10 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.search_objects(
-                "contacts", query, properties or ["email", "firstname", "lastname"], limit
-            )
+            with client:
+                return client.search_objects(
+                    "contacts", query, properties or ["email", "firstname", "lastname"], limit
+                )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -208,7 +216,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.get_object("contacts", contact_id, properties)
+            with client:
+                return client.get_object("contacts", contact_id, properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -232,7 +241,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.create_object("contacts", properties)
+            with client:
+                return client.create_object("contacts", properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -257,7 +267,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.update_object("contacts", contact_id, properties)
+            with client:
+                return client.update_object("contacts", contact_id, properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -286,9 +297,10 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.search_objects(
-                "companies", query, properties or ["name", "domain", "industry"], limit
-            )
+            with client:
+                return client.search_objects(
+                    "companies", query, properties or ["name", "domain", "industry"], limit
+                )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -313,7 +325,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.get_object("companies", company_id, properties)
+            with client:
+                return client.get_object("companies", company_id, properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -337,7 +350,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.create_object("companies", properties)
+            with client:
+                return client.create_object("companies", properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -362,7 +376,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.update_object("companies", company_id, properties)
+            with client:
+                return client.update_object("companies", company_id, properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -392,9 +407,10 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.search_objects(
-                "deals", query, properties or ["dealname", "amount", "dealstage"], limit
-            )
+            with client:
+                return client.search_objects(
+                    "deals", query, properties or ["dealname", "amount", "dealstage"], limit
+                )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -420,7 +436,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.get_object("deals", deal_id, properties)
+            with client:
+                return client.get_object("deals", deal_id, properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -444,7 +461,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.create_object("deals", properties)
+            with client:
+                return client.create_object("deals", properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -470,7 +488,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.update_object("deals", deal_id, properties)
+            with client:
+                return client.update_object("deals", deal_id, properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
