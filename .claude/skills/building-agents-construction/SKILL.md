@@ -352,6 +352,44 @@ Return this exact structure:
 
 ---
 
+## REFERENCE: Web Tools
+
+The following web tools are available for agents that need to search or scrape the web:
+
+| Tool         | Description                                                   | Key Parameters                           |
+| ------------ | ------------------------------------------------------------- | ---------------------------------------- |
+| `web_search` | Search the web using Google or Brave APIs                     | `query`, `num_results`, `provider`       |
+| `web_scrape` | Extract content from webpages using headless browser          | `url`, `selector`, `include_links`       |
+| `pdf_read`   | Read and extract text content from PDF files                  | `file_path`, `pages`, `include_metadata` |
+
+**Example Usage:**
+
+```python
+# Search the web
+web_search(query="Python async programming guide", num_results=5)
+
+# Scrape a webpage
+web_scrape(
+    url="https://example.com/article",
+    selector="article",  # Target specific element
+    include_links=True
+)
+
+# Read a PDF document
+pdf_read(
+    file_path="documents/report.pdf",
+    pages="1-10",
+    include_metadata=True
+)
+```
+
+**Notes:**
+- `web_search` supports "auto", "google", or "brave" providers
+- `web_scrape` uses Playwright for JavaScript-rendered content
+- `pdf_read` can extract specific pages with "1-10" or "1,3,5" format
+
+---
+
 ## COMMON MISTAKES TO AVOID
 
 1. **Using tools that don't exist** - Always check `mcp__agent-builder__list_mcp_tools()` first
