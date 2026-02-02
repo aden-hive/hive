@@ -163,11 +163,24 @@ class LiteLLMProvider(LLMProvider):
                 content = response.choices[0].message.content if response.choices else None
                 has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
                 if not content and not has_tool_calls:
+                    # If the conversation ends with an assistant message,
+                    # an empty response is expected — don't retry.
+                    messages = kwargs.get("messages", [])
+                    last_role = next(
+                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
+                        None,
+                    )
+                    if last_role == "assistant":
+                        logger.debug(
+                            "[retry] Empty response after assistant message — "
+                            "expected, not retrying."
+                        )
+                        return response
+
                     finish_reason = (
                         response.choices[0].finish_reason if response.choices else "unknown"
                     )
                     # Dump full request to file for debugging
-                    messages = kwargs.get("messages", [])
                     token_count, token_method = _estimate_tokens(model, messages)
                     dump_path = _dump_failed_request(
                         model=model,
@@ -474,7 +487,10 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
 
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
-            buffered_events: list[StreamEvent] = []
+            # Post-stream events (ToolCall, TextEnd, Finish) are buffered
+            # because they depend on the full stream.  TextDeltaEvents are
+            # yielded immediately so callers see tokens in real time.
+            tail_events: list[StreamEvent] = []
             accumulated_text = ""
             tool_calls_acc: dict[int, dict[str, str]] = {}
             input_tokens = 0
@@ -490,14 +506,12 @@ class LiteLLMProvider(LLMProvider):
 
                     delta = choice.delta
 
-                    # --- Text content ---
+                    # --- Text content — yield immediately for real-time streaming ---
                     if delta and delta.content:
                         accumulated_text += delta.content
-                        buffered_events.append(
-                            TextDeltaEvent(
-                                content=delta.content,
-                                snapshot=accumulated_text,
-                            )
+                        yield TextDeltaEvent(
+                            content=delta.content,
+                            snapshot=accumulated_text,
                         )
 
                     # --- Tool calls (accumulate across chunks) ---
@@ -521,7 +535,7 @@ class LiteLLMProvider(LLMProvider):
                                 parsed_args = json.loads(tc_data["arguments"])
                             except (json.JSONDecodeError, KeyError):
                                 parsed_args = {"_raw": tc_data.get("arguments", "")}
-                            buffered_events.append(
+                            tail_events.append(
                                 ToolCallEvent(
                                     tool_use_id=tc_data["id"],
                                     tool_name=tc_data["name"],
@@ -530,14 +544,14 @@ class LiteLLMProvider(LLMProvider):
                             )
 
                         if accumulated_text:
-                            buffered_events.append(TextEndEvent(full_text=accumulated_text))
+                            tail_events.append(TextEndEvent(full_text=accumulated_text))
 
                         usage = getattr(chunk, "usage", None)
                         if usage:
                             input_tokens = getattr(usage, "prompt_tokens", 0) or 0
                             output_tokens = getattr(usage, "completion_tokens", 0) or 0
 
-                        buffered_events.append(
+                        tail_events.append(
                             FinishEvent(
                                 stop_reason=choice.finish_reason,
                                 input_tokens=input_tokens,
@@ -547,8 +561,25 @@ class LiteLLMProvider(LLMProvider):
                         )
 
                 # Check whether the stream produced any real content.
+                # (If text deltas were yielded above, has_content is True
+                # and we skip the retry path — nothing was yielded in vain.)
                 has_content = accumulated_text or tool_calls_acc
                 if not has_content and attempt < RATE_LIMIT_MAX_RETRIES:
+                    # If the conversation ends with an assistant message,
+                    # an empty stream is expected (nothing new to say).
+                    # Don't retry — just flush whatever we have.
+                    last_role = next(
+                        (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
+                        None,
+                    )
+                    if last_role == "assistant":
+                        logger.debug(
+                            "[stream] Empty response after assistant message — "
+                            "expected, not retrying."
+                        )
+                        for event in tail_events:
+                            yield event
+                        return
                     wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
                     token_count, token_method = _estimate_tokens(
                         self.model,
@@ -570,8 +601,8 @@ class LiteLLMProvider(LLMProvider):
                     await asyncio.sleep(wait)
                     continue
 
-                # Success (or final attempt) — flush buffered events.
-                for event in buffered_events:
+                # Success (or final attempt) — flush remaining events.
+                for event in tail_events:
                     yield event
                 return
 

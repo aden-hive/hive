@@ -440,13 +440,14 @@ class EventLoopNode(NodeProtocol):
 
             # Execute tool calls
             tool_results: list[dict] = []
+            limit_hit = False
+            executed_in_batch = 0
             for tc in tool_calls:
                 tool_call_count += 1
                 if tool_call_count > self._config.max_tool_calls_per_turn:
-                    logger.warning(
-                        f"Max tool calls per turn ({self._config.max_tool_calls_per_turn}) exceeded"
-                    )
+                    limit_hit = True
                     break
+                executed_in_batch += 1
 
                 # Publish tool call started
                 await self._publish_tool_started(
@@ -493,6 +494,44 @@ class EventLoopNode(NodeProtocol):
                     result.is_error,
                 )
 
+            # If the limit was hit, add error results for every remaining
+            # tool call so the conversation stays consistent.  Without this,
+            # the assistant message contains tool_calls that have no
+            # corresponding tool results, causing the LLM to repeat them
+            # in the next turn (infinite loop).
+            if limit_hit:
+                max_tc = self._config.max_tool_calls_per_turn
+                skipped = tool_calls[executed_in_batch:]
+                logger.warning(
+                    "Max tool calls per turn (%d) exceeded — "
+                    "discarding %d remaining call(s): %s",
+                    max_tc,
+                    len(skipped),
+                    ", ".join(tc.tool_name for tc in skipped),
+                )
+                discard_msg = (
+                    f"Tool call discarded: max tool calls per turn "
+                    f"({max_tc}) exceeded. Consolidate your work and "
+                    f"use fewer tool calls."
+                )
+                for tc in skipped:
+                    await conversation.add_tool_result(
+                        tool_use_id=tc.tool_use_id,
+                        content=discard_msg,
+                        is_error=True,
+                    )
+                    tool_results.append(
+                        {
+                            "tool_use_id": tc.tool_use_id,
+                            "tool_name": tc.tool_name,
+                            "content": discard_msg,
+                            "is_error": True,
+                        }
+                    )
+                # Limit hit — return from this turn so the judge can
+                # evaluate instead of looping back for another stream.
+                return final_text, tool_results, token_counts
+
             # Tool calls processed -- loop back to stream with updated conversation
 
     # -------------------------------------------------------------------
@@ -533,7 +572,35 @@ class EventLoopNode(NodeProtocol):
     ) -> ToolResult:
         """Handle set_output tool call. Returns ToolResult (sync)."""
         key = tool_input.get("key", "")
+        value = tool_input.get("value", "")
         valid_keys = output_keys or []
+
+        # Recover from truncated JSON (max_tokens hit mid-argument).
+        # The _raw key is set by litellm when json.loads fails.
+        if not key and "_raw" in tool_input:
+            import re
+
+            raw = tool_input["_raw"]
+            key_match = re.search(r'"key"\s*:\s*"(\w+)"', raw)
+            if key_match:
+                key = key_match.group(1)
+            val_match = re.search(r'"value"\s*:\s*"', raw)
+            if val_match:
+                start = val_match.end()
+                value = raw[start:].rstrip()
+                for suffix in ('"}\n', '"}', '"'):
+                    if value.endswith(suffix):
+                        value = value[: -len(suffix)]
+                        break
+            if key:
+                logger.warning(
+                    "Recovered set_output args from truncated JSON: " "key=%s, value_len=%d",
+                    key,
+                    len(value),
+                )
+                # Re-inject so the caller sees proper key/value
+                tool_input["key"] = key
+                tool_input["value"] = value
 
         if key not in valid_keys:
             return ToolResult(
@@ -668,19 +735,46 @@ class EventLoopNode(NodeProtocol):
         ratio = conversation.usage_ratio()
 
         if ratio >= 1.2:
-            # Emergency -- don't risk another LLM call on a bloated context
+            level = "emergency"
             logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
             await conversation.compact(
                 "Previous conversation context (emergency compaction).",
                 keep_recent=1,
             )
         elif ratio >= 1.0:
+            level = "aggressive"
             logger.info("Aggressive compaction triggered (usage %.0f%%)", ratio * 100)
             summary = await self._generate_compaction_summary(ctx, conversation)
             await conversation.compact(summary, keep_recent=2)
         else:
+            level = "normal"
             summary = await self._generate_compaction_summary(ctx, conversation)
             await conversation.compact(summary, keep_recent=4)
+
+        new_ratio = conversation.usage_ratio()
+        logger.info(
+            "Compaction complete (%s): %.0f%% -> %.0f%%",
+            level,
+            ratio * 100,
+            new_ratio * 100,
+        )
+        if self._event_bus:
+            from framework.runtime.event_bus import AgentEvent, EventType
+
+            await self._event_bus.publish(
+                AgentEvent(
+                    type=EventType.CUSTOM,
+                    stream_id=ctx.node_id,
+                    node_id=ctx.node_id,
+                    data={
+                        "custom_type": "node_compaction",
+                        "node_id": ctx.node_id,
+                        "level": level,
+                        "usage_before": round(ratio * 100),
+                        "usage_after": round(new_ratio * 100),
+                    },
+                )
+            )
 
     async def _generate_compaction_summary(
         self,
