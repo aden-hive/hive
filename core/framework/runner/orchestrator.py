@@ -209,7 +209,7 @@ class AgentOrchestrator:
 
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for agent_name, response in zip(routing.selected_agents, responses):
+            for agent_name, response in zip(routing.selected_agents, responses, strict=True):
                 if isinstance(response, Exception):
                     results[agent_name] = {"error": str(response)}
                 else:
@@ -330,7 +330,7 @@ class AgentOrchestrator:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for name, result in zip(agent_names, results):
+        for name, result in zip(agent_names, results, strict=True):
             if isinstance(result, Exception):
                 responses[name] = AgentMessage(
                     type=MessageType.RESPONSE,
@@ -359,7 +359,7 @@ class AgentOrchestrator:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         capabilities = {}
-        for name, result in zip(agent_names, results):
+        for name, result in zip(agent_names, results, strict=True):
             if isinstance(result, Exception):
                 capabilities[name] = CapabilityResponse(
                     agent_name=name,

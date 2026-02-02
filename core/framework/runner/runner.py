@@ -4,24 +4,25 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Any
+from typing import TYPE_CHECKING, Any
 
 from framework.graph import Goal
-from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition, AsyncEntryPointSpec
+from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.graph.node import NodeSpec
-from framework.graph.executor import GraphExecutor, ExecutionResult
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.core import Runtime
 
 # Multi-entry-point runtime imports
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
+from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.core import Runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 if TYPE_CHECKING:
-    from framework.runner.protocol import CapabilityResponse, AgentMessage
+    from framework.runner.protocol import AgentMessage, CapabilityResponse
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     )
 
     # Build Goal
-    from framework.graph.goal import SuccessCriterion, Constraint
+    from framework.graph.goal import Constraint, SuccessCriterion
 
     success_criteria = []
     for sc_data in goal_data.get("success_criteria", []):
@@ -804,7 +805,12 @@ class AgentRunner:
             entry_node=self.graph.entry_node,
             terminal_nodes=self.graph.terminal_nodes,
             success_criteria=[
-                {"id": sc.id, "description": sc.description, "metric": sc.metric, "target": sc.target}
+                {
+                    "id": sc.id,
+                    "description": sc.description,
+                    "metric": sc.metric,
+                    "target": sc.target,
+                }
                 for sc in self.goal.success_criteria
             ],
             constraints=[
@@ -854,7 +860,7 @@ class AgentRunner:
 
             # Check tool credentials (Tier 2)
             missing_creds = cred_manager.get_missing_for_tools(info.required_tools)
-            for cred_name, spec in missing_creds:
+            for _cred_name, spec in missing_creds:
                 missing_credentials.append(spec.env_var)
                 affected_tools = [t for t in info.required_tools if t in spec.tools]
                 tools_str = ", ".join(affected_tools)
@@ -864,9 +870,9 @@ class AgentRunner:
                 warnings.append(warning_msg)
 
             # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
-            node_types = list(set(node.node_type for node in self.graph.nodes))
+            node_types = list({node.node_type for node in self.graph.nodes})
             missing_node_creds = cred_manager.get_missing_for_node_types(node_types)
-            for cred_name, spec in missing_node_creds:
+            for _cred_name, spec in missing_node_creds:
                 if spec.env_var not in missing_credentials:  # Avoid duplicates
                     missing_credentials.append(spec.env_var)
                     affected_types = [t for t in node_types if t in spec.node_types]
@@ -892,7 +898,9 @@ class AgentRunner:
             missing_credentials=missing_credentials,
         )
 
-    async def can_handle(self, request: dict, llm: LLMProvider | None = None) -> "CapabilityResponse":
+    async def can_handle(
+        self, request: dict, llm: LLMProvider | None = None
+    ) -> "CapabilityResponse":
         """
         Ask the agent if it can handle this request.
 
@@ -905,7 +913,7 @@ class AgentRunner:
         Returns:
             CapabilityResponse with level, confidence, and reasoning
         """
-        from framework.runner.protocol import CapabilityResponse, CapabilityLevel
+        from framework.runner.protocol import CapabilityLevel, CapabilityResponse
 
         # Use provided LLM or set up our own
         eval_llm = llm
@@ -961,7 +969,7 @@ Respond with JSON only:
             )
 
             # Parse response
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 level_map = {
@@ -1000,7 +1008,7 @@ Respond with JSON only:
 
     def _keyword_capability_check(self, request: dict) -> "CapabilityResponse":
         """Simple keyword-based capability check (fallback when no LLM)."""
-        from framework.runner.protocol import CapabilityResponse, CapabilityLevel
+        from framework.runner.protocol import CapabilityLevel, CapabilityResponse
 
         info = self.info()
         request_str = json.dumps(request).lower()
