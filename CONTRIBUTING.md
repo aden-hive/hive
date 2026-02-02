@@ -49,12 +49,13 @@ You may submit PRs without prior assignment for:
 
 ```bash
 # Install Python packages and verify setup
-./quickstart.sh
+./quickstart.sh          # Linux / macOS / WSL
+.\quickstart.ps1         # Windows (PowerShell)
 ```
 
 > **Windows Users:**  
-> If you are on native Windows, it is recommended to use **WSL (Windows Subsystem for Linux)**.  
-> Alternatively, make sure to run PowerShell or Git Bash with Python 3.11+ installed, and disable "App Execution Aliases" in Windows settings.
+> Use `.\quickstart.ps1` in PowerShell for native Windows setup.  
+> Alternatively, use **WSL** and run `./quickstart.sh`. Ensure Python 3.11+ is installed and disable "App Execution Aliases" in Windows settings if needed.
 
 > **Tip:** Installing Claude Code skills is optional for running existing agents, but required if you plan to **build new agents**.
 

@@ -77,7 +77,8 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Run quickstart setup
-./quickstart.sh
+./quickstart.sh          # Linux / macOS / WSL
+.\quickstart.ps1         # Windows (PowerShell)
 ```
 
 This sets up:
