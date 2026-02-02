@@ -615,6 +615,24 @@ class EventBus:
             )
         )
 
+    async def emit_node_input_blocked(
+        self,
+        stream_id: str,
+        node_id: str,
+        prompt: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node input blocked event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_INPUT_BLOCKED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"prompt": prompt},
+            )
+        )
+
     # === QUERY OPERATIONS ===
 
     def get_history(

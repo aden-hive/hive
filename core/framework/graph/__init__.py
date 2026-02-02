@@ -1,5 +1,11 @@
 """Graph structures: Goals, Nodes, Edges, and Flexible Execution."""
 
+from framework.graph.client_io import (
+    ActiveNodeClientIO,
+    ClientIOGateway,
+    InertNodeClientIO,
+    NodeClientIO,
+)
 from framework.graph.code_sandbox import CodeSandbox, safe_eval, safe_exec
 from framework.graph.context_handoff import ContextHandoff, HandoffContext
 from framework.graph.conversation import ConversationStore, Message, NodeConversation
@@ -94,4 +100,9 @@ __all__ = [
     # Context Handoff
     "ContextHandoff",
     "HandoffContext",
+    # Client I/O
+    "NodeClientIO",
+    "ActiveNodeClientIO",
+    "InertNodeClientIO",
+    "ClientIOGateway",
 ]
