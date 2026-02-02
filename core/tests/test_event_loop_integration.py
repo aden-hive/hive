@@ -8,27 +8,23 @@ Set HIVE_TEST_LLM_MODEL=<model> to override the real model.
 
 from __future__ import annotations
 
-import asyncio
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from framework.graph.conversation import ConversationStore, NodeConversation
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.event_loop_node import (
     EventLoopNode,
-    JudgeProtocol,
     JudgeVerdict,
     LoopConfig,
 )
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import (
-    FunctionNode,
     NodeContext,
     NodeProtocol,
     NodeResult,
@@ -103,7 +99,7 @@ class ScriptableMockLLMProvider(LLMProvider):
         messages: list[dict[str, Any]],
         system: str = "",
         tools: list[Tool] | None = None,
-        tool_executor: Callable[["ToolUse"], "ToolResult"] | None = None,
+        tool_executor: Callable[[ToolUse], ToolResult] | None = None,
         max_iterations: int = 10,
         max_tokens: int = 1024,
     ) -> LLMResponse:
@@ -334,7 +330,9 @@ async def test_event_loop_node_in_graph(runtime):
     scripts = [
         # stream 1: call set_output("result", "ok")
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_1", "input": {"key": "result", "value": "ok"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_1", "input": {"key": "result", "value": "ok"}}
+            ],
         ),
         # stream 2: text finish (turn ends, implicit judge accepts because all keys present)
         StreamScript(text="Done."),
@@ -435,7 +433,13 @@ async def test_event_loop_tool_execution():
         ),
         # stream 2: call set_output with result
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_so", "input": {"key": "result", "value": "Found: TechCorp"}}],
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_so",
+                    "input": {"key": "result", "value": "Found: TechCorp"},
+                }
+            ],
         ),
         # stream 3: text finish
         StreamScript(text="Search complete."),
@@ -478,11 +482,19 @@ async def test_event_loop_set_output():
     scripts = [
         # stream 1: set lead_score
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_1", "input": {"key": "lead_score", "value": "87"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_1", "input": {"key": "lead_score", "value": "87"}}
+            ],
         ),
         # stream 2: set company
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_2", "input": {"key": "company", "value": "TechCorp"}}],
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_2",
+                    "input": {"key": "company", "value": "TechCorp"},
+                }
+            ],
         ),
         # stream 3: text finish
         StreamScript(text="Outputs set."),
@@ -509,12 +521,20 @@ async def test_event_loop_missing_output_keys_retried():
     scripts = [
         # Iteration 1: only set "score" (missing "reason")
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_1", "input": {"key": "score", "value": "87"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_1", "input": {"key": "score", "value": "87"}}
+            ],
         ),
         StreamScript(text="Scored the lead."),
         # Iteration 2 (after implicit retry feedback): set "reason"
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_2", "input": {"key": "reason", "value": "good fit"}}],
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_2",
+                    "input": {"key": "reason", "value": "good fit"},
+                }
+            ],
         ),
         StreamScript(text="Complete."),
     ]
@@ -545,7 +565,13 @@ async def test_event_loop_conversation_compaction():
     for i in range(4):
         scripts.append(
             StreamScript(
-                tool_calls=[{"name": "set_output", "id": f"tc_{i}", "input": {"key": "result", "value": f"val_{i}"}}],
+                tool_calls=[
+                    {
+                        "name": "set_output",
+                        "id": f"tc_{i}",
+                        "input": {"key": "result", "value": f"val_{i}"},
+                    }
+                ],
             )
         )
         scripts.append(StreamScript(text=f"Iteration {i} done. " + "x" * 200))
@@ -577,11 +603,15 @@ async def test_event_loop_checkpoint_and_restore():
     # Phase 1: Run with max_iterations=2, judge always retries -> fails at max
     scripts_phase1 = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_p1", "input": {"key": "score", "value": "50"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_p1", "input": {"key": "score", "value": "50"}}
+            ],
         ),
         StreamScript(text="Phase 1 iter 0."),
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_p1b", "input": {"key": "score", "value": "60"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_p1b", "input": {"key": "score", "value": "60"}}
+            ],
         ),
         StreamScript(text="Phase 1 iter 1."),
     ]
@@ -614,10 +644,18 @@ async def test_event_loop_checkpoint_and_restore():
     # so the accumulator may not have "score". Re-set both keys to be safe.
     scripts_phase2 = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_p2a", "input": {"key": "score", "value": "75"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_p2a", "input": {"key": "score", "value": "75"}}
+            ],
         ),
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_p2b", "input": {"key": "reason", "value": "recovered"}}],
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_p2b",
+                    "input": {"key": "reason", "value": "recovered"},
+                }
+            ],
         ),
         StreamScript(text="Phase 2 done."),
     ]
@@ -687,12 +725,20 @@ async def test_event_loop_pause_and_resume():
     # Phase 1: pause_requested=True -> immediate return
     scripts_phase1 = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_p", "input": {"key": "partial", "value": "started"}}],
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_p",
+                    "input": {"key": "partial", "value": "started"},
+                }
+            ],
         ),
         StreamScript(text="Should not reach here in phase 1."),
     ]
     llm1 = ScriptableMockLLMProvider(scripts_phase1)
-    ctx1 = make_ctx(llm=llm1, output_keys=["partial", "final"], input_data={"pause_requested": True})
+    ctx1 = make_ctx(
+        llm=llm1, output_keys=["partial", "final"], input_data={"pause_requested": True}
+    )
 
     node1 = EventLoopNode(
         config=LoopConfig(max_iterations=5),
@@ -706,10 +752,18 @@ async def test_event_loop_pause_and_resume():
     # Phase 2: Resume without pause
     scripts_phase2 = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_r1", "input": {"key": "partial", "value": "resumed"}}],
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_r1",
+                    "input": {"key": "partial", "value": "resumed"},
+                }
+            ],
         ),
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_r2", "input": {"key": "final", "value": "done"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_r2", "input": {"key": "final", "value": "done"}}
+            ],
         ),
         StreamScript(text="Resume complete."),
     ]
@@ -785,7 +839,9 @@ async def test_context_handoff_between_nodes(runtime):
     # Enrichment node scripts: set lead_score
     enrichment_scripts = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_e", "input": {"key": "lead_score", "value": "92"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_e", "input": {"key": "lead_score", "value": "92"}}
+            ],
         ),
         StreamScript(text="Enrichment complete."),
     ]
@@ -794,12 +850,16 @@ async def test_context_handoff_between_nodes(runtime):
     # Strategy node scripts: set strategy
     strategy_scripts = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_s", "input": {"key": "strategy", "value": "premium"}}],
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_s",
+                    "input": {"key": "strategy", "value": "premium"},
+                }
+            ],
         ),
         StreamScript(text="Strategy determined."),
     ]
-    strategy_llm = ScriptableMockLLMProvider(strategy_scripts)
-
     enrichment_spec = NodeSpec(
         id="enrichment",
         name="Enrichment",
@@ -943,6 +1003,7 @@ async def test_internal_node_no_client_output():
 @pytest.mark.asyncio
 async def test_mixed_node_graph(runtime):
     """function -> event_loop -> function end-to-end."""
+
     # Function 1: write leads to memory
     def load_leads(**kwargs):
         return ["lead_A", "lead_B", "lead_C"]
@@ -950,7 +1011,13 @@ async def test_mixed_node_graph(runtime):
     # Event loop: process leads, produce summary
     el_scripts = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_sum", "input": {"key": "summary", "value": "3 leads processed"}}],
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_sum",
+                    "input": {"key": "summary", "value": "3 leads processed"},
+                }
+            ],
         ),
         StreamScript(text="Processing complete."),
     ]
@@ -997,7 +1064,9 @@ async def test_mixed_node_graph(runtime):
         nodes=[load_spec, process_spec, format_spec],
         edges=[
             EdgeSpec(id="e1", source="load", target="process", condition=EdgeCondition.ON_SUCCESS),
-            EdgeSpec(id="e2", source="process", target="format", condition=EdgeCondition.ON_SUCCESS),
+            EdgeSpec(
+                id="e2", source="process", target="format", condition=EdgeCondition.ON_SUCCESS
+            ),
         ],
         terminal_nodes=["format"],
     )
@@ -1032,19 +1101,22 @@ async def test_fan_out_rejects_overlapping_output_keys(runtime):
     """
     scripts_a = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_a", "input": {"key": "result", "value": "from_A"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_a", "input": {"key": "result", "value": "from_A"}}
+            ],
         ),
         StreamScript(text="A done."),
     ]
     scripts_b = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_b", "input": {"key": "result", "value": "from_B"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_b", "input": {"key": "result", "value": "from_B"}}
+            ],
         ),
         StreamScript(text="B done."),
     ]
     # Combined scripts: A's scripts then B's scripts
     combined = scripts_a + scripts_b
-    llm = ScriptableMockLLMProvider(combined)
 
     source_spec = NodeSpec(
         id="source",
@@ -1075,8 +1147,12 @@ async def test_fan_out_rejects_overlapping_output_keys(runtime):
         entry_node="source",
         nodes=[source_spec, branch_a_spec, branch_b_spec],
         edges=[
-            EdgeSpec(id="e_a", source="source", target="branch_a", condition=EdgeCondition.ON_SUCCESS),
-            EdgeSpec(id="e_b", source="source", target="branch_b", condition=EdgeCondition.ON_SUCCESS),
+            EdgeSpec(
+                id="e_a", source="source", target="branch_a", condition=EdgeCondition.ON_SUCCESS
+            ),
+            EdgeSpec(
+                id="e_b", source="source", target="branch_b", condition=EdgeCondition.ON_SUCCESS
+            ),
         ],
         terminal_nodes=["branch_a", "branch_b"],
     )
@@ -1085,7 +1161,9 @@ async def test_fan_out_rejects_overlapping_output_keys(runtime):
     # Source node: simple success
     source_scripts = [
         StreamScript(
-            tool_calls=[{"name": "set_output", "id": "tc_src", "input": {"key": "trigger", "value": "go"}}],
+            tool_calls=[
+                {"name": "set_output", "id": "tc_src", "input": {"key": "trigger", "value": "go"}}
+            ],
         ),
         StreamScript(text="Source done."),
     ]

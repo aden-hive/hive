@@ -17,8 +17,7 @@ from framework.graph.client_io import (
     InertNodeClientIO,
     NodeClientIO,
 )
-from framework.runtime.event_bus import AgentEvent, EventBus, EventType
-
+from framework.runtime.event_bus import AgentEvent, EventType
 
 _AGENT_EVENT_FIELDS = {"stream_id", "node_id", "execution_id", "correlation_id"}
 
@@ -32,9 +31,7 @@ class MockEventBus:
     async def _record(self, event_type: EventType, **kwargs) -> None:
         agent_kwargs = {k: v for k, v in kwargs.items() if k in _AGENT_EVENT_FIELDS}
         data = {k: v for k, v in kwargs.items() if k not in _AGENT_EVENT_FIELDS}
-        self.events.append(
-            AgentEvent(type=event_type, **agent_kwargs, data=data)
-        )
+        self.events.append(AgentEvent(type=event_type, **agent_kwargs, data=data))
 
     async def emit_client_output_delta(self, **kwargs) -> None:
         await self._record(EventType.CLIENT_OUTPUT_DELTA, **kwargs)
@@ -120,7 +117,7 @@ async def test_inert_emit_publishes_internal():
 
 @pytest.mark.asyncio
 async def test_inert_request_input_returns_redirect():
-    """InertNodeClientIO.request_input returns a redirect string and publishes NODE_INPUT_BLOCKED."""
+    """request_input returns a redirect string and publishes NODE_INPUT_BLOCKED."""
     bus = MockEventBus()
     io = InertNodeClientIO(node_id="n2", event_bus=bus)
 
