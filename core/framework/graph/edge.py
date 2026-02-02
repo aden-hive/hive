@@ -608,4 +608,73 @@ class GraphSpec(BaseModel):
                     continue
                 errors.append(f"Node '{node.id}' is unreachable from entry")
 
+        # Validate fan-out branches for client-facing and event-loop conflicts
+        def collect_branch_nodes(start_id: str) -> list[Any]:
+            visited: set[str] = set()
+            to_visit = [start_id]
+            collected: list[NodeSpec] = []
+
+            while to_visit:
+                current_id = to_visit.pop()
+                if current_id in visited:
+                    continue
+                visited.add(current_id)
+
+                node = self.get_node(current_id)
+                if not node:
+                    continue
+                collected.append(node)
+
+                incoming = self.get_incoming_edges(current_id)
+                if current_id != start_id and len(incoming) > 1:
+                    continue
+
+                for edge in self.get_outgoing_edges(current_id):
+                    to_visit.append(edge.target)
+
+            return collected
+
+        def is_client_facing(node: Any) -> bool:
+            return bool(getattr(node, "client_facing", False))
+
+        def is_event_loop(node: Any) -> bool:
+            return node.node_type == "event_loop" or bool(getattr(node, "event_loop", False))
+
+        for node in self.nodes:
+            outgoing = self.get_outgoing_edges(node.id)
+            if len(outgoing) <= 1:
+                continue
+
+            branches = [collect_branch_nodes(edge.target) for edge in outgoing]
+
+            client_facing_nodes = {
+                branch_node.id
+                for branch in branches
+                for branch_node in branch
+                if is_client_facing(branch_node)
+            }
+            if len(client_facing_nodes) > 1:
+                errors.append(
+                    f"Fan-out from '{node.id}' has multiple client-facing nodes: "
+                    f"{sorted(client_facing_nodes)}"
+                )
+
+            branch_event_loop_keys: list[set[str]] = []
+            for branch in branches:
+                keys: set[str] = set()
+                for branch_node in branch:
+                    if is_event_loop(branch_node):
+                        keys.update(branch_node.output_keys)
+                branch_event_loop_keys.append(keys)
+
+            for i in range(len(branch_event_loop_keys)):
+                for j in range(i + 1, len(branch_event_loop_keys)):
+                    overlap = branch_event_loop_keys[i] & branch_event_loop_keys[j]
+                    if overlap:
+                        errors.append(
+                            f"Fan-out from '{node.id}' has overlapping event_loop output_keys: "
+                            f"{sorted(overlap)}"
+                        )
+                        break
+
         return errors
