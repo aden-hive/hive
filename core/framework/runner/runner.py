@@ -110,12 +110,22 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         data = json.loads(data)
 
     # Extract graph and goal
-    graph_data = data.get("graph", {})
+    if "graph" not in data or not isinstance(data["graph"], dict):
+        raise ValueError("agent export missing required 'graph' data")
+    graph_data = data["graph"]
     goal_data = data.get("goal", {})
+
+    entry_node = graph_data.get("entry_node")
+    if not entry_node:
+        raise ValueError("agent export missing required 'graph.entry_node'")
+
+    nodes_data = graph_data.get("nodes")
+    if not isinstance(nodes_data, list) or not nodes_data:
+        raise ValueError("agent export missing required 'graph.nodes'")
 
     # Build NodeSpec objects
     nodes = []
-    for node_data in graph_data.get("nodes", []):
+    for node_data in nodes_data:
         nodes.append(NodeSpec(**node_data))
 
     # Build EdgeSpec objects
@@ -161,7 +171,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         id=graph_data.get("id", "agent-graph"),
         goal_id=graph_data.get("goal_id", ""),
         version=graph_data.get("version", "1.0.0"),
-        entry_node=graph_data.get("entry_node", ""),
+        entry_node=entry_node,
         entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
         async_entry_points=async_entry_points,  # Support multi-entry-point agents
         terminal_nodes=graph_data.get("terminal_nodes", []),
