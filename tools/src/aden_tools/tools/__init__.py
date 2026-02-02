@@ -36,6 +36,7 @@ from .file_system_toolkits.replace_file_content import (
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .pdf_read_tool import register_tools as register_pdf_read
+from .supabase_tool import register_tools as register_supabase
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
@@ -61,6 +62,7 @@ def register_all_tools(
     register_pdf_read(mcp)
 
     # Tools that need credentials (pass credentials if provided)
+    register_supabase(mcp, credentials=credentials)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
 
@@ -93,6 +95,12 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "supabase_select",
+        "supabase_insert",
+        "supabase_update",
+        "supabase_delete",
+        "supabase_upload_file",
+        "supabase_download_file",
     ]
 
 

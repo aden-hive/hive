@@ -50,11 +50,13 @@ from .base import CredentialError, CredentialManager, CredentialSpec
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
+from .supabase import SUPABASE_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
+    **SUPABASE_CREDENTIALS,
 }
 
 __all__ = [
@@ -69,4 +71,5 @@ __all__ = [
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
+    "SUPABASE_CREDENTIALS",
 ]
