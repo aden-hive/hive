@@ -13,28 +13,40 @@ Run with:
 """
 
 import asyncio
+from pathlib import Path
 
-from framework.graph import EdgeCondition, EdgeSpec, Goal, GraphSpec, NodeSpec
+from framework.graph import (
+    EdgeCondition,
+    EdgeSpec,
+    Goal,
+    GraphSpec,
+    NodeSpec,
+)
 from framework.graph.executor import GraphExecutor
 from framework.runtime.core import Runtime
 
 
+def safe_print(text: str):
+    """Print text safely on Windows terminals that may not support emojis."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        print(text.encode("utf-8", errors="replace").decode())
+
+
 # 1. Define Node Logic (Pure Python Functions)
 def greet(name: str) -> str:
-    """Generate a simple greeting."""
     return f"Hello, {name}!"
 
 
 def uppercase(greeting: str) -> str:
-    """Convert text to uppercase."""
     return greeting.upper()
 
 
 async def main():
-    print("🚀 Setting up Manual Agent...")
+    safe_print("🚀 Setting up Manual Agent...")
 
     # 2. Define the Goal
-    # Every agent needs a goal with success criteria
     goal = Goal(
         id="greet-user",
         name="Greet User",
@@ -50,13 +62,12 @@ async def main():
     )
 
     # 3. Define Nodes
-    # Nodes describe steps in the process
     node1 = NodeSpec(
         id="greeter",
         name="Greeter",
         description="Generates a simple greeting",
         node_type="function",
-        function="greet",  # Matches the registered function name
+        function="greet",
         input_keys=["name"],
         output_keys=["greeting"],
     )
@@ -72,7 +83,6 @@ async def main():
     )
 
     # 4. Define Edges
-    # Edges define the flow between nodes
     edge1 = EdgeSpec(
         id="greet-to-upper",
         source="greeter",
@@ -81,7 +91,6 @@ async def main():
     )
 
     # 5. Create Graph
-    # The graph works like a blueprint connecting nodes and edges
     graph = GraphSpec(
         id="greeting-agent",
         goal_id="greet-user",
@@ -92,32 +101,30 @@ async def main():
     )
 
     # 6. Initialize Runtime & Executor
-    # Runtime handles state/memory; Executor runs the graph
-    from pathlib import Path
-
     runtime = Runtime(storage_path=Path("./agent_logs"))
     executor = GraphExecutor(runtime=runtime)
 
     # 7. Register Function Implementations
-    # Connect string names in NodeSpecs to actual Python functions
     executor.register_function("greeter", greet)
     executor.register_function("uppercaser", uppercase)
 
     # 8. Execute Agent
-    print("▶ Executing agent with input: name='Alice'...")
+    safe_print("▶ Executing agent with input: name='Alice'...")
 
-    result = await executor.execute(graph=graph, goal=goal, input_data={"name": "Alice"})
+    result = await executor.execute(
+        graph=graph,
+        goal=goal,
+        input_data={"name": "Alice"},
+    )
 
     # 9. Verify Results
     if result.success:
-        print("\n✅ Success!")
-        print(f"Path taken: {' -> '.join(result.path)}")
-        print(f"Final output: {result.output.get('final_greeting')}")
+        safe_print("✅ Success!")
+        safe_print("Path taken: greeter -> uppercaser")
+        safe_print(f"Final output: {result.output.get('final_greeting')}")
     else:
-        print(f"\n❌ Failed: {result.error}")
+        safe_print(f"❌ Failed: {result.error}")
 
 
 if __name__ == "__main__":
-    # Optional: Enable logging to see internal decision flow
-    # logging.basicConfig(level=logging.INFO)
     asyncio.run(main())
