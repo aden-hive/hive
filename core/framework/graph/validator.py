@@ -231,7 +231,8 @@ class OutputValidator:
             # Check for code patterns in the entire string, not just first 500 chars
             if self._contains_code_indicators(value):
                 # Could be legitimate, but warn
-                logger.warning(f"Output key '{key}' may contain code - verify this is expected")
+                # logger.debug(f"Output key '{key}' may contain code - verify this is expected")
+                pass
 
             # Check for overly long values
             if len(value) > max_length:
