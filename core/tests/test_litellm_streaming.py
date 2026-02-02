@@ -181,9 +181,9 @@ class TestRealAPITextStreaming:
 
         # Snapshot must accumulate monotonically
         for i in range(1, len(text_deltas)):
-            assert len(text_deltas[i].snapshot) > len(
-                text_deltas[i - 1].snapshot
-            ), f"Snapshot did not grow at index {i}"
+            assert len(text_deltas[i].snapshot) > len(text_deltas[i - 1].snapshot), (
+                f"Snapshot did not grow at index {i}"
+            )
 
         # Must end with TextEndEvent then FinishEvent
         text_ends = [e for e in events if isinstance(e, TextEndEvent)]
@@ -283,9 +283,9 @@ class TestRealAPIToolCallStreaming:
 
         # Must have multiple tool call events
         tool_calls = [e for e in events if isinstance(e, ToolCallEvent)]
-        assert (
-            len(tool_calls) >= 2
-        ), f"Expected 2+ ToolCallEvents for parallel requests, got {len(tool_calls)}"
+        assert len(tool_calls) >= 2, (
+            f"Expected 2+ ToolCallEvents for parallel requests, got {len(tool_calls)}"
+        )
 
         # Verify tool names used
         tool_names = {tc.tool_name for tc in tool_calls}
