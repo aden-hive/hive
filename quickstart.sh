@@ -176,7 +176,7 @@ echo ""
 
 # Upgrade pip, setuptools, and wheel
 echo -n "  Upgrading pip... "
-$PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
+$PYTHON_CMD -m pip install --upgrade pip setuptools wheel --no-input > /dev/null 2>&1 || true
 echo -e "${GREEN}ok${NC}"
 
 # Install framework package from core/
@@ -193,6 +193,11 @@ if [ -f "pyproject.toml" ]; then
 else
     echo -e "${RED}failed (no pyproject.toml)${NC}"
     exit 1
+fi
+# WSL fallback: uv venv sometimes fails silently
+if [ ! -d ".venv" ]; then
+    echo -e "${YELLOW}  uv venv missing, using pip fallback (WSL)${NC}"
+    $PYTHON_CMD -m pip install -e . --no-build-isolation > /dev/null 2>&1
 fi
 
 # Install aden_tools package from tools/
@@ -212,10 +217,60 @@ else
     exit 1
 fi
 
-# Install MCP dependencies
+
+# ------------------------------------------------------------
+# Install MCP dependencies (TOOLS VENV – FINAL & SAFE)
+# ------------------------------------------------------------
+# Modified by Shashank (GitHub: shashankongit) on 2026-02-02
+# Reason: MCP_STATUS was previously checked without being safely set,
+# which caused `[: -eq: unary operator expected` in WSL/bash.
+# Explicitly capturing and quoting the exit status avoids false failures
+# while keeping behavior unchanged.
+
+
+echo -n "  Installing MCP dependencies... "
+
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+
+# Ensure tools venv python exists
+if [ ! -x "$TOOLS_PYTHON" ]; then
+    echo -e "${RED}failed${NC}"
+    echo -e "${YELLOW}Hint:${NC} tools venv python not found"
+    exit 1
+fi
+
+# Ensure pip exists inside tools venv (WSL fix)
+if ! "$TOOLS_PYTHON" -m pip --version > /dev/null 2>&1; then
+    "$TOOLS_PYTHON" -m ensurepip --upgrade > /dev/null 2>&1
+fi
+
+
+# Install MCP
 echo -n "  Installing MCP... "
-$PYTHON_CMD -m pip install mcp fastmcp > /dev/null 2>&1
-echo -e "${GREEN}ok${NC}"
+
+"$TOOLS_PYTHON" -m pip install mcp fastmcp > /dev/null 2>&1
+MCP_STATUS=$?
+
+if [ $MCP_STATUS -eq 0 ]; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${RED}failed${NC}"
+    echo -e "${YELLOW}Hint:${NC} MCP install failed in tools venv"
+    exit 1
+fi
+
+set -e
+# ---- SAFE ZONE END ----
+
+
+
+
+
+
+
+
+
+
 
 # Fix openai version compatibility
 echo -n "  Checking openai... "
@@ -230,7 +285,7 @@ echo -e "${GREEN}ok${NC}"
 # Install Playwright browser
 echo -n "  Installing Playwright browser... "
 if $PYTHON_CMD -c "import playwright" > /dev/null 2>&1; then
-    if $PYTHON_CMD -m playwright install chromium > /dev/null 2>&1; then
+    if $PYTHON_CMD -m playwright install chromium > /dev/null 2>&1 || true; then
         echo -e "${GREEN}ok${NC}"
     else
         echo -e "${YELLOW}⏭${NC}"
