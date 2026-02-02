@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from framework.runner.execution_context import ExecutionContext
+
 
 from framework.llm.provider import Tool, ToolResult, ToolUse
 
@@ -188,38 +190,65 @@ class ToolRegistry:
         return {name: rt.tool for name, rt in self._tools.items()}
 
     def get_executor(self) -> Callable[[ToolUse], ToolResult]:
-        """
-        Get unified tool executor function.
+      """
+       Get unified tool executor function.
 
-        Returns a function that dispatches to the appropriate tool executor.
-        """
+       Returns a function that dispatches to the appropriate tool executor.
+      """
 
-        def executor(tool_use: ToolUse) -> ToolResult:
-            if tool_use.name not in self._tools:
-                return ToolResult(
-                    tool_use_id=tool_use.id,
-                    content=json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
-                    is_error=True,
-                )
+      def executor(
+        tool_use: ToolUse,
+        context: ExecutionContext | None = None
+      ) -> ToolResult:
 
-            registered = self._tools[tool_use.name]
-            try:
-                result = registered.executor(tool_use.input)
-                if isinstance(result, ToolResult):
-                    return result
-                return ToolResult(
-                    tool_use_id=tool_use.id,
-                    content=json.dumps(result) if not isinstance(result, str) else result,
-                    is_error=False,
-                )
-            except Exception as e:
-                return ToolResult(
-                    tool_use_id=tool_use.id,
-                    content=json.dumps({"error": str(e)}),
-                    is_error=True,
-                )
+        # 🔹 SIMULATION MODE (NEW)
+        if context and context.simulate:
+            logger.info(
+                "Simulating tool execution",
+                extra={
+                    "tool_name": tool_use.name,
+                    "inputs": tool_use.input,
+                },
+            )
 
-        return executor
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content=json.dumps({
+                    "simulation": True,
+                    "tool": tool_use.name,
+                    "inputs": tool_use.input,
+                    "message": "This action was simulated. No side effects were performed."
+                }),
+                is_error=False,
+            )
+
+        # 🔹 EXISTING BEHAVIOR (UNCHANGED)
+        if tool_use.name not in self._tools:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content=json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
+                is_error=True,
+            )
+
+        registered = self._tools[tool_use.name]
+        try:
+            result = registered.executor(tool_use.input)
+            if isinstance(result, ToolResult):
+                return result
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content=json.dumps(result) if not isinstance(result, str) else result,
+                is_error=False,
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content=json.dumps({"error": str(e)}),
+                is_error=True,
+            )
+
+      return executor
+
 
     def get_registered_names(self) -> list[str]:
         """Get list of registered tool names."""
