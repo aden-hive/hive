@@ -9,7 +9,7 @@ Philosophy: Google Strictness + Apple UX
 
 Usage:
     from aden_tools.credentials import CredentialStoreAdapter
-    from core.framework.credentials import CredentialStore
+    from framework.credentials import CredentialStore
 
     # With encrypted storage (production)
     store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
