@@ -167,6 +167,12 @@ def register_all_tools(
         "slack_get_messages_for_analysis",
         # Phase 2: Workflow
         "slack_trigger_workflow",
+        # Phase 3: Critical Power Tools
+        "slack_get_conversation_context",
+        "slack_find_user_by_email",
+        "slack_kick_user_from_channel",
+        "slack_delete_file",
+        "slack_get_team_stats",
     ]
 
 
