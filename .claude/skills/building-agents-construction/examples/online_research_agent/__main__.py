@@ -58,33 +58,69 @@ def run(topic, mock, quiet, verbose, debug):
     click.echo(json.dumps(output_data, indent=2, default=str))
     sys.exit(0 if result.success else 1)
 
+def draw_tree(current_node, edges, visited=None, depth=0, prefix=""):
+    """
+    Recursively draws the agent graph as a tree with proper branch styling.
+    """
+    if visited is None:
+        visited = set()
+    
+    # Handle cycles/loops gracefully
+    if current_node in visited:
+        click.echo(f"{prefix}└── {click.style(current_node, fg='yellow')} (loop back)")
+        return
+    visited.add(current_node)
+
+    # Find all children (target nodes) for the current node
+    children = [e['target'] for e in edges if e['source'] == current_node]
+    
+    # Print the current node. If it's the root (depth 0), we don't need a branch symbol
+    if depth == 0:
+        click.echo(click.style(current_node, fg="green", bold=True))
+    
+    # Iterate through children and draw branches
+    for i, child in enumerate(children):
+        is_last = (i == len(children) - 1)
+        
+        # Branch symbol: T-shape for middle, L-shape for last
+        connector = "└── " if is_last else "├── "
+        
+        # Display the child node
+        click.echo(f"{prefix}{connector}{child}")
+    
+        new_prefix = prefix + ("    " if is_last else "│   ")
+        
+        draw_tree(child, edges, visited, depth + 1, new_prefix)
 
 @cli.command()
 @click.option("--json", "output_json", is_flag=True)
 def info(output_json):
-    """Show agent information."""
+    """Show agent information with a hierarchical flow visualization."""
     info_data = default_agent.info()
+    
     if output_json:
         click.echo(json.dumps(info_data, indent=2))
-    else:
-        click.echo(f"Agent: {info_data['name']}")
-        click.echo(f"Version: {info_data['version']}")
-        click.echo(f"Description: {info_data['description']}")
-        
-        click.echo(f"\n[Nodes]")
-        for node in info_data['nodes']:
-            suffix = ""
-            if node == info_data['entry_node']: suffix += " (ENTRY)"
-            if node in info_data['terminal_nodes']: suffix += " (TERMINAL)"
-            click.echo(f"  • {node  }{suffix}")
+        return
 
-        click.echo(f"\n[Flow / Edges]")
-        if info_data['edges']:
-            for edge in info_data['edges']:
-                # Using the new source/target data we added to agent.py
-                click.echo(f"  {edge['source']}  -->  {edge['target']}")
-        else:
-            click.echo("  No edges defined.")
+    click.echo(click.style(f"Agent: {info_data['name']}", fg="cyan", bold=True))
+    click.echo(f"Version: {info_data['version']}")
+    click.echo(f"Description: {info_data['description']}")
+    
+    click.echo(click.style("\n[Nodes]", fg="yellow"))
+    for node in info_data['nodes']:
+        roles = []
+        if node == info_data['entry_node']: roles.append("ENTRY")
+        if node in info_data['terminal_nodes']: roles.append("TERMINAL")
+        
+        role_str = f" ({', '.join(roles)})" if roles else ""
+        click.echo(f"  • {node}{click.style(role_str, dim=True)}")
+
+    # Hierarchy tree
+    click.echo(click.style("\n[Agent Flow Tree]", fg="yellow"))
+    if info_data['edges']:
+        draw_tree(info_data['entry_node'], info_data['edges'])
+    else:
+        click.echo("  No edges defined.")
 
 
 @cli.command()
