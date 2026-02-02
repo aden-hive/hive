@@ -2487,6 +2487,31 @@ def _get_agent_module_from_path(agent_path: str) -> str:
     return path.name
 
 
+def _validate_agent_path(agent_path: str) -> dict[str, str] | None:
+    """Validate an exported agent path and return an error payload if invalid."""
+    if not agent_path:
+        return {"error": "agent_path required (e.g., 'exports/my_agent')"}
+
+    path = Path(agent_path)
+    if not path.exists():
+        return {
+            "error": f"Agent path not found: {agent_path}",
+            "hint": "Export the agent to create the exports/<agent_name> directory",
+        }
+
+    if not path.is_dir():
+        return {"error": f"Agent path is not a directory: {agent_path}"}
+
+    agent_json = path / "agent.json"
+    if not agent_json.exists():
+        return {
+            "error": f"agent.json not found in {agent_path}",
+            "hint": "Export the agent to generate agent.json",
+        }
+
+    return None
+
+
 def _format_constraint(constraint: Constraint) -> str:
     """Format a single constraint for display."""
     severity = "HARD" if constraint.constraint_type == "hard" else "SOFT"
@@ -2597,8 +2622,11 @@ def generate_constraint_tests(
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
-    if not agent_path:
-        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+    error = _validate_agent_path(agent_path)
+    if error:
+        error["goal_id"] = goal_id
+        error["agent_path"] = agent_path
+        return json.dumps(error)
 
     agent_module = _get_agent_module_from_path(agent_path)
 
@@ -2677,8 +2705,11 @@ def generate_success_tests(
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
-    if not agent_path:
-        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+    error = _validate_agent_path(agent_path)
+    if error:
+        error["goal_id"] = goal_id
+        error["agent_path"] = agent_path
+        return json.dumps(error)
 
     agent_module = _get_agent_module_from_path(agent_path)
 
@@ -2765,6 +2796,12 @@ def run_tests(
     """
     import re
     import subprocess
+
+    error = _validate_agent_path(agent_path)
+    if error:
+        error["goal_id"] = goal_id
+        error["agent_path"] = agent_path
+        return json.dumps(error)
 
     tests_dir = Path(agent_path) / "tests"
 
@@ -2957,8 +2994,11 @@ def debug_test(
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
-    if not agent_path:
-        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+    error = _validate_agent_path(agent_path)
+    if error:
+        error["goal_id"] = goal_id
+        error["agent_path"] = agent_path
+        return json.dumps(error)
 
     tests_dir = Path(agent_path) / "tests"
 
@@ -3101,8 +3141,11 @@ def list_tests(
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
-    if not agent_path:
-        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+    error = _validate_agent_path(agent_path)
+    if error:
+        error["goal_id"] = goal_id
+        error["agent_path"] = agent_path
+        return json.dumps(error)
 
     tests_dir = Path(agent_path) / "tests"
 
