@@ -1,6 +1,7 @@
 """Graph structures: Goals, Nodes, Edges, and Flexible Execution."""
 
 from framework.graph.code_sandbox import CodeSandbox, safe_eval, safe_exec
+from framework.graph.context_handoff import ContextHandoff, HandoffContext
 from framework.graph.conversation import ConversationStore, Message, NodeConversation
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.event_loop_node import (
@@ -90,4 +91,7 @@ __all__ = [
     "OutputAccumulator",
     "JudgeProtocol",
     "JudgeVerdict",
+    # Context Handoff
+    "ContextHandoff",
+    "HandoffContext",
 ]

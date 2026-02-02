@@ -108,6 +108,50 @@ class ConversationStore(Protocol):
 # ---------------------------------------------------------------------------
 
 
+def _try_extract_key(content: str, key: str) -> str | None:
+    """Try 4 strategies to extract a *key*'s value from message content.
+
+    Strategies (in order):
+    1. Whole message is JSON — ``json.loads``, check for key.
+    2. Embedded JSON via ``find_json_object`` helper.
+    3. Colon format: ``key: value``.
+    4. Equals format: ``key = value``.
+    """
+    from framework.graph.node import find_json_object
+
+    # 1. Whole message is JSON
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict) and key in parsed:
+            val = parsed[key]
+            return json.dumps(val) if not isinstance(val, str) else val
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 2. Embedded JSON via find_json_object
+    json_str = find_json_object(content)
+    if json_str:
+        try:
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict) and key in parsed:
+                val = parsed[key]
+                return json.dumps(val) if not isinstance(val, str) else val
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # 3. Colon format: key: value
+    match = re.search(rf"\b{re.escape(key)}\s*:\s*(.+)", content)
+    if match:
+        return match.group(1).strip()
+
+    # 4. Equals format: key = value
+    match = re.search(rf"\b{re.escape(key)}\s*=\s*(.+)", content)
+    if match:
+        return match.group(1).strip()
+
+    return None
+
+
 class NodeConversation:
     """Message history for a graph node with optional write-through persistence.
 
@@ -283,39 +327,7 @@ class NodeConversation:
 
     def _try_extract_key(self, content: str, key: str) -> str | None:
         """Try 4 strategies to extract a key's value from message content."""
-        from framework.graph.node import find_json_object
-
-        # 1. Whole message is JSON
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, dict) and key in parsed:
-                val = parsed[key]
-                return json.dumps(val) if not isinstance(val, str) else val
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        # 2. Embedded JSON via find_json_object
-        json_str = find_json_object(content)
-        if json_str:
-            try:
-                parsed = json.loads(json_str)
-                if isinstance(parsed, dict) and key in parsed:
-                    val = parsed[key]
-                    return json.dumps(val) if not isinstance(val, str) else val
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # 3. Colon format: key: value
-        match = re.search(rf"\b{re.escape(key)}\s*:\s*(.+)", content)
-        if match:
-            return match.group(1).strip()
-
-        # 4. Equals format: key = value
-        match = re.search(rf"\b{re.escape(key)}\s*=\s*(.+)", content)
-        if match:
-            return match.group(1).strip()
-
-        return None
+        return _try_extract_key(content, key)
 
     # --- Lifecycle ---------------------------------------------------------
 

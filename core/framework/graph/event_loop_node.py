@@ -161,13 +161,15 @@ class EventLoopNode(NodeProtocol):
         self._injection_queue: asyncio.Queue[str] = asyncio.Queue()
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
-        """Validate that required inputs and LLM are available."""
+        """Validate hard requirements only.
+
+        Event loop nodes are LLM-powered and can reason about flexible input,
+        so input_keys are treated as hints — not strict requirements.
+        Only the LLM provider is a hard dependency.
+        """
         errors = []
         if ctx.llm is None:
             errors.append("LLM provider is required for EventLoopNode")
-        for key in ctx.node_spec.input_keys:
-            if key not in ctx.input_data and ctx.memory.read(key) is None:
-                errors.append(f"Missing required input: {key}")
         return errors
 
     # -------------------------------------------------------------------
@@ -578,12 +580,25 @@ class EventLoopNode(NodeProtocol):
     # -------------------------------------------------------------------
 
     def _build_initial_message(self, ctx: NodeContext) -> str:
-        """Build the initial user message from input data and memory."""
+        """Build the initial user message from input data and memory.
+
+        Includes ALL input_data (not just declared input_keys) so that
+        upstream handoff data flows through regardless of key naming.
+        Declared input_keys are also checked in shared memory as fallback.
+        """
         parts = []
-        for key in ctx.node_spec.input_keys:
-            value = ctx.input_data.get(key) or ctx.memory.read(key)
+        seen: set[str] = set()
+        # Include everything from input_data (flexible handoff)
+        for key, value in ctx.input_data.items():
             if value is not None:
                 parts.append(f"{key}: {value}")
+                seen.add(key)
+        # Fallback: check memory for declared input_keys not already covered
+        for key in ctx.node_spec.input_keys:
+            if key not in seen:
+                value = ctx.memory.read(key)
+                if value is not None:
+                    parts.append(f"{key}: {value}")
         if ctx.goal_context:
             parts.append(f"\nGoal: {ctx.goal_context}")
         return "\n".join(parts) if parts else "Begin."
