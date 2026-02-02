@@ -36,23 +36,39 @@ echo ""
 echo -e "${BLUE}Step 1: Checking Python prerequisites...${NC}"
 echo ""
 
-# Check for Python
-if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
-    echo -e "${RED}Error: Python is not installed.${NC}"
-    echo "Please install Python 3.11+ from https://python.org"
-    exit 1
+PYTHON_CMD=""
+
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+  # Windows Git Bash: avoid Microsoft Store python alias
+  for p in \
+    "/c/Program Files/Python311/python.exe" \
+    "/c/Program Files/Python310/python.exe"
+  do
+    if [ -x "$p" ]; then
+      PYTHON_CMD="$p"
+      break
+    fi
+  done
+else
+  # Unix-like systems
+  if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+  elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+  fi
 fi
 
-# Use python3 if available, otherwise python
-PYTHON_CMD="python3"
-if ! command -v python3 &> /dev/null; then
-    PYTHON_CMD="python"
+if [ -z "$PYTHON_CMD" ]; then
+  echo -e "${RED}Error: Python 3.11+ not found.${NC}"
+  echo "Please install Python from https://python.org"
+  exit 1
 fi
+
 
 # Check Python version
-PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)')
-PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
+PYTHON_VERSION=$("$PYTHON_CMD" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+PYTHON_MAJOR=$("$PYTHON_CMD" -c 'import sys; print(sys.version_info.major)')
+PYTHON_MINOR=$("$PYTHON_CMD" -c 'import sys; print(sys.version_info.minor)')
 
 echo -e "  Detected Python: ${GREEN}$PYTHON_VERSION${NC}"
 
@@ -70,7 +86,7 @@ echo -e "${GREEN}  ✓ Python version OK${NC}"
 echo ""
 
 # Check for pip
-if ! $PYTHON_CMD -m pip --version &> /dev/null; then
+if ! "$PYTHON_CMD" -m pip --version &> /dev/null; then
     echo -e "${RED}Error: pip is not installed${NC}"
     echo "Please install pip for Python $PYTHON_VERSION"
     exit 1
@@ -88,14 +104,14 @@ echo ""
 
 # Upgrade pip, setuptools, and wheel
 echo "  Upgrading pip, setuptools, wheel..."
-$PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
+"$PYTHON_CMD" -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
 echo -e "${GREEN}  ✓ Core tools upgraded${NC}"
 
 # Install framework package from core/
 echo "  Installing framework package from core/..."
 cd "$SCRIPT_DIR/core"
 if [ -f "pyproject.toml" ]; then
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
+    "$PYTHON_CMD" -m pip install -e . > /dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✓ framework package installed${NC}"
     else
@@ -110,7 +126,7 @@ fi
 echo "  Installing aden_tools package from tools/..."
 cd "$SCRIPT_DIR/tools"
 if [ -f "pyproject.toml" ]; then
-    $PYTHON_CMD -m pip install -e . > /dev/null 2>&1
+    "$PYTHON_CMD" -m pip install -e . > /dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✓ aden_tools package installed${NC}"
     else
@@ -124,25 +140,25 @@ fi
 
 # Install MCP dependencies
 echo "  Installing MCP dependencies..."
-$PYTHON_CMD -m pip install mcp fastmcp > /dev/null 2>&1
+"$PYTHON_CMD" -m pip install mcp fastmcp > /dev/null 2>&1
 echo -e "${GREEN}  ✓ MCP dependencies installed${NC}"
 
 # Fix openai version compatibility
-OPENAI_VERSION=$($PYTHON_CMD -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
+OPENAI_VERSION=$("$PYTHON_CMD" -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
 if [ "$OPENAI_VERSION" = "not_installed" ]; then
     echo "  Installing openai package..."
-    $PYTHON_CMD -m pip install "openai>=1.0.0" > /dev/null 2>&1
+    "$PYTHON_CMD" -m pip install "openai>=1.0.0" > /dev/null 2>&1
     echo -e "${GREEN}  ✓ openai installed${NC}"
 elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
     echo "  Upgrading openai to 1.x+ for litellm compatibility..."
-    $PYTHON_CMD -m pip install --upgrade "openai>=1.0.0" > /dev/null 2>&1
+    "$PYTHON_CMD" -m pip install --upgrade "openai>=1.0.0" > /dev/null 2>&1
     echo -e "${GREEN}  ✓ openai upgraded${NC}"
 else
     echo -e "${GREEN}  ✓ openai $OPENAI_VERSION is compatible${NC}"
 fi
 
 # Install click for CLI
-$PYTHON_CMD -m pip install click > /dev/null 2>&1
+"$PYTHON_CMD" -m pip install click > /dev/null 2>&1
 echo -e "${GREEN}  ✓ click installed${NC}"
 
 cd "$SCRIPT_DIR"
@@ -158,7 +174,7 @@ echo ""
 IMPORT_ERRORS=0
 
 # Test framework import
-if $PYTHON_CMD -c "import framework" > /dev/null 2>&1; then
+if "$PYTHON_CMD" -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ framework imports OK${NC}"
 else
     echo -e "${RED}  ✗ framework import failed${NC}"
@@ -166,7 +182,7 @@ else
 fi
 
 # Test aden_tools import
-if $PYTHON_CMD -c "import aden_tools" > /dev/null 2>&1; then
+if "$PYTHON_CMD" -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ aden_tools imports OK${NC}"
 else
     echo -e "${RED}  ✗ aden_tools import failed${NC}"
@@ -174,14 +190,14 @@ else
 fi
 
 # Test litellm import
-if $PYTHON_CMD -c "import litellm" > /dev/null 2>&1; then
+if "$PYTHON_CMD" -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ litellm imports OK${NC}"
 else
     echo -e "${YELLOW}  ⚠ litellm import issues (may be OK)${NC}"
 fi
 
 # Test MCP server module
-if $PYTHON_CMD -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
+if "$PYTHON_CMD" -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ MCP server module OK${NC}"
 else
     echo -e "${RED}  ✗ MCP server module failed${NC}"
@@ -256,7 +272,7 @@ if [ -f "$SCRIPT_DIR/.mcp.json" ]; then
     echo -e "${GREEN}  ✓ .mcp.json found at project root${NC}"
     echo ""
     echo "  MCP servers configured:"
-    $PYTHON_CMD -c "
+    "$PYTHON_CMD" -c "
 import json
 with open('$SCRIPT_DIR/.mcp.json') as f:
     config = json.load(f)
@@ -278,7 +294,7 @@ echo -e "${BLUE}Step 6: Checking API key...${NC}"
 echo ""
 
 # Check using CredentialManager (preferred)
-API_KEY_AVAILABLE=$($PYTHON_CMD -c "
+API_KEY_AVAILABLE=$("$PYTHON_CMD" -c "
 from aden_tools.credentials import CredentialManager
 creds = CredentialManager()
 print('yes' if creds.is_available('anthropic') else 'no')
