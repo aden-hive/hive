@@ -72,4 +72,4 @@ exports/*
 .venv
 
 docs/github-issues/*
-core/tests/*
+core/tests/*dumps/*
