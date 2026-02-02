@@ -26,6 +26,41 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Configuration paths
+HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
+
+
+def get_hive_config() -> dict[str, Any]:
+    """Load hive configuration from ~/.hive/configuration.json."""
+    if not HIVE_CONFIG_FILE.exists():
+        return {}
+    try:
+        with open(HIVE_CONFIG_FILE) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def get_claude_code_token() -> str | None:
+    """
+    Get the OAuth token from Claude Code subscription.
+
+    Reads from ~/.claude/.credentials.json which is created by the
+    Claude Code CLI when users authenticate with their subscription.
+
+    Returns:
+        The access token if available, None otherwise.
+    """
+    if not CLAUDE_CREDENTIALS_FILE.exists():
+        return None
+    try:
+        with open(CLAUDE_CREDENTIALS_FILE) as f:
+            creds = json.load(f)
+        return creds.get("claudeAiOauth", {}).get("accessToken")
+    except (json.JSONDecodeError, OSError):
+        return None
+
 
 @dataclass
 class AgentInfo:
@@ -434,15 +469,32 @@ class AgentRunner:
 
             self._llm = MockLLMProvider(model=self.model)
         else:
-            # Detect required API key from model name
-            api_key_env = self._get_api_key_env_var(self.model)
-            if api_key_env and os.environ.get(api_key_env):
-                from framework.llm.litellm import LiteLLMProvider
+            from framework.llm.litellm import LiteLLMProvider
 
-                self._llm = LiteLLMProvider(model=self.model)
-            elif api_key_env:
-                logger.warning(f"{api_key_env} not set. LLM calls will fail.")
-                logger.warning(f"Set it with: export {api_key_env}=your-api-key")
+            # Check if Claude Code subscription is configured
+            config = get_hive_config()
+            llm_config = config.get("llm", {})
+            use_claude_code = llm_config.get("use_claude_code_subscription", False)
+
+            api_key = None
+            if use_claude_code:
+                # Get OAuth token from Claude Code subscription
+                api_key = get_claude_code_token()
+                if not api_key:
+                    print("Warning: Claude Code subscription configured but no token found.")
+                    print("Run 'claude' to authenticate, then try again.")
+
+            if api_key:
+                # Use Claude Code subscription token
+                self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+            else:
+                # Fall back to environment variable
+                api_key_env = self._get_api_key_env_var(self.model)
+                if api_key_env and os.environ.get(api_key_env):
+                    self._llm = LiteLLMProvider(model=self.model)
+                elif api_key_env:
+                    print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                    print(f"Set it with: export {api_key_env}=your-api-key")
 
         # Get tools for executor/runtime
         tools = list(self._tool_registry.get_tools().values())
@@ -549,6 +601,10 @@ class AgentRunner:
         """
         Execute the agent with given input data.
 
+        Validates credentials before execution. If any required credentials
+        are missing, returns an error result with instructions on how to
+        provide them.
+
         For single-entry-point agents, this is the standard execution path.
         For multi-entry-point agents, you can optionally specify which entry point to use.
 
@@ -561,6 +617,20 @@ class AgentRunner:
         Returns:
             ExecutionResult with output, path, and metrics
         """
+        # Validate credentials before execution (fail-fast)
+        validation = self.validate()
+        if validation.missing_credentials:
+            error_lines = ["Cannot run agent: missing required credentials\n"]
+            for warning in validation.warnings:
+                if "Missing " in warning:
+                    error_lines.append(f"  {warning}")
+            error_lines.append("\nSet the required environment variables and re-run the agent.")
+            error_msg = "\n".join(error_lines)
+            return ExecutionResult(
+                success=False,
+                error=error_msg,
+            )
+
         if self._uses_async_entry_points or self.enable_tui:
             # Multi-entry-point mode: use AgentRuntime
             return await self._run_with_agent_runtime(
@@ -841,28 +911,66 @@ class AgentRunner:
             warnings.append(f"Missing tool implementations: {', '.join(missing_tools)}")
 
         # Check credentials for required tools and node types
+        # Uses CredentialStore (encrypted files + env var fallback)
         missing_credentials = []
         try:
-            from aden_tools.credentials import CredentialManager
+            from aden_tools.credentials import CREDENTIAL_SPECS
 
-            cred_manager = CredentialManager()
+            from framework.credentials import CredentialStore
+            from framework.credentials.storage import (
+                CompositeStorage,
+                EncryptedFileStorage,
+                EnvVarStorage,
+            )
 
-            # Check tool credentials (Tier 2)
-            missing_creds = cred_manager.get_missing_for_tools(info.required_tools)
-            for _, spec in missing_creds:
-                missing_credentials.append(spec.env_var)
-                affected_tools = [t for t in info.required_tools if t in spec.tools]
-                tools_str = ", ".join(affected_tools)
-                warning_msg = f"Missing {spec.env_var} for {tools_str}"
-                if spec.help_url:
-                    warning_msg += f"\n  Get it at: {spec.help_url}"
-                warnings.append(warning_msg)
+            # Build env mapping for fallback
+            env_mapping = {
+                (spec.credential_id or name): spec.env_var
+                for name, spec in CREDENTIAL_SPECS.items()
+            }
+            storage = CompositeStorage(
+                primary=EncryptedFileStorage(),
+                fallbacks=[EnvVarStorage(env_mapping=env_mapping)],
+            )
+            store = CredentialStore(storage=storage)
+
+            # Build reverse mappings
+            tool_to_cred: dict[str, str] = {}
+            node_type_to_cred: dict[str, str] = {}
+            for cred_name, spec in CREDENTIAL_SPECS.items():
+                for tool_name in spec.tools:
+                    tool_to_cred[tool_name] = cred_name
+                for nt in spec.node_types:
+                    node_type_to_cred[nt] = cred_name
+
+            # Check tool credentials
+            checked: set[str] = set()
+            for tool_name in info.required_tools:
+                cred_name = tool_to_cred.get(tool_name)
+                if cred_name is None or cred_name in checked:
+                    continue
+                checked.add(cred_name)
+                spec = CREDENTIAL_SPECS[cred_name]
+                cred_id = spec.credential_id or cred_name
+                if spec.required and not store.is_available(cred_id):
+                    missing_credentials.append(spec.env_var)
+                    affected_tools = [t for t in info.required_tools if t in spec.tools]
+                    tools_str = ", ".join(affected_tools)
+                    warning_msg = f"Missing {spec.env_var} for {tools_str}"
+                    if spec.help_url:
+                        warning_msg += f"\n  Get it at: {spec.help_url}"
+                    warnings.append(warning_msg)
 
             # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
             node_types = list({node.node_type for node in self.graph.nodes})
-            missing_node_creds = cred_manager.get_missing_for_node_types(node_types)
-            for _, spec in missing_node_creds:
-                if spec.env_var not in missing_credentials:  # Avoid duplicates
+            for nt in node_types:
+                cred_name = node_type_to_cred.get(nt)
+                if cred_name is None or cred_name in checked:
+                    continue
+                checked.add(cred_name)
+                spec = CREDENTIAL_SPECS[cred_name]
+                cred_id = spec.credential_id or cred_name
+                if spec.required and not store.is_available(cred_id):
                     missing_credentials.append(spec.env_var)
                     affected_types = [t for t in node_types if t in spec.node_types]
                     types_str = ", ".join(affected_types)

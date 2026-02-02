@@ -22,6 +22,7 @@ from framework.graph.plan import Plan
 from framework.testing.prompts import (
     PYTEST_TEST_FILE_HEADER,
 )
+from framework.utils.io import atomic_write
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
@@ -122,11 +123,11 @@ def _save_session(session: BuildSession):
 
     # Save session file
     session_file = SESSIONS_DIR / f"{session.id}.json"
-    with open(session_file, "w") as f:
+    with atomic_write(session_file) as f:
         json.dump(session.to_dict(), f, indent=2, default=str)
 
     # Update active session pointer
-    with open(ACTIVE_SESSION_FILE, "w") as f:
+    with atomic_write(ACTIVE_SESSION_FILE) as f:
         f.write(session.id)
 
 
@@ -246,7 +247,7 @@ def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) 
         _session = _load_session(session_id)
 
         # Update active session pointer
-        with open(ACTIVE_SESSION_FILE, "w") as f:
+        with atomic_write(ACTIVE_SESSION_FILE) as f:
             f.write(session_id)
 
         return json.dumps(
@@ -457,14 +458,27 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         return None
 
     try:
-        from aden_tools.credentials import CredentialManager
+        from aden_tools.credentials import CREDENTIAL_SPECS
 
-        cred_manager = CredentialManager()
-        missing_creds = cred_manager.get_missing_for_tools(tools_list)
+        store = _get_credential_store()
 
-        if missing_creds:
-            cred_errors = []
-            for cred_name, spec in missing_creds:
+        # Build tool -> credential mapping
+        tool_to_cred: dict[str, str] = {}
+        for cred_name, spec in CREDENTIAL_SPECS.items():
+            for tool_name in spec.tools:
+                tool_to_cred[tool_name] = cred_name
+
+        # Find missing credentials
+        cred_errors = []
+        checked: set[str] = set()
+        for tool_name in tools_list:
+            cred_name = tool_to_cred.get(tool_name)
+            if cred_name is None or cred_name in checked:
+                continue
+            checked.add(cred_name)
+            spec = CREDENTIAL_SPECS[cred_name]
+            cred_id = spec.credential_id or cred_name
+            if spec.required and not store.is_available(cred_id):
                 affected_tools = [t for t in tools_list if t in spec.tools]
                 cred_errors.append(
                     {
@@ -476,15 +490,16 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
                     }
                 )
 
+        if cred_errors:
             return {
                 "valid": False,
                 "errors": [f"Missing credentials for tools: {[e['env_var'] for e in cred_errors]}"],
                 "missing_credentials": cred_errors,
-                "action_required": "Add the credentials to your .env file and retry",
+                "action_required": "Store credentials via store_credential and retry",
                 "example": f"Add to .env:\n{cred_errors[0]['env_var']}=your_key_here",
                 "message": (
                     "Cannot add node: missing API credentials. "
-                    "Add them to .env and retry this command."
+                    "Store them via store_credential and retry this command."
                 ),
             }
     except ImportError as e:
@@ -492,7 +507,7 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         return {
             "valid": True,
             "warnings": [
-                f"⚠️ Credential validation SKIPPED: aden_tools not available ({e}). "
+                f"Credential validation SKIPPED: aden_tools not available ({e}). "
                 "Tools may fail at runtime if credentials are missing. "
                 "Add tools/src to PYTHONPATH to enable validation."
             ],
@@ -1474,13 +1489,13 @@ def export_graph() -> str:
 
     # Write agent.json
     agent_json_path = exports_dir / "agent.json"
-    with open(agent_json_path, "w") as f:
+    with atomic_write(agent_json_path) as f:
         json.dump(export_data, f, indent=2, default=str)
 
     # Generate README.md
     readme_content = _generate_readme(session, export_data, all_tools)
     readme_path = exports_dir / "README.md"
-    with open(readme_path, "w") as f:
+    with atomic_write(readme_path) as f:
         f.write(readme_content)
 
     # Write mcp_servers.json if MCP servers are configured
@@ -1489,8 +1504,9 @@ def export_graph() -> str:
     if session.mcp_servers:
         mcp_config = {"servers": session.mcp_servers}
         mcp_servers_path = exports_dir / "mcp_servers.json"
-        with open(mcp_servers_path, "w") as f:
+        with atomic_write(mcp_servers_path) as f:
             json.dump(mcp_config, f, indent=2)
+
         mcp_servers_size = mcp_servers_path.stat().st_size
 
     # Get file sizes
@@ -3230,8 +3246,272 @@ def load_exported_plan(
 
 
 # =============================================================================
+# CREDENTIAL STORE TOOLS
+# =============================================================================
+
+
+def _get_credential_store():
+    """Get a CredentialStore that checks encrypted files and env vars.
+
+    Uses CompositeStorage: encrypted file storage (primary) with env var fallback.
+    This ensures credentials stored via `store_credential` AND env vars are both found.
+    """
+    from framework.credentials import CredentialStore
+    from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+
+    # Build env var mapping from CREDENTIAL_SPECS for the fallback
+    env_mapping: dict[str, str] = {}
+    try:
+        from aden_tools.credentials import CREDENTIAL_SPECS
+
+        for name, spec in CREDENTIAL_SPECS.items():
+            cred_id = spec.credential_id or name
+            env_mapping[cred_id] = spec.env_var
+    except ImportError:
+        pass
+
+    storage = CompositeStorage(
+        primary=EncryptedFileStorage(),
+        fallbacks=[EnvVarStorage(env_mapping=env_mapping)],
+    )
+    return CredentialStore(storage=storage)
+
+
+@mcp.tool()
+def check_missing_credentials(
+    agent_path: Annotated[str, "Path to the exported agent directory (e.g., 'exports/my-agent')"],
+) -> str:
+    """
+    Detect missing credentials for an agent by inspecting its tools and node types.
+
+    Returns a list of missing credentials with env var names, descriptions, and help URLs.
+    Use this before running or testing an agent to identify what needs to be configured.
+    """
+    try:
+        from aden_tools.credentials import CREDENTIAL_SPECS
+
+        from framework.runner import AgentRunner
+
+        runner = AgentRunner.load(agent_path)
+        runner.validate()
+
+        store = _get_credential_store()
+        info = runner.info()
+        node_types = list({node.node_type for node in runner.graph.nodes})
+
+        # Build reverse mappings: tool/node_type -> credential name
+        tool_to_cred: dict[str, str] = {}
+        node_type_to_cred: dict[str, str] = {}
+        for cred_name, spec in CREDENTIAL_SPECS.items():
+            for tool_name in spec.tools:
+                tool_to_cred[tool_name] = cred_name
+            for nt in spec.node_types:
+                node_type_to_cred[nt] = cred_name
+
+        # Gather missing credentials (tools + node types), deduplicated
+        seen: set[str] = set()
+        all_missing = []
+
+        for name_list, mapping in [
+            (info.required_tools, tool_to_cred),
+            (node_types, node_type_to_cred),
+        ]:
+            for item_name in name_list:
+                cred_name = mapping.get(item_name)
+                if cred_name is None or cred_name in seen:
+                    continue
+                seen.add(cred_name)
+                spec = CREDENTIAL_SPECS[cred_name]
+                cred_id = spec.credential_id or cred_name
+                if spec.required and not store.is_available(cred_id):
+                    all_missing.append(
+                        {
+                            "credential_name": cred_name,
+                            "env_var": spec.env_var,
+                            "description": spec.description,
+                            "help_url": spec.help_url,
+                            "tools": spec.tools,
+                        }
+                    )
+
+        # Also check what's already set
+        available = []
+        for name, spec in CREDENTIAL_SPECS.items():
+            if name in seen:
+                continue
+            cred_id = spec.credential_id or name
+            if store.is_available(cred_id):
+                relevant_tools = [t for t in spec.tools if t in info.required_tools]
+                relevant_nodes = [n for n in spec.node_types if n in node_types]
+                if relevant_tools or relevant_nodes:
+                    available.append(
+                        {
+                            "credential_name": name,
+                            "env_var": spec.env_var,
+                            "description": spec.description,
+                            "status": "available",
+                        }
+                    )
+
+        return json.dumps(
+            {
+                "agent": agent_path,
+                "missing": all_missing,
+                "available": available,
+                "total_missing": len(all_missing),
+                "ready": len(all_missing) == 0,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def store_credential(
+    credential_name: Annotated[
+        str, "Logical credential name (e.g., 'hubspot', 'brave_search', 'anthropic')"
+    ],
+    credential_value: Annotated[str, "The secret value to store (API key, token, etc.)"],
+    key_name: Annotated[
+        str, "Key name within the credential (e.g., 'api_key', 'access_token')"
+    ] = "api_key",
+    display_name: Annotated[str, "Human-readable name (e.g., 'HubSpot Access Token')"] = "",
+) -> str:
+    """
+    Store a credential securely in the encrypted credential store at ~/.hive/credentials.
+
+    Uses Fernet encryption (AES-128-CBC + HMAC). Requires HIVE_CREDENTIAL_KEY env var.
+    """
+    try:
+        from pydantic import SecretStr
+
+        from framework.credentials import CredentialKey, CredentialObject
+
+        store = _get_credential_store()
+
+        if not display_name:
+            display_name = credential_name.replace("_", " ").title()
+
+        cred = CredentialObject(
+            id=credential_name,
+            name=display_name,
+            keys={
+                key_name: CredentialKey(
+                    name=key_name,
+                    value=SecretStr(credential_value),
+                )
+            },
+        )
+        store.save_credential(cred)
+
+        return json.dumps(
+            {
+                "success": True,
+                "credential": credential_name,
+                "key": key_name,
+                "location": "~/.hive/credentials",
+                "encrypted": True,
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def list_stored_credentials() -> str:
+    """
+    List all credentials currently stored in the encrypted credential store.
+
+    Returns credential IDs and metadata (never returns secret values).
+    """
+    try:
+        store = _get_credential_store()
+        credential_ids = store.list_credentials()
+
+        credentials = []
+        for cred_id in credential_ids:
+            try:
+                cred = store.get_credential(cred_id)
+                credentials.append(
+                    {
+                        "id": cred.id,
+                        "name": cred.name,
+                        "keys": list(cred.keys.keys()),
+                        "created_at": cred.created_at.isoformat() if cred.created_at else None,
+                    }
+                )
+            except Exception:
+                credentials.append({"id": cred_id, "error": "Could not load"})
+
+        return json.dumps(
+            {
+                "count": len(credentials),
+                "credentials": credentials,
+                "location": "~/.hive/credentials",
+            },
+            indent=2,
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def delete_stored_credential(
+    credential_name: Annotated[str, "Logical credential name to delete (e.g., 'hubspot')"],
+) -> str:
+    """
+    Delete a credential from the encrypted credential store.
+    """
+    try:
+        store = _get_credential_store()
+        deleted = store.delete_credential(credential_name)
+        return json.dumps(
+            {
+                "success": deleted,
+                "credential": credential_name,
+                "message": f"Credential '{credential_name}' deleted"
+                if deleted
+                else f"Credential '{credential_name}' not found",
+            }
+        )
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+@mcp.tool()
+def verify_credentials(
+    agent_path: Annotated[str, "Path to the exported agent directory (e.g., 'exports/my-agent')"],
+) -> str:
+    """
+    Verify that all required credentials are configured for an agent.
+
+    Runs the full validation pipeline and reports pass/fail status.
+    Use this after storing credentials to confirm the agent is ready to run.
+    """
+    try:
+        from framework.runner import AgentRunner
+
+        runner = AgentRunner.load(agent_path)
+        validation = runner.validate()
+
+        return json.dumps(
+            {
+                "agent": agent_path,
+                "ready": not validation.missing_credentials,
+                "missing_credentials": validation.missing_credentials,
+                "warnings": validation.warnings,
+                "errors": validation.errors,
+            },
+            indent=2,
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="stdio")

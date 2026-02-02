@@ -669,6 +669,137 @@ Keep the same JSON structure but with shorter content values.
             return match.group(1).strip()
         return content
 
+    def _estimate_tokens(
+        self, model: str, system: str, messages: list[dict], tools: list | None
+    ) -> int:
+        """Estimate total input tokens for an LLM call."""
+        import json
+
+        try:
+            import litellm as _litellm
+        except ImportError:
+            # Rough estimate: 1 token ≈ 4 chars
+            total_chars = len(system)
+            for m in messages:
+                total_chars += len(str(m.get("content", "")))
+            if tools:
+                total_chars += len(
+                    json.dumps(
+                        [
+                            {
+                                "name": t.name,
+                                "description": t.description,
+                                "parameters": t.parameters,
+                            }
+                            for t in tools
+                        ],
+                        default=str,
+                    )
+                )
+            return total_chars // 4
+
+        total = 0
+        if system:
+            total += _litellm.token_counter(model=model, text=system)
+        for m in messages:
+            content = str(m.get("content", ""))
+            if content:
+                total += _litellm.token_counter(model=model, text=content)
+        if tools:
+            tools_text = json.dumps(
+                [
+                    {"name": t.name, "description": t.description, "parameters": t.parameters}
+                    for t in tools
+                ],
+                default=str,
+            )
+            total += _litellm.token_counter(model=model, text=tools_text)
+        return total
+
+    def _get_context_limit(self, model: str) -> int:
+        """Get usable input token budget (80% of model's max_input_tokens)."""
+        try:
+            import litellm as _litellm
+
+            info = _litellm.get_model_info(model)
+            max_input = info.get("max_input_tokens") or info.get("max_tokens") or 8192
+            return int(max_input * 0.8)
+        except Exception:
+            return 8192
+
+    def _compact_inputs(
+        self, ctx: NodeContext, system: str, messages: list[dict], tools: list | None
+    ) -> list[dict]:
+        """Compact message inputs if they exceed the model's context window.
+
+        Uses a sliding window strategy: iteratively halves the longest input
+        value until the total token count fits within the budget.
+        """
+        model = ctx.llm.model if hasattr(ctx.llm, "model") else "gpt-3.5-turbo"
+        budget = self._get_context_limit(model)
+        estimated = self._estimate_tokens(model, system, messages, tools)
+
+        if estimated <= budget:
+            return messages
+
+        logger.warning(
+            f"[compaction] Input tokens (~{estimated}) exceed budget ({budget}) "
+            f"for model {model}. Compacting inputs..."
+        )
+
+        # Parse user message into key:value pairs for selective truncation
+        if not messages or not messages[0].get("content"):
+            return messages
+
+        content = messages[0]["content"]
+        lines = content.split("\n")
+        pairs: list[tuple[str, str]] = []
+        for line in lines:
+            if ": " in line:
+                key, _, value = line.partition(": ")
+                pairs.append((key, value))
+            else:
+                pairs.append(("", line))
+
+        # Iteratively halve the longest value until we fit
+        max_iterations = 20
+        for i in range(max_iterations):
+            # Find longest value
+            longest_idx = -1
+            longest_len = 0
+            for idx, (key, value) in enumerate(pairs):
+                if key and len(value) > longest_len:
+                    longest_len = len(value)
+                    longest_idx = idx
+
+            if longest_idx == -1 or longest_len <= 100:
+                break
+
+            key, value = pairs[longest_idx]
+            new_len = max(longest_len // 2, 100)
+            pairs[longest_idx] = (key, value[:new_len] + "...")
+            logger.warning(f"[compaction] Truncated '{key}' from {longest_len} to {new_len} chars")
+
+            # Re-estimate
+            new_content = "\n".join(f"{k}: {v}" if k else v for k, v in pairs)
+            test_messages = [{"role": "user", "content": new_content}]
+            estimated = self._estimate_tokens(model, system, test_messages, tools)
+            if estimated <= budget:
+                logger.warning(
+                    f"[compaction] Fits within budget after {i + 1} rounds (~{estimated} tokens)"
+                )
+                return test_messages
+
+        # Final reassembly even if still over budget
+        final_content = "\n".join(f"{k}: {v}" if k else v for k, v in pairs)
+        final_messages = [{"role": "user", "content": final_content}]
+        final_est = self._estimate_tokens(model, system, final_messages, tools)
+        logger.warning(
+            f"[compaction] Still ~{final_est} tokens after max compaction "
+            f"(budget={budget}). Proceeding anyway."
+        )
+        return final_messages
+
     async def execute(self, ctx: NodeContext) -> NodeResult:
         """Execute the LLM node."""
         import time
@@ -710,6 +841,9 @@ Keep the same JSON structure but with shorter content values.
 
             # Build system prompt
             system = self._build_system_prompt(ctx)
+
+            # Compact inputs if they exceed the model's context window
+            messages = self._compact_inputs(ctx, system, messages, ctx.available_tools)
 
             # Log the LLM call details
             logger.info("      🤖 LLM Call:")
@@ -1185,10 +1319,7 @@ Keep the same JSON structure but with shorter content values.
         # Use configured cleanup model, or fall back to defaults
         if cleanup_llm_model:
             # Use the configured cleanup model (LiteLLM handles API keys via env vars)
-            cleaner_llm = LiteLLMProvider(
-                model=cleanup_llm_model,
-                temperature=0.0,
-            )
+            cleaner_llm = LiteLLMProvider(model=cleanup_llm_model)
             logger.info(f"      Using configured cleanup LLM: {cleanup_llm_model}")
         else:
             # Fall back to default logic: Cerebras preferred, then Haiku
@@ -1203,13 +1334,11 @@ Keep the same JSON structure but with shorter content values.
                 cleaner_llm = LiteLLMProvider(
                     api_key=os.environ.get("CEREBRAS_API_KEY"),
                     model="cerebras/llama-3.3-70b",
-                    temperature=0.0,
                 )
             else:
                 cleaner_llm = LiteLLMProvider(
                     api_key=api_key,
                     model="claude-3-5-haiku-20241022",
-                    temperature=0.0,
                 )
 
         prompt = f"""Extract the JSON object from this LLM response.
@@ -1219,7 +1348,9 @@ Expected output keys: {output_keys}
 LLM Response:
 {raw_response}
 
-Output ONLY the JSON object, nothing else."""
+Output ONLY the JSON object, nothing else.
+If no valid JSON object exists in the response, output exactly: {{"error": "NO_JSON_FOUND"}}
+Do NOT fabricate data or return empty objects."""
 
         try:
             result = cleaner_llm.complete(
@@ -1266,6 +1397,14 @@ Output ONLY the JSON object, nothing else."""
                 parsed = json.loads(cleaned)
             except json.JSONDecodeError:
                 parsed = json.loads(_fix_unescaped_newlines_in_json(cleaned))
+
+            # Validate LLM didn't return empty or fabricated data
+            if parsed.get("error") == "NO_JSON_FOUND":
+                raise ValueError("Cannot parse JSON from response")
+            if not parsed or parsed == {}:
+                raise ValueError("Cannot parse JSON from response")
+            if all(v is None for v in parsed.values()):
+                raise ValueError("Cannot parse JSON from response")
             logger.info("      ✓ LLM cleaned JSON output")
             return parsed
 

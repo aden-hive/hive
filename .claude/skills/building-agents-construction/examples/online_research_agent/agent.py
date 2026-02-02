@@ -225,14 +225,11 @@ class OnlineResearchAgent:
             with open(mcp_config_path) as f:
                 mcp_servers = json.load(f)
 
-            for server_name, server_config in mcp_servers.items():
-                server_config["name"] = server_name
+            for server_config in mcp_servers.get("servers", []):
                 # Resolve relative cwd paths
-                if (
-                    "cwd" in server_config
-                    and not Path(server_config["cwd"]).is_absolute()
-                ):
-                    server_config["cwd"] = str(agent_dir / server_config["cwd"])
+                cwd = server_config.get("cwd")
+                if cwd and not Path(cwd).is_absolute():
+                    server_config["cwd"] = str(agent_dir / cwd)
                 tool_registry.register_mcp_server(server_config)
 
         llm = None

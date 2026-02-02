@@ -1,14 +1,10 @@
 # Contributing to Aden Agent Framework
 
-Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors. We’re especially looking for help building tools, integrations([check #2805](https://github.com/adenhq/hive/issues/2805)), and example agents for the framework. If you’re interested in extending its functionality, this is the perfect place to start. 
 
 ## Code of Conduct
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
-
-## Contributor License Agreement
-
-By submitting a Pull Request, you agree that your contributions will be licensed under the Aden Agent Framework license.
 
 ## Issue Assignment Policy
 
@@ -18,14 +14,10 @@ To prevent duplicate work and respect contributors' time, we require issue assig
 
 1. **Find an Issue:** Browse existing issues or create a new one
 2. **Claim It:** Leave a comment (e.g., *"I'd like to work on this!"*)
-3. **Wait for Assignment:** A maintainer will assign you within 24 hours
+3. **Wait for Assignment:** A maintainer will assign you within 24 hours. Issues with reproducible steps or proposals are prioritized.
 4. **Submit Your PR:** Once assigned, you're ready to contribute
 
 > **Note:** PRs for unassigned issues may be delayed or closed if someone else was already assigned.
-
-### The 5-Day Momentum Rule
-
-To keep the project moving, issues with **no activity for 5 days** (no PR or status update) will be unassigned. If you need more time, just drop a quick comment!
 
 ### Exceptions (No Assignment Needed)
 
@@ -39,28 +31,24 @@ You may submit PRs without prior assignment for:
   | Typos & Documentation & Linting | Refactoring for "clean code" |
   | No logic/API/DB changes | New features (even tiny ones) |
 
-If a high-quality PR is submitted for a "stale" assigned issue (no activity for 7+ days), we may proceed with the submitted code.
-
 ## Getting Started
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/hive.git`
 3. Create a feature branch: `git checkout -b feature/your-feature-name`
 4. Make your changes
-5. Run tests: `PYTHONPATH=core:exports python -m pytest`
+5. Run checks and tests:
+   ```bash
+   make check    # Lint and format checks (ruff check + ruff format --check on core/ and tools/)
+   make test     # Core tests (cd core && pytest tests/ -v)
+   ```
 6. Commit your changes following our commit conventions
 7. Push to your fork and submit a Pull Request
 
 ## Development Setup
 
 ```bash
-# Install Python packages
-./scripts/setup-python.sh
-
-# Verify installation
-python -c "import framework; import aden_tools; print('✓ Setup complete')"
-
-# Install Claude Code skills (optional)
+# Install Python packages and verify setup
 ./quickstart.sh
 ```
 
@@ -103,7 +91,7 @@ docs(readme): update installation instructions
 1. **Get assigned to the issue first** (see [Issue Assignment Policy](#issue-assignment-policy))
 2. Update documentation if needed
 3. Add tests for new functionality
-4. Ensure all tests pass
+4. Ensure `make check` and `make test` pass
 5. Update the CHANGELOG.md if applicable
 6. Request review from maintainers
 
@@ -117,7 +105,7 @@ feat(component): add new feature description
 ## Project Structure
 
 - `core/` - Core framework (agent runtime, graph executor, protocols)
-- `tools/` - MCP Tools Package (19 tools for agent capabilities)
+- `tools/` - MCP Tools Package (tools for agent capabilities)
 - `exports/` - Agent packages and examples
 - `docs/` - Documentation
 - `scripts/` - Build and utility scripts
@@ -141,15 +129,24 @@ feat(component): add new feature description
 > ```
 
 ```bash
-# Run all tests for the framework
-cd core && python -m pytest
+# Run lint and format checks (mirrors CI lint job)
+make check
 
-# Run all tests for tools
-cd tools && python -m pytest
+# Run core framework tests (mirrors CI test job)
+make test
+
+# Or run tests directly
+cd core && pytest tests/ -v
 
 # Run tests for a specific agent
 PYTHONPATH=core:exports python -m agent_name test
 ```
+
+> **CI also validates** that all exported agent JSON files (`exports/*/agent.json`) are well-formed JSON. Ensure your agent exports are valid before submitting.
+
+## Contributor License Agreement
+
+By submitting a Pull Request, you agree that your contributions will be licensed under the Aden Agent Framework license.
 
 ## Questions?
 

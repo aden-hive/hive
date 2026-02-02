@@ -2,8 +2,11 @@
 #
 # setup-python.sh - Python Environment Setup for Aden Agent Framework
 #
-# This script sets up the Python environment with all required packages
-# for building and running goal-driven agents.
+# DEPRECATED: Use ./quickstart.sh instead. It does everything this script
+# does plus verifies MCP configuration, Claude Code skills, and API keys.
+#
+# This script is kept for CI/headless environments where the extra
+# verification steps in quickstart.sh are not needed.
 #
 
 set -e
@@ -36,6 +39,8 @@ echo ""
 echo "=================================================="
 echo "  Aden Agent Framework - Python Setup"
 echo "=================================================="
+echo ""
+echo -e "${YELLOW}NOTE: Consider using ./quickstart.sh instead for a complete setup.${NC}"
 echo ""
 
 # Available Python interpreter
@@ -164,6 +169,25 @@ else
 fi
 echo ""
 
+# Install Playwright browser for web scraping
+echo "=================================================="
+echo "Installing Playwright Browser"
+echo "=================================================="
+echo ""
+
+if $PYTHON_CMD -c "import playwright" > /dev/null 2>&1; then
+    echo "Installing Chromium browser for web scraping..."
+    if $PYTHON_CMD -m playwright install chromium > /dev/null 2>&1; then
+        echo -e "${GREEN}✓${NC} Playwright Chromium installed"
+    else
+        echo -e "${YELLOW}⚠${NC} Playwright browser install failed (web_scrape tool may not work)"
+        echo "  Run manually: python -m playwright install chromium"
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} Playwright not found, skipping browser install"
+fi
+echo ""
+
 # Fix openai version compatibility with litellm
 echo "=================================================="
 echo "Fixing Package Compatibility"
@@ -187,6 +211,24 @@ elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
     echo -e "${GREEN}✓${NC} openai upgraded to $OPENAI_VERSION"
 else
     echo -e "${GREEN}✓${NC} openai $OPENAI_VERSION is compatible"
+fi
+echo ""
+
+# Ensure exports directory exists
+echo "=================================================="
+echo "Checking Directory Structure"
+echo "=================================================="
+echo ""
+
+if [ ! -d "$PROJECT_ROOT/exports" ]; then
+    echo "Creating exports directory..."
+    mkdir -p "$PROJECT_ROOT/exports"
+    echo "# Agent Exports" > "$PROJECT_ROOT/exports/README.md"
+    echo "" >> "$PROJECT_ROOT/exports/README.md"
+    echo "This directory is the default location for generated agent packages." >> "$PROJECT_ROOT/exports/README.md"
+    echo -e "${GREEN}✓${NC} Created exports directory"
+else
+    echo -e "${GREEN}✓${NC} exports directory exists"
 fi
 echo ""
 

@@ -5,11 +5,11 @@ This provides backward compatibility, allowing existing tools to work unchanged
 while enabling new features (template resolution, multi-key credentials, etc.).
 
 Usage:
-    from core.framework.credentials import CredentialStore
+    from framework.credentials import CredentialStore
     from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
     # Create new credential store
-    store = CredentialStore.with_encrypted_storage("/var/hive/credentials")
+    store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
 
     # Wrap with adapter for backward compatibility
     credentials = CredentialStoreAdapter(store)
@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 from .base import CredentialError, CredentialSpec
 
 if TYPE_CHECKING:
-    from core.framework.credentials import CredentialStore
+    from framework.credentials import CredentialStore
 
 
 class CredentialStoreAdapter:
@@ -368,7 +368,7 @@ class CredentialStoreAdapter:
             credentials = CredentialStoreAdapter.for_testing({"brave_search": "test-key"})
             assert credentials.get("brave_search") == "test-key"
         """
-        from core.framework.credentials import CredentialStore
+        from framework.credentials import CredentialStore
 
         # Convert to CredentialStore.for_testing format
         # Simple credentials get a single "api_key" key
@@ -395,13 +395,14 @@ class CredentialStoreAdapter:
         Returns:
             CredentialStoreAdapter using env vars for storage
         """
-        from core.framework.credentials import CredentialStore
+        from framework.credentials import CredentialStore
 
         # Build env mapping from specs if not provided
-        if env_mapping is None and specs is None:
-            from . import CREDENTIAL_SPECS
+        if env_mapping is None:
+            if specs is None:
+                from . import CREDENTIAL_SPECS
 
-            specs = CREDENTIAL_SPECS
+                specs = CREDENTIAL_SPECS
             env_mapping = {name: spec.env_var for name, spec in specs.items()}
 
         store = CredentialStore.with_env_storage(env_mapping)

@@ -1,5 +1,4 @@
 """MCP servers for worker-bee."""
 
-from framework.mcp.agent_builder_server import mcp as agent_builder_server
-
-__all__ = ["agent_builder_server"]
+# Don't auto-import servers to avoid double-import issues when running with -m
+__all__ = []
