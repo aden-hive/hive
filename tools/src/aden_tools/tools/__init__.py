@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
+from .excel_tool import register_tools as register_excel
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
@@ -63,6 +64,7 @@ def register_all_tools(
     register_example(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
+    register_excel(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -100,6 +102,11 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "excel_read",
+        "excel_write",
+        "excel_append",
+        "excel_info",
+        "excel_list_sheets",
         "send_email",
         "send_budget_alert_email",
         "hubspot_search_contacts",
