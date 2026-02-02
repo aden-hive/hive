@@ -177,6 +177,7 @@ class NodeConversation:
         self._messages: list[Message] = []
         self._next_seq: int = 0
         self._meta_persisted: bool = False
+        self._last_api_input_tokens: int | None = None
 
     # --- Properties --------------------------------------------------------
 
@@ -292,9 +293,34 @@ class NodeConversation:
         return repaired
 
     def estimate_tokens(self) -> int:
-        """Rough token estimate: total characters / 4."""
+        """Best available token estimate.
+
+        Uses actual API input token count when available (set via
+        :meth:`update_token_count`), otherwise falls back to the rough
+        ``total_chars / 4`` heuristic.
+        """
+        if self._last_api_input_tokens is not None:
+            return self._last_api_input_tokens
         total_chars = sum(len(m.content) for m in self._messages)
         return total_chars // 4
+
+    def update_token_count(self, actual_input_tokens: int) -> None:
+        """Store actual API input token count for more accurate compaction.
+
+        Called by EventLoopNode after each LLM call with the ``input_tokens``
+        value from the API response.  This value includes system prompt and
+        tool definitions, so it may be higher than a message-only estimate.
+        """
+        self._last_api_input_tokens = actual_input_tokens
+
+    def usage_ratio(self) -> float:
+        """Current token usage as a fraction of *max_history_tokens*.
+
+        Returns 0.0 when ``max_history_tokens`` is zero (unlimited).
+        """
+        if self._max_history_tokens <= 0:
+            return 0.0
+        return self.estimate_tokens() / self._max_history_tokens
 
     def needs_compaction(self) -> bool:
         return self.estimate_tokens() >= self._max_history_tokens * self._compaction_threshold
@@ -381,6 +407,7 @@ class NodeConversation:
             await self._store.write_cursor({"next_seq": self._next_seq})
 
         self._messages = [summary_msg] + recent_messages
+        self._last_api_input_tokens = None  # reset; next LLM call will recalibrate
 
     async def clear(self) -> None:
         """Remove all messages, keep system prompt, preserve ``_next_seq``."""
@@ -388,6 +415,7 @@ class NodeConversation:
             await self._store.delete_parts_before(self._next_seq)
             await self._store.write_cursor({"next_seq": self._next_seq})
         self._messages.clear()
+        self._last_api_input_tokens = None
 
     def export_summary(self) -> str:
         """Structured summary with [STATS], [CONFIG], [RECENT_MESSAGES] sections."""

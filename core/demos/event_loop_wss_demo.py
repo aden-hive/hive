@@ -32,6 +32,8 @@ sys.path.insert(0, str(_CORE_DIR))  # framework.*
 sys.path.insert(0, str(_HIVE_DIR / "tools" / "src"))  # aden_tools.*
 sys.path.insert(0, str(_HIVE_DIR))  # core.framework.* (for aden_tools imports)
 
+import os  # noqa: E402
+
 from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter  # noqa: E402
 from core.framework.credentials import CredentialStore  # noqa: E402
 
@@ -67,13 +69,39 @@ LLM = LiteLLMProvider(model="claude-sonnet-4-5-20250929")
 
 TOOL_REGISTRY = ToolRegistry()
 
-# Composite credential store: encrypted files (primary) + env vars (fallback)
+# Credential store: Aden sync (OAuth2 tokens) + encrypted files + env var fallback
 _env_mapping = {name: spec.env_var for name, spec in CREDENTIAL_SPECS.items()}
-_composite = CompositeStorage(
+_local_storage = CompositeStorage(
     primary=EncryptedFileStorage(),
     fallbacks=[EnvVarStorage(env_mapping=_env_mapping)],
 )
-CREDENTIALS = CredentialStoreAdapter(CredentialStore(storage=_composite))
+
+if os.environ.get("ADEN_API_KEY"):
+    try:
+        from framework.credentials.aden import (  # noqa: E402
+            AdenCachedStorage,
+            AdenClientConfig,
+            AdenCredentialClient,
+            AdenSyncProvider,
+        )
+
+        _client = AdenCredentialClient(AdenClientConfig(base_url="https://api.adenhq.com"))
+        _provider = AdenSyncProvider(client=_client)
+        _storage = AdenCachedStorage(
+            local_storage=_local_storage,
+            aden_provider=_provider,
+        )
+        _cred_store = CredentialStore(storage=_storage, providers=[_provider], auto_refresh=True)
+        _synced = _provider.sync_all(_cred_store)
+        logger.info("Synced %d credentials from Aden", _synced)
+    except Exception as e:
+        logger.warning("Aden sync unavailable: %s", e)
+        _cred_store = CredentialStore(storage=_local_storage)
+else:
+    logger.info("ADEN_API_KEY not set, using local credential storage")
+    _cred_store = CredentialStore(storage=_local_storage)
+
+CREDENTIALS = CredentialStoreAdapter(_cred_store)
 
 # Debug: log which credentials resolved
 for _name in ["brave_search", "hubspot", "anthropic"]:

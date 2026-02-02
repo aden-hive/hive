@@ -169,6 +169,68 @@ class TestNodeConversation:
         assert conv.estimate_tokens() == 100
 
     @pytest.mark.asyncio
+    async def test_update_token_count_overrides_estimate(self):
+        """When actual API token count is provided, estimate_tokens uses it."""
+        conv = NodeConversation()
+        await conv.add_user_message("a" * 400)
+        assert conv.estimate_tokens() == 100  # chars/4 fallback
+
+        conv.update_token_count(500)
+        assert conv.estimate_tokens() == 500  # actual API value
+
+    @pytest.mark.asyncio
+    async def test_compact_resets_token_count(self):
+        """After compaction, actual token count is cleared (recalibrates on next LLM call)."""
+        conv = NodeConversation()
+        await conv.add_user_message("a" * 400)
+        conv.update_token_count(500)
+        assert conv.estimate_tokens() == 500
+
+        await conv.compact("summary", keep_recent=0)
+        # Falls back to chars/4 for the summary message
+        assert conv.estimate_tokens() == len("summary") // 4
+
+    @pytest.mark.asyncio
+    async def test_clear_resets_token_count(self):
+        """clear() also resets the actual token count."""
+        conv = NodeConversation()
+        await conv.add_user_message("hello")
+        conv.update_token_count(1000)
+        assert conv.estimate_tokens() == 1000
+
+        await conv.clear()
+        assert conv.estimate_tokens() == 0
+
+    @pytest.mark.asyncio
+    async def test_usage_ratio(self):
+        """usage_ratio returns estimate / max_history_tokens."""
+        conv = NodeConversation(max_history_tokens=1000)
+        await conv.add_user_message("a" * 400)
+        assert conv.usage_ratio() == pytest.approx(0.1)  # 100/1000
+
+        conv.update_token_count(800)
+        assert conv.usage_ratio() == pytest.approx(0.8)  # 800/1000
+
+    @pytest.mark.asyncio
+    async def test_usage_ratio_zero_budget(self):
+        """usage_ratio returns 0 when max_history_tokens is 0 (unlimited)."""
+        conv = NodeConversation(max_history_tokens=0)
+        await conv.add_user_message("a" * 400)
+        assert conv.usage_ratio() == 0.0
+
+    @pytest.mark.asyncio
+    async def test_needs_compaction_with_actual_tokens(self):
+        """needs_compaction uses actual API token count when available."""
+        conv = NodeConversation(max_history_tokens=1000, compaction_threshold=0.8)
+        await conv.add_user_message("a" * 100)  # chars/4 = 25, well under 800
+
+        assert conv.needs_compaction() is False
+
+        # Simulate API reporting much higher actual token usage
+        conv.update_token_count(850)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
     async def test_needs_compaction(self):
         conv = NodeConversation(max_history_tokens=100, compaction_threshold=0.8)
         await conv.add_user_message("x" * 320)
