@@ -76,7 +76,7 @@ def info(output_json):
             suffix = ""
             if node == info_data['entry_node']: suffix += " (ENTRY)"
             if node in info_data['terminal_nodes']: suffix += " (TERMINAL)"
-            click.echo(f"  • {node}{suffix}")
+            click.echo(f"  • {node  }{suffix}")
 
         click.echo(f"\n[Flow / Edges]")
         if info_data['edges']:
