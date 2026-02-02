@@ -369,6 +369,10 @@ class AgentRunner:
         """
         return self._tool_registry.discover_from_module(module_path)
 
+    def list_tools(self) -> list[str]:
+        """List registered tool names."""
+        return self._tool_registry.get_registered_names()
+
     def register_mcp_server(
         self,
         name: str,

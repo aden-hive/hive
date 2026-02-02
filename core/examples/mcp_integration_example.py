@@ -33,8 +33,8 @@ async def example_1_programmatic_registration():
     print(f"Registered {num_tools} tools from tools MCP server")
 
     # List all available tools
-    tools = runner._tool_registry.get_tools()
-    print(f"\nAvailable tools: {list(tools.keys())}")
+    tools = runner.list_tools()
+    print(f"\nAvailable tools: {tools}")
 
     # Run the agent with MCP tools available
     result = await runner.run(
@@ -85,8 +85,8 @@ async def example_3_config_file():
     runner = AgentRunner.load(test_agent_path)
 
     # Tools are automatically available
-    tools = runner._tool_registry.get_tools()
-    print(f"Available tools: {list(tools.keys())}")
+    tools = runner.list_tools()
+    print(f"Available tools: {tools}")
 
     # Cleanup
     runner.cleanup()

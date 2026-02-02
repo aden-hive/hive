@@ -367,8 +367,9 @@ def cmd_info(args: argparse.Namespace) -> int:
             print(f"  - [{c['type']}] {c['description']}")
         print()
         print(f"Required Tools ({len(info.required_tools)}):")
+        available_tools = set(runner.list_tools())
         for tool in info.required_tools:
-            status = "✓" if runner._tool_registry.has_tool(tool) else "✗"
+            status = "✓" if tool in available_tools else "✗"
             print(f"  {status} {tool}")
         print()
         print(f"Tools Module: {'✓ tools.py found' if info.has_tools_module else '✗ no tools.py'}")
