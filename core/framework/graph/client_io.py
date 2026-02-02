@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from framework.runtime.event_bus import EventBus
@@ -145,7 +146,10 @@ class InertNodeClientIO(NodeClientIO):
                 node_id=self.node_id,
                 prompt=prompt,
             )
-        return "You are an internal processing node. There is no user to interact with. Work with the data provided in your inputs to complete your task."
+        return (
+            "You are an internal processing node. There is no user to interact with."
+            " Work with the data provided in your inputs to complete your task."
+        )
 
 
 class ClientIOGateway:
