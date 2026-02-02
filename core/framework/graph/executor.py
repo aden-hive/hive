@@ -945,6 +945,17 @@ class GraphExecutor:
                 branch.status = "failed"
                 branch.error = f"Node {branch.node_id} not found in graph"
                 return branch, RuntimeError(branch.error)
+
+            effective_max_retries = node_spec.max_retries
+            if node_spec.node_type == "event_loop":
+                if effective_max_retries > 1:
+                    self.logger.warning(
+                        f"EventLoopNode '{node_spec.id}' has "
+                        f"max_retries={effective_max_retries}. Overriding "
+                        "to 1 — event loop nodes handle retry internally."
+                    )
+                effective_max_retries = 1
+
             branch.status = "running"
 
             try:
@@ -978,7 +989,7 @@ class GraphExecutor:
 
                 # Execute with retries
                 last_result = None
-                for attempt in range(node_spec.max_retries):
+                for attempt in range(effective_max_retries):
                     branch.retry_count = attempt
 
                     # Build context for this branch
@@ -1006,7 +1017,7 @@ class GraphExecutor:
 
                     self.logger.warning(
                         f"      ↻ Branch {node_spec.name}: "
-                        f"retry {attempt + 1}/{node_spec.max_retries}"
+                        f"retry {attempt + 1}/{effective_max_retries}"
                     )
 
                 # All retries exhausted
@@ -1015,7 +1026,7 @@ class GraphExecutor:
                 branch.result = last_result
                 self.logger.error(
                     f"      ✗ Branch {node_spec.name}: "
-                    f"failed after {node_spec.max_retries} attempts"
+                    f"failed after {effective_max_retries} attempts"
                 )
                 return branch, last_result
 

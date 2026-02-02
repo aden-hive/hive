@@ -598,18 +598,23 @@ async def handle_ws(websocket):
         async def _run():
             try:
                 result = await node.execute(ctx)
-                await websocket.send(
-                    json.dumps(
-                        {
-                            "type": "result",
-                            "success": result.success,
-                            "output": result.output,
-                            "error": result.error,
-                            "tokens": result.tokens_used,
-                        }
+                try:
+                    await websocket.send(
+                        json.dumps(
+                            {
+                                "type": "result",
+                                "success": result.success,
+                                "output": result.output,
+                                "error": result.error,
+                                "tokens": result.tokens_used,
+                            }
+                        )
                     )
-                )
+                except Exception:
+                    pass
                 logger.info(f"Loop ended: success={result.success}, tokens={result.tokens_used}")
+            except websockets.exceptions.ConnectionClosed:
+                logger.info("Loop stopped: WebSocket closed")
             except Exception as e:
                 logger.exception("Loop error")
                 try:

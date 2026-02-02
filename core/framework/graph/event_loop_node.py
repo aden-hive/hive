@@ -327,7 +327,7 @@ class EventLoopNode(NodeProtocol):
         latency_ms = int((time.time() - start_time) * 1000)
         return NodeResult(
             success=False,
-            error=(f"Max iterations ({self._config.max_iterations}) " "reached without acceptance"),
+            error=(f"Max iterations ({self._config.max_iterations}) reached without acceptance"),
             output=accumulator.to_dict(),
             tokens_used=total_input_tokens + total_output_tokens,
             latency_ms=latency_ms,
@@ -425,8 +425,7 @@ class EventLoopNode(NodeProtocol):
                 tool_call_count += 1
                 if tool_call_count > self._config.max_tool_calls_per_turn:
                     logger.warning(
-                        f"Max tool calls per turn "
-                        f"({self._config.max_tool_calls_per_turn}) exceeded"
+                        f"Max tool calls per turn ({self._config.max_tool_calls_per_turn}) exceeded"
                     )
                     break
 
@@ -567,7 +566,7 @@ class EventLoopNode(NodeProtocol):
                 return JudgeVerdict(
                     action="RETRY",
                     feedback=(
-                        f"Missing output keys: {missing}. " "Use set_output tool to provide them."
+                        f"Missing output keys: {missing}. Use set_output tool to provide them."
                     ),
                 )
 
