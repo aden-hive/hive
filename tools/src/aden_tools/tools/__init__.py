@@ -147,6 +147,26 @@ def register_all_tools(
         "slack_post_blocks",
         "slack_open_modal",
         "slack_update_home_tab",
+        # Phase 2: User Status & Presence
+        "slack_set_status",
+        "slack_set_presence",
+        "slack_get_presence",
+        # Phase 2: Reminders
+        "slack_create_reminder",
+        "slack_list_reminders",
+        "slack_delete_reminder",
+        # Phase 2: User Groups
+        "slack_create_usergroup",
+        "slack_list_usergroups",
+        # Phase 2: Emoji
+        "slack_list_emoji",
+        # Phase 2: Canvas
+        "slack_create_canvas",
+        "slack_edit_canvas",
+        # Phase 2: Analytics (AI-Driven)
+        "slack_get_messages_for_analysis",
+        # Phase 2: Workflow
+        "slack_trigger_workflow",
     ]
 
 

@@ -65,10 +65,31 @@ jobs:
           cd core
           pytest tests/ -v
 
+  test-tools:
+    name: Test Tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies and run tests
+        run: |
+          cd tools
+          uv sync --extra dev
+          uv pip install --python .venv/bin/python -e ../core
+          uv run --extra dev pytest tests/ -v
+
   validate:
     name: Validate Agent Exports
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, test-tools]
     steps:
       - uses: actions/checkout@v4
 
