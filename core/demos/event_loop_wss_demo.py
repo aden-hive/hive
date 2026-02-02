@@ -32,9 +32,14 @@ sys.path.insert(0, str(_CORE_DIR))  # framework.*
 sys.path.insert(0, str(_HIVE_DIR / "tools" / "src"))  # aden_tools.*
 sys.path.insert(0, str(_HIVE_DIR))  # core.framework.* (for aden_tools imports)
 
-from aden_tools.credentials import CredentialStoreAdapter  # noqa: E402
+from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter  # noqa: E402
 from core.framework.credentials import CredentialStore  # noqa: E402
 
+from framework.credentials.storage import (  # noqa: E402
+    CompositeStorage,
+    EncryptedFileStorage,
+    EnvVarStorage,
+)
 from framework.graph.event_loop_node import EventLoopNode, JudgeVerdict, LoopConfig  # noqa: E402
 from framework.graph.node import NodeContext, NodeSpec, SharedMemory  # noqa: E402
 from framework.llm.litellm import LiteLLMProvider  # noqa: E402
@@ -61,7 +66,22 @@ LLM = LiteLLMProvider(model="claude-sonnet-4-5-20250929")
 # -------------------------------------------------------------------------
 
 TOOL_REGISTRY = ToolRegistry()
-CREDENTIALS = CredentialStoreAdapter(CredentialStore.with_encrypted_storage())
+
+# Composite credential store: encrypted files (primary) + env vars (fallback)
+_env_mapping = {name: spec.env_var for name, spec in CREDENTIAL_SPECS.items()}
+_composite = CompositeStorage(
+    primary=EncryptedFileStorage(),
+    fallbacks=[EnvVarStorage(env_mapping=_env_mapping)],
+)
+CREDENTIALS = CredentialStoreAdapter(CredentialStore(storage=_composite))
+
+# Debug: log which credentials resolved
+for _name in ["brave_search", "hubspot", "anthropic"]:
+    _val = CREDENTIALS.get(_name)
+    if _val:
+        logger.debug("credential %s: OK (len=%d)", _name, len(_val))
+    else:
+        logger.debug("credential %s: not found", _name)
 
 # --- web_search (Brave Search API) ---
 
@@ -193,9 +213,10 @@ _HUBSPOT_API = "https://api.hubapi.com"
 
 def _hubspot_headers() -> dict | None:
     token = CREDENTIALS.get("hubspot")
-    logger.info(
-        "HubSpot token: %s...%s (len=%d)", token[:8], token[-4:], len(token)
-    ) if token else logger.info("HubSpot token: None")
+    if token:
+        logger.debug("HubSpot token: %s...%s (len=%d)", token[:8], token[-4:], len(token))
+    else:
+        logger.debug("HubSpot token: not found")
     if not token:
         return None
     return {

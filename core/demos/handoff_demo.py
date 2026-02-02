@@ -35,9 +35,14 @@ sys.path.insert(0, str(_CORE_DIR))  # framework.*
 sys.path.insert(0, str(_HIVE_DIR / "tools" / "src"))  # aden_tools.*
 sys.path.insert(0, str(_HIVE_DIR))  # core.framework.* (for aden_tools imports)
 
-from aden_tools.credentials import CredentialStoreAdapter  # noqa: E402
+from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter  # noqa: E402
 from core.framework.credentials import CredentialStore  # noqa: E402
 
+from framework.credentials.storage import (  # noqa: E402
+    CompositeStorage,
+    EncryptedFileStorage,
+    EnvVarStorage,
+)
 from framework.graph.context_handoff import ContextHandoff  # noqa: E402
 from framework.graph.conversation import NodeConversation  # noqa: E402
 from framework.graph.event_loop_node import EventLoopNode, LoopConfig  # noqa: E402
@@ -64,7 +69,20 @@ LLM = LiteLLMProvider(model="claude-sonnet-4-5-20250929")
 # Credentials
 # -------------------------------------------------------------------------
 
-CREDENTIALS = CredentialStoreAdapter(CredentialStore.with_encrypted_storage())
+# Composite credential store: encrypted files (primary) + env vars (fallback)
+_env_mapping = {name: spec.env_var for name, spec in CREDENTIAL_SPECS.items()}
+_composite = CompositeStorage(
+    primary=EncryptedFileStorage(),
+    fallbacks=[EnvVarStorage(env_mapping=_env_mapping)],
+)
+CREDENTIALS = CredentialStoreAdapter(CredentialStore(storage=_composite))
+
+for _name in ["brave_search", "hubspot"]:
+    _val = CREDENTIALS.get(_name)
+    if _val:
+        logger.debug("credential %s: OK (len=%d)", _name, len(_val))
+    else:
+        logger.debug("credential %s: not found", _name)
 
 # -------------------------------------------------------------------------
 # Tool Registry — web_search + web_scrape for Node A (Researcher)
