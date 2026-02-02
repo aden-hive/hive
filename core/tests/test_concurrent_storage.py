@@ -55,8 +55,9 @@ async def test_cache_invalidation_on_save(tmp_path: Path):
         # Load summary again - should get fresh data, not cached stale data
         summary = await storage.load_summary(run_id)
         assert summary is not None
-        assert summary.status == RunStatus.COMPLETED, \
+        assert summary.status == RunStatus.COMPLETED, (
             "Summary cache should be invalidated on save - got stale data"
+        )
     finally:
         await storage.stop()
 
@@ -81,15 +82,15 @@ async def test_batched_write_cache_consistency(tmp_path: Path):
         # Before batch flush, cache should NOT contain the run
         # (This is the fix - previously cache was updated immediately)
         cache_key = f"run:{run_id}"
-        assert cache_key not in storage._cache, \
+        assert cache_key not in storage._cache, (
             "Cache should not be updated before batch is flushed"
+        )
 
         # Wait for batch to flush
         await asyncio.sleep(0.1)
 
         # After batch flush, cache should contain the run
-        assert cache_key in storage._cache, \
-            "Cache should be updated after batch flush"
+        assert cache_key in storage._cache, "Cache should be updated after batch flush"
 
         # Verify data on disk matches cache
         loaded_run = await storage.load_run(run_id, use_cache=False)
@@ -115,8 +116,7 @@ async def test_immediate_write_updates_cache(tmp_path: Path):
 
         # Cache should be updated immediately for immediate writes
         cache_key = f"run:{run_id}"
-        assert cache_key in storage._cache, \
-            "Cache should be updated after immediate write"
+        assert cache_key in storage._cache, "Cache should be updated after immediate write"
 
         # Verify cached value is correct
         cached_run = storage._cache[cache_key].value
