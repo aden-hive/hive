@@ -153,7 +153,10 @@ class NodeSpec(BaseModel):
     # Node behavior type
     node_type: str = Field(
         default="llm_tool_use",
-        description="Type: 'llm_tool_use', 'llm_generate', 'function', 'router', 'human_input'",
+        description=(
+            "Type: 'event_loop', 'function', 'router', 'human_input'. "
+            "Deprecated: 'llm_tool_use', 'llm_generate' (use 'event_loop' instead)."
+        ),
     )
 
     # Data flow
@@ -216,6 +219,12 @@ class NodeSpec(BaseModel):
     max_validation_retries: int = Field(
         default=2,
         description="Maximum retries when Pydantic validation fails (with feedback to LLM)",
+    )
+
+    # Client-facing behavior
+    client_facing: bool = Field(
+        default=False,
+        description="If True, this node streams output to the end user and can request input.",
     )
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
