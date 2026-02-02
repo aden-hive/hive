@@ -10,12 +10,16 @@ See: https://docs.litellm.ai/docs/providers
 import json
 import logging
 from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 try:
     import litellm
+    from litellm.exceptions import RateLimitError
 except ImportError:
     litellm = None  # type: ignore[assignment]
+    RateLimitError = Exception  # type: ignore[assignment, misc]
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
@@ -87,6 +91,88 @@ class LiteLLMProvider(LLMProvider):
             raise ImportError(
                 "LiteLLM is not installed. Please install it with: pip install litellm"
             )
+
+    def _completion_with_rate_limit_retry(self, **kwargs: Any) -> Any:
+        """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
+        model = kwargs.get("model", self.model)
+        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+            try:
+                response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+
+                # Some providers (e.g. Gemini) return 200 with empty content on
+                # rate limit / quota exhaustion instead of a proper 429.  Treat
+                # empty responses the same as a rate-limit error and retry.
+                content = response.choices[0].message.content if response.choices else None
+                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                if not content and not has_tool_calls:
+                    finish_reason = (
+                        response.choices[0].finish_reason if response.choices else "unknown"
+                    )
+                    # Dump full request to file for debugging
+                    messages = kwargs.get("messages", [])
+                    token_count, token_method = _estimate_tokens(model, messages)
+                    dump_path = _dump_failed_request(
+                        model=model,
+                        kwargs=kwargs,
+                        error_type="empty_response",
+                        attempt=attempt,
+                    )
+                    logger.warning(
+                        f"[retry] Empty response - {len(messages)} messages, "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+
+                    if attempt == RATE_LIMIT_MAX_RETRIES:
+                        logger.error(
+                            f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                            f"attempts — empty response "
+                            f"(finish_reason={finish_reason}, "
+                            f"choices={len(response.choices) if response.choices else 0})"
+                        )
+                        return response
+                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    logger.warning(
+                        f"[retry] {model} returned empty response "
+                        f"(finish_reason={finish_reason}, "
+                        f"choices={len(response.choices) if response.choices else 0}) — "
+                        f"likely rate limited or quota exceeded. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    time.sleep(wait)
+                    continue
+
+                return response
+            except RateLimitError as e:
+                # Dump full request to file for debugging
+                messages = kwargs.get("messages", [])
+                token_count, token_method = _estimate_tokens(model, messages)
+                dump_path = _dump_failed_request(
+                    model=model,
+                    kwargs=kwargs,
+                    error_type="rate_limit",
+                    attempt=attempt,
+                )
+                if attempt == RATE_LIMIT_MAX_RETRIES:
+                    logger.error(
+                        f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                        f"attempts — rate limit error: {e!s}. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+                    raise
+                wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                logger.warning(
+                    f"[retry] {model} rate limited (429): {e!s}. "
+                    f"~{token_count} tokens ({token_method}). "
+                    f"Full request dumped to: {dump_path}. "
+                    f"Retrying in {wait}s "
+                    f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                )
+                time.sleep(wait)
+        # unreachable, but satisfies type checker
+        raise RuntimeError("Exhausted rate limit retries")
 
     def complete(
         self,

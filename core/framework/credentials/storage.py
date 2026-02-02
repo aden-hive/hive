@@ -111,14 +111,16 @@ class EncryptedFileStorage(CredentialStorage):
     If not set, a new key is generated (and must be persisted for data recovery).
 
     Example:
-        storage = EncryptedFileStorage("/var/hive/credentials")
+        storage = EncryptedFileStorage("~/.hive/credentials")
         storage.save(credential)
         credential = storage.load("brave_search")
     """
 
+    DEFAULT_PATH = "~/.hive/credentials"
+
     def __init__(
         self,
-        base_path: str | Path,
+        base_path: str | Path | None = None,
         encryption_key: bytes | None = None,
         key_env_var: str = "HIVE_CREDENTIAL_KEY",
     ):
@@ -126,7 +128,7 @@ class EncryptedFileStorage(CredentialStorage):
         Initialize encrypted storage.
 
         Args:
-            base_path: Directory for credential files
+            base_path: Directory for credential files. Defaults to ~/.hive/credentials.
             encryption_key: 32-byte Fernet key. If None, reads from env var.
             key_env_var: Environment variable containing encryption key
         """
@@ -137,7 +139,7 @@ class EncryptedFileStorage(CredentialStorage):
                 "Encrypted storage requires 'cryptography'. Install with: pip install cryptography"
             ) from e
 
-        self.base_path = Path(base_path)
+        self.base_path = Path(base_path or self.DEFAULT_PATH).expanduser()
         self._ensure_dirs()
         self._key_env_var = key_env_var
 
@@ -459,7 +461,7 @@ class CompositeStorage(CredentialStorage):
 
     Example:
         storage = CompositeStorage(
-            primary=EncryptedFileStorage("/var/hive/credentials"),
+            primary=EncryptedFileStorage("~/.hive/credentials"),
             fallbacks=[EnvVarStorage({"brave_search": "BRAVE_SEARCH_API_KEY"})]
         )
     """
