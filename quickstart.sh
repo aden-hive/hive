@@ -176,7 +176,7 @@ echo ""
 
 # Upgrade pip, setuptools, and wheel
 echo -n "  Upgrading pip... "
-$PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1
+$PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null
 echo -e "${GREEN}ok${NC}"
 
 # Install framework package from core/
@@ -184,7 +184,7 @@ echo -n "  Installing framework... "
 cd "$SCRIPT_DIR/core"
 
 if [ -f "pyproject.toml" ]; then
-    uv sync > /dev/null 2>&1
+    uv sync > /dev/null
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✓ framework package installed${NC}"
     else
@@ -200,7 +200,7 @@ echo -n "  Installing tools... "
 cd "$SCRIPT_DIR/tools"
 
 if [ -f "pyproject.toml" ]; then
-    uv sync > /dev/null 2>&1
+    uv sync > /dev/null
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✓ aden_tools package installed${NC}"
     else
@@ -214,17 +214,17 @@ fi
 
 # Install MCP dependencies
 echo -n "  Installing MCP... "
-$PYTHON_CMD -m pip install mcp fastmcp > /dev/null 2>&1
+$PYTHON_CMD -m pip install mcp fastmcp > /dev/null
 echo -e "${GREEN}ok${NC}"
 
 # Fix openai version compatibility
 echo -n "  Checking openai... "
-$PYTHON_CMD -m pip install "openai>=1.0.0" > /dev/null 2>&1
+$PYTHON_CMD -m pip install "openai>=1.0.0" > /dev/null
 echo -e "${GREEN}ok${NC}"
 
 # Install click for CLI
 echo -n "  Installing CLI tools... "
-$PYTHON_CMD -m pip install click > /dev/null 2>&1
+$PYTHON_CMD -m pip install click > /dev/null
 echo -e "${GREEN}ok${NC}"
 
 # Install Playwright browser
@@ -252,7 +252,7 @@ echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Configuring LLM provider...${NC
 # Install MCP dependencies (in tools venv)
 echo "  Installing MCP dependencies..."
 TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
-uv pip install --python "$TOOLS_PYTHON" mcp fastmcp > /dev/null 2>&1
+uv pip install --python "$TOOLS_PYTHON" mcp fastmcp > /dev/null
 echo -e "${GREEN}  ✓ MCP dependencies installed${NC}"
 
 # Fix openai version compatibility (in tools venv)
@@ -260,11 +260,11 @@ TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
 OPENAI_VERSION=$($TOOLS_PYTHON -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
 if [ "$OPENAI_VERSION" = "not_installed" ]; then
     echo "  Installing openai package..."
-    uv pip install --python "$TOOLS_PYTHON" "openai>=1.0.0" > /dev/null 2>&1
+    uv pip install --python "$TOOLS_PYTHON" "openai>=1.0.0" > /dev/null
     echo -e "${GREEN}  ✓ openai installed${NC}"
 elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
     echo "  Upgrading openai to 1.x+ for litellm compatibility..."
-    uv pip install --python "$TOOLS_PYTHON" --upgrade "openai>=1.0.0" > /dev/null 2>&1
+    uv pip install --python "$TOOLS_PYTHON" --upgrade "openai>=1.0.0" > /dev/null
     echo -e "${GREEN}  ✓ openai upgraded${NC}"
 else
     echo -e "${GREEN}  ✓ openai $OPENAI_VERSION is compatible${NC}"
@@ -272,17 +272,17 @@ fi
 
 # Install click for CLI (in tools venv)
 TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
-uv pip install --python "$TOOLS_PYTHON" click > /dev/null 2>&1
+uv pip install --python "$TOOLS_PYTHON" click > /dev/null
 echo -e "${GREEN}  ✓ click installed${NC}"
 
 cd "$SCRIPT_DIR"
 echo ""
 
 # ============================================================
-# Step 3: Verify Python Imports
+# Step 4: Verify Python Imports
 # ============================================================
 
-echo -e "${BLUE}Step 3: Verifying Python imports...${NC}"
+echo -e "${BLUE}Step 4: Verifying Python imports...${NC}"
 echo ""
 
 IMPORT_ERRORS=0
@@ -338,10 +338,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 5: Verify Claude Code Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
+echo -e "${BLUE}Step 5: Verifying Claude Code skills...${NC}"
 echo ""
 
 # Provider data as parallel indexed arrays (Bash 3.2 compatible — no declare -A)
@@ -585,17 +585,20 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Verify Setup
+# Step 6: Verify Setup
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 4: Verifying installation...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Verifying installation...${NC}"
 echo ""
 
 ERRORS=0
 
 # Test imports
+CORE_PYTHON="$SCRIPT_DIR/core/.venv/bin/python"
+TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
+
 echo -n "  ⬡ framework... "
-if $PYTHON_CMD -c "import framework" > /dev/null 2>&1; then
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -603,7 +606,7 @@ else
 fi
 
 echo -n "  ⬡ aden_tools... "
-if $PYTHON_CMD -c "import aden_tools" > /dev/null 2>&1; then
+if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -611,7 +614,7 @@ else
 fi
 
 echo -n "  ⬡ litellm... "
-if $PYTHON_CMD -c "import litellm" > /dev/null 2>&1; then
+if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}--${NC}"
