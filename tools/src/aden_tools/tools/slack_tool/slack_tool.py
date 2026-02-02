@@ -985,6 +985,158 @@ class _SlackClient:
         
         return {"success": True, "status_code": response.status_code}
 
+    # ============================================================
+    # Phase 3: Critical Power Tools
+    # ============================================================
+
+    def get_conversation_context(
+        self,
+        channel: str,
+        limit: int = 20,
+        include_user_info: bool = True,
+    ) -> dict[str, Any]:
+        """Get rich conversation context for AI understanding.
+        
+        Fetches recent messages with user details, making it easy for
+        the agent to understand who said what and respond appropriately.
+        
+        Args:
+            channel: Channel ID
+            limit: Number of messages to fetch
+            include_user_info: Whether to resolve user IDs to names
+        """
+        history = self.get_history(channel, limit=limit)
+        if "error" in history:
+            return history
+        
+        messages = history.get("messages", [])
+        
+        # Build user cache to avoid repeated lookups
+        user_cache: dict[str, str] = {}
+        
+        context_messages = []
+        for msg in messages:
+            user_id = msg.get("user", "unknown")
+            
+            # Resolve user name if requested
+            user_name = user_id
+            if include_user_info and user_id != "unknown":
+                if user_id not in user_cache:
+                    user_info = self.get_user_info(user_id)
+                    if "user" in user_info:
+                        user_cache[user_id] = user_info["user"].get("real_name", user_id)
+                    else:
+                        user_cache[user_id] = user_id
+                user_name = user_cache[user_id]
+            
+            context_messages.append({
+                "user_id": user_id,
+                "user_name": user_name,
+                "text": msg.get("text", ""),
+                "ts": msg.get("ts"),
+                "has_replies": msg.get("reply_count", 0) > 0,
+            })
+        
+        return {
+            "channel": channel,
+            "message_count": len(context_messages),
+            "messages": context_messages,
+            "users_in_conversation": list(user_cache.values()),
+        }
+
+    def find_user_by_email(
+        self,
+        email: str,
+    ) -> dict[str, Any]:
+        """Find a Slack user by their email address.
+        
+        CRITICAL for CRM integrations - bridges email addresses
+        to Slack user IDs for DMs and mentions.
+        
+        Args:
+            email: User's email address
+        """
+        response = httpx.get(
+            f"{SLACK_API_BASE}/users.lookupByEmail",
+            headers=self._headers,
+            params={"email": email},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def kick_user_from_channel(
+        self,
+        channel: str,
+        user: str,
+    ) -> dict[str, Any]:
+        """Remove a user from a channel.
+        
+        Args:
+            channel: Channel ID
+            user: User ID to remove
+        """
+        response = httpx.post(
+            f"{SLACK_API_BASE}/conversations.kick",
+            headers=self._headers,
+            json={"channel": channel, "user": user},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def delete_file(
+        self,
+        file_id: str,
+    ) -> dict[str, Any]:
+        """Delete a file from Slack.
+        
+        Args:
+            file_id: The file ID to delete
+        """
+        response = httpx.post(
+            f"{SLACK_API_BASE}/files.delete",
+            headers=self._headers,
+            json={"file": file_id},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def get_team_stats(self) -> dict[str, Any]:
+        """Get high-level workspace statistics.
+        
+        Provides an overview of the team including user count
+        and basic team info.
+        """
+        # Get team info
+        team_response = httpx.get(
+            f"{SLACK_API_BASE}/team.info",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        team_data = self._handle_response(team_response)
+        
+        # Get user count
+        users_response = httpx.get(
+            f"{SLACK_API_BASE}/users.list",
+            headers=self._headers,
+            params={"limit": 1},  # Just need cursor metadata
+            timeout=30.0,
+        )
+        users_data = self._handle_response(users_response)
+        
+        if "error" in team_data:
+            return team_data
+        
+        team = team_data.get("team", {})
+        members = users_data.get("members", [])
+        
+        return {
+            "team_name": team.get("name"),
+            "team_domain": team.get("domain"),
+            "team_id": team.get("id"),
+            "member_count_sample": len(members),
+            "note": "For exact member count, paginate through users.list",
+        }
+
 
 def register_tools(
     mcp: FastMCP,
@@ -2581,6 +2733,138 @@ def register_tools(
                     return {"error": f"Invalid payload JSON: {e}"}
             
             return client.trigger_workflow(webhook_url, payload_dict)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # =========================================================================
+    # Phase 3 Tools: Critical Power Tools
+    # =========================================================================
+
+    @mcp.tool()
+    def slack_get_conversation_context(
+        channel: str,
+        limit: int = 20,
+        include_user_info: bool = True,
+    ) -> dict:
+        """
+        Get rich conversation context with user names resolved.
+
+        Perfect for understanding who said what before responding.
+        Returns messages with real names instead of just user IDs.
+
+        Args:
+            channel: Channel ID
+            limit: Number of messages to fetch (default 20)
+            include_user_info: Resolve user IDs to names (default True)
+
+        Returns:
+            Dict with messages including user names and conversation summary
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_conversation_context(channel, limit, include_user_info)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_find_user_by_email(
+        email: str,
+    ) -> dict:
+        """
+        Find a Slack user by their email address.
+
+        CRITICAL for CRM integrations - bridges email addresses to Slack
+        user IDs so you can DM or mention them.
+
+        Args:
+            email: User's email address
+
+        Returns:
+            Dict with user info including ID, name, etc.
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.find_user_by_email(email)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_kick_user_from_channel(
+        channel: str,
+        user: str,
+    ) -> dict:
+        """
+        Remove a user from a channel.
+
+        Admin tool for moderation and access control.
+
+        Args:
+            channel: Channel ID
+            user: User ID to remove
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.kick_user_from_channel(channel, user)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_delete_file(
+        file_id: str,
+    ) -> dict:
+        """
+        Delete a file from Slack.
+
+        Useful for cleaning up temporary reports or CSVs after processing.
+
+        Args:
+            file_id: The file ID to delete
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.delete_file(file_id)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_get_team_stats() -> dict:
+        """
+        Get high-level workspace statistics.
+
+        Provides overview of the team including name, domain, and member count.
+
+        Returns:
+            Dict with team info and member statistics
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_team_stats()
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

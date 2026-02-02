@@ -877,3 +877,167 @@ class TestSlackUpdateHomeTab:
 
         assert "error" in result
         assert "Invalid blocks JSON" in result["error"]
+
+
+# =============================================================================
+# Phase 3: Critical Power Tools Tests
+# =============================================================================
+
+
+class TestSlackGetConversationContext:
+    """Tests for slack_get_conversation_context tool."""
+
+    def test_get_conversation_context_success(self, get_tool_fn, monkeypatch):
+        """Get conversation context returns messages with user names."""
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+        fn = get_tool_fn("slack_get_conversation_context")
+
+        with patch("httpx.get") as mock_get:
+            # Mock history response first, then user info responses
+            def mock_get_response(url, **kwargs):
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                if "conversations.history" in url:
+                    mock_response.json.return_value = {
+                        "ok": True,
+                        "messages": [
+                            {"ts": "1234.1", "user": "U001", "text": "Hello"},
+                            {"ts": "1234.2", "user": "U002", "text": "Hi there"},
+                        ],
+                    }
+                elif "users.info" in url:
+                    user_id = kwargs.get("params", {}).get("user", "U001")
+                    name = "Alice" if user_id == "U001" else "Bob"
+                    mock_response.json.return_value = {
+                        "ok": True,
+                        "user": {"id": user_id, "real_name": name},
+                    }
+                return mock_response
+            mock_get.side_effect = mock_get_response
+
+            result = fn(channel="C123", limit=10, include_user_info=True)
+
+        assert result["channel"] == "C123"
+        assert result["message_count"] == 2
+        assert len(result["users_in_conversation"]) > 0
+
+
+class TestSlackFindUserByEmail:
+    """Tests for slack_find_user_by_email tool."""
+
+    def test_find_user_by_email_success(self, get_tool_fn, monkeypatch):
+        """Find user by email returns user info."""
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+        fn = get_tool_fn("slack_find_user_by_email")
+
+        with patch("httpx.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "ok": True,
+                "user": {
+                    "id": "U001",
+                    "name": "john.doe",
+                    "real_name": "John Doe",
+                    "profile": {"email": "john.doe@example.com"},
+                },
+            }
+            mock_get.return_value = mock_response
+
+            result = fn(email="john.doe@example.com")
+
+        assert result["ok"] is True
+        assert result["user"]["id"] == "U001"
+        assert result["user"]["name"] == "john.doe"
+
+    def test_find_user_by_email_not_found(self, get_tool_fn, monkeypatch):
+        """Find user by email returns error when not found."""
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+        fn = get_tool_fn("slack_find_user_by_email")
+
+        with patch("httpx.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "ok": False,
+                "error": "users_not_found",
+            }
+            mock_get.return_value = mock_response
+
+            result = fn(email="nonexistent@example.com")
+
+        assert "error" in result
+
+
+class TestSlackKickUserFromChannel:
+    """Tests for slack_kick_user_from_channel tool."""
+
+    def test_kick_user_success(self, get_tool_fn, monkeypatch):
+        """Kick user returns success."""
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+        fn = get_tool_fn("slack_kick_user_from_channel")
+
+        with patch("httpx.post") as mock_post:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"ok": True}
+            mock_post.return_value = mock_response
+
+            result = fn(channel="C123", user="U456")
+
+        assert result["ok"] is True
+
+
+class TestSlackDeleteFile:
+    """Tests for slack_delete_file tool."""
+
+    def test_delete_file_success(self, get_tool_fn, monkeypatch):
+        """Delete file returns success."""
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+        fn = get_tool_fn("slack_delete_file")
+
+        with patch("httpx.post") as mock_post:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"ok": True}
+            mock_post.return_value = mock_response
+
+            result = fn(file_id="F123ABC")
+
+        assert result["ok"] is True
+
+
+class TestSlackGetTeamStats:
+    """Tests for slack_get_team_stats tool."""
+
+    def test_get_team_stats_success(self, get_tool_fn, monkeypatch):
+        """Get team stats returns team info."""
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+        fn = get_tool_fn("slack_get_team_stats")
+
+        with patch("httpx.get") as mock_get:
+            def mock_response(url, **kwargs):
+                response = MagicMock()
+                response.status_code = 200
+                if "team.info" in url:
+                    response.json.return_value = {
+                        "ok": True,
+                        "team": {
+                            "id": "T123",
+                            "name": "My Workspace",
+                            "domain": "myworkspace",
+                        },
+                    }
+                elif "users.list" in url:
+                    response.json.return_value = {
+                        "ok": True,
+                        "members": [{"id": "U001"}, {"id": "U002"}],
+                    }
+                return response
+            mock_get.side_effect = mock_response
+
+            result = fn()
+
+        assert result["team_name"] == "My Workspace"
+        assert result["team_domain"] == "myworkspace"
+        assert result["team_id"] == "T123"
