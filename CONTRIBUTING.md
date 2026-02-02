@@ -31,6 +31,47 @@ You may submit PRs without prior assignment for:
   | Typos & Documentation & Linting | Refactoring for "clean code" |
   | No logic/API/DB changes | New features (even tiny ones) |
 
+## Good First Contributions
+
+Not sure where to start? Here are some beginner-friendly ways to contribute:
+
+### Recommended Entry Points
+
+- **Documentation fixes** — Fix typos, clarify instructions, or fill in missing docs. These don't require issue assignment (see [Exceptions](#exceptions-no-assignment-needed)).
+- **Example agents** — Add or improve example agents in `exports/`. Great for learning the framework while contributing.
+- **Issue triage** — Help label and reproduce reported bugs. Clear reproduction steps make issues easier to fix.
+- **Test coverage** — Add tests for untested code paths in `core/` or `tools/`.
+- **Integrations and tools** — Build new MCP tools. See [#2805](https://github.com/adenhq/hive/issues/2805) for the integration wishlist.
+
+### Running Checks Locally
+
+Before submitting any PR, make sure your changes pass:
+
+```bash
+make check    # Lint and format checks
+make test     # Run core tests
+```
+
+This catches most issues before CI runs and speeds up the review process.
+
+### Understanding Labels
+
+When browsing issues, these labels help you find the right fit:
+
+| Label | Meaning |
+|-------|---------|
+| `good first issue` | Suitable for newcomers — limited scope, clear requirements |
+| `help wanted` | Maintainers are actively looking for contributors |
+| `bug` | Something is broken and needs fixing |
+| `enhancement` | A new feature or improvement |
+| `documentation` | Docs-related changes |
+| `integrations` | New tool or service integrations |
+| `backlog` | Acknowledged but not yet prioritized |
+
+> **Tip:** Filter issues by [`good first issue`](https://github.com/adenhq/hive/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) or [`help wanted`](https://github.com/adenhq/hive/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) to find work suited to your experience level.
+
+---
+
 ## Getting Started
 
 1. Fork the repository
