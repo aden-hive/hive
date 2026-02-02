@@ -1,3 +1,18 @@
+
+Modern AI agent systems often look powerful in demos, but break down quickly in real production environments.
+
+Teams struggle with challenges such as:
+
+- **Runaway agent loops** that are hard to inspect or stop
+- **Unpredictable behavior** as agents adapt or interact over time
+- **Uncontrolled AI spend** without clear visibility into cost drivers
+- **Lack of governance and safety** for long-running or autonomous agents
+- **Poor observability**, making it difficult to understand *why* actions were taken
+
+Traditional workflow engines are too rigid, while many agent frameworks focus on short-lived tasks without providing the guardrails required for real operational use.
+
+Hive is designed to address these problems by making agent behavior observable, adaptable, and governable from the start.
+
 <p align="center">
   <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
 </p>
