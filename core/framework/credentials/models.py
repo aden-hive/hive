@@ -3,7 +3,7 @@ Core data models for the credential store.
 
 This module defines the key-vault structure where credentials are objects
 containing one or more keys (e.g., api_key, access_token, refresh_token).
-"""
+""" 
 
 from __future__ import annotations
 

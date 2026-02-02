@@ -380,7 +380,7 @@ class OnlineResearchAgent:
                 "description": self.goal.description,
             },
             "nodes": [n.id for n in self.nodes],
-            "edges": [e.id for e in self.edges],
+            "edges": [{"id": e.id, "source": e.source, "target": e.target} for e in self.edges],
             "entry_node": self.entry_node,
             "entry_points": self.entry_points,
             "pause_nodes": self.pause_nodes,

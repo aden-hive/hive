@@ -70,9 +70,21 @@ def info(output_json):
         click.echo(f"Agent: {info_data['name']}")
         click.echo(f"Version: {info_data['version']}")
         click.echo(f"Description: {info_data['description']}")
-        click.echo(f"\nNodes: {', '.join(info_data['nodes'])}")
-        click.echo(f"Entry: {info_data['entry_node']}")
-        click.echo(f"Terminal: {', '.join(info_data['terminal_nodes'])}")
+        
+        click.echo(f"\n[Nodes]")
+        for node in info_data['nodes']:
+            suffix = ""
+            if node == info_data['entry_node']: suffix += " (ENTRY)"
+            if node in info_data['terminal_nodes']: suffix += " (TERMINAL)"
+            click.echo(f"  • {node}{suffix}")
+
+        click.echo(f"\n[Flow / Edges]")
+        if info_data['edges']:
+            for edge in info_data['edges']:
+                # Using the new source/target data we added to agent.py
+                click.echo(f"  {edge['source']}  -->  {edge['target']}")
+        else:
+            click.echo("  No edges defined.")
 
 
 @cli.command()
