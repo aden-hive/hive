@@ -235,10 +235,9 @@ class EventLoopNode(NodeProtocol):
             # 6c. Publish iteration event
             await self._publish_iteration(stream_id, node_id, iteration)
 
-            # 6d. Compaction check
+            # 6d. Pre-turn compaction check (tiered)
             if conversation.needs_compaction():
-                summary = await self._generate_compaction_summary(ctx, conversation)
-                await conversation.compact(summary, keep_recent=4)
+                await self._compact_tiered(ctx, conversation)
 
             # 6e. Run single LLM turn
             assistant_text, tool_results_list, turn_tokens = await self._run_single_turn(
@@ -246,6 +245,15 @@ class EventLoopNode(NodeProtocol):
             )
             total_input_tokens += turn_tokens.get("input", 0)
             total_output_tokens += turn_tokens.get("output", 0)
+
+            # 6e'. Feed actual API token count back for accurate estimation
+            turn_input = turn_tokens.get("input", 0)
+            if turn_input > 0:
+                conversation.update_token_count(turn_input)
+
+            # 6e''. Post-turn compaction check (catches tool-result bloat)
+            if conversation.needs_compaction():
+                await self._compact_tiered(ctx, conversation)
 
             # 6f. Stall detection
             recent_responses.append(assistant_text)
@@ -367,6 +375,15 @@ class EventLoopNode(NodeProtocol):
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
+            # Pre-send guard: if context is at or over budget, compact before
+            # calling the LLM — prevents API context-length errors.
+            if conversation.usage_ratio() >= 1.0:
+                logger.warning(
+                    "Pre-send guard: context at %.0f%% of budget, compacting",
+                    conversation.usage_ratio() * 100,
+                )
+                await self._compact_tiered(ctx, conversation)
+
             messages = conversation.to_llm_messages()
             accumulated_text = ""
             tool_calls: list[ToolCallEvent] = []
@@ -634,6 +651,36 @@ class EventLoopNode(NodeProtocol):
         if asyncio.iscoroutine(result) or asyncio.isfuture(result):
             result = await result
         return result
+
+    async def _compact_tiered(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+    ) -> None:
+        """Run compaction with aggressiveness scaled to usage level.
+
+        | Usage          | Strategy                                    |
+        |----------------|---------------------------------------------|
+        | 80-100%        | Normal: LLM summary, keep 4 recent messages |
+        | 100-120%       | Aggressive: LLM summary, keep 2 recent      |
+        | >= 120%        | Emergency: static summary, keep 1 recent     |
+        """
+        ratio = conversation.usage_ratio()
+
+        if ratio >= 1.2:
+            # Emergency -- don't risk another LLM call on a bloated context
+            logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
+            await conversation.compact(
+                "Previous conversation context (emergency compaction).",
+                keep_recent=1,
+            )
+        elif ratio >= 1.0:
+            logger.info("Aggressive compaction triggered (usage %.0f%%)", ratio * 100)
+            summary = await self._generate_compaction_summary(ctx, conversation)
+            await conversation.compact(summary, keep_recent=2)
+        else:
+            summary = await self._generate_compaction_summary(ctx, conversation)
+            await conversation.compact(summary, keep_recent=4)
 
     async def _generate_compaction_summary(
         self,
