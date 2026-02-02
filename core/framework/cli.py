@@ -8,6 +8,9 @@ Usage:
     hive list exports/
     hive dispatch exports/ --input '{"key": "value"}'
     hive shell exports/my-agent
+    hive memory inspect exports/my-agent <run_id>
+    hive memory list exports/my-agent
+    hive memory stats exports/my-agent
 
 Testing commands:
     hive test-run <agent_path> --goal <goal_id>
@@ -74,6 +77,11 @@ def main():
     from framework.testing.cli import register_testing_commands
 
     register_testing_commands(subparsers)
+
+    # Register memory commands (memory inspect/list/stats)
+    from framework.memory.cli import register_memory_commands
+
+    register_memory_commands(subparsers)
 
     args = parser.parse_args()
 
