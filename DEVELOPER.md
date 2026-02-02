@@ -166,7 +166,6 @@ hive/                                    # Repository root
 │   │   ├── testing/                     # Testing utilities
 │   │   └── __init__.py
 │   ├── pyproject.toml                   # Package metadata and dependencies
-│   ├── requirements.txt                 # Python dependencies
 │   ├── README.md                        # Framework documentation
 │   ├── MCP_INTEGRATION_GUIDE.md         # MCP server integration guide
 │   └── docs/                            # Protocol documentation
@@ -182,7 +181,6 @@ hive/                                    # Repository root
 │   │       ├── mcp_server.py            # HTTP MCP server
 │   │       └── __init__.py
 │   ├── pyproject.toml                   # Package metadata
-│   ├── requirements.txt                 # Python dependencies
 │   └── README.md                        # Tools documentation
 │
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
@@ -528,16 +526,11 @@ chore(deps): update React to 18.2.0
 ```bash
 # Add to core framework
 cd core
-pip install <package>
-# Then add to requirements.txt or pyproject.toml
+uv add <package>
 
 # Add to tools package
 cd tools
-pip install <package>
-# Then add to requirements.txt or pyproject.toml
-
-# Reinstall in editable mode
-pip install -e .
+uv add <package>
 ```
 
 ### Creating a New Agent
