@@ -463,6 +463,7 @@ class LiteLLMProvider(LLMProvider):
             "messages": full_messages,
             "max_tokens": max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True},
             **self.extra_kwargs,
         }
         if self.api_key:

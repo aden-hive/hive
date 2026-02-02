@@ -11,6 +11,7 @@ The executor:
 
 import asyncio
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -380,6 +381,15 @@ class GraphExecutor:
                     # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
                     max_retries = getattr(node_spec, "max_retries", 3)
 
+                    # Event loop nodes handle retry internally via judge —
+                    # executor retry is catastrophic (retry multiplication)
+                    if node_spec.node_type == "event_loop" and max_retries > 0:
+                        self.logger.warning(
+                            f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
+                            "Overriding to 0 — event loop nodes handle retry internally via judge."
+                        )
+                        max_retries = 0
+
                     if node_retry_counts[current_node_id] < max_retries:
                         # Retry - don't increment steps for retries
                         steps -= 1
@@ -658,7 +668,15 @@ class GraphExecutor:
         )
 
     # Valid node types - no ambiguous "llm" type allowed
-    VALID_NODE_TYPES = {"llm_tool_use", "llm_generate", "router", "function", "human_input"}
+    VALID_NODE_TYPES = {
+        "llm_tool_use",
+        "llm_generate",
+        "router",
+        "function",
+        "human_input",
+        "event_loop",
+    }
+    DEPRECATED_NODE_TYPES = {"llm_tool_use": "event_loop", "llm_generate": "event_loop"}
 
     def _get_node_implementation(
         self, node_spec: NodeSpec, cleanup_llm_model: str | None = None
@@ -674,6 +692,17 @@ class GraphExecutor:
                 f"Invalid node type '{node_spec.node_type}' for node '{node_spec.id}'. "
                 f"Must be one of: {sorted(self.VALID_NODE_TYPES)}. "
                 f"Use 'llm_tool_use' for nodes that call tools, 'llm_generate' for text generation."
+            )
+
+        # Warn on deprecated node types
+        if node_spec.node_type in self.DEPRECATED_NODE_TYPES:
+            replacement = self.DEPRECATED_NODE_TYPES[node_spec.node_type]
+            warnings.warn(
+                f"Node type '{node_spec.node_type}' is deprecated. "
+                f"Use '{replacement}' instead. "
+                f"Node: '{node_spec.id}'",
+                DeprecationWarning,
+                stacklevel=2,
             )
 
         # Create based on type
@@ -711,6 +740,13 @@ class GraphExecutor:
                 tool_executor=None,
                 require_tools=False,
                 cleanup_llm_model=cleanup_llm_model,
+            )
+
+        if node_spec.node_type == "event_loop":
+            # Event loop nodes must be pre-registered (like function nodes)
+            raise RuntimeError(
+                f"EventLoopNode '{node_spec.id}' not found in registry. "
+                "Register it with executor.register_node() before execution."
             )
 
         # Should never reach here due to validation above

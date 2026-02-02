@@ -1,0 +1,818 @@
+"""EventLoopNode: Multi-turn LLM streaming loop with tool execution and judge evaluation.
+
+Implements NodeProtocol and runs a streaming event loop:
+1. Calls LLMProvider.stream() to get streaming events
+2. Processes text deltas, tool calls, and finish events
+3. Executes tools and feeds results back to the conversation
+4. Uses judge evaluation (or implicit stop-reason) to decide loop termination
+5. Publishes lifecycle events to EventBus
+6. Persists conversation and outputs via write-through to ConversationStore
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any, Literal, Protocol, runtime_checkable
+
+from framework.graph.conversation import ConversationStore, NodeConversation
+from framework.graph.node import NodeContext, NodeProtocol, NodeResult
+from framework.llm.provider import Tool, ToolResult, ToolUse
+from framework.llm.stream_events import (
+    FinishEvent,
+    StreamErrorEvent,
+    TextDeltaEvent,
+    ToolCallEvent,
+)
+from framework.runtime.event_bus import EventBus
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Judge protocol (simple 3-action interface for event loop evaluation)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class JudgeVerdict:
+    """Result of judge evaluation for the event loop."""
+
+    action: Literal["ACCEPT", "RETRY", "ESCALATE"]
+    feedback: str = ""
+
+
+@runtime_checkable
+class JudgeProtocol(Protocol):
+    """Protocol for event-loop judges.
+
+    Implementations evaluate the current state of the event loop and
+    decide whether to accept the output, retry with feedback, or escalate.
+    """
+
+    async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict: ...
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LoopConfig:
+    """Configuration for the event loop."""
+
+    max_iterations: int = 50
+    max_tool_calls_per_turn: int = 10
+    judge_every_n_turns: int = 1
+    stall_detection_threshold: int = 3
+    max_history_tokens: int = 32_000
+    store_prefix: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Output accumulator with write-through persistence
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OutputAccumulator:
+    """Accumulates output key-value pairs with optional write-through persistence.
+
+    Values are stored in memory and optionally written through to a
+    ConversationStore's cursor data for crash recovery.
+    """
+
+    values: dict[str, Any] = field(default_factory=dict)
+    store: ConversationStore | None = None
+
+    async def set(self, key: str, value: Any) -> None:
+        """Set a key-value pair, persisting immediately if store is available."""
+        self.values[key] = value
+        if self.store:
+            cursor = await self.store.read_cursor() or {}
+            outputs = cursor.get("outputs", {})
+            outputs[key] = value
+            cursor["outputs"] = outputs
+            await self.store.write_cursor(cursor)
+
+    def get(self, key: str) -> Any | None:
+        """Get a value by key, or None if not present."""
+        return self.values.get(key)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a copy of all accumulated values."""
+        return dict(self.values)
+
+    def has_all_keys(self, required: list[str]) -> bool:
+        """Check if all required keys have been set (non-None)."""
+        return all(key in self.values and self.values[key] is not None for key in required)
+
+    @classmethod
+    async def restore(cls, store: ConversationStore) -> OutputAccumulator:
+        """Restore an OutputAccumulator from a store's cursor data."""
+        cursor = await store.read_cursor()
+        values = {}
+        if cursor and "outputs" in cursor:
+            values = cursor["outputs"]
+        return cls(values=values, store=store)
+
+
+# ---------------------------------------------------------------------------
+# EventLoopNode
+# ---------------------------------------------------------------------------
+
+
+class EventLoopNode(NodeProtocol):
+    """Multi-turn LLM streaming loop with tool execution and judge evaluation.
+
+    Lifecycle:
+    1. Try to restore from durable state (crash recovery)
+    2. If no prior state, init from NodeSpec.system_prompt + input_keys
+    3. Loop: drain injection queue -> stream LLM -> execute tools -> judge
+       (each add_* and set_output writes through to store immediately)
+    4. Publish events to EventBus at each stage
+    5. Write cursor after each iteration
+    6. Terminate when judge returns ACCEPT (or max iterations)
+    7. Build output dict from OutputAccumulator
+
+    Always returns NodeResult with retryable=False semantics. The executor
+    must NOT retry event loop nodes -- retry is handled internally by the
+    judge (RETRY action continues the loop). See WP-7 enforcement.
+    """
+
+    def __init__(
+        self,
+        event_bus: EventBus | None = None,
+        judge: JudgeProtocol | None = None,
+        config: LoopConfig | None = None,
+        tool_executor: Callable[[ToolUse], ToolResult | Awaitable[ToolResult]] | None = None,
+        conversation_store: ConversationStore | None = None,
+    ) -> None:
+        self._event_bus = event_bus
+        self._judge = judge
+        self._config = config or LoopConfig()
+        self._tool_executor = tool_executor
+        self._conversation_store = conversation_store
+        self._injection_queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def validate_input(self, ctx: NodeContext) -> list[str]:
+        """Validate that required inputs and LLM are available."""
+        errors = []
+        if ctx.llm is None:
+            errors.append("LLM provider is required for EventLoopNode")
+        for key in ctx.node_spec.input_keys:
+            if key not in ctx.input_data and ctx.memory.read(key) is None:
+                errors.append(f"Missing required input: {key}")
+        return errors
+
+    # -------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------
+
+    async def execute(self, ctx: NodeContext) -> NodeResult:
+        """Run the event loop."""
+        start_time = time.time()
+        total_input_tokens = 0
+        total_output_tokens = 0
+        stream_id = ctx.node_id
+        node_id = ctx.node_id
+
+        # 1. Guard: LLM required
+        if ctx.llm is None:
+            return NodeResult(success=False, error="LLM provider not available")
+
+        # 2. Restore or create new conversation + accumulator
+        conversation, accumulator, start_iteration = await self._restore(ctx)
+        if conversation is None:
+            conversation = NodeConversation(
+                system_prompt=ctx.node_spec.system_prompt or "",
+                max_history_tokens=self._config.max_history_tokens,
+                output_keys=ctx.node_spec.output_keys or None,
+                store=self._conversation_store,
+            )
+            accumulator = OutputAccumulator(store=self._conversation_store)
+            start_iteration = 0
+
+            # Add initial user message from input data
+            initial_message = self._build_initial_message(ctx)
+            if initial_message:
+                await conversation.add_user_message(initial_message)
+
+        # 3. Build tool list: node tools + synthetic set_output tool
+        tools = list(ctx.available_tools)
+        set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
+        if set_output_tool:
+            tools.append(set_output_tool)
+
+        # 4. Publish loop started
+        await self._publish_loop_started(stream_id, node_id)
+
+        # 5. Stall detection state
+        recent_responses: list[str] = []
+
+        # 6. Main loop
+        for iteration in range(start_iteration, self._config.max_iterations):
+            # 6a. Check pause
+            if await self._check_pause(ctx, conversation, iteration):
+                latency_ms = int((time.time() - start_time) * 1000)
+                return NodeResult(
+                    success=True,
+                    output=accumulator.to_dict(),
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    latency_ms=latency_ms,
+                )
+
+            # 6b. Drain injection queue
+            await self._drain_injection_queue(conversation)
+
+            # 6c. Publish iteration event
+            await self._publish_iteration(stream_id, node_id, iteration)
+
+            # 6d. Compaction check
+            if conversation.needs_compaction():
+                summary = await self._generate_compaction_summary(ctx, conversation)
+                await conversation.compact(summary, keep_recent=4)
+
+            # 6e. Run single LLM turn
+            assistant_text, tool_results_list, turn_tokens = await self._run_single_turn(
+                ctx, conversation, tools, iteration, accumulator
+            )
+            total_input_tokens += turn_tokens.get("input", 0)
+            total_output_tokens += turn_tokens.get("output", 0)
+
+            # 6f. Stall detection
+            recent_responses.append(assistant_text)
+            if len(recent_responses) > self._config.stall_detection_threshold:
+                recent_responses.pop(0)
+            if self._is_stalled(recent_responses):
+                await self._publish_stalled(stream_id, node_id)
+                latency_ms = int((time.time() - start_time) * 1000)
+                return NodeResult(
+                    success=False,
+                    error=(
+                        f"Node stalled: {self._config.stall_detection_threshold} "
+                        "consecutive identical responses"
+                    ),
+                    output=accumulator.to_dict(),
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    latency_ms=latency_ms,
+                )
+
+            # 6g. Write cursor checkpoint
+            await self._write_cursor(ctx, conversation, accumulator, iteration)
+
+            # 6h. Judge evaluation
+            should_judge = (
+                (iteration + 1) % self._config.judge_every_n_turns == 0
+                or not tool_results_list  # no tool calls = natural stop
+            )
+
+            if should_judge:
+                verdict = await self._evaluate(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    assistant_text,
+                    tool_results_list,
+                    iteration,
+                )
+
+                if verdict.action == "ACCEPT":
+                    # Check for missing output keys
+                    missing = self._get_missing_output_keys(accumulator, ctx.node_spec.output_keys)
+                    if missing and self._judge is not None:
+                        hint = (
+                            f"Missing required output keys: {missing}. "
+                            "Use set_output to provide them."
+                        )
+                        await conversation.add_user_message(hint)
+                        continue
+
+                    # Write outputs to shared memory
+                    for key, value in accumulator.to_dict().items():
+                        ctx.memory.write(key, value, validate=False)
+
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    return NodeResult(
+                        success=True,
+                        output=accumulator.to_dict(),
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        latency_ms=latency_ms,
+                    )
+
+                elif verdict.action == "ESCALATE":
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    return NodeResult(
+                        success=False,
+                        error=f"Judge escalated: {verdict.feedback}",
+                        output=accumulator.to_dict(),
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        latency_ms=latency_ms,
+                    )
+
+                elif verdict.action == "RETRY":
+                    if verdict.feedback:
+                        await conversation.add_user_message(f"[Judge feedback]: {verdict.feedback}")
+                    continue
+
+        # 7. Max iterations exhausted
+        await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations)
+        latency_ms = int((time.time() - start_time) * 1000)
+        return NodeResult(
+            success=False,
+            error=(f"Max iterations ({self._config.max_iterations}) " "reached without acceptance"),
+            output=accumulator.to_dict(),
+            tokens_used=total_input_tokens + total_output_tokens,
+            latency_ms=latency_ms,
+        )
+
+    async def inject_event(self, content: str) -> None:
+        """Inject an external event into the running loop.
+
+        The content becomes a user message prepended to the next iteration.
+        Thread-safe via asyncio.Queue.
+        """
+        await self._injection_queue.put(content)
+
+    # -------------------------------------------------------------------
+    # Single LLM turn with caller-managed tool orchestration
+    # -------------------------------------------------------------------
+
+    async def _run_single_turn(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        tools: list[Tool],
+        iteration: int,
+        accumulator: OutputAccumulator,
+    ) -> tuple[str, list[dict], dict[str, int]]:
+        """Run a single LLM turn with streaming and tool execution.
+
+        Returns (assistant_text, tool_results, token_counts).
+        """
+        stream_id = ctx.node_id
+        node_id = ctx.node_id
+        token_counts: dict[str, int] = {"input": 0, "output": 0}
+        tool_call_count = 0
+        final_text = ""
+
+        # Inner tool loop: stream may produce tool calls requiring re-invocation
+        while True:
+            messages = conversation.to_llm_messages()
+            accumulated_text = ""
+            tool_calls: list[ToolCallEvent] = []
+
+            # Stream LLM response
+            async for event in ctx.llm.stream(
+                messages=messages,
+                system=conversation.system_prompt,
+                tools=tools if tools else None,
+                max_tokens=ctx.max_tokens,
+            ):
+                if isinstance(event, TextDeltaEvent):
+                    accumulated_text = event.snapshot
+                    await self._publish_text_delta(
+                        stream_id, node_id, event.content, event.snapshot, ctx
+                    )
+
+                elif isinstance(event, ToolCallEvent):
+                    tool_calls.append(event)
+
+                elif isinstance(event, FinishEvent):
+                    token_counts["input"] += event.input_tokens
+                    token_counts["output"] += event.output_tokens
+
+                elif isinstance(event, StreamErrorEvent):
+                    if not event.recoverable:
+                        raise RuntimeError(f"Stream error: {event.error}")
+                    logger.warning(f"Recoverable stream error: {event.error}")
+
+            final_text = accumulated_text
+
+            # Record assistant message (write-through via conversation store)
+            tc_dicts = None
+            if tool_calls:
+                tc_dicts = [
+                    {
+                        "id": tc.tool_use_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.tool_name,
+                            "arguments": json.dumps(tc.tool_input),
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+            await conversation.add_assistant_message(
+                content=accumulated_text,
+                tool_calls=tc_dicts,
+            )
+
+            # If no tool calls, turn is complete
+            if not tool_calls:
+                return final_text, [], token_counts
+
+            # Execute tool calls
+            tool_results: list[dict] = []
+            for tc in tool_calls:
+                tool_call_count += 1
+                if tool_call_count > self._config.max_tool_calls_per_turn:
+                    logger.warning(
+                        f"Max tool calls per turn "
+                        f"({self._config.max_tool_calls_per_turn}) exceeded"
+                    )
+                    break
+
+                # Publish tool call started
+                await self._publish_tool_started(
+                    stream_id, node_id, tc.tool_use_id, tc.tool_name, tc.tool_input
+                )
+
+                # Handle set_output synthetic tool
+                if tc.tool_name == "set_output":
+                    result = self._handle_set_output(tc.tool_input, ctx.node_spec.output_keys)
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content=result.content,
+                        is_error=result.is_error,
+                    )
+                    # Async write-through for set_output
+                    if not result.is_error:
+                        await accumulator.set(tc.tool_input["key"], tc.tool_input["value"])
+                else:
+                    # Execute real tool
+                    result = await self._execute_tool(tc)
+
+                # Record tool result in conversation (write-through)
+                await conversation.add_tool_result(
+                    tool_use_id=tc.tool_use_id,
+                    content=result.content,
+                    is_error=result.is_error,
+                )
+                tool_results.append(
+                    {
+                        "tool_use_id": tc.tool_use_id,
+                        "tool_name": tc.tool_name,
+                        "content": result.content,
+                        "is_error": result.is_error,
+                    }
+                )
+
+                # Publish tool call completed
+                await self._publish_tool_completed(
+                    stream_id,
+                    node_id,
+                    tc.tool_use_id,
+                    tc.tool_name,
+                    result.content,
+                    result.is_error,
+                )
+
+            # Tool calls processed -- loop back to stream with updated conversation
+
+    # -------------------------------------------------------------------
+    # set_output synthetic tool
+    # -------------------------------------------------------------------
+
+    def _build_set_output_tool(self, output_keys: list[str] | None) -> Tool | None:
+        """Build the synthetic set_output tool for explicit output declaration."""
+        if not output_keys:
+            return None
+        return Tool(
+            name="set_output",
+            description=(
+                "Set an output value for this node. Call once per output key. "
+                f"Valid keys: {output_keys}"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": f"Output key. Must be one of: {output_keys}",
+                        "enum": output_keys,
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The output value to store.",
+                    },
+                },
+                "required": ["key", "value"],
+            },
+        )
+
+    def _handle_set_output(
+        self,
+        tool_input: dict[str, Any],
+        output_keys: list[str] | None,
+    ) -> ToolResult:
+        """Handle set_output tool call. Returns ToolResult (sync)."""
+        key = tool_input.get("key", "")
+        valid_keys = output_keys or []
+
+        if key not in valid_keys:
+            return ToolResult(
+                tool_use_id="",
+                content=f"Invalid output key '{key}'. Valid keys: {valid_keys}",
+                is_error=True,
+            )
+
+        return ToolResult(
+            tool_use_id="",
+            content=f"Output '{key}' set successfully.",
+            is_error=False,
+        )
+
+    # -------------------------------------------------------------------
+    # Judge evaluation
+    # -------------------------------------------------------------------
+
+    async def _evaluate(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        accumulator: OutputAccumulator,
+        assistant_text: str,
+        tool_results: list[dict],
+        iteration: int,
+    ) -> JudgeVerdict:
+        """Evaluate the current state using judge or implicit logic."""
+        if self._judge is not None:
+            context = {
+                "assistant_text": assistant_text,
+                "tool_calls": tool_results,
+                "output_accumulator": accumulator.to_dict(),
+                "iteration": iteration,
+                "conversation_summary": conversation.export_summary(),
+                "output_keys": ctx.node_spec.output_keys,
+                "missing_keys": self._get_missing_output_keys(
+                    accumulator, ctx.node_spec.output_keys
+                ),
+            }
+            return await self._judge.evaluate(context)
+
+        # Implicit judge: accept when no tool calls and all output keys present
+        if not tool_results:
+            missing = self._get_missing_output_keys(accumulator, ctx.node_spec.output_keys)
+            if not missing:
+                return JudgeVerdict(action="ACCEPT")
+            else:
+                return JudgeVerdict(
+                    action="RETRY",
+                    feedback=(
+                        f"Missing output keys: {missing}. " "Use set_output tool to provide them."
+                    ),
+                )
+
+        # Tool calls were made -- continue loop
+        return JudgeVerdict(action="RETRY", feedback="")
+
+    # -------------------------------------------------------------------
+    # Helpers
+    # -------------------------------------------------------------------
+
+    def _build_initial_message(self, ctx: NodeContext) -> str:
+        """Build the initial user message from input data and memory."""
+        parts = []
+        for key in ctx.node_spec.input_keys:
+            value = ctx.input_data.get(key) or ctx.memory.read(key)
+            if value is not None:
+                parts.append(f"{key}: {value}")
+        if ctx.goal_context:
+            parts.append(f"\nGoal: {ctx.goal_context}")
+        return "\n".join(parts) if parts else "Begin."
+
+    def _get_missing_output_keys(
+        self,
+        accumulator: OutputAccumulator,
+        output_keys: list[str] | None,
+    ) -> list[str]:
+        """Return output keys that have not been set yet."""
+        if not output_keys:
+            return []
+        return [k for k in output_keys if accumulator.get(k) is None]
+
+    def _is_stalled(self, recent_responses: list[str]) -> bool:
+        """Detect stall: N consecutive identical non-empty responses."""
+        if len(recent_responses) < self._config.stall_detection_threshold:
+            return False
+        if not recent_responses[0]:
+            return False
+        return all(r == recent_responses[0] for r in recent_responses)
+
+    async def _execute_tool(self, tc: ToolCallEvent) -> ToolResult:
+        """Execute a tool call, handling both sync and async executors."""
+        if self._tool_executor is None:
+            return ToolResult(
+                tool_use_id=tc.tool_use_id,
+                content=f"No tool executor configured for '{tc.tool_name}'",
+                is_error=True,
+            )
+        tool_use = ToolUse(id=tc.tool_use_id, name=tc.tool_name, input=tc.tool_input)
+        result = self._tool_executor(tool_use)
+        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+            result = await result
+        return result
+
+    async def _generate_compaction_summary(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+    ) -> str:
+        """Use LLM to generate a conversation summary for compaction."""
+        messages_text = "\n".join(
+            f"[{m.role}]: {m.content[:200]}" for m in conversation.messages[-10:]
+        )
+        prompt = (
+            "Summarize this conversation so far in 2-3 sentences, "
+            "preserving key decisions and results:\n\n"
+            f"{messages_text}"
+        )
+        try:
+            response = ctx.llm.complete(
+                messages=[{"role": "user", "content": prompt}],
+                system="Summarize conversations concisely.",
+                max_tokens=300,
+            )
+            return response.content
+        except Exception as e:
+            logger.warning(f"Compaction summary generation failed: {e}")
+            return "Previous conversation context (summary unavailable)."
+
+    # -------------------------------------------------------------------
+    # Persistence: restore, cursor, injection, pause
+    # -------------------------------------------------------------------
+
+    async def _restore(
+        self,
+        ctx: NodeContext,
+    ) -> tuple[NodeConversation | None, OutputAccumulator | None, int]:
+        """Attempt to restore from a previous checkpoint."""
+        if self._conversation_store is None:
+            return None, None, 0
+
+        conversation = await NodeConversation.restore(self._conversation_store)
+        if conversation is None:
+            return None, None, 0
+
+        accumulator = await OutputAccumulator.restore(self._conversation_store)
+
+        cursor = await self._conversation_store.read_cursor()
+        start_iteration = cursor.get("iteration", 0) + 1 if cursor else 0
+
+        logger.info(
+            f"Restored event loop: iteration={start_iteration}, "
+            f"messages={conversation.message_count}, "
+            f"outputs={list(accumulator.values.keys())}"
+        )
+        return conversation, accumulator, start_iteration
+
+    async def _write_cursor(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        accumulator: OutputAccumulator,
+        iteration: int,
+    ) -> None:
+        """Write checkpoint cursor for crash recovery."""
+        if self._conversation_store:
+            cursor = await self._conversation_store.read_cursor() or {}
+            cursor.update(
+                {
+                    "iteration": iteration,
+                    "node_id": ctx.node_id,
+                    "next_seq": conversation.next_seq,
+                    "outputs": accumulator.to_dict(),
+                }
+            )
+            await self._conversation_store.write_cursor(cursor)
+
+    async def _drain_injection_queue(self, conversation: NodeConversation) -> int:
+        """Drain all pending injected events as user messages. Returns count."""
+        count = 0
+        while not self._injection_queue.empty():
+            try:
+                content = self._injection_queue.get_nowait()
+                await conversation.add_user_message(f"[External event]: {content}")
+                count += 1
+            except asyncio.QueueEmpty:
+                break
+        return count
+
+    async def _check_pause(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        iteration: int,
+    ) -> bool:
+        """Check if pause has been requested. Returns True if paused."""
+        pause_requested = ctx.input_data.get("pause_requested", False)
+        if not pause_requested:
+            pause_requested = ctx.memory.read("pause_requested") or False
+        if pause_requested:
+            logger.info(f"Pause requested at iteration {iteration}")
+            return True
+        return False
+
+    # -------------------------------------------------------------------
+    # EventBus publishing helpers
+    # -------------------------------------------------------------------
+
+    async def _publish_loop_started(self, stream_id: str, node_id: str) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_node_loop_started(
+                stream_id=stream_id,
+                node_id=node_id,
+                max_iterations=self._config.max_iterations,
+            )
+
+    async def _publish_iteration(self, stream_id: str, node_id: str, iteration: int) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_node_loop_iteration(
+                stream_id=stream_id,
+                node_id=node_id,
+                iteration=iteration,
+            )
+
+    async def _publish_loop_completed(self, stream_id: str, node_id: str, iterations: int) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_node_loop_completed(
+                stream_id=stream_id,
+                node_id=node_id,
+                iterations=iterations,
+            )
+
+    async def _publish_stalled(self, stream_id: str, node_id: str) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_node_stalled(
+                stream_id=stream_id,
+                node_id=node_id,
+                reason="Consecutive identical responses detected",
+            )
+
+    async def _publish_text_delta(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        snapshot: str,
+        ctx: NodeContext,
+    ) -> None:
+        if self._event_bus:
+            if ctx.node_spec.client_facing:
+                await self._event_bus.emit_client_output_delta(
+                    stream_id=stream_id,
+                    node_id=node_id,
+                    content=content,
+                    snapshot=snapshot,
+                )
+            else:
+                await self._event_bus.emit_llm_text_delta(
+                    stream_id=stream_id,
+                    node_id=node_id,
+                    content=content,
+                    snapshot=snapshot,
+                )
+
+    async def _publish_tool_started(
+        self,
+        stream_id: str,
+        node_id: str,
+        tool_use_id: str,
+        tool_name: str,
+        tool_input: dict,
+    ) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_tool_call_started(
+                stream_id=stream_id,
+                node_id=node_id,
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                tool_input=tool_input,
+            )
+
+    async def _publish_tool_completed(
+        self,
+        stream_id: str,
+        node_id: str,
+        tool_use_id: str,
+        tool_name: str,
+        result: str,
+        is_error: bool,
+    ) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_tool_call_completed(
+                stream_id=stream_id,
+                node_id=node_id,
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                result=result,
+                is_error=is_error,
+            )
