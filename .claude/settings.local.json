@@ -32,9 +32,13 @@
       "mcp__agent-builder__verify_credentials",
       "Bash(PYTHONPATH=/home/timothy/oss/hive/core:/home/timothy/oss/hive/exports python:*)",
       "Bash(PYTHONPATH=core:exports:tools/src python -m hubspot_input:*)",
-      "mcp__agent-builder__export_graph"
+      "mcp__agent-builder__export_graph",
+      "Bash(python3:*)"
     ]
   },
-  "enabledMcpjsonServers": ["agent-builder", "tools"],
-  "enableAllProjectMcpServers": true
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "agent-builder",
+    "tools"
+  ]
 }
