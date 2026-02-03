@@ -1,38 +1,30 @@
 # TUI Text Selection and Copy Guide
 
-The Aden TUI now supports text selection and copying from the log pane!
+## Keybindings
 
-## How to Select and Copy Text:
+| Key           | Action                |
+|---------------|-----------------------|
+| `Tab`         | Next panel            |
+| `Shift+Tab`   | Previous panel        |
+| `Ctrl+S`      | Save SVG screenshot   |
+| `Ctrl+O`      | Command palette       |
+| `Q`           | Quit                  |
 
-### 1. **Focus the Log Pane**
-   - Press `Tab` to cycle through panels (Graph View → Log Pane → Chat Input)
-   - Or click directly on the blue log pane
-   - When focused, the border will be brighter
+## Panel Cycle Order
 
-### 2. **Select Text**
-   - **Mouse Selection**: Click and drag to select text
-   - **Keyboard Selection** (if supported by your terminal):
-     - Use arrow keys to navigate
-     - Hold `Shift` + arrow keys to select
+`Tab` cycles: **Log Pane → Graph View → Chat Input**
 
-### 3. **Copy Text**
-   - **Windows**: `Ctrl+C` or right-click → Copy
-   - **Mac**: `Cmd+C`
-   - **Linux**: `Ctrl+Shift+C` or right-click → Copy
+## Text Selection
 
-### 4. **Navigate Panels**
-   - `Tab`: Move to next panel
-   - `Shift+Tab`: Move to previous panel
-   - `Q`: Quit the TUI
+Textual apps capture the mouse, so normal click-drag selection won't work by default. To select and copy text from any pane:
 
-## Notes:
-- The RichLog widget supports native text selection
-- Copying works through your terminal's clipboard
-- Auto-scroll is enabled, but you can scroll manually when focused
-- The log pane shows a highlighted border when focused
+1. **Hold `Shift`** while clicking and dragging — this bypasses Textual's mouse capture and lets your terminal handle selection natively.
+2. Copy with your terminal's shortcut (`Cmd+C` on macOS, `Ctrl+Shift+C` on most Linux terminals).
 
-## Troubleshooting:
-If text selection doesn't work:
-1. Make sure your terminal supports mouse mode (most modern terminals do)
-2. Try clicking and dragging with your mouse
-3. Some terminals require holding `Shift` while selecting
+## Log Pane Scrolling
+
+The log pane uses `auto_scroll=False`. New output only scrolls to the bottom when you are already at the bottom of the log. If you've scrolled up to read earlier output, it stays in place.
+
+## Screenshots
+
+`Ctrl+S` saves an SVG screenshot to the `screenshots/` directory with a timestamped filename. Open the SVG in any browser to view it.

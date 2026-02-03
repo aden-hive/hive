@@ -16,7 +16,8 @@ dependencies = [
   "pytest-xdist>=3.0",
 ]
 
-# [project.optional-dependencies]
+[project.optional-dependencies]
+tui = ["textual>=0.75.0"]
 
 [project.scripts]
 hive = "framework.cli:main"

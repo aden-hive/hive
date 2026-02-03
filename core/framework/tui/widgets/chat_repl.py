@@ -1,10 +1,20 @@
 """
-Chat / REPL Widget - Uses TextArea for reliable display.
+Chat / REPL Widget - Uses RichLog for append-only, selection-safe display.
+
+Streaming display approach:
+- The processing-indicator Label is used as a live status bar during streaming
+  (Label.update() replaces text in-place, unlike RichLog which is append-only).
+- On EXECUTION_COMPLETED, the final output is written to RichLog as permanent history.
+- Tool events are written directly to RichLog as discrete status lines.
 """
+
+import asyncio
+import threading
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, TextArea
+from textual.widgets import Input, Label, RichLog
 
 from framework.runtime.agent_runtime import AgentRuntime
 
@@ -19,13 +29,22 @@ class ChatRepl(Vertical):
         layout: vertical;
     }
 
-    ChatRepl > TextArea {
+    ChatRepl > RichLog {
         width: 100%;
         height: 1fr;
         background: $surface;
         border: none;
         scrollbar-background: $panel;
         scrollbar-color: $primary;
+    }
+
+    ChatRepl > #processing-indicator {
+        width: 100%;
+        height: 1;
+        background: $primary 20%;
+        color: $text;
+        text-style: bold;
+        display: none;
     }
 
     ChatRepl > Input {
@@ -45,109 +64,182 @@ class ChatRepl(Vertical):
     def __init__(self, runtime: AgentRuntime):
         super().__init__()
         self.runtime = runtime
+        self._current_exec_id: str | None = None
+        self._streaming_snapshot: str = ""
+
+        # Dedicated event loop for agent execution.
+        # Keeps blocking runtime code (LLM calls, MCP tools) off
+        # the Textual event loop so the UI stays responsive.
+        self._agent_loop = asyncio.new_event_loop()
+        self._agent_thread = threading.Thread(
+            target=self._agent_loop.run_forever,
+            daemon=True,
+            name="agent-execution",
+        )
+        self._agent_thread.start()
 
     def compose(self) -> ComposeResult:
-        # Use TextArea (read-only) like LogPane
-        yield TextArea("", id="chat-history", read_only=True)
+        yield RichLog(id="chat-history", highlight=True, markup=True, auto_scroll=False, wrap=True)
+        yield Label("Agent is processing...", id="processing-indicator")
         yield Input(placeholder="Enter input for agent...", id="chat-input")
+
+    def _write_history(self, content: str) -> None:
+        """Write to chat history, only auto-scrolling if user is at the bottom."""
+        history = self.query_one("#chat-history", RichLog)
+        was_at_bottom = history.is_vertical_scroll_end
+        history.write(content)
+        if was_at_bottom:
+            history.scroll_end(animate=False)
 
     def on_mount(self) -> None:
         """Add welcome message when widget mounts."""
-        history = self.query_one("#chat-history", TextArea)
-        history.load_text("Chat REPL Ready - Type your input below\n")
-        with open("tui_debug.log", "a") as f:
-            f.write("DEBUG: ChatREPL mounted with welcome message\n")
+        history = self.query_one("#chat-history", RichLog)
+        history.write("[bold cyan]Chat REPL Ready[/bold cyan] — Type your input below\n")
 
     async def on_input_submitted(self, message: Input.Submitted) -> None:
-        """Handle input submission."""
-        with open("tui_debug.log", "a") as f:
-            f.write("DEBUG: on_input_submitted called\n")
-
+        """Handle input submission — fire-and-forget via trigger()."""
         user_input = message.value.strip()
-
-        with open("tui_debug.log", "a") as f:
-            f.write(f"DEBUG: ChatREPL input: '{user_input}'\n")
-
         if not user_input:
             return
 
-        # Get chat history
-        with open("tui_debug.log", "a") as f:
-            f.write("DEBUG: Getting chat history\n")
-        history = self.query_one("#chat-history", TextArea)
+        # Double-submit guard: reject input while an execution is in-flight
+        if self._current_exec_id is not None:
+            self._write_history("[dim]Agent is still running — please wait.[/dim]")
+            return
 
-        # Display user message
-        with open("tui_debug.log", "a") as f:
-            f.write("DEBUG: Adding user message\n")
-        current_text = history.text
-        history.load_text(f"{current_text}\nYou: {user_input}\n")
+        indicator = self.query_one("#processing-indicator", Label)
 
-        with open("tui_debug.log", "a") as f:
-            f.write("DEBUG: User message added\n")
-
-        # Clear input
+        # Append user message and clear input
+        self._write_history(f"[bold green]You:[/bold green] {user_input}")
         message.input.value = ""
 
-        # Execute agent
         try:
-            with open("tui_debug.log", "a") as f:
-                f.write("DEBUG: Starting agent execution\n")
-
-            # Show processing
-            current_text = history.text
-            history.load_text(f"{current_text}Agent is processing...\n")
-
-            with open("tui_debug.log", "a") as f:
-                f.write("DEBUG: Processing message shown\n")
-
             # Get entry point
             entry_points = self.runtime.get_entry_points()
             if not entry_points:
-                current_text = history.text
-                history.load_text(f"{current_text}Error: No entry points\n")
+                self._write_history("[bold red]Error:[/bold red] No entry points")
                 return
 
-            with open("tui_debug.log", "a") as f:
-                f.write("DEBUG: Calling trigger_and_wait\n")
+            # Determine the input key from the entry node
+            entry_point = entry_points[0]
+            entry_node = self.runtime.graph.get_node(entry_point.entry_node)
 
-            # Execute
-            result = await self.runtime.trigger_and_wait(
-                entry_point_id=entry_points[0].id,
-                input_data={"input_string": user_input},
-                timeout=30.0,
-            )
-
-            with open("tui_debug.log", "a") as f:
-                f.write(f"DEBUG: Got result: {result}\n")
-
-            # Remove "processing" line and display result
-            lines = history.text.split("\n")
-            lines = [line for line in lines if "processing" not in line.lower()]
-
-            # Display result
-            if result and result.success and result.output:
-                output_str = str(result.output.get("output_string", result.output))
-                lines.append(f"Agent: {output_str}")
-                with open("tui_debug.log", "a") as f:
-                    f.write("DEBUG: Added success result\n")
-            elif result and result.error:
-                lines.append(f"Error: {result.error}")
+            if entry_node and entry_node.input_keys:
+                input_key = entry_node.input_keys[0]
             else:
-                lines.append("No result")
+                input_key = "input"
 
-            history.load_text("\n".join(lines) + "\n")
+            # Reset streaming state
+            self._streaming_snapshot = ""
 
-            with open("tui_debug.log", "a") as f:
-                f.write("DEBUG: Execution complete\n")
+            # Show processing indicator
+            indicator.update("Thinking...")
+            indicator.display = True
+
+            # Disable input while the agent is working
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.disabled = True
+
+            # Submit execution to the dedicated agent loop so blocking
+            # runtime code (LLM, MCP tools) never touches Textual's loop.
+            # trigger() returns immediately with an exec_id; the heavy
+            # execution task runs entirely on the agent thread.
+            future = asyncio.run_coroutine_threadsafe(
+                self.runtime.trigger(
+                    entry_point_id=entry_point.id,
+                    input_data={input_key: user_input},
+                ),
+                self._agent_loop,
+            )
+            # wrap_future lets us await without blocking Textual's loop
+            self._current_exec_id = await asyncio.wrap_future(future)
 
         except Exception as e:
-            with open("tui_debug.log", "a") as f:
-                f.write(f"ERROR: Exception in handler: {e}\n")
-                import traceback
+            indicator.display = False
+            self._current_exec_id = None
+            # Re-enable input on error
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.disabled = False
+            self._write_history(f"[bold red]Error:[/bold red] {e}")
 
-                f.write(f"{traceback.format_exc()}\n")
-            current_text = history.text
-            lines = current_text.split("\n")
-            lines = [line for line in lines if "processing" not in line.lower()]
-            lines.append(f"Error: {str(e)}")
-            history.load_text("\n".join(lines) + "\n")
+    # -- Event handlers called by app.py _handle_event --
+
+    def handle_text_delta(self, content: str, snapshot: str) -> None:
+        """Handle a streaming text token from the LLM."""
+        self._streaming_snapshot = snapshot
+
+        # Show a truncated live preview in the indicator label
+        indicator = self.query_one("#processing-indicator", Label)
+        preview = snapshot[-80:] if len(snapshot) > 80 else snapshot
+        # Replace newlines for single-line display
+        preview = preview.replace("\n", " ")
+        indicator.update(
+            f"Thinking: ...{preview}" if len(snapshot) > 80 else f"Thinking: {preview}"
+        )
+
+    def handle_tool_started(self, tool_name: str, tool_input: dict[str, Any]) -> None:
+        """Handle a tool call starting."""
+        # Update indicator to show tool activity
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.update(f"Using tool: {tool_name}...")
+
+        # Write a discrete status line to history
+        self._write_history(f"[dim]Tool: {tool_name}[/dim]")
+
+    def handle_tool_completed(self, tool_name: str, result: str, is_error: bool) -> None:
+        """Handle a tool call completing."""
+        result_str = str(result)
+        preview = result_str[:200] + "..." if len(result_str) > 200 else result_str
+        preview = preview.replace("\n", " ")
+
+        if is_error:
+            self._write_history(f"[dim red]Tool {tool_name} error: {preview}[/dim red]")
+        else:
+            self._write_history(f"[dim]Tool {tool_name} result: {preview}[/dim]")
+
+        # Restore thinking indicator
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("Thinking...")
+
+    def handle_execution_completed(self, output: dict[str, Any]) -> None:
+        """Handle execution finishing successfully."""
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.display = False
+
+        # Write the final output to permanent history
+        output_str = str(output.get("output_string", output))
+        self._write_history(f"[bold blue]Agent:[/bold blue] {output_str}")
+        self._write_history("")  # separator
+
+        self._current_exec_id = None
+        self._streaming_snapshot = ""
+
+        # Re-enable input
+        chat_input = self.query_one("#chat-input", Input)
+        chat_input.disabled = False
+        chat_input.focus()
+
+    def handle_execution_failed(self, error: str) -> None:
+        """Handle execution failing."""
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.display = False
+
+        self._write_history(f"[bold red]Error:[/bold red] {error}")
+        self._write_history("")  # separator
+
+        self._current_exec_id = None
+        self._streaming_snapshot = ""
+
+        # Re-enable input
+        chat_input = self.query_one("#chat-input", Input)
+        chat_input.disabled = False
+        chat_input.focus()
+
+    def handle_input_requested(self, prompt: str) -> None:
+        """Handle the agent requesting input from the user."""
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.update(f"Input requested: {prompt}")
+
+        chat_input = self.query_one("#chat-input", Input)
+        chat_input.placeholder = prompt or "Agent is waiting for input..."
+        chat_input.focus()

@@ -128,6 +128,8 @@ class GraphExecutor:
         cleansing_config: CleansingConfig | None = None,
         enable_parallel_execution: bool = True,
         parallel_config: ParallelExecutionConfig | None = None,
+        event_bus: Any | None = None,
+        stream_id: str = "",
     ):
         """
         Initialize the executor.
@@ -142,6 +144,8 @@ class GraphExecutor:
             cleansing_config: Optional output cleansing configuration
             enable_parallel_execution: Enable parallel fan-out execution (default True)
             parallel_config: Configuration for parallel execution behavior
+            event_bus: Optional event bus for emitting node lifecycle events
+            stream_id: Stream ID for event correlation
         """
         self.runtime = runtime
         self.llm = llm
@@ -151,6 +155,8 @@ class GraphExecutor:
         self.approval_callback = approval_callback
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
+        self._event_bus = event_bus
+        self._stream_id = stream_id
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -255,6 +261,7 @@ class GraphExecutor:
         total_latency = 0
         node_retry_counts: dict[str, int] = {}  # Track retries per node
         node_visit_counts: dict[str, int] = {}  # Track visits for feedback loops
+        is_retrying = False  # Flag to avoid counting retries as feedback-loop visits
 
         # Determine entry point (may differ if resuming)
         current_node_id = graph.get_entry_point(session_state)
@@ -284,7 +291,12 @@ class GraphExecutor:
                     raise RuntimeError(f"Node not found: {current_node_id}")
 
                 # Enforce max_node_visits (feedback/callback edge support)
-                node_visit_counts[current_node_id] = node_visit_counts.get(current_node_id, 0) + 1
+                # Don't count retries as new visits — retries have their own limit.
+                if not is_retrying:
+                    node_visit_counts[current_node_id] = (
+                        node_visit_counts.get(current_node_id, 0) + 1
+                    )
+                is_retrying = False
                 max_visits = getattr(node_spec, "max_node_visits", 1)
                 if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
                     self.logger.warning(
@@ -352,9 +364,21 @@ class GraphExecutor:
                         description=f"Validation errors for {current_node_id}: {validation_errors}",
                     )
 
+                # Emit node-started event (skip event_loop nodes — they emit their own)
+                if self._event_bus and node_spec.node_type != "event_loop":
+                    await self._event_bus.emit_node_loop_started(
+                        stream_id=self._stream_id, node_id=current_node_id
+                    )
+
                 # Execute node
                 self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
+
+                # Emit node-completed event (skip event_loop nodes)
+                if self._event_bus and node_spec.node_type != "event_loop":
+                    await self._event_bus.emit_node_loop_completed(
+                        stream_id=self._stream_id, node_id=current_node_id, iterations=1
+                    )
 
                 if result.success:
                     # Validate output before accepting it
@@ -433,6 +457,7 @@ class GraphExecutor:
                         self.logger.info(
                             f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
                         )
+                        is_retrying = True
                         continue
                     else:
                         # Max retries exceeded - fail the execution
@@ -1043,11 +1068,23 @@ class GraphExecutor:
                     ctx = self._build_context(node_spec, memory, goal, mapped, graph.max_tokens)
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
+                    # Emit node-started event (skip event_loop nodes)
+                    if self._event_bus and node_spec.node_type != "event_loop":
+                        await self._event_bus.emit_node_loop_started(
+                            stream_id=self._stream_id, node_id=branch.node_id
+                        )
+
                     self.logger.info(
                         f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
                     )
                     result = await node_impl.execute(ctx)
                     last_result = result
+
+                    # Emit node-completed event (skip event_loop nodes)
+                    if self._event_bus and node_spec.node_type != "event_loop":
+                        await self._event_bus.emit_node_loop_completed(
+                            stream_id=self._stream_id, node_id=branch.node_id, iterations=1
+                        )
 
                     if result.success:
                         # Write outputs to shared memory using async write

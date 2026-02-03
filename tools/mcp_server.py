@@ -70,16 +70,20 @@ from aden_tools.tools import register_all_tools  # noqa: E402
 
 # Create credential store with access to both env vars AND encrypted store
 # This allows using Aden-synced credentials from ~/.hive/credentials
-try:
-    from framework.credentials import CredentialStore
+# Only use encrypted storage if HIVE_CREDENTIAL_KEY is configured;
+# otherwise fall back to env-only to avoid generating a throwaway key.
+if os.environ.get("HIVE_CREDENTIAL_KEY"):
+    try:
+        from framework.credentials import CredentialStore
 
-    store = CredentialStore.with_encrypted_storage()  # ~/.hive/credentials
-    credentials = CredentialStoreAdapter(store)
-    logger.info("Using CredentialStoreAdapter with encrypted storage")
-except Exception as e:
-    # Fall back to env-only adapter if encrypted storage fails
+        store = CredentialStore.with_encrypted_storage()  # ~/.hive/credentials
+        credentials = CredentialStoreAdapter(store)
+        logger.info("Using CredentialStoreAdapter with encrypted storage")
+    except Exception as e:
+        credentials = CredentialStoreAdapter.with_env_storage()
+        logger.warning(f"Falling back to env-only CredentialStoreAdapter: {e}")
+else:
     credentials = CredentialStoreAdapter.with_env_storage()
-    logger.warning(f"Falling back to env-only CredentialStoreAdapter: {e}")
 
 # Tier 1: Validate startup-required credentials (if any)
 try:

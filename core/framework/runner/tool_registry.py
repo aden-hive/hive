@@ -33,6 +33,11 @@ class ToolRegistry:
     4. Manually registered tools
     """
 
+    # Framework-internal context keys injected into tool calls.
+    # Stripped from LLM-facing schemas (the LLM doesn't know these values)
+    # and auto-injected at call time for tools that accept them.
+    CONTEXT_PARAMS = frozenset({"workspace_id", "agent_id", "session_id"})
+
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
@@ -305,15 +310,29 @@ class ToolRegistry:
             # Register each tool
             count = 0
             for mcp_tool in client.list_tools():
-                # Convert MCP tool to framework Tool
+                # Capture the full set of params this tool accepts (before schema stripping)
+                accepted_params = set(mcp_tool.input_schema.get("properties", {}).keys())
+
+                # Convert MCP tool to framework Tool (strips context params from LLM schema)
                 tool = self._convert_mcp_tool_to_framework_tool(mcp_tool)
 
                 # Create executor that calls the MCP server
-                def make_mcp_executor(client_ref: MCPClient, tool_name: str, registry_ref):
+                def make_mcp_executor(
+                    client_ref: MCPClient,
+                    tool_name: str,
+                    registry_ref: "ToolRegistry",
+                    tool_params: set,
+                ):
                     def executor(inputs: dict) -> Any:
                         try:
-                            # Inject session context for tools that need it
-                            merged_inputs = {**registry_ref._session_context, **inputs}
+                            # Only inject context params the tool actually accepts
+                            filtered_context = {
+                                k: v
+                                for k, v in registry_ref._session_context.items()
+                                if k in tool_params
+                            }
+                            # Context overrides inputs so framework values always win
+                            merged_inputs = {**inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:
@@ -330,7 +349,7 @@ class ToolRegistry:
                 self.register(
                     mcp_tool.name,
                     tool,
-                    make_mcp_executor(client, mcp_tool.name, self),
+                    make_mcp_executor(client, mcp_tool.name, self, accepted_params),
                 )
                 count += 1
 
@@ -355,6 +374,11 @@ class ToolRegistry:
         input_schema = mcp_tool.input_schema
         properties = input_schema.get("properties", {})
         required = input_schema.get("required", [])
+
+        # Strip framework-internal context params from LLM-facing schema.
+        # The LLM can't know these values; they're auto-injected at call time.
+        properties = {k: v for k, v in properties.items() if k not in self.CONTEXT_PARAMS}
+        required = [r for r in required if r not in self.CONTEXT_PARAMS]
 
         # Convert to framework Tool format
         tool = Tool(

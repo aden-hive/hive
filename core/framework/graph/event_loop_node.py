@@ -986,8 +986,7 @@ class EventLoopNode(NodeProtocol):
             response = ctx.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
-                    "Summarize conversations concisely. "
-                    "Always preserve the tool history section."
+                    "Summarize conversations concisely. Always preserve the tool history section."
                 ),
                 max_tokens=500,
             )
