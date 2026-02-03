@@ -23,7 +23,7 @@ from framework.graph.node import NodeSpec
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.runtime.execution_stream import EntryPointSpec
-from framework.runtime.outcome_aggregator import OutcomeAggregator
+from framework.runtime.outcome_aggregator import OutcomeAggregator, validate_goal_constraints
 from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 
 # === Test Fixtures ===
@@ -383,6 +383,68 @@ class TestOutcomeAggregator:
 
         assert len(aggregator._constraint_violations) == 1
         assert aggregator._constraint_violations[0].constraint_id == "c-1"
+
+
+def test_validate_goal_constraints_violated():
+    """validate_goal_constraints returns violations when output violates check."""
+    goal = Goal(
+        id="g1",
+        name="Test",
+        description="No competitor names",
+        constraints=[
+            Constraint(
+                id="no-competitor",
+                description="No competitor names",
+                constraint_type="hard",
+                check="'CompetitorBrand' not in str(result.get('content', ''))",
+            )
+        ],
+    )
+    output = {"content": "Our product beats CompetitorBrand!"}
+    violations = validate_goal_constraints(goal, output)
+    assert len(violations) == 1
+    assert violations[0].constraint_id == "no-competitor"
+    assert violations[0].violated is True
+
+
+def test_validate_goal_constraints_satisfied():
+    """validate_goal_constraints returns empty list when output satisfies check."""
+    goal = Goal(
+        id="g1",
+        name="Test",
+        description="No competitor names",
+        constraints=[
+            Constraint(
+                id="no-competitor",
+                description="No competitor names",
+                constraint_type="hard",
+                check="'CompetitorBrand' not in str(result.get('content', ''))",
+            )
+        ],
+    )
+    output = {"content": "Our product is great."}
+    violations = validate_goal_constraints(goal, output)
+    assert len(violations) == 0
+
+
+def test_validate_goal_constraints_empty_check_skipped():
+    """Constraints with empty check are skipped; no violation reported."""
+    goal = Goal(
+        id="g1",
+        name="Test",
+        description="No check",
+        constraints=[
+            Constraint(
+                id="no-check",
+                description="No programmatic check",
+                constraint_type="hard",
+                check="",
+            )
+        ],
+    )
+    output = {"anything": "anything"}
+    violations = validate_goal_constraints(goal, output)
+    assert len(violations) == 0
 
 
 # === AgentRuntime Tests ===

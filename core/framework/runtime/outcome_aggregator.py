@@ -11,10 +11,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from framework.graph.code_sandbox import safe_eval
+from framework.graph.goal import Goal
 from framework.schemas.decision import Decision, Outcome
 
 if TYPE_CHECKING:
-    from framework.graph.goal import Goal
     from framework.runtime.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,54 @@ class ConstraintCheck:
     stream_id: str | None = None
     execution_id: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
+
+
+def validate_goal_constraints(goal: Goal, output: dict[str, Any]) -> list[ConstraintCheck]:
+    """
+    Validate execution output against goal constraints.
+
+    Evaluates each constraint's `check` expression (if non-empty and not "llm_judge")
+    with context {"result": output, "output": output}. If evaluation fails or
+    returns falsy, the constraint is considered violated.
+
+    Args:
+        goal: The goal with constraints to check
+        output: The execution output (e.g. memory.read_all())
+
+    Returns:
+        List of ConstraintCheck for violated constraints only.
+    """
+    violations: list[ConstraintCheck] = []
+    if not goal.constraints:
+        return violations
+
+    context = {"result": output, "output": output}
+
+    for constraint in goal.constraints:
+        check_expr = (constraint.check or "").strip()
+        if not check_expr or check_expr.lower() == "llm_judge":
+            continue
+
+        try:
+            eval_result = safe_eval(check_expr, context)
+            if eval_result.success and eval_result.result:
+                continue
+            violation_details = (
+                eval_result.error if eval_result.error else "expression evaluated to false"
+            )
+        except Exception as e:
+            violation_details = f"evaluation error: {e}"
+
+        violations.append(
+            ConstraintCheck(
+                constraint_id=constraint.id,
+                description=constraint.description,
+                violated=True,
+                violation_details=violation_details,
+            )
+        )
+
+    return violations
 
 
 @dataclass
@@ -219,6 +268,28 @@ class OutcomeAggregator:
                     description=violation_details,
                 )
             )
+
+    def validate_constraints(self, output: dict[str, Any]) -> list[ConstraintCheck]:
+        """
+        Validate output against goal constraints and record any violations.
+
+        Calls validate_goal_constraints(goal, output), records each violation
+        via record_constraint_violation, and returns the list of violations.
+
+        Args:
+            output: The execution output to validate
+
+        Returns:
+            List of ConstraintCheck for violated constraints.
+        """
+        violations = validate_goal_constraints(self.goal, output)
+        for v in violations:
+            self.record_constraint_violation(
+                constraint_id=v.constraint_id,
+                description=v.description,
+                violation_details=v.violation_details or "violated",
+            )
+        return violations
 
     # === GOAL EVALUATION ===
 

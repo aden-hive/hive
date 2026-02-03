@@ -31,6 +31,7 @@ from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
+from framework.runtime.outcome_aggregator import validate_goal_constraints
 
 
 @dataclass
@@ -356,8 +357,10 @@ class GraphExecutor:
                     summary = result.to_summary(node_spec)
                     self.logger.info(f"   📝 Summary: {summary}")
 
-                    # Log what was written to memory (detailed view)
+                    # Write node output to shared memory (so terminal / no-edge paths see it)
                     if result.output:
+                        for key, value in result.output.items():
+                            memory.write(key, value, validate=False)
                         self.logger.info("   Written to memory:")
                         for key, value in result.output.items():
                             value_str = str(value)
@@ -444,6 +447,46 @@ class GraphExecutor:
                 if node_spec.id in graph.pause_nodes:
                     self.logger.info("💾 Saving session state after pause node")
                     saved_memory = memory.read_all()
+                    # Validate hard constraints before returning success
+                    violations = validate_goal_constraints(goal, saved_memory)
+                    hard_violations = [
+                        v
+                        for v in violations
+                        if (c := next((c for c in goal.constraints if c.id == v.constraint_id), None))
+                        and c.constraint_type == "hard"
+                    ]
+                    if hard_violations:
+                        err_msg = "; ".join(
+                            f"{v.constraint_id} ({v.description}): {v.violation_details or 'violated'}"
+                            for v in hard_violations
+                        )
+                        self.runtime.end_run(
+                            success=False,
+                            narrative=f"Hard constraint violated: {err_msg}",
+                        )
+                        total_retries_count = sum(node_retry_counts.values())
+                        nodes_failed = [
+                            nid for nid, count in node_retry_counts.items() if count > 0
+                        ]
+                        return ExecutionResult(
+                            success=False,
+                            error=f"Hard constraint violated: {err_msg}",
+                            output=saved_memory,
+                            steps_executed=steps,
+                            total_tokens=total_tokens,
+                            total_latency_ms=total_latency,
+                            path=path,
+                            paused_at=node_spec.id,
+                            session_state={
+                                "paused_at": node_spec.id,
+                                "memory": saved_memory,
+                            },
+                            total_retries=total_retries_count,
+                            nodes_with_failures=nodes_failed,
+                            retry_details=dict(node_retry_counts),
+                            had_partial_failures=len(nodes_failed) > 0,
+                            execution_quality="failed",
+                        )
                     session_state_out = {
                         "paused_at": node_spec.id,
                         "resume_from": f"{node_spec.id}_resume",  # Resume key
@@ -557,6 +600,43 @@ class GraphExecutor:
 
             # Collect output
             output = memory.read_all()
+
+            # Validate hard constraints before returning success
+            violations = validate_goal_constraints(goal, output)
+            hard_violations = [
+                v
+                for v in violations
+                if (c := next((c for c in goal.constraints if c.id == v.constraint_id), None))
+                and c.constraint_type == "hard"
+            ]
+            if hard_violations:
+                err_msg = "; ".join(
+                    f"{v.constraint_id} ({v.description}): {v.violation_details or 'violated'}"
+                    for v in hard_violations
+                )
+                self.logger.warning(f"Hard constraint violated: {err_msg}")
+                self.runtime.end_run(
+                    success=False,
+                    narrative=f"Hard constraint violated: {err_msg}",
+                )
+                total_retries_count = sum(node_retry_counts.values())
+                nodes_failed = [
+                    nid for nid, count in node_retry_counts.items() if count > 0
+                ]
+                return ExecutionResult(
+                    success=False,
+                    error=f"Hard constraint violated: {err_msg}",
+                    output=output,
+                    steps_executed=steps,
+                    total_tokens=total_tokens,
+                    total_latency_ms=total_latency,
+                    path=path,
+                    total_retries=total_retries_count,
+                    nodes_with_failures=nodes_failed,
+                    retry_details=dict(node_retry_counts),
+                    had_partial_failures=len(nodes_failed) > 0,
+                    execution_quality="failed",
+                )
 
             self.logger.info("\n✓ Execution complete!")
             self.logger.info(f"   Steps: {steps}")
