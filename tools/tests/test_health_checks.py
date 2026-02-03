@@ -10,6 +10,7 @@ from aden_tools.credentials.health_check import (
     GitHubHealthChecker,
     GoogleSearchHealthChecker,
     ResendHealthChecker,
+    check_credential_health,
 )
 
 
@@ -255,3 +256,53 @@ class TestResendHealthChecker:
 
         assert result.valid is False
         assert result.details["error"] == "timeout"
+
+
+class TestCheckCredentialHealthDispatcher:
+    """Tests for the check_credential_health() top-level dispatcher."""
+
+    def test_unknown_credential_returns_valid(self):
+        """Unregistered credential names are assumed valid."""
+        result = check_credential_health("nonexistent_service", "some-key")
+
+        assert result.valid is True
+        assert result.details.get("no_checker") is True
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_dispatches_to_registered_checker(self, mock_client_cls):
+        """Normal dispatch calls the registered checker."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = 200
+        mock_client.get.return_value = response
+
+        result = check_credential_health("brave_search", "test-key")
+
+        assert result.valid is True
+        mock_client.get.assert_called_once()
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_google_search_with_cse_id(self, mock_client_cls):
+        """google_search special case passes cse_id to checker."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = 200
+        mock_client.get.return_value = response
+
+        result = check_credential_health("google_search", "api-key", cse_id="cse-123")
+
+        assert result.valid is True
+        # Verify the request included the cse_id as the cx param
+        call_kwargs = mock_client.get.call_args
+        assert call_kwargs[1]["params"]["cx"] == "cse-123"
+
+    def test_google_search_without_cse_id(self):
+        """google_search without cse_id does partial check (no HTTP call)."""
+        result = check_credential_health("google_search", "api-key")
+
+        assert result.valid is True
+        assert result.details.get("partial_check") is True

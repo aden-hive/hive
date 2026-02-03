@@ -47,21 +47,14 @@ jq -r '.required_tools[]?' exports/{agent_name}/agent.json 2>/dev/null
 jq -r '.graph.nodes[]?.node_type' exports/{agent_name}/agent.json 2>/dev/null | sort -u
 ```
 
-Use this lookup table to map tools and node types to credential IDs and env vars:
+Map the extracted tools and node types to credentials by reading the spec files directly:
 
-```
-Tool → Credential mapping:
-  web_search                          → brave_search (BRAVE_SEARCH_API_KEY)
-  google_search                       → google_search (GOOGLE_API_KEY) + google_cse (GOOGLE_CSE_ID)
-  send_email, send_budget_alert_email → resend (RESEND_API_KEY)
-  github_* (any github_ prefixed)     → github (GITHUB_TOKEN)
-  hubspot_* (any hubspot_ prefixed)   → hubspot (HUBSPOT_ACCESS_TOKEN)
-
-Node type → Credential mapping:
-  llm_generate, llm_tool_use          → anthropic (ANTHROPIC_API_KEY)
+```bash
+# Read all credential specs — each file defines tools, node_types, env_var, and credential_id
+cat tools/src/aden_tools/credentials/llm.py tools/src/aden_tools/credentials/search.py tools/src/aden_tools/credentials/email.py tools/src/aden_tools/credentials/integrations.py
 ```
 
-Read the tool list and node types, apply the table, and build a list of needed credential IDs.
+For each `CredentialSpec`, match its `tools` and `node_types` lists against the agent's required tools and node types. Extract the `env_var`, `credential_id`, and `credential_group` for every match. This is the list of needed credentials.
 
 #### Step 2b: Check Existing Credential Sources
 
@@ -115,14 +108,7 @@ Decision logic:
 
 Diff the "needed" credentials against the "found" credentials to get the truly missing list.
 
-Group related credentials using this table:
-
-```
-Groups:
-  google_custom_search: google_search + google_cse
-```
-
-When a group is detected, present all credentials in the group as a single setup step rather than asking for each one individually.
+Group related credentials by their `credential_group` field from the spec files. Credentials that share the same non-empty `credential_group` value should be presented as a single setup step rather than asking for each one individually.
 
 **If nothing is missing and there's no HIVE_CREDENTIAL_KEY issue:** Report all credentials as configured and skip Steps 3-5. Example:
 

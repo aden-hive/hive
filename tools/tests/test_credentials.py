@@ -470,6 +470,6 @@ class TestSpecCompleteness:
         """Specs without a group have empty credential_group."""
         for name, spec in CREDENTIAL_SPECS.items():
             if name not in ("google_search", "google_cse"):
-                assert (
-                    spec.credential_group == ""
-                ), f"Credential '{name}' has unexpected credential_group='{spec.credential_group}'"
+                assert spec.credential_group == "", (
+                    f"Credential '{name}' has unexpected credential_group='{spec.credential_group}'"
+                )

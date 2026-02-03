@@ -239,11 +239,12 @@ class AnthropicHealthChecker:
 
     def check(self, api_key: str) -> HealthCheckResult:
         """
-        Validate Anthropic API key.
+        Validate Anthropic API key without consuming tokens.
 
-        Sends a minimal request to the messages endpoint.
-        A 401 means invalid key; 400 (bad request) or 200 means the key is valid.
-        429 (rate limited) also indicates a valid key.
+        Sends a deliberately invalid request (empty messages) to the messages endpoint.
+        A 401 means invalid key; 400 (bad request) means the key authenticated
+        but the payload was rejected — confirming the key is valid without
+        generating any tokens. 429 (rate limited) also indicates a valid key.
         """
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
@@ -254,10 +255,11 @@ class AnthropicHealthChecker:
                         "anthropic-version": "2023-06-01",
                         "Content-Type": "application/json",
                     },
+                    # Empty messages triggers 400 (not 200), so no tokens are consumed.
                     json={
                         "model": "claude-sonnet-4-20250514",
                         "max_tokens": 1,
-                        "messages": [{"role": "user", "content": "hi"}],
+                        "messages": [],
                     },
                 )
 
