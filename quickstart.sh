@@ -663,7 +663,7 @@ else
 fi
 
 echo -n "  ⬡ litellm... "
-if $PYTHON_CMD -c "import litellm" > /dev/null 2>&1; then
+if $CORE_PYTHON -c "import litellm" > /dev/null 2>&1 || $TOOLS_PYTHON -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}--${NC}"
