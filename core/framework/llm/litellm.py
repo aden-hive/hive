@@ -89,7 +89,7 @@ class LiteLLMProvider(LLMProvider):
     Supports any model that LiteLLM supports, including:
     - OpenAI: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo
     - Anthropic: claude-3-opus, claude-3-sonnet, claude-3-haiku
-    - Google: gemini-pro, gemini-1.5-pro, gemini-1.5-flash
+    - Google: gemini-2.5-flash, gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash
     - DeepSeek: deepseek-chat, deepseek-coder, deepseek-reasoner
     - Mistral: mistral-large, mistral-medium, mistral-small
     - Groq: llama3-70b, mixtral-8x7b
