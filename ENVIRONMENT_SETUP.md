@@ -122,6 +122,18 @@ python -c "import litellm; print('✓ litellm OK')"
 - **Recommended:** Python 3.11 or 3.12
 - **Tested on:** Python 3.11, 3.12, 3.13
 
+### Windows Notes (Git Bash)
+
+If you have multiple Python versions installed on Windows, list them using:
+```bash
+py -0p
+We recommend Python 3.12 in a virtual environment:
+py -3.12 -m venv .venv
+source .venv/Scripts/activate
+python --version
+Then run the setup script:
+./scripts/setup-python.sh
+
 ### System Requirements
 
 - pip (latest version)
