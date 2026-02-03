@@ -42,7 +42,7 @@
 ## Adenとは
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Adenは、AIエージェントの構築、デプロイ、運用、適応のためのプラットフォームです：
