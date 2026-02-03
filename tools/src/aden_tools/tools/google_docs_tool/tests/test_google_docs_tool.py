@@ -348,3 +348,115 @@ class TestGoogleDocsAddComment:
 
         assert result["id"] == "comment123"
         assert result["content"] == "This needs review"
+
+
+class TestImageUriValidation:
+    """Tests for image URI validation."""
+
+    @patch("httpx.post")
+    def test_insert_image_valid_https_uri(self, mock_post, mcp_with_credentials):
+        """Test that valid HTTPS URIs are accepted."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"replies": []}
+        mock_post.return_value = mock_response
+
+        tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_insert_image")
+        result = tool_fn(
+            document_id="doc123",
+            image_uri="https://example.com/image.png",
+            index=1,
+        )
+
+        assert "error" not in result
+
+    def test_insert_image_empty_uri(self, mcp_with_credentials):
+        """Test that empty URI returns an error."""
+        tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_insert_image")
+        result = tool_fn(
+            document_id="doc123",
+            image_uri="",
+            index=1,
+        )
+
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+
+    def test_insert_image_invalid_scheme(self, mcp_with_credentials):
+        """Test that non-http(s) schemes are rejected."""
+        tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_insert_image")
+        result = tool_fn(
+            document_id="doc123",
+            image_uri="ftp://example.com/image.png",
+            index=1,
+        )
+
+        assert "error" in result
+        assert "scheme" in result["error"].lower()
+
+    def test_insert_image_missing_scheme(self, mcp_with_credentials):
+        """Test that URIs without scheme are rejected."""
+        tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_insert_image")
+        result = tool_fn(
+            document_id="doc123",
+            image_uri="example.com/image.png",
+            index=1,
+        )
+
+        assert "error" in result
+        assert "scheme" in result["error"].lower() or "format" in result["error"].lower()
+
+    def test_insert_image_javascript_uri_rejected(self, mcp_with_credentials):
+        """Test that javascript: URIs are rejected."""
+        tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_insert_image")
+        result = tool_fn(
+            document_id="doc123",
+            image_uri="javascript:alert('xss')",
+            index=1,
+        )
+
+        assert "error" in result
+
+
+class TestReplaceAllTextValidation:
+    """Tests for replace_all_text validation."""
+
+    def test_replace_all_text_empty_find_text(self, mcp_with_credentials):
+        """Test that empty find_text returns an error."""
+        tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_replace_all_text")
+        result = tool_fn(
+            document_id="doc123",
+            find_text="",
+            replace_text="replacement",
+        )
+
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+
+
+class TestServiceAccountTokenExchange:
+    """Tests for service account JWT token exchange."""
+
+    @patch("httpx.post")
+    @patch.dict(
+        "os.environ",
+        {"GOOGLE_SERVICE_ACCOUNT_JSON": '{"access_token": "pre-exchanged-token"}'},
+    )
+    def test_fallback_to_pre_exchanged_token(self, mock_post):
+        """Test that pre-exchanged tokens in JSON are used as fallback."""
+        server = FastMCP("test")
+        register_tools(server)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "documentId": "doc123",
+            "title": "Test",
+        }
+        mock_post.return_value = mock_response
+
+        tool_fn = get_tool_fn(server, "google_docs_create_document")
+        result = tool_fn(title="Test")
+
+        # Should use the pre-exchanged token and make the API call
+        assert "error" not in result or "not configured" not in result.get("error", "")

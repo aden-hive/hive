@@ -15,9 +15,13 @@ of the document) to avoid index shifting issues.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import re
+import time
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
 from fastmcp import FastMCP
@@ -27,6 +31,172 @@ if TYPE_CHECKING:
 
 GOOGLE_DOCS_API_BASE = "https://docs.googleapis.com/v1"
 GOOGLE_DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
+GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+# Allowed URL schemes for image insertion
+ALLOWED_IMAGE_SCHEMES = {"https", "http"}
+# Regex pattern for valid URLs
+URL_PATTERN = re.compile(
+    r"^https?://"  # http:// or https://
+    r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|"  # domain
+    r"localhost|"  # localhost
+    r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"  # or ip
+    r"(?::\d+)?"  # optional port
+    r"(?:/?|[/?]\S+)$",
+    re.IGNORECASE,
+)
+
+
+def _validate_image_uri(uri: str) -> dict[str, str] | None:
+    """Validate that an image URI is well-formed and uses a secure scheme.
+
+    Args:
+        uri: The URI to validate
+
+    Returns:
+        None if valid, or an error dict if invalid
+    """
+    if not uri or not uri.strip():
+        return {"error": "Image URI cannot be empty"}
+
+    parsed = urlparse(uri)
+
+    # Check scheme
+    if not parsed.scheme:
+        return {"error": "Invalid image URI: missing scheme. Use https:// or http://"}
+
+    if parsed.scheme.lower() not in ALLOWED_IMAGE_SCHEMES:
+        return {
+            "error": f"Invalid image URI scheme: '{parsed.scheme}'. "
+            f"Only {', '.join(ALLOWED_IMAGE_SCHEMES)} are allowed."
+        }
+
+    # Check for valid URL format
+    if not URL_PATTERN.match(uri):
+        return {"error": f"Invalid image URI format: '{uri}'"}
+
+    # Check netloc (domain)
+    if not parsed.netloc:
+        return {"error": "Invalid image URI: missing domain"}
+
+    return None
+
+
+def _get_document_end_index(doc: dict[str, Any]) -> int:
+    """Extract the end index from a document for appending text.
+
+    Args:
+        doc: The document response from the API
+
+    Returns:
+        The index to insert at for appending to end of document
+    """
+    body = doc.get("body", {})
+    content = body.get("content", [])
+    if content:
+        last_element = content[-1]
+        end_index = last_element.get("endIndex", 1)
+        return end_index - 1  # Insert before the final newline
+    return 1
+
+
+def _create_service_account_token(service_account_json: str) -> str | None:
+    """Create an access token from a service account JSON using JWT.
+
+    This implements the OAuth 2.0 service account flow:
+    1. Create a signed JWT
+    2. Exchange it for an access token
+
+    Args:
+        service_account_json: The service account JSON string
+
+    Returns:
+        Access token string, or None if token creation failed
+    """
+    try:
+        sa_data = json.loads(service_account_json)
+    except json.JSONDecodeError:
+        return None
+
+    # Check if this is actually a service account
+    if sa_data.get("type") != "service_account":
+        # Not a service account, check for direct access token
+        return sa_data.get("access_token")
+
+    # Required fields for service account
+    private_key = sa_data.get("private_key")
+    client_email = sa_data.get("client_email")
+    token_uri = sa_data.get("token_uri", GOOGLE_OAUTH_TOKEN_URL)
+
+    if not private_key or not client_email:
+        return None
+
+    # Create JWT header and claims
+    now = int(time.time())
+    header = {"alg": "RS256", "typ": "JWT"}
+    claims = {
+        "iss": client_email,
+        "sub": client_email,
+        "aud": token_uri,
+        "iat": now,
+        "exp": now + 3600,  # 1 hour expiry
+        "scope": (
+            "https://www.googleapis.com/auth/documents "
+            "https://www.googleapis.com/auth/drive.file "
+            "https://www.googleapis.com/auth/drive"
+        ),
+    }
+
+    try:
+        # Try using cryptography library for RSA signing
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        # Encode header and claims
+        def _b64url_encode(data: bytes) -> str:
+            return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
+
+        header_b64 = _b64url_encode(json.dumps(header).encode())
+        claims_b64 = _b64url_encode(json.dumps(claims).encode())
+        signing_input = f"{header_b64}.{claims_b64}"
+
+        # Load private key and sign
+        private_key_obj = serialization.load_pem_private_key(
+            private_key.encode(), password=None, backend=default_backend()
+        )
+        signature = private_key_obj.sign(
+            signing_input.encode(),
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+        signature_b64 = _b64url_encode(signature)
+
+        jwt_token = f"{signing_input}.{signature_b64}"
+
+        # Exchange JWT for access token
+        response = httpx.post(
+            token_uri,
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": jwt_token,
+            },
+            timeout=30.0,
+        )
+
+        if response.status_code == 200:
+            token_data = response.json()
+            return token_data.get("access_token")
+
+        return None
+
+    except ImportError:
+        # cryptography not available, cannot sign JWT
+        # Fall back to checking for pre-exchanged token
+        return sa_data.get("access_token")
+    except Exception:
+        # Any signing/exchange error
+        return None
 
 
 class _GoogleDocsClient:
@@ -114,15 +284,7 @@ class _GoogleDocsClient:
             doc = self.get_document(document_id)
             if "error" in doc:
                 return doc
-            # Get the end index from the document body
-            body = doc.get("body", {})
-            content = body.get("content", [])
-            if content:
-                last_element = content[-1]
-                end_index = last_element.get("endIndex", 1)
-                location["index"] = end_index - 1  # Insert before the final newline
-            else:
-                location["index"] = 1
+            location["index"] = _get_document_end_index(doc)
 
         request = {
             "insertText": {
@@ -140,6 +302,9 @@ class _GoogleDocsClient:
         match_case: bool = True,
     ) -> dict[str, Any]:
         """Global find-and-replace (ideal for populating templates with dynamic data)."""
+        if not find_text:
+            return {"error": "find_text cannot be empty"}
+
         request = {
             "replaceAllText": {
                 "containsText": {
@@ -160,6 +325,11 @@ class _GoogleDocsClient:
         height_pt: float | None = None,
     ) -> dict[str, Any]:
         """Insert an image into the document body via URI."""
+        # Validate image URI before making API call
+        validation_error = _validate_image_uri(image_uri)
+        if validation_error:
+            return validation_error
+
         request: dict[str, Any] = {
             "insertInlineImage": {
                 "location": {"index": index},
@@ -275,8 +445,6 @@ class _GoogleDocsClient:
         )
         if response.status_code == 200:
             # Return base64-encoded content for binary formats
-            import base64
-
             return {
                 "document_id": document_id,
                 "mime_type": mime_type,
@@ -302,20 +470,14 @@ def register_tools(
                     f"got {type(token).__name__}"
                 )
             return token
-        # Try environment variables
+        # Try environment variables - direct access token first
         token = os.getenv("GOOGLE_DOCS_ACCESS_TOKEN")
         if token:
             return token
-        # Try service account JSON (would need additional handling for token exchange)
+        # Try service account JSON with proper JWT token exchange
         service_account = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
         if service_account:
-            # For service accounts, we'd need to implement JWT token exchange
-            # This is a simplified version that expects a pre-exchanged token
-            try:
-                sa_data = json.loads(service_account)
-                return sa_data.get("access_token")
-            except json.JSONDecodeError:
-                return None
+            return _create_service_account_token(service_account)
         return None
 
     def _get_client() -> _GoogleDocsClient | dict[str, str]:

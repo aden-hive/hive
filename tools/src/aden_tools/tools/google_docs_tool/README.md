@@ -44,7 +44,7 @@ export GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
 
 - `https://www.googleapis.com/auth/documents` - Full access to Google Docs
 - `https://www.googleapis.com/auth/drive.file` - Access to files created/opened by the app
-- `https://www.googleapis.com/auth/drive` - For export and comments functionality
+- `https://www.googleapis.com/auth/drive` - Required for document export and comment functionality
 
 ## Available Tools
 
