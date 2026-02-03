@@ -421,7 +421,12 @@ Hive provides granular budget controls including spending limits, throttles, and
 
 **Q: Where can I find examples and documentation?**
 
-Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API reference, and getting started tutorials. The repository also includes documentation in the `docs/` folder and a comprehensive [DEVELOPER.md](DEVELOPER.md) guide.
+Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API reference, and getting started tutorials. The repository also includes:
+- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Common commands and quick tips
+- **[ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)** - Detailed setup instructions
+- **[DEVELOPER.md](DEVELOPER.md)** - Development guidelines
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution process
+- **`docs/` folder** - In-depth technical documentation
 
 **Q: How can I contribute to Aden?**
 
