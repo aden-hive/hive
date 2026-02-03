@@ -94,6 +94,20 @@ class ParallelExecutionConfig:
     branch_timeout_seconds: float = 300.0
 
 
+class MemoryConflictError(RuntimeError):
+    """Raised when parallel branches write the same memory key and strategy is 'error'."""
+
+    def __init__(self, key: str, first_branch: str, second_branch: str):
+        self.key = key
+        self.first_branch = first_branch
+        self.second_branch = second_branch
+        super().__init__(
+            f"Memory conflict on key '{key}': branch '{second_branch}' attempted "
+            f"to write a key already written by branch '{first_branch}' "
+            f"(strategy: 'error')"
+        )
+
+
 class GraphExecutor:
     """
     Executes agent graphs.
@@ -900,6 +914,11 @@ class GraphExecutor:
             target_spec = graph.get_node(branch.node_id)
             self.logger.info(f"      • {target_spec.name if target_spec else branch.node_id}")
 
+        # Track which branch first wrote each memory key for conflict strategy enforcement.
+        # Plain dict is safe: asyncio is single-threaded, and we update synchronously
+        branch_writes: dict[str, str] = {}
+        conflict_strategy = self._parallel_config.memory_conflict_strategy
+
         async def execute_single_branch(
             branch: ParallelBranch,
         ) -> tuple[ParallelBranch, NodeResult | Exception]:
@@ -956,8 +975,18 @@ class GraphExecutor:
                     last_result = result
 
                     if result.success:
-                        # Write outputs to shared memory using async write
+                        # Write outputs respecting memory conflict strategy
                         for key, value in result.output.items():
+                            if key in branch_writes:
+                                prior = branch_writes[key]
+                                if conflict_strategy == "error":
+                                    raise MemoryConflictError(
+                                        key, prior, branch.branch_id
+                                    )
+                                elif conflict_strategy == "first_wins":
+                                    continue
+                            # Mark key BEFORE await to prevent race
+                            branch_writes[key] = branch.branch_id
                             await memory.write_async(key, value)
 
                         branch.result = result

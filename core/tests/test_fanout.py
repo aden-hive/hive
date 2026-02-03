@@ -12,6 +12,7 @@ Covers:
 - Single-edge paths unaffected
 """
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -75,6 +76,20 @@ class TimingNode(NodeProtocol):
         return NodeResult(
             success=True, output={f"{self.label}_done": True}, tokens_used=1, latency_ms=1
         )
+
+class DelayedNode(NodeProtocol):
+    """Succeeds after a configurable async delay. Controls branch completion order."""
+
+    def __init__(self, output: dict, delay: float = 0):
+        self._output = output
+        self._delay = delay
+        self.executed = False
+
+    async def execute(self, ctx: NodeContext) -> NodeResult:
+        if self._delay > 0:
+            await asyncio.sleep(self._delay)
+        self.executed = True
+        return NodeResult(success=True, output=self._output, tokens_used=1, latency_ms=1)
 
 
 # --- Fixtures ---
@@ -488,3 +503,148 @@ async def test_parallel_disabled_uses_sequential(runtime, goal):
     # Only one branch should have executed (sequential follows first edge)
     executed_count = sum([b1_impl.executed, b2_impl.executed])
     assert executed_count == 1
+
+
+# === 12. Memory conflict strategies ===
+
+
+def _make_conflict_graph():
+    """Build a fan-out graph where two branches write the same key."""
+    b1 = NodeSpec(
+        id="b1",
+        name="B1",
+        description="fast branch",
+        node_type="function",
+        output_keys=["shared_key"],
+    )
+    b2 = NodeSpec(
+        id="b2",
+        name="B2",
+        description="slow branch",
+        node_type="function",
+        output_keys=["shared_key"],
+    )
+    return _make_fanout_graph([b1, b2]), b1, b2
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_last_wins_uses_latest_value(runtime, goal):
+    """last_wins: the later branch's write should overwrite the earlier one."""
+    graph, _, _ = _make_conflict_graph()
+
+    config = ParallelExecutionConfig(memory_conflict_strategy="last_wins")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    # b1 finishes instantly, b2 finishes after a delay — b2 writes last
+    executor.register_node("b1", DelayedNode({"shared_key": "from_b1"}, delay=0))
+    executor.register_node("b2", DelayedNode({"shared_key": "from_b2"}, delay=0.05))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+    assert result.output["shared_key"] == "from_b2"
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_first_wins_keeps_earliest_value(runtime, goal):
+    """first_wins: the first branch to write wins; later writes are skipped."""
+    graph, _, _ = _make_conflict_graph()
+
+    config = ParallelExecutionConfig(memory_conflict_strategy="first_wins")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", DelayedNode({"shared_key": "from_b1"}, delay=0))
+    executor.register_node("b2", DelayedNode({"shared_key": "from_b2"}, delay=0.05))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+    assert result.output["shared_key"] == "from_b1"
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_error_strategy_raises_on_conflict(runtime, goal):
+    """error: conflicting writes should cause branch failure."""
+    graph, _, _ = _make_conflict_graph()
+
+    config = ParallelExecutionConfig(
+        memory_conflict_strategy="error",
+        on_branch_failure="fail_all",
+    )
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", DelayedNode({"shared_key": "from_b1"}, delay=0))
+    executor.register_node("b2", DelayedNode({"shared_key": "from_b2"}, delay=0.05))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert not result.success
+    assert result.error is not None
+    assert "conflict" in result.error.lower() or "failed" in result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_no_conflict_with_distinct_keys(runtime, goal):
+    """error strategy should not trigger when branches write different keys."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="b1", node_type="function", output_keys=["key_a"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="b2", node_type="function", output_keys=["key_b"]
+    )
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(memory_conflict_strategy="error")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SuccessNode({"key_a": "a"}))
+    executor.register_node("b2", SuccessNode({"key_b": "b"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+    assert result.output["key_a"] == "a"
+    assert result.output["key_b"] == "b"
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_error_with_continue_others(runtime, goal):
+    """error + continue_others: conflicting branch fails but others continue."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="fast", node_type="function", output_keys=["shared"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="slow conflict", node_type="function",
+        output_keys=["shared"],
+    )
+    b3 = NodeSpec(
+        id="b3", name="B3", description="unique", node_type="function",
+        output_keys=["unique_key"],
+    )
+    graph = _make_fanout_graph([b1, b2, b3])
+
+    config = ParallelExecutionConfig(
+        memory_conflict_strategy="error",
+        on_branch_failure="continue_others",
+    )
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", DelayedNode({"shared": "from_b1"}, delay=0))
+    executor.register_node("b2", DelayedNode({"shared": "from_b2"}, delay=0.05))
+    b3_impl = SuccessNode({"unique_key": "b3_ok"})
+    executor.register_node("b3", b3_impl)
+
+    await executor.execute(graph, goal, {})
+
+    # b2 failed from conflict, but b1 and b3 succeeded
+    assert b3_impl.executed
