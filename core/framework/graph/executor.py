@@ -11,6 +11,7 @@ The executor:
 
 import asyncio
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -380,6 +381,15 @@ class GraphExecutor:
                     # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
                     max_retries = getattr(node_spec, "max_retries", 3)
 
+                    # Event loop nodes handle retry internally via judge —
+                    # executor retry is catastrophic (retry multiplication)
+                    if node_spec.node_type == "event_loop" and max_retries > 0:
+                        self.logger.warning(
+                            f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
+                            "Overriding to 0 — event loop nodes handle retry internally via judge."
+                        )
+                        max_retries = 0
+
                     if node_retry_counts[current_node_id] < max_retries:
                         # Retry - don't increment steps for retries
                         steps -= 1
@@ -658,7 +668,15 @@ class GraphExecutor:
         )
 
     # Valid node types - no ambiguous "llm" type allowed
-    VALID_NODE_TYPES = {"llm_tool_use", "llm_generate", "router", "function", "human_input"}
+    VALID_NODE_TYPES = {
+        "llm_tool_use",
+        "llm_generate",
+        "router",
+        "function",
+        "human_input",
+        "event_loop",
+    }
+    DEPRECATED_NODE_TYPES = {"llm_tool_use": "event_loop", "llm_generate": "event_loop"}
 
     def _get_node_implementation(
         self, node_spec: NodeSpec, cleanup_llm_model: str | None = None
@@ -674,6 +692,17 @@ class GraphExecutor:
                 f"Invalid node type '{node_spec.node_type}' for node '{node_spec.id}'. "
                 f"Must be one of: {sorted(self.VALID_NODE_TYPES)}. "
                 f"Use 'llm_tool_use' for nodes that call tools, 'llm_generate' for text generation."
+            )
+
+        # Warn on deprecated node types
+        if node_spec.node_type in self.DEPRECATED_NODE_TYPES:
+            replacement = self.DEPRECATED_NODE_TYPES[node_spec.node_type]
+            warnings.warn(
+                f"Node type '{node_spec.node_type}' is deprecated. "
+                f"Use '{replacement}' instead. "
+                f"Node: '{node_spec.id}'",
+                DeprecationWarning,
+                stacklevel=2,
             )
 
         # Create based on type
@@ -711,6 +740,13 @@ class GraphExecutor:
                 tool_executor=None,
                 require_tools=False,
                 cleanup_llm_model=cleanup_llm_model,
+            )
+
+        if node_spec.node_type == "event_loop":
+            # Event loop nodes must be pre-registered (like function nodes)
+            raise RuntimeError(
+                f"EventLoopNode '{node_spec.id}' not found in registry. "
+                "Register it with executor.register_node() before execution."
             )
 
         # Should never reach here due to validation above
@@ -909,6 +945,17 @@ class GraphExecutor:
                 branch.status = "failed"
                 branch.error = f"Node {branch.node_id} not found in graph"
                 return branch, RuntimeError(branch.error)
+
+            effective_max_retries = node_spec.max_retries
+            if node_spec.node_type == "event_loop":
+                if effective_max_retries > 1:
+                    self.logger.warning(
+                        f"EventLoopNode '{node_spec.id}' has "
+                        f"max_retries={effective_max_retries}. Overriding "
+                        "to 1 — event loop nodes handle retry internally."
+                    )
+                effective_max_retries = 1
+
             branch.status = "running"
 
             try:
@@ -942,7 +989,7 @@ class GraphExecutor:
 
                 # Execute with retries
                 last_result = None
-                for attempt in range(node_spec.max_retries):
+                for attempt in range(effective_max_retries):
                     branch.retry_count = attempt
 
                     # Build context for this branch
@@ -970,7 +1017,7 @@ class GraphExecutor:
 
                     self.logger.warning(
                         f"      ↻ Branch {node_spec.name}: "
-                        f"retry {attempt + 1}/{node_spec.max_retries}"
+                        f"retry {attempt + 1}/{effective_max_retries}"
                     )
 
                 # All retries exhausted
@@ -979,7 +1026,7 @@ class GraphExecutor:
                 branch.result = last_result
                 self.logger.error(
                     f"      ✗ Branch {node_spec.name}: "
-                    f"failed after {node_spec.max_retries} attempts"
+                    f"failed after {effective_max_retries} attempts"
                 )
                 return branch, last_result
 

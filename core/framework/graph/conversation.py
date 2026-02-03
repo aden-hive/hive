@@ -108,6 +108,50 @@ class ConversationStore(Protocol):
 # ---------------------------------------------------------------------------
 
 
+def _try_extract_key(content: str, key: str) -> str | None:
+    """Try 4 strategies to extract a *key*'s value from message content.
+
+    Strategies (in order):
+    1. Whole message is JSON — ``json.loads``, check for key.
+    2. Embedded JSON via ``find_json_object`` helper.
+    3. Colon format: ``key: value``.
+    4. Equals format: ``key = value``.
+    """
+    from framework.graph.node import find_json_object
+
+    # 1. Whole message is JSON
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict) and key in parsed:
+            val = parsed[key]
+            return json.dumps(val) if not isinstance(val, str) else val
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 2. Embedded JSON via find_json_object
+    json_str = find_json_object(content)
+    if json_str:
+        try:
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict) and key in parsed:
+                val = parsed[key]
+                return json.dumps(val) if not isinstance(val, str) else val
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # 3. Colon format: key: value
+    match = re.search(rf"\b{re.escape(key)}\s*:\s*(.+)", content)
+    if match:
+        return match.group(1).strip()
+
+    # 4. Equals format: key = value
+    match = re.search(rf"\b{re.escape(key)}\s*=\s*(.+)", content)
+    if match:
+        return match.group(1).strip()
+
+    return None
+
+
 class NodeConversation:
     """Message history for a graph node with optional write-through persistence.
 
@@ -133,6 +177,7 @@ class NodeConversation:
         self._messages: list[Message] = []
         self._next_seq: int = 0
         self._meta_persisted: bool = False
+        self._last_api_input_tokens: int | None = None
 
     # --- Properties --------------------------------------------------------
 
@@ -205,13 +250,77 @@ class NodeConversation:
     # --- Query -------------------------------------------------------------
 
     def to_llm_messages(self) -> list[dict[str, Any]]:
-        """Return messages as OpenAI-format dicts (system prompt excluded)."""
-        return [m.to_llm_dict() for m in self._messages]
+        """Return messages as OpenAI-format dicts (system prompt excluded).
+
+        Automatically repairs orphaned tool_use blocks (assistant messages
+        with tool_calls that lack corresponding tool-result messages).  This
+        can happen when a loop is cancelled mid-tool-execution.
+        """
+        msgs = [m.to_llm_dict() for m in self._messages]
+        return self._repair_orphaned_tool_calls(msgs)
+
+    @staticmethod
+    def _repair_orphaned_tool_calls(
+        msgs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Ensure every tool_call has a matching tool-result message."""
+        repaired: list[dict[str, Any]] = []
+        for i, m in enumerate(msgs):
+            repaired.append(m)
+            tool_calls = m.get("tool_calls")
+            if m.get("role") != "assistant" or not tool_calls:
+                continue
+            # Collect IDs of tool results that follow this assistant message
+            answered: set[str] = set()
+            for j in range(i + 1, len(msgs)):
+                if msgs[j].get("role") == "tool":
+                    tid = msgs[j].get("tool_call_id")
+                    if tid:
+                        answered.add(tid)
+                else:
+                    break  # stop at first non-tool message
+            # Patch any missing results
+            for tc in tool_calls:
+                tc_id = tc.get("id")
+                if tc_id and tc_id not in answered:
+                    repaired.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": "ERROR: Tool execution was interrupted.",
+                        }
+                    )
+        return repaired
 
     def estimate_tokens(self) -> int:
-        """Rough token estimate: total characters / 4."""
+        """Best available token estimate.
+
+        Uses actual API input token count when available (set via
+        :meth:`update_token_count`), otherwise falls back to the rough
+        ``total_chars / 4`` heuristic.
+        """
+        if self._last_api_input_tokens is not None:
+            return self._last_api_input_tokens
         total_chars = sum(len(m.content) for m in self._messages)
         return total_chars // 4
+
+    def update_token_count(self, actual_input_tokens: int) -> None:
+        """Store actual API input token count for more accurate compaction.
+
+        Called by EventLoopNode after each LLM call with the ``input_tokens``
+        value from the API response.  This value includes system prompt and
+        tool definitions, so it may be higher than a message-only estimate.
+        """
+        self._last_api_input_tokens = actual_input_tokens
+
+    def usage_ratio(self) -> float:
+        """Current token usage as a fraction of *max_history_tokens*.
+
+        Returns 0.0 when ``max_history_tokens`` is zero (unlimited).
+        """
+        if self._max_history_tokens <= 0:
+            return 0.0
+        return self.estimate_tokens() / self._max_history_tokens
 
     def needs_compaction(self) -> bool:
         return self.estimate_tokens() >= self._max_history_tokens * self._compaction_threshold
@@ -244,39 +353,7 @@ class NodeConversation:
 
     def _try_extract_key(self, content: str, key: str) -> str | None:
         """Try 4 strategies to extract a key's value from message content."""
-        from framework.graph.node import find_json_object
-
-        # 1. Whole message is JSON
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, dict) and key in parsed:
-                val = parsed[key]
-                return json.dumps(val) if not isinstance(val, str) else val
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        # 2. Embedded JSON via find_json_object
-        json_str = find_json_object(content)
-        if json_str:
-            try:
-                parsed = json.loads(json_str)
-                if isinstance(parsed, dict) and key in parsed:
-                    val = parsed[key]
-                    return json.dumps(val) if not isinstance(val, str) else val
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # 3. Colon format: key: value
-        match = re.search(rf"\b{re.escape(key)}\s*:\s*(.+)", content)
-        if match:
-            return match.group(1).strip()
-
-        # 4. Equals format: key = value
-        match = re.search(rf"\b{re.escape(key)}\s*=\s*(.+)", content)
-        if match:
-            return match.group(1).strip()
-
-        return None
+        return _try_extract_key(content, key)
 
     # --- Lifecycle ---------------------------------------------------------
 
@@ -330,6 +407,7 @@ class NodeConversation:
             await self._store.write_cursor({"next_seq": self._next_seq})
 
         self._messages = [summary_msg] + recent_messages
+        self._last_api_input_tokens = None  # reset; next LLM call will recalibrate
 
     async def clear(self) -> None:
         """Remove all messages, keep system prompt, preserve ``_next_seq``."""
@@ -337,6 +415,7 @@ class NodeConversation:
             await self._store.delete_parts_before(self._next_seq)
             await self._store.write_cursor({"next_seq": self._next_seq})
         self._messages.clear()
+        self._last_api_input_tokens = None
 
     def export_summary(self) -> str:
         """Structured summary with [STATS], [CONFIG], [RECENT_MESSAGES] sections."""
