@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
+from .excel_tool import register_tools as register_excel
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.execute_command_tool import (
@@ -81,6 +82,7 @@ def register_all_tools(
     register_grep_search(mcp)
     register_execute_command(mcp)
     register_csv(mcp)
+    register_excel(mcp)
 
     return [
         "example_tool",
@@ -100,6 +102,11 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "excel_read",
+        "excel_write",
+        "excel_append",
+        "excel_info",
+        "excel_create_sheet",
         "send_email",
         "send_budget_alert_email",
         "hubspot_search_contacts",

@@ -75,6 +75,15 @@ python mcp_server.py
 | `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
+| `csv_read`             | Read and parse CSV files                        |
+| `csv_write`            | Write data to CSV files                         |
+| `csv_append`           | Append data to existing CSV files               |
+| `csv_info`             | Get information about CSV files                 |
+| `excel_read`           | Read and parse Excel files (.xlsx/.xls)        |
+| `excel_write`          | Write data to Excel files                       |
+| `excel_append`         | Append data to existing Excel files             |
+| `excel_info`           | Get information about Excel files               |
+| `excel_create_sheet`   | Create new sheets in Excel files                |
 
 ## Project Structure
 
