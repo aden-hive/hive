@@ -38,6 +38,7 @@ from .file_system_toolkits.replace_file_content import (
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
+from .google_docs_tool import register_tools as register_google_docs
 from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
@@ -70,6 +71,8 @@ def register_all_tools(
     # email supports multiple providers (Resend) with auto-detection
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    # Google Docs integration
+    register_google_docs(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -114,6 +117,16 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        "google_docs_create_document",
+        "google_docs_get_document",
+        "google_docs_insert_text",
+        "google_docs_replace_all_text",
+        "google_docs_insert_image",
+        "google_docs_format_text",
+        "google_docs_batch_update",
+        "google_docs_create_list",
+        "google_docs_add_comment",
+        "google_docs_export_content",
     ]
 
 
