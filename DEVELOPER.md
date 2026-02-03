@@ -44,7 +44,7 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 Ensure you have installed:
 
 - **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.12 or 3.13 recommended)
-- **pip** - Package installer for Python (comes with Python)
+- **uv** - Python package manager ([Install](https://docs.astral.sh/uv/getting-started/installation/))
 - **git** - Version control
 - **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional, for using building skills)
 
@@ -52,7 +52,7 @@ Verify installation:
 
 ```bash
 python --version    # Should be 3.11+
-pip --version       # Should be latest
+uv --version        # Should be latest
 git --version       # Any recent version
 ```
 
@@ -128,8 +128,12 @@ hive/                                    # Repository root
 │
 ├── .github/                             # GitHub configuration
 │   ├── workflows/
-│   │   ├── ci.yml                       # Runs on every PR
-│   │   └── release.yml                  # Runs on tags
+│   │   ├── ci.yml                       # Lint, test, validate on every PR
+│   │   ├── release.yml                  # Runs on tags
+│   │   ├── pr-requirements.yml          # PR requirement checks
+│   │   ├── pr-check-command.yml         # PR check commands
+│   │   ├── claude-issue-triage.yml      # Automated issue triage
+│   │   └── auto-close-duplicates.yml    # Close duplicate issues
 │   ├── ISSUE_TEMPLATE/                  # Bug report & feature request templates
 │   ├── PULL_REQUEST_TEMPLATE.md         # PR description template
 │   └── CODEOWNERS                       # Auto-assign reviewers
@@ -166,7 +170,6 @@ hive/                                    # Repository root
 │   │   ├── testing/                     # Testing utilities
 │   │   └── __init__.py
 │   ├── pyproject.toml                   # Package metadata and dependencies
-│   ├── requirements.txt                 # Python dependencies
 │   ├── README.md                        # Framework documentation
 │   ├── MCP_INTEGRATION_GUIDE.md         # MCP server integration guide
 │   └── docs/                            # Protocol documentation
@@ -182,7 +185,6 @@ hive/                                    # Repository root
 │   │       ├── mcp_server.py            # HTTP MCP server
 │   │       └── __init__.py
 │   ├── pyproject.toml                   # Package metadata
-│   ├── requirements.txt                 # Python dependencies
 │   └── README.md                        # Tools documentation
 │
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
@@ -191,14 +193,16 @@ hive/                                    # Repository root
 ├── docs/                                # Documentation
 │   ├── getting-started.md               # Quick start guide
 │   ├── configuration.md                 # Configuration reference
-│   ├── architecture.md                  # System architecture
-│   └── articles/                        # Technical articles
+│   ├── architecture/                    # System architecture
+│   ├── articles/                        # Technical articles
+│   ├── quizzes/                         # Developer quizzes
+│   └── i18n/                            # Translations
 │
 ├── scripts/                             # Build & utility scripts
 │   ├── setup-python.sh                  # Python environment setup
 │   └── setup.sh                         # Legacy setup script
 │
-├── quickstart.sh                        # Install Claude Code skills
+├── quickstart.sh                        # Interactive setup wizard
 ├── ENVIRONMENT_SETUP.md                 # Complete Python setup guide
 ├── README.md                            # Project overview
 ├── DEVELOPER.md                         # This file
@@ -375,7 +379,7 @@ def test_ticket_categorization():
 - **PEP 8** - Follow Python style guide
 - **Type hints** - Use for function signatures and class attributes
 - **Docstrings** - Document classes and public functions
-- **Black** - Code formatter (run with `black .`)
+- **Ruff** - Linter and formatter (run with `make check`)
 
 ```python
 # Good
@@ -509,8 +513,8 @@ chore(deps): update React to 18.2.0
 
 1. Create a feature branch from `main`
 2. Make your changes with clear commits
-3. Run tests locally: `PYTHONPATH=core:exports python -m pytest`
-4. Run linting: `black --check .`
+3. Run tests locally: `make test`
+4. Run linting: `make check`
 5. Push and create a PR
 6. Fill out the PR template
 7. Request review from CODEOWNERS
@@ -528,16 +532,11 @@ chore(deps): update React to 18.2.0
 ```bash
 # Add to core framework
 cd core
-pip install <package>
-# Then add to requirements.txt or pyproject.toml
+uv add <package>
 
 # Add to tools package
 cd tools
-pip install <package>
-# Then add to requirements.txt or pyproject.toml
-
-# Reinstall in editable mode
-pip install -e .
+uv add <package>
 ```
 
 ### Creating a New Agent
@@ -670,9 +669,8 @@ cat .env
 # Or check shell environment
 echo $ANTHROPIC_API_KEY
 
-# Copy from .env.example if needed
-cp .env.example .env
-# Then edit .env with your API keys
+# Create .env if needed
+# Then add your API keys
 ```
 
 
