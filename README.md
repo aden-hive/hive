@@ -56,7 +56,7 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## The Problem Hive Solves
 
-AI agents are powerful, autonomous, and unpredictable. A single logic error, infinite loop, or poorly scoped task can silently consume API tokens, trigger runaway workflows, and incur significant operational cost before anyone notices.
+AI agents are powerful, autonomous, and unpredictable. A single logic error, infinite loop, or poorly scoped task can silently consume API tokens, trigger runaway workflows, and incur high operational cost before anyone notices.
 
 Today, most teams only discover these failures **after** money has already been spent.
 
