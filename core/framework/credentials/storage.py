@@ -263,27 +263,57 @@ class EncryptedFileStorage(CredentialStorage):
         operation: str,
         credential_type: str | None = None,
     ) -> None:
-        """Update the metadata index."""
+        """Update the metadata index with file locking for concurrency safety."""
         index_path = self.base_path / "metadata" / "index.json"
+        lock_path = self.base_path / "metadata" / ".index.lock"
 
-        if index_path.exists():
-            with open(index_path) as f:
-                index = json.load(f)
-        else:
-            index = {"credentials": {}, "version": "1.0"}
+        with open(lock_path, "w") as lock_file:
+            self._acquire_lock(lock_file)
+            try:
+                if index_path.exists():
+                    with open(index_path) as f:
+                        index = json.load(f)
+                else:
+                    index = {"credentials": {}, "version": "1.0"}
 
-        if operation == "save":
-            index["credentials"][credential_id] = {
-                "updated_at": datetime.now(UTC).isoformat(),
-                "type": credential_type,
-            }
-        elif operation == "delete":
-            index["credentials"].pop(credential_id, None)
+                if operation == "save":
+                    index["credentials"][credential_id] = {
+                        "updated_at": datetime.now(UTC).isoformat(),
+                        "type": credential_type,
+                    }
+                elif operation == "delete":
+                    index["credentials"].pop(credential_id, None)
 
-        index["last_modified"] = datetime.now(UTC).isoformat()
+                index["last_modified"] = datetime.now(UTC).isoformat()
 
-        with open(index_path, "w") as f:
-            json.dump(index, f, indent=2)
+                with open(index_path, "w") as f:
+                    json.dump(index, f, indent=2)
+            finally:
+                self._release_lock(lock_file)
+
+    def _acquire_lock(self, lock_file) -> None:
+        """Acquire exclusive file lock (cross-platform)."""
+        try:
+            import fcntl
+
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+        except ImportError:
+            # Windows
+            import msvcrt
+
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _release_lock(self, lock_file) -> None:
+        """Release file lock (cross-platform)."""
+        try:
+            import fcntl
+
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+        except ImportError:
+            # Windows
+            import msvcrt
+
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 class EnvVarStorage(CredentialStorage):
