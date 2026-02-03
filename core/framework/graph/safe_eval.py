@@ -75,16 +75,6 @@ class SafeEvalVisitor(ast.NodeVisitor):
     def visit_Constant(self, node: ast.Constant) -> Any:
         return node.value
 
-    # --- Number/String/Bytes/NameConstant (Python < 3.8 compat if needed) ---
-    def visit_Num(self, node: ast.Num) -> Any:
-        return node.n
-
-    def visit_Str(self, node: ast.Str) -> Any:
-        return node.s
-
-    def visit_NameConstant(self, node: ast.NameConstant) -> Any:
-        return node.value
-
     # --- Data Structures ---
     def visit_List(self, node: ast.List) -> list:
         return [self.visit(elt) for elt in node.elts]
