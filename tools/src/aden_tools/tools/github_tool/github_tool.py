@@ -37,9 +37,7 @@ def _sanitize_path_param(param: str, param_name: str = "parameter") -> str:
         ValueError: If parameter contains invalid characters
     """
     if "/" in param or ".." in param:
-        raise ValueError(
-            f"Invalid {param_name}: cannot contain '/' or '..'"
-        )
+        raise ValueError(f"Invalid {param_name}: cannot contain '/' or '..'")
     return param
 
 
