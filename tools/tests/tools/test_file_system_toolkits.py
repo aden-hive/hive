@@ -1,6 +1,7 @@
 """Tests for file_system_toolkits tools (FastMCP)."""
 
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -575,12 +576,14 @@ class TestExecuteCommandTool:
         # Create a test file
         (tmp_path / "testfile.txt").write_text("content")
 
-        result = execute_command_fn(command=f"ls {tmp_path}", **mock_workspace)
+        cmd = f"dir {tmp_path}" if sys.platform == "win32" else f"ls {tmp_path}"
+        result = execute_command_fn(command=cmd, **mock_workspace)
 
         assert result["success"] is True
         assert result["return_code"] == 0
         assert "testfile.txt" in result["stdout"]
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Pipes/tr not standard on Windows cmd")
     def test_execute_command_with_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
         """Executing a command with pipe works correctly."""
         result = execute_command_fn(command="echo 'hello world' | tr 'a-z' 'A-Z'", **mock_workspace)

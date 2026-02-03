@@ -13,6 +13,20 @@ This guide covers everything you need to know to develop with the Aden Agent Fra
 7. [Git Workflow](#git-workflow)
 8. [Common Tasks](#common-tasks)
 9. [Troubleshooting](#troubleshooting)
+10. [Windows Development](#windows-development)
+
+---
+
+## Windows Development
+
+### Environment Setup
+- Use PowerShell for running scripts and tests.
+- Symlinks require Developer Mode or Admin privileges. Tests using symlinks are skipped otherwise.
+
+### Test Considerations
+- Pipes (`|`) and some shell commands (`ls`, `grep`) behave differently or are missing on Windows.
+- Path separators are `\` instead of `/`.
+- Absolute paths include drive letters (e.g., `C:\User\...`).
 
 ---
 

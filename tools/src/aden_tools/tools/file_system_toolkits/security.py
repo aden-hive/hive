@@ -16,7 +16,7 @@ def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str
     # Resolve absolute path
     if os.path.isabs(path):
         # Treat absolute paths as relative to the session root if they start with /
-        rel_path = path.lstrip(os.sep)
+        rel_path = path.lstrip(os.sep + "/")
         final_path = os.path.abspath(os.path.join(session_dir, rel_path))
     else:
         final_path = os.path.abspath(os.path.join(session_dir, path))

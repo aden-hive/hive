@@ -4,6 +4,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+import sys
 
 
 class TestGetSecurePath:
@@ -228,6 +229,9 @@ class TestGetSecurePath:
         expected = self.workspaces_dir / "test-workspace" / "test-agent" / "test-session"
         assert result == str(expected)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Symlinks require admin privileges on Windows"
+    )
     def test_symlink_within_sandbox_works(self, ids):
         """Symlinks that stay within the sandbox are allowed."""
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
@@ -247,6 +251,9 @@ class TestGetSecurePath:
 
         assert result == str(symlink_path)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Symlinks require admin privileges on Windows"
+    )
     def test_symlink_escape_detected_with_realpath(self, ids):
         """Symlinks pointing outside sandbox can be detected using realpath.
 
