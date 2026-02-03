@@ -17,11 +17,9 @@ import pytest
 from fastmcp import FastMCP
 
 from aden_tools.tools.github_tool.github_tool import (
-    GITHUB_API_BASE,
     _GitHubClient,
     register_tools,
 )
-
 
 # --- _GitHubClient tests ---
 
