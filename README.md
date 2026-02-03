@@ -199,6 +199,21 @@ flowchart LR
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **Adaptiveness** → On failure, the system evolves the graph and redeploys automatically
 
+### How Adaptiveness Works in Practice
+
+When an agent execution fails, Hive captures structured failure data such as
+execution context, tool usage, and outcome mismatches. This information is sent
+back to the Coding Agent, which evaluates the failure against the original goal
+and evolves the agent graph automatically.
+
+MCP (Model Context Protocol) tools exposed by the Control Plane allow agents to
+interact with external systems such as files, APIs, and web services. These tools
+are available to SDK-wrapped nodes without requiring changes to the core runtime.
+
+Human-in-the-loop nodes can be inserted at key points to pause execution, request
+approval, or collect feedback. This feedback directly informs future adaptations
+while keeping humans in control of high-impact decisions.
+
 ## Run pre-built Agents (Coming Soon)
 
 ### Run a sample agent
