@@ -673,8 +673,32 @@ class TestCsvSql:
         names = [row["name"] for row in result["rows"]]
         assert "Alice" in names
         assert "Bob" in names
-  
-    
+
+    # --- NEW: security regression tests required by Issue #1256 ---
+
+    def test_reject_non_select(self, csv_tools, products_csv, tmp_path):
+        """Reject any non-SELECT / non-WITH query."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="DROP TABLE data",
+            )
+        assert "error" in result
+
+    def test_reject_multi_statement(self, csv_tools, products_csv, tmp_path):
+        """Reject multi-statement queries with semicolons."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data; DROP TABLE data",
+            )
+        assert "error" in result
 
     def test_where_clause(self, csv_tools, products_csv, tmp_path):
         """Filter with WHERE clause."""
