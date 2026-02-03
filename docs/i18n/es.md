@@ -29,7 +29,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-49_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## Descripción General
@@ -78,6 +78,7 @@ cd hive
 ```
 
 Esto instala:
+
 - **framework** - Runtime del agente principal y ejecutor de grafos
 - **aden_tools** - 19 herramientas MCP para capacidades de agentes
 - Todas las dependencias requeridas
@@ -162,14 +163,14 @@ flowchart LR
 
 ### La Ventaja de Aden
 
-| Frameworks Tradicionales | Aden |
-|--------------------------|------|
-| Codificar flujos de trabajo de agentes | Describir objetivos en lenguaje natural |
-| Definición manual de grafos | Grafos de agentes auto-generados |
-| Manejo reactivo de errores | Auto-evolución proactiva |
-| Configuraciones de herramientas estáticas | Nodos dinámicos envueltos en SDK |
-| Configuración de monitoreo separada | Observabilidad en tiempo real integrada |
-| Gestión de presupuesto DIY | Controles de costos y degradación integrados |
+| Frameworks Tradicionales                  | Aden                                         |
+| ----------------------------------------- | -------------------------------------------- |
+| Codificar flujos de trabajo de agentes    | Describir objetivos en lenguaje natural      |
+| Definición manual de grafos               | Grafos de agentes auto-generados             |
+| Manejo reactivo de errores                | Auto-evolución proactiva                     |
+| Configuraciones de herramientas estáticas | Nodos dinámicos envueltos en SDK             |
+| Configuración de monitoreo separada       | Observabilidad en tiempo real integrada      |
+| Gestión de presupuesto DIY                | Controles de costos y degradación integrados |
 
 ### Cómo Funciona
 

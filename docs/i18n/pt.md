@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-49_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## Visão Geral
@@ -80,6 +80,7 @@ cd hive
 ```
 
 Isto instala:
+
 - **framework** - Runtime do agente principal e executor de grafos
 - **aden_tools** - 19 ferramentas MCP para capacidades de agentes
 - Todas as dependências necessárias
@@ -164,14 +165,14 @@ flowchart LR
 
 ### A Vantagem Aden
 
-| Frameworks Tradicionais | Aden |
-|-------------------------|------|
-| Codificar fluxos de trabalho de agentes | Descrever objetivos em linguagem natural |
-| Definição manual de grafos | Grafos de agentes auto-gerados |
-| Tratamento reativo de erros | Auto-evolução proativa |
-| Configurações de ferramentas estáticas | Nós dinâmicos envolvidos em SDK |
-| Configuração de monitoramento separada | Observabilidade em tempo real integrada |
-| Gerenciamento de orçamento DIY | Controles de custo e degradação integrados |
+| Frameworks Tradicionais                 | Aden                                       |
+| --------------------------------------- | ------------------------------------------ |
+| Codificar fluxos de trabalho de agentes | Descrever objetivos em linguagem natural   |
+| Definição manual de grafos              | Grafos de agentes auto-gerados             |
+| Tratamento reativo de erros             | Auto-evolução proativa                     |
+| Configurações de ferramentas estáticas  | Nós dinâmicos envolvidos em SDK            |
+| Configuração de monitoramento separada  | Observabilidade em tempo real integrada    |
+| Gerenciamento de orçamento DIY          | Controles de custo e degradação integrados |
 
 ### Como Funciona
 

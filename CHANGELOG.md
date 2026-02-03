@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- **Excel tools** - Added `excel_read`, `excel_write`, `excel_append`, `excel_info`, and `excel_sheet_list` tools for reading and writing Excel (.xlsx/.xlsm) files
 - Initial project structure
 - React frontend (honeycomb) with Vite and TypeScript
 - Node.js backend (hive) with Express and TypeScript
@@ -17,24 +19,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive documentation
 
 ### Changed
+
 - N/A
 
 ### Deprecated
+
 - N/A
 
 ### Removed
+
 - N/A
 
-
 ### Fixed
+
 - tools: Fixed web_scrape tool attempting to parse non-HTML content (PDF, JSON) as HTML (#487)
 
 ### Security
+
 - N/A
 
 ## [0.1.0] - 2025-01-13
 
 ### Added
+
 - Initial release
 
 [Unreleased]: https://github.com/adenhq/hive/compare/v0.1.0...HEAD

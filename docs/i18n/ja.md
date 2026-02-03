@@ -30,7 +30,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-49_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 ## 概要
@@ -80,6 +80,7 @@ cd hive
 ```
 
 これにより以下がインストールされます：
+
 - **framework** - コアエージェントランタイムとグラフエグゼキュータ
 - **aden_tools** - エージェント機能のための19個のMCPツール
 - すべての必要な依存関係
@@ -164,14 +165,14 @@ flowchart LR
 
 ### Adenの優位性
 
-| 従来のフレームワーク | Aden |
-|----------------------|------|
-| エージェントワークフローをハードコード | 自然言語で目標を記述 |
-| 手動でグラフを定義 | 自動生成されるエージェントグラフ |
-| 事後的なエラー処理 | プロアクティブな自己進化 |
-| 静的なツール設定 | 動的なSDKラップノード |
-| 別途モニタリング設定 | 組み込みのリアルタイム可観測性 |
-| DIY予算管理 | 統合されたコスト制御と劣化 |
+| 従来のフレームワーク                   | Aden                             |
+| -------------------------------------- | -------------------------------- |
+| エージェントワークフローをハードコード | 自然言語で目標を記述             |
+| 手動でグラフを定義                     | 自動生成されるエージェントグラフ |
+| 事後的なエラー処理                     | プロアクティブな自己進化         |
+| 静的なツール設定                       | 動的なSDKラップノード            |
+| 別途モニタリング設定                   | 組み込みのリアルタイム可観測性   |
+| DIY予算管理                            | 統合されたコスト制御と劣化       |
 
 ### 仕組み
 

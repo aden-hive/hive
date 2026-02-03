@@ -11,6 +11,7 @@ Test your understanding of Aden's architecture and backend systems. This challen
 ## Part 1: System Architecture (20 points)
 
 ### Task 1.1: Component Mapping 🗺️
+
 Study the Aden architecture and answer:
 
 1. Describe the data flow from when a user defines a goal to when worker agents execute. Include all major components.
@@ -23,6 +24,7 @@ Study the Aden architecture and answer:
    - Hot storage vs Cold storage for events
 
 ### Task 1.2: Database Design 💾
+
 Aden uses three databases. For each, explain:
 
 1. **TimescaleDB:** What type of data is stored? Why TimescaleDB specifically?
@@ -30,6 +32,7 @@ Aden uses three databases. For each, explain:
 3. **PostgreSQL:** What is its primary purpose?
 
 ### Task 1.3: Real-time Communication 📡
+
 Answer these about the real-time systems:
 
 1. What protocol connects the SDK to the Hive backend for policy updates?
@@ -41,6 +44,7 @@ Answer these about the real-time systems:
 ## Part 2: Code Analysis (25 points)
 
 ### Task 2.1: API Routes 🛣️
+
 Explore the backend code and document:
 
 1. List all the main API route prefixes (e.g., `/user`, `/v1/control`, etc.)
@@ -48,7 +52,8 @@ Explore the backend code and document:
 3. What authentication method is used for API requests?
 
 ### Task 2.2: MCP Tools Deep Dive 🔧
-The MCP server provides 19 tools. Categorize them and answer:
+
+The MCP server provides 49 tools. Categorize them and answer:
 
 1. List all **Budget tools** (tools with "budget" in the name)
 2. List all **Analytics tools**
@@ -59,6 +64,7 @@ The MCP server provides 19 tools. Categorize them and answer:
    - When would the Coding Agent use it?
 
 ### Task 2.3: Event Specification 📊
+
 Find and analyze the SDK event specification:
 
 1. What are the four event types that can be sent from SDK to server?
@@ -70,6 +76,7 @@ Find and analyze the SDK event specification:
 ## Part 3: Design Questions (25 points)
 
 ### Task 3.1: Scaling Scenario 📈
+
 Imagine Aden needs to handle 1000 concurrent agents across 50 teams:
 
 1. Which components would be the bottleneck? Why?
@@ -78,20 +85,24 @@ Imagine Aden needs to handle 1000 concurrent agents across 50 teams:
 4. How would you ensure team data isolation at scale?
 
 ### Task 3.2: New Feature Design 🆕
+
 Design a new feature: **Agent Collaboration Logs**
 
 Requirements:
+
 - Track when agents communicate with each other
 - Store the message content and metadata
 - Support querying by time range, agent, or conversation thread
 - Real-time streaming to the dashboard
 
 Provide:
+
 1. Database schema design (which DB and table structure)
 2. API endpoint design (routes and payloads)
 3. How would this integrate with existing event batching?
 
 ### Task 3.3: Failure Handling ⚠️
+
 The self-healing loop is core to Aden. Design the detailed flow:
 
 1. How should failures be categorized (types of failures)?
@@ -104,24 +115,28 @@ The self-healing loop is core to Aden. Design the detailed flow:
 ## Part 4: Practical Implementation (30 points)
 
 ### Task 4.1: Write a New MCP Tool 🛠️
+
 Create a new MCP tool called `hive_agent_performance_report`:
 
 **Requirements:**
+
 - Returns performance metrics for a specific agent over a time period
 - Includes: total requests, success rate, avg latency, total cost
 - Accepts parameters: `agent_id`, `start_time`, `end_time`
 
 Provide:
+
 1. Tool definition (name, description, input schema)
 2. Implementation pseudocode or actual TypeScript
 3. Example request and response
 
 ### Task 4.2: Budget Enforcement Algorithm 💰
+
 Implement the logic for budget enforcement:
 
 ```typescript
 interface BudgetCheck {
-  action: 'allow' | 'block' | 'throttle' | 'degrade';
+  action: "allow" | "block" | "throttle" | "degrade";
   reason: string;
   degradedModel?: string;
   delayMs?: number;
@@ -131,19 +146,21 @@ function checkBudget(
   currentSpend: number,
   budgetLimit: number,
   requestedModel: string,
-  estimatedCost: number
+  estimatedCost: number,
 ): BudgetCheck {
   // Your implementation here
 }
 ```
 
 Requirements:
+
 - Block if budget would be exceeded
 - Throttle (2000ms delay) if ≥95% used
 - Degrade to cheaper model if ≥80% used
 - Allow otherwise
 
 ### Task 4.3: Event Aggregation Query 📈
+
 Write a SQL query for TimescaleDB that:
 
 1. Aggregates metrics by hour for the last 24 hours
@@ -172,13 +189,13 @@ Write a SQL query for TimescaleDB that:
 
 ## Scoring
 
-| Section | Points |
-|---------|--------|
-| Part 1: System Architecture | 20 |
-| Part 2: Code Analysis | 25 |
-| Part 3: Design Questions | 25 |
-| Part 4: Implementation | 30 |
-| **Total** | **100** |
+| Section                     | Points  |
+| --------------------------- | ------- |
+| Part 1: System Architecture | 20      |
+| Part 2: Code Analysis       | 25      |
+| Part 3: Design Questions    | 25      |
+| Part 4: Implementation      | 30      |
+| **Total**                   | **100** |
 
 **Passing score:** 75+ points
 
