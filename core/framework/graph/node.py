@@ -24,47 +24,9 @@ from pydantic import BaseModel, Field
 
 from framework.runtime.core import Runtime
 from framework.llm.provider import LLMProvider, Tool
+from framework.utils import extract_json, strip_code_blocks
 
 logger = logging.getLogger(__name__)
-
-
-def find_json_object(text: str) -> str | None:
-    """Find the first valid JSON object in text using balanced brace matching.
-
-    This handles nested objects correctly, unlike simple regex like r'\\{[^{}]*\\}'.
-    """
-    start = text.find('{')
-    if start == -1:
-        return None
-
-    depth = 0
-    in_string = False
-    escape_next = False
-
-    for i, char in enumerate(text[start:], start):
-        if escape_next:
-            escape_next = False
-            continue
-
-        if char == '\\' and in_string:
-            escape_next = True
-            continue
-
-        if char == '"' and not escape_next:
-            in_string = not in_string
-            continue
-
-        if in_string:
-            continue
-
-        if char == '{':
-            depth += 1
-        elif char == '}':
-            depth -= 1
-            if depth == 0:
-                return text[start:i + 1]
-
-    return None
 
 
 class NodeSpec(BaseModel):
@@ -429,20 +391,6 @@ class LLMNode(NodeProtocol):
         self.tool_executor = tool_executor
         self.require_tools = require_tools
 
-    def _strip_code_blocks(self, content: str) -> str:
-        """Strip markdown code block wrappers from content.
-
-        LLMs often wrap JSON output in ```json...``` blocks.
-        This method removes those wrappers to get clean content.
-        """
-        import re
-        content = content.strip()
-        # Match ```json or ``` at start and ``` at end (greedy to handle nested)
-        match = re.match(r'^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$', content, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        return content
-
     async def execute(self, ctx: NodeContext) -> NodeResult:
         """Execute the LLM node."""
         import time
@@ -554,7 +502,7 @@ class LLMNode(NodeProtocol):
                     import json
 
                     # Try to extract JSON from response
-                    parsed = self._extract_json(response.content, ctx.node_spec.output_keys)
+                    parsed = extract_json(response.content, ctx.node_spec.output_keys)
 
                     # If parsed successfully, write each field to its corresponding output key
                     if isinstance(parsed, dict):
@@ -563,7 +511,7 @@ class LLMNode(NodeProtocol):
                                 value = parsed[key]
                                 # Strip code block wrappers from string values
                                 if isinstance(value, str):
-                                    value = self._strip_code_blocks(value)
+                                    value = strip_code_blocks(value)
                                 ctx.memory.write(key, value)
                                 output[key] = value
                             elif key in ctx.input_data:
@@ -572,12 +520,12 @@ class LLMNode(NodeProtocol):
                                 output[key] = ctx.input_data[key]
                             else:
                                 # Key not in parsed JSON or input, write the whole response (stripped)
-                                stripped_content = self._strip_code_blocks(response.content)
+                                stripped_content = strip_code_blocks(response.content)
                                 ctx.memory.write(key, stripped_content)
                                 output[key] = stripped_content
                     else:
                         # Not a dict, fall back to writing entire response to all keys (stripped)
-                        stripped_content = self._strip_code_blocks(response.content)
+                        stripped_content = strip_code_blocks(response.content)
                         for key in ctx.node_spec.output_keys:
                             ctx.memory.write(key, stripped_content)
                             output[key] = stripped_content
@@ -595,15 +543,9 @@ class LLMNode(NodeProtocol):
                         tokens_used=response.input_tokens + response.output_tokens,
                         latency_ms=latency_ms,
                     )
-                    # JSON extraction failed completely - still strip code blocks
-                    # logger.warning(f"      ⚠ Failed to extract JSON output: {e}")
-                    # stripped_content = self._strip_code_blocks(response.content)
-                    # for key in ctx.node_spec.output_keys:
-                    #     ctx.memory.write(key, stripped_content)
-                    #     output[key] = stripped_content
             else:
                 # For non-llm_generate or single output nodes, write entire response (stripped)
-                stripped_content = self._strip_code_blocks(response.content)
+                stripped_content = strip_code_blocks(response.content)
                 for key in ctx.node_spec.output_keys:
                     ctx.memory.write(key, stripped_content)
                     output[key] = stripped_content
@@ -634,122 +576,6 @@ class LLMNode(NodeProtocol):
         """
         # Default output
         return {"result": content}
-
-    def _extract_json(self, raw_response: str, output_keys: list[str]) -> dict[str, Any]:
-        """Extract clean JSON from potentially verbose LLM response.
-
-        Tries multiple extraction strategies in order:
-        1. Direct JSON parse
-        2. Markdown code block extraction
-        3. Balanced brace matching
-        4. Haiku LLM fallback (last resort)
-        """
-        import json
-        import re
-
-        content = raw_response.strip()
-
-        # Try direct JSON parse first (fast path)
-        try:
-            content = raw_response.strip()
-
-            # Remove markdown code blocks if present - more robust extraction
-            if content.startswith("```"):
-                # Try multiple patterns for markdown code blocks
-                # Pattern 1: ```json\n...\n``` or ```\n...\n```
-                match = re.search(r'^```(?:json)?\s*\n([\s\S]*?)\n```\s*$', content)
-                if match:
-                    content = match.group(1).strip()
-                else:
-                    # Pattern 2: Just strip the first and last lines if they're ```
-                    lines = content.split('\n')
-                    if lines[0].startswith('```') and lines[-1].strip() == '```':
-                        content = '\n'.join(lines[1:-1]).strip()
-
-            parsed = json.loads(content)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-        # Try to extract JSON from markdown code blocks (greedy match to handle nested blocks)
-        # Use anchored match to capture from first ``` to last ```
-        code_block_match = re.match(r'^```(?:json|JSON)?\s*\n?(.*)\n?```\s*$', content, re.DOTALL)
-        if code_block_match:
-            try:
-                parsed = json.loads(code_block_match.group(1).strip())
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
-
-        # Try to find JSON object by matching balanced braces (use module-level helper)
-        json_str = find_json_object(content)
-        if json_str:
-            try:
-                parsed = json.loads(json_str)
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
-
-        # All local extraction methods failed - use LLM as last resort
-        # Prefer Cerebras (faster/cheaper), fallback to Anthropic Haiku
-        import os
-        api_key = os.environ.get("CEREBRAS_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("Cannot parse JSON and no API key for LLM cleanup (set CEREBRAS_API_KEY or ANTHROPIC_API_KEY)")
-
-        # Use fast LLM to clean the response (Cerebras llama-3.3-70b preferred)
-        from framework.llm.litellm import LiteLLMProvider
-        if os.environ.get("CEREBRAS_API_KEY"):
-            cleaner_llm = LiteLLMProvider(
-                api_key=os.environ.get("CEREBRAS_API_KEY"),
-                model="cerebras/llama-3.3-70b",
-                temperature=0.0
-            )
-        else:
-            # Fallback to Anthropic Haiku
-            from framework.llm.anthropic import AnthropicProvider
-            cleaner_llm = AnthropicProvider(model="claude-3-5-haiku-20241022")
-
-        prompt = f"""Extract the JSON object from this LLM response.
-
-Expected output keys: {output_keys}
-
-LLM Response:
-{raw_response}
-
-Output ONLY the JSON object, nothing else."""
-
-        try:
-            result = cleaner_llm.complete(
-                messages=[{"role": "user", "content": prompt}],
-                system="Extract JSON from text. Output only valid JSON.",
-                json_mode=True,
-            )
-
-            cleaned = result.content.strip()
-            # Remove markdown if LLM added it
-            if cleaned.startswith("```"):
-                match = re.search(r'^```(?:json)?\s*\n([\s\S]*?)\n```\s*$', cleaned)
-                if match:
-                    cleaned = match.group(1).strip()
-                else:
-                    # Fallback: strip first/last lines
-                    lines = cleaned.split('\n')
-                    if lines[0].startswith('```') and lines[-1].strip() == '```':
-                        cleaned = '\n'.join(lines[1:-1]).strip()
-
-            parsed = json.loads(cleaned)
-            logger.info("      ✓ LLM cleaned JSON output")
-            return parsed
-
-        except ValueError:
-            raise  # Re-raise our descriptive error
-        except Exception as e:
-            logger.warning(f"      ⚠ LLM JSON extraction failed: {e}")
-            raise
 
     def _build_messages(self, ctx: NodeContext) -> list[dict]:
         """Build the message list for the LLM."""
