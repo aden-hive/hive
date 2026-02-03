@@ -50,4 +50,60 @@ INTEGRATION_CREDENTIALS = {
         credential_id="hubspot",
         credential_key="access_token",
     ),
+    "trello_api_key": CredentialSpec(
+        env_var="TRELLO_API_KEY",
+        tools=[
+            "trello_list_boards",
+            "trello_get_member",
+            "trello_list_lists",
+            "trello_list_cards",
+            "trello_create_card",
+            "trello_move_card",
+            "trello_update_card",
+            "trello_add_comment",
+            "trello_add_attachment",
+        ],
+        required=True,
+        startup_required=False,
+        help_url="https://trello.com/power-ups/admin",
+        description="Trello API key",
+        direct_api_key_supported=True,
+        api_key_instructions=(
+            "To get a Trello API key:\n"
+            "1. Go to https://trello.com/power-ups/admin\n"
+            "2. Create or open a Power-Up\n"
+            "3. Copy the API key shown in the Power-Up admin page\n"
+        ),
+        credential_id="trello_api_key",
+        credential_key="api_key",
+    ),
+    "trello_api_token": CredentialSpec(
+        env_var="TRELLO_API_TOKEN",
+        tools=[
+            "trello_list_boards",
+            "trello_get_member",
+            "trello_list_lists",
+            "trello_list_cards",
+            "trello_create_card",
+            "trello_move_card",
+            "trello_update_card",
+            "trello_add_comment",
+            "trello_add_attachment",
+        ],
+        required=True,
+        startup_required=False,
+        help_url="https://trello.com/1/authorize",
+        description="Trello API token",
+        direct_api_key_supported=True,
+        api_key_instructions=(
+            "To get a Trello API token:\n"
+            "1. Ensure you have a Trello API key\n"
+            "2. Go to the recently created Power-Up\n"
+            "3. Click on API key section\n"
+            "4. Click on Token button\n"
+            "5. Authorize and copy the token returned by Trello\n"
+        ),
+        credential_id="trello_api_token",
+        credential_key="token",
+    ),
 }
