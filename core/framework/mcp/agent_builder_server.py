@@ -539,7 +539,7 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
             {
                 "success": False,
                 "error": f"Agent path not found: {path}",
-                "hint": "Ensure the agent is exported and the path exists",
+                "hint": "Run export_graph to create an agent in exports/ first",
             }
         )
 
@@ -2626,8 +2626,6 @@ def generate_constraint_tests(
     # Derive agent_path from session if not provided
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
-    if not agent_path and _session:
-        agent_path = f"exports/{_session.name}"
 
     path, err = _validate_agent_path(agent_path)
     if err:
@@ -2707,8 +2705,6 @@ def generate_success_tests(
         return json.dumps({"error": f"Invalid goal JSON: {e}"})
 
     # Derive agent_path from session if not provided
-    if not agent_path and _session:
-        agent_path = f"exports/{_session.name}"
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
