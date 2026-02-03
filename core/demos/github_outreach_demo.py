@@ -27,15 +27,20 @@ Usage:
     Then open http://localhost:8768 in your browser.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 from http import HTTPStatus
 from pathlib import Path
+from typing import Any
 
+import httpx
 import websockets
 from pydantic import BaseModel, ValidationError
 from websockets.http11 import Request, Response
@@ -63,9 +68,8 @@ from framework.graph.event_loop_node import (  # noqa: E402
 )
 from framework.graph.executor import GraphExecutor  # noqa: E402
 from framework.graph.goal import Goal  # noqa: E402
-from framework.graph.node import NodeContext, NodeResult, NodeSpec  # noqa: E402
+from framework.graph.node import NodeSpec  # noqa: E402
 from framework.llm.litellm import LiteLLMProvider  # noqa: E402
-from framework.llm.provider import Tool  # noqa: E402
 from framework.runner.tool_registry import ToolRegistry  # noqa: E402
 from framework.runtime.core import Runtime  # noqa: E402
 from framework.runtime.event_bus import (  # noqa: E402
@@ -83,7 +87,7 @@ logger = logging.getLogger("github_outreach_demo")
 
 STORE_DIR = Path(tempfile.mkdtemp(prefix="hive_outreach_"))
 RUNTIME = Runtime(STORE_DIR / "runtime")
-LLM = LiteLLMProvider(model="claude-haiku-4-5-20251001")
+LLM = LiteLLMProvider(model="gpt-5-mini-2025-08-07")
 
 # -------------------------------------------------------------------------
 # Credentials
@@ -140,7 +144,7 @@ class GitHubUser(BaseModel):
 
 
 class ScannerOutput(BaseModel):
-    github_users: str  # JSON string of list[GitHubUser]
+    github_users: str  # Filename of JSON file containing list[GitHubUser]
 
 
 class UserProfile(BaseModel):
@@ -152,7 +156,7 @@ class UserProfile(BaseModel):
 
 
 class ProfilerOutput(BaseModel):
-    user_profiles: str  # JSON string of list[UserProfile]
+    user_profiles: str  # Filename of JSON file containing list[UserProfile]
 
 
 class RelevanceScore(BaseModel):
@@ -162,7 +166,7 @@ class RelevanceScore(BaseModel):
 
 
 class ScorerOutput(BaseModel):
-    relevance_scores: str  # JSON string of list[RelevanceScore]
+    relevance_scores: str  # Filename of JSON file containing list[RelevanceScore]
 
 
 class Contact(BaseModel):
@@ -174,7 +178,7 @@ class Contact(BaseModel):
 
 
 class ExtractorOutput(BaseModel):
-    contact_list: str  # JSON string of list[Contact]
+    contact_list: str  # Filename of JSON file containing list[Contact]
 
 
 class DraftEmail(BaseModel):
@@ -184,208 +188,435 @@ class DraftEmail(BaseModel):
 
 
 class CampaignOutput(BaseModel):
-    draft_emails: str  # JSON string of list[DraftEmail]
+    draft_emails: str  # Filename of JSON file containing list[DraftEmail]
 
 
 # =========================================================================
-# Mock Tools (deterministic fake data for demo)
+# Tool Registration
 # =========================================================================
 
 TOOL_REGISTRY = ToolRegistry()
 
-_FAKE_USERS = [
-    {"username": "alice-dev", "user_type": "stargazer"},
-    {"username": "bob-codes", "user_type": "contributor"},
-    {"username": "carol-ml", "user_type": "stargazer"},
-    {"username": "dave-ops", "user_type": "issue_author"},
-    {"username": "eve-sec", "user_type": "contributor"},
-    {"username": "frank-data", "user_type": "stargazer"},
-]
+# ---- GitHub API helpers ----
 
-_FAKE_PROFILES = {
-    "alice-dev": {
-        "username": "alice-dev",
-        "name": "Alice Chen",
-        "bio": "Full-stack engineer. Building tools for developers.",
-        "company": "TechStartup Inc",
-        "location": "San Francisco, CA",
-        "languages": ["Python", "TypeScript", "Rust"],
-        "public_repos": 42,
-    },
-    "bob-codes": {
-        "username": "bob-codes",
-        "name": "Bob Martinez",
-        "bio": "Open source contributor. DevOps enthusiast.",
-        "company": "CloudScale Corp",
-        "location": "Austin, TX",
-        "languages": ["Go", "Python", "Terraform"],
-        "public_repos": 28,
-    },
-    "carol-ml": {
-        "username": "carol-ml",
-        "name": "Carol Wang",
-        "bio": "ML engineer. Researching LLM applications.",
-        "company": "AI Research Lab",
-        "location": "Seattle, WA",
-        "languages": ["Python", "Julia", "C++"],
-        "public_repos": 15,
-    },
-    "dave-ops": {
-        "username": "dave-ops",
-        "name": "Dave Thompson",
-        "bio": "Platform engineering. Kubernetes specialist.",
-        "company": None,
-        "location": "Remote",
-        "languages": ["Go", "Python", "Shell"],
-        "public_repos": 33,
-    },
-    "eve-sec": {
-        "username": "eve-sec",
-        "name": "Eve Nakamura",
-        "bio": "Security researcher and open source advocate.",
-        "company": "SecureNet",
-        "location": "Tokyo, Japan",
-        "languages": ["Rust", "Python", "C"],
-        "public_repos": 21,
-    },
-    "frank-data": {
-        "username": "frank-data",
-        "name": "Frank Okafor",
-        "bio": "Data engineer. Building data pipelines at scale.",
-        "company": "DataFlow Inc",
-        "location": "London, UK",
-        "languages": ["Python", "Scala", "SQL"],
-        "public_repos": 18,
-    },
-}
-
-_FAKE_CONTACTS = {
-    "alice-dev": {"email": "alice@techstartup.io", "twitter": "@alice_dev"},
-    "bob-codes": {"email": "bob.m@cloudscale.com", "twitter": None},
-    "carol-ml": {"email": "carol.wang@ailab.org", "twitter": "@carol_ml"},
-    "dave-ops": {"email": None, "twitter": "@dave_ops"},
-    "eve-sec": {"email": "eve@securenet.jp", "twitter": "@eve_security"},
-    "frank-data": {"email": "frank.o@dataflow.io", "twitter": None},
-}
+_GITHUB_API = "https://api.github.com"
 
 
-def _exec_scan_github_repo(inputs: dict) -> dict:
-    repo_url = inputs.get("repo_url", "")
-    max_results = min(inputs.get("max_results", 10), 20)
-    users = _FAKE_USERS[:max_results]
+def _github_headers() -> dict[str, str]:
+    """Build GitHub API headers with auth token from credential store or env."""
+    token = os.getenv("GITHUB_TOKEN") or CREDENTIALS.get("github")
+    if not token:
+        raise RuntimeError(
+            "GitHub token not configured. "
+            "Set GITHUB_TOKEN env var or configure via credential store."
+        )
     return {
-        "repo_url": repo_url,
-        "users": users,
-        "total_found": len(users),
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
     }
 
 
-def _exec_fetch_user_profile(inputs: dict) -> dict:
-    username = inputs.get("username", "")
-    profile = _FAKE_PROFILES.get(username)
-    if profile:
-        return profile
-    return {"error": f"User '{username}' not found"}
+def _github_get(path: str, params: dict | None = None) -> dict:
+    """Authenticated GET against the GitHub REST API."""
+    try:
+        resp = httpx.get(
+            f"{_GITHUB_API}{path}",
+            headers=_github_headers(),
+            params=params or {},
+            timeout=30.0,
+        )
+        if resp.status_code >= 400:
+            try:
+                msg = resp.json().get("message", resp.text)
+            except Exception:
+                msg = resp.text
+            return {"error": f"GitHub API error ({resp.status_code}): {msg}"}
+        return {"success": True, "data": resp.json()}
+    except httpx.TimeoutException:
+        return {"error": "Request timed out"}
+    except httpx.RequestError as e:
+        err = str(e)
+        if "Authorization" in err or "Bearer" in err:
+            return {"error": "Network error occurred"}
+        return {"error": f"Network error: {err}"}
 
 
-def _exec_extract_contacts(inputs: dict) -> dict:
-    username = inputs.get("username", "")
-    contacts = _FAKE_CONTACTS.get(username, {})
+def _sanitize(value: str) -> str:
+    """Reject path-traversal characters in URL path segments."""
+    if "/" in value or ".." in value:
+        raise ValueError(f"Invalid parameter: {value!r}")
+    return value
+
+
+# ---- Real GitHub tools (registered via register_function) ----
+
+
+def github_get_repo(owner: str, repo: str) -> dict:
+    """Get repository info including description, stars, forks, language, and topics."""
+    return _github_get(f"/repos/{_sanitize(owner)}/{_sanitize(repo)}")
+
+
+def github_list_issues(
+    owner: str,
+    repo: str,
+    state: str = "all",
+    limit: int = 30,
+) -> dict:
+    """List issues for a repository. Each issue includes author login, title, labels."""
+    limit = int(limit)
+    return _github_get(
+        f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/issues",
+        {"state": state, "per_page": min(limit, 100)},
+    )
+
+
+def github_list_pull_requests(
+    owner: str,
+    repo: str,
+    state: str = "all",
+    limit: int = 30,
+) -> dict:
+    """List pull requests for a repository. Each PR includes author login and title."""
+    limit = int(limit)
+    return _github_get(
+        f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/pulls",
+        {"state": state, "per_page": min(limit, 100)},
+    )
+
+
+def github_list_stargazers(
+    owner: str,
+    repo: str,
+    limit: int = 30,
+) -> dict:
+    """List users who starred a repository. Each entry has a login username."""
+    limit = int(limit)
+    return _github_get(
+        f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/stargazers",
+        {"per_page": min(limit, 100)},
+    )
+
+
+def github_get_user_profile(username: str) -> dict:
+    """Get a GitHub user's public profile: name, bio, company, location, email."""
+    return _github_get(f"/users/{_sanitize(username)}")
+
+
+def github_list_user_repos(
+    username: str,
+    sort: str = "updated",
+    limit: int = 10,
+) -> dict:
+    """List public repos for a GitHub user to understand their tech stack."""
+    limit = int(limit)
+    return _github_get(
+        f"/users/{_sanitize(username)}/repos",
+        {"type": "public", "sort": sort, "per_page": min(limit, 100)},
+    )
+
+
+TOOL_REGISTRY.register_function(github_get_repo)
+TOOL_REGISTRY.register_function(github_list_issues)
+TOOL_REGISTRY.register_function(github_list_pull_requests)
+TOOL_REGISTRY.register_function(github_list_stargazers)
+TOOL_REGISTRY.register_function(github_get_user_profile)
+TOOL_REGISTRY.register_function(github_list_user_repos)
+
+
+# ---- Web search + scrape tools (contact enrichment) ----
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+
+def _search_credentials() -> dict[str, str | None]:
+    """Get search API credentials from credential store or env."""
     return {
-        "username": username,
-        "email": contacts.get("email"),
-        "twitter": contacts.get("twitter"),
+        "brave_api_key": (CREDENTIALS.get("brave_search") or os.getenv("BRAVE_SEARCH_API_KEY")),
+        "google_api_key": (CREDENTIALS.get("google_search") or os.getenv("GOOGLE_API_KEY")),
+        "google_cse_id": (CREDENTIALS.get("google_cse") or os.getenv("GOOGLE_CSE_ID")),
     }
 
 
-def _exec_load_campaign_template(inputs: dict) -> dict:
+def web_search(query: str, num_results: int = 5) -> dict:
+    """Search the web for information using Brave or Google."""
+    num_results = int(num_results)
+    if not query or len(query) > 500:
+        return {"error": "Query must be 1-500 characters"}
+
+    creds = _search_credentials()
+
+    try:
+        # Try Brave first
+        if creds["brave_api_key"]:
+            resp = httpx.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={
+                    "q": query,
+                    "count": min(num_results, 20),
+                },
+                headers={
+                    "X-Subscription-Token": creds["brave_api_key"],
+                    "Accept": "application/json",
+                },
+                timeout=30.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                web = data.get("web", {})
+                results = [
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "snippet": r.get("description", ""),
+                    }
+                    for r in web.get("results", [])[:num_results]
+                ]
+                return {
+                    "query": query,
+                    "results": results,
+                    "total": len(results),
+                    "provider": "brave",
+                }
+            return {
+                "error": f"Brave search failed: HTTP {resp.status_code}",
+            }
+
+        # Fall back to Google
+        if creds["google_api_key"] and creds["google_cse_id"]:
+            resp = httpx.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={
+                    "key": creds["google_api_key"],
+                    "cx": creds["google_cse_id"],
+                    "q": query,
+                    "num": min(num_results, 10),
+                },
+                timeout=30.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                results = [
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("link", ""),
+                        "snippet": r.get("snippet", ""),
+                    }
+                    for r in data.get("items", [])[:num_results]
+                ]
+                return {
+                    "query": query,
+                    "results": results,
+                    "total": len(results),
+                    "provider": "google",
+                }
+            return {
+                "error": (f"Google search failed: HTTP {resp.status_code}"),
+            }
+
+        return {
+            "error": (
+                "No search credentials configured. "
+                "Set BRAVE_SEARCH_API_KEY or "
+                "GOOGLE_API_KEY+GOOGLE_CSE_ID"
+            ),
+        }
+
+    except httpx.TimeoutException:
+        return {"error": "Search request timed out"}
+    except httpx.RequestError as e:
+        return {"error": f"Network error: {e}"}
+
+
+def web_scrape(url: str, max_length: int = 10000) -> dict:
+    """Scrape and extract text content from a webpage URL."""
+    max_length = int(max_length)
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    try:
+        resp = httpx.get(
+            url,
+            headers={"User-Agent": _BROWSER_UA},
+            timeout=30.0,
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return {
+                "error": f"HTTP {resp.status_code}: Failed to fetch URL",
+            }
+
+        html = resp.text
+
+        # Extract title before stripping tags
+        title_m = re.search(
+            r"<title[^>]*>(.*?)</title>",
+            html,
+            re.IGNORECASE | re.DOTALL,
+        )
+        title = title_m.group(1).strip() if title_m else ""
+
+        # Strip script, style, nav, footer, header contents
+        html = re.sub(
+            r"<(script|style|nav|footer|header)[^>]*>.*?</\1>",
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        # Strip remaining HTML tags
+        text = re.sub(r"<[^>]+>", " ", html)
+        # Normalize whitespace
+        text = re.sub(r"\s+", " ", text).strip()
+
+        if len(text) > max_length:
+            text = text[:max_length] + "..."
+
+        return {
+            "url": url,
+            "title": title,
+            "content": text,
+            "length": len(text),
+        }
+
+    except httpx.TimeoutException:
+        return {"error": "Request timed out"}
+    except httpx.RequestError as e:
+        return {"error": f"Network error: {e}"}
+
+
+# ---- Mock tools (no direct API equivalent) ----
+
+
+def load_campaign_template() -> dict:
+    """Load the outreach campaign email template with placeholders."""
     return {
         "template": (
             "Subject: {project_name} - Collaboration Opportunity\n\n"
             "Hi {name},\n\n"
-            "I noticed your work on {user_repo_highlights} and thought you might "
-            "be interested in {project_name}. {personalized_hook}\n\n"
-            "We'd love to have you involved. Would you be open to a quick chat?\n\n"
+            "I noticed your work on {user_repo_highlights} and thought "
+            "you might be interested in {project_name}. "
+            "{personalized_hook}\n\n"
+            "We'd love to have you involved. "
+            "Would you be open to a quick chat?\n\n"
             "Best,\nThe {project_name} Team"
         ),
     }
 
 
-TOOL_REGISTRY.register(
-    name="scan_github_repo",
-    tool=Tool(
-        name="scan_github_repo",
-        description=(
-            "Scan a GitHub repository to find stargazers, contributors, and issue authors. "
-            "Returns a list of GitHub users with their relationship type."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "repo_url": {"type": "string", "description": "GitHub repository URL"},
-                "max_results": {
-                    "type": "integer",
-                    "description": "Max users to return (default 10)",
-                },
-            },
-            "required": ["repo_url"],
-        },
-    ),
-    executor=lambda inputs: _exec_scan_github_repo(inputs),
-)
+# ---- File ops tools (context management for large data) ----
+# Agents use these to write large intermediate results to disk and pass
+# filenames between nodes, keeping the LLM conversation context small.
 
-TOOL_REGISTRY.register(
-    name="fetch_user_profile",
-    tool=Tool(
-        name="fetch_user_profile",
-        description=(
-            "Fetch a GitHub user's profile including bio, company, location, "
-            "languages, and public repo count."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "username": {"type": "string", "description": "GitHub username"},
-            },
-            "required": ["username"],
-        },
-    ),
-    executor=lambda inputs: _exec_fetch_user_profile(inputs),
-)
+_DATA_DIR = STORE_DIR / "data"
 
-TOOL_REGISTRY.register(
-    name="extract_contacts",
-    tool=Tool(
-        name="extract_contacts",
-        description=(
-            "Extract available contact information for a GitHub user. "
-            "Returns email and social media handles if publicly available."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "username": {"type": "string", "description": "GitHub username"},
-            },
-            "required": ["username"],
-        },
-    ),
-    executor=lambda inputs: _exec_extract_contacts(inputs),
-)
 
-TOOL_REGISTRY.register(
-    name="load_campaign_template",
-    tool=Tool(
-        name="load_campaign_template",
-        description="Load the marketing campaign email template with placeholders.",
-        parameters={
-            "type": "object",
-            "properties": {},
-        },
-    ),
-    executor=lambda inputs: _exec_load_campaign_template(inputs),
-)
+def save_data(filename: str, data: str) -> dict:
+    """Save data to a file for later retrieval by this or downstream nodes.
 
-logger.info("Tools loaded: %s", ", ".join(TOOL_REGISTRY.get_registered_names()))
+    Use this to store large results (user lists, profiles, scores, emails)
+    instead of passing them inline through set_output. Returns a brief
+    summary with the filename to reference in set_output calls.
+
+    Args:
+        filename: Simple filename like 'github_users.json'. No paths or '..'.
+        data: The string data to write (typically JSON).
+    """
+    if not filename or ".." in filename or "/" in filename:
+        return {"error": "Invalid filename. Use simple names like 'users.json'"}
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    path = _DATA_DIR / filename
+    path.write_text(data, encoding="utf-8")
+    lines = data.count("\n") + 1
+    return {
+        "success": True,
+        "filename": filename,
+        "size_bytes": len(data.encode("utf-8")),
+        "lines": lines,
+        "preview": data[:200] + ("..." if len(data) > 200 else ""),
+    }
+
+
+def load_data(filename: str, offset: int = 0, limit: int = 0) -> dict:
+    """Load data from a previously saved file, with support for incremental reading.
+
+    For large files, use offset and limit to page through the data
+    without loading everything into context at once.
+
+    Args:
+        filename: The filename that was used with save_data.
+        offset: 0-based line number to start reading from. Default 0.
+        limit: Max number of lines to return. 0 means all remaining lines.
+
+    Examples:
+        load_data('users.json')                    # read entire file
+        load_data('users.json', offset=0, limit=20)  # first 20 lines
+        load_data('users.json', offset=20, limit=20) # next 20 lines
+    """
+    if not filename or ".." in filename or "/" in filename:
+        return {"error": "Invalid filename"}
+    offset = int(offset)
+    limit = int(limit)
+    path = _DATA_DIR / filename
+    if not path.exists():
+        return {"error": f"File not found: {filename}"}
+    content = path.read_text(encoding="utf-8")
+    all_lines = content.split("\n")
+    total = len(all_lines)
+
+    if offset > 0 or limit > 0:
+        start = min(offset, total)
+        end = min(start + limit, total) if limit > 0 else total
+        sliced = all_lines[start:end]
+        return {
+            "success": True,
+            "filename": filename,
+            "content": "\n".join(sliced),
+            "total_lines": total,
+            "offset": start,
+            "lines_returned": len(sliced),
+            "has_more": end < total,
+        }
+    return {
+        "success": True,
+        "filename": filename,
+        "content": content,
+        "total_lines": total,
+        "size_bytes": len(content.encode("utf-8")),
+    }
+
+
+def list_data_files() -> dict:
+    """List all data files saved during this pipeline run.
+
+    Use this to discover what intermediate results are available
+    from previous nodes in the pipeline.
+    """
+    if not _DATA_DIR.exists():
+        return {"files": []}
+    files = []
+    for f in sorted(_DATA_DIR.iterdir()):
+        if f.is_file():
+            files.append(
+                {
+                    "filename": f.name,
+                    "size_bytes": f.stat().st_size,
+                }
+            )
+    return {"files": files}
+
+
+TOOL_REGISTRY.register_function(web_search)
+TOOL_REGISTRY.register_function(web_scrape)
+TOOL_REGISTRY.register_function(load_campaign_template)
+TOOL_REGISTRY.register_function(save_data)
+TOOL_REGISTRY.register_function(load_data)
+TOOL_REGISTRY.register_function(list_data_files)
+
+logger.info("Tools registered: %s", ", ".join(TOOL_REGISTRY.get_registered_names()))
 
 
 # =========================================================================
@@ -418,17 +649,39 @@ NODE_SPECS = {
     "scanner": NodeSpec(
         id="scanner",
         name="Scanner",
-        description="Scan the GitHub repository to find users",
+        description="Scan a GitHub repository to find contributors, issue authors, and stargazers",
         node_type="event_loop",
         input_keys=["repo_url", "scan_config"],
         output_keys=["github_users"],
-        tools=["scan_github_repo"],
+        tools=[
+            "github_get_repo",
+            "github_list_issues",
+            "github_list_pull_requests",
+            "github_list_stargazers",
+            "save_data",
+        ],
         system_prompt=(
             "You are a GitHub Scanner agent. You receive a repository URL and scan config.\n\n"
-            "1. Use the scan_github_repo tool to find users from the repository\n"
-            "2. Format the results as a JSON array of objects with 'username' and 'user_type'\n"
-            "3. Call set_output(key='github_users', value=<the JSON array string>)\n\n"
-            "Work efficiently — scan once and output the results."
+            "Parse the repository URL to extract the owner and repo name.\n"
+            "Then use the available GitHub tools to discover users:\n"
+            "1. Use github_get_repo to get repo metadata (stars, language, description)\n"
+            "2. Use github_list_issues to find issue authors (look at each issue's user.login)\n"
+            "3. Use github_list_pull_requests to find PR contributors "
+            "(look at each PR's user.login)\n"
+            "4. Use github_list_stargazers to find stargazers (each entry has a login field)\n\n"
+            "Collect unique usernames from all sources. Classify each user:\n"
+            "- 'contributor' if they authored a pull request\n"
+            "- 'issue_author' if they authored an issue\n"
+            "- 'stargazer' if they starred the repo\n"
+            "If a user appears in multiple categories, use the highest-value type "
+            "(contributor > issue_author > stargazer).\n\n"
+            "Respect the scan_config for any limits or filtering preferences.\n\n"
+            "CONTEXT MANAGEMENT:\n"
+            "Format the result as a JSON array of objects with 'username' and 'user_type'.\n"
+            "Use save_data('github_users.json', <json_string>) to write the list to a file.\n"
+            "Then call set_output(key='github_users', value='github_users.json')\n"
+            "This passes a filename — not the raw data — to downstream nodes, "
+            "keeping the conversation context small."
         ),
     ),
     "profiler": NodeSpec(
@@ -438,13 +691,26 @@ NODE_SPECS = {
         node_type="event_loop",
         input_keys=["github_users"],
         output_keys=["user_profiles"],
-        tools=["fetch_user_profile"],
+        tools=[
+            "github_get_user_profile",
+            "github_list_user_repos",
+            "load_data",
+            "save_data",
+        ],
         system_prompt=(
-            "You are a GitHub Profiler agent. You receive a list of GitHub users.\n\n"
-            "1. For each user, call fetch_user_profile to get their detailed profile\n"
-            "2. Compile all profiles into a JSON array\n"
-            "3. Call set_output(key='user_profiles', value=<the JSON array string>)\n\n"
-            "Include: username, name, bio, company, location, languages, public_repos."
+            "You are a GitHub Profiler agent. Your input 'github_users' is a filename.\n\n"
+            "WORKFLOW:\n"
+            "1. Use load_data to read the user list from the input filename\n"
+            "2. For each user, call github_get_user_profile and github_list_user_repos\n"
+            "3. Compile profiles into a JSON array with: username, name, bio, company, "
+            "languages (from repos)\n"
+            "4. Use save_data('user_profiles.json', <json>) to write results to a file\n"
+            "5. Call set_output(key='user_profiles', value='user_profiles.json')\n\n"
+            "CONTEXT MANAGEMENT:\n"
+            "Start by loading the user list file. For large lists, use load_data with "
+            "offset and limit to page through users in batches "
+            "(e.g. load_data('github_users.json', offset=0, limit=20), then offset=20, etc.). "
+            "When done, save all profiles to a file and pass the filename — not the raw data."
         ),
     ),
     "scorer": NodeSpec(
@@ -454,15 +720,19 @@ NODE_SPECS = {
         node_type="event_loop",
         input_keys=["github_users", "project_url"],
         output_keys=["relevance_scores"],
+        tools=["load_data", "save_data"],
         system_prompt=(
-            "You are a Relevance Scorer agent. You receive a list of GitHub users and "
-            "the project URL we're promoting.\n\n"
-            "For each user, assess their potential relevance to the project based on:\n"
-            "- Their user_type (contributor > stargazer > issue_author)\n"
-            "- Assumed technical overlap\n\n"
-            "Output a JSON array of objects with: username, score (0.0-1.0), reasoning.\n"
-            "Call set_output(key='relevance_scores', value=<the JSON array string>)\n\n"
-            "Score generously — this is a demo with fake data."
+            "You are a Relevance Scorer agent. Your input 'github_users' is a filename "
+            "and 'project_url' is a URL string.\n\n"
+            "WORKFLOW:\n"
+            "1. Use load_data to read the user list from the github_users filename\n"
+            "2. For each user, assess relevance to the project based on:\n"
+            "   - Their user_type (contributor > issue_author > stargazer)\n"
+            "   - Assumed technical overlap with the project\n"
+            "3. Output a JSON array of objects with: username, score (0.0-1.0), reasoning\n"
+            "4. Use save_data('relevance_scores.json', <json>) to write results\n"
+            "5. Call set_output(key='relevance_scores', value='relevance_scores.json')\n\n"
+            "Score generously — this is a demo."
         ),
     ),
     "extractor": NodeSpec(
@@ -472,16 +742,24 @@ NODE_SPECS = {
         node_type="event_loop",
         input_keys=["user_profiles", "relevance_scores"],
         output_keys=["contact_list"],
-        tools=["extract_contacts"],
+        tools=["web_search", "web_scrape", "load_data", "save_data"],
         max_node_visits=3,
         system_prompt=(
-            "You are a Contact Extractor agent. You receive user profiles and relevance scores.\n\n"
-            "1. For each user with a relevance score >= 0.3, call extract_contacts\n"
-            "2. Merge profile data with contact info into a curated list\n"
-            "3. Output a JSON array of contacts with: username, name, email, "
-            "twitter, relevance_score\n"
-            "4. Call set_output(key='contact_list', value=<the JSON array string>)\n\n"
-            "Include all users who have at least one contact method available."
+            "You are a Contact Extractor agent. Your inputs 'user_profiles' and "
+            "'relevance_scores' are filenames pointing to JSON data files.\n\n"
+            "WORKFLOW:\n"
+            "1. Use load_data to read both files (profiles and scores). For large files, "
+            "use offset and limit to page through them incrementally "
+            "(e.g. load_data('file.json', offset=0, limit=30))\n"
+            "2. For each user with relevance score >= 0.3, enrich their contact info:\n"
+            "   - Use web_search to find contact details ('{username} github email', etc.)\n"
+            "   - If results include personal sites, use web_scrape to extract details\n"
+            "   - Look for: email addresses, Twitter/X handles, LinkedIn profiles\n"
+            "3. Compile a JSON array of contacts with: username, name, email, twitter, "
+            "relevance_score\n"
+            "4. Use save_data('contact_list.json', <json>) to write results\n"
+            "5. Call set_output(key='contact_list', value='contact_list.json')\n\n"
+            "Include all users who have at least one contact method."
         ),
     ),
     "review": NodeSpec(
@@ -494,16 +772,23 @@ NODE_SPECS = {
         output_keys=["approved_contacts", "redo_extraction"],
         nullable_output_keys=["approved_contacts", "redo_extraction"],
         max_node_visits=3,
+        tools=["load_data", "save_data"],
         system_prompt=(
-            "You are the Review agent at a human checkpoint. Present the contact list "
-            "to the operator in a clear, readable format.\n\n"
-            "Show each contact with: name, username, email, twitter, relevance score.\n\n"
-            "Ask the operator to either:\n"
-            "- **Approve** the list (possibly with modifications) — call "
-            "set_output(key='approved_contacts', value=<the approved JSON list>)\n"
-            "- **Request redo** — call set_output(key='redo_extraction', value='true') "
-            "to send back to the Extractor for refinement\n\n"
-            "Only set ONE output key per decision."
+            "You are the Review agent at a human checkpoint. Your input 'contact_list' "
+            "is a filename pointing to a JSON data file.\n\n"
+            "WORKFLOW:\n"
+            "1. Use load_data to read the contact list from the file\n"
+            "2. Present the contacts to the operator in a clear, readable format\n"
+            "   Show each contact with: name, username, email, twitter, relevance score\n"
+            "3. Ask the operator to either approve or request a redo\n"
+            "4. Based on the operator's response, call set_output EXACTLY ONCE:\n\n"
+            "   IF APPROVED: save the approved list with save_data, then call:\n"
+            "     set_output(key='approved_contacts', value='approved_contacts.json')\n\n"
+            "   IF REDO REQUESTED: call:\n"
+            "     set_output(key='redo_extraction', value='true')\n\n"
+            "CRITICAL RULE: Call set_output EXACTLY ONCE with EXACTLY ONE key.\n"
+            "NEVER call set_output twice. NEVER set both keys.\n"
+            "The two output keys are mutually exclusive — setting both will cause an error."
         ),
     ),
     "campaign_builder": NodeSpec(
@@ -513,17 +798,20 @@ NODE_SPECS = {
         node_type="event_loop",
         input_keys=["approved_contacts", "project_url"],
         output_keys=["draft_emails"],
-        tools=["load_campaign_template"],
+        tools=["load_campaign_template", "load_data", "save_data"],
         max_node_visits=3,
         system_prompt=(
-            "You are the Campaign Builder agent. You receive approved "
-            "contacts and the project URL.\n\n"
-            "1. Load the campaign template using load_campaign_template\n"
-            "2. For each approved contact, customize the email:\n"
+            "You are the Campaign Builder agent. Your input 'approved_contacts' is a "
+            "filename and 'project_url' is a URL string.\n\n"
+            "WORKFLOW:\n"
+            "1. Use load_data to read the approved contacts from the file\n"
+            "2. Load the campaign template using load_campaign_template\n"
+            "3. For each approved contact, customize the email:\n"
             "   - Fill in their name and relevant details\n"
             "   - Add a personalized hook based on their profile/interests\n"
-            "3. Output a JSON array of email objects with: recipient, subject, body\n"
-            "4. Call set_output(key='draft_emails', value=<the JSON array string>)\n\n"
+            "4. Format as a JSON array of email objects with: recipient, subject, body\n"
+            "5. Use save_data('draft_emails.json', <json>) to write the drafts\n"
+            "6. Call set_output(key='draft_emails', value='draft_emails.json')\n\n"
             "Make each email feel personal and relevant."
         ),
     ),
@@ -537,15 +825,22 @@ NODE_SPECS = {
         output_keys=["approved_emails", "revise_campaigns"],
         nullable_output_keys=["approved_emails", "revise_campaigns"],
         max_node_visits=3,
+        tools=["load_data", "save_data"],
         system_prompt=(
-            "You are the Approval agent at the final human checkpoint. Present the "
-            "draft campaign emails to the operator for review.\n\n"
-            "Show each email with recipient, subject, and body.\n\n"
-            "Ask the operator to either:\n"
-            "- **Approve** — call set_output(key='approved_emails', value=<the JSON list>)\n"
-            "- **Request revision** — call set_output(key='revise_campaigns', value='true') "
-            "to send back to the Campaign Builder\n\n"
-            "Only set ONE output key per decision."
+            "You are the Approval agent at the final human checkpoint. Your input "
+            "'draft_emails' is a filename pointing to a JSON data file.\n\n"
+            "WORKFLOW:\n"
+            "1. Use load_data to read the draft emails from the file\n"
+            "2. Present each email to the operator with: recipient, subject, and body\n"
+            "3. Ask the operator to either approve or request revision\n"
+            "4. Based on the operator's response, call set_output EXACTLY ONCE:\n\n"
+            "   IF APPROVED: save the approved list with save_data, then call:\n"
+            "     set_output(key='approved_emails', value='approved_emails.json')\n\n"
+            "   IF REVISION REQUESTED: call:\n"
+            "     set_output(key='revise_campaigns', value='true')\n\n"
+            "CRITICAL RULE: Call set_output EXACTLY ONCE with EXACTLY ONE key.\n"
+            "NEVER call set_output twice. NEVER set both keys.\n"
+            "The two output keys are mutually exclusive — setting both will cause an error."
         ),
     ),
     "sender": NodeSpec(
@@ -655,7 +950,7 @@ GRAPH = GraphSpec(
     edges=EDGES,
     terminal_nodes=["sender"],
     max_steps=30,
-    max_tokens=4096,
+    max_tokens=64000,
 )
 
 GOAL = Goal(
@@ -674,35 +969,116 @@ GOAL = Goal(
 # =========================================================================
 
 
-async def send_emails(ctx: NodeContext) -> NodeResult:
-    """Simulate sending approved campaign emails."""
-    approved = ctx.input_data.get("approved_emails") or ctx.memory.read("approved_emails")
+def _send_email_via_resend(
+    to: str,
+    subject: str,
+    html: str,
+    from_email: str,
+) -> dict:
+    """Send a single email via the Resend REST API."""
+    api_key = CREDENTIALS.get("resend") or os.getenv("RESEND_API_KEY")
+    if not api_key:
+        return {"error": "Resend API key not configured"}
+
+    try:
+        resp = httpx.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": from_email,
+                "to": [to] if isinstance(to, str) else to,
+                "subject": subject,
+                "html": html,
+            },
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "success": True,
+                "id": data.get("id", ""),
+            }
+        return {
+            "error": (f"Resend API ({resp.status_code}): {resp.text[:200]}"),
+        }
+    except httpx.TimeoutException:
+        return {"error": "Email send timed out"}
+    except httpx.RequestError as e:
+        return {"error": f"Network error: {e}"}
+
+
+def send_emails(approved_emails: str = "") -> str:
+    """Send approved campaign emails via Resend, or log if unconfigured.
+
+    Called by FunctionNode which unpacks input_keys as kwargs.
+    Returns a JSON string (FunctionNode wraps it in NodeResult).
+    """
+    approved = approved_emails
     if not approved:
-        return NodeResult(success=False, error="No approved emails to send")
+        return json.dumps({"error": "No approved emails to send"})
+
+    # Load from file if the value is a filename (file-ops pattern)
+    if isinstance(approved, str) and not approved.strip().startswith("["):
+        data_path = _DATA_DIR / approved
+        if data_path.exists():
+            approved = data_path.read_text(encoding="utf-8")
 
     try:
         emails = json.loads(approved) if isinstance(approved, str) else approved
     except (json.JSONDecodeError, TypeError):
         emails = [{"recipient": "unknown", "status": "parse_error"}]
 
+    from_email = os.getenv("EMAIL_FROM", "noreply@example.com")
+    has_resend = bool(CREDENTIALS.get("resend") or os.getenv("RESEND_API_KEY"))
+
     results = []
     for email in emails:
+        recipient = email.get("recipient", "unknown")
+        subject = email.get("subject", "")
+        body = email.get("body", "")
+        html_body = "<div style='font-family:sans-serif;'>" + body.replace("\n", "<br>") + "</div>"
+
+        if has_resend:
+            result = _send_email_via_resend(
+                to=recipient,
+                subject=subject,
+                html=html_body,
+                from_email=from_email,
+            )
+            sent_ok = result.get("success", False)
+            status = "sent" if sent_ok else "failed"
+            msg_id = result.get("id", "")
+            error = result.get("error", "")
+        else:
+            status = "logged"
+            msg_id = f"mock_{len(results) + 1:03d}"
+            error = ""
+            logger.info(
+                "(mock) Would send to %s: %s",
+                recipient,
+                subject,
+            )
+
         results.append(
             {
-                "recipient": email.get("recipient", "unknown"),
-                "subject": email.get("subject", ""),
-                "status": "sent",
-                "message_id": f"msg_{len(results) + 1:03d}",
+                "recipient": recipient,
+                "subject": subject,
+                "status": status,
+                "message_id": msg_id,
+                "error": error,
             }
         )
-        logger.info("Sent email to %s: %s", email.get("recipient"), email.get("subject"))
+        if status == "sent":
+            logger.info(
+                "Sent to %s: %s",
+                recipient,
+                subject,
+            )
 
-    return NodeResult(
-        success=True,
-        output={"send_results": json.dumps(results)},
-        tokens_used=0,
-        latency_ms=len(results) * 100,
-    )
+    return json.dumps(results)
 
 
 # =========================================================================
@@ -782,15 +1158,23 @@ class CheckpointJudge:
     async def evaluate(self, context: dict) -> JudgeVerdict:
         accumulator = context.get("output_accumulator", {})
 
-        # Check if LLM has set any output key
-        has_output = accumulator and any(v is not None for v in accumulator.values())
-        if has_output:
+        # Check if any output key has a real (non-None, non-empty) value
+        def _is_set(v: Any) -> bool:
+            if v is None:
+                return False
+            if isinstance(v, str) and len(v.strip()) == 0:
+                return False
+            return True
+
+        set_keys = [k for k, v in accumulator.items() if _is_set(v)]
+
+        if set_keys:
             # Validate against schema if provided
             if self._model is not None:
                 try:
                     parsed = {}
                     for k, v in accumulator.items():
-                        if v is None:
+                        if not _is_set(v):
                             continue
                         if isinstance(v, str):
                             try:
@@ -1596,7 +1980,9 @@ async def _run_pipeline(websocket, initial_message: str):
             config=LoopConfig(
                 max_iterations=30,
                 max_tool_calls_per_turn=15,
-                max_history_tokens=32_000,
+                max_history_tokens=64000,
+                max_tool_result_chars=8_000,
+                spillover_dir=str(_DATA_DIR),
             ),
             conversation_store=None,
             tool_executor=tool_executor if spec.tools else None,

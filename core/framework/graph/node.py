@@ -16,6 +16,7 @@ Protocol:
 """
 
 import asyncio
+import inspect
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -1755,8 +1756,19 @@ class FunctionNode(NodeProtocol):
         start = time.time()
 
         try:
-            # Call the function
-            result = self.func(**ctx.input_data)
+            # Filter input_data to only declared input_keys to prevent
+            # leaking extra memory keys from upstream nodes.
+            if ctx.node_spec.input_keys:
+                filtered = {
+                    k: v for k, v in ctx.input_data.items() if k in ctx.node_spec.input_keys
+                }
+            else:
+                filtered = ctx.input_data
+
+            # Call the function (supports both sync and async)
+            result = self.func(**filtered)
+            if inspect.isawaitable(result):
+                result = await result
 
             latency_ms = int((time.time() - start) * 1000)
 

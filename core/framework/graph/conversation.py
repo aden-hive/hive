@@ -371,12 +371,18 @@ class NodeConversation:
         # Clamp: must discard at least 1 message
         keep_recent = max(0, min(keep_recent, len(self._messages) - 1))
 
-        if keep_recent > 0:
-            old_messages = self._messages[:-keep_recent]
-            recent_messages = self._messages[-keep_recent:]
-        else:
-            old_messages = self._messages
-            recent_messages = []
+        total = len(self._messages)
+        split = total - keep_recent if keep_recent > 0 else total
+
+        # Advance split past orphaned tool results at the boundary.
+        # Tool-role messages reference a tool_use from the preceding
+        # assistant message; if that assistant message falls into the
+        # compacted (old) portion the tool_result becomes invalid.
+        while split < total and self._messages[split].role == "tool":
+            split += 1
+
+        old_messages = list(self._messages[:split])
+        recent_messages = list(self._messages[split:])
 
         # Extract protected values from messages being discarded
         if self._output_keys:
