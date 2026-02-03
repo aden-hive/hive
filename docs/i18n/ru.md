@@ -42,7 +42,7 @@
 ## Что такое Aden
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Aden — это платформа для создания, развёртывания, эксплуатации и адаптации ИИ-агентов:
