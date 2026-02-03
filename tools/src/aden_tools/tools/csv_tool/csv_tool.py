@@ -284,17 +284,6 @@ def register_tools(mcp: FastMCP) -> None:
         Query a CSV file using SQL (powered by DuckDB).
 
         The CSV file is loaded as a table named 'data'. Use standard SQL syntax.
-
-        Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
-            agent_id: Agent identifier
-            session_id: Session identifier
-            query: SQL query to execute. The CSV is available as table 'data'.
-                Example: "SELECT * FROM data WHERE price > 100 ORDER BY name LIMIT 10"
-
-        Returns:
-            dict with query results, columns, and row count
         """
         try:
             import duckdb
@@ -318,8 +307,9 @@ def register_tools(mcp: FastMCP) -> None:
             if not query or not query.strip():
                 return {"error": "query cannot be empty"}
 
-            query_upper = query.strip().upper()
-            if not query_upper.startswith("SELECT"):
+            # Security: allow SELECT/WITH only
+            query_upper = query.lstrip().upper()
+            if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
                 return {"error": "Only SELECT queries are allowed for security reasons"}
 
             # Disallowed keywords for security
@@ -339,9 +329,9 @@ def register_tools(mcp: FastMCP) -> None:
                     return {"error": f"'{keyword}' is not allowed in queries"}
 
             # Block obvious multi-statement / injection attempts
-            forbidden_tokens = [";", "--", "/*", "*/"]
-            for token in forbidden_tokens:
-                if token in query:
+            q_lower = query.lower()
+            for token in [";", "--", "/*", "*/"]:
+                if token in q_lower:
                     return {"error": "Multiple statements or comments are not allowed"}
 
             con = duckdb.connect(":memory:")
@@ -349,14 +339,13 @@ def register_tools(mcp: FastMCP) -> None:
                 # SAFE: parameter binding (no string interpolation)
                 con.execute(
                     "CREATE TABLE data AS SELECT * FROM read_csv_auto(?)",
-                    [secure_path],
+                    [str(secure_path)],
                 )
 
                 result = con.execute(query)
                 columns = [desc[0] for desc in result.description]
                 rows = result.fetchall()
 
-                # Convert to list of dicts
                 rows_as_dicts = [dict(zip(columns, row, strict=False)) for row in rows]
 
                 return {
