@@ -23,11 +23,13 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: Setup UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Install dependencies
         run: |
-          cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+          uv sync --group dev  
+          uv pip install -e core 
 
       - name: Ruff lint
         run: |
@@ -54,11 +56,13 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: Setup UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Install dependencies
         run: |
-          cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+          uv sync --group dev
+          uv pip install -e core
 
       - name: Run tests
         run: |
@@ -99,11 +103,13 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: Setup UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Install dependencies
         run: |
-          cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+          uv sync --group dev  
+          uv pip install -e core
 
       - name: Validate exported agents
         run: |
@@ -126,7 +132,7 @@ jobs:
           for agent_dir in "${agent_dirs[@]}"; do
             if [ -f "$agent_dir/agent.json" ]; then
               echo "Validating $agent_dir"
-              python -c "import json; json.load(open('$agent_dir/agent.json'))"
+              python3 -c "import json; json.load(open('$agent_dir/agent.json'))"
               validated=$((validated + 1))
             fi
           done

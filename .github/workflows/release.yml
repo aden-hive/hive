@@ -23,11 +23,13 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: Setup UV
+        uses: astral-sh/setup-uv@v4
+
       - name: Install dependencies
         run: |
-          cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+          uv sync --group dev
+          uv pip install -e core
 
       - name: Run tests
         run: |
