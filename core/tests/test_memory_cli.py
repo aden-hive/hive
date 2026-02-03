@@ -392,6 +392,30 @@ def test_list_runs_json_output(mock_summary, capsys, tmp_path):
             assert len(output) == 1
 
 
+def test_list_runs_negative_limit(capsys, tmp_path):
+    """Test that negative limit returns error."""
+    args = Namespace(
+        agent_path="exports/test-agent",
+        status=None,
+        goal=None,
+        limit=-5,
+        json=False,
+    )
+
+    storage_path = tmp_path / "storage"
+    storage_path.mkdir()
+
+    with patch("framework.memory.cli._get_storage_path") as mock_get_path:
+        mock_get_path.return_value = storage_path
+
+        result = cmd_list(args)
+
+        assert result == 1
+
+        captured = capsys.readouterr()
+        assert "limit must be a positive number" in captured.err
+
+
 def test_stats(capsys, tmp_path):
     """Test statistics display."""
     args = Namespace(

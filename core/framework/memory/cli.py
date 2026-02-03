@@ -139,6 +139,11 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     storage = FileStorage(storage_path)
 
+    # Validate limit
+    if args.limit < 1:
+        print("Error: limit must be a positive number", file=sys.stderr)
+        return 1
+
     # Get run IDs
     if args.status:
         run_ids = storage.get_runs_by_status(args.status)
