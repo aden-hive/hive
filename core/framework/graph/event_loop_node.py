@@ -143,12 +143,20 @@ class EventLoopNode(NodeProtocol):
     Lifecycle:
     1. Try to restore from durable state (crash recovery)
     2. If no prior state, init from NodeSpec.system_prompt + input_keys
-    3. Loop: drain injection queue -> stream LLM -> execute tools -> judge
+    3. Loop: drain injection queue -> stream LLM -> execute tools
+       -> if client_facing + no tools: block for user input (inject_event)
+       -> if not client_facing or tools present: judge evaluates
        (each add_* and set_output writes through to store immediately)
     4. Publish events to EventBus at each stage
     5. Write cursor after each iteration
-    6. Terminate when judge returns ACCEPT (or max iterations)
+    6. Terminate when judge returns ACCEPT, shutdown signaled, or max iterations
     7. Build output dict from OutputAccumulator
+
+    Client-facing blocking: When ``client_facing=True`` and the LLM produces
+    text without tool calls (a natural conversational turn), the node blocks
+    via ``_await_user_input()`` until ``inject_event()`` or ``signal_shutdown()``
+    is called.  This separates blocking (node concern) from output evaluation
+    (judge concern).
 
     Always returns NodeResult with retryable=False semantics. The executor
     must NOT retry event loop nodes -- retry is handled internally by the
@@ -169,6 +177,9 @@ class EventLoopNode(NodeProtocol):
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
         self._injection_queue: asyncio.Queue[str] = asyncio.Queue()
+        # Client-facing input blocking state
+        self._input_ready = asyncio.Event()
+        self._shutdown = False
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
         """Validate hard requirements only.
@@ -221,6 +232,15 @@ class EventLoopNode(NodeProtocol):
         if set_output_tool:
             tools.append(set_output_tool)
 
+        logger.info(
+            "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
+            node_id,
+            len(tools),
+            [t.name for t in tools],
+            ctx.node_spec.client_facing,
+            type(self._judge).__name__ if self._judge else "None",
+        )
+
         # 4. Publish loop started
         await self._publish_loop_started(stream_id, node_id)
 
@@ -250,8 +270,23 @@ class EventLoopNode(NodeProtocol):
                 await self._compact_tiered(ctx, conversation, accumulator)
 
             # 6e. Run single LLM turn
+            logger.info(
+                "[%s] iter=%d: running LLM turn (msgs=%d)",
+                node_id,
+                iteration,
+                len(conversation.messages),
+            )
             assistant_text, tool_results_list, turn_tokens = await self._run_single_turn(
                 ctx, conversation, tools, iteration, accumulator
+            )
+            logger.info(
+                "[%s] iter=%d: LLM done — text=%d chars, tool_calls=%d, tokens=%s, accumulator=%s",
+                node_id,
+                iteration,
+                len(assistant_text),
+                len(tool_results_list),
+                turn_tokens,
+                {k: ("set" if v is not None else "None") for k, v in accumulator.to_dict().items()},
             )
             total_input_tokens += turn_tokens.get("input", 0)
             total_output_tokens += turn_tokens.get("output", 0)
@@ -286,12 +321,66 @@ class EventLoopNode(NodeProtocol):
             # 6g. Write cursor checkpoint
             await self._write_cursor(ctx, conversation, accumulator, iteration)
 
-            # 6h. Judge evaluation
+            # 6h. Client-facing input wait
+            logger.info(
+                "[%s] iter=%d: 6h check — client_facing=%s, tool_results=%d",
+                node_id,
+                iteration,
+                ctx.node_spec.client_facing,
+                len(tool_results_list),
+            )
+            if ctx.node_spec.client_facing and not tool_results_list:
+                # LLM finished speaking (no tool calls) on a client-facing node.
+                # This is a conversational turn boundary: block for user input
+                # instead of running the judge.
+                if self._shutdown:
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    return NodeResult(
+                        success=True,
+                        output=accumulator.to_dict(),
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        latency_ms=latency_ms,
+                    )
+
+                logger.info("[%s] iter=%d: blocking for user input...", node_id, iteration)
+                got_input = await self._await_user_input(ctx)
+                logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
+                if not got_input:
+                    # Shutdown signaled during wait
+                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    return NodeResult(
+                        success=True,
+                        output=accumulator.to_dict(),
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        latency_ms=latency_ms,
+                    )
+
+                # Clear stall detection — user input resets the conversation
+                recent_responses.clear()
+
+                # For nodes with an explicit judge, fall through to judge
+                # evaluation so the LLM gets structured feedback about missing
+                # outputs (e.g. "Missing output keys: [...]"). Without this,
+                # the LLM may generate text like "Ready to proceed!" without
+                # ever calling set_output, and the judge feedback never reaches it.
+                #
+                # For nodes without a judge (HITL review/approval), skip the
+                # judge — the implicit judge would incorrectly ACCEPT when all
+                # output keys are nullable.
+                if self._judge is None:
+                    logger.info("[%s] iter=%d: no judge, continuing", node_id, iteration)
+                    continue
+                logger.info("[%s] iter=%d: has judge, falling through to 6i", node_id, iteration)
+
+            # 6i. Judge evaluation
             should_judge = (
                 (iteration + 1) % self._config.judge_every_n_turns == 0
                 or not tool_results_list  # no tool calls = natural stop
             )
 
+            logger.info("[%s] iter=%d: 6i should_judge=%s", node_id, iteration, should_judge)
             if should_judge:
                 verdict = await self._evaluate(
                     ctx,
@@ -300,6 +389,14 @@ class EventLoopNode(NodeProtocol):
                     assistant_text,
                     tool_results_list,
                     iteration,
+                )
+                fb_preview = (verdict.feedback or "")[:200]
+                logger.info(
+                    "[%s] iter=%d: judge verdict=%s feedback=%r",
+                    node_id,
+                    iteration,
+                    verdict.action,
+                    fb_preview,
                 )
 
                 if verdict.action == "ACCEPT":
@@ -311,6 +408,12 @@ class EventLoopNode(NodeProtocol):
                         hint = (
                             f"Missing required output keys: {missing}. "
                             "Use set_output to provide them."
+                        )
+                        logger.info(
+                            "[%s] iter=%d: ACCEPT but missing keys %s",
+                            node_id,
+                            iteration,
+                            missing,
                         )
                         await conversation.add_user_message(hint)
                         continue
@@ -360,8 +463,38 @@ class EventLoopNode(NodeProtocol):
 
         The content becomes a user message prepended to the next iteration.
         Thread-safe via asyncio.Queue.
+        Also unblocks _await_user_input() if the node is waiting.
         """
         await self._injection_queue.put(content)
+        self._input_ready.set()
+
+    def signal_shutdown(self) -> None:
+        """Signal the node to exit its loop cleanly.
+
+        Unblocks any pending _await_user_input() call and causes
+        the loop to exit on the next check.
+        """
+        self._shutdown = True
+        self._input_ready.set()
+
+    async def _await_user_input(self, ctx: NodeContext) -> bool:
+        """Block until user input arrives or shutdown is signaled.
+
+        Called when a client_facing node produces text without tool calls —
+        a natural conversational turn boundary.
+
+        Returns True if input arrived, False if shutdown was signaled.
+        """
+        if self._event_bus:
+            await self._event_bus.emit_client_input_requested(
+                stream_id=ctx.node_id,
+                node_id=ctx.node_id,
+                prompt="",
+            )
+
+        self._input_ready.clear()
+        await self._input_ready.wait()
+        return not self._shutdown
 
     # -------------------------------------------------------------------
     # Single LLM turn with caller-managed tool orchestration
@@ -426,6 +559,12 @@ class EventLoopNode(NodeProtocol):
                     logger.warning(f"Recoverable stream error: {event.error}")
 
             final_text = accumulated_text
+            logger.info(
+                "[%s] LLM response: text=%r tool_calls=%s",
+                node_id,
+                accumulated_text[:300] if accumulated_text else "(empty)",
+                [tc.tool_name for tc in tool_calls] if tool_calls else "[]",
+            )
 
             # Record assistant message (write-through via conversation store)
             tc_dicts = None
@@ -467,6 +606,12 @@ class EventLoopNode(NodeProtocol):
                 )
 
                 # Handle set_output synthetic tool
+                logger.info(
+                    "[%s] tool_call: %s(%s)",
+                    node_id,
+                    tc.tool_name,
+                    json.dumps(tc.tool_input)[:200],
+                )
                 if tc.tool_name == "set_output":
                     result = self._handle_set_output(tc.tool_input, ctx.node_spec.output_keys)
                     result = ToolResult(
@@ -1130,6 +1275,10 @@ class EventLoopNode(NodeProtocol):
         while not self._injection_queue.empty():
             try:
                 content = self._injection_queue.get_nowait()
+                logger.info(
+                    "[drain] injected message: %s",
+                    content[:200] if content else "(empty)",
+                )
                 await conversation.add_user_message(f"[External event]: {content}")
                 count += 1
             except asyncio.QueueEmpty:

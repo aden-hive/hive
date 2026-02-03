@@ -175,6 +175,7 @@ class _GitHubClient:
         owner: str,
         repo: str,
         state: str = "open",
+        page: int = 1,
         limit: int = 30,
     ) -> dict[str, Any]:
         """List issues for a repository."""
@@ -183,6 +184,7 @@ class _GitHubClient:
         params = {
             "state": state,
             "per_page": min(limit, 100),
+            "page": max(1, page),
         }
 
         response = httpx.get(
@@ -275,6 +277,7 @@ class _GitHubClient:
         owner: str,
         repo: str,
         state: str = "open",
+        page: int = 1,
         limit: int = 30,
     ) -> dict[str, Any]:
         """List pull requests for a repository."""
@@ -283,6 +286,7 @@ class _GitHubClient:
         params = {
             "state": state,
             "per_page": min(limit, 100),
+            "page": max(1, page),
         }
 
         response = httpx.get(
@@ -395,6 +399,46 @@ class _GitHubClient:
         branch = _sanitize_path_param(branch, "branch")
         response = httpx.get(
             f"{GITHUB_API_BASE}/repos/{owner}/{repo}/branches/{branch}",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    # --- Stargazers ---
+
+    def list_stargazers(
+        self,
+        owner: str,
+        repo: str,
+        page: int = 1,
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        """List users who starred a repository."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        params = {
+            "per_page": min(limit, 100),
+            "page": max(1, page),
+        }
+
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/stargazers",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    # --- Users ---
+
+    def get_user_profile(
+        self,
+        username: str,
+    ) -> dict[str, Any]:
+        """Get a user's public profile."""
+        username = _sanitize_path_param(username, "username")
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/users/{username}",
             headers=self._headers,
             timeout=30.0,
         )
@@ -522,6 +566,7 @@ def register_tools(
         owner: str,
         repo: str,
         state: str = "open",
+        page: int = 1,
         limit: int = 30,
     ) -> dict:
         """
@@ -531,7 +576,8 @@ def register_tools(
             owner: Repository owner
             repo: Repository name
             state: Issue state ("open", "closed", "all")
-            limit: Maximum number of issues to return (1-100, default 30)
+            page: Page number for pagination (1-based, default 1)
+            limit: Maximum number of issues per page (1-100, default 30)
 
         Returns:
             Dict with list of issues or error
@@ -540,7 +586,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.list_issues(owner, repo, state, limit)
+            return client.list_issues(owner, repo, state, page, limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -648,6 +694,7 @@ def register_tools(
         owner: str,
         repo: str,
         state: str = "open",
+        page: int = 1,
         limit: int = 30,
     ) -> dict:
         """
@@ -657,7 +704,8 @@ def register_tools(
             owner: Repository owner
             repo: Repository name
             state: PR state ("open", "closed", "all")
-            limit: Maximum number of PRs to return (1-100, default 30)
+            page: Page number for pagination (1-based, default 1)
+            limit: Maximum number of PRs per page (1-100, default 30)
 
         Returns:
             Dict with list of pull requests or error
@@ -666,7 +714,7 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.list_pull_requests(owner, repo, state, limit)
+            return client.list_pull_requests(owner, repo, state, page, limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -812,6 +860,62 @@ def register_tools(
             return client
         try:
             return client.get_branch(owner, repo, branch)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Stargazers ---
+
+    @mcp.tool()
+    def github_list_stargazers(
+        owner: str,
+        repo: str,
+        page: int = 1,
+        limit: int = 30,
+    ) -> dict:
+        """
+        List users who starred a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            page: Page number for pagination (1-based, default 1)
+            limit: Maximum number of stargazers per page (1-100, default 30)
+
+        Returns:
+            Dict with list of stargazers or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_stargazers(owner, repo, page, limit)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    # --- Users ---
+
+    @mcp.tool()
+    def github_get_user_profile(
+        username: str,
+    ) -> dict:
+        """
+        Get a GitHub user's public profile including name, bio, company, location, and email.
+
+        Args:
+            username: GitHub username
+
+        Returns:
+            Dict with user profile information or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_user_profile(username)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
