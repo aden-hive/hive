@@ -3,27 +3,6 @@
 Aden Tools MCP Server
 
 Exposes all tools via Model Context Protocol using FastMCP.
-
-Usage:
-    # Run with HTTP transport (default, for Docker)
-    python mcp_server.py
-
-    # Run with custom port
-    python mcp_server.py --port 8001
-
-    # Run with STDIO transport (for local testing)
-    python mcp_server.py --stdio
-
-Environment Variables:
-    MCP_PORT              - Server port (default: 4001)
-    ANTHROPIC_API_KEY     - Required at startup for testing/LLM nodes
-    BRAVE_SEARCH_API_KEY  - Required for web_search tool (validated at agent load time)
-
-Note:
-    Two-tier credential validation:
-    - Tier 1 (startup): ANTHROPIC_API_KEY must be set before server starts
-    - Tier 2 (agent load): Tool credentials validated when agent is loaded
-    See aden_tools.credentials for details.
 """
 
 import argparse
@@ -37,7 +16,6 @@ logger = logging.getLogger(__name__)
 def setup_logger():
     """Configure logger for MCP server."""
     if not logger.handlers:
-        # For STDIO mode, log to stderr; for HTTP mode, log to stdout
         stream = sys.stderr if "--stdio" in sys.argv else sys.stdout
         handler = logging.StreamHandler(stream)
         formatter = logging.Formatter("[MCP] %(message)s")
@@ -50,63 +28,52 @@ setup_logger()
 
 # Suppress FastMCP banner in STDIO mode
 if "--stdio" in sys.argv:
-    # Monkey-patch rich Console to redirect to stderr
     import rich.console
 
     _original_console_init = rich.console.Console.__init__
 
     def _patched_console_init(self, *args, **kwargs):
-        kwargs["file"] = sys.stderr  # Force all rich output to stderr
+        kwargs["file"] = sys.stderr
         _original_console_init(self, *args, **kwargs)
 
     rich.console.Console.__init__ = _patched_console_init
+
 
 from fastmcp import FastMCP  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import PlainTextResponse  # noqa: E402
 
 from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
-from aden_tools.tools import register_all_tools  # noqa: E402
 
-# Create credential store with access to both env vars AND encrypted store
-# This allows using Aden-synced credentials from ~/.hive/credentials
+# Create credential store
 try:
     from framework.credentials import CredentialStore
 
-    store = CredentialStore.with_encrypted_storage()  # ~/.hive/credentials
+    store = CredentialStore.with_encrypted_storage()
     credentials = CredentialStoreAdapter(store)
     logger.info("Using CredentialStoreAdapter with encrypted storage")
 except Exception as e:
-    # Fall back to env-only adapter if encrypted storage fails
     credentials = CredentialStoreAdapter.with_env_storage()
     logger.warning(f"Falling back to env-only CredentialStoreAdapter: {e}")
 
-# Tier 1: Validate startup-required credentials (if any)
+# Tier 1 credential validation
 try:
     credentials.validate_startup()
     logger.info("Startup credentials validated")
 except CredentialError as e:
-    # Non-fatal - tools will validate their own credentials when called
     logger.warning(str(e))
 
-mcp = FastMCP("tools")
 
-# Register all tools with the MCP server, passing credential store
-tools = register_all_tools(mcp, credentials=credentials)
-# Only print to stdout in HTTP mode (STDIO mode requires clean stdout for JSON-RPC)
-if "--stdio" not in sys.argv:
-    logger.info(f"Registered {len(tools)} tools: {tools}")
+mcp = FastMCP("tools")
 
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> PlainTextResponse:
-    """Health check endpoint for container orchestration."""
     return PlainTextResponse("OK")
 
 
 @mcp.custom_route("/", methods=["GET"])
 async def index(request: Request) -> PlainTextResponse:
-    """Landing page for browser visits."""
     return PlainTextResponse("Welcome to the Hive MCP Server")
 
 
@@ -131,8 +98,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # 🔑 IMPORTANT: import + register tools ONLY at runtime
+    from aden_tools.tools import register_all_tools
+
+    tools = register_all_tools(mcp, credentials=credentials)
+
+    if not args.stdio:
+        logger.info(f"Registered {len(tools)} tools")
+
     if args.stdio:
-        # STDIO mode: only JSON-RPC messages go to stdout
         mcp.run(transport="stdio")
     else:
         logger.info(f"Starting HTTP server on {args.host}:{args.port}")
