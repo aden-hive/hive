@@ -15,7 +15,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -248,9 +248,7 @@ class DurableWaitRuntime:
                         "attempt": wait_request.attempt,
                         "signal_type": wait_request.signal_type,
                         "timeout_at": (
-                            wait_request.timeout_at.isoformat()
-                            if wait_request.timeout_at
-                            else None
+                            wait_request.timeout_at.isoformat() if wait_request.timeout_at else None
                         ),
                     },
                 )
@@ -312,7 +310,7 @@ class DurableWaitRuntime:
         from framework.runtime.event_bus import AgentEvent, EventType
 
         if now is None:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
         expired = await self._store.get_expired(now)
         resumed: list[WaitResumed] = []
         for run_id, wait_id in expired:

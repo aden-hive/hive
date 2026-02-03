@@ -10,7 +10,8 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -24,7 +25,6 @@ from framework.runtime.durable_wait import (
     WaitStoreIfce,
 )
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
-
 
 # === Fixtures ===
 
@@ -43,7 +43,7 @@ def wait_request(run_id: str) -> WaitRequest:
         attempt=1,
         signal_type="email.reply",
         match={"thread_id": "t1"},
-        timeout_at=datetime(2025, 3, 1, 12, 0, 0, tzinfo=timezone.utc),
+        timeout_at=datetime(2025, 3, 1, 12, 0, 0, tzinfo=UTC),
     )
 
 
@@ -54,7 +54,7 @@ def signal_envelope() -> SignalEnvelope:
         payload={"thread_id": "t1", "body": "Got it"},
         correlation_id="c1",
         causation_id=None,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
 
 
@@ -87,7 +87,7 @@ def test_wait_request_creation(wait_request: WaitRequest, run_id: str) -> None:
 
 
 def test_wait_request_frozen(wait_request: WaitRequest) -> None:
-    with pytest.raises(Exception):  # FrozenInstanceError
+    with pytest.raises(FrozenInstanceError):
         wait_request.wait_id = "other"  # type: ignore[misc]
 
 
@@ -154,7 +154,7 @@ async def test_wait_store_run_isolation(
         payload={},
         correlation_id=None,
         causation_id=None,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     # Signal for different run must not match
     matched = await wait_store.match_signal("run_other", envelope)
@@ -187,7 +187,7 @@ async def test_wait_store_match_signal_deterministic_fifo(
         payload={},
         correlation_id=None,
         causation_id=None,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     matched = await wait_store.match_signal(run_id, envelope)
     assert matched == "w_0"
@@ -233,7 +233,7 @@ async def test_wait_store_match_signal_type_and_match_filter(
         payload={"thread_id": "t1"},
         correlation_id=None,
         causation_id=None,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     matched = await wait_store.match_signal(run_id, envelope_approval)
     assert matched == "w2"
@@ -246,7 +246,7 @@ async def test_wait_store_match_signal_type_and_match_filter(
         payload={"thread_id": "t1"},
         correlation_id=None,
         causation_id=None,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     assert await wait_store.match_signal(run_id, envelope_reply) == "w1"
     pending2 = await wait_store.get_pending(run_id)
@@ -275,8 +275,8 @@ async def test_wait_store_get_expired(
     wait_store: WaitStoreIfce,
     run_id: str,
 ) -> None:
-    past = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    future = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    past = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
+    future = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
     req_past = WaitRequest(
         wait_id="expired",
         run_id=run_id,
@@ -298,7 +298,7 @@ async def test_wait_store_get_expired(
     await wait_store.add(req_past)
     await wait_store.add(req_future)
 
-    now = datetime(2025, 2, 1, 0, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2025, 2, 1, 0, 0, 0, tzinfo=UTC)
     expired = await wait_store.get_expired(now)
     assert len(expired) == 1
     assert expired[0][0] == run_id and expired[0][1] == "expired"
@@ -323,7 +323,7 @@ async def test_wait_store_get_expired_none_timeout(
         timeout_at=None,
     )
     await wait_store.add(req)
-    expired = await wait_store.get_expired(datetime.now(timezone.utc))
+    expired = await wait_store.get_expired(datetime.now(UTC))
     assert len(expired) == 0
 
 
@@ -425,7 +425,7 @@ async def test_runtime_tick_returns_expired_waits(
     wait_store: WaitStoreIfce,
     run_id: str,
 ) -> None:
-    past = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    past = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
     req = WaitRequest(
         wait_id="timed_out",
         run_id=run_id,
@@ -436,7 +436,7 @@ async def test_runtime_tick_returns_expired_waits(
         timeout_at=past,
     )
     await wait_store.add(req)
-    now = datetime(2025, 2, 1, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2025, 2, 1, 12, 0, 0, tzinfo=UTC)
     resumed = await durable_runtime.tick(now)
     assert len(resumed) == 1
     assert resumed[0].wait_id == "timed_out"
@@ -451,7 +451,7 @@ async def test_runtime_tick_emits_wait_timed_out(
     event_bus: EventBus,
     run_id: str,
 ) -> None:
-    past = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    past = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
     req = WaitRequest(
         wait_id="timed_out",
         run_id=run_id,
@@ -472,7 +472,7 @@ async def test_runtime_tick_emits_wait_timed_out(
         event_types=[EventType.WAIT_TIMED_OUT],
         handler=handler,
     )
-    now = datetime(2025, 2, 1, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2025, 2, 1, 12, 0, 0, tzinfo=UTC)
     await durable_runtime.tick(now)
     await asyncio.sleep(0.05)
     event_bus.unsubscribe(sub_id)
@@ -488,7 +488,7 @@ async def test_runtime_tick_exactly_once_per_wait(
     wait_store: WaitStoreIfce,
     run_id: str,
 ) -> None:
-    past = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    past = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
     req = WaitRequest(
         wait_id="once",
         run_id=run_id,
@@ -499,7 +499,7 @@ async def test_runtime_tick_exactly_once_per_wait(
         timeout_at=past,
     )
     await wait_store.add(req)
-    now = datetime(2025, 2, 1, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2025, 2, 1, 12, 0, 0, tzinfo=UTC)
     first = await durable_runtime.tick(now)
     assert len(first) == 1
     second = await durable_runtime.tick(now)

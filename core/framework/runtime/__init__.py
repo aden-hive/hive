@@ -2,6 +2,7 @@
 
 from framework.runtime.core import Runtime
 from framework.runtime.durable_wait import (
+    WAIT_TIMEOUT_SIGNAL_TYPE,
     DurableWaitRuntime,
     ExecutionPaused,
     InMemoryWaitStore,
@@ -17,6 +18,7 @@ __all__ = [
     "InMemoryWaitStore",
     "Runtime",
     "SignalEnvelope",
+    "WAIT_TIMEOUT_SIGNAL_TYPE",
     "WaitRequest",
     "WaitResumed",
     "WaitStoreIfce",
