@@ -359,6 +359,20 @@ class AdenCredentialClient:
         """
         response = self._request_with_retry("POST", f"/v1/credentials/{integration_id}/refresh")
         data = response.json()
+
+        if response.status_code != 200:
+            # Check if the server indicates that re-authorization is needed
+            requires_reauth = data.get("requires_reauthorization", False)
+            error_msg = data.get("error", "Failed to refresh token")
+            
+            if requires_reauth:
+                raise AdenRefreshError(
+                    message=error_msg,
+                    requires_reauthorization=True,
+                    reauthorization_url=data.get("reauthorization_url")
+                )
+            raise AdenRefreshError(f"Refresh failed: {error_msg}")
+
         return AdenCredentialResponse.from_dict(data, integration_id=integration_id)
 
     def list_integrations(self) -> list[AdenIntegrationInfo]:
