@@ -2,6 +2,8 @@
 import sqlite3
 import numpy as np
 from datetime import datetime
+import tensorflow as tf
+from tensorflow.keras import layers, models
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("HiveStringDB")
@@ -67,3 +69,41 @@ async def get_training_batch(limit: int = 5) -> list:
     cursor = db_conn.cursor()
     cursor.execute("SELECT * FROM statements WHERE status = 'INITIATED' LIMIT ?", (limit,))
     return cursor.fetchall()
+
+
+mcp = FastMCP("HiveKerasEngine")
+
+@mcp.tool()
+async def build_ann_model(input_dim: int, num_classes: int) -> str:
+    """
+    Generates a simple ANN for structured business data classification.
+    """
+    model = models.Sequential([
+        layers.Dense(64, activation='relu', input_shape=(input_dim,)),
+        layers.Dropout(0.2),
+        layers.Dense(32, activation='relu'),
+        layers.Dense(num_classes, activation='softmax')
+    ])
+    
+    model.compile(optimizer='adam', 
+                  loss='categorical_crossentropy', 
+                  metrics=['accuracy'])
+    
+    # In a real app, you'd save the model path to the SQLite DB
+    return "ANN Model compiled and ready for training."
+
+@mcp.tool()
+async def build_cnn_model(seq_length: int, vocab_size: int) -> str:
+    """
+    Generates a 1D CNN for sequence-based business statement analysis.
+    """
+    model = models.Sequential([
+        layers.Embedding(vocab_size, 64, input_length=seq_length),
+        layers.Conv1D(128, 5, activation='relu'),
+        layers.GlobalMaxPooling1D(),
+        layers.Dense(10, activation='relu'),
+        layers.Dense(1, activation='sigmoid')
+    ])
+    
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return "CNN Model for text sequence analysis initiated."
