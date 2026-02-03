@@ -21,6 +21,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -1533,6 +1534,8 @@ Do NOT fabricate data or return empty objects."""
 
     def _build_system_prompt(self, ctx: NodeContext) -> str:
         """Build the system prompt."""
+        from datetime import datetime
+
         parts = []
 
         if ctx.node_spec.system_prompt:
@@ -1554,6 +1557,15 @@ Do NOT fabricate data or return empty objects."""
                     pass
 
             parts.append(prompt)
+
+        # Inject current datetime so LLM knows "now"
+        utc_dt = datetime.now(UTC)
+        local_dt = datetime.now().astimezone()
+        local_tz_name = local_dt.tzname() or "Unknown"
+        parts.append("\n## Runtime Context")
+        parts.append(f"- Current Date/Time (UTC): {utc_dt.isoformat()}")
+        parts.append(f"- Local Timezone: {local_tz_name}")
+        parts.append(f"- Current Date/Time (Local): {local_dt.isoformat()}")
 
         if ctx.goal_context:
             parts.append("\n# Goal Context")
