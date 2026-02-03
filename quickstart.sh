@@ -59,7 +59,7 @@ prompt_choice() {
     echo -e "${BOLD}$prompt${NC}"
     for opt in "${options[@]}"; do
         echo -e "  ${CYAN}$i)${NC} $opt"
-        ((i++))
+        i=$((i + 1))
     done
     echo ""
 
@@ -191,8 +191,7 @@ echo -n "  Installing framework... "
 cd "$SCRIPT_DIR/core"
 
 if [ -f "pyproject.toml" ]; then
-    uv sync > /dev/null 2>&1
-    if [ $? -eq 0 ]; then
+    if uv sync > /dev/null 2>&1; then
         echo -e "${GREEN}  ✓ framework package installed${NC}"
     else
         echo -e "${YELLOW}  ⚠ framework installation had issues (may be OK)${NC}"
@@ -207,8 +206,7 @@ echo -n "  Installing tools... "
 cd "$SCRIPT_DIR/tools"
 
 if [ -f "pyproject.toml" ]; then
-    uv sync > /dev/null 2>&1
-    if [ $? -eq 0 ]; then
+    if uv sync > /dev/null 2>&1; then
         echo -e "${GREEN}  ✓ aden_tools package installed${NC}"
     else
         echo -e "${RED}  ✗ aden_tools installation failed${NC}"
@@ -472,7 +470,7 @@ config = {
         'model': '$model',
         'api_key_env_var': '$env_var'
     },
-    'created_at': '$(date -Iseconds)'
+    'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
 }
 with open('$HIVE_CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
@@ -547,7 +545,7 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
         i=1
         for provider in "${FOUND_PROVIDERS[@]}"; do
             echo -e "  ${CYAN}$i)${NC} $provider"
-            ((i++))
+            i=$((i + 1))
         done
         echo ""
 
