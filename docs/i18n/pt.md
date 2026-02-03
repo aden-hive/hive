@@ -42,7 +42,7 @@ Visite [adenhq.com](https://adenhq.com) para documentação completa, exemplos e
 ## O que é Aden
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Aden é uma plataforma para construir, implantar, operar e adaptar agentes de IA:
