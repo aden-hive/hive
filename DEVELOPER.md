@@ -509,6 +509,20 @@ docs(readme): update installation instructions
 chore(deps): update React to 18.2.0
 ```
 
+
+### Running Local Checks and Tests
+
+The repository includes Makefile targets used by CI and maintainers.
+
+After running `./quickstart.sh`, activate the framework virtual environment before running checks or tests:
+
+```bash
+source core/.venv/bin/activate
+make check
+make test
+```
+Tools such as ruff are installed inside the virtual environment and may not be available unless the environment is activated.
+
 ### Pull Request Process
 
 1. Create a feature branch from `main`
