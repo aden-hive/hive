@@ -503,8 +503,7 @@ class EventLoopNode(NodeProtocol):
                 max_tc = self._config.max_tool_calls_per_turn
                 skipped = tool_calls[executed_in_batch:]
                 logger.warning(
-                    "Max tool calls per turn (%d) exceeded — "
-                    "discarding %d remaining call(s): %s",
+                    "Max tool calls per turn (%d) exceeded — discarding %d remaining call(s): %s",
                     max_tc,
                     len(skipped),
                     ", ".join(tc.tool_name for tc in skipped),
@@ -594,7 +593,7 @@ class EventLoopNode(NodeProtocol):
                         break
             if key:
                 logger.warning(
-                    "Recovered set_output args from truncated JSON: " "key=%s, value_len=%d",
+                    "Recovered set_output args from truncated JSON: key=%s, value_len=%d",
                     key,
                     len(value),
                 )
@@ -870,7 +869,10 @@ class EventLoopNode(NodeProtocol):
         """Check if pause has been requested. Returns True if paused."""
         pause_requested = ctx.input_data.get("pause_requested", False)
         if not pause_requested:
-            pause_requested = ctx.memory.read("pause_requested") or False
+            try:
+                pause_requested = ctx.memory.read("pause_requested") or False
+            except (PermissionError, KeyError):
+                pause_requested = False
         if pause_requested:
             logger.info(f"Pause requested at iteration {iteration}")
             return True

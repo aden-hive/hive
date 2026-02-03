@@ -208,6 +208,15 @@ class NodeSpec(BaseModel):
     max_retries: int = Field(default=3)
     retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
 
+    # Visit limits (for feedback/callback edges)
+    max_node_visits: int = Field(
+        default=1,
+        description=(
+            "Max times this node executes in one graph run. "
+            "Set >1 for feedback loops. 0 = unlimited (max_steps guards)."
+        ),
+    )
+
     # Pydantic model for output validation
     output_model: type[BaseModel] | None = Field(
         default=None,

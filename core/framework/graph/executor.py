@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from framework.graph.edge import EdgeSpec, GraphSpec
+from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import (
     FunctionNode,
@@ -54,6 +54,9 @@ class ExecutionResult:
     retry_details: dict[str, int] = field(default_factory=dict)  # {node_id: retry_count}
     had_partial_failures: bool = False  # True if any node failed but eventually succeeded
     execution_quality: str = "clean"  # "clean", "degraded", or "failed"
+
+    # Visit tracking (for feedback/callback edges)
+    node_visit_counts: dict[str, int] = field(default_factory=dict)  # {node_id: visit_count}
 
     @property
     def is_clean_success(self) -> bool:
@@ -251,6 +254,7 @@ class GraphExecutor:
         total_tokens = 0
         total_latency = 0
         node_retry_counts: dict[str, int] = {}  # Track retries per node
+        node_visit_counts: dict[str, int] = {}  # Track visits for feedback loops
 
         # Determine entry point (may differ if resuming)
         current_node_id = graph.get_entry_point(session_state)
@@ -278,6 +282,30 @@ class GraphExecutor:
                 node_spec = graph.get_node(current_node_id)
                 if node_spec is None:
                     raise RuntimeError(f"Node not found: {current_node_id}")
+
+                # Enforce max_node_visits (feedback/callback edge support)
+                node_visit_counts[current_node_id] = node_visit_counts.get(current_node_id, 0) + 1
+                max_visits = getattr(node_spec, "max_node_visits", 1)
+                if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
+                    self.logger.warning(
+                        f"   ⊘ Node '{node_spec.name}' visit limit reached "
+                        f"({node_visit_counts[current_node_id]}/{max_visits}), skipping"
+                    )
+                    # Skip execution — follow outgoing edges using current memory
+                    skip_result = NodeResult(success=True, output=memory.read_all())
+                    next_node = self._follow_edges(
+                        graph=graph,
+                        goal=goal,
+                        current_node_id=current_node_id,
+                        current_node_spec=node_spec,
+                        result=skip_result,
+                        memory=memory,
+                    )
+                    if next_node is None:
+                        self.logger.info("   → No more edges after visit limit, ending")
+                        break
+                    current_node_id = next_node
+                    continue
 
                 path.append(current_node_id)
 
@@ -447,6 +475,7 @@ class GraphExecutor:
                             retry_details=dict(node_retry_counts),
                             had_partial_failures=len(nodes_failed) > 0,
                             execution_quality="failed",
+                            node_visit_counts=dict(node_visit_counts),
                         )
 
                 # Check if we just executed a pause node - if so, save state and return
@@ -486,6 +515,7 @@ class GraphExecutor:
                         retry_details=dict(node_retry_counts),
                         had_partial_failures=len(nodes_failed) > 0,
                         execution_quality=exec_quality,
+                        node_visit_counts=dict(node_visit_counts),
                     )
 
                 # Check if this is a terminal node - if so, we're done
@@ -606,6 +636,7 @@ class GraphExecutor:
                 retry_details=dict(node_retry_counts),
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality=exec_quality,
+                node_visit_counts=dict(node_visit_counts),
             )
 
         except Exception as e:
@@ -632,6 +663,7 @@ class GraphExecutor:
                 retry_details=dict(node_retry_counts),
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality="failed",
+                node_visit_counts=dict(node_visit_counts),
             )
 
     def _build_context(
@@ -858,6 +890,21 @@ class GraphExecutor:
                 target_node_name=target_node_spec.name if target_node_spec else edge.target,
             ):
                 traversable.append(edge)
+
+        # Priority filtering for CONDITIONAL edges:
+        # When multiple CONDITIONAL edges match, keep only the highest-priority
+        # group.  This prevents mutually-exclusive conditional branches (e.g.
+        # forward vs. feedback) from incorrectly triggering fan-out.
+        # ON_SUCCESS / other edge types are unaffected.
+        if len(traversable) > 1:
+            conditionals = [e for e in traversable if e.condition == EdgeCondition.CONDITIONAL]
+            if len(conditionals) > 1:
+                max_prio = max(e.priority for e in conditionals)
+                traversable = [
+                    e
+                    for e in traversable
+                    if e.condition != EdgeCondition.CONDITIONAL or e.priority == max_prio
+                ]
 
         return traversable
 

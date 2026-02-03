@@ -43,6 +43,7 @@ lint.select = [
   "W", # pycodestyle warnings
 ]
 
+lint.per-file-ignores."demos/*" = ["E501"]
 lint.isort.combine-as-imports = true
 lint.isort.known-first-party = ["framework"]
 lint.isort.section-order = [
