@@ -182,14 +182,6 @@ echo ""
 echo -e "${DIM}This may take a minute...${NC}"
 echo ""
 
-# Upgrade pip, setuptools, and wheel
-echo -n "  Upgrading pip... "
-if $PYTHON_CMD -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1; then
-    echo -e "${GREEN}ok${NC}"
-else
-    echo -e "${YELLOW}skipped (pip not available, using uv)${NC}"
-fi
-
 # Install framework package from core/
 echo -n "  Installing framework... "
 cd "$SCRIPT_DIR/core"
@@ -219,30 +211,6 @@ if [ -f "pyproject.toml" ]; then
 else
     echo -e "${RED}failed${NC}"
     exit 1
-fi
-
-# Install MCP dependencies
-echo -n "  Installing MCP... "
-if $PYTHON_CMD -m pip install mcp fastmcp > /dev/null 2>&1; then
-    echo -e "${GREEN}ok${NC}"
-else
-    echo -e "${YELLOW}skipped${NC}"
-fi
-
-# Fix openai version compatibility
-echo -n "  Checking openai... "
-if $PYTHON_CMD -m pip install "openai>=1.0.0" > /dev/null 2>&1; then
-    echo -e "${GREEN}ok${NC}"
-else
-    echo -e "${YELLOW}skipped${NC}"
-fi
-
-# Install click for CLI
-echo -n "  Installing CLI tools... "
-if $PYTHON_CMD -m pip install click > /dev/null 2>&1; then
-    echo -e "${GREEN}ok${NC}"
-else
-    echo -e "${YELLOW}skipped${NC}"
 fi
 
 # Install Playwright browser
