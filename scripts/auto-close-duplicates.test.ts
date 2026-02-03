@@ -266,5 +266,16 @@ export const BusinessStatementSchema = z.object({
   metadata: z.record(z.any()),
   status: z.enum(["INITIATED", "TRAINING", "TESTING", "VALIDATED"])
 });
-    
+// orchestrator/StringDatabaseManager.ts
+import { z } from "zod";
+
+export class StringDatabaseManager {
+  private statusEnum = z.enum(["INITIATED", "TRAINING", "TESTING", "VALIDATED", "JUDGED"]);
+
+  async processLifecycle(stmtId: string, action: string) {
+    // Logic to move statement from SQLite 'INITIATED' to Keras 'TRAINING'
+    // Calls the Python MCP tools defined in the server
+  }
+}
+
       
