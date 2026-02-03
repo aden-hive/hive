@@ -174,6 +174,109 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     shell_parser.set_defaults(func=cmd_shell)
 
+    # version command
+    version_parser = subparsers.add_parser(
+        "version",
+        help="Manage agent versions",
+        description="Version control for agent graphs and goals.",
+    )
+    version_subparsers = version_parser.add_subparsers(dest="version_command", required=True)
+
+    # version save
+    save_parser = version_subparsers.add_parser(
+        "save",
+        help="Save a new version",
+        description="Create a new version of an agent.",
+    )
+    save_parser.add_argument("agent_path", type=str, help="Path to agent folder")
+    save_parser.add_argument(
+        "--description", "-d", type=str, required=True, help="Description of changes"
+    )
+    save_parser.add_argument(
+        "--bump",
+        "-b",
+        type=str,
+        choices=["major", "minor", "patch"],
+        default="patch",
+        help="Version bump type (default: patch)",
+    )
+    save_parser.add_argument("--tag", "-t", type=str, help="Optional tag for this version")
+    save_parser.add_argument("--created-by", type=str, help="User creating this version")
+    save_parser.set_defaults(func=cmd_version_save)
+
+    # version list
+    list_versions_parser = version_subparsers.add_parser(
+        "list", help="List all versions", description="Show all versions of an agent."
+    )
+    list_versions_parser.add_argument("agent_id", type=str, help="Agent identifier")
+    list_versions_parser.add_argument(
+        "--json", action="store_true", help="Output as JSON"
+    )
+    list_versions_parser.set_defaults(func=cmd_version_list)
+
+    # version rollback
+    rollback_parser = version_subparsers.add_parser(
+        "rollback",
+        help="Rollback to a version",
+        description="Restore an agent to a previous version.",
+    )
+    rollback_parser.add_argument("agent_id", type=str, help="Agent identifier")
+    rollback_parser.add_argument("version", type=str, help="Version to rollback to")
+    rollback_parser.add_argument(
+        "--export",
+        "-e",
+        type=str,
+        help="Export path to save rolled-back agent (default: exports/{agent_id})",
+    )
+    rollback_parser.set_defaults(func=cmd_version_rollback)
+
+    # version diff
+    diff_parser = version_subparsers.add_parser(
+        "diff",
+        help="Compare versions",
+        description="Show differences between two versions.",
+    )
+    diff_parser.add_argument("agent_id", type=str, help="Agent identifier")
+    diff_parser.add_argument("from_version", type=str, help="Starting version")
+    diff_parser.add_argument("to_version", type=str, help="Target version")
+    diff_parser.add_argument(
+        "--json", action="store_true", help="Output as JSON"
+    )
+    diff_parser.set_defaults(func=cmd_version_diff)
+
+    # version tag
+    tag_parser = version_subparsers.add_parser(
+        "tag", help="Tag a version", description="Add a tag to a version (e.g., production)."
+    )
+    tag_parser.add_argument("agent_id", type=str, help="Agent identifier")
+    tag_parser.add_argument("version", type=str, help="Version to tag")
+    tag_parser.add_argument("tag", type=str, help="Tag name")
+    tag_parser.set_defaults(func=cmd_version_tag)
+
+    # version ab-test
+    ab_test_parser = version_subparsers.add_parser(
+        "ab-test",
+        help="Create A/B test",
+        description="Set up A/B testing between two versions.",
+    )
+    ab_test_parser.add_argument("agent_id", type=str, help="Agent identifier")
+    ab_test_parser.add_argument("version_a", type=str, help="First version")
+    ab_test_parser.add_argument("version_b", type=str, help="Second version")
+    ab_test_parser.add_argument(
+        "--split",
+        "-s",
+        type=float,
+        default=0.5,
+        help="Traffic split for version A (0.0-1.0, default: 0.5)",
+    )
+    ab_test_parser.add_argument(
+        "--metrics",
+        "-m",
+        nargs="+",
+        help="Metrics to track (e.g., response_time success_rate)",
+    )
+    ab_test_parser.set_defaults(func=cmd_version_ab_test)
+
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
@@ -1071,3 +1174,252 @@ def _interactive_multi(agents_dir: Path) -> int:
 
     orchestrator.cleanup()
     return 0
+
+# Version Management Commands
+
+def cmd_version_save(args: argparse.Namespace) -> int:
+    from framework.runner import AgentRunner
+    from framework.runner.versioning import AgentVersionManager
+
+    try:
+        runner = AgentRunner.load(args.agent_path)
+    except Exception as e:
+        print(f"Error loading agent: {e}", file=sys.stderr)
+        return 1
+
+    agent_path = Path(args.agent_path)
+    agent_id = agent_path.name
+
+    versions_dir = Path(".aden/versions")
+    manager = AgentVersionManager(versions_dir)
+
+    try:
+        version = manager.save_version(
+            agent_id=agent_id,
+            graph=runner.graph,
+            goal=runner.goal,
+            description=args.description,
+            bump=args.bump,
+            created_by=args.created_by,
+            tags=[args.tag] if args.tag else None,
+        )
+
+        print(f"Saved version {version.version} of {agent_id}")
+        print(f"Description: {version.description}")
+        if args.tag:
+            manager.tag_version(agent_id, version.version, args.tag)
+            print(f"Tagged as: {args.tag}")
+
+        return 0
+
+    except Exception as e:
+        print(f"Error saving version: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_version_list(args: argparse.Namespace) -> int:
+    from framework.runner.versioning import AgentVersionManager
+
+    versions_dir = Path(".aden/versions")
+    manager = AgentVersionManager(versions_dir)
+
+    try:
+        versions = manager.list_versions(args.agent_id)
+
+        if not versions:
+            print(f"No versions found for agent: {args.agent_id}")
+            return 0
+
+        registry = manager._load_registry(args.agent_id)
+
+        if args.json:
+            output = {
+                "agent_id": args.agent_id,
+                "current_version": registry.current_version,
+                "versions": [v.model_dump() for v in versions],
+                "tags": registry.tags,
+            }
+            print(json.dumps(output, indent=2, default=str))
+        else:
+            print(f"\nVersions for {args.agent_id}:")
+            print(f"Current: {registry.current_version}\n")
+
+            for v in versions:
+                marker = "*" if v.version == registry.current_version else " "
+                tags_str = f" [{', '.join(v.tags)}]" if v.tags else ""
+                print(f"{marker} {v.version}{tags_str}")
+                print(f"  {v.description}")
+                print(f"  Created: {v.created_at}")
+                if v.created_by:
+                    print(f"  By: {v.created_by}")
+                print()
+
+            if registry.tags:
+                print("Tags:")
+                for tag, version in registry.tags.items():
+                    print(f"  {tag} -> {version}")
+                print()
+
+        return 0
+
+    except Exception as e:
+        print(f"Error listing versions: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_version_rollback(args: argparse.Namespace) -> int:
+    from framework.runner.versioning import AgentVersionManager
+
+    versions_dir = Path(".aden/versions")
+    manager = AgentVersionManager(versions_dir)
+
+    try:
+        graph, goal = manager.rollback(args.agent_id, args.version)
+
+        print(f"Rolled back {args.agent_id} to version {args.version}")
+
+        if args.export:
+            export_path = Path(args.export)
+        else:
+            export_path = Path("exports") / args.agent_id
+
+        export_path.mkdir(parents=True, exist_ok=True)
+
+        export_data = {
+            "graph": graph.model_dump(),
+            "goal": goal.model_dump(),
+            "version": args.version,
+        }
+
+        agent_file = export_path / "agent.json"
+        with open(agent_file, "w") as f:
+            json.dump(export_data, f, indent=2, default=str)
+
+        print(f"Exported to: {export_path}")
+
+        return 0
+
+    except Exception as e:
+        print(f"Error during rollback: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_version_diff(args: argparse.Namespace) -> int:
+    """Compare two versions"""
+    from framework.runner.versioning import AgentVersionManager
+
+    versions_dir = Path(".aden/versions")
+    manager = AgentVersionManager(versions_dir)
+
+    try:
+        diff = manager.compare_versions(
+            args.agent_id, args.from_version, args.to_version
+        )
+
+        if args.json:
+            print(json.dumps(diff.model_dump(), indent=2))
+        else:
+            print(f"\nDiff: {args.from_version} → {args.to_version}")
+            print(f"Agent: {args.agent_id}\n")
+            print(f"Summary: {diff.summary}\n")
+
+            if diff.nodes_added:
+                print(f"Nodes added ({len(diff.nodes_added)}):")
+                for node_id in diff.nodes_added:
+                    print(f"  + {node_id}")
+                print()
+
+            if diff.nodes_removed:
+                print(f"Nodes removed ({len(diff.nodes_removed)}):")
+                for node_id in diff.nodes_removed:
+                    print(f"  - {node_id}")
+                print()
+
+            if diff.nodes_modified:
+                print(f"Nodes modified ({len(diff.nodes_modified)}):")
+                for node in diff.nodes_modified:
+                    print(f"  ~ {node['id']}")
+                print()
+
+            if diff.edges_added:
+                print(f"Edges added ({len(diff.edges_added)}):")
+                for edge_id in diff.edges_added:
+                    print(f"  + {edge_id}")
+                print()
+
+            if diff.edges_removed:
+                print(f"Edges removed ({len(diff.edges_removed)}):")
+                for edge_id in diff.edges_removed:
+                    print(f"  - {edge_id}")
+                print()
+
+            if diff.edges_modified:
+                print(f"Edges modified ({len(diff.edges_modified)}):")
+                for edge in diff.edges_modified:
+                    print(f"  ~ {edge['id']}")
+                print()
+
+            changes = []
+            if diff.success_criteria_changed:
+                changes.append("success criteria")
+            if diff.constraints_changed:
+                changes.append("constraints")
+            if diff.capabilities_changed:
+                changes.append("capabilities")
+
+            if changes:
+                print(f"Goal changes: {', '.join(changes)}")
+                print()
+
+        return 0
+
+    except Exception as e:
+        print(f"Error comparing versions: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_version_tag(args: argparse.Namespace) -> int:
+    from framework.runner.versioning import AgentVersionManager
+
+    versions_dir = Path(".aden/versions")
+    manager = AgentVersionManager(versions_dir)
+
+    try:
+        manager.tag_version(args.agent_id, args.version, args.tag)
+        print(f"Tagged version {args.version} as '{args.tag}'")
+        return 0
+
+    except Exception as e:
+        print(f"Error tagging version: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_version_ab_test(args: argparse.Namespace) -> int:
+    from framework.runner.versioning import AgentVersionManager
+
+    versions_dir = Path(".aden/versions")
+    manager = AgentVersionManager(versions_dir)
+
+    try:
+        config = manager.create_ab_test(
+            agent_id=args.agent_id,
+            version_a=args.version_a,
+            version_b=args.version_b,
+            traffic_split=args.split,
+            metrics=args.metrics,
+        )
+
+        print(f"Created A/B test for {args.agent_id}")
+        print(f"Version A: {args.version_a} ({args.split * 100:.0f}% traffic)")
+        print(f"Version B: {args.version_b} ({(1 - args.split) * 100:.0f}% traffic)")
+        if args.metrics:
+            print(f"Metrics: {', '.join(args.metrics)}")
+
+        print(f"\nA/B test configuration saved.")
+        print(f"Use AgentVersionManager.route_ab_test() to route requests.")
+
+        return 0
+
+    except Exception as e:
+        print(f"Error creating A/B test: {e}", file=sys.stderr)
+        return 1

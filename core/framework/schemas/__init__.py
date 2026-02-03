@@ -2,6 +2,15 @@
 
 from framework.schemas.decision import Decision, DecisionEvaluation, Option, Outcome
 from framework.schemas.run import Problem, Run, RunSummary
+from framework.schemas.version import (
+    ABTestConfig,
+    ABTestResult,
+    AgentVersion,
+    BumpType,
+    VersionDiff,
+    VersionRegistry,
+    VersionStatus,
+)
 
 __all__ = [
     "Decision",
@@ -11,4 +20,11 @@ __all__ = [
     "Run",
     "RunSummary",
     "Problem",
+    "AgentVersion",
+    "VersionRegistry",
+    "VersionDiff",
+    "BumpType",
+    "VersionStatus",
+    "ABTestConfig",
+    "ABTestResult",
 ]
