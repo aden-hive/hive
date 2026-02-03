@@ -68,7 +68,8 @@ prompt_choice() {
     while true; do
         read -r -p "Enter choice (1-${#options[@]}): " choice
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
-            return $((choice - 1))
+            PROMPT_CHOICE=$((choice - 1))
+            return 0
         fi
         echo -e "${RED}Invalid choice. Please enter 1-${#options[@]}${NC}"
     done
@@ -557,7 +558,7 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
         "Groq - Fast, free tier" \
         "Cerebras - Fast, free tier" \
         "Skip for now"
-    choice=$?
+     choice=$PROMPT_CHOICE
 
     case $choice in
         0)
@@ -646,7 +647,7 @@ ERRORS=0
 
 # Test imports
 echo -n "  ⬡ framework... "
-if $PYTHON_CMD -c "import framework" > /dev/null 2>&1; then
+if $CORE_PYTHON -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -654,7 +655,7 @@ else
 fi
 
 echo -n "  ⬡ aden_tools... "
-if $PYTHON_CMD -c "import aden_tools" > /dev/null 2>&1; then
+if $TOOLS_PYTHON -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -662,7 +663,7 @@ else
 fi
 
 echo -n "  ⬡ litellm... "
-if $PYTHON_CMD -c "import litellm" > /dev/null 2>&1; then
+if $CORE_PYTHON -c "import litellm" > /dev/null 2>&1 || $TOOLS_PYTHON -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}--${NC}"
