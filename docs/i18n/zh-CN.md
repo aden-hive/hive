@@ -42,7 +42,7 @@
 ## 什么是 Aden
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Aden 是一个用于构建、部署、运营和适应 AI 智能体的平台：
