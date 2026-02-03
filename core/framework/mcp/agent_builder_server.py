@@ -22,6 +22,7 @@ from framework.graph.plan import Plan
 from framework.testing.prompts import (
     PYTEST_TEST_FILE_HEADER,
 )
+from framework.utils.io import atomic_write
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
@@ -122,11 +123,11 @@ def _save_session(session: BuildSession):
 
     # Save session file
     session_file = SESSIONS_DIR / f"{session.id}.json"
-    with open(session_file, "w") as f:
+    with atomic_write(session_file) as f:
         json.dump(session.to_dict(), f, indent=2, default=str)
 
     # Update active session pointer
-    with open(ACTIVE_SESSION_FILE, "w") as f:
+    with atomic_write(ACTIVE_SESSION_FILE) as f:
         f.write(session.id)
 
 
@@ -246,7 +247,7 @@ def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) 
         _session = _load_session(session_id)
 
         # Update active session pointer
-        with open(ACTIVE_SESSION_FILE, "w") as f:
+        with atomic_write(ACTIVE_SESSION_FILE) as f:
             f.write(session_id)
 
         return json.dumps(
@@ -1488,13 +1489,13 @@ def export_graph() -> str:
 
     # Write agent.json
     agent_json_path = exports_dir / "agent.json"
-    with open(agent_json_path, "w") as f:
+    with atomic_write(agent_json_path) as f:
         json.dump(export_data, f, indent=2, default=str)
 
     # Generate README.md
     readme_content = _generate_readme(session, export_data, all_tools)
     readme_path = exports_dir / "README.md"
-    with open(readme_path, "w") as f:
+    with atomic_write(readme_path) as f:
         f.write(readme_content)
 
     # Write mcp_servers.json if MCP servers are configured
@@ -1503,8 +1504,9 @@ def export_graph() -> str:
     if session.mcp_servers:
         mcp_config = {"servers": session.mcp_servers}
         mcp_servers_path = exports_dir / "mcp_servers.json"
-        with open(mcp_servers_path, "w") as f:
+        with atomic_write(mcp_servers_path) as f:
             json.dump(mcp_config, f, indent=2)
+
         mcp_servers_size = mcp_servers_path.stat().st_size
 
     # Get file sizes
