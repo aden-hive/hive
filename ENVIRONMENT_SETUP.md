@@ -358,7 +358,7 @@ Windows:
 
 ```powershell
 $env:PYTHONPATH="core;exports"
-python -m support_ticket_agent validate
+python -m your_agent_name validate
 ```
 
 ### Agent imports fail with "broken installation"
