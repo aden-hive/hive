@@ -190,52 +190,91 @@ class AgentRuntime:
     async def start(self) -> None:
         """Start the agent runtime and all registered entry points."""
         if self._running:
+            # already running, log warning so we know about accidental double calls
+            logger.warning("start() called but AgentRuntime is already running, ignoring")
             return
 
         async with self._lock:
-            # Start storage
-            await self._storage.start()
+            logger.debug("AgentRuntime starting...")
+            started_streams = []
 
-            # Create streams for each entry point
-            for ep_id, spec in self._entry_points.items():
-                stream = ExecutionStream(
-                    stream_id=ep_id,
-                    entry_spec=spec,
-                    graph=self.graph,
-                    goal=self.goal,
-                    state_manager=self._state_manager,
-                    storage=self._storage,
-                    outcome_aggregator=self._outcome_aggregator,
-                    event_bus=self._event_bus,
-                    llm=self._llm,
-                    tools=self._tools,
-                    tool_executor=self._tool_executor,
-                    result_retention_max=self._config.execution_result_max,
-                    result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
-                )
-                await stream.start()
-                self._streams[ep_id] = stream
+            try:
+                # Start storage
+                await self._storage.start()
 
-            self._running = True
-            logger.info(f"AgentRuntime started with {len(self._streams)} streams")
+                # Create streams for each entry point
+                for ep_id, spec in self._entry_points.items():
+                    stream = ExecutionStream(
+                        stream_id=ep_id,
+                        entry_spec=spec,
+                        graph=self.graph,
+                        goal=self.goal,
+                        state_manager=self._state_manager,
+                        storage=self._storage,
+                        outcome_aggregator=self._outcome_aggregator,
+                        event_bus=self._event_bus,
+                        llm=self._llm,
+                        tools=self._tools,
+                        tool_executor=self._tool_executor,
+                        result_retention_max=self._config.execution_result_max,
+                        result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
+                    )
+                    try:
+                        await stream.start()
+                        started_streams.append(stream)
+                        self._streams[ep_id] = stream
+                    except Exception as e:
+                        # if one stream fails to start, log and continue with others
+                        logger.error(f"failed to start stream '{ep_id}': {e}")
+
+                self._running = True
+                logger.info(f"AgentRuntime started with {len(self._streams)} streams")
+
+            except Exception as e:
+                # cleanup any started streams if we fail during startup
+                logger.error(f"AgentRuntime failed to start: {e}")
+                for stream in started_streams:
+                    try:
+                        await stream.stop()
+                    except Exception as stop_err:
+                        logger.warning(f"error stopping stream during cleanup: {stop_err}")
+                self._streams.clear()
+                raise
 
     async def stop(self) -> None:
         """Stop the agent runtime and all streams."""
         if not self._running:
+            logger.debug("stop() called but AgentRuntime is not running, ignoring")
             return
 
         async with self._lock:
-            # Stop all streams
-            for stream in self._streams.values():
-                await stream.stop()
+            logger.debug("AgentRuntime stopping...")
+            errors = []
+
+            # Stop all streams, collect errors but dont fail fast
+            for stream_id, stream in list(self._streams.items()):
+                try:
+                    await stream.stop()
+                except Exception as e:
+                    # log error but keep trying to stop other streams
+                    logger.error(f"failed to stop stream '{stream_id}': {e}")
+                    errors.append((stream_id, e))
 
             self._streams.clear()
 
             # Stop storage
-            await self._storage.stop()
+            try:
+                await self._storage.stop()
+            except Exception as e:
+                logger.error(f"failed to stop storage: {e}")
+                errors.append(("storage", e))
 
             self._running = False
             logger.info("AgentRuntime stopped")
+
+            # if there were errors, log summary
+            if errors:
+                logger.warning(f"AgentRuntime stopped with {len(errors)} errors during cleanup")
 
     async def trigger(
         self,
@@ -393,6 +432,62 @@ class AgentRuntime:
             "event_bus": self._event_bus.get_stats(),
             "state_manager": self._state_manager.get_stats(),
         }
+
+    async def health_check(self) -> dict[str, Any]:
+        """
+        Check health of the runtime and all components.
+
+        returns dict with health status and details for each component.
+        useful for readiness/liveness probes in k8s or monitoring.
+        """
+        result: dict[str, Any] = {
+            "healthy": True,
+            "status": "healthy",
+            "components": {},
+        }
+
+        # check if runtime is running
+        if not self._running:
+            result["healthy"] = False
+            result["status"] = "not_running"
+            result["components"]["runtime"] = {"healthy": False, "error": "runtime not started"}
+            return result
+
+        result["components"]["runtime"] = {"healthy": True}
+
+        # check streams
+        stream_issues = []
+        for stream_id, stream in self._streams.items():
+            try:
+                stats = stream.get_stats()
+                result["components"][f"stream_{stream_id}"] = {
+                    "healthy": True,
+                    "active_executions": stats.get("active_executions", 0),
+                }
+            except Exception as e:
+                stream_issues.append(stream_id)
+                result["components"][f"stream_{stream_id}"] = {
+                    "healthy": False,
+                    "error": str(e),
+                }
+
+        if stream_issues:
+            result["healthy"] = False
+            result["status"] = "degraded"
+
+        # check storage (get_stats is async)
+        try:
+            storage_stats = await self._storage.get_stats()
+            result["components"]["storage"] = {
+                "healthy": True,
+                "cache_stats": storage_stats.get("cache", {}),
+            }
+        except Exception as e:
+            result["healthy"] = False
+            result["status"] = "degraded"
+            result["components"]["storage"] = {"healthy": False, "error": str(e)}
+
+        return result
 
     # === PROPERTIES ===
 

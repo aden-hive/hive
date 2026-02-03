@@ -285,6 +285,122 @@ class EncryptedFileStorage(CredentialStorage):
         with open(index_path, "w") as f:
             json.dump(index, f, indent=2)
 
+    def rotate_key(
+        self,
+        new_key: bytes,
+        validate_strength: bool = True,
+    ) -> dict[str, bool]:
+        """
+        rotate encryption key by re-encrypting all credentials.
+
+        this method:
+        1. loads all credentials with the current key
+        2. creates new encrypted files with the new key
+        3. atomically replaces old files
+        4. rolls back on any failure
+
+        args:
+            new_key: 44-byte base64-encoded fernet key (32 random bytes encoded)
+            validate_strength: if True, validates key format
+
+        returns:
+            dict mapping credential_id to success status
+
+        raises:
+            ValueError: if new key format is invalid
+            CredentialDecryptionError: if any credential cant be decrypted
+        """
+        from cryptography.fernet import Fernet
+
+        # validate key format
+        if validate_strength:
+            if len(new_key) != 44:  # fernet keys are 44 bytes base64
+                raise ValueError(
+                    "invalid key length - fernet keys should be 44 bytes base64 encoded"
+                )
+            try:
+                Fernet(new_key)  # will raise if invalid
+            except Exception as e:
+                raise ValueError(f"invalid fernet key: {e}") from e
+
+        # load all credentials with current key
+        cred_ids = self.list_all()
+        if not cred_ids:
+            logger.info("no credentials to rotate")
+            return {}
+
+        logger.info(f"starting key rotation for {len(cred_ids)} credentials")
+
+        # first pass: load and verify all credentials can be decrypted
+        credentials: list[CredentialObject] = []
+        for cred_id in cred_ids:
+            cred = self.load(cred_id)
+            if cred is None:
+                raise CredentialDecryptionError(
+                    f"failed to load credential '{cred_id}' during rotation"
+                )
+            credentials.append(cred)
+
+        # create backup of current files
+        backup_dir = self.base_path / "credentials_backup"
+        backup_dir.mkdir(exist_ok=True)
+
+        backup_files: list[tuple[Path, Path]] = []
+        for cred_id in cred_ids:
+            src = self._cred_path(cred_id)
+            dst = backup_dir / src.name
+            if src.exists():
+                import shutil
+
+                shutil.copy2(src, dst)
+                backup_files.append((src, dst))
+
+        # switch to new key and re-encrypt
+        old_key = self._key
+        old_fernet = self._fernet
+
+        try:
+            self._key = new_key
+            self._fernet = Fernet(new_key)
+
+            results: dict[str, bool] = {}
+            for cred in credentials:
+                try:
+                    self.save(cred)
+                    results[cred.id] = True
+                    logger.debug(f"rotated key for credential '{cred.id}'")
+                except Exception as e:
+                    logger.error(f"failed to rotate credential '{cred.id}': {e}")
+                    results[cred.id] = False
+                    raise  # will trigger rollback
+
+            logger.info(f"key rotation complete for {len(credentials)} credentials")
+
+            # cleanup backups on success
+            for _, backup in backup_files:
+                backup.unlink(missing_ok=True)
+            backup_dir.rmdir()
+
+            return results
+
+        except Exception as e:
+            # rollback: restore old key and backup files
+            logger.error(f"key rotation failed, rolling back: {e}")
+            self._key = old_key
+            self._fernet = old_fernet
+
+            for src, backup in backup_files:
+                if backup.exists():
+                    import shutil
+
+                    shutil.copy2(backup, src)
+                    backup.unlink()
+
+            if backup_dir.exists():
+                backup_dir.rmdir()
+
+            raise
+
 
 class EnvVarStorage(CredentialStorage):
     """

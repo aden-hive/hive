@@ -3,5 +3,13 @@
   "pythonVersion": "3.11",
   "typeCheckingMode": "basic",
   "include": ["core", "tools/src", "exports"],
-  "exclude": ["**/node_modules", "**/__pycache__", "**/.*"]
+  "exclude": ["**/node_modules", "**/__pycache__", "**/.*"],
+  "strictListInference": true,
+  "strictDictionaryInference": true,
+  "strictSetInference": true,
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnusedImport": true,
+  "reportUnusedVariable": true,
+  "reportIncompatibleVariableOverride": true
 }

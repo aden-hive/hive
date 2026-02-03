@@ -523,6 +523,38 @@ class CredentialStore:
         with self._lock:
             self._cache.clear()
 
+    # --- Key Rotation ---
+
+    def rotate_encryption_key(self, new_key: bytes) -> dict[str, bool]:
+        """
+        rotate the encryption key for all credentials.
+
+        this only works with EncryptedFileStorage backend.
+
+        args:
+            new_key: new 44-byte base64-encoded fernet key
+
+        returns:
+            dict mapping credential_id to rotation success status
+
+        raises:
+            ValueError: if storage doesnt support key rotation
+        """
+        from .storage import EncryptedFileStorage
+
+        if not isinstance(self._storage, EncryptedFileStorage):
+            raise ValueError("key rotation only supported with EncryptedFileStorage backend")
+
+        with self._lock:
+            # clear cache since all credentials will be re-encrypted
+            self.clear_cache()
+
+            # do the rotation
+            results = self._storage.rotate_key(new_key)
+
+            logger.info(f"rotated encryption key for {len(results)} credentials")
+            return results
+
     # --- Factory Methods ---
 
     @classmethod
