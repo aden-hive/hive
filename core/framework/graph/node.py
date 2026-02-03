@@ -20,6 +20,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -1348,7 +1349,9 @@ Expected output keys: {output_keys}
 LLM Response:
 {raw_response}
 
-Output ONLY the JSON object, nothing else."""
+Output ONLY the JSON object, nothing else.
+If no valid JSON object exists in the response, output exactly: {{"error": "NO_JSON_FOUND"}}
+Do NOT fabricate data or return empty objects."""
 
         try:
             result = cleaner_llm.complete(
@@ -1395,6 +1398,14 @@ Output ONLY the JSON object, nothing else."""
                 parsed = json.loads(cleaned)
             except json.JSONDecodeError:
                 parsed = json.loads(_fix_unescaped_newlines_in_json(cleaned))
+
+            # Validate LLM didn't return empty or fabricated data
+            if parsed.get("error") == "NO_JSON_FOUND":
+                raise ValueError("Cannot parse JSON from response")
+            if not parsed or parsed == {}:
+                raise ValueError("Cannot parse JSON from response")
+            if all(v is None for v in parsed.values()):
+                raise ValueError("Cannot parse JSON from response")
             logger.info("      ✓ LLM cleaned JSON output")
             return parsed
 
@@ -1504,6 +1515,8 @@ Output ONLY the JSON object, nothing else."""
 
     def _build_system_prompt(self, ctx: NodeContext) -> str:
         """Build the system prompt."""
+        from datetime import datetime
+
         parts = []
 
         if ctx.node_spec.system_prompt:
@@ -1525,6 +1538,15 @@ Output ONLY the JSON object, nothing else."""
                     pass
 
             parts.append(prompt)
+
+        # Inject current datetime so LLM knows "now"
+        utc_dt = datetime.now(UTC)
+        local_dt = datetime.now().astimezone()
+        local_tz_name = local_dt.tzname() or "Unknown"
+        parts.append("\n## Runtime Context")
+        parts.append(f"- Current Date/Time (UTC): {utc_dt.isoformat()}")
+        parts.append(f"- Local Timezone: {local_tz_name}")
+        parts.append(f"- Current Date/Time (Local): {local_dt.isoformat()}")
 
         if ctx.goal_context:
             parts.append("\n# Goal Context")

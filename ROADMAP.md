@@ -268,7 +268,7 @@ classDef done fill:#9e9e9e,color:#fff,stroke:#757575
     - [ ] Wake-up Tool (resume agent tasks)
 
 ### Deployment (Self-Hosted)
-- [ ] Docker container standardization
+- [ ] Workder agent docker container standardization
 - [ ] Headless backend execution
 - [ ] Exposed API for frontend attachment
 - [ ] Local monitoring & observability
