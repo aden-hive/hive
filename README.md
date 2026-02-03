@@ -63,6 +63,50 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
 ## Quick Start
+### Windows (WSL) Setup Notes
+### Manual Setup (uv-based Fallback)
+### Common Setup Mistakes
+
+- Running setup commands in **PowerShell instead of WSL**.  
+  All `source`, `python3`, `uv`, and virtual environment commands must be run
+  inside the **Ubuntu (WSL) terminal**.
+
+- Mixing Windows and Linux paths (e.g. `/mnt/c/...` vs `~/hive`).  
+  Prefer working inside the Linux home directory (`~/hive`) to avoid
+  permission and performance issues.
+
+- Assuming `pip install -r requirements.txt` is required.  
+  Hive uses multiple Python packages with isolated virtual environments,
+  and dependencies are installed via `quickstart.sh` or `uv`.
+
+- Interrupting setup without restarting the environment.  
+  After interrupting setup, ensure you activate the correct virtual environment:
+  ```bash
+  source core/.venv/bin/activate
+
+
+On some systems, `quickstart.sh` may hang during dependency installation,
+particularly while upgrading `pip` inside WSL environments.
+
+If this happens, you can safely interrupt the script and complete the setup manually
+using `uv`, which is faster and more reliable.
+
+#### Core framework setup
+```bash
+cd ~/hive/core
+~/.local/bin/uv venv .venv --python python3.12
+~/.local/bin/uv pip install -e .
+
+
+If you are running Aden Hive on **Windows using WSL (Ubuntu)**:
+
+- Run all setup commands inside the **Ubuntu terminal**, not PowerShell.
+- Do not mix Windows and Linux commands (`source`, `python3`, `uv`).
+- The `quickstart.sh` script may appear to hang during `pip` upgrades on some systems.
+
+If the setup appears stuck for several minutes, it is safe to interrupt it with `Ctrl+C`
+and continue using the manual setup instructions below.
+
 
 ### Prerequisites
 
