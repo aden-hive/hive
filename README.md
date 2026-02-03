@@ -34,6 +34,8 @@
   <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
+> **🆕 New Contribution:** [Documentation Chatbot](docs/chatbot/README.md) - AI-powered assistant for navigating Aden docs
+
 ## Overview
 
 Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
