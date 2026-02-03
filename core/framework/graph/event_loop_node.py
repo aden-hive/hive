@@ -17,6 +17,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from framework.graph.conversation import ConversationStore, NodeConversation
@@ -72,6 +73,15 @@ class LoopConfig:
     stall_detection_threshold: int = 3
     max_history_tokens: int = 32_000
     store_prefix: str = ""
+
+    # --- Tool result context management ---
+    # When a tool result exceeds this character count, it is truncated in the
+    # conversation context.  If *spillover_dir* is set the full result is
+    # written to a file and the truncated message includes the filename so
+    # the agent can retrieve it with load_data().  If *spillover_dir* is
+    # ``None`` the result is simply truncated with an explanatory note.
+    max_tool_result_chars: int = 3_000
+    spillover_dir: str | None = None  # Path string; created on first use
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +247,7 @@ class EventLoopNode(NodeProtocol):
 
             # 6d. Pre-turn compaction check (tiered)
             if conversation.needs_compaction():
-                await self._compact_tiered(ctx, conversation)
+                await self._compact_tiered(ctx, conversation, accumulator)
 
             # 6e. Run single LLM turn
             assistant_text, tool_results_list, turn_tokens = await self._run_single_turn(
@@ -253,7 +263,7 @@ class EventLoopNode(NodeProtocol):
 
             # 6e''. Post-turn compaction check (catches tool-result bloat)
             if conversation.needs_compaction():
-                await self._compact_tiered(ctx, conversation)
+                await self._compact_tiered(ctx, conversation, accumulator)
 
             # 6f. Stall detection
             recent_responses.append(assistant_text)
@@ -294,7 +304,9 @@ class EventLoopNode(NodeProtocol):
 
                 if verdict.action == "ACCEPT":
                     # Check for missing output keys
-                    missing = self._get_missing_output_keys(accumulator, ctx.node_spec.output_keys)
+                    missing = self._get_missing_output_keys(
+                        accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+                    )
                     if missing and self._judge is not None:
                         hint = (
                             f"Missing required output keys: {missing}. "
@@ -382,7 +394,7 @@ class EventLoopNode(NodeProtocol):
                     "Pre-send guard: context at %.0f%% of budget, compacting",
                     conversation.usage_ratio() * 100,
                 )
-                await self._compact_tiered(ctx, conversation)
+                await self._compact_tiered(ctx, conversation, accumulator)
 
             messages = conversation.to_llm_messages()
             accumulated_text = ""
@@ -468,6 +480,8 @@ class EventLoopNode(NodeProtocol):
                 else:
                     # Execute real tool
                     result = await self._execute_tool(tc)
+                    # Truncate large results to prevent context blowup
+                    result = self._truncate_tool_result(result, tc.tool_name)
 
                 # Record tool result in conversation (write-through)
                 await conversation.add_tool_result(
@@ -503,8 +517,7 @@ class EventLoopNode(NodeProtocol):
                 max_tc = self._config.max_tool_calls_per_turn
                 skipped = tool_calls[executed_in_batch:]
                 logger.warning(
-                    "Max tool calls per turn (%d) exceeded — "
-                    "discarding %d remaining call(s): %s",
+                    "Max tool calls per turn (%d) exceeded — discarding %d remaining call(s): %s",
                     max_tc,
                     len(skipped),
                     ", ".join(tc.tool_name for tc in skipped),
@@ -531,6 +544,20 @@ class EventLoopNode(NodeProtocol):
                 # Limit hit — return from this turn so the judge can
                 # evaluate instead of looping back for another stream.
                 return final_text, tool_results, token_counts
+
+            # --- Mid-turn pruning: prevent context blowup within a single turn ---
+            if conversation.usage_ratio() >= 0.6:
+                protect = max(2000, self._config.max_history_tokens // 12)
+                pruned = await conversation.prune_old_tool_results(
+                    protect_tokens=protect,
+                    min_prune_tokens=max(1000, protect // 3),
+                )
+                if pruned > 0:
+                    logger.info(
+                        "Mid-turn pruning: cleared %d old tool results (usage now %.0f%%)",
+                        pruned,
+                        conversation.usage_ratio() * 100,
+                    )
 
             # Tool calls processed -- loop back to stream with updated conversation
 
@@ -594,7 +621,7 @@ class EventLoopNode(NodeProtocol):
                         break
             if key:
                 logger.warning(
-                    "Recovered set_output args from truncated JSON: " "key=%s, value_len=%d",
+                    "Recovered set_output args from truncated JSON: key=%s, value_len=%d",
                     key,
                     len(value),
                 )
@@ -634,18 +661,21 @@ class EventLoopNode(NodeProtocol):
                 "assistant_text": assistant_text,
                 "tool_calls": tool_results,
                 "output_accumulator": accumulator.to_dict(),
+                "accumulator": accumulator,
                 "iteration": iteration,
                 "conversation_summary": conversation.export_summary(),
                 "output_keys": ctx.node_spec.output_keys,
                 "missing_keys": self._get_missing_output_keys(
-                    accumulator, ctx.node_spec.output_keys
+                    accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 ),
             }
             return await self._judge.evaluate(context)
 
         # Implicit judge: accept when no tool calls and all output keys present
         if not tool_results:
-            missing = self._get_missing_output_keys(accumulator, ctx.node_spec.output_keys)
+            missing = self._get_missing_output_keys(
+                accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+            )
             if not missing:
                 return JudgeVerdict(action="ACCEPT")
             else:
@@ -662,6 +692,60 @@ class EventLoopNode(NodeProtocol):
     # -------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_tool_call_history(
+        conversation: NodeConversation,
+        max_entries: int = 30,
+    ) -> str:
+        """Build a compact tool call history from the conversation.
+
+        Used in compaction summaries to prevent the LLM from re-calling
+        tools it already called. Extracts:
+        - Tool call counts (e.g. "github_list_pull_requests (6x)")
+        - Files saved via save_data
+        - Outputs set via set_output
+        - Errors encountered
+        """
+        tool_counts: dict[str, int] = {}
+        files_saved: list[str] = []
+        outputs_set: list[str] = []
+        errors: list[str] = []
+
+        for msg in conversation.messages:
+            if msg.role == "assistant" and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    func = tc.get("function", {})
+                    name = func.get("name", "unknown")
+                    tool_counts[name] = tool_counts.get(name, 0) + 1
+                    try:
+                        args = json.loads(func.get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    if name == "save_data" and args.get("filename"):
+                        files_saved.append(args["filename"])
+                    if name == "set_output" and args.get("key"):
+                        outputs_set.append(args["key"])
+
+            if msg.role == "tool" and msg.is_error:
+                preview = msg.content[:120].replace("\n", " ")
+                errors.append(preview)
+
+        parts: list[str] = []
+        if tool_counts:
+            lines = [f"  {n} ({c}x)" for n, c in tool_counts.items()]
+            parts.append("TOOLS ALREADY CALLED:\n" + "\n".join(lines[:max_entries]))
+        if files_saved:
+            unique = list(dict.fromkeys(files_saved))
+            parts.append("FILES SAVED: " + ", ".join(unique))
+        if outputs_set:
+            unique = list(dict.fromkeys(outputs_set))
+            parts.append("OUTPUTS SET: " + ", ".join(unique))
+        if errors:
+            parts.append(
+                "ERRORS (do NOT retry these):\n" + "\n".join(f"  - {e}" for e in errors[:10])
+            )
+        return "\n\n".join(parts)
 
     def _build_initial_message(self, ctx: NodeContext) -> str:
         """Build the initial user message from input data and memory.
@@ -691,11 +775,13 @@ class EventLoopNode(NodeProtocol):
         self,
         accumulator: OutputAccumulator,
         output_keys: list[str] | None,
+        nullable_keys: list[str] | None = None,
     ) -> list[str]:
-        """Return output keys that have not been set yet."""
+        """Return output keys that have not been set yet (excluding nullable keys)."""
         if not output_keys:
             return []
-        return [k for k in output_keys if accumulator.get(k) is None]
+        skip = set(nullable_keys) if nullable_keys else set()
+        return [k for k in output_keys if k not in skip and accumulator.get(k) is None]
 
     def _is_stalled(self, recent_responses: list[str]) -> bool:
         """Detect stall: N consecutive identical non-empty responses."""
@@ -719,10 +805,73 @@ class EventLoopNode(NodeProtocol):
             result = await result
         return result
 
+    def _truncate_tool_result(
+        self,
+        result: ToolResult,
+        tool_name: str,
+    ) -> ToolResult:
+        """Truncate a large tool result to keep the conversation context small.
+
+        If *spillover_dir* is configured and the result exceeds
+        *max_tool_result_chars*, the full content is written to a file and
+        the in-context result is replaced with a preview + filename reference.
+        Without *spillover_dir*, large results are truncated with a note.
+
+        Small results (and errors) pass through unchanged.
+        """
+        limit = self._config.max_tool_result_chars
+        if limit <= 0 or result.is_error or len(result.content) <= limit:
+            return result
+
+        # Determine a preview size — leave room for the metadata wrapper
+        preview_chars = max(limit - 300, limit // 2)
+        preview = result.content[:preview_chars]
+
+        spill_dir = self._config.spillover_dir
+        if spill_dir:
+            spill_path = Path(spill_dir)
+            spill_path.mkdir(parents=True, exist_ok=True)
+            # Use tool_use_id for uniqueness, sanitise for filesystem
+            safe_id = result.tool_use_id.replace("/", "_")[:60]
+            filename = f"tool_{tool_name}_{safe_id}.txt"
+            (spill_path / filename).write_text(result.content, encoding="utf-8")
+
+            truncated = (
+                f"[Result from {tool_name}: {len(result.content)} chars — "
+                f"too large for context, saved to '{filename}'. "
+                f"Use load_data('{filename}') to read the full result.]\n\n"
+                f"Preview:\n{preview}…"
+            )
+            logger.info(
+                "Tool result spilled to file: %s (%d chars → %s)",
+                tool_name,
+                len(result.content),
+                filename,
+            )
+        else:
+            truncated = (
+                f"[Result from {tool_name}: {len(result.content)} chars — "
+                f"truncated to fit context budget. Only the first "
+                f"{preview_chars} chars are shown.]\n\n{preview}…"
+            )
+            logger.info(
+                "Tool result truncated in-place: %s (%d → %d chars)",
+                tool_name,
+                len(result.content),
+                len(truncated),
+            )
+
+        return ToolResult(
+            tool_use_id=result.tool_use_id,
+            content=truncated,
+            is_error=False,
+        )
+
     async def _compact_tiered(
         self,
         ctx: NodeContext,
         conversation: NodeConversation,
+        accumulator: OutputAccumulator | None = None,
     ) -> None:
         """Run compaction with aggressiveness scaled to usage level.
 
@@ -734,13 +883,47 @@ class EventLoopNode(NodeProtocol):
         """
         ratio = conversation.usage_ratio()
 
+        # --- Tier 0: Prune old tool results (zero-cost, no LLM call) ---
+        protect = max(2000, self._config.max_history_tokens // 12)
+        pruned = await conversation.prune_old_tool_results(
+            protect_tokens=protect,
+            min_prune_tokens=max(1000, protect // 3),
+        )
+        if pruned > 0:
+            new_ratio = conversation.usage_ratio()
+            logger.info(
+                "Pruned %d old tool results: %.0f%% -> %.0f%%",
+                pruned,
+                ratio * 100,
+                new_ratio * 100,
+            )
+            if not conversation.needs_compaction():
+                # Pruning freed enough — skip full compaction entirely
+                if self._event_bus:
+                    from framework.runtime.event_bus import AgentEvent, EventType
+
+                    await self._event_bus.publish(
+                        AgentEvent(
+                            type=EventType.CUSTOM,
+                            stream_id=ctx.node_id,
+                            node_id=ctx.node_id,
+                            data={
+                                "custom_type": "node_compaction",
+                                "node_id": ctx.node_id,
+                                "level": "prune_only",
+                                "usage_before": round(ratio * 100),
+                                "usage_after": round(new_ratio * 100),
+                            },
+                        )
+                    )
+                return
+            ratio = new_ratio
+
         if ratio >= 1.2:
             level = "emergency"
             logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
-            await conversation.compact(
-                "Previous conversation context (emergency compaction).",
-                keep_recent=1,
-            )
+            summary = self._build_emergency_summary(ctx, accumulator, conversation)
+            await conversation.compact(summary, keep_recent=1)
         elif ratio >= 1.0:
             level = "aggressive"
             logger.info("Aggressive compaction triggered (usage %.0f%%)", ratio * 100)
@@ -782,6 +965,8 @@ class EventLoopNode(NodeProtocol):
         conversation: NodeConversation,
     ) -> str:
         """Use LLM to generate a conversation summary for compaction."""
+        tool_history = self._extract_tool_call_history(conversation)
+
         messages_text = "\n".join(
             f"[{m.role}]: {m.content[:200]}" for m in conversation.messages[-10:]
         )
@@ -790,16 +975,106 @@ class EventLoopNode(NodeProtocol):
             "preserving key decisions and results:\n\n"
             f"{messages_text}"
         )
+        if tool_history:
+            prompt += (
+                "\n\nINCLUDE this tool history verbatim in your summary "
+                "(the agent needs it to avoid re-calling tools):\n\n"
+                f"{tool_history}"
+            )
+
         try:
             response = ctx.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                system="Summarize conversations concisely.",
-                max_tokens=300,
+                system=(
+                    "Summarize conversations concisely. "
+                    "Always preserve the tool history section."
+                ),
+                max_tokens=500,
             )
-            return response.content
+            summary = response.content
+            # Ensure tool history is present even if LLM dropped it
+            if tool_history and "TOOLS ALREADY CALLED" not in summary:
+                summary += "\n\n" + tool_history
+            return summary
         except Exception as e:
             logger.warning(f"Compaction summary generation failed: {e}")
+            if tool_history:
+                return f"Previous conversation context (summary unavailable).\n\n{tool_history}"
             return "Previous conversation context (summary unavailable)."
+
+    def _build_emergency_summary(
+        self,
+        ctx: NodeContext,
+        accumulator: OutputAccumulator | None = None,
+        conversation: NodeConversation | None = None,
+    ) -> str:
+        """Build a structured emergency compaction summary.
+
+        Unlike normal/aggressive compaction which uses an LLM summary,
+        emergency compaction cannot afford an LLM call (context is already
+        way over budget).  Instead, build a deterministic summary from the
+        node's known state so the LLM can continue working after
+        compaction without losing track of its task and inputs.
+        """
+        parts = [
+            "EMERGENCY COMPACTION — previous conversation was too large "
+            "and has been replaced with this summary.\n"
+        ]
+
+        # 1. Node identity
+        spec = ctx.node_spec
+        parts.append(f"NODE: {spec.name} (id={spec.id})")
+        if spec.description:
+            parts.append(f"PURPOSE: {spec.description}")
+
+        # 2. Inputs the node received
+        input_lines = []
+        for key in spec.input_keys:
+            value = ctx.input_data.get(key) or ctx.memory.read(key)
+            if value is not None:
+                # Truncate long values but keep them recognisable
+                v_str = str(value)
+                if len(v_str) > 200:
+                    v_str = v_str[:200] + "…"
+                input_lines.append(f"  {key}: {v_str}")
+        if input_lines:
+            parts.append("INPUTS:\n" + "\n".join(input_lines))
+
+        # 3. Output accumulator state (what's been set so far)
+        if accumulator:
+            acc_state = accumulator.to_dict()
+            set_keys = {k: v for k, v in acc_state.items() if v is not None}
+            missing = [k for k, v in acc_state.items() if v is None]
+            if set_keys:
+                lines = [f"  {k}: {str(v)[:150]}" for k, v in set_keys.items()]
+                parts.append("OUTPUTS ALREADY SET:\n" + "\n".join(lines))
+            if missing:
+                parts.append(f"OUTPUTS STILL NEEDED: {', '.join(missing)}")
+        elif spec.output_keys:
+            parts.append(f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}")
+
+        # 4. Available tools reminder
+        if spec.tools:
+            parts.append(f"AVAILABLE TOOLS: {', '.join(spec.tools)}")
+
+        # 5. Spillover files hint
+        if self._config.spillover_dir:
+            parts.append(
+                "NOTE: Large tool results were saved to files. "
+                "Use load_data('<filename>') to read them."
+            )
+
+        # 6. Tool call history (prevent re-calling tools)
+        if conversation is not None:
+            tool_history = self._extract_tool_call_history(conversation)
+            if tool_history:
+                parts.append(tool_history)
+
+        parts.append(
+            "\nContinue working towards setting the remaining outputs. "
+            "Use your tools and the inputs above."
+        )
+        return "\n\n".join(parts)
 
     # -------------------------------------------------------------------
     # Persistence: restore, cursor, injection, pause
@@ -870,7 +1145,10 @@ class EventLoopNode(NodeProtocol):
         """Check if pause has been requested. Returns True if paused."""
         pause_requested = ctx.input_data.get("pause_requested", False)
         if not pause_requested:
-            pause_requested = ctx.memory.read("pause_requested") or False
+            try:
+                pause_requested = ctx.memory.read("pause_requested") or False
+            except (PermissionError, KeyError):
+                pause_requested = False
         if pause_requested:
             logger.info(f"Pause requested at iteration {iteration}")
             return True

@@ -25,8 +25,6 @@ pip install playwright playwright-stealth
 playwright install chromium
 ```
 
-In Docker, add `RUN playwright install chromium --with-deps` to the Dockerfile.
-
 ## Environment Variables
 
 This tool does not require any environment variables.
