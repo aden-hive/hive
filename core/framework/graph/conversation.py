@@ -75,6 +75,16 @@ class Message:
         )
 
 
+def _extract_spillover_filename(content: str) -> str | None:
+    """Extract spillover filename from a truncated tool result.
+
+    Matches the pattern produced by EventLoopNode._truncate_tool_result():
+        "saved to 'tool_github_list_stargazers_abc123.txt'"
+    """
+    match = re.search(r"saved to '([^']+)'", content)
+    return match.group(1) if match else None
+
+
 # ---------------------------------------------------------------------------
 # ConversationStore protocol (Phase 2)
 # ---------------------------------------------------------------------------
@@ -357,6 +367,85 @@ class NodeConversation:
 
     # --- Lifecycle ---------------------------------------------------------
 
+    async def prune_old_tool_results(
+        self,
+        protect_tokens: int = 5000,
+        min_prune_tokens: int = 2000,
+    ) -> int:
+        """Replace old tool result content with compact placeholders.
+
+        Walks backward through messages. Recent tool results (within
+        *protect_tokens*) are kept intact. Older tool results have their
+        content replaced with a ~100-char placeholder that preserves the
+        spillover filename reference (if any). Message structure (role,
+        seq, tool_use_id) stays valid for the LLM API.
+
+        Error tool results are never pruned — they prevent re-calling
+        failing tools.
+
+        Returns the number of messages pruned (0 if nothing was pruned).
+        """
+        if not self._messages:
+            return 0
+
+        # Phase 1: Walk backward, classify tool results as protected vs pruneable
+        protected_tokens = 0
+        pruneable: list[int] = []  # indices into self._messages
+        pruneable_tokens = 0
+
+        for i in range(len(self._messages) - 1, -1, -1):
+            msg = self._messages[i]
+            if msg.role != "tool":
+                continue
+            if msg.is_error:
+                continue  # never prune errors
+            if msg.content.startswith("[Pruned tool result"):
+                continue  # already pruned
+
+            est = len(msg.content) // 4
+            if protected_tokens < protect_tokens:
+                protected_tokens += est
+            else:
+                pruneable.append(i)
+                pruneable_tokens += est
+
+        # Phase 2: Only prune if enough to be worthwhile
+        if pruneable_tokens < min_prune_tokens:
+            return 0
+
+        # Phase 3: Replace content with compact placeholder
+        count = 0
+        for i in pruneable:
+            msg = self._messages[i]
+            orig_len = len(msg.content)
+            spillover = _extract_spillover_filename(msg.content)
+
+            if spillover:
+                placeholder = (
+                    f"[Pruned tool result: {orig_len} chars. "
+                    f"Full data in '{spillover}'. "
+                    f"Use load_data('{spillover}') to retrieve.]"
+                )
+            else:
+                placeholder = f"[Pruned tool result: {orig_len} chars cleared from context.]"
+
+            self._messages[i] = Message(
+                seq=msg.seq,
+                role=msg.role,
+                content=placeholder,
+                tool_use_id=msg.tool_use_id,
+                tool_calls=msg.tool_calls,
+                is_error=msg.is_error,
+            )
+            count += 1
+
+            if self._store:
+                await self._store.write_part(msg.seq, self._messages[i].to_storage_dict())
+
+        # Reset token estimate — content lengths changed
+        self._last_api_input_tokens = None
+        return count
+
     async def compact(self, summary: str, keep_recent: int = 2) -> None:
         """Replace old messages with a summary, optionally keeping recent ones.
 
@@ -371,12 +460,18 @@ class NodeConversation:
         # Clamp: must discard at least 1 message
         keep_recent = max(0, min(keep_recent, len(self._messages) - 1))
 
-        if keep_recent > 0:
-            old_messages = self._messages[:-keep_recent]
-            recent_messages = self._messages[-keep_recent:]
-        else:
-            old_messages = self._messages
-            recent_messages = []
+        total = len(self._messages)
+        split = total - keep_recent if keep_recent > 0 else total
+
+        # Advance split past orphaned tool results at the boundary.
+        # Tool-role messages reference a tool_use from the preceding
+        # assistant message; if that assistant message falls into the
+        # compacted (old) portion the tool_result becomes invalid.
+        while split < total and self._messages[split].role == "tool":
+            split += 1
+
+        old_messages = list(self._messages[:split])
+        recent_messages = list(self._messages[split:])
 
         # Extract protected values from messages being discarded
         if self._output_keys:
