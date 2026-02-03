@@ -52,7 +52,8 @@ def validate_goal_constraints(goal: Goal, output: dict[str, Any]) -> list[Constr
 
     Evaluates each constraint's `check` expression (if non-empty and not "llm_judge")
     with context {"result": output, "output": output}. If evaluation fails or
-    returns falsy, the constraint is considered violated.
+    returns falsy, the constraint is considered violated. Used by GraphExecutor
+    to enforce hard constraints before returning success (see #3428).
 
     Args:
         goal: The goal with constraints to check
@@ -65,6 +66,7 @@ def validate_goal_constraints(goal: Goal, output: dict[str, Any]) -> list[Constr
     if not goal.constraints:
         return violations
 
+    # Expressions can use "result" or "output" (e.g. result.get("content", ""))
     context = {"result": output, "output": output}
 
     for constraint in goal.constraints:

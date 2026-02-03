@@ -447,12 +447,16 @@ class GraphExecutor:
                 if node_spec.id in graph.pause_nodes:
                     self.logger.info("💾 Saving session state after pause node")
                     saved_memory = memory.read_all()
-                    # Validate hard constraints before returning success
+                    # Enforce Goal hard constraints before returning success (fixes #3428)
                     violations = validate_goal_constraints(goal, saved_memory)
                     hard_violations = [
                         v
                         for v in violations
-                        if (c := next((c for c in goal.constraints if c.id == v.constraint_id), None))
+                        if (
+                            c := next(
+                                (c for c in goal.constraints if c.id == v.constraint_id), None
+                            )
+                        )
                         and c.constraint_type == "hard"
                     ]
                     if hard_violations:
@@ -601,7 +605,7 @@ class GraphExecutor:
             # Collect output
             output = memory.read_all()
 
-            # Validate hard constraints before returning success
+            # Enforce Goal hard constraints: fail run if any hard constraint is violated (fixes #3428)
             violations = validate_goal_constraints(goal, output)
             hard_violations = [
                 v
@@ -620,9 +624,7 @@ class GraphExecutor:
                     narrative=f"Hard constraint violated: {err_msg}",
                 )
                 total_retries_count = sum(node_retry_counts.values())
-                nodes_failed = [
-                    nid for nid, count in node_retry_counts.items() if count > 0
-                ]
+                nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
                 return ExecutionResult(
                     success=False,
                     error=f"Hard constraint violated: {err_msg}",
