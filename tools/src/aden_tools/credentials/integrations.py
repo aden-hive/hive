@@ -91,4 +91,39 @@ INTEGRATION_CREDENTIALS = {
         credential_id="hubspot",
         credential_key="access_token",
     ),
+    "slack": CredentialSpec(
+        env_var="SLACK_BOT_TOKEN",
+        tools=[
+            "slack_send_message",
+            "slack_list_channels",
+            "slack_get_channel_history",
+            "slack_list_users",
+            "slack_get_user",
+        ],
+        required=True,
+        startup_required=False,
+        help_url="https://api.slack.com/apps",
+        description="Slack Bot User OAuth Token",
+        # Auth method support
+        aden_supported=True,
+        aden_provider_name="slack",
+        direct_api_key_supported=True,
+        api_key_instructions="""To get a Slack Bot Token:
+1. Go to https://api.slack.com/apps
+2. Create a new app (or select existing)
+3. Go to "OAuth & Permissions"
+4. Add the following Bot Token Scopes:
+   - chat:write
+   - channels:read
+   - channels:history
+   - users:read
+5. Install the app to your workspace
+6. Copy the "Bot User OAuth Token" (starts with xoxb-)""",
+        # Health check configuration
+        health_check_endpoint="https://slack.com/api/auth.test",
+        health_check_method="POST",
+        # Credential store mapping
+        credential_id="slack",
+        credential_key="bot_token",
+    ),
 }
