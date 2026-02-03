@@ -624,7 +624,8 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
             ;;
         5)
             echo ""
-            echo -e "${YELLOW}Skipped.${NC} Add your API key later:"
+            echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
+            echo -e "Add your API key later by running:"
             echo ""
             echo -e "  ${CYAN}echo 'ANTHROPIC_API_KEY=your-key' >> .env${NC}"
             echo ""
