@@ -192,9 +192,7 @@ class TestGitHubClient:
         }
         mock_patch.return_value = mock_response
 
-        result = self.client.update_issue(
-            "owner", "repo", 1, title="Updated Title", state="closed"
-        )
+        result = self.client.update_issue("owner", "repo", 1, title="Updated Title", state="closed")
 
         assert result["success"] is True
         assert result["data"]["state"] == "closed"
