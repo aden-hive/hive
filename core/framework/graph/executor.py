@@ -11,6 +11,8 @@ The executor:
 
 import asyncio
 import logging
+import json
+from typing import Any, Callable
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -269,14 +271,22 @@ class GraphExecutor:
         self.logger.info(f"   Goal: {goal.description}")
         self.logger.info(f"   Entry node: {graph.entry_node}")
 
+        last_node_id = None
+        last_node_name = None
+
+
         try:
             while steps < graph.max_steps:
                 steps += 1
 
                 # Get current node
                 node_spec = graph.get_node(current_node_id)
+                last_node_id = current_node_id
+        
                 if node_spec is None:
                     raise RuntimeError(f"Node not found: {current_node_id}")
+
+                last_node_name = node_spec.name
 
                 path.append(current_node_id)
 
@@ -599,30 +609,42 @@ class GraphExecutor:
             )
 
         except Exception as e:
-            self.runtime.report_problem(
-                severity="critical",
-                description=str(e),
-            )
-            self.runtime.end_run(
-                success=False,
-                narrative=f"Failed at step {steps}: {e}",
-            )
+               error_context = {
+    "error": str(e),
+    "step": steps,
+    "last_node_id": last_node_id,
+    "last_node_name": last_node_name,
+    "path": path[-5:],
+    "retry_details": dict(node_retry_counts),
+    "nodes_with_failures": list(node_retry_counts.keys()),
+}
 
-            # Calculate quality metrics even for exceptions
-            total_retries_count = sum(node_retry_counts.values())
-            nodes_failed = list(node_retry_counts.keys())
+self.logger.exception("Unhandled exception during graph execution")
 
-            return ExecutionResult(
-                success=False,
-                error=str(e),
-                steps_executed=steps,
-                path=path,
-                total_retries=total_retries_count,
-                nodes_with_failures=nodes_failed,
-                retry_details=dict(node_retry_counts),
-                had_partial_failures=len(nodes_failed) > 0,
-                execution_quality="failed",
-            )
+self.runtime.report_problem(
+    severity="critical",
+    description=json.dumps(error_context, ensure_ascii=False),
+)
+
+self.runtime.end_run(
+    success=False,
+    narrative=f"Failed at step {steps}: {e}",
+)
+
+total_retries_count = sum(node_retry_counts.values())
+nodes_failed = list(node_retry_counts.keys())
+
+return ExecutionResult(
+    success=False,
+    error=str(e),
+    steps_executed=steps,
+    path=path,
+    total_retries=total_retries_count,
+    nodes_with_failures=nodes_failed,
+    retry_details=dict(node_retry_counts),
+    had_partial_failures=len(nodes_failed) > 0,
+    execution_quality="failed",
+)
 
     def _build_context(
         self,
