@@ -292,6 +292,19 @@ class DurableWaitRuntime:
                     },
                 )
             )
+            await self._event_bus.publish(
+                AgentEvent(
+                    type=EventType.WAIT_RESUMED,
+                    stream_id=self._stream_id,
+                    execution_id=run_id,
+                    data={
+                        "wait_id": wait_id,
+                        "run_id": run_id,
+                        "timed_out": False,
+                        "matched_signal_type": envelope.signal_type,
+                    },
+                )
+            )
 
         return WaitResumed(
             run_id=run_id,
@@ -325,6 +338,19 @@ class DurableWaitRuntime:
                             "wait_id": wait_id,
                             "run_id": run_id,
                             "signal_type": WAIT_TIMEOUT_SIGNAL_TYPE,
+                        },
+                    )
+                )
+                await self._event_bus.publish(
+                    AgentEvent(
+                        type=EventType.WAIT_RESUMED,
+                        stream_id=self._stream_id,
+                        execution_id=run_id,
+                        data={
+                            "wait_id": wait_id,
+                            "run_id": run_id,
+                            "timed_out": True,
+                            "matched_signal_type": WAIT_TIMEOUT_SIGNAL_TYPE,
                         },
                     )
                 )
