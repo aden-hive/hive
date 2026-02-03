@@ -545,6 +545,20 @@ class EventLoopNode(NodeProtocol):
                 # evaluate instead of looping back for another stream.
                 return final_text, tool_results, token_counts
 
+            # --- Mid-turn pruning: prevent context blowup within a single turn ---
+            if conversation.usage_ratio() >= 0.6:
+                protect = max(2000, self._config.max_history_tokens // 12)
+                pruned = await conversation.prune_old_tool_results(
+                    protect_tokens=protect,
+                    min_prune_tokens=max(1000, protect // 3),
+                )
+                if pruned > 0:
+                    logger.info(
+                        "Mid-turn pruning: cleared %d old tool results (usage now %.0f%%)",
+                        pruned,
+                        conversation.usage_ratio() * 100,
+                    )
+
             # Tool calls processed -- loop back to stream with updated conversation
 
     # -------------------------------------------------------------------
@@ -678,6 +692,60 @@ class EventLoopNode(NodeProtocol):
     # -------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_tool_call_history(
+        conversation: NodeConversation,
+        max_entries: int = 30,
+    ) -> str:
+        """Build a compact tool call history from the conversation.
+
+        Used in compaction summaries to prevent the LLM from re-calling
+        tools it already called. Extracts:
+        - Tool call counts (e.g. "github_list_pull_requests (6x)")
+        - Files saved via save_data
+        - Outputs set via set_output
+        - Errors encountered
+        """
+        tool_counts: dict[str, int] = {}
+        files_saved: list[str] = []
+        outputs_set: list[str] = []
+        errors: list[str] = []
+
+        for msg in conversation.messages:
+            if msg.role == "assistant" and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    func = tc.get("function", {})
+                    name = func.get("name", "unknown")
+                    tool_counts[name] = tool_counts.get(name, 0) + 1
+                    try:
+                        args = json.loads(func.get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    if name == "save_data" and args.get("filename"):
+                        files_saved.append(args["filename"])
+                    if name == "set_output" and args.get("key"):
+                        outputs_set.append(args["key"])
+
+            if msg.role == "tool" and msg.is_error:
+                preview = msg.content[:120].replace("\n", " ")
+                errors.append(preview)
+
+        parts: list[str] = []
+        if tool_counts:
+            lines = [f"  {n} ({c}x)" for n, c in tool_counts.items()]
+            parts.append("TOOLS ALREADY CALLED:\n" + "\n".join(lines[:max_entries]))
+        if files_saved:
+            unique = list(dict.fromkeys(files_saved))
+            parts.append("FILES SAVED: " + ", ".join(unique))
+        if outputs_set:
+            unique = list(dict.fromkeys(outputs_set))
+            parts.append("OUTPUTS SET: " + ", ".join(unique))
+        if errors:
+            parts.append(
+                "ERRORS (do NOT retry these):\n" + "\n".join(f"  - {e}" for e in errors[:10])
+            )
+        return "\n\n".join(parts)
 
     def _build_initial_message(self, ctx: NodeContext) -> str:
         """Build the initial user message from input data and memory.
@@ -815,10 +883,46 @@ class EventLoopNode(NodeProtocol):
         """
         ratio = conversation.usage_ratio()
 
+        # --- Tier 0: Prune old tool results (zero-cost, no LLM call) ---
+        protect = max(2000, self._config.max_history_tokens // 12)
+        pruned = await conversation.prune_old_tool_results(
+            protect_tokens=protect,
+            min_prune_tokens=max(1000, protect // 3),
+        )
+        if pruned > 0:
+            new_ratio = conversation.usage_ratio()
+            logger.info(
+                "Pruned %d old tool results: %.0f%% -> %.0f%%",
+                pruned,
+                ratio * 100,
+                new_ratio * 100,
+            )
+            if not conversation.needs_compaction():
+                # Pruning freed enough — skip full compaction entirely
+                if self._event_bus:
+                    from framework.runtime.event_bus import AgentEvent, EventType
+
+                    await self._event_bus.publish(
+                        AgentEvent(
+                            type=EventType.CUSTOM,
+                            stream_id=ctx.node_id,
+                            node_id=ctx.node_id,
+                            data={
+                                "custom_type": "node_compaction",
+                                "node_id": ctx.node_id,
+                                "level": "prune_only",
+                                "usage_before": round(ratio * 100),
+                                "usage_after": round(new_ratio * 100),
+                            },
+                        )
+                    )
+                return
+            ratio = new_ratio
+
         if ratio >= 1.2:
             level = "emergency"
             logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
-            summary = self._build_emergency_summary(ctx, accumulator)
+            summary = self._build_emergency_summary(ctx, accumulator, conversation)
             await conversation.compact(summary, keep_recent=1)
         elif ratio >= 1.0:
             level = "aggressive"
@@ -861,6 +965,8 @@ class EventLoopNode(NodeProtocol):
         conversation: NodeConversation,
     ) -> str:
         """Use LLM to generate a conversation summary for compaction."""
+        tool_history = self._extract_tool_call_history(conversation)
+
         messages_text = "\n".join(
             f"[{m.role}]: {m.content[:200]}" for m in conversation.messages[-10:]
         )
@@ -869,21 +975,38 @@ class EventLoopNode(NodeProtocol):
             "preserving key decisions and results:\n\n"
             f"{messages_text}"
         )
+        if tool_history:
+            prompt += (
+                "\n\nINCLUDE this tool history verbatim in your summary "
+                "(the agent needs it to avoid re-calling tools):\n\n"
+                f"{tool_history}"
+            )
+
         try:
             response = ctx.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
-                system="Summarize conversations concisely.",
-                max_tokens=300,
+                system=(
+                    "Summarize conversations concisely. "
+                    "Always preserve the tool history section."
+                ),
+                max_tokens=500,
             )
-            return response.content
+            summary = response.content
+            # Ensure tool history is present even if LLM dropped it
+            if tool_history and "TOOLS ALREADY CALLED" not in summary:
+                summary += "\n\n" + tool_history
+            return summary
         except Exception as e:
             logger.warning(f"Compaction summary generation failed: {e}")
+            if tool_history:
+                return f"Previous conversation context (summary unavailable).\n\n{tool_history}"
             return "Previous conversation context (summary unavailable)."
 
     def _build_emergency_summary(
         self,
         ctx: NodeContext,
         accumulator: OutputAccumulator | None = None,
+        conversation: NodeConversation | None = None,
     ) -> str:
         """Build a structured emergency compaction summary.
 
@@ -940,6 +1063,12 @@ class EventLoopNode(NodeProtocol):
                 "NOTE: Large tool results were saved to files. "
                 "Use load_data('<filename>') to read them."
             )
+
+        # 6. Tool call history (prevent re-calling tools)
+        if conversation is not None:
+            tool_history = self._extract_tool_call_history(conversation)
+            if tool_history:
+                parts.append(tool_history)
 
         parts.append(
             "\nContinue working towards setting the remaining outputs. "

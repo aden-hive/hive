@@ -36,6 +36,7 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Callable
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -87,7 +88,7 @@ logger = logging.getLogger("github_outreach_demo")
 
 STORE_DIR = Path(tempfile.mkdtemp(prefix="hive_outreach_"))
 RUNTIME = Runtime(STORE_DIR / "runtime")
-LLM = LiteLLMProvider(model="gpt-5-mini-2025-08-07")
+LLM = LiteLLMProvider(model="claude-haiku-4-5-20251001")
 
 # -------------------------------------------------------------------------
 # Credentials
@@ -136,6 +137,7 @@ class IntakeOutput(BaseModel):
     repo_url: str
     project_url: str
     scan_config: str
+    min_leads: str  # Minimum number of leads to collect (numeric string)
 
 
 class GitHubUser(BaseModel):
@@ -261,13 +263,19 @@ def github_list_issues(
     owner: str,
     repo: str,
     state: str = "all",
-    limit: int = 30,
+    page: int = 1,
+    limit: int = 100,
 ) -> dict:
-    """List issues for a repository. Each issue includes author login, title, labels."""
+    """List issues for a repository. Each issue includes author login, title, labels.
+
+    Use page parameter to paginate through results (page 1, 2, 3, ...).
+    Each page returns up to `limit` items (max 100).
+    """
     limit = int(limit)
+    page = max(1, int(page))
     return _github_get(
         f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/issues",
-        {"state": state, "per_page": min(limit, 100)},
+        {"state": state, "per_page": min(limit, 100), "page": page},
     )
 
 
@@ -275,26 +283,38 @@ def github_list_pull_requests(
     owner: str,
     repo: str,
     state: str = "all",
-    limit: int = 30,
+    page: int = 1,
+    limit: int = 100,
 ) -> dict:
-    """List pull requests for a repository. Each PR includes author login and title."""
+    """List pull requests for a repository. Each PR includes author login and title.
+
+    Use page parameter to paginate through results (page 1, 2, 3, ...).
+    Each page returns up to `limit` items (max 100).
+    """
     limit = int(limit)
+    page = max(1, int(page))
     return _github_get(
         f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/pulls",
-        {"state": state, "per_page": min(limit, 100)},
+        {"state": state, "per_page": min(limit, 100), "page": page},
     )
 
 
 def github_list_stargazers(
     owner: str,
     repo: str,
-    limit: int = 30,
+    page: int = 1,
+    limit: int = 100,
 ) -> dict:
-    """List users who starred a repository. Each entry has a login username."""
+    """List users who starred a repository. Each entry has a login username.
+
+    Use page parameter to paginate through results (page 1, 2, 3, ...).
+    Each page returns up to `limit` items (max 100).
+    """
     limit = int(limit)
+    page = max(1, int(page))
     return _github_get(
         f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/stargazers",
-        {"per_page": min(limit, 100)},
+        {"per_page": min(limit, 100), "page": page},
     )
 
 
@@ -540,21 +560,21 @@ def save_data(filename: str, data: str) -> dict:
     }
 
 
-def load_data(filename: str, offset: int = 0, limit: int = 0) -> dict:
-    """Load data from a previously saved file, with support for incremental reading.
+def load_data(filename: str, offset: int = 0, limit: int = 50) -> dict:
+    """Load data from a previously saved file with pagination.
 
-    For large files, use offset and limit to page through the data
-    without loading everything into context at once.
+    Always returns a page of lines with metadata about the full file,
+    so you know the shape of the data without loading it all into context.
 
     Args:
         filename: The filename that was used with save_data.
         offset: 0-based line number to start reading from. Default 0.
-        limit: Max number of lines to return. 0 means all remaining lines.
+        limit: Max number of lines to return. Default 50.
 
     Examples:
-        load_data('users.json')                    # read entire file
-        load_data('users.json', offset=0, limit=20)  # first 20 lines
-        load_data('users.json', offset=20, limit=20) # next 20 lines
+        load_data('users.json')                     # first 50 lines
+        load_data('users.json', offset=50, limit=50) # next 50 lines
+        load_data('users.json', limit=200)           # first 200 lines
     """
     if not filename or ".." in filename or "/" in filename:
         return {"error": "Invalid filename"}
@@ -566,26 +586,21 @@ def load_data(filename: str, offset: int = 0, limit: int = 0) -> dict:
     content = path.read_text(encoding="utf-8")
     all_lines = content.split("\n")
     total = len(all_lines)
+    size_bytes = len(content.encode("utf-8"))
 
-    if offset > 0 or limit > 0:
-        start = min(offset, total)
-        end = min(start + limit, total) if limit > 0 else total
-        sliced = all_lines[start:end]
-        return {
-            "success": True,
-            "filename": filename,
-            "content": "\n".join(sliced),
-            "total_lines": total,
-            "offset": start,
-            "lines_returned": len(sliced),
-            "has_more": end < total,
-        }
+    start = min(offset, total)
+    end = min(start + limit, total)
+    sliced = all_lines[start:end]
+
     return {
         "success": True,
         "filename": filename,
-        "content": content,
+        "content": "\n".join(sliced),
         "total_lines": total,
-        "size_bytes": len(content.encode("utf-8")),
+        "size_bytes": size_bytes,
+        "offset": start,
+        "lines_returned": len(sliced),
+        "has_more": end < total,
     }
 
 
@@ -631,17 +646,21 @@ NODE_SPECS = {
         node_type="event_loop",
         client_facing=True,
         input_keys=[],
-        output_keys=["repo_url", "project_url", "scan_config"],
+        output_keys=["repo_url", "project_url", "scan_config", "min_leads"],
         system_prompt=(
             "You are the Intake agent for a GitHub outreach pipeline. "
-            "Your job is to collect three pieces of information from the operator:\n\n"
+            "Your job is to collect four pieces of information from the operator:\n\n"
             "1. **repo_url** — The GitHub repository URL to scan for potential contacts "
             "(e.g., https://github.com/anthropics/claude-code)\n"
             "2. **project_url** — The project URL we're promoting "
             "(e.g., https://github.com/our-org/our-project)\n"
             "3. **scan_config** — Scan parameters as a brief description "
-            "(e.g., 'stargazers and contributors, last 6 months, max 10')\n\n"
-            "Once you have all three, call set_output for each key with the values provided. "
+            "(e.g., 'stargazers and contributors, last 6 months')\n"
+            "4. **min_leads** — Minimum number of leads to collect (a number). "
+            "Ask the operator: 'How many leads do you need at minimum?' "
+            "If they say something vague like 'as many as possible', default to 50.\n\n"
+            "Once you have all four, call set_output for each key with the values provided. "
+            "For min_leads, set it as a plain number string (e.g., '100').\n"
             "Be conversational but efficient. Ask for missing information if the operator "
             "doesn't provide everything at once."
         ),
@@ -659,6 +678,8 @@ NODE_SPECS = {
             "github_list_pull_requests",
             "github_list_stargazers",
             "save_data",
+            "load_data",
+            "list_data_files",
         ],
         system_prompt=(
             "You are a GitHub Scanner agent. You receive a repository URL and scan config.\n\n"
@@ -669,6 +690,21 @@ NODE_SPECS = {
             "3. Use github_list_pull_requests to find PR contributors "
             "(look at each PR's user.login)\n"
             "4. Use github_list_stargazers to find stargazers (each entry has a login field)\n\n"
+            "PAGINATION — CRITICAL:\n"
+            "Each GitHub list tool returns up to 100 items per page. You MUST paginate:\n"
+            "  - Always call with limit=100 for maximum results per page.\n"
+            "  - If a page returns 100 items, call again with page=2, page=3, etc.\n"
+            "  - Stop when a page returns fewer than 100 items (that's the last page).\n"
+            "  - Example: github_list_stargazers(owner, repo, page=1, limit=100)\n"
+            "            github_list_stargazers(owner, repo, page=2, limit=100)\n\n"
+            "SPILLOVER RECOVERY:\n"
+            "Tool results larger than 8KB are truncated. When you see a message like\n"
+            "  'saved to tool_xxx.txt — Use load_data(filename) to read the full result'\n"
+            "you MUST call load_data(filename) to retrieve the full data. The truncated\n"
+            "preview only shows a fraction of the users. Use load_data with offset/limit\n"
+            "to page through the file: load_data(filename, offset=0, limit=50), then\n"
+            "offset=50, offset=100, etc. until has_more is false.\n\n"
+            "USER COLLECTION:\n"
             "Collect unique usernames from all sources. Classify each user:\n"
             "- 'contributor' if they authored a pull request\n"
             "- 'issue_author' if they authored an issue\n"
@@ -1092,12 +1128,20 @@ class SchemaJudge:
     For internal (non-client-facing) nodes:
     1. Check if required output keys are set
     2. Validate accumulated values against Pydantic model
-    3. RETRY with structural feedback on validation failure
-    4. ACCEPT on valid output
+    3. Optionally load referenced files and check minimum item counts
+    4. RETRY with structural feedback on validation failure
+    5. ACCEPT on valid output
     """
 
-    def __init__(self, output_model: type[BaseModel]):
+    def __init__(
+        self,
+        output_model: type[BaseModel],
+        min_items: dict[str, int | Callable[[], int]] | None = None,
+        data_dir: Path | None = None,
+    ):
         self._model = output_model
+        self._min_items = min_items or {}
+        self._data_dir = data_dir
 
     async def evaluate(self, context: dict) -> JudgeVerdict:
         accumulator = context.get("output_accumulator", {})
@@ -1123,7 +1167,6 @@ class SchemaJudge:
                 else:
                     parsed[key] = value
             self._model.model_validate(parsed)
-            return JudgeVerdict(action="ACCEPT")
         except ValidationError as e:
             errors = "; ".join(
                 f"{'.'.join(str(x) for x in err['loc'])}: {err['msg']}" for err in e.errors()
@@ -1132,6 +1175,36 @@ class SchemaJudge:
                 action="RETRY",
                 feedback=f"Output schema validation failed: {errors}. Fix and re-set outputs.",
             )
+
+        # Check minimum item counts for file-based outputs
+        for key, min_count_or_fn in self._min_items.items():
+            min_count = min_count_or_fn() if callable(min_count_or_fn) else min_count_or_fn
+            value = accumulator.get(key)
+            if not value or not self._data_dir:
+                continue
+            fpath = self._data_dir / value
+            if not fpath.exists():
+                return JudgeVerdict(
+                    action="RETRY",
+                    feedback=f"Output file '{value}' not found. Use save_data to create it.",
+                )
+            try:
+                content = fpath.read_text(encoding="utf-8")
+                data = json.loads(content)
+                if isinstance(data, list) and len(data) < min_count:
+                    return JudgeVerdict(
+                        action="RETRY",
+                        feedback=(
+                            f"Insufficient results: '{value}' contains {len(data)} items "
+                            f"but at least {min_count} are required. "
+                            f"Use pagination (page=1, page=2, ...) on the GitHub tools "
+                            f"and load_data on spillover files to collect more users."
+                        ),
+                    )
+            except (json.JSONDecodeError, OSError):
+                pass  # File exists but can't be parsed — let it through
+
+        return JudgeVerdict(action="ACCEPT")
 
 
 class CheckpointJudge:
@@ -1944,6 +2017,10 @@ async def _run_pipeline(websocket, initial_message: str):
     active_node: EventLoopNode | None = None
     pending_messages: list[str] = []
 
+    # --- Shared pipeline config (updated by Intake, read by judges) ---
+
+    pipeline_config: dict[str, Any] = {"min_leads": 50}  # default
+
     # --- Build judges (hybrid approach — Option C) ---
 
     # Client-facing: CheckpointJudge (blocks for user, optional schema)
@@ -1955,7 +2032,11 @@ async def _run_pipeline(websocket, initial_message: str):
 
     # Internal: SchemaJudge (validates output structure)
     schema_judges: dict[str, SchemaJudge] = {
-        "scanner": SchemaJudge(ScannerOutput),
+        "scanner": SchemaJudge(
+            ScannerOutput,
+            min_items={"github_users": lambda: pipeline_config["min_leads"]},
+            data_dir=_DATA_DIR,
+        ),
         "profiler": SchemaJudge(ProfilerOutput),
         "scorer": SchemaJudge(ScorerOutput),
         "extractor": SchemaJudge(ExtractorOutput),
@@ -2054,6 +2135,30 @@ async def _run_pipeline(websocket, initial_message: str):
                     active_checkpoint.signal_message()
 
     bus.subscribe(event_types=[EventType.CUSTOM], handler=on_awaiting_input)
+
+    # --- Capture min_leads from Intake's set_output tool call ---
+
+    async def on_tool_started(event: AgentEvent):
+        if event.node_id != "intake":
+            return
+        if event.data.get("tool_name") != "set_output":
+            return
+        tool_input = event.data.get("tool_input", {})
+        if tool_input.get("key") != "min_leads":
+            return
+        raw = tool_input.get("value", "")
+        try:
+            val = int(raw)
+            if val > 0:
+                pipeline_config["min_leads"] = val
+                logger.info("Scanner min_leads set to %d (from user)", val)
+        except (ValueError, TypeError):
+            logger.info(
+                "No valid min_leads from user, using default %d",
+                pipeline_config["min_leads"],
+            )
+
+    bus.subscribe(event_types=[EventType.TOOL_CALL_STARTED], handler=on_tool_started)
 
     # --- Inject initial user message into intake node ---
 
