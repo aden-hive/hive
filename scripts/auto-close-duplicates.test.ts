@@ -259,3 +259,12 @@ describe("decideAutoClose", () => {
     expect(result).toBe(null);
   });
 });
+// orchestrator/schema.ts
+export const BusinessStatementSchema = z.object({
+  statementId: z.string().uuid(),
+  content: z.string().min(10, "Statement too short for analysis"),
+  metadata: z.record(z.any()),
+  status: z.enum(["INITIATED", "TRAINING", "TESTING", "VALIDATED"])
+});
+    
+      
