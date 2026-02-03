@@ -1,17 +1,33 @@
 """
-MCP Server for Agent Building Tools
+Enhanced MCP Server for Agent Building Tools
 
-Exposes tools for building goal-driven agents via the Model Context Protocol.
+Exposes comprehensive tools for building, testing, and managing goal-driven agents
+via the Model Context Protocol.
+
+Features:
+- Advanced session management with templates and persistence
+- Comprehensive test management suite with smart discovery
+- Enhanced graph validation and dependency analysis
+- Performance monitoring and analytics
+- Intelligent credential management
+- Advanced planning and simulation capabilities
+- Security enhancements and access control
 
 Usage:
     python -m framework.mcp.agent_builder_server
 """
 
+import asyncio
 import json
 import os
-from datetime import datetime
+import time
+import uuid
+from collections import defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, Dict, List, Optional, Set
+from functools import wraps
+import structlog
 
 from mcp.server import FastMCP
 
@@ -24,48 +40,333 @@ from framework.testing.prompts import (
 )
 from framework.utils.io import atomic_write
 
+# Enhanced logging
+logger = structlog.get_logger(__name__)
+
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
-
 
 # Session persistence directory
 SESSIONS_DIR = Path(".agent-builder-sessions")
 ACTIVE_SESSION_FILE = SESSIONS_DIR / ".active"
+TEMPLATES_DIR = SESSIONS_DIR / "templates"
+METRICS_DIR = SESSIONS_DIR / "metrics"
+
+# Enhanced configuration
+class MCPServerConfig:
+    """Enhanced configuration for the MCP server."""
+    
+    def __init__(self):
+        self.test_timeout = 300  # seconds
+        self.max_concurrent_tests = 5
+        self.enable_performance_monitoring = True
+        self.credential_encryption_key = self._generate_key()
+        self.session_retention_days = 30
+        self.max_session_history = 100
+        self.enable_analytics = True
+        self.security_enabled = True
+        
+    def _generate_key(self) -> str:
+        """Generate encryption key for credentials."""
+        return os.environ.get("HIVE_CREDENTIAL_KEY", "default-key-change-me")
+        
+    def validate(self) -> List[str]:
+        """Validate configuration and return any issues."""
+        issues = []
+        if self.test_timeout < 10:
+            issues.append("test_timeout must be at least 10 seconds")
+        if self.max_concurrent_tests < 1:
+            issues.append("max_concurrent_tests must be at least 1")
+        return issues
+
+# Global configuration
+config = MCPServerConfig()
+
+# Enhanced error handling
+class EnhancedMCPError(Exception):
+    """Enhanced error with detailed diagnostics."""
+    
+    def __init__(self, message: str, error_code: str, context: dict):
+        self.message = message
+        self.error_code = error_code
+        self.context = context
+        self.timestamp = datetime.now()
+        super().__init__(self.message)
+
+# Performance monitoring decorator
+def monitor_performance(func):
+    """Decorator to monitor tool performance."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        start_time = time.time()
+        try:
+            if asyncio.iscoroutinefunction(func):
+                result = await func(*args, **kwargs)
+            else:
+                result = func(*args, **kwargs)
+            execution_time = time.time() - start_time
+            logger.info("tool_executed", 
+                       tool=func.__name__, 
+                       execution_time=execution_time,
+                       success=True)
+            
+            # Record metrics
+            _record_tool_metrics(func.__name__, execution_time, True)
+            return result
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error("tool_failed",
+                        tool=func.__name__,
+                        execution_time=execution_time,
+                        error=str(e))
+            _record_tool_metrics(func.__name__, execution_time, False)
+            raise
+    return wrapper
+
+# Metrics collection
+class MetricsCollector:
+    """Collect and analyze tool usage metrics."""
+    
+    def __init__(self):
+        self.tool_usage = defaultdict(int)
+        self.execution_times = defaultdict(list)
+        self.error_counts = defaultdict(int)
+        self.start_time = datetime.now()
+        
+    def record_tool_usage(self, tool_name: str, execution_time: float, success: bool = True):
+        """Record tool usage metrics."""
+        self.tool_usage[tool_name] += 1
+        self.execution_times[tool_name].append(execution_time)
+        if not success:
+            self.error_counts[tool_name] += 1
+            
+    def get_performance_summary(self) -> dict:
+        """Get performance summary."""
+        return {
+            "most_used_tools": sorted(self.tool_usage.items(), 
+                                    key=lambda x: x[1], reverse=True)[:10],
+            "average_execution_times": {
+                tool: sum(times) / len(times) 
+                for tool, times in self.execution_times.items()
+            },
+            "error_rates": {
+                tool: self.error_counts[tool] / self.tool_usage[tool]
+                for tool in self.tool_usage.keys()
+                if self.tool_usage[tool] > 0
+            },
+            "uptime_hours": (datetime.now() - self.start_time).total_seconds() / 3600
+        }
+
+# Global metrics collector
+_metrics = MetricsCollector()
+
+def _record_tool_metrics(tool_name: str, execution_time: float, success: bool):
+    """Record tool metrics."""
+    _metrics.record_tool_usage(tool_name, execution_time, success)
 
 
-# Session storage
+# Enhanced session storage
 class BuildSession:
-    """Build session with persistence support."""
+    """Enhanced build session with comprehensive features."""
 
-    def __init__(self, name: str, session_id: str | None = None):
-        self.id = session_id or f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    def __init__(self, name: str, session_id: str | None = None, template: str | None = None):
+        self.id = session_id or f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         self.name = name
+        self.template = template
         self.goal: Goal | None = None
         self.nodes: list[NodeSpec] = []
         self.edges: list[EdgeSpec] = []
         self.mcp_servers: list[dict] = []  # MCP server configurations
         self.created_at = datetime.now().isoformat()
         self.last_modified = datetime.now().isoformat()
+        
+        # Enhanced features
+        self.version = "2.0.0"
+        self.tags: List[str] = []
+        self.description = ""
+        self.performance_requirements: Dict[str, Any] = {}
+        self.resource_limits: Dict[str, Any] = {}
+        self.monitoring_config: Dict[str, Any] = {"enabled": True}
+        self.test_results: List[Dict[str, Any]] = []
+        self.execution_history: List[Dict[str, Any]] = []
+        self.backup_count = 0
+        
+        # Load from template if specified
+        if template:
+            self._load_from_template(template)
+
+    def _load_from_template(self, template_name: str):
+        """Load session from template."""
+        template_path = TEMPLATES_DIR / f"{template_name}.json"
+        if template_path.exists():
+            try:
+                with open(template_path) as f:
+                    template_data = json.load(f)
+                    
+                # Apply template data
+                if "nodes" in template_data:
+                    self.nodes = [NodeSpec(**n) for n in template_data["nodes"]]
+                if "edges" in template_data:
+                    self.edges = [EdgeSpec(**e) for e in template_data["edges"]]
+                if "mcp_servers" in template_data:
+                    self.mcp_servers = template_data["mcp_servers"]
+                if "performance_requirements" in template_data:
+                    self.performance_requirements = template_data["performance_requirements"]
+                    
+                logger.info("template_loaded", template=template_name, session=self.id)
+            except Exception as e:
+                logger.error("template_load_failed", template=template_name, error=str(e))
+
+    def add_execution_record(self, execution_data: Dict[str, Any]):
+        """Add execution record to history."""
+        execution_data["timestamp"] = datetime.now().isoformat()
+        self.execution_history.append(execution_data)
+        
+        # Keep only last 50 records
+        if len(self.execution_history) > 50:
+            self.execution_history = self.execution_history[-50:]
+
+    def add_test_result(self, test_result: Dict[str, Any]):
+        """Add test result to session."""
+        test_result["timestamp"] = datetime.now().isoformat()
+        self.test_results.append(test_result)
+        
+        # Keep only last 100 test results
+        if len(self.test_results) > 100:
+            self.test_results = self.test_results[-100:]
+
+    def create_backup(self) -> str:
+        """Create a backup of the current session."""
+        self.backup_count += 1
+        backup_id = f"{self.id}_backup_{self.backup_count}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        backup_data = self.to_dict()
+        backup_data["backup_id"] = backup_id
+        backup_data["original_session_id"] = self.id
+        backup_data["backup_created_at"] = datetime.now().isoformat()
+        
+        backup_file = SESSIONS_DIR / "backups" / f"{backup_id}.json"
+        backup_file.parent.mkdir(exist_ok=True)
+        
+        with atomic_write(backup_file) as f:
+            json.dump(backup_data, f, indent=2, default=str)
+            
+        return backup_id
+
+    def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics for this session."""
+        return {
+            "node_count": len(self.nodes),
+            "edge_count": len(self.edges),
+            "complexity_score": self._calculate_complexity(),
+            "test_coverage": self._calculate_test_coverage(),
+            "last_test_run": self._get_last_test_run(),
+            "execution_count": len(self.execution_history),
+            "success_rate": self._calculate_success_rate()
+        }
+        
+    def _calculate_complexity(self) -> float:
+        """Calculate graph complexity score."""
+        if not self.nodes:
+            return 0.0
+            
+        # Basic complexity based on nodes, edges, and branching
+        base_score = len(self.nodes) + len(self.edges)
+        
+        # Add complexity for different node types
+        type_weights = {
+            "llm_generate": 2.0,
+            "llm_tool_use": 3.0,
+            "router": 4.0,
+            "function": 1.0
+        }
+        
+        type_complexity = sum(type_weights.get(node.node_type, 1.0) for node in self.nodes)
+        
+        # Add complexity for conditional edges
+        conditional_edges = sum(1 for edge in self.edges 
+                              if edge.condition == EdgeCondition.CONDITIONAL)
+        
+        return (base_score + type_complexity + conditional_edges * 2) / 10.0
+        
+    def _calculate_test_coverage(self) -> float:
+        """Calculate test coverage percentage."""
+        if not self.test_results:
+            return 0.0
+            
+        # Simple coverage based on recent test results
+        recent_tests = [t for t in self.test_results 
+                       if datetime.fromisoformat(t["timestamp"]) > 
+                       datetime.now() - timedelta(days=7)]
+        
+        if not recent_tests:
+            return 0.0
+            
+        passed_tests = sum(1 for t in recent_tests if t.get("passed", False))
+        return (passed_tests / len(recent_tests)) * 100
+        
+    def _get_last_test_run(self) -> Optional[str]:
+        """Get timestamp of last test run."""
+        if not self.test_results:
+            return None
+        return max(t["timestamp"] for t in self.test_results)
+        
+    def _calculate_success_rate(self) -> float:
+        """Calculate execution success rate."""
+        if not self.execution_history:
+            return 0.0
+            
+        successful = sum(1 for e in self.execution_history if e.get("success", False))
+        return (successful / len(self.execution_history)) * 100
 
     def to_dict(self) -> dict:
-        """Serialize session to dictionary."""
-        return {
+        """Serialize session to dictionary with enhanced data."""
+        base_dict = {
             "session_id": self.id,
             "name": self.name,
+            "version": self.version,
+            "template": self.template,
+            "description": self.description,
+            "tags": self.tags,
             "goal": self.goal.model_dump() if self.goal else None,
             "nodes": [n.model_dump() for n in self.nodes],
             "edges": [e.model_dump() for e in self.edges],
             "mcp_servers": self.mcp_servers,
             "created_at": self.created_at,
             "last_modified": self.last_modified,
+            "performance_requirements": self.performance_requirements,
+            "resource_limits": self.resource_limits,
+            "monitoring_config": self.monitoring_config,
+            "test_results": self.test_results[-10:],  # Only recent test results
+            "execution_history": self.execution_history[-10:],  # Only recent executions
+            "backup_count": self.backup_count,
+            "performance_metrics": self.get_performance_metrics()
         }
+        return base_dict
 
     @classmethod
     def from_dict(cls, data: dict) -> "BuildSession":
-        """Deserialize session from dictionary."""
-        session = cls(name=data["name"], session_id=data["session_id"])
+        """Deserialize session from dictionary with enhanced data."""
+        session = cls(
+            name=data["name"], 
+            session_id=data["session_id"],
+            template=data.get("template")
+        )
+        
+        # Restore basic data
+        session.version = data.get("version", "1.0.0")
+        session.description = data.get("description", "")
+        session.tags = data.get("tags", [])
         session.created_at = data.get("created_at", session.created_at)
         session.last_modified = data.get("last_modified", session.last_modified)
+        
+        # Restore enhanced data
+        session.performance_requirements = data.get("performance_requirements", {})
+        session.resource_limits = data.get("resource_limits", {})
+        session.monitoring_config = data.get("monitoring_config", {"enabled": True})
+        session.test_results = data.get("test_results", [])
+        session.execution_history = data.get("execution_history", [])
+        session.backup_count = data.get("backup_count", 0)
 
         # Restore goal
         if data.get("goal"):
@@ -110,12 +411,14 @@ _session: BuildSession | None = None
 
 
 def _ensure_sessions_dir():
-    """Ensure sessions directory exists."""
+    """Ensure sessions directory and subdirectories exist."""
     SESSIONS_DIR.mkdir(exist_ok=True)
-
+    TEMPLATES_DIR.mkdir(exist_ok=True)
+    METRICS_DIR.mkdir(exist_ok=True)
+    (SESSIONS_DIR / "backups").mkdir(exist_ok=True)
 
 def _save_session(session: BuildSession):
-    """Save session to disk."""
+    """Save session to disk with enhanced features."""
     _ensure_sessions_dir()
 
     # Update last modified
@@ -129,7 +432,26 @@ def _save_session(session: BuildSession):
     # Update active session pointer
     with atomic_write(ACTIVE_SESSION_FILE) as f:
         f.write(session.id)
+        
+    # Save metrics
+    _save_session_metrics(session)
 
+def _save_session_metrics(session: BuildSession):
+    """Save session metrics for analytics."""
+    if not config.enable_analytics:
+        return
+        
+    metrics_file = METRICS_DIR / f"{session.id}_metrics.json"
+    metrics_data = {
+        "session_id": session.id,
+        "timestamp": datetime.now().isoformat(),
+        "metrics": session.get_performance_metrics(),
+        "node_types": [node.node_type for node in session.nodes],
+        "tool_usage": list(set(tool for node in session.nodes for tool in node.tools))
+    }
+    
+    with atomic_write(metrics_file) as f:
+        json.dump(metrics_data, f, indent=2, default=str)
 
 def _load_session(session_id: str) -> BuildSession:
     """Load session from disk."""
@@ -141,7 +463,6 @@ def _load_session(session_id: str) -> BuildSession:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
-
 
 def _load_active_session() -> BuildSession | None:
     """Load the active session if one exists."""
@@ -159,8 +480,27 @@ def _load_active_session() -> BuildSession | None:
 
     return None
 
+def _cleanup_old_sessions():
+    """Clean up old sessions based on retention policy."""
+    if not SESSIONS_DIR.exists():
+        return
+        
+    cutoff_date = datetime.now() - timedelta(days=config.session_retention_days)
+    
+    for session_file in SESSIONS_DIR.glob("*.json"):
+        try:
+            with open(session_file) as f:
+                data = json.load(f)
+                
+            created_at = datetime.fromisoformat(data.get("created_at", ""))
+            if created_at < cutoff_date:
+                session_file.unlink()
+                logger.info("session_cleaned_up", session_id=data.get("session_id"))
+        except Exception as e:
+            logger.error("session_cleanup_failed", file=str(session_file), error=str(e))
 
 def get_session() -> BuildSession:
+    """Get current session with enhanced error handling."""
     global _session
 
     # Try to load active session if no session in memory
@@ -168,9 +508,24 @@ def get_session() -> BuildSession:
         _session = _load_active_session()
 
     if _session is None:
-        raise ValueError("No active session. Call create_session first.")
+        raise EnhancedMCPError(
+            "No active session. Call create_session first.",
+            "NO_ACTIVE_SESSION",
+            {"available_sessions": _get_available_sessions()}
+        )
 
     return _session
+
+def _get_available_sessions() -> List[str]:
+    """Get list of available session IDs."""
+    if not SESSIONS_DIR.exists():
+        return []
+        
+    sessions = []
+    for session_file in SESSIONS_DIR.glob("*.json"):
+        if session_file.name != ".active":
+            sessions.append(session_file.stem)
+    return sessions
 
 
 # =============================================================================
@@ -179,24 +534,59 @@ def get_session() -> BuildSession:
 
 
 @mcp.tool()
-def create_session(name: Annotated[str, "Name for the agent being built"]) -> str:
-    """Create a new agent building session. Call this first before building an agent."""
+@monitor_performance
+def create_session(
+    name: Annotated[str, "Name for the agent being built"],
+    template: Annotated[str, "Template to use (optional): 'marketing', 'data_analysis', 'customer_service', 'workflow'"] = "",
+    description: Annotated[str, "Description of what this agent will do"] = "",
+    tags: Annotated[str, "Comma-separated tags for categorization"] = ""
+) -> str:
+    """Create a new agent building session with optional template support."""
     global _session
-    _session = BuildSession(name)
+    
+    # Clean up old sessions periodically
+    _cleanup_old_sessions()
+    
+    # Parse tags
+    tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+    
+    _session = BuildSession(name, template=template if template else None)
+    _session.description = description
+    _session.tags = tag_list
+    
     _save_session(_session)  # Auto-save
+    
+    # Get template info if used
+    template_info = {}
+    if template:
+        template_path = TEMPLATES_DIR / f"{template}.json"
+        if template_path.exists():
+            template_info = {
+                "template_applied": template,
+                "nodes_from_template": len(_session.nodes),
+                "edges_from_template": len(_session.edges)
+            }
+        else:
+            template_info = {"template_warning": f"Template '{template}' not found, created empty session"}
+    
     return json.dumps(
         {
             "session_id": _session.id,
             "name": name,
+            "description": description,
+            "tags": tag_list,
             "status": "created",
             "persisted": True,
+            "version": _session.version,
+            **template_info
         }
     )
 
 
 @mcp.tool()
+@monitor_performance
 def list_sessions() -> str:
-    """List all saved agent building sessions."""
+    """List all saved agent building sessions with enhanced metadata."""
     _ensure_sessions_dir()
 
     sessions = []
@@ -205,15 +595,27 @@ def list_sessions() -> str:
             try:
                 with open(session_file) as f:
                     data = json.load(f)
+                    
+                    # Calculate additional metrics
+                    performance_metrics = data.get("performance_metrics", {})
+                    
                     sessions.append(
                         {
                             "session_id": data["session_id"],
                             "name": data["name"],
+                            "description": data.get("description", ""),
+                            "tags": data.get("tags", []),
+                            "version": data.get("version", "1.0.0"),
+                            "template": data.get("template"),
                             "created_at": data.get("created_at"),
                             "last_modified": data.get("last_modified"),
                             "node_count": len(data.get("nodes", [])),
                             "edge_count": len(data.get("edges", [])),
+                            "mcp_servers_count": len(data.get("mcp_servers", [])),
                             "has_goal": data.get("goal") is not None,
+                            "complexity_score": performance_metrics.get("complexity_score", 0),
+                            "test_coverage": performance_metrics.get("test_coverage", 0),
+                            "success_rate": performance_metrics.get("success_rate", 0)
                         }
                     )
             except Exception:
@@ -228,17 +630,246 @@ def list_sessions() -> str:
         except Exception:
             pass
 
+    # Sort by last modified (most recent first)
+    sessions.sort(key=lambda s: s["last_modified"], reverse=True)
+
     return json.dumps(
         {
-            "sessions": sorted(sessions, key=lambda s: s["last_modified"], reverse=True),
+            "sessions": sessions,
             "total": len(sessions),
             "active_session_id": active_id,
+            "templates_available": _get_available_templates(),
+            "summary": {
+                "total_nodes": sum(s["node_count"] for s in sessions),
+                "total_edges": sum(s["edge_count"] for s in sessions),
+                "avg_complexity": sum(s["complexity_score"] for s in sessions) / len(sessions) if sessions else 0
+            }
         },
         indent=2,
     )
 
+def _get_available_templates() -> List[str]:
+    """Get list of available session templates."""
+    if not TEMPLATES_DIR.exists():
+        return []
+    return [f.stem for f in TEMPLATES_DIR.glob("*.json")]
 
 @mcp.tool()
+@monitor_performance
+def create_session_template(
+    template_name: Annotated[str, "Name for the template"],
+    session_id: Annotated[str, "Session ID to use as template source"],
+    description: Annotated[str, "Description of what this template is for"] = ""
+) -> str:
+    """Create a reusable session template from an existing session."""
+    try:
+        session = _load_session(session_id)
+        
+        template_data = {
+            "name": template_name,
+            "description": description,
+            "created_at": datetime.now().isoformat(),
+            "source_session": session_id,
+            "nodes": [n.model_dump() for n in session.nodes],
+            "edges": [e.model_dump() for e in session.edges],
+            "mcp_servers": session.mcp_servers,
+            "performance_requirements": session.performance_requirements,
+            "resource_limits": session.resource_limits,
+            "monitoring_config": session.monitoring_config
+        }
+        
+        template_file = TEMPLATES_DIR / f"{template_name}.json"
+        with atomic_write(template_file) as f:
+            json.dump(template_data, f, indent=2, default=str)
+            
+        return json.dumps({
+            "success": True,
+            "template_name": template_name,
+            "template_file": str(template_file),
+            "nodes_included": len(session.nodes),
+            "edges_included": len(session.edges),
+            "message": f"Template '{template_name}' created successfully"
+        })
+        
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+@mcp.tool()
+@monitor_performance
+def list_session_templates() -> str:
+    """List all available session templates."""
+    _ensure_sessions_dir()
+    
+    templates = []
+    if TEMPLATES_DIR.exists():
+        for template_file in TEMPLATES_DIR.glob("*.json"):
+            try:
+                with open(template_file) as f:
+                    data = json.load(f)
+                    templates.append({
+                        "name": data["name"],
+                        "description": data.get("description", ""),
+                        "created_at": data.get("created_at"),
+                        "node_count": len(data.get("nodes", [])),
+                        "edge_count": len(data.get("edges", [])),
+                        "mcp_servers_count": len(data.get("mcp_servers", []))
+                    })
+            except Exception:
+                pass
+                
+    return json.dumps({
+        "templates": templates,
+        "total": len(templates)
+    }, indent=2)
+
+@mcp.tool()
+@monitor_performance
+def backup_session(
+    session_id: Annotated[str, "Session ID to backup"] = ""
+) -> str:
+    """Create a backup of a session."""
+    try:
+        if not session_id:
+            session = get_session()
+        else:
+            session = _load_session(session_id)
+            
+        backup_id = session.create_backup()
+        _save_session(session)  # Save updated backup count
+        
+        return json.dumps({
+            "success": True,
+            "backup_id": backup_id,
+            "session_id": session.id,
+            "backup_count": session.backup_count,
+            "message": f"Backup created: {backup_id}"
+        })
+        
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+@mcp.tool()
+@monitor_performance
+def compare_sessions(
+    session_id_1: Annotated[str, "First session ID to compare"],
+    session_id_2: Annotated[str, "Second session ID to compare"]
+) -> str:
+    """Compare two sessions and show differences."""
+    try:
+        session1 = _load_session(session_id_1)
+        session2 = _load_session(session_id_2)
+        
+        comparison = {
+            "session_1": {
+                "id": session1.id,
+                "name": session1.name,
+                "node_count": len(session1.nodes),
+                "edge_count": len(session1.edges),
+                "complexity": session1._calculate_complexity()
+            },
+            "session_2": {
+                "id": session2.id,
+                "name": session2.name,
+                "node_count": len(session2.nodes),
+                "edge_count": len(session2.edges),
+                "complexity": session2._calculate_complexity()
+            },
+            "differences": {
+                "node_count_diff": len(session2.nodes) - len(session1.nodes),
+                "edge_count_diff": len(session2.edges) - len(session1.edges),
+                "complexity_diff": session2._calculate_complexity() - session1._calculate_complexity()
+            },
+            "unique_to_session_1": {
+                "nodes": [n.id for n in session1.nodes if not any(n2.id == n.id for n2 in session2.nodes)],
+                "tools": list(set(tool for node in session1.nodes for tool in node.tools) - 
+                            set(tool for node in session2.nodes for tool in node.tools))
+            },
+            "unique_to_session_2": {
+                "nodes": [n.id for n in session2.nodes if not any(n1.id == n.id for n1 in session1.nodes)],
+                "tools": list(set(tool for node in session2.nodes for tool in node.tools) - 
+                            set(tool for node in session1.nodes for tool in node.tools))
+            }
+        }
+        
+        return json.dumps(comparison, indent=2)
+        
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+@mcp.tool()
+@monitor_performance
+def get_session_analytics() -> str:
+    """Get analytics and insights across all sessions."""
+    _ensure_sessions_dir()
+    
+    if not SESSIONS_DIR.exists():
+        return json.dumps({"error": "No sessions directory found"})
+        
+    analytics = {
+        "total_sessions": 0,
+        "node_type_distribution": defaultdict(int),
+        "tool_usage_frequency": defaultdict(int),
+        "complexity_distribution": {"low": 0, "medium": 0, "high": 0},
+        "template_usage": defaultdict(int),
+        "creation_timeline": defaultdict(int),
+        "performance_trends": []
+    }
+    
+    for session_file in SESSIONS_DIR.glob("*.json"):
+        try:
+            with open(session_file) as f:
+                data = json.load(f)
+                
+            analytics["total_sessions"] += 1
+            
+            # Node type distribution
+            for node in data.get("nodes", []):
+                analytics["node_type_distribution"][node.get("node_type", "unknown")] += 1
+                
+            # Tool usage
+            for node in data.get("nodes", []):
+                for tool in node.get("tools", []):
+                    analytics["tool_usage_frequency"][tool] += 1
+                    
+            # Complexity distribution
+            complexity = data.get("performance_metrics", {}).get("complexity_score", 0)
+            if complexity < 2:
+                analytics["complexity_distribution"]["low"] += 1
+            elif complexity < 5:
+                analytics["complexity_distribution"]["medium"] += 1
+            else:
+                analytics["complexity_distribution"]["high"] += 1
+                
+            # Template usage
+            template = data.get("template")
+            if template:
+                analytics["template_usage"][template] += 1
+            else:
+                analytics["template_usage"]["none"] += 1
+                
+            # Creation timeline (by month)
+            created_at = data.get("created_at", "")
+            if created_at:
+                month = created_at[:7]  # YYYY-MM
+                analytics["creation_timeline"][month] += 1
+                
+        except Exception:
+            pass
+            
+    # Convert defaultdicts to regular dicts for JSON serialization
+    analytics["node_type_distribution"] = dict(analytics["node_type_distribution"])
+    analytics["tool_usage_frequency"] = dict(analytics["tool_usage_frequency"])
+    analytics["template_usage"] = dict(analytics["template_usage"])
+    analytics["creation_timeline"] = dict(analytics["creation_timeline"])
+    
+    # Add server performance metrics
+    analytics["server_metrics"] = _metrics.get_performance_summary()
+    
+    return json.dumps(analytics, indent=2)
+
+
+@mcp.tool()
+@monitor_performance
 def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) -> str:
     """Load a previously saved agent building session by its ID."""
     global _session
@@ -268,6 +899,7 @@ def load_session_by_id(session_id: Annotated[str, "ID of the session to load"]) 
 
 
 @mcp.tool()
+@monitor_performance
 def delete_session(session_id: Annotated[str, "ID of the session to delete"]) -> str:
     """Delete a saved agent building session."""
     global _session
@@ -302,6 +934,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
 
 
 @mcp.tool()
+@monitor_performance
 def set_goal(
     goal_id: Annotated[str, "Unique identifier for the goal"],
     name: Annotated[str, "Human-readable name"],
@@ -547,6 +1180,7 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
 
 
 @mcp.tool()
+@monitor_performance
 def add_node(
     node_id: Annotated[str, "Unique identifier for the node"],
     name: Annotated[str, "Human-readable name"],
@@ -652,6 +1286,7 @@ def add_node(
 
 
 @mcp.tool()
+@monitor_performance
 def add_edge(
     edge_id: Annotated[str, "Unique identifier for the edge"],
     source: Annotated[str, "Source node ID"],
@@ -1147,24 +1782,553 @@ def validate_graph() -> str:
     errors.extend(context_errors)
     warnings.extend(context_warnings)
 
+@mcp.tool()
+@monitor_performance
+def validate_graph_enhanced() -> str:
+    """
+    Enhanced graph validation with comprehensive analysis.
+    
+    Performs advanced validation including:
+    - Dependency analysis and circular dependency detection
+    - Performance prediction and resource estimation
+    - Security analysis and potential vulnerabilities
+    - Optimization suggestions
+    """
+    session = get_session()
+    errors = []
+    warnings = []
+    suggestions = []
+    
+    # Run basic validation first
+    basic_validation = json.loads(validate_graph())
+    errors.extend(basic_validation.get("errors", []))
+    warnings.extend(basic_validation.get("warnings", []))
+    
+    if not session.goal or not session.nodes:
+        return json.dumps({
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+            "enhanced_analysis": "Skipped - basic validation failed"
+        })
+    
+    # Enhanced analysis
+    analysis = {
+        "complexity_metrics": _analyze_graph_complexity(session),
+        "performance_prediction": _predict_performance(session),
+        "resource_estimation": _estimate_resources(session),
+        "security_analysis": _analyze_security(session),
+        "optimization_suggestions": _generate_optimization_suggestions(session),
+        "bottleneck_analysis": _analyze_bottlenecks(session),
+        "scalability_assessment": _assess_scalability(session)
+    }
+    
+    # Add suggestions based on analysis
+    if analysis["complexity_metrics"]["complexity_score"] > 7:
+        suggestions.append("Consider breaking down complex nodes into smaller, focused components")
+    
+    if analysis["performance_prediction"]["estimated_execution_time"] > 300:
+        suggestions.append("Estimated execution time is high - consider parallel processing or caching")
+    
+    if analysis["resource_estimation"]["memory_mb"] > 1000:
+        suggestions.append("High memory usage predicted - monitor resource consumption")
+    
+    # Check for common anti-patterns
+    anti_patterns = _detect_anti_patterns(session)
+    if anti_patterns:
+        warnings.extend([f"Anti-pattern detected: {pattern}" for pattern in anti_patterns])
+    
     return json.dumps(
         {
             "valid": len(errors) == 0,
             "errors": errors,
             "warnings": warnings,
-            "entry_node": entry_candidates[0] if entry_candidates else None,
-            "terminal_nodes": terminal_candidates,
-            "node_count": len(session.nodes),
-            "edge_count": len(session.edges),
-            "pause_resume_detected": is_pause_resume_agent,
-            "pause_nodes": pause_nodes,
-            "resume_entry_points": resume_entry_points,
-            "all_entry_points": entry_candidates,
-            "context_flow": {node_id: list(keys) for node_id, keys in available_context.items()}
-            if available_context
-            else None,
-        }
+            "suggestions": suggestions,
+            "enhanced_analysis": analysis,
+            "validation_score": _calculate_validation_score(analysis, len(errors), len(warnings)),
+            "recommendations": _generate_recommendations(analysis, errors, warnings)
+        },
+        indent=2
     )
+
+def _analyze_graph_complexity(session: BuildSession) -> Dict[str, Any]:
+    """Analyze graph complexity metrics."""
+    nodes = session.nodes
+    edges = session.edges
+    
+    # Basic metrics
+    node_count = len(nodes)
+    edge_count = len(edges)
+    
+    # Node type distribution
+    node_types = defaultdict(int)
+    for node in nodes:
+        node_types[node.node_type] += 1
+    
+    # Calculate branching factor
+    branching_factors = []
+    for node in nodes:
+        outgoing_edges = sum(1 for edge in edges if edge.source == node.id)
+        if outgoing_edges > 0:
+            branching_factors.append(outgoing_edges)
+    
+    avg_branching = sum(branching_factors) / len(branching_factors) if branching_factors else 0
+    max_branching = max(branching_factors) if branching_factors else 0
+    
+    # Calculate depth (longest path)
+    max_depth = _calculate_max_depth(nodes, edges)
+    
+    # Complexity score (0-10 scale)
+    complexity_score = min(10, (
+        node_count * 0.1 +
+        edge_count * 0.05 +
+        avg_branching * 0.5 +
+        max_depth * 0.2 +
+        node_types.get("router", 0) * 0.3 +
+        node_types.get("llm_tool_use", 0) * 0.2
+    ))
+    
+    return {
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "node_types": dict(node_types),
+        "avg_branching_factor": round(avg_branching, 2),
+        "max_branching_factor": max_branching,
+        "max_depth": max_depth,
+        "complexity_score": round(complexity_score, 2),
+        "complexity_level": "low" if complexity_score < 3 else "medium" if complexity_score < 7 else "high"
+    }
+
+def _predict_performance(session: BuildSession) -> Dict[str, Any]:
+    """Predict performance characteristics."""
+    nodes = session.nodes
+    
+    # Estimate execution time based on node types
+    time_estimates = {
+        "llm_generate": 5.0,  # seconds
+        "llm_tool_use": 8.0,
+        "router": 0.1,
+        "function": 0.5
+    }
+    
+    total_estimated_time = 0
+    api_calls = 0
+    
+    for node in nodes:
+        node_time = time_estimates.get(node.node_type, 1.0)
+        total_estimated_time += node_time
+        
+        if node.node_type in ["llm_generate", "llm_tool_use"]:
+            api_calls += 1
+    
+    # Adjust for parallel execution potential
+    max_depth = _calculate_max_depth(nodes, session.edges)
+    if max_depth > 0:
+        parallel_factor = len(nodes) / max_depth
+        adjusted_time = total_estimated_time / min(parallel_factor, 3)  # Max 3x speedup
+    else:
+        adjusted_time = total_estimated_time
+    
+    return {
+        "estimated_execution_time": round(adjusted_time, 1),
+        "total_api_calls": api_calls,
+        "parallelization_potential": round(parallel_factor, 2) if max_depth > 0 else 1.0,
+        "bottleneck_nodes": _identify_bottleneck_nodes(nodes, session.edges),
+        "critical_path_length": max_depth
+    }
+
+def _estimate_resources(session: BuildSession) -> Dict[str, Any]:
+    """Estimate resource requirements."""
+    nodes = session.nodes
+    
+    # Memory estimates per node type (MB)
+    memory_estimates = {
+        "llm_generate": 100,
+        "llm_tool_use": 150,
+        "router": 10,
+        "function": 50
+    }
+    
+    total_memory = sum(memory_estimates.get(node.node_type, 50) for node in nodes)
+    
+    # CPU estimates (relative units)
+    cpu_estimates = {
+        "llm_generate": 2,
+        "llm_tool_use": 3,
+        "router": 1,
+        "function": 1
+    }
+    
+    total_cpu = sum(cpu_estimates.get(node.node_type, 1) for node in nodes)
+    
+    # Network estimates (API calls)
+    network_calls = sum(1 for node in nodes if node.node_type in ["llm_generate", "llm_tool_use"])
+    
+    return {
+        "memory_mb": total_memory,
+        "cpu_units": total_cpu,
+        "network_calls": network_calls,
+        "storage_mb": 10,  # Base storage for logs, state
+        "estimated_cost_usd": network_calls * 0.01  # Rough API cost estimate
+    }
+
+def _analyze_security(session: BuildSession) -> Dict[str, Any]:
+    """Analyze potential security issues."""
+    nodes = session.nodes
+    security_issues = []
+    security_score = 10  # Start with perfect score
+    
+    # Check for potential security issues
+    for node in nodes:
+        # Check for dangerous tools
+        dangerous_tools = ["execute_command", "file_write", "shell_exec"]
+        if any(tool in dangerous_tools for tool in node.tools):
+            security_issues.append(f"Node '{node.id}' uses potentially dangerous tools")
+            security_score -= 2
+        
+        # Check for external API calls without validation
+        if node.node_type == "llm_tool_use" and not node.system_prompt:
+            security_issues.append(f"Node '{node.id}' lacks input validation in system prompt")
+            security_score -= 1
+        
+        # Check for hardcoded credentials (basic check)
+        if node.system_prompt and any(keyword in node.system_prompt.lower() 
+                                     for keyword in ["password", "api_key", "secret"]):
+            security_issues.append(f"Node '{node.id}' may contain hardcoded credentials")
+            security_score -= 3
+    
+    return {
+        "security_score": max(0, security_score),
+        "security_level": "high" if security_score >= 8 else "medium" if security_score >= 5 else "low",
+        "security_issues": security_issues,
+        "recommendations": [
+            "Use environment variables for credentials",
+            "Implement input validation in system prompts",
+            "Limit tool permissions to minimum required",
+            "Add audit logging for sensitive operations"
+        ]
+    }
+
+def _generate_optimization_suggestions(session: BuildSession) -> List[str]:
+    """Generate optimization suggestions."""
+    suggestions = []
+    nodes = session.nodes
+    edges = session.edges
+    
+    # Check for optimization opportunities
+    node_types = defaultdict(int)
+    for node in nodes:
+        node_types[node.node_type] += 1
+    
+    # Suggest caching for repeated operations
+    if node_types["llm_generate"] > 3:
+        suggestions.append("Consider caching LLM responses for repeated queries")
+    
+    # Suggest parallel execution
+    sequential_chains = _find_sequential_chains(nodes, edges)
+    if any(len(chain) > 3 for chain in sequential_chains):
+        suggestions.append("Long sequential chains detected - consider parallel processing")
+    
+    # Suggest node consolidation
+    if len(nodes) > 10:
+        suggestions.append("Large number of nodes - consider consolidating related functionality")
+    
+    # Suggest router optimization
+    if node_types["router"] > 2:
+        suggestions.append("Multiple routers detected - consider consolidating routing logic")
+    
+    return suggestions
+
+def _analyze_bottlenecks(session: BuildSession) -> Dict[str, Any]:
+    """Analyze potential bottlenecks."""
+    nodes = session.nodes
+    edges = session.edges
+    
+    bottlenecks = []
+    
+    # Find nodes with high fan-in (many incoming edges)
+    for node in nodes:
+        incoming_count = sum(1 for edge in edges if edge.target == node.id)
+        if incoming_count > 3:
+            bottlenecks.append({
+                "node_id": node.id,
+                "type": "fan_in",
+                "severity": "high" if incoming_count > 5 else "medium",
+                "description": f"Node receives input from {incoming_count} sources"
+            })
+    
+    # Find nodes with high fan-out (many outgoing edges)
+    for node in nodes:
+        outgoing_count = sum(1 for edge in edges if edge.source == node.id)
+        if outgoing_count > 3:
+            bottlenecks.append({
+                "node_id": node.id,
+                "type": "fan_out",
+                "severity": "high" if outgoing_count > 5 else "medium",
+                "description": f"Node sends output to {outgoing_count} targets"
+            })
+    
+    # Find expensive operations
+    for node in nodes:
+        if node.node_type == "llm_tool_use" and len(node.tools) > 5:
+            bottlenecks.append({
+                "node_id": node.id,
+                "type": "tool_heavy",
+                "severity": "medium",
+                "description": f"Node uses {len(node.tools)} tools"
+            })
+    
+    return {
+        "bottlenecks": bottlenecks,
+        "bottleneck_count": len(bottlenecks),
+        "critical_bottlenecks": [b for b in bottlenecks if b["severity"] == "high"]
+    }
+
+def _assess_scalability(session: BuildSession) -> Dict[str, Any]:
+    """Assess scalability characteristics."""
+    nodes = session.nodes
+    edges = session.edges
+    
+    # Calculate scalability metrics
+    parallelizable_nodes = sum(1 for node in nodes if node.node_type in ["function", "router"])
+    sequential_nodes = sum(1 for node in nodes if node.node_type in ["llm_generate", "llm_tool_use"])
+    
+    parallelization_ratio = parallelizable_nodes / len(nodes) if nodes else 0
+    
+    # Assess state management
+    stateful_nodes = sum(1 for node in nodes if len(node.output_keys) > 2)
+    state_complexity = stateful_nodes / len(nodes) if nodes else 0
+    
+    # Calculate scalability score
+    scalability_score = (
+        parallelization_ratio * 4 +
+        (1 - state_complexity) * 3 +
+        (1 / (len(edges) / len(nodes))) * 3 if nodes else 0
+    )
+    
+    return {
+        "scalability_score": round(min(10, scalability_score), 2),
+        "parallelization_ratio": round(parallelization_ratio, 2),
+        "state_complexity": round(state_complexity, 2),
+        "scalability_level": "high" if scalability_score >= 7 else "medium" if scalability_score >= 4 else "low",
+        "scaling_recommendations": [
+            "Minimize shared state between nodes",
+            "Design for horizontal scaling",
+            "Use async operations where possible",
+            "Implement circuit breakers for external dependencies"
+        ]
+    }
+
+def _calculate_max_depth(nodes: List[NodeSpec], edges: List[EdgeSpec]) -> int:
+    """Calculate maximum depth of the graph."""
+    # Build adjacency list
+    graph = defaultdict(list)
+    for edge in edges:
+        graph[edge.source].append(edge.target)
+    
+    # Find entry nodes (no incoming edges)
+    incoming = set(edge.target for edge in edges)
+    entry_nodes = [node.id for node in nodes if node.id not in incoming]
+    
+    if not entry_nodes:
+        return 0
+    
+    # DFS to find maximum depth
+    def dfs(node_id: str, visited: Set[str]) -> int:
+        if node_id in visited:
+            return 0  # Cycle detected
+        
+        visited.add(node_id)
+        max_child_depth = 0
+        
+        for child in graph[node_id]:
+            child_depth = dfs(child, visited.copy())
+            max_child_depth = max(max_child_depth, child_depth)
+        
+        return max_child_depth + 1
+    
+    return max(dfs(entry, set()) for entry in entry_nodes)
+
+def _identify_bottleneck_nodes(nodes: List[NodeSpec], edges: List[EdgeSpec]) -> List[str]:
+    """Identify nodes that are likely bottlenecks."""
+    bottlenecks = []
+    
+    for node in nodes:
+        # High fan-in or fan-out
+        incoming = sum(1 for edge in edges if edge.target == node.id)
+        outgoing = sum(1 for edge in edges if edge.source == node.id)
+        
+        if incoming > 2 or outgoing > 2:
+            bottlenecks.append(node.id)
+        
+        # Expensive node types
+        if node.node_type == "llm_tool_use" and len(node.tools) > 3:
+            bottlenecks.append(node.id)
+    
+    return list(set(bottlenecks))
+
+def _find_sequential_chains(nodes: List[NodeSpec], edges: List[EdgeSpec]) -> List[List[str]]:
+    """Find sequential chains of nodes."""
+    # Build adjacency lists
+    outgoing = defaultdict(list)
+    incoming = defaultdict(list)
+    
+    for edge in edges:
+        outgoing[edge.source].append(edge.target)
+        incoming[edge.target].append(edge.source)
+    
+    chains = []
+    visited = set()
+    
+    for node in nodes:
+        if node.id in visited:
+            continue
+            
+        # Start a chain if this node has at most one incoming edge
+        if len(incoming[node.id]) <= 1:
+            chain = []
+            current = node.id
+            
+            while current and current not in visited:
+                chain.append(current)
+                visited.add(current)
+                
+                # Continue if there's exactly one outgoing edge
+                if len(outgoing[current]) == 1:
+                    current = outgoing[current][0]
+                else:
+                    break
+            
+            if len(chain) > 1:
+                chains.append(chain)
+    
+    return chains
+
+def _detect_anti_patterns(session: BuildSession) -> List[str]:
+    """Detect common anti-patterns in the graph."""
+    anti_patterns = []
+    nodes = session.nodes
+    edges = session.edges
+    
+    # God node (too many responsibilities)
+    for node in nodes:
+        if len(node.input_keys) > 5 or len(node.output_keys) > 5:
+            anti_patterns.append(f"God node: '{node.id}' has too many inputs/outputs")
+    
+    # Circular dependencies
+    if _has_circular_dependencies(nodes, edges):
+        anti_patterns.append("Circular dependencies detected")
+    
+    # Dead ends (nodes with no outgoing edges that aren't terminal)
+    terminal_nodes = _find_terminal_nodes(nodes, edges)
+    for node in nodes:
+        outgoing = sum(1 for edge in edges if edge.source == node.id)
+        if outgoing == 0 and node.id not in terminal_nodes:
+            anti_patterns.append(f"Dead end: '{node.id}' has no outgoing edges")
+    
+    # Unused nodes (no incoming or outgoing edges)
+    for node in nodes:
+        incoming = sum(1 for edge in edges if edge.target == node.id)
+        outgoing = sum(1 for edge in edges if edge.source == node.id)
+        if incoming == 0 and outgoing == 0:
+            anti_patterns.append(f"Isolated node: '{node.id}' has no connections")
+    
+    return anti_patterns
+
+def _has_circular_dependencies(nodes: List[NodeSpec], edges: List[EdgeSpec]) -> bool:
+    """Check for circular dependencies using DFS."""
+    graph = defaultdict(list)
+    for edge in edges:
+        graph[edge.source].append(edge.target)
+    
+    visited = set()
+    rec_stack = set()
+    
+    def has_cycle(node_id: str) -> bool:
+        visited.add(node_id)
+        rec_stack.add(node_id)
+        
+        for neighbor in graph[node_id]:
+            if neighbor not in visited:
+                if has_cycle(neighbor):
+                    return True
+            elif neighbor in rec_stack:
+                return True
+        
+        rec_stack.remove(node_id)
+        return False
+    
+    for node in nodes:
+        if node.id not in visited:
+            if has_cycle(node.id):
+                return True
+    
+    return False
+
+def _find_terminal_nodes(nodes: List[NodeSpec], edges: List[EdgeSpec]) -> List[str]:
+    """Find nodes that should be terminal (based on naming or purpose)."""
+    terminal_indicators = ["output", "result", "final", "end", "complete"]
+    terminal_nodes = []
+    
+    for node in nodes:
+        if any(indicator in node.id.lower() or indicator in node.name.lower() 
+               for indicator in terminal_indicators):
+            terminal_nodes.append(node.id)
+    
+    return terminal_nodes
+
+def _calculate_validation_score(analysis: Dict[str, Any], error_count: int, warning_count: int) -> float:
+    """Calculate overall validation score (0-100)."""
+    base_score = 100
+    
+    # Deduct for errors and warnings
+    base_score -= error_count * 20
+    base_score -= warning_count * 5
+    
+    # Adjust based on complexity
+    complexity_score = analysis["complexity_metrics"]["complexity_score"]
+    if complexity_score > 8:
+        base_score -= 10
+    elif complexity_score < 3:
+        base_score += 5
+    
+    # Adjust based on security
+    security_score = analysis["security_analysis"]["security_score"]
+    base_score += (security_score - 5) * 2
+    
+    # Adjust based on scalability
+    scalability_score = analysis["scalability_assessment"]["scalability_score"]
+    base_score += (scalability_score - 5) * 1
+    
+    return max(0, min(100, base_score))
+
+def _generate_recommendations(analysis: Dict[str, Any], errors: List[str], warnings: List[str]) -> List[str]:
+    """Generate actionable recommendations."""
+    recommendations = []
+    
+    if errors:
+        recommendations.append("🔴 Fix validation errors before proceeding")
+    
+    if warnings:
+        recommendations.append("🟡 Address validation warnings for better reliability")
+    
+    complexity = analysis["complexity_metrics"]["complexity_score"]
+    if complexity > 7:
+        recommendations.append("🔧 Consider simplifying the graph structure")
+    
+    security_score = analysis["security_analysis"]["security_score"]
+    if security_score < 7:
+        recommendations.append("🔒 Improve security by addressing identified issues")
+    
+    bottlenecks = analysis["bottleneck_analysis"]["bottleneck_count"]
+    if bottlenecks > 0:
+        recommendations.append("⚡ Optimize bottleneck nodes for better performance")
+    
+    scalability = analysis["scalability_assessment"]["scalability_score"]
+    if scalability < 5:
+        recommendations.append("📈 Design for better scalability")
+    
+    return recommendations
 
 
 def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -> str:
@@ -1357,6 +2521,7 @@ Terminal nodes: {", ".join(f"`{t}`" for t in export_data["graph"]["terminal_node
 
 
 @mcp.tool()
+@monitor_performance
 def export_graph() -> str:
     """
     Export the validated graph as a GraphSpec for GraphExecutor.
@@ -2776,6 +3941,7 @@ def generate_success_tests(
 
 
 @mcp.tool()
+@monitor_performance
 def run_tests(
     goal_id: Annotated[str, "ID of the goal to test"],
     agent_path: Annotated[str, "Path to the agent export folder"],
@@ -2787,13 +3953,14 @@ def run_tests(
     ] = -1,
     fail_fast: Annotated[bool, "Stop on first failure (-x flag)"] = False,
     verbose: Annotated[bool, "Verbose output (-v flag)"] = True,
+    coverage: Annotated[bool, "Generate coverage report"] = False,
 ) -> str:
     """
-    Run pytest on agent test files.
+    Run pytest on agent test files with enhanced reporting and analytics.
 
     Tests are located at {agent_path}/tests/test_*.py
     By default, tests run in parallel using pytest-xdist with auto-detected worker count.
-    Returns pass/fail summary with detailed results parsed from pytest output.
+    Returns comprehensive pass/fail summary with detailed results and analytics.
     """
     import re
     import subprocess
@@ -2834,6 +4001,8 @@ def run_tests(
             "success": "test_success_criteria.py",
             "outcome": "test_success_criteria.py",  # alias
             "edge_case": "test_edge_cases.py",
+            "integration": "test_integration.py",
+            "performance": "test_performance.py"
         }
         for t in types_list:
             if t in type_to_file:
@@ -2849,12 +4018,18 @@ def run_tests(
 
     # Parallel execution (default: auto-detect CPU count)
     if parallel == -1:
-        cmd.extend(["-n", "auto"])  # pytest-xdist auto-detects CPU count
+        cmd.extend(["-n", str(min(config.max_concurrent_tests, 4))])  # Respect config limits
     elif parallel > 0:
-        cmd.extend(["-n", str(parallel)])
+        cmd.extend(["-n", str(min(parallel, config.max_concurrent_tests))])
+
+    # Add coverage if requested
+    if coverage:
+        cmd.extend(["--cov", str(path), "--cov-report", "json"])
 
     # Add short traceback and quiet summary
     cmd.append("--tb=short")
+    cmd.append("--json-report")
+    cmd.append(f"--json-report-file={tests_dir}/test_report.json")
 
     # Set PYTHONPATH to project root so agents can import from core.framework
     env = os.environ.copy()
@@ -2862,20 +4037,21 @@ def run_tests(
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
     env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
 
-    # Run pytest
+    # Run pytest with timeout
+    start_time = time.time()
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=600,  # 10 minute timeout
+            timeout=config.test_timeout,
             env=env,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
             {
                 "goal_id": goal_id,
-                "error": "Test execution timed out after 10 minutes",
+                "error": f"Test execution timed out after {config.test_timeout} seconds",
                 "command": " ".join(cmd),
             }
         )
@@ -2888,18 +4064,15 @@ def run_tests(
             }
         )
 
-    # Parse pytest output
+    execution_time = time.time() - start_time
     output = result.stdout + "\n" + result.stderr
 
-    # Extract summary line (e.g., "5 passed, 2 failed in 1.23s")
+    # Parse pytest output
     summary_match = re.search(r"=+ ([\d\w,\s]+) in [\d.]+s =+", output)
     summary_text = summary_match.group(1) if summary_match else "unknown"
 
     # Parse passed/failed counts
-    passed = 0
-    failed = 0
-    skipped = 0
-    error = 0
+    passed = failed = skipped = error = 0
 
     passed_match = re.search(r"(\d+) passed", summary_text)
     if passed_match:
@@ -2921,7 +4094,6 @@ def run_tests(
 
     # Extract individual test results
     test_results = []
-    # Match lines like: "test_constraints.py::test_constraint_foo PASSED"
     test_pattern = re.compile(r"([\w/]+\.py)::(\w+)\s+(PASSED|FAILED|SKIPPED|ERROR)")
     for match in test_pattern.finditer(output):
         test_results.append(
@@ -2934,24 +4106,64 @@ def run_tests(
 
     # Extract failure details
     failures = []
-    # Match FAILURES section
     failure_section = re.search(
         r"=+ FAILURES =+(.+?)(?:=+ (?:short test summary|ERRORS|warnings) =+|$)", output, re.DOTALL
     )
     if failure_section:
         failure_text = failure_section.group(1)
-        # Split by test name headers
         failure_blocks = re.split(r"_+ (test_\w+) _+", failure_text)
         for i in range(1, len(failure_blocks), 2):
             if i + 1 < len(failure_blocks):
                 test_name = failure_blocks[i]
-                details = failure_blocks[i + 1].strip()[:500]  # Limit detail length
+                details = failure_blocks[i + 1].strip()[:500]
                 failures.append(
                     {
                         "test_name": test_name,
                         "details": details,
                     }
                 )
+
+    # Load JSON report if available
+    json_report = {}
+    json_report_file = tests_dir / "test_report.json"
+    if json_report_file.exists():
+        try:
+            with open(json_report_file) as f:
+                json_report = json.load(f)
+        except Exception:
+            pass
+
+    # Enhanced analytics
+    analytics = {
+        "execution_time": execution_time,
+        "tests_per_second": total / execution_time if execution_time > 0 else 0,
+        "failure_rate": (failed / total * 100) if total > 0 else 0,
+        "test_types_run": types_list,
+        "parallel_workers": parallel if parallel > 0 else "auto",
+        "coverage_enabled": coverage
+    }
+
+    # Save test results to session if available
+    try:
+        session = get_session()
+        test_result_record = {
+            "goal_id": goal_id,
+            "agent_path": agent_path,
+            "passed": result.returncode == 0,
+            "summary": {
+                "total": total,
+                "passed": passed,
+                "failed": failed,
+                "skipped": skipped,
+                "errors": error
+            },
+            "execution_time": execution_time,
+            "test_types": types_list
+        }
+        session.add_test_result(test_result_record)
+        _save_session(session)
+    except Exception:
+        pass  # Don't fail if session save fails
 
     return json.dumps(
         {
@@ -2965,13 +4177,290 @@ def run_tests(
                 "errors": error,
                 "pass_rate": f"{(passed / total * 100):.1f}%" if total > 0 else "0%",
             },
+            "analytics": analytics,
             "command": " ".join(cmd),
             "return_code": result.returncode,
             "test_results": test_results,
             "failures": failures,
-            "raw_output": output[-2000:] if len(output) > 2000 else output,  # Last 2000 chars
+            "json_report": json_report.get("summary", {}) if json_report else {},
+            "raw_output": output[-2000:] if len(output) > 2000 else output,
         }
     )
+
+@mcp.tool()
+@monitor_performance
+def run_test_suite(
+    agent_path: Annotated[str, "Path to the agent export folder"],
+    suite_name: Annotated[str, "Test suite name: 'smoke', 'regression', 'full', 'performance'"] = "smoke",
+    generate_report: Annotated[bool, "Generate detailed HTML report"] = True
+) -> str:
+    """
+    Run predefined test suites with comprehensive reporting.
+    
+    Test suites:
+    - smoke: Quick validation tests (constraints + basic success criteria)
+    - regression: All existing tests to catch regressions
+    - full: Complete test suite including edge cases and integration
+    - performance: Performance and load testing
+    """
+    path, err = _validate_agent_path(agent_path)
+    if err:
+        return err
+
+    # Define test suite configurations
+    suite_configs = {
+        "smoke": {
+            "test_types": ["constraint", "success"],
+            "parallel": 2,
+            "timeout": 120,
+            "fail_fast": True
+        },
+        "regression": {
+            "test_types": ["all"],
+            "parallel": -1,
+            "timeout": 300,
+            "fail_fast": False
+        },
+        "full": {
+            "test_types": ["all"],
+            "parallel": -1,
+            "timeout": 600,
+            "fail_fast": False,
+            "coverage": True
+        },
+        "performance": {
+            "test_types": ["performance"],
+            "parallel": 1,  # Performance tests should run sequentially
+            "timeout": 900,
+            "fail_fast": False
+        }
+    }
+    
+    if suite_name not in suite_configs:
+        return json.dumps({
+            "error": f"Unknown test suite '{suite_name}'",
+            "available_suites": list(suite_configs.keys())
+        })
+    
+    config_data = suite_configs[suite_name]
+    
+    # Run the test suite
+    result = run_tests(
+        goal_id=f"suite_{suite_name}",
+        agent_path=agent_path,
+        test_types=json.dumps(config_data["test_types"]),
+        parallel=config_data["parallel"],
+        fail_fast=config_data["fail_fast"],
+        verbose=True,
+        coverage=config_data.get("coverage", False)
+    )
+    
+    # Parse result and add suite-specific information
+    result_data = json.loads(result)
+    result_data["suite_name"] = suite_name
+    result_data["suite_config"] = config_data
+    
+    # Generate HTML report if requested
+    if generate_report:
+        report_path = _generate_test_report(agent_path, suite_name, result_data)
+        result_data["html_report"] = str(report_path) if report_path else None
+    
+    return json.dumps(result_data, indent=2)
+
+def _generate_test_report(agent_path: str, suite_name: str, test_results: dict) -> Optional[Path]:
+    """Generate HTML test report."""
+    try:
+        path = Path(agent_path)
+        reports_dir = path / "reports"
+        reports_dir.mkdir(exist_ok=True)
+        
+        report_file = reports_dir / f"test_report_{suite_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+        
+        # Simple HTML report template
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Test Report - {suite_name}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                .header {{ background: #f0f0f0; padding: 20px; border-radius: 5px; }}
+                .summary {{ display: flex; gap: 20px; margin: 20px 0; }}
+                .metric {{ background: #e8f4f8; padding: 15px; border-radius: 5px; text-align: center; }}
+                .passed {{ background: #d4edda; }}
+                .failed {{ background: #f8d7da; }}
+                .test-results {{ margin: 20px 0; }}
+                .test-item {{ padding: 10px; border-bottom: 1px solid #eee; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>Test Report: {suite_name.title()}</h1>
+                <p>Agent: {agent_path}</p>
+                <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            </div>
+            
+            <div class="summary">
+                <div class="metric passed">
+                    <h3>{test_results['summary']['passed']}</h3>
+                    <p>Passed</p>
+                </div>
+                <div class="metric failed">
+                    <h3>{test_results['summary']['failed']}</h3>
+                    <p>Failed</p>
+                </div>
+                <div class="metric">
+                    <h3>{test_results['summary']['total']}</h3>
+                    <p>Total</p>
+                </div>
+                <div class="metric">
+                    <h3>{test_results['summary']['pass_rate']}</h3>
+                    <p>Pass Rate</p>
+                </div>
+            </div>
+            
+            <div class="test-results">
+                <h2>Test Results</h2>
+        """
+        
+        for test in test_results.get('test_results', []):
+            status_class = 'passed' if test['status'] == 'passed' else 'failed'
+            html_content += f"""
+                <div class="test-item {status_class}">
+                    <strong>{test['test_name']}</strong> - {test['status'].upper()}
+                    <br><small>{test['file']}</small>
+                </div>
+            """
+        
+        html_content += """
+            </div>
+        </body>
+        </html>
+        """
+        
+        with open(report_file, 'w') as f:
+            f.write(html_content)
+            
+        return report_file
+        
+    except Exception as e:
+        logger.error("report_generation_failed", error=str(e))
+        return None
+
+@mcp.tool()
+@monitor_performance
+def analyze_test_trends(
+    agent_path: Annotated[str, "Path to the agent export folder"],
+    days: Annotated[int, "Number of days to analyze"] = 30
+) -> str:
+    """Analyze test execution trends and patterns over time."""
+    try:
+        session = get_session()
+        
+        # Filter test results by date range
+        cutoff_date = datetime.now() - timedelta(days=days)
+        recent_tests = [
+            test for test in session.test_results
+            if datetime.fromisoformat(test["timestamp"]) > cutoff_date
+        ]
+        
+        if not recent_tests:
+            return json.dumps({
+                "message": f"No test results found in the last {days} days",
+                "suggestion": "Run some tests first using run_tests or run_test_suite"
+            })
+        
+        # Analyze trends
+        trends = {
+            "total_test_runs": len(recent_tests),
+            "success_rate_trend": [],
+            "execution_time_trend": [],
+            "failure_patterns": defaultdict(int),
+            "test_frequency": defaultdict(int),
+            "performance_metrics": {
+                "avg_execution_time": 0,
+                "fastest_run": float('inf'),
+                "slowest_run": 0,
+                "total_test_time": 0
+            }
+        }
+        
+        # Calculate trends by day
+        daily_stats = defaultdict(lambda: {"passed": 0, "failed": 0, "total_time": 0})
+        
+        for test in recent_tests:
+            date = test["timestamp"][:10]  # YYYY-MM-DD
+            daily_stats[date]["total_time"] += test.get("execution_time", 0)
+            
+            if test.get("passed", False):
+                daily_stats[date]["passed"] += 1
+            else:
+                daily_stats[date]["failed"] += 1
+                
+            # Track failure patterns
+            for failure in test.get("failures", []):
+                trends["failure_patterns"][failure.get("test_name", "unknown")] += 1
+                
+            # Track test frequency by type
+            for test_type in test.get("test_types", []):
+                trends["test_frequency"][test_type] += 1
+        
+        # Build trend data
+        for date, stats in sorted(daily_stats.items()):
+            total = stats["passed"] + stats["failed"]
+            success_rate = (stats["passed"] / total * 100) if total > 0 else 0
+            trends["success_rate_trend"].append({
+                "date": date,
+                "success_rate": success_rate,
+                "total_tests": total
+            })
+            trends["execution_time_trend"].append({
+                "date": date,
+                "execution_time": stats["total_time"]
+            })
+        
+        # Calculate performance metrics
+        execution_times = [test.get("execution_time", 0) for test in recent_tests]
+        if execution_times:
+            trends["performance_metrics"]["avg_execution_time"] = sum(execution_times) / len(execution_times)
+            trends["performance_metrics"]["fastest_run"] = min(execution_times)
+            trends["performance_metrics"]["slowest_run"] = max(execution_times)
+            trends["performance_metrics"]["total_test_time"] = sum(execution_times)
+        
+        # Convert defaultdicts to regular dicts
+        trends["failure_patterns"] = dict(trends["failure_patterns"])
+        trends["test_frequency"] = dict(trends["test_frequency"])
+        
+        # Add insights
+        insights = []
+        
+        if len(trends["success_rate_trend"]) > 1:
+            recent_rate = trends["success_rate_trend"][-1]["success_rate"]
+            previous_rate = trends["success_rate_trend"][-2]["success_rate"]
+            if recent_rate > previous_rate:
+                insights.append("✅ Success rate is improving")
+            elif recent_rate < previous_rate:
+                insights.append("⚠️ Success rate is declining")
+            else:
+                insights.append("➡️ Success rate is stable")
+        
+        if trends["failure_patterns"]:
+            most_failing = max(trends["failure_patterns"].items(), key=lambda x: x[1])
+            insights.append(f"🔍 Most failing test: {most_failing[0]} ({most_failing[1]} failures)")
+        
+        avg_time = trends["performance_metrics"]["avg_execution_time"]
+        if avg_time > 60:
+            insights.append("⏱️ Tests are taking longer than 1 minute on average")
+        elif avg_time < 10:
+            insights.append("⚡ Tests are running very quickly")
+        
+        trends["insights"] = insights
+        trends["analysis_period"] = f"{days} days"
+        
+        return json.dumps(trends, indent=2)
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -3546,6 +5035,452 @@ def verify_credentials(
     except Exception as e:
         return json.dumps({"error": str(e)})
 
+
+# =============================================================================
+# PERFORMANCE MONITORING AND ANALYTICS
+# =============================================================================
+
+@mcp.tool()
+@monitor_performance
+def get_server_metrics() -> str:
+    """Get comprehensive server performance metrics and analytics."""
+    metrics = _metrics.get_performance_summary()
+    
+    # Add system information
+    system_info = {
+        "platform": "unknown",
+        "python_version": "unknown",
+        "cpu_count": 0,
+        "memory_total_gb": 0,
+        "memory_available_gb": 0,
+        "disk_usage_gb": 0
+    }
+    
+    try:
+        import psutil
+        import platform
+        
+        system_info.update({
+            "platform": platform.system(),
+            "python_version": platform.python_version(),
+            "cpu_count": psutil.cpu_count(),
+            "memory_total_gb": round(psutil.virtual_memory().total / (1024**3), 2),
+            "memory_available_gb": round(psutil.virtual_memory().available / (1024**3), 2),
+            "disk_usage_gb": round(psutil.disk_usage('/').used / (1024**3), 2)
+        })
+    except ImportError:
+        system_info["note"] = "psutil not available - install for detailed system metrics"
+    except Exception as e:
+        system_info["error"] = f"Failed to get system info: {str(e)}"
+    
+    # Add configuration info
+    config_info = {
+        "test_timeout": config.test_timeout,
+        "max_concurrent_tests": config.max_concurrent_tests,
+        "performance_monitoring": config.enable_performance_monitoring,
+        "analytics_enabled": config.enable_analytics,
+        "session_retention_days": config.session_retention_days
+    }
+    
+    return json.dumps({
+        "server_metrics": metrics,
+        "system_info": system_info,
+        "configuration": config_info,
+        "timestamp": datetime.now().isoformat()
+    }, indent=2)
+
+@mcp.tool()
+@monitor_performance
+def analyze_agent_performance(
+    agent_path: Annotated[str, "Path to the agent export folder"],
+    include_predictions: Annotated[bool, "Include performance predictions"] = True
+) -> str:
+    """Analyze agent performance characteristics and provide optimization recommendations."""
+    try:
+        path, err = _validate_agent_path(agent_path)
+        if err:
+            return err
+            
+        # Load agent configuration
+        agent_file = path / "agent.json"
+        if not agent_file.exists():
+            return json.dumps({"error": "Agent configuration not found"})
+            
+        with open(agent_file) as f:
+            agent_data = json.load(f)
+            
+        graph_data = agent_data.get("graph", {})
+        nodes = graph_data.get("nodes", [])
+        edges = graph_data.get("edges", [])
+        
+        # Analyze performance characteristics
+        analysis = {
+            "agent_info": {
+                "name": agent_data.get("agent", {}).get("name", "Unknown"),
+                "version": agent_data.get("agent", {}).get("version", "1.0.0"),
+                "node_count": len(nodes),
+                "edge_count": len(edges)
+            },
+            "complexity_analysis": _analyze_agent_complexity(nodes, edges),
+            "resource_analysis": _analyze_agent_resources(nodes),
+            "bottleneck_analysis": _analyze_agent_bottlenecks(nodes, edges),
+            "optimization_opportunities": _find_optimization_opportunities(nodes, edges)
+        }
+        
+        if include_predictions:
+            analysis["performance_predictions"] = _predict_agent_performance(nodes, edges)
+            
+        # Generate recommendations
+        recommendations = _generate_performance_recommendations(analysis)
+        analysis["recommendations"] = recommendations
+        
+        return json.dumps(analysis, indent=2)
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+def _analyze_agent_complexity(nodes: List[dict], edges: List[dict]) -> Dict[str, Any]:
+    """Analyze agent complexity from loaded data."""
+    node_types = defaultdict(int)
+    tool_usage = defaultdict(int)
+    
+    for node in nodes:
+        node_types[node.get("node_type", "unknown")] += 1
+        for tool in node.get("tools", []):
+            tool_usage[tool] += 1
+    
+    # Calculate complexity score
+    complexity_factors = {
+        "llm_generate": 2.0,
+        "llm_tool_use": 3.0,
+        "router": 4.0,
+        "function": 1.0
+    }
+    
+    complexity_score = sum(
+        node_types[node_type] * complexity_factors.get(node_type, 1.0)
+        for node_type in node_types
+    )
+    
+    return {
+        "node_types": dict(node_types),
+        "tool_usage": dict(tool_usage),
+        "complexity_score": round(complexity_score, 2),
+        "complexity_level": "low" if complexity_score < 10 else "medium" if complexity_score < 25 else "high"
+    }
+
+def _analyze_agent_resources(nodes: List[dict]) -> Dict[str, Any]:
+    """Analyze resource requirements from loaded data."""
+    memory_estimates = {
+        "llm_generate": 100,
+        "llm_tool_use": 150,
+        "router": 10,
+        "function": 50
+    }
+    
+    cpu_estimates = {
+        "llm_generate": 2,
+        "llm_tool_use": 3,
+        "router": 1,
+        "function": 1
+    }
+    
+    total_memory = 0
+    total_cpu = 0
+    api_calls = 0
+    
+    for node in nodes:
+        node_type = node.get("node_type", "function")
+        total_memory += memory_estimates.get(node_type, 50)
+        total_cpu += cpu_estimates.get(node_type, 1)
+        
+        if node_type in ["llm_generate", "llm_tool_use"]:
+            api_calls += 1
+    
+    return {
+        "estimated_memory_mb": total_memory,
+        "estimated_cpu_units": total_cpu,
+        "api_calls": api_calls,
+        "estimated_cost_usd": api_calls * 0.01
+    }
+
+def _analyze_agent_bottlenecks(nodes: List[dict], edges: List[dict]) -> Dict[str, Any]:
+    """Analyze potential bottlenecks from loaded data."""
+    # Build connection maps
+    incoming_counts = defaultdict(int)
+    outgoing_counts = defaultdict(int)
+    
+    for edge in edges:
+        incoming_counts[edge.get("target", "")] += 1
+        outgoing_counts[edge.get("source", "")] += 1
+    
+    bottlenecks = []
+    
+    # Find high fan-in/fan-out nodes
+    for node in nodes:
+        node_id = node.get("id", "")
+        incoming = incoming_counts[node_id]
+        outgoing = outgoing_counts[node_id]
+        
+        if incoming > 3:
+            bottlenecks.append({
+                "node_id": node_id,
+                "type": "high_fan_in",
+                "count": incoming,
+                "severity": "high" if incoming > 5 else "medium"
+            })
+            
+        if outgoing > 3:
+            bottlenecks.append({
+                "node_id": node_id,
+                "type": "high_fan_out",
+                "count": outgoing,
+                "severity": "high" if outgoing > 5 else "medium"
+            })
+        
+        # Check for tool-heavy nodes
+        tools = node.get("tools", [])
+        if len(tools) > 5:
+            bottlenecks.append({
+                "node_id": node_id,
+                "type": "tool_heavy",
+                "count": len(tools),
+                "severity": "medium"
+            })
+    
+    return {
+        "bottlenecks": bottlenecks,
+        "bottleneck_count": len(bottlenecks),
+        "high_severity_count": sum(1 for b in bottlenecks if b["severity"] == "high")
+    }
+
+def _find_optimization_opportunities(nodes: List[dict], edges: List[dict]) -> List[str]:
+    """Find optimization opportunities from loaded data."""
+    opportunities = []
+    
+    # Count node types
+    node_types = defaultdict(int)
+    for node in nodes:
+        node_types[node.get("node_type", "unknown")] += 1
+    
+    # Suggest optimizations
+    if node_types["llm_generate"] > 5:
+        opportunities.append("Consider caching LLM responses for repeated queries")
+    
+    if node_types["router"] > 3:
+        opportunities.append("Multiple routers detected - consider consolidating routing logic")
+    
+    if len(nodes) > 15:
+        opportunities.append("Large graph - consider breaking into smaller sub-graphs")
+    
+    # Check for sequential chains
+    if len(edges) < len(nodes) * 0.8:  # Sparse connectivity suggests sequential processing
+        opportunities.append("Graph appears sequential - consider parallel processing opportunities")
+    
+    return opportunities
+
+def _predict_agent_performance(nodes: List[dict], edges: List[dict]) -> Dict[str, Any]:
+    """Predict performance characteristics from loaded data."""
+    # Time estimates per node type (seconds)
+    time_estimates = {
+        "llm_generate": 5.0,
+        "llm_tool_use": 8.0,
+        "router": 0.1,
+        "function": 0.5
+    }
+    
+    total_time = 0
+    critical_path_time = 0
+    
+    for node in nodes:
+        node_type = node.get("node_type", "function")
+        node_time = time_estimates.get(node_type, 1.0)
+        total_time += node_time
+    
+    # Estimate critical path (simplified)
+    max_depth = len(nodes) // 3  # Rough estimate
+    critical_path_time = total_time / max(1, len(nodes) // max_depth)
+    
+    return {
+        "estimated_total_time": round(total_time, 1),
+        "estimated_critical_path_time": round(critical_path_time, 1),
+        "parallelization_potential": round(total_time / critical_path_time, 2),
+        "throughput_estimate": round(3600 / critical_path_time, 1),  # executions per hour
+        "scalability_factor": "high" if critical_path_time < 30 else "medium" if critical_path_time < 120 else "low"
+    }
+
+def _generate_performance_recommendations(analysis: Dict[str, Any]) -> List[str]:
+    """Generate performance recommendations based on analysis."""
+    recommendations = []
+    
+    complexity = analysis["complexity_analysis"]["complexity_level"]
+    if complexity == "high":
+        recommendations.append("🔧 High complexity detected - consider simplifying the agent structure")
+    
+    bottlenecks = analysis["bottleneck_analysis"]["high_severity_count"]
+    if bottlenecks > 0:
+        recommendations.append(f"⚡ {bottlenecks} high-severity bottlenecks found - optimize these nodes first")
+    
+    if "performance_predictions" in analysis:
+        predictions = analysis["performance_predictions"]
+        if predictions["estimated_critical_path_time"] > 120:
+            recommendations.append("⏱️ Long execution time predicted - consider parallel processing")
+        
+        if predictions["parallelization_potential"] > 3:
+            recommendations.append("🚀 High parallelization potential - redesign for concurrent execution")
+    
+    opportunities = analysis["optimization_opportunities"]
+    if opportunities:
+        recommendations.extend([f"💡 {opp}" for opp in opportunities[:3]])  # Top 3 opportunities
+    
+    return recommendations
+
+@mcp.tool()
+@monitor_performance
+def generate_performance_report(
+    agent_path: Annotated[str, "Path to the agent export folder"],
+    include_graphs: Annotated[bool, "Include performance graphs"] = False
+) -> str:
+    """Generate comprehensive performance report for an agent."""
+    try:
+        # Get performance analysis
+        analysis_result = analyze_agent_performance(agent_path, include_predictions=True)
+        analysis = json.loads(analysis_result)
+        
+        if "error" in analysis:
+            return analysis_result
+        
+        # Generate report
+        report = {
+            "report_id": f"perf_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "agent_path": agent_path,
+            "generated_at": datetime.now().isoformat(),
+            "executive_summary": _generate_executive_summary(analysis),
+            "detailed_analysis": analysis,
+            "action_items": _generate_action_items(analysis),
+            "performance_score": _calculate_performance_score(analysis)
+        }
+        
+        # Save report to file
+        path = Path(agent_path)
+        reports_dir = path / "reports"
+        reports_dir.mkdir(exist_ok=True)
+        
+        report_file = reports_dir / f"performance_report_{report['report_id']}.json"
+        with atomic_write(report_file) as f:
+            json.dump(report, f, indent=2, default=str)
+        
+        report["report_file"] = str(report_file)
+        
+        return json.dumps(report, indent=2)
+        
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+def _generate_executive_summary(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate executive summary from analysis."""
+    agent_info = analysis["agent_info"]
+    complexity = analysis["complexity_analysis"]
+    bottlenecks = analysis["bottleneck_analysis"]
+    
+    summary = {
+        "agent_name": agent_info["name"],
+        "overall_health": "good",  # Will be calculated
+        "key_metrics": {
+            "complexity_level": complexity["complexity_level"],
+            "bottleneck_count": bottlenecks["bottleneck_count"],
+            "node_count": agent_info["node_count"]
+        },
+        "top_concerns": [],
+        "quick_wins": []
+    }
+    
+    # Determine overall health
+    concerns = 0
+    if complexity["complexity_level"] == "high":
+        concerns += 2
+        summary["top_concerns"].append("High complexity may impact maintainability")
+    
+    if bottlenecks["high_severity_count"] > 0:
+        concerns += bottlenecks["high_severity_count"]
+        summary["top_concerns"].append(f"{bottlenecks['high_severity_count']} critical bottlenecks")
+    
+    summary["overall_health"] = "excellent" if concerns == 0 else "good" if concerns < 3 else "needs_attention"
+    
+    # Identify quick wins
+    opportunities = analysis.get("optimization_opportunities", [])
+    summary["quick_wins"] = opportunities[:2]  # Top 2 quick wins
+    
+    return summary
+
+def _generate_action_items(analysis: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Generate prioritized action items."""
+    action_items = []
+    
+    # High priority items
+    bottlenecks = analysis["bottleneck_analysis"]["bottlenecks"]
+    for bottleneck in bottlenecks:
+        if bottleneck["severity"] == "high":
+            action_items.append({
+                "priority": "high",
+                "category": "performance",
+                "title": f"Optimize bottleneck node: {bottleneck['node_id']}",
+                "description": f"Node has {bottleneck['type']} with count {bottleneck['count']}",
+                "estimated_effort": "medium"
+            })
+    
+    # Medium priority items
+    complexity = analysis["complexity_analysis"]["complexity_level"]
+    if complexity == "high":
+        action_items.append({
+            "priority": "medium",
+            "category": "architecture",
+            "title": "Reduce graph complexity",
+            "description": "Consider breaking down complex nodes or simplifying the flow",
+            "estimated_effort": "high"
+        })
+    
+    # Low priority items (optimizations)
+    opportunities = analysis.get("optimization_opportunities", [])
+    for opp in opportunities[:3]:
+        action_items.append({
+            "priority": "low",
+            "category": "optimization",
+            "title": "Optimization opportunity",
+            "description": opp,
+            "estimated_effort": "low"
+        })
+    
+    return action_items
+
+def _calculate_performance_score(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """Calculate overall performance score."""
+    base_score = 100
+    
+    # Deduct for complexity
+    complexity_level = analysis["complexity_analysis"]["complexity_level"]
+    if complexity_level == "high":
+        base_score -= 20
+    elif complexity_level == "medium":
+        base_score -= 10
+    
+    # Deduct for bottlenecks
+    bottlenecks = analysis["bottleneck_analysis"]
+    base_score -= bottlenecks["high_severity_count"] * 15
+    base_score -= (bottlenecks["bottleneck_count"] - bottlenecks["high_severity_count"]) * 5
+    
+    # Bonus for good architecture
+    node_count = analysis["agent_info"]["node_count"]
+    if 5 <= node_count <= 10:  # Sweet spot
+        base_score += 5
+    
+    final_score = max(0, min(100, base_score))
+    
+    return {
+        "score": final_score,
+        "grade": "A" if final_score >= 90 else "B" if final_score >= 80 else "C" if final_score >= 70 else "D" if final_score >= 60 else "F",
+        "category": "excellent" if final_score >= 90 else "good" if final_score >= 75 else "fair" if final_score >= 60 else "poor"
+    }
 
 # =============================================================================
 # MAIN
