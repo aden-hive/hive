@@ -1,4 +1,32 @@
+
 #!/usr/bin/env bun
+import { z } from "zod";
+
+// Re-using our validation schema
+const StatementSchema = z.object({
+  id: z.string().uuid(),
+  content: z.string().min(10),
+  status: z.enum(["INITIATED", "TRAINING", "TESTING", "VALIDATED"])
+});
+
+export class StringDatabaseManager {
+  /**
+   * Orchestrates the import and lifecycle of business logic.
+   */
+  async processNewImport(rawData: any) {
+    // 1. Validate Input
+    const parsed = StatementSchema.safeParse(rawData);
+    if (!parsed.success) throw new Error("Invalid Business Statement format");
+
+    // 2. Call MCP Tool (Python) to persist in SQLite
+    // (Actual call logic via client.callTool omitted for brevity)
+    console.log(`Persisting statement ${parsed.data.id} to SQLite...`);
+    
+    // 3. Optional: Trigger Vectorization
+    // In a full implementation, you'd send this to a vector tool here
+    return parsed.data;
+  }
+}
 
 declare global {
   var process: {
