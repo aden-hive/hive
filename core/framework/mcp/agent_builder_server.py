@@ -12,7 +12,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
-
+from pydantic import ValidationError
 from mcp.server import FastMCP
 
 from framework.graph import Constraint, EdgeCondition, EdgeSpec, Goal, NodeSpec, SuccessCriterion
@@ -355,23 +355,18 @@ def set_goal(
         warnings.append("Consider adding constraints")
 
     # Validate required fields in criteria and constraints
-    for i, sc in enumerate(criteria_list):
-        if not isinstance(sc, dict):
-            errors.append(f"success_criteria[{i}] must be an object")
-        else:
-            if "id" not in sc:
-                errors.append(f"success_criteria[{i}] missing required field 'id'")
-            if "description" not in sc:
-                errors.append(f"success_criteria[{i}] missing required field 'description'")
-
-    for i, c in enumerate(constraint_list):
-        if not isinstance(c, dict):
-            errors.append(f"constraints[{i}] must be an object")
-        else:
-            if "id" not in c:
-                errors.append(f"constraints[{i}] missing required field 'id'")
-            if "description" not in c:
-                errors.append(f"constraints[{i}] missing required field 'description'")
+    # Validate required fields using Pydantic models
+    try:
+        if criteria_list:
+            [SuccessCriterion.model_validate(sc) for sc in criteria_list]
+        
+        if constraint_list:
+            [Constraint.model_validate(c) for c in constraint_list]
+    
+    except ValidationError as e:
+        errors.append(str(e))
+    except TypeError as e:
+        errors.append(f"Invalid data type: {str(e)}")
 
     # Return early if validation failed
     if errors:
@@ -605,16 +600,21 @@ def add_node(
     errors = []
     warnings = []
 
-    if not node_id:
-        errors.append("Node must have an id")
-    if not name:
-        errors.append("Node must have a name")
-    if node_type == "llm_tool_use" and not tools_list:
-        errors.append(f"Node '{node_id}' of type llm_tool_use must specify tools")
-    if node_type == "router" and not routes_dict:
-        errors.append(f"Router node '{node_id}' must specify routes")
-    if node_type in ("llm_generate", "llm_tool_use") and not system_prompt:
-        warnings.append(f"LLM node '{node_id}' should have a system_prompt")
+    # Validate using Pydantic NodeSpec model (replaces manual checks)
+    try:
+        # If node_data is a string (JSON), parse it first
+        if isinstance(node_data, str):
+            node_data = json.loads(node_data)
+        
+        # This line validates id, name, type, and specific fields like 'tools' or 'routes'
+        node = NodeSpec.model_validate(node_data)
+
+    except ValidationError as e:
+        errors.append(str(e))
+        # IMPORTANT: Return early because 'node' won't be valid below
+        return json.dumps({"valid": False, "errors": errors})
+    except json.JSONDecodeError:
+        return json.dumps({"valid": False, "errors": ["Invalid JSON format"]})
 
     _save_session(session)  # Auto-save
 
