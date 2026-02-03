@@ -5,6 +5,21 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+import os
+import sys
+
+REQUIRED_ENV_VARS = [
+    "ANTHROPIC_API_KEY"
+]
+
+missing = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
+
+if missing:
+    raise RuntimeError(
+        f"Missing required environment variables: {', '.join(missing)}. "
+        "Please set them before starting the MCP server."
+    )
+
 
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
