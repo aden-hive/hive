@@ -3,11 +3,11 @@
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class MessageType(Enum):
+class MessageType(StrEnum):
     """Types of messages in the system."""
 
     REQUEST = "request"  # Initial request from user/orchestrator
@@ -18,7 +18,7 @@ class MessageType(Enum):
     CAPABILITY_RESPONSE = "capability_response"  # Agent's answer
 
 
-class CapabilityLevel(Enum):
+class CapabilityLevel(StrEnum):
     """How confident an agent is about handling a request."""
 
     CANNOT_HANDLE = "cannot_handle"  # Definitely not for this agent

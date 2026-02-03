@@ -15,7 +15,7 @@ You cannot skip steps or bypass validation.
 
 from collections.abc import Callable
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +26,7 @@ from framework.graph.goal import Goal
 from framework.graph.node import NodeSpec
 
 
-class BuildPhase(str, Enum):
+class BuildPhase(StrEnum):
     """Current phase of the build process."""
 
     INIT = "init"  # Just started
