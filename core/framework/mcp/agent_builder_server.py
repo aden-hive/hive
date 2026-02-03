@@ -516,6 +516,36 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
     return None
 
 
+def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
+    """
+    Validate and normalize agent_path.
+
+    Returns:
+        (Path, None) if valid
+        (None, error_json) if invalid
+    """
+    if not agent_path:
+        return None, json.dumps(
+            {
+                "success": False,
+                "error": "agent_path is required (e.g., 'exports/my_agent')",
+            }
+        )
+
+    path = Path(agent_path)
+
+    if not path.exists():
+        return None, json.dumps(
+            {
+                "success": False,
+                "error": f"Agent path not found: {path}",
+                "hint": "Run export_graph to create an agent in exports/ first",
+            }
+        )
+
+    return path, None
+
+
 @mcp.tool()
 def add_node(
     node_id: Annotated[str, "Unique identifier for the node"],
@@ -2597,10 +2627,11 @@ def generate_constraint_tests(
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
-    if not agent_path:
-        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+    path, err = _validate_agent_path(agent_path)
+    if err:
+        return err
 
-    agent_module = _get_agent_module_from_path(agent_path)
+    agent_module = _get_agent_module_from_path(path)
 
     # Format constraints for display
     constraints_formatted = (
@@ -2619,9 +2650,9 @@ def generate_constraint_tests(
     return json.dumps(
         {
             "goal_id": goal_id,
-            "agent_path": agent_path,
+            "agent_path": str(path),
             "agent_module": agent_module,
-            "output_file": f"{agent_path}/tests/test_constraints.py",
+            "output_file": f"{str(path)}/tests/test_constraints.py",
             "constraints": [c.model_dump() for c in goal.constraints] if goal.constraints else [],
             "constraints_formatted": constraints_formatted,
             "test_guidelines": {
@@ -2677,10 +2708,11 @@ def generate_success_tests(
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
-    if not agent_path:
-        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+    path, err = _validate_agent_path(agent_path)
+    if err:
+        return err
 
-    agent_module = _get_agent_module_from_path(agent_path)
+    agent_module = _get_agent_module_from_path(path)
 
     # Parse node/tool names for context
     nodes = [n.strip() for n in node_names.split(",") if n.strip()]
@@ -2705,9 +2737,9 @@ def generate_success_tests(
     return json.dumps(
         {
             "goal_id": goal_id,
-            "agent_path": agent_path,
+            "agent_path": str(path),
             "agent_module": agent_module,
-            "output_file": f"{agent_path}/tests/test_success_criteria.py",
+            "output_file": f"{str(path)}/tests/test_success_criteria.py",
             "success_criteria": [c.model_dump() for c in goal.success_criteria]
             if goal.success_criteria
             else [],
@@ -2766,7 +2798,11 @@ def run_tests(
     import re
     import subprocess
 
-    tests_dir = Path(agent_path) / "tests"
+    path, err = _validate_agent_path(agent_path)
+    if err:
+        return err
+
+    tests_dir = path / "tests"
 
     if not tests_dir.exists():
         return json.dumps(
@@ -2957,10 +2993,11 @@ def debug_test(
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
-    if not agent_path:
-        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+    path, err = _validate_agent_path(agent_path)
+    if err:
+        return err
 
-    tests_dir = Path(agent_path) / "tests"
+    tests_dir = path / "tests"
 
     if not tests_dir.exists():
         return json.dumps(
@@ -3101,10 +3138,11 @@ def list_tests(
     if not agent_path and _session:
         agent_path = f"exports/{_session.name}"
 
-    if not agent_path:
-        return json.dumps({"error": "agent_path required (e.g., 'exports/my_agent')"})
+    path, err = _validate_agent_path(agent_path)
+    if err:
+        return err
 
-    tests_dir = Path(agent_path) / "tests"
+    tests_dir = path / "tests"
 
     if not tests_dir.exists():
         return json.dumps(
