@@ -68,7 +68,8 @@ prompt_choice() {
     while true; do
         read -r -p "Enter choice (1-${#options[@]}): " choice
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
-            return $((choice - 1))
+            PROMPT_CHOICE=$((choice - 1))
+            return 0
         fi
         echo -e "${RED}Invalid choice. Please enter 1-${#options[@]}${NC}"
     done
@@ -557,7 +558,7 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
         "Groq - Fast, free tier" \
         "Cerebras - Fast, free tier" \
         "Skip for now"
-    choice=$?
+     choice=$PROMPT_CHOICE
 
     case $choice in
         0)
