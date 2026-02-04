@@ -867,9 +867,12 @@ class AgentRunner:
             is_multi_entry_point=self._uses_async_entry_points,
         )
 
-    def validate(self) -> ValidationResult:
+    def validate(self, strict: bool = False) -> ValidationResult:
         """
         Check agent is valid and all required tools are registered.
+
+        Args:
+            strict: If True, fail validation on missing tools or credentials.
 
         Returns:
             ValidationResult with errors, warnings, and missing tools
@@ -977,8 +980,13 @@ class AgentRunner:
                         f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
                     )
 
+        # Determine validity
+        is_valid = len(errors) == 0
+        if strict and (missing_tools or missing_credentials):
+            is_valid = False
+
         return ValidationResult(
-            valid=len(errors) == 0,
+            valid=is_valid,
             errors=errors,
             warnings=warnings,
             missing_tools=missing_tools,
