@@ -410,4 +410,5 @@ If credentials are missing, you'll receive a response like:
 | ------------ | ---------------------- | ----------------------------------------------------- |
 | `web_search` | `BRAVE_SEARCH_API_KEY` | [brave.com/search/api](https://brave.com/search/api/) |
 
-Note: The MCP server itself requires `ANTHROPIC_API_KEY` at startup for LLM operations.
+Note: MCP servers can start without LLM API keys. You only need an LLM provider key when
+executing LLM-dependent nodes/tools (or running real agent tests).

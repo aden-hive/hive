@@ -11,38 +11,43 @@ PYTEST_TEST_FILE_HEADER = '''"""
 
 {description}
 
-REQUIRES: API_KEY (OpenAI or Anthropic) for real testing.
-"""
-
+REQUIRES: At least one LLM provider API key for real testing.
+"""\n
 import os
 import pytest
 from {agent_module} import default_agent
 
 
 def _get_api_key():
-    """Get API key from CredentialStoreAdapter or environment."""
-    # 1. Try CredentialStoreAdapter for Anthropic
+    """Return any configured LLM provider key (credential store or env)."""
+    # 1) Credential store (preferred)
     try:
         from aden_tools.credentials import CredentialStoreAdapter
+
         creds = CredentialStoreAdapter.default()
-        if creds.is_available("anthropic"):
-            return creds.get("anthropic")
-    except (ImportError, KeyError):
+        for provider in ("openai", "anthropic", "cerebras", "groq"):
+            value = creds.store.get(provider)
+            if value:
+                return value
+    except Exception:
         pass
 
-    # 2. Fallback to standard environment variables for OpenAI and others
+    # 2) Environment fallback
     return (
-        os.environ.get("OPENAI_API_KEY") or
-        os.environ.get("ANTHROPIC_API_KEY") or
-        os.environ.get("CEREBRAS_API_KEY") or
-        os.environ.get("GROQ_API_KEY")
+        os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("CEREBRAS_API_KEY")
+        or os.environ.get("GROQ_API_KEY")
     )
 
 
 # Skip all tests if no API key and not in mock mode
 pytestmark = pytest.mark.skipif(
     not _get_api_key() and not os.environ.get("MOCK_MODE"),
-    reason="API key required. Please set OPENAI_API_KEY, ANTHROPIC_API_KEY, or use MOCK_MODE=1."
+    reason=(
+        "LLM API key required. Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, "
+        "CEREBRAS_API_KEY, GROQ_API_KEY, or use MOCK_MODE=1."
+    ),
 )
 '''
 
@@ -54,20 +59,23 @@ import pytest
 
 
 def _get_api_key():
-    """Get API key from CredentialStoreAdapter or environment."""
+    """Return any configured LLM provider key (credential store or env)."""
     try:
         from aden_tools.credentials import CredentialStoreAdapter
+
         creds = CredentialStoreAdapter.default()
-        if creds.is_available("anthropic"):
-            return creds.get("anthropic")
-    except (ImportError, KeyError):
+        for provider in ("openai", "anthropic", "cerebras", "groq"):
+            value = creds.store.get(provider)
+            if value:
+                return value
+    except Exception:
         pass
 
     return (
-        os.environ.get("OPENAI_API_KEY") or
-        os.environ.get("ANTHROPIC_API_KEY") or
-        os.environ.get("CEREBRAS_API_KEY") or
-        os.environ.get("GROQ_API_KEY")
+        os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("ANTHROPIC_API_KEY")
+        or os.environ.get("CEREBRAS_API_KEY")
+        or os.environ.get("GROQ_API_KEY")
     )
 
 
@@ -79,21 +87,28 @@ def mock_mode():
 
 @pytest.fixture(scope="session", autouse=True)
 def check_api_key():
-    """Ensure API key is set for real testing."""
+    """Ensure an LLM provider key is set for real testing."""
     if not _get_api_key():
         if os.environ.get("MOCK_MODE"):
             print("\\n⚠️  Running in MOCK MODE - structure validation only")
             print("   This does NOT test LLM behavior or agent quality")
-            print("   Set OPENAI_API_KEY or ANTHROPIC_API_KEY for real testing\\n")
+            print(
+                "   Set one of OPENAI_API_KEY / ANTHROPIC_API_KEY / CEREBRAS_API_KEY / GROQ_API_KEY "
+                "for real testing\\n"
+            )
         else:
             pytest.fail(
-                "\\n❌ No API key found!\\n\\n"
-                "Real testing requires an API key. Choose one:\\n"
-                "1. Set OpenAI key:\\n"
+                "\\n❌ No LLM API key found!\\n\\n"
+                "Real testing requires at least one provider key. Choose one:\\n"
+                "1. OpenAI:\\n"
                 "   export OPENAI_API_KEY='your-key-here'\\n"
-                "2. Set Anthropic key:\\n"
+                "2. Anthropic:\\n"
                 "   export ANTHROPIC_API_KEY='your-key-here'\\n"
-                "3. Run structure validation only:\\n"
+                "3. Cerebras:\\n"
+                "   export CEREBRAS_API_KEY='your-key-here'\\n"
+                "4. Groq:\\n"
+                "   export GROQ_API_KEY='your-key-here'\\n"
+                "5. Structure validation only:\\n"
                 "   MOCK_MODE=1 pytest exports/{agent_name}/tests/\\n\\n"
                 "Note: Mock mode does NOT validate agent behavior or quality."
             )

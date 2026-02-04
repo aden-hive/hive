@@ -24,7 +24,10 @@ cp .env.example .env
 
 | Variable               | Required For                  | Get Key                                                 |
 | ---------------------- | ----------------------------- | ------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`    | MCP server startup, LLM nodes | [console.anthropic.com](https://console.anthropic.com/) |
+| `OPENAI_API_KEY`       | LLM calls (OpenAI)            | [platform.openai.com](https://platform.openai.com/api-keys) |
+| `ANTHROPIC_API_KEY`    | LLM calls (Anthropic)         | [console.anthropic.com](https://console.anthropic.com/) |
+| `GROQ_API_KEY`         | LLM calls (Groq)              | [console.groq.com](https://console.groq.com/keys)       |
+| `CEREBRAS_API_KEY`     | LLM calls (Cerebras)          | [cloud.cerebras.ai](https://cloud.cerebras.ai/)         |
 | `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
 | `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
 | `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |

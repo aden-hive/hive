@@ -16,13 +16,14 @@ Usage:
 
 Environment Variables:
     MCP_PORT              - Server port (default: 4001)
-    ANTHROPIC_API_KEY     - Required at startup for testing/LLM nodes
+    LLM provider API keys - Optional at startup; required only when using LLM-dependent tools/nodes
+                           (e.g., OPENAI_API_KEY / ANTHROPIC_API_KEY / GROQ_API_KEY / CEREBRAS_API_KEY)
     BRAVE_SEARCH_API_KEY  - Required for web_search tool (validated at agent load time)
 
 Note:
     Two-tier credential validation:
-    - Tier 1 (startup): ANTHROPIC_API_KEY must be set before server starts
-    - Tier 2 (agent load): Tool credentials validated when agent is loaded
+    - Tier 1 (startup): Only credentials marked startup_required=True are enforced at startup
+    - Tier 2 (tool use): Tool credentials are validated when a tool is called
     See aden_tools.credentials for details.
 """
 
