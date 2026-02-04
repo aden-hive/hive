@@ -255,6 +255,7 @@ class GraphExecutor:
         total_latency = 0
         node_retry_counts: dict[str, int] = {}  # Track retries per node
         node_visit_counts: dict[str, int] = {}  # Track visits for feedback loops
+        _is_retry = False  # True when looping back for a retry (not a new visit)
 
         # Determine entry point (may differ if resuming)
         current_node_id = graph.get_entry_point(session_state)
@@ -284,7 +285,11 @@ class GraphExecutor:
                     raise RuntimeError(f"Node not found: {current_node_id}")
 
                 # Enforce max_node_visits (feedback/callback edge support)
-                node_visit_counts[current_node_id] = node_visit_counts.get(current_node_id, 0) + 1
+                # Don't increment visit count on retries — retries are not new visits
+                if not _is_retry:
+                    cnt = node_visit_counts.get(current_node_id, 0) + 1
+                    node_visit_counts[current_node_id] = cnt
+                _is_retry = False
                 max_visits = getattr(node_spec, "max_node_visits", 1)
                 if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
                     self.logger.warning(
@@ -433,6 +438,7 @@ class GraphExecutor:
                         self.logger.info(
                             f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
                         )
+                        _is_retry = True
                         continue
                     else:
                         # Max retries exceeded - fail the execution
