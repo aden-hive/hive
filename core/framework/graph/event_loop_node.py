@@ -640,7 +640,18 @@ class EventLoopNode(NodeProtocol):
                     )
                     # Async write-through for set_output
                     if not result.is_error:
-                        await accumulator.set(tc.tool_input["key"], tc.tool_input["value"])
+                        value = tc.tool_input["value"]
+                        # Parse JSON strings into native types so downstream
+                        # consumers get lists/dicts instead of serialised JSON,
+                        # and the hallucination validator skips non-string values.
+                        if isinstance(value, str):
+                            try:
+                                parsed = json.loads(value)
+                                if isinstance(parsed, (list, dict)):
+                                    value = parsed
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                        await accumulator.set(tc.tool_input["key"], value)
                 else:
                     # Execute real tool
                     result = await self._execute_tool(tc)

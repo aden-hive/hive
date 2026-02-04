@@ -930,9 +930,10 @@ assert approval == "APPROVED", f"Expected APPROVED, got {approval}"
 - `steps_executed: int` - Number of nodes executed
 - `total_tokens: int` - Cumulative token usage
 - `total_latency_ms: int` - Total execution time
-- `path: list[str]` - Node IDs traversed
+- `path: list[str]` - Node IDs traversed (may contain repeated IDs from feedback loops)
 - `paused_at: str | None` - Node ID if HITL pause occurred
 - `session_state: dict` - State for resuming
+- `node_visit_counts: dict[str, int]` - How many times each node executed (useful for feedback loop testing)
 
 ### Happy Path Test
 ```python
@@ -973,6 +974,57 @@ async def test_performance_latency(mock_mode):
     result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
     duration = time.time() - start
     assert duration < 5.0, f"Took {{duration}}s, expected <5s"
+```
+
+### Testing Event Loop Nodes
+
+Event loop nodes run multi-turn loops internally. Tests should verify:
+
+**Output Keys Test** — All required keys are set via `set_output`:
+```python
+@pytest.mark.asyncio
+async def test_all_output_keys_set(mock_mode):
+    """Test that event_loop nodes set all required output keys."""
+    result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
+    assert result.success, f"Agent failed: {{result.error}}"
+    output = result.output or {{}}
+    for key in ["expected_key_1", "expected_key_2"]:
+        assert key in output, f"Output key '{{key}}' not set by event_loop node"
+```
+
+**Feedback Loop Test** — Verify feedback loops terminate:
+```python
+@pytest.mark.asyncio
+async def test_feedback_loop_respects_max_visits(mock_mode):
+    """Test that feedback loops terminate at max_node_visits."""
+    result = await default_agent.run({{"input": "trigger_rejection"}}, mock_mode=mock_mode)
+    assert result.success or result.error is not None
+    visits = getattr(result, "node_visit_counts", {{}}) or {{}}
+    for node_id, count in visits.items():
+        assert count <= 5, f"Node {{node_id}} visited {{count}} times"
+```
+
+**Fan-Out Test** — Verify parallel branches both complete:
+```python
+@pytest.mark.asyncio
+async def test_parallel_branches_complete(mock_mode):
+    """Test that fan-out branches all complete and produce outputs."""
+    result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
+    assert result.success
+    output = result.output or {{}}
+    # Check outputs from both parallel branches
+    assert "branch_a_output" in output, "Branch A output missing"
+    assert "branch_b_output" in output, "Branch B output missing"
+```
+
+**Client-Facing Node Test** — In mock mode, client-facing nodes may not block:
+```python
+@pytest.mark.asyncio
+async def test_client_facing_node(mock_mode):
+    """Test that client-facing nodes produce output."""
+    result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
+    # In mock mode, client-facing blocking is typically bypassed
+    assert result.success or result.paused_at is not None
 ```
 
 ## Integration with building-agents
