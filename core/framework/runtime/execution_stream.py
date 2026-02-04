@@ -320,6 +320,8 @@ class ExecutionStream:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    event_bus=self._event_bus,
+                    stream_id=self.stream_id,
                 )
 
                 # Create modified graph with entry point
