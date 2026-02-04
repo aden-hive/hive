@@ -24,7 +24,7 @@ def _get_api_key():
     # 1. Try CredentialStoreAdapter for Anthropic
     try:
         from aden_tools.credentials import CredentialStoreAdapter
-        creds = CredentialStoreAdapter.with_env_storage()
+        creds = CredentialStoreAdapter.default()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
     except (ImportError, KeyError):
@@ -57,7 +57,7 @@ def _get_api_key():
     """Get API key from CredentialStoreAdapter or environment."""
     try:
         from aden_tools.credentials import CredentialStoreAdapter
-        creds = CredentialStoreAdapter.with_env_storage()
+        creds = CredentialStoreAdapter.default()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
     except (ImportError, KeyError):
