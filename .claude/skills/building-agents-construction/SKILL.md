@@ -28,7 +28,7 @@ When this skill is loaded, IMMEDIATELY begin executing Step 1. Do not explain wh
 mcp__agent-builder__add_mcp_server(
     name="hive-tools",
     transport="stdio",
-    command="python",
+    command="python3",
     args='["mcp_server.py", "--stdio"]',
     cwd="tools",
     description="Hive tools MCP server"
@@ -284,8 +284,8 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 >
 > ```bash
 > cd /home/timothy/oss/hive
-> PYTHONPATH=core:exports python -m AGENT_NAME validate
-> PYTHONPATH=core:exports python -m AGENT_NAME info
+> PYTHONPATH=core:exports python3 -m AGENT_NAME validate
+> PYTHONPATH=core:exports python3 -m AGENT_NAME info
 > ```
 
 ---
@@ -295,7 +295,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 **RUN validation:**
 
 ```bash
-cd /home/timothy/oss/hive && PYTHONPATH=core:exports python -m AGENT_NAME validate
+cd /home/timothy/oss/hive && PYTHONPATH=core:exports python3 -m AGENT_NAME validate
 ```
 
 - If valid: Agent is complete!
