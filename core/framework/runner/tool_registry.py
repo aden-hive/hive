@@ -280,7 +280,16 @@ class ToolRegistry:
             return
 
         base_dir = config_path.parent
-        for server_config in config.get("servers", []):
+
+        # Support both formats:
+        #   {"servers": [{"name": "x", ...}]}        (list format)
+        #   {"server-name": {"transport": ...}, ...}  (dict format)
+        server_list = config.get("servers", [])
+        if not server_list and "servers" not in config:
+            # Treat top-level keys as server names
+            server_list = [{"name": name, **cfg} for name, cfg in config.items()]
+
+        for server_config in server_list:
             cwd = server_config.get("cwd")
             if cwd and not Path(cwd).is_absolute():
                 server_config["cwd"] = str((base_dir / cwd).resolve())

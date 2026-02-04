@@ -1,9 +1,8 @@
-"""Agent graph construction for Online Research Agent."""
+"""Agent graph construction for Deep Research Agent."""
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult, GraphExecutor
-from framework.graph.event_loop_node import EventLoopNode, LoopConfig
 from framework.runtime.event_bus import EventBus
 from framework.runtime.core import Runtime
 from framework.llm import LiteLLMProvider
@@ -11,164 +10,132 @@ from framework.runner.tool_registry import ToolRegistry
 
 from .config import default_config, metadata
 from .nodes import (
-    parse_query_node,
-    search_sources_node,
-    fetch_content_node,
-    evaluate_sources_node,
-    synthesize_findings_node,
-    write_report_node,
-    quality_check_node,
-    save_report_node,
+    intake_node,
+    research_node,
+    review_node,
+    report_node,
 )
 
 # Goal definition
 goal = Goal(
-    id="comprehensive-online-research",
-    name="Comprehensive Online Research",
-    description="Research any topic by searching multiple sources, synthesizing information, and producing a well-structured narrative report with citations.",
+    id="rigorous-interactive-research",
+    name="Rigorous Interactive Research",
+    description=(
+        "Research any topic by searching diverse sources, analyzing findings, "
+        "and producing a cited report — with user checkpoints to guide direction."
+    ),
     success_criteria=[
         SuccessCriterion(
-            id="source-coverage",
-            description="Query 10+ diverse sources",
+            id="source-diversity",
+            description="Use multiple diverse, authoritative sources",
             metric="source_count",
-            target=">=10",
-            weight=0.20,
-        ),
-        SuccessCriterion(
-            id="relevance",
-            description="All sources directly address the query",
-            metric="relevance_score",
-            target="90%",
+            target=">=5",
             weight=0.25,
         ),
         SuccessCriterion(
-            id="synthesis",
-            description="Synthesize findings into coherent narrative",
-            metric="coherence_score",
-            target="85%",
-            weight=0.25,
-        ),
-        SuccessCriterion(
-            id="citations",
-            description="Include citations for all claims",
+            id="citation-coverage",
+            description="Every factual claim in the report cites its source",
             metric="citation_coverage",
             target="100%",
-            weight=0.15,
+            weight=0.25,
         ),
         SuccessCriterion(
-            id="actionable",
-            description="Report answers the user's question",
-            metric="answer_completeness",
+            id="user-satisfaction",
+            description="User reviews findings before report generation",
+            metric="user_approval",
+            target="true",
+            weight=0.25,
+        ),
+        SuccessCriterion(
+            id="report-completeness",
+            description="Final report answers the original research questions",
+            metric="question_coverage",
             target="90%",
-            weight=0.15,
+            weight=0.25,
         ),
     ],
     constraints=[
         Constraint(
             id="no-hallucination",
-            description="Only include information found in sources",
+            description="Only include information found in fetched sources",
             constraint_type="quality",
             category="accuracy",
         ),
         Constraint(
             id="source-attribution",
-            description="Every factual claim must cite its source",
+            description="Every claim must cite its source with a numbered reference",
             constraint_type="quality",
             category="accuracy",
         ),
         Constraint(
-            id="recency-preference",
-            description="Prefer recent sources when relevant",
-            constraint_type="quality",
-            category="relevance",
-        ),
-        Constraint(
-            id="no-paywalled",
-            description="Avoid sources that require payment to access",
+            id="user-checkpoint",
+            description="Present findings to the user before writing the final report",
             constraint_type="functional",
-            category="accessibility",
+            category="interaction",
         ),
     ],
 )
 
 # Node list
 nodes = [
-    parse_query_node,
-    search_sources_node,
-    fetch_content_node,
-    evaluate_sources_node,
-    synthesize_findings_node,
-    write_report_node,
-    quality_check_node,
-    save_report_node,
+    intake_node,
+    research_node,
+    review_node,
+    report_node,
 ]
 
 # Edge definitions
 edges = [
+    # intake -> research
     EdgeSpec(
-        id="parse-to-search",
-        source="parse-query",
-        target="search-sources",
+        id="intake-to-research",
+        source="intake",
+        target="research",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
+    # research -> review
     EdgeSpec(
-        id="search-to-fetch",
-        source="search-sources",
-        target="fetch-content",
+        id="research-to-review",
+        source="research",
+        target="review",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
+    # review -> research (feedback loop)
     EdgeSpec(
-        id="fetch-to-evaluate",
-        source="fetch-content",
-        target="evaluate-sources",
-        condition=EdgeCondition.ON_SUCCESS,
+        id="review-to-research-feedback",
+        source="review",
+        target="research",
+        condition=EdgeCondition.CONDITIONAL,
+        condition_expr="needs_more_research == True",
         priority=1,
     ),
+    # review -> report (user satisfied)
     EdgeSpec(
-        id="evaluate-to-synthesize",
-        source="evaluate-sources",
-        target="synthesize-findings",
-        condition=EdgeCondition.ON_SUCCESS,
-        priority=1,
-    ),
-    EdgeSpec(
-        id="synthesize-to-write",
-        source="synthesize-findings",
-        target="write-report",
-        condition=EdgeCondition.ON_SUCCESS,
-        priority=1,
-    ),
-    EdgeSpec(
-        id="write-to-quality",
-        source="write-report",
-        target="quality-check",
-        condition=EdgeCondition.ON_SUCCESS,
-        priority=1,
-    ),
-    EdgeSpec(
-        id="quality-to-save",
-        source="quality-check",
-        target="save-report",
-        condition=EdgeCondition.ON_SUCCESS,
-        priority=1,
+        id="review-to-report",
+        source="review",
+        target="report",
+        condition=EdgeCondition.CONDITIONAL,
+        condition_expr="needs_more_research == False",
+        priority=2,
     ),
 ]
 
 # Graph configuration
-entry_node = "parse-query"
-entry_points = {"start": "parse-query"}
+entry_node = "intake"
+entry_points = {"start": "intake"}
 pause_nodes = []
-terminal_nodes = ["save-report"]
+terminal_nodes = ["report"]
 
 
-class OnlineResearchAgent:
+class DeepResearchAgent:
     """
-    Online Research Agent - Deep-dive research with narrative reports.
+    Deep Research Agent — 4-node pipeline with user checkpoints.
 
-    Uses GraphExecutor directly with EventLoopNode instances registered
-    in the node_registry for multi-turn tool execution.
+    Flow: intake -> research -> review -> report
+                      ^           |
+                      +-- feedback loop (if user wants more)
     """
 
     def __init__(self, config=None):
@@ -188,7 +155,7 @@ class OnlineResearchAgent:
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
         return GraphSpec(
-            id="online-research-agent-graph",
+            id="deep-research-agent-graph",
             goal_id=self.goal.id,
             version="1.0.0",
             entry_node=self.entry_node,
@@ -201,29 +168,11 @@ class OnlineResearchAgent:
             max_tokens=self.config.max_tokens,
         )
 
-    def _build_node_registry(self, tool_executor=None) -> dict:
-        """Create EventLoopNode instances for all event_loop nodes."""
-        registry = {}
-        for node_spec in self.nodes:
-            if node_spec.node_type == "event_loop":
-                registry[node_spec.id] = EventLoopNode(
-                    event_bus=self._event_bus,
-                    judge=None,  # implicit judge: accept when output_keys are filled
-                    config=LoopConfig(
-                        max_iterations=50,
-                        max_tool_calls_per_turn=15,
-                        stall_detection_threshold=3,
-                        max_history_tokens=32000,
-                    ),
-                    tool_executor=tool_executor,
-                )
-        return registry
-
     def _setup(self, mock_mode=False) -> GraphExecutor:
         """Set up the executor with all components."""
         from pathlib import Path
 
-        storage_path = Path.home() / ".hive" / "online_research_agent"
+        storage_path = Path.home() / ".hive" / "deep_research_agent"
         storage_path.mkdir(parents=True, exist_ok=True)
 
         self._event_bus = EventBus()
@@ -245,7 +194,6 @@ class OnlineResearchAgent:
         tools = list(self._tool_registry.get_tools().values())
 
         self._graph = self._build_graph()
-        node_registry = self._build_node_registry(tool_executor=tool_executor)
         runtime = Runtime(storage_path)
 
         self._executor = GraphExecutor(
@@ -253,7 +201,8 @@ class OnlineResearchAgent:
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            node_registry=node_registry,
+            event_bus=self._event_bus,
+            storage_path=storage_path,
         )
 
         return self._executor
@@ -317,7 +266,7 @@ class OnlineResearchAgent:
             "entry_points": self.entry_points,
             "pause_nodes": self.pause_nodes,
             "terminal_nodes": self.terminal_nodes,
-            "multi_entrypoint": True,
+            "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
         }
 
     def validate(self):
@@ -339,10 +288,6 @@ class OnlineResearchAgent:
             if terminal not in node_ids:
                 errors.append(f"Terminal node '{terminal}' not found")
 
-        for pause in self.pause_nodes:
-            if pause not in node_ids:
-                errors.append(f"Pause node '{pause}' not found")
-
         for ep_id, node_id in self.entry_points.items():
             if node_id not in node_ids:
                 errors.append(
@@ -357,4 +302,4 @@ class OnlineResearchAgent:
 
 
 # Create default instance
-default_agent = OnlineResearchAgent()
+default_agent = DeepResearchAgent()
