@@ -21,23 +21,22 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: |
-          cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+        run: uv sync --project core --group dev
 
       - name: Ruff lint
         run: |
-          ruff check core/
-          ruff check tools/
+          uv run --project core ruff check core/
+          uv run --project core ruff check tools/
 
       - name: Ruff format
         run: |
-          ruff format --check core/
-          ruff format --check tools/
+          uv run --project core ruff format --check core/
+          uv run --project core ruff format --check tools/
 
   test:
     name: Test Python Framework
@@ -52,18 +51,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
         run: |
           cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+          uv sync
 
       - name: Run tests
         run: |
           cd core
-          pytest tests/ -v
+          uv run pytest tests/ -v
 
   test-tools:
     name: Test Tools
@@ -83,8 +83,7 @@ jobs:
         run: |
           cd tools
           uv sync --extra dev
-          uv pip install --python .venv/bin/python -e ../core
-          uv run --extra dev pytest tests/ -v
+          uv run pytest tests/ -v
 
   validate:
     name: Validate Agent Exports
@@ -97,13 +96,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
         run: |
           cd core
-          pip install -e .
-          pip install -r requirements-dev.txt
+          uv sync
 
       - name: Validate exported agents
         run: |

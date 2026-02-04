@@ -68,32 +68,7 @@ from starlette.responses import PlainTextResponse  # noqa: E402
 from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
 from aden_tools.tools import register_all_tools  # noqa: E402
 
-# Create credential store with access to both env vars AND encrypted store.
-# CompositeStorage tries encrypted store first, then falls back to env vars.
-# This allows Aden-synced credentials from ~/.hive/credentials while still
-# supporting plain GITHUB_TOKEN / BRAVE_SEARCH_API_KEY env vars.
-try:
-    from framework.credentials import CredentialStore
-    from framework.credentials.storage import (
-        CompositeStorage,
-        EncryptedFileStorage,
-        EnvVarStorage,
-    )
-
-    from aden_tools.credentials import CREDENTIAL_SPECS
-
-    _env_mapping = {name: spec.env_var for name, spec in CREDENTIAL_SPECS.items()}
-    _storage = CompositeStorage(
-        primary=EncryptedFileStorage(),
-        fallbacks=[EnvVarStorage(env_mapping=_env_mapping)],
-    )
-    store = CredentialStore(storage=_storage)
-    credentials = CredentialStoreAdapter(store)
-    logger.info("Using CompositeStorage (encrypted + env fallback)")
-except Exception as e:
-    # Fall back to env-only adapter if composite setup fails
-    credentials = CredentialStoreAdapter.with_env_storage()
-    logger.warning(f"Falling back to env-only CredentialStoreAdapter: {e}")
+credentials = CredentialStoreAdapter.default()
 
 # Tier 1: Validate startup-required credentials (if any)
 try:

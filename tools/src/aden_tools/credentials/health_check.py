@@ -231,10 +231,213 @@ class GoogleSearchHealthChecker:
             )
 
 
+class AnthropicHealthChecker:
+    """Health checker for Anthropic API credentials."""
+
+    ENDPOINT = "https://api.anthropic.com/v1/messages"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """
+        Validate Anthropic API key without consuming tokens.
+
+        Sends a deliberately invalid request (empty messages) to the messages endpoint.
+        A 401 means invalid key; 400 (bad request) means the key authenticated
+        but the payload was rejected — confirming the key is valid without
+        generating any tokens. 429 (rate limited) also indicates a valid key.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.post(
+                    self.ENDPOINT,
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "Content-Type": "application/json",
+                    },
+                    # Empty messages triggers 400 (not 200), so no tokens are consumed.
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 1,
+                        "messages": [],
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Anthropic API key valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Anthropic API key is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 429:
+                    # Rate limited but key is valid
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Anthropic API key valid (rate limited)",
+                        details={"status_code": 429, "rate_limited": True},
+                    )
+                elif response.status_code == 400:
+                    # Bad request but key authenticated - key is valid
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Anthropic API key valid",
+                        details={"status_code": 400},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Anthropic API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Anthropic API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Anthropic API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class GitHubHealthChecker:
+    """Health checker for GitHub Personal Access Token."""
+
+    ENDPOINT = "https://api.github.com/user"
+    TIMEOUT = 10.0
+
+    def check(self, access_token: str) -> HealthCheckResult:
+        """
+        Validate GitHub token by fetching the authenticated user.
+
+        Returns the authenticated username on success.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    username = data.get("login", "unknown")
+                    return HealthCheckResult(
+                        valid=True,
+                        message=f"GitHub token valid (authenticated as {username})",
+                        details={"username": username},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="GitHub token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="GitHub token lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"GitHub API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="GitHub API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to GitHub API: {e}",
+                details={"error": str(e)},
+            )
+
+
+class ResendHealthChecker:
+    """Health checker for Resend API credentials."""
+
+    ENDPOINT = "https://api.resend.com/domains"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """
+        Validate Resend API key by listing domains.
+
+        A successful response confirms the key is valid.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Accept": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Resend API key valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Resend API key is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Resend API key lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Resend API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Resend API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Resend API: {e}",
+                details={"error": str(e)},
+            )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
+    "google_search": GoogleSearchHealthChecker(),
+    "anthropic": AnthropicHealthChecker(),
+    "github": GitHubHealthChecker(),
+    "resend": ResendHealthChecker(),
 }
 
 
