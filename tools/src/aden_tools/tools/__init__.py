@@ -7,7 +7,7 @@ Usage:
     from aden_tools.credentials import CredentialStoreAdapter
 
     mcp = FastMCP("my-server")
-    credentials = CredentialStoreAdapter.with_env_storage()
+    credentials = CredentialStoreAdapter.default()
     register_all_tools(mcp, credentials=credentials)
 """
 
@@ -117,6 +117,9 @@ def register_all_tools(
         "github_search_code",
         "github_list_branches",
         "github_get_branch",
+        "github_list_stargazers",
+        "github_get_user_profile",
+        "github_get_user_emails",
         "send_email",
         "send_budget_alert_email",
         "hubspot_search_contacts",

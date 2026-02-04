@@ -183,41 +183,26 @@ echo ""
 echo -e "${DIM}This may take a minute...${NC}"
 echo ""
 
-# Install framework package from core/
-echo -n "  Installing framework... "
-cd "$SCRIPT_DIR/core"
+# Install all workspace packages (core + tools) from workspace root
+echo -n "  Installing workspace packages... "
+cd "$SCRIPT_DIR"
 
 if [ -f "pyproject.toml" ]; then
     if uv sync > /dev/null 2>&1; then
-        echo -e "${GREEN}  ✓ framework package installed${NC}"
+        echo -e "${GREEN}  ✓ workspace packages installed${NC}"
     else
-        echo -e "${YELLOW}  ⚠ framework installation had issues (may be OK)${NC}"
-    fi
-else
-    echo -e "${RED}failed (no pyproject.toml)${NC}"
-    exit 1
-fi
-
-# Install aden_tools package from tools/
-echo -n "  Installing tools... "
-cd "$SCRIPT_DIR/tools"
-
-if [ -f "pyproject.toml" ]; then
-    if uv sync > /dev/null 2>&1; then
-        echo -e "${GREEN}  ✓ aden_tools package installed${NC}"
-    else
-        echo -e "${RED}  ✗ aden_tools installation failed${NC}"
+        echo -e "${RED}  ✗ workspace installation failed${NC}"
         exit 1
     fi
 else
-    echo -e "${RED}failed${NC}"
+    echo -e "${RED}failed (no root pyproject.toml)${NC}"
     exit 1
 fi
 
 # Install Playwright browser
 echo -n "  Installing Playwright browser... "
-if $PYTHON_CMD -c "import playwright" > /dev/null 2>&1; then
-    if $PYTHON_CMD -m playwright install chromium > /dev/null 2>&1; then
+if uv run python -c "import playwright" > /dev/null 2>&1; then
+    if uv run python -m playwright install chromium > /dev/null 2>&1; then
         echo -e "${GREEN}ok${NC}"
     else
         echo -e "${YELLOW}⏭${NC}"
@@ -236,33 +221,6 @@ echo ""
 # ============================================================
 
 echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Configuring LLM provider...${NC}"
-# Install MCP dependencies (in tools venv)
-echo "  Installing MCP dependencies..."
-TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
-uv pip install --python "$TOOLS_PYTHON" mcp fastmcp > /dev/null 2>&1
-echo -e "${GREEN}  ✓ MCP dependencies installed${NC}"
-
-# Fix openai version compatibility (in tools venv)
-TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
-OPENAI_VERSION=$($TOOLS_PYTHON -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not_installed")
-if [ "$OPENAI_VERSION" = "not_installed" ]; then
-    echo "  Installing openai package..."
-    uv pip install --python "$TOOLS_PYTHON" "openai>=1.0.0" > /dev/null 2>&1
-    echo -e "${GREEN}  ✓ openai installed${NC}"
-elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
-    echo "  Upgrading openai to 1.x+ for litellm compatibility..."
-    uv pip install --python "$TOOLS_PYTHON" --upgrade "openai>=1.0.0" > /dev/null 2>&1
-    echo -e "${GREEN}  ✓ openai upgraded${NC}"
-else
-    echo -e "${GREEN}  ✓ openai $OPENAI_VERSION is compatible${NC}"
-fi
-
-# Install click for CLI (in tools venv)
-TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
-uv pip install --python "$TOOLS_PYTHON" click > /dev/null 2>&1
-echo -e "${GREEN}  ✓ click installed${NC}"
-
-cd "$SCRIPT_DIR"
 echo ""
 
 # ============================================================
@@ -274,42 +232,28 @@ echo ""
 
 IMPORT_ERRORS=0
 
-# Test imports using their respective venvs
-CORE_PYTHON="$SCRIPT_DIR/core/.venv/bin/python"
-TOOLS_PYTHON="$SCRIPT_DIR/tools/.venv/bin/python"
-
-# Test framework import (from core venv)
-if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import framework" > /dev/null 2>&1; then
+# Test imports using workspace venv via uv run
+if uv run python -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ framework imports OK${NC}"
 else
     echo -e "${RED}  ✗ framework import failed${NC}"
     IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
 fi
 
-# Test aden_tools import (from tools venv)
-if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import aden_tools" > /dev/null 2>&1; then
+if uv run python -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ aden_tools imports OK${NC}"
 else
     echo -e "${RED}  ✗ aden_tools import failed${NC}"
     IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
 fi
 
-# Test litellm import (from core venv)
-if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "import litellm" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ litellm imports OK (core)${NC}"
+if uv run python -c "import litellm" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓ litellm imports OK${NC}"
 else
-    echo -e "${YELLOW}  ⚠ litellm import issues in core (may be OK)${NC}"
+    echo -e "${YELLOW}  ⚠ litellm import issues (may be OK)${NC}"
 fi
 
-# Test litellm import (from tools venv)
-if [ -f "$TOOLS_PYTHON" ] && $TOOLS_PYTHON -c "import litellm" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓ litellm imports OK (tools)${NC}"
-else
-    echo -e "${YELLOW}  ⚠ litellm import issues in tools (may be OK)${NC}"
-fi
-
-# Test MCP server module (from core venv)
-if [ -f "$CORE_PYTHON" ] && $CORE_PYTHON -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
+if uv run python -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ MCP server module OK${NC}"
 else
     echo -e "${RED}  ✗ MCP server module failed${NC}"
@@ -647,7 +591,7 @@ ERRORS=0
 
 # Test imports
 echo -n "  ⬡ framework... "
-if $CORE_PYTHON -c "import framework" > /dev/null 2>&1; then
+if uv run python -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -655,7 +599,7 @@ else
 fi
 
 echo -n "  ⬡ aden_tools... "
-if $TOOLS_PYTHON -c "import aden_tools" > /dev/null 2>&1; then
+if uv run python -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -663,7 +607,7 @@ else
 fi
 
 echo -n "  ⬡ litellm... "
-if $CORE_PYTHON -c "import litellm" > /dev/null 2>&1 || $TOOLS_PYTHON -c "import litellm" > /dev/null 2>&1; then
+if uv run python -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}--${NC}"

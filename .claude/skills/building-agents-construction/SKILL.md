@@ -124,11 +124,14 @@ AskUserQuestion(questions=[{
 - node_id (kebab-case)
 - name
 - description
-- node_type: `"llm_generate"` (no tools) or `"llm_tool_use"` (uses tools)
+- node_type: `"event_loop"` (recommended for all LLM work) or `"function"` (deterministic, no LLM)
 - input_keys (what data this node receives)
 - output_keys (what data this node produces)
-- tools (ONLY tools that exist - empty list for llm_generate)
-- system_prompt
+- tools (ONLY tools that exist - empty list if no tools needed)
+- system_prompt (should mention `set_output` for producing structured outputs)
+- client_facing: True if this node interacts with the user
+- nullable_output_keys (for mutually exclusive outputs)
+- max_node_visits (>1 if this node is a feedback loop target)
 
 **PRESENT the workflow to the user:**
 
@@ -136,7 +139,7 @@ AskUserQuestion(questions=[{
 >
 > 1. **[node-id]** - [description]
 >
->    - Type: [llm_generate/llm_tool_use]
+>    - Type: event_loop [client-facing] / function
 >    - Input: [keys]
 >    - Output: [keys]
 >    - Tools: [tools or "none"]
@@ -211,8 +214,8 @@ mcp__agent-builder__get_session_status()
 - source (node that outputs)
 - target (node that receives)
 - condition: `"on_success"`, `"always"`, `"on_failure"`, or `"conditional"`
-- condition_expr (Python expression, only if conditional)
-- priority (integer, lower = higher priority)
+- condition_expr (Python expression using `output.get(...)`, only if conditional)
+- priority (positive = forward edge evaluated first, negative = feedback edge)
 
 **FOR EACH edge, call:**
 
@@ -317,45 +320,114 @@ mcp__agent-builder__get_session_status()
 
 ## REFERENCE: Node Types
 
-| Type           | tools param            | Use when                                       |
-| -------------- | ---------------------- | ---------------------------------------------- |
-| `llm_generate` | `'[]'`                 | Pure reasoning, JSON output, no external calls |
-| `llm_tool_use` | `'["tool1", "tool2"]'` | Needs to call MCP tools                        |
+| Type | tools param | Use when |
+|------|-------------|----------|
+| `event_loop` | `'["tool1"]'` or `'[]'` | **Recommended.** LLM-powered work with or without tools |
+| `function` | N/A | Deterministic Python operations, no LLM |
+| `llm_generate` (legacy) | `'[]'` | Deprecated — use `event_loop` instead |
+| `llm_tool_use` (legacy) | `'["tool1"]'` | Deprecated — use `event_loop` instead |
 
 ---
 
-## REFERENCE: Edge Conditions
+## REFERENCE: NodeSpec New Fields
 
-| Condition     | When edge is followed                 |
-| ------------- | ------------------------------------- |
-| `on_success`  | Source node completed successfully    |
-| `on_failure`  | Source node failed                    |
-| `always`      | Always, regardless of success/failure |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `client_facing` | `False` | Streams output to user, blocks for input between turns |
+| `nullable_output_keys` | `[]` | Output keys that may remain unset (mutually exclusive outputs) |
+| `max_node_visits` | `1` | Max executions per run. Set >1 for feedback loop targets. 0=unlimited |
+
+---
+
+## REFERENCE: Edge Conditions & Priority
+
+| Condition | When edge is followed |
+|-----------|--------------------------------------|
+| `on_success` | Source node completed successfully |
+| `on_failure` | Source node failed |
+| `always` | Always, regardless of success/failure |
 | `conditional` | When condition_expr evaluates to True |
+
+**Priority:** Positive = forward edge (evaluated first). Negative = feedback edge (loops back to earlier node). Multiple ON_SUCCESS edges from same source = parallel execution (fan-out).
 
 ---
 
 ## REFERENCE: System Prompt Best Practice
 
-For nodes with JSON output, include this in the system_prompt:
+For event_loop nodes, instruct the LLM to use `set_output` for structured outputs:
 
 ```
-CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks.
-Just the JSON object starting with { and ending with }.
+Use set_output(key, value) to store your results. For example:
+- set_output("search_results", <your results as a JSON string>)
 
-Return this exact structure:
-{
-  "key1": "...",
-  "key2": "..."
-}
+Do NOT return raw JSON. Use the set_output tool to produce outputs.
 ```
+
+---
+
+## CRITICAL: EventLoopNode Registration
+
+**`AgentRuntime` does NOT support `event_loop` nodes.** The `AgentRuntime` / `create_agent_runtime()` path creates `GraphExecutor` instances internally without passing a `node_registry`, causing all `event_loop` nodes to fail at runtime with:
+
+```
+EventLoopNode 'node-id' not found in registry. Register it with executor.register_node() before execution.
+```
+
+**The correct pattern**: Use `GraphExecutor` directly with a `node_registry` dict containing `EventLoopNode` instances:
+
+```python
+from framework.graph.executor import GraphExecutor, ExecutionResult
+from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+from framework.runtime.event_bus import EventBus
+from framework.runtime.core import Runtime  # REQUIRED - executor calls runtime.start_run()
+
+# 1. Build node_registry with EventLoopNode instances
+event_bus = EventBus()
+node_registry = {}
+for node_spec in nodes:
+    if node_spec.node_type == "event_loop":
+        node_registry[node_spec.id] = EventLoopNode(
+            event_bus=event_bus,
+            judge=None,  # implicit judge: accepts when output_keys are filled
+            config=LoopConfig(
+                max_iterations=50,
+                max_tool_calls_per_turn=15,
+                stall_detection_threshold=3,
+                max_history_tokens=32000,
+            ),
+            tool_executor=tool_executor,
+        )
+
+# 2. Create Runtime for run tracking (GraphExecutor calls runtime.start_run())
+storage_path = Path.home() / ".hive" / "my_agent"
+storage_path.mkdir(parents=True, exist_ok=True)
+runtime = Runtime(storage_path)
+
+# 3. Create GraphExecutor WITH node_registry and runtime
+executor = GraphExecutor(
+    runtime=runtime,       # NOT None - executor needs this for run tracking
+    llm=llm,
+    tools=tools,
+    tool_executor=tool_executor,
+    node_registry=node_registry,  # EventLoopNode instances
+)
+
+# 4. Execute
+result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
+```
+
+**DO NOT use `AgentRuntime` or `create_agent_runtime()` for agents with `event_loop` nodes.**
+
+**DO NOT pass `runtime=None` to `GraphExecutor`** — it will crash with `'NoneType' object has no attribute 'start_run'`.
 
 ---
 
 ## COMMON MISTAKES TO AVOID
 
-1. **Using tools that don't exist** - Always check `mcp__agent-builder__list_mcp_tools()` first
-2. **Wrong entry_points format** - Must be `{"start": "node-id"}`, NOT a set or list
-3. **Skipping validation** - Always validate nodes and graph before proceeding
-4. **Not waiting for approval** - Always ask user before major steps
-5. **Displaying this file** - Execute the steps, don't show documentation
+1. **Using `AgentRuntime` with event_loop nodes** - `AgentRuntime` does not register EventLoopNodes. Use `GraphExecutor` directly with `node_registry`
+2. **Passing `runtime=None` to GraphExecutor** - The executor calls `runtime.start_run()` internally. Always provide a `Runtime(storage_path)` instance
+3. **Using tools that don't exist** - Always check `mcp__agent-builder__list_mcp_tools()` first
+4. **Wrong entry_points format** - Must be `{"start": "node-id"}`, NOT a set or list
+5. **Skipping validation** - Always validate nodes and graph before proceeding
+6. **Not waiting for approval** - Always ask user before major steps
+7. **Displaying this file** - Execute the steps, don't show documentation
