@@ -397,6 +397,7 @@ NODE_SPECS = {
             "github_list_issues",
             "github_list_pull_requests",
             "github_list_stargazers",
+            "execute_command_tool",
             "save_data",
             "load_data",
             "list_data_files",
@@ -432,6 +433,12 @@ NODE_SPECS = {
             "If a user appears in multiple categories, use the highest-value type "
             "(contributor > issue_author > stargazer).\n\n"
             "Respect the scan_config for any limits or filtering preferences.\n\n"
+            "SHELL TOOL:\n"
+            "You have execute_command_tool for running shell commands. Use it for file "
+            "management tasks like merging JSON files, deduplicating data, or processing "
+            "saved data with jq/python one-liners. Example:\n"
+            "  execute_command_tool(command='cat data/file.json | python3 -c \"import sys,json; "
+            "d=json.load(sys.stdin); print(len(d))\"')\n\n"
             "CONTEXT MANAGEMENT:\n"
             "Format the result as a JSON array of objects with 'username' and 'user_type'.\n"
             "Use save_data('github_users.json', <json_string>) to write the list to a file.\n"
@@ -450,6 +457,7 @@ NODE_SPECS = {
         tools=[
             "github_get_user_profile",
             "github_list_repos",
+            "execute_command_tool",
             "load_data",
             "save_data",
         ],
@@ -463,6 +471,10 @@ NODE_SPECS = {
             "languages (from repos)\n"
             "4. Use save_data('user_profiles.json', <json>) to write results to a file\n"
             "5. Call set_output(key='user_profiles', value='user_profiles.json')\n\n"
+            "SHELL TOOL:\n"
+            "You have execute_command_tool for running shell commands. Use it for file "
+            "management tasks like filtering JSON, extracting fields, or merging data. "
+            "Example: execute_command_tool(command='python3 -c \"import json; ...')\n\n"
             "CONTEXT MANAGEMENT:\n"
             "Start by loading the user list file. For large lists, use load_data with "
             "offset and limit to page through users in batches "
@@ -503,6 +515,7 @@ NODE_SPECS = {
             "github_get_user_emails",
             "web_search",
             "web_scrape",
+            "execute_command_tool",
             "load_data",
             "save_data",
         ],
@@ -524,6 +537,12 @@ NODE_SPECS = {
             "relevance_score\n"
             "4. Use save_data('contact_list.json', <json>) to write results\n"
             "5. Call set_output(key='contact_list', value='contact_list.json')\n\n"
+            "SHELL TOOL:\n"
+            "You have execute_command_tool for running shell commands. Use it for file "
+            "management tasks like merging profiles and scores, deduplicating contacts, "
+            "or batch-processing data. Example:\n"
+            "  execute_command_tool(command='python3 -c \"import json; profiles=json.load("
+            'open(\\"data/user_profiles.json\\")); print(len(profiles))"\')\n\n'
             "Include all users who have at least one contact method."
         ),
     ),
