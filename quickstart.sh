@@ -215,7 +215,7 @@ if [ -f "pyproject.toml" ]; then
     if ! $PYTHON_CMD -m pip install -e . > "$INSTALL_OUTPUT" 2>&1; then
         INSTALL_ERROR=$(cat "$INSTALL_OUTPUT")
         rm -f "$INSTALL_OUTPUT"
-        
+
         echo ""
         echo -e "${RED}========================================${NC}"
         echo -e "${RED}Setup Failed: Framework Installation Error${NC}"
@@ -224,7 +224,7 @@ if [ -f "pyproject.toml" ]; then
         echo -e "${YELLOW}What happened:${NC}"
         echo "  Failed to install framework package from core/"
         echo ""
-        
+
         # Smart detection of specific errors
         if echo "$INSTALL_ERROR" | grep -qi "network\|connection\|timeout"; then
             echo -e "${YELLOW}Quick fix:${NC}"
@@ -280,7 +280,7 @@ if [ -f "pyproject.toml" ]; then
     if ! $PYTHON_CMD -m pip install -e . > "$INSTALL_OUTPUT" 2>&1; then
         INSTALL_ERROR=$(cat "$INSTALL_OUTPUT")
         rm -f "$INSTALL_OUTPUT"
-        
+
         echo ""
         echo -e "${RED}========================================${NC}"
         echo -e "${RED}Setup Failed: Tools Package Installation Error${NC}"
@@ -289,7 +289,7 @@ if [ -f "pyproject.toml" ]; then
         echo -e "${YELLOW}What happened:${NC}"
         echo "  Failed to install aden_tools package from tools/"
         echo ""
-        
+
         # Smart detection
         if echo "$INSTALL_ERROR" | grep -qi "network\|connection\|timeout"; then
             echo -e "${YELLOW}Quick fix:${NC}"
@@ -333,12 +333,12 @@ INSTALL_OUTPUT=$(mktemp)
 if ! $PYTHON_CMD -m pip install mcp fastmcp > "$INSTALL_OUTPUT" 2>&1; then
     INSTALL_ERROR=$(cat "$INSTALL_OUTPUT")
     rm -f "$INSTALL_OUTPUT"
-    
+
     echo ""
     echo -e "${YELLOW}Warning:${NC} MCP dependencies installation failed"
     echo "  This may not be critical for basic agent functionality"
     echo ""
-    
+
     # Check if it's a network issue
     if echo "$INSTALL_ERROR" | grep -qi "network\|connection\|timeout"; then
         echo -e "${YELLOW}Quick fix:${NC}"
@@ -358,7 +358,7 @@ if [ "$OPENAI_VERSION" = "not_installed" ]; then
     if ! $PYTHON_CMD -m pip install "openai>=1.0.0" > "$INSTALL_OUTPUT" 2>&1; then
         INSTALL_ERROR=$(cat "$INSTALL_OUTPUT")
         rm -f "$INSTALL_OUTPUT"
-        
+
         echo ""
         echo -e "${RED}========================================${NC}"
         echo -e "${RED}Setup Failed: openai Installation Error${NC}"
@@ -367,7 +367,7 @@ if [ "$OPENAI_VERSION" = "not_installed" ]; then
         echo -e "${YELLOW}What happened:${NC}"
         echo "  Failed to install openai package"
         echo ""
-        
+
         if echo "$INSTALL_ERROR" | grep -qi "network\|connection\|timeout"; then
             echo -e "${YELLOW}Quick fix:${NC}"
             echo "  Network issue. Check connection and retry"
@@ -394,7 +394,7 @@ elif [[ "$OPENAI_VERSION" =~ ^0\. ]]; then
     if ! $PYTHON_CMD -m pip install --upgrade "openai>=1.0.0" > "$UPGRADE_OUTPUT" 2>&1; then
         UPGRADE_ERROR=$(cat "$UPGRADE_OUTPUT")
         rm -f "$UPGRADE_OUTPUT"
-        
+
         echo ""
         echo -e "${RED}========================================${NC}"
         echo -e "${RED}Setup Failed: openai Upgrade Error (Issue #450)${NC}"
@@ -444,7 +444,7 @@ else
     IMPORT_ERROR_MSG=$(cat "$IMPORT_ERROR")
     echo -e "${RED}  ✗ framework import failed${NC}"
     echo ""
-    
+
     # Smart detection of import issues
     if echo "$IMPORT_ERROR_MSG" | grep -qi "no module"; then
         echo -e "${YELLOW}  Quick fix:${NC} Reinstall framework package:"
@@ -466,7 +466,7 @@ else
     IMPORT_ERROR_MSG=$(cat "$IMPORT_ERROR")
     echo -e "${RED}  ✗ aden_tools import failed${NC}"
     echo ""
-    
+
     if echo "$IMPORT_ERROR_MSG" | grep -qi "no module"; then
         echo -e "${YELLOW}  Quick fix:${NC} Reinstall aden_tools package:"
         echo -e "    ${BLUE}cd $SCRIPT_DIR/tools && pip install -e .${NC}"
