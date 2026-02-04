@@ -439,18 +439,39 @@ PYTHONPATH=core:tools/src python your_script.py
 
 ### MCP Server Configuration
 
-The `.mcp.json` at project root configures MCP servers to use their respective virtual environments:
+The `.mcp.json` at project root configures MCP servers. Using `uv` is the recommended way as it handles cross-platform path differences automatically:
 
 ```json
 {
   "mcpServers": {
     "agent-builder": {
-      "command": "core/.venv/bin/python",
-      "args": ["-m", "framework.mcp.agent_builder_server"]
+      "command": "uv",
+      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
+      "cwd": "core"
     },
     "tools": {
-      "command": "tools/.venv/bin/python",
-      "args": ["-m", "aden_tools.mcp_server", "--stdio"]
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools"
+    }
+  }
+}
+```
+
+If you are not using `uv`, you must use the absolute or relative path to the Python executable in the virtual environment. Note that the path differs between Linux/macOS and Windows:
+
+- **Linux/macOS:** `core/.venv/bin/python` or `.venv/bin/python`
+- **Windows:** `core/.venv/Scripts/python.exe` or `.venv/Scripts/python.exe`
+
+Example of manual configuration (Windows):
+
+```json
+{
+  "mcpServers": {
+    "agent-builder": {
+      "command": "core/.venv/Scripts/python.exe",
+      "args": ["-m", "framework.mcp.agent_builder_server"],
+      "cwd": "core"
     }
   }
 }
