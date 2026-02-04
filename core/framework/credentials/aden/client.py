@@ -149,13 +149,16 @@ class AdenCredentialResponse:
             expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
 
         return cls(
-            integration_id=integration_id or data.get("alias", data.get("provider", "")),
-            integration_type=data.get("provider", ""),
+            integration_id=integration_id
+            or data.get("integration_id", data.get("alias", data.get("provider", ""))),
+            integration_type=data.get("integration_type", data.get("provider", "")),
             access_token=data["access_token"],
             token_type=data.get("token_type", "Bearer"),
             expires_at=expires_at,
             scopes=data.get("scopes", []),
-            metadata={"email": data.get("email")} if data.get("email") else {},
+            metadata=data.get("metadata", {}) if data.get("metadata") else (
+                {"email": data.get("email")} if data.get("email") else {}
+            ),
         )
 
 
