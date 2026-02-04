@@ -415,13 +415,14 @@ class GraphExecutor:
                     max_retries = getattr(node_spec, "max_retries", 3)
 
                     # Event loop nodes handle retry internally via judge —
-                    # executor retry is catastrophic (retry multiplication)
-                    if node_spec.node_type == "event_loop" and max_retries > 0:
-                        self.logger.warning(
+                    # but allow 1 executor retry for post-execution failures
+                    # (e.g. output validation) that the judge can't catch.
+                    if node_spec.node_type == "event_loop" and max_retries > 1:
+                        self.logger.info(
                             f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
-                            "Overriding to 0 — event loop nodes handle retry internally via judge."
+                            "Capping to 1 — event loop nodes handle retry internally via judge."
                         )
-                        max_retries = 0
+                        max_retries = 1
 
                     if node_retry_counts[current_node_id] < max_retries:
                         # Retry - don't increment steps for retries
