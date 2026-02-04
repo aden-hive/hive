@@ -28,6 +28,7 @@ cp .env.example .env
 | `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
 | `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
 | `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+| `LINEAR_API_KEY`       | Linear tools                  | [linear.app/settings/api](https://linear.app/settings/api) |
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
@@ -36,6 +37,7 @@ Alternatively, export as environment variables:
 ```bash
 export ANTHROPIC_API_KEY=your-key-here
 export BRAVE_SEARCH_API_KEY=your-key-here
+export LINEAR_API_KEY=your-key-here
 ```
 
 See [.env.example](.env.example) for details.
@@ -61,6 +63,8 @@ python mcp_server.py
 
 ## Available Tools
 
+### Core Tools
+
 | Tool                   | Description                                    |
 | ---------------------- | ---------------------------------------------- |
 | `example_tool`         | Template tool demonstrating the pattern        |
@@ -75,6 +79,31 @@ python mcp_server.py
 | `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
+
+### Linear Integration
+
+Project management tools for Linear (requires `LINEAR_API_KEY`):
+
+| Tool                       | Description                                    |
+| -------------------------- | ---------------------------------------------- |
+| `linear_issue_create`      | Create a new Linear issue                      |
+| `linear_issue_get`         | Get issue details by ID or identifier          |
+| `linear_issue_update`      | Update an existing issue                       |
+| `linear_issue_delete`      | Delete an issue                                |
+| `linear_issue_search`      | Search issues with filters                     |
+| `linear_issue_add_comment` | Add a comment to an issue                      |
+| `linear_project_create`    | Create a new project                           |
+| `linear_project_get`       | Get project details                            |
+| `linear_project_update`    | Update a project                               |
+| `linear_project_list`      | List projects with filters                     |
+| `linear_teams_list`        | List all teams                                 |
+| `linear_team_get`          | Get team details                               |
+| `linear_workflow_states_get` | Get workflow states for a team               |
+| `linear_label_create`      | Create a new label                             |
+| `linear_labels_list`       | List all labels                                |
+| `linear_users_list`        | List all users                                 |
+| `linear_user_get`          | Get user details                               |
+| `linear_viewer`            | Get authenticated user info                    |
 
 ## Project Structure
 
@@ -94,6 +123,7 @@ tools/
 │       │   ├── apply_patch.py
 │       │   ├── grep_search.py
 │       │   └── execute_command_tool.py
+│       ├── linear_tool/     # Linear project management
 │       ├── web_search_tool/
 │       ├── web_scrape_tool/
 │       └── pdf_read_tool/
