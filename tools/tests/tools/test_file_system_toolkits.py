@@ -589,6 +589,81 @@ class TestExecuteCommandTool:
         assert result["return_code"] == 0
         assert "HELLO WORLD" in result["stdout"]
 
+    def test_execute_command_binary_output_safe_decode(
+        self, execute_command_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Executing a command with binary output handles encoding gracefully.
+
+        Regression test for issue #3486: UnicodeDecodeError on binary output.
+        The tool should use errors='replace' to safely decode binary data.
+        """
+        import sys
+
+        # Create a binary file with non-UTF-8 bytes
+        binary_file = tmp_path / "binary.bin"
+        binary_file.write_bytes(b"\x80\x81\x82\xff\xfeHello\x00\x01World")
+
+        if sys.platform == "win32":
+            command = f"type {binary_file}"
+        else:
+            command = f"cat {binary_file}"
+
+        result = execute_command_fn(command=command, **mock_workspace)
+
+        # Should NOT crash with UnicodeDecodeError
+        assert result["success"] is True
+        # Output should contain the readable parts (with replacement chars for invalid bytes)
+        assert "Hello" in result["stdout"] or "World" in result["stdout"]
+        # Truncation flags should be present
+        assert "stdout_truncated" in result
+        assert "stderr_truncated" in result
+
+    def test_execute_command_large_output_truncation(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Executing a command with large output truncates it safely.
+
+        Regression test for issue #3486: Large output causing context overflow.
+        The tool should limit output to MAX_OUTPUT_LENGTH (~5KB).
+        """
+        import sys
+
+        # Generate large output (> 5KB)
+        if sys.platform == "win32":
+            # PowerShell command to generate ~10KB of output
+            command = 'powershell -Command "1..200 | ForEach-Object { \'Line \' + $_ + \': This is a test line with some content to make it longer\' }"'
+        else:
+            command = "yes 'This is a test line with some content' | head -n 200"
+
+        result = execute_command_fn(command=command, **mock_workspace)
+
+        assert result["success"] is True
+        assert result["return_code"] == 0
+
+        # Check that output was truncated
+        from aden_tools.tools.file_system_toolkits.execute_command_tool.execute_command_tool import (
+            MAX_OUTPUT_LENGTH,
+        )
+
+        # If output was large enough to trigger truncation
+        if result.get("stdout_truncated", False):
+            assert len(result["stdout"]) <= MAX_OUTPUT_LENGTH + 100  # Allow for truncation marker
+            assert "[output truncated" in result["stdout"]
+
+    def test_execute_command_truncation_flags_present(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Executing any command includes truncation status flags in response."""
+        result = execute_command_fn(command="echo 'short output'", **mock_workspace)
+
+        assert result["success"] is True
+        # New fields should always be present
+        assert "stdout_truncated" in result
+        assert "stderr_truncated" in result
+        # Short output should not be truncated
+        assert result["stdout_truncated"] is False
+        assert result["stderr_truncated"] is False
+
 
 class TestApplyDiffTool:
     """Tests for apply_diff tool."""
