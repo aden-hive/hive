@@ -201,8 +201,8 @@ fi
 
 # Install Playwright browser
 echo -n "  Installing Playwright browser... "
-if uv run python -c "import playwright" > /dev/null 2>&1; then
-    if uv run python -m playwright install chromium > /dev/null 2>&1; then
+if uv run --active python -c "import playwright" > /dev/null 2>&1; then
+    if uv run --active python -m playwright install chromium > /dev/null 2>&1; then
         echo -e "${GREEN}ok${NC}"
     else
         echo -e "${YELLOW}⏭${NC}"
@@ -233,27 +233,27 @@ echo ""
 IMPORT_ERRORS=0
 
 # Test imports using workspace venv via uv run
-if uv run python -c "import framework" > /dev/null 2>&1; then
+if uv run --active python -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ framework imports OK${NC}"
 else
     echo -e "${RED}  ✗ framework import failed${NC}"
     IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
 fi
 
-if uv run python -c "import aden_tools" > /dev/null 2>&1; then
+if uv run --active python -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ aden_tools imports OK${NC}"
 else
     echo -e "${RED}  ✗ aden_tools import failed${NC}"
     IMPORT_ERRORS=$((IMPORT_ERRORS + 1))
 fi
 
-if uv run python -c "import litellm" > /dev/null 2>&1; then
+if uv run --active python -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ litellm imports OK${NC}"
 else
     echo -e "${YELLOW}  ⚠ litellm import issues (may be OK)${NC}"
 fi
 
-if uv run python -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
+if uv run --active python -c "from framework.mcp import agent_builder_server" > /dev/null 2>&1; then
     echo -e "${GREEN}  ✓ MCP server module OK${NC}"
 else
     echo -e "${RED}  ✗ MCP server module failed${NC}"
@@ -591,7 +591,7 @@ ERRORS=0
 
 # Test imports
 echo -n "  ⬡ framework... "
-if uv run python -c "import framework" > /dev/null 2>&1; then
+if uv run --active python -c "import framework" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -599,7 +599,7 @@ else
 fi
 
 echo -n "  ⬡ aden_tools... "
-if uv run python -c "import aden_tools" > /dev/null 2>&1; then
+if uv run --active python -c "import aden_tools" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${RED}failed${NC}"
@@ -607,7 +607,7 @@ else
 fi
 
 echo -n "  ⬡ litellm... "
-if uv run python -c "import litellm" > /dev/null 2>&1; then
+if uv run --active python -c "import litellm" > /dev/null 2>&1; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}--${NC}"
