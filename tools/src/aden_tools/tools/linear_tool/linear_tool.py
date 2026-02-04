@@ -698,13 +698,19 @@ def register_tools(
     def _get_api_key() -> str | None:
         """Get Linear API key from credential manager or environment."""
         if credentials is not None:
-            api_key = credentials.get("linear")
-            # Defensive check: ensure we get a string, not a complex object
-            if api_key is not None and not isinstance(api_key, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('linear'), got {type(api_key).__name__}"
-                )
-            return api_key
+            try:
+                api_key = credentials.get("linear")
+                # Defensive check: ensure we get a string, not a complex object
+                if api_key is not None and not isinstance(api_key, str):
+                    raise TypeError(
+                        f"Expected string from credentials.get('linear'), got {type(api_key).__name__}"
+                    )
+                if api_key is not None:
+                    return api_key
+            except Exception:
+                # Fall through to environment variable if credential store fails
+                # (e.g., decryption error, corruption, etc.)
+                pass
         return os.getenv("LINEAR_API_KEY")
 
     def _get_client() -> _LinearClient | dict[str, str]:
