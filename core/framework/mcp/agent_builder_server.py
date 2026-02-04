@@ -3417,7 +3417,7 @@ def store_credential(
     display_name: Annotated[str, "Human-readable name (e.g., 'HubSpot Access Token')"] = "",
 ) -> str:
     """
-    Store a credential securely in the encrypted credential store at ~/.hive/credentials.
+    Store a credential securely in the local encrypted store at ~/.hive/credentials.
 
     Uses Fernet encryption (AES-128-CBC + HMAC). Requires HIVE_CREDENTIAL_KEY env var.
     """
@@ -3459,7 +3459,7 @@ def store_credential(
 @mcp.tool()
 def list_stored_credentials() -> str:
     """
-    List all credentials currently stored in the encrypted credential store.
+    List all credentials currently stored in the local encrypted store.
 
     Returns credential IDs and metadata (never returns secret values).
     """
@@ -3499,7 +3499,7 @@ def delete_stored_credential(
     credential_name: Annotated[str, "Logical credential name to delete (e.g., 'hubspot')"],
 ) -> str:
     """
-    Delete a credential from the encrypted credential store.
+    Delete a credential from the local encrypted store.
     """
     try:
         store = _get_credential_store()

@@ -42,7 +42,7 @@ from framework.credentials.storage import (  # noqa: E402
     EncryptedFileStorage,
     EnvVarStorage,
 )
-from framework.graph.event_loop_node import EventLoopNode, JudgeVerdict, LoopConfig  # noqa: E402
+from framework.graph.event_loop_node import EventLoopNode, LoopConfig  # noqa: E402
 from framework.graph.node import NodeContext, NodeSpec, SharedMemory  # noqa: E402
 from framework.llm.litellm import LiteLLMProvider  # noqa: E402
 from framework.llm.provider import Tool  # noqa: E402
@@ -317,47 +317,6 @@ logger.info(
 
 
 # -------------------------------------------------------------------------
-# ChatJudge — keeps the event loop alive between user messages
-# -------------------------------------------------------------------------
-
-
-class ChatJudge:
-    """Judge that blocks between user messages, keeping the loop alive.
-
-    After the LLM finishes responding, the judge awaits a signal indicating
-    a new user message has been injected, then returns RETRY to continue.
-    """
-
-    def __init__(self, on_ready=None):
-        self._message_ready = asyncio.Event()
-        self._shutdown = False
-        self._on_ready = on_ready  # async callback fired when waiting for input
-
-    async def evaluate(self, context: dict) -> JudgeVerdict:
-        # Notify client that the LLM is done — ready for next input
-        if self._on_ready:
-            await self._on_ready()
-
-        # Block until next user message (or shutdown)
-        self._message_ready.clear()
-        await self._message_ready.wait()
-
-        if self._shutdown:
-            return JudgeVerdict(action="ACCEPT")
-
-        return JudgeVerdict(action="RETRY")
-
-    def signal_message(self):
-        """Unblock the judge — a new user message has been injected."""
-        self._message_ready.set()
-
-    def signal_shutdown(self):
-        """Unblock the judge and let the loop exit cleanly."""
-        self._shutdown = True
-        self._message_ready.set()
-
-
-# -------------------------------------------------------------------------
 # HTML page (embedded)
 # -------------------------------------------------------------------------
 
@@ -565,7 +524,7 @@ connect();
 
 
 async def handle_ws(websocket):
-    """Persistent WebSocket: long-lived EventLoopNode kept alive by ChatJudge."""
+    """Persistent WebSocket: long-lived EventLoopNode with client_facing blocking."""
     global STORE
 
     # -- Event forwarding (WebSocket ← EventBus) ----------------------------
@@ -593,15 +552,7 @@ async def handle_ws(websocket):
         handler=forward_event,
     )
 
-    # -- Ready callback (tells browser the LLM is done, waiting for input) --
-    async def send_ready():
-        try:
-            await websocket.send(json.dumps({"type": "ready"}))
-        except Exception:
-            pass
-
     # -- Per-connection state -----------------------------------------------
-    judge = ChatJudge(on_ready=send_ready)
     node = None
     loop_task = None
 
@@ -613,12 +564,25 @@ async def handle_ws(websocket):
         name="Chat Assistant",
         description="A conversational assistant that remembers context across messages",
         node_type="event_loop",
+        client_facing=True,
         system_prompt=(
             "You are a helpful assistant with access to tools. "
             "You can search the web, scrape webpages, and query HubSpot CRM. "
             "Use tools when the user asks for current information or external data. "
             "You have full conversation history, so you can reference previous messages."
         ),
+    )
+
+    # -- Ready callback: subscribe to CLIENT_INPUT_REQUESTED on the bus ---
+    async def on_input_requested(event):
+        try:
+            await websocket.send(json.dumps({"type": "ready"}))
+        except Exception:
+            pass
+
+    bus.subscribe(
+        event_types=[EventType.CLIENT_INPUT_REQUESTED],
+        handler=on_input_requested,
     )
 
     async def start_loop(first_message: str):
@@ -637,7 +601,6 @@ async def handle_ws(websocket):
         )
         node = EventLoopNode(
             event_bus=bus,
-            judge=judge,
             config=LoopConfig(max_iterations=10_000, max_history_tokens=32_000),
             conversation_store=STORE,
             tool_executor=tool_executor,
@@ -683,10 +646,11 @@ async def handle_ws(websocket):
         loop_task = asyncio.create_task(_run())
 
     async def stop_loop():
-        """Signal the judge and wait for the loop task to finish."""
+        """Signal the node and wait for the loop task to finish."""
         nonlocal node, loop_task
         if loop_task and not loop_task.done():
-            judge.signal_shutdown()
+            if node:
+                node.signal_shutdown()
             try:
                 await asyncio.wait_for(loop_task, timeout=5.0)
             except (TimeoutError, asyncio.CancelledError):
@@ -712,8 +676,6 @@ async def handle_ws(websocket):
                 if conv_dir.exists():
                     shutil.rmtree(conv_dir)
                 STORE = FileConversationStore(conv_dir)
-                # Reset judge for next session
-                judge = ChatJudge(on_ready=send_ready)
                 await websocket.send(json.dumps({"type": "cleared"}))
                 logger.info("Conversation cleared")
                 continue
@@ -727,10 +689,9 @@ async def handle_ws(websocket):
                 logger.info(f"Starting persistent loop: {topic}")
                 await start_loop(topic)
             else:
-                # Subsequent message — inject and unblock the judge
+                # Subsequent message — inject into the running loop
                 logger.info(f"Injecting message: {topic}")
                 await node.inject_event(topic)
-                judge.signal_message()
 
     except websockets.exceptions.ConnectionClosed:
         pass

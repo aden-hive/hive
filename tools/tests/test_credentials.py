@@ -10,6 +10,17 @@ from aden_tools.credentials import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_dotenv(tmp_path, monkeypatch):
+    """Isolate tests from the project .env file.
+
+    EnvVarStorage falls back to reading Path.cwd()/.env when a key is
+    missing from os.environ.  Changing cwd to a temp dir ensures
+    monkeypatch.delenv() truly simulates a missing credential.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 class TestCredentialStoreAdapter:
     """Tests for CredentialStoreAdapter class."""
 
@@ -438,3 +449,38 @@ class TestStartupValidation:
 
         # Should not raise
         creds.validate_startup()
+
+
+class TestSpecCompleteness:
+    """Tests that all credential specs have required fields populated."""
+
+    def test_direct_api_key_specs_have_instructions(self):
+        """All specs with direct_api_key_supported=True have non-empty api_key_instructions."""
+        for name, spec in CREDENTIAL_SPECS.items():
+            if spec.direct_api_key_supported:
+                assert spec.api_key_instructions.strip(), (
+                    f"Credential '{name}' has direct_api_key_supported=True "
+                    f"but empty api_key_instructions"
+                )
+
+    def test_all_specs_have_credential_id(self):
+        """All credential specs have a non-empty credential_id."""
+        for name, spec in CREDENTIAL_SPECS.items():
+            assert spec.credential_id, f"Credential '{name}' is missing credential_id"
+
+    def test_google_search_and_cse_share_credential_group(self):
+        """google_search and google_cse share the same credential_group."""
+        google_search = CREDENTIAL_SPECS["google_search"]
+        google_cse = CREDENTIAL_SPECS["google_cse"]
+
+        assert google_search.credential_group == "google_custom_search"
+        assert google_cse.credential_group == "google_custom_search"
+        assert google_search.credential_group == google_cse.credential_group
+
+    def test_credential_group_default_empty(self):
+        """Specs without a group have empty credential_group."""
+        for name, spec in CREDENTIAL_SPECS.items():
+            if name not in ("google_search", "google_cse"):
+                assert spec.credential_group == "", (
+                    f"Credential '{name}' has unexpected credential_group='{spec.credential_group}'"
+                )

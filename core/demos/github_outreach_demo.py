@@ -17,7 +17,7 @@ Features demonstrated:
 - Fan-out / fan-in (Scanner → [Profiler, Scorer] → Extractor)
 - Feedback edges (Review → Extractor, Approval → Campaign Builder)
 - Client-facing HITL checkpoints (Intake, Review, Approval)
-- Hybrid judges: Pydantic schema validation + custom CheckpointJudge
+- SchemaJudge for output validation + native client_facing blocking for HITL
 - max_node_visits for feedback loop control
 
 Usage:
@@ -33,7 +33,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import sys
 import tempfile
 from collections.abc import Callable
@@ -199,316 +198,30 @@ class CampaignOutput(BaseModel):
 
 TOOL_REGISTRY = ToolRegistry()
 
-# ---- GitHub API helpers ----
+# ---- MCP server tools (GitHub, web search, web scrape, email) ----
+# The aden-tools MCP server provides the official tool implementations.
+# Tools are auto-discovered via register_mcp_server() and available to
+# nodes through their NodeSpec.tools lists.
 
-_GITHUB_API = "https://api.github.com"
+_MCP_SERVER_PATH = str(_HIVE_DIR / "tools" / "mcp_server.py")
 
-
-def _github_headers() -> dict[str, str]:
-    """Build GitHub API headers with auth token from credential store or env."""
-    token = os.getenv("GITHUB_TOKEN") or CREDENTIALS.get("github")
-    if not token:
-        raise RuntimeError(
-            "GitHub token not configured. "
-            "Set GITHUB_TOKEN env var or configure via credential store."
-        )
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
+_mcp_tool_count = TOOL_REGISTRY.register_mcp_server(
+    {
+        "name": "aden-tools",
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [_MCP_SERVER_PATH, "--stdio"],
+        "description": "Aden tools MCP server (GitHub, web search, email, etc.)",
     }
-
-
-def _github_get(path: str, params: dict | None = None) -> dict:
-    """Authenticated GET against the GitHub REST API."""
-    try:
-        resp = httpx.get(
-            f"{_GITHUB_API}{path}",
-            headers=_github_headers(),
-            params=params or {},
-            timeout=30.0,
-        )
-        if resp.status_code >= 400:
-            try:
-                msg = resp.json().get("message", resp.text)
-            except Exception:
-                msg = resp.text
-            return {"error": f"GitHub API error ({resp.status_code}): {msg}"}
-        return {"success": True, "data": resp.json()}
-    except httpx.TimeoutException:
-        return {"error": "Request timed out"}
-    except httpx.RequestError as e:
-        err = str(e)
-        if "Authorization" in err or "Bearer" in err:
-            return {"error": "Network error occurred"}
-        return {"error": f"Network error: {err}"}
-
-
-def _sanitize(value: str) -> str:
-    """Reject path-traversal characters in URL path segments."""
-    if "/" in value or ".." in value:
-        raise ValueError(f"Invalid parameter: {value!r}")
-    return value
-
-
-# ---- Real GitHub tools (registered via register_function) ----
-
-
-def github_get_repo(owner: str, repo: str) -> dict:
-    """Get repository info including description, stars, forks, language, and topics."""
-    return _github_get(f"/repos/{_sanitize(owner)}/{_sanitize(repo)}")
-
-
-def github_list_issues(
-    owner: str,
-    repo: str,
-    state: str = "all",
-    page: int = 1,
-    limit: int = 100,
-) -> dict:
-    """List issues for a repository. Each issue includes author login, title, labels.
-
-    Use page parameter to paginate through results (page 1, 2, 3, ...).
-    Each page returns up to `limit` items (max 100).
-    """
-    limit = int(limit)
-    page = max(1, int(page))
-    return _github_get(
-        f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/issues",
-        {"state": state, "per_page": min(limit, 100), "page": page},
-    )
-
-
-def github_list_pull_requests(
-    owner: str,
-    repo: str,
-    state: str = "all",
-    page: int = 1,
-    limit: int = 100,
-) -> dict:
-    """List pull requests for a repository. Each PR includes author login and title.
-
-    Use page parameter to paginate through results (page 1, 2, 3, ...).
-    Each page returns up to `limit` items (max 100).
-    """
-    limit = int(limit)
-    page = max(1, int(page))
-    return _github_get(
-        f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/pulls",
-        {"state": state, "per_page": min(limit, 100), "page": page},
-    )
-
-
-def github_list_stargazers(
-    owner: str,
-    repo: str,
-    page: int = 1,
-    limit: int = 100,
-) -> dict:
-    """List users who starred a repository. Each entry has a login username.
-
-    Use page parameter to paginate through results (page 1, 2, 3, ...).
-    Each page returns up to `limit` items (max 100).
-    """
-    limit = int(limit)
-    page = max(1, int(page))
-    return _github_get(
-        f"/repos/{_sanitize(owner)}/{_sanitize(repo)}/stargazers",
-        {"per_page": min(limit, 100), "page": page},
-    )
-
-
-def github_get_user_profile(username: str) -> dict:
-    """Get a GitHub user's public profile: name, bio, company, location, email."""
-    return _github_get(f"/users/{_sanitize(username)}")
-
-
-def github_list_user_repos(
-    username: str,
-    sort: str = "updated",
-    limit: int = 10,
-) -> dict:
-    """List public repos for a GitHub user to understand their tech stack."""
-    limit = int(limit)
-    return _github_get(
-        f"/users/{_sanitize(username)}/repos",
-        {"type": "public", "sort": sort, "per_page": min(limit, 100)},
-    )
-
-
-TOOL_REGISTRY.register_function(github_get_repo)
-TOOL_REGISTRY.register_function(github_list_issues)
-TOOL_REGISTRY.register_function(github_list_pull_requests)
-TOOL_REGISTRY.register_function(github_list_stargazers)
-TOOL_REGISTRY.register_function(github_get_user_profile)
-TOOL_REGISTRY.register_function(github_list_user_repos)
-
-
-# ---- Web search + scrape tools (contact enrichment) ----
-
-_BROWSER_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
 )
+logger.info("Registered %d tools from MCP server", _mcp_tool_count)
 
 
-def _search_credentials() -> dict[str, str | None]:
-    """Get search API credentials from credential store or env."""
-    return {
-        "brave_api_key": (CREDENTIALS.get("brave_search") or os.getenv("BRAVE_SEARCH_API_KEY")),
-        "google_api_key": (CREDENTIALS.get("google_search") or os.getenv("GOOGLE_API_KEY")),
-        "google_cse_id": (CREDENTIALS.get("google_cse") or os.getenv("GOOGLE_CSE_ID")),
-    }
+# ---- Demo-specific tools (context management for large data) ----
+# Agents use these to write large intermediate results to disk and pass
+# filenames between nodes, keeping the LLM conversation context small.
 
-
-def web_search(query: str, num_results: int = 5) -> dict:
-    """Search the web for information using Brave or Google."""
-    num_results = int(num_results)
-    if not query or len(query) > 500:
-        return {"error": "Query must be 1-500 characters"}
-
-    creds = _search_credentials()
-
-    try:
-        # Try Brave first
-        if creds["brave_api_key"]:
-            resp = httpx.get(
-                "https://api.search.brave.com/res/v1/web/search",
-                params={
-                    "q": query,
-                    "count": min(num_results, 20),
-                },
-                headers={
-                    "X-Subscription-Token": creds["brave_api_key"],
-                    "Accept": "application/json",
-                },
-                timeout=30.0,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                web = data.get("web", {})
-                results = [
-                    {
-                        "title": r.get("title", ""),
-                        "url": r.get("url", ""),
-                        "snippet": r.get("description", ""),
-                    }
-                    for r in web.get("results", [])[:num_results]
-                ]
-                return {
-                    "query": query,
-                    "results": results,
-                    "total": len(results),
-                    "provider": "brave",
-                }
-            return {
-                "error": f"Brave search failed: HTTP {resp.status_code}",
-            }
-
-        # Fall back to Google
-        if creds["google_api_key"] and creds["google_cse_id"]:
-            resp = httpx.get(
-                "https://www.googleapis.com/customsearch/v1",
-                params={
-                    "key": creds["google_api_key"],
-                    "cx": creds["google_cse_id"],
-                    "q": query,
-                    "num": min(num_results, 10),
-                },
-                timeout=30.0,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                results = [
-                    {
-                        "title": r.get("title", ""),
-                        "url": r.get("link", ""),
-                        "snippet": r.get("snippet", ""),
-                    }
-                    for r in data.get("items", [])[:num_results]
-                ]
-                return {
-                    "query": query,
-                    "results": results,
-                    "total": len(results),
-                    "provider": "google",
-                }
-            return {
-                "error": (f"Google search failed: HTTP {resp.status_code}"),
-            }
-
-        return {
-            "error": (
-                "No search credentials configured. "
-                "Set BRAVE_SEARCH_API_KEY or "
-                "GOOGLE_API_KEY+GOOGLE_CSE_ID"
-            ),
-        }
-
-    except httpx.TimeoutException:
-        return {"error": "Search request timed out"}
-    except httpx.RequestError as e:
-        return {"error": f"Network error: {e}"}
-
-
-def web_scrape(url: str, max_length: int = 10000) -> dict:
-    """Scrape and extract text content from a webpage URL."""
-    max_length = int(max_length)
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-
-    try:
-        resp = httpx.get(
-            url,
-            headers={"User-Agent": _BROWSER_UA},
-            timeout=30.0,
-            follow_redirects=True,
-        )
-        if resp.status_code != 200:
-            return {
-                "error": f"HTTP {resp.status_code}: Failed to fetch URL",
-            }
-
-        html = resp.text
-
-        # Extract title before stripping tags
-        title_m = re.search(
-            r"<title[^>]*>(.*?)</title>",
-            html,
-            re.IGNORECASE | re.DOTALL,
-        )
-        title = title_m.group(1).strip() if title_m else ""
-
-        # Strip script, style, nav, footer, header contents
-        html = re.sub(
-            r"<(script|style|nav|footer|header)[^>]*>.*?</\1>",
-            "",
-            html,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-        # Strip remaining HTML tags
-        text = re.sub(r"<[^>]+>", " ", html)
-        # Normalize whitespace
-        text = re.sub(r"\s+", " ", text).strip()
-
-        if len(text) > max_length:
-            text = text[:max_length] + "..."
-
-        return {
-            "url": url,
-            "title": title,
-            "content": text,
-            "length": len(text),
-        }
-
-    except httpx.TimeoutException:
-        return {"error": "Request timed out"}
-    except httpx.RequestError as e:
-        return {"error": f"Network error: {e}"}
-
-
-# ---- Mock tools (no direct API equivalent) ----
+_DATA_DIR = STORE_DIR / "data"
 
 
 def load_campaign_template() -> dict:
@@ -525,13 +238,6 @@ def load_campaign_template() -> dict:
             "Best,\nThe {project_name} Team"
         ),
     }
-
-
-# ---- File ops tools (context management for large data) ----
-# Agents use these to write large intermediate results to disk and pass
-# filenames between nodes, keeping the LLM conversation context small.
-
-_DATA_DIR = STORE_DIR / "data"
 
 
 def save_data(filename: str, data: str) -> dict:
@@ -584,9 +290,21 @@ def load_data(filename: str, offset: int = 0, limit: int = 50) -> dict:
     if not path.exists():
         return {"error": f"File not found: {filename}"}
     content = path.read_text(encoding="utf-8")
-    all_lines = content.split("\n")
-    total = len(all_lines)
     size_bytes = len(content.encode("utf-8"))
+
+    # If content is a single long line, try to pretty-print JSON so
+    # line-based pagination actually works.  Handles spillover files
+    # written before the pretty-print fix in _truncate_tool_result().
+    all_lines = content.split("\n")
+    if len(all_lines) <= 2 and size_bytes > 500:
+        try:
+            parsed = json.loads(content)
+            content = json.dumps(parsed, indent=2, ensure_ascii=False)
+            all_lines = content.split("\n")
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass  # Not JSON — keep original lines
+
+    total = len(all_lines)
 
     start = min(offset, total)
     end = min(start + limit, total)
@@ -624,8 +342,6 @@ def list_data_files() -> dict:
     return {"files": files}
 
 
-TOOL_REGISTRY.register_function(web_search)
-TOOL_REGISTRY.register_function(web_scrape)
 TOOL_REGISTRY.register_function(load_campaign_template)
 TOOL_REGISTRY.register_function(save_data)
 TOOL_REGISTRY.register_function(load_data)
@@ -659,7 +375,11 @@ NODE_SPECS = {
             "4. **min_leads** — Minimum number of leads to collect (a number). "
             "Ask the operator: 'How many leads do you need at minimum?' "
             "If they say something vague like 'as many as possible', default to 50.\n\n"
-            "Once you have all four, call set_output for each key with the values provided. "
+            "CRITICAL: Once you have all four, you MUST call the set_output tool for EACH "
+            "key. Call set_output(key='repo_url', value='...'), then "
+            "set_output(key='project_url', value='...'), etc. for all four keys.\n"
+            "Do NOT just say 'ready to proceed' or 'handing off' — the pipeline ONLY "
+            "advances when you make actual set_output tool calls.\n"
             "For min_leads, set it as a plain number string (e.g., '100').\n"
             "Be conversational but efficient. Ask for missing information if the operator "
             "doesn't provide everything at once."
@@ -677,6 +397,7 @@ NODE_SPECS = {
             "github_list_issues",
             "github_list_pull_requests",
             "github_list_stargazers",
+            "execute_command_tool",
             "save_data",
             "load_data",
             "list_data_files",
@@ -712,6 +433,12 @@ NODE_SPECS = {
             "If a user appears in multiple categories, use the highest-value type "
             "(contributor > issue_author > stargazer).\n\n"
             "Respect the scan_config for any limits or filtering preferences.\n\n"
+            "SHELL TOOL:\n"
+            "You have execute_command_tool for running shell commands. Use it for file "
+            "management tasks like merging JSON files, deduplicating data, or processing "
+            "saved data with jq/python one-liners. Example:\n"
+            "  execute_command_tool(command='cat data/file.json | python3 -c \"import sys,json; "
+            "d=json.load(sys.stdin); print(len(d))\"')\n\n"
             "CONTEXT MANAGEMENT:\n"
             "Format the result as a JSON array of objects with 'username' and 'user_type'.\n"
             "Use save_data('github_users.json', <json_string>) to write the list to a file.\n"
@@ -729,7 +456,8 @@ NODE_SPECS = {
         output_keys=["user_profiles"],
         tools=[
             "github_get_user_profile",
-            "github_list_user_repos",
+            "github_list_repos",
+            "execute_command_tool",
             "load_data",
             "save_data",
         ],
@@ -737,11 +465,16 @@ NODE_SPECS = {
             "You are a GitHub Profiler agent. Your input 'github_users' is a filename.\n\n"
             "WORKFLOW:\n"
             "1. Use load_data to read the user list from the input filename\n"
-            "2. For each user, call github_get_user_profile and github_list_user_repos\n"
+            "2. For each user, call github_get_user_profile to get their profile, and "
+            "github_list_repos(username=<username>) to list their public repos\n"
             "3. Compile profiles into a JSON array with: username, name, bio, company, "
             "languages (from repos)\n"
             "4. Use save_data('user_profiles.json', <json>) to write results to a file\n"
             "5. Call set_output(key='user_profiles', value='user_profiles.json')\n\n"
+            "SHELL TOOL:\n"
+            "You have execute_command_tool for running shell commands. Use it for file "
+            "management tasks like filtering JSON, extracting fields, or merging data. "
+            "Example: execute_command_tool(command='python3 -c \"import json; ...')\n\n"
             "CONTEXT MANAGEMENT:\n"
             "Start by loading the user list file. For large lists, use load_data with "
             "offset and limit to page through users in batches "
@@ -778,7 +511,14 @@ NODE_SPECS = {
         node_type="event_loop",
         input_keys=["user_profiles", "relevance_scores"],
         output_keys=["contact_list"],
-        tools=["web_search", "web_scrape", "load_data", "save_data"],
+        tools=[
+            "github_get_user_emails",
+            "web_search",
+            "web_scrape",
+            "execute_command_tool",
+            "load_data",
+            "save_data",
+        ],
         max_node_visits=3,
         system_prompt=(
             "You are a Contact Extractor agent. Your inputs 'user_profiles' and "
@@ -788,13 +528,21 @@ NODE_SPECS = {
             "use offset and limit to page through them incrementally "
             "(e.g. load_data('file.json', offset=0, limit=30))\n"
             "2. For each user with relevance score >= 0.3, enrich their contact info:\n"
-            "   - Use web_search to find contact details ('{username} github email', etc.)\n"
+            "   - Use github_get_user_emails(username) to find emails from their "
+            "public commits and profile (this is the BEST source for GitHub emails)\n"
+            "   - If no email found, try web_search ('{username} github email')\n"
             "   - If results include personal sites, use web_scrape to extract details\n"
             "   - Look for: email addresses, Twitter/X handles, LinkedIn profiles\n"
             "3. Compile a JSON array of contacts with: username, name, email, twitter, "
             "relevance_score\n"
             "4. Use save_data('contact_list.json', <json>) to write results\n"
             "5. Call set_output(key='contact_list', value='contact_list.json')\n\n"
+            "SHELL TOOL:\n"
+            "You have execute_command_tool for running shell commands. Use it for file "
+            "management tasks like merging profiles and scores, deduplicating contacts, "
+            "or batch-processing data. Example:\n"
+            "  execute_command_tool(command='python3 -c \"import json; profiles=json.load("
+            'open(\\"data/user_profiles.json\\")); print(len(profiles))"\')\n\n'
             "Include all users who have at least one contact method."
         ),
     ),
@@ -830,25 +578,48 @@ NODE_SPECS = {
     "campaign_builder": NodeSpec(
         id="campaign_builder",
         name="Campaign Builder",
-        description="Build personalized outreach emails from approved contacts",
+        description="Iteratively build personalized outreach emails in batches",
         node_type="event_loop",
+        client_facing=True,
         input_keys=["approved_contacts", "project_url"],
         output_keys=["draft_emails"],
+        nullable_output_keys=["draft_emails"],
         tools=["load_campaign_template", "load_data", "save_data"],
-        max_node_visits=3,
+        max_node_visits=5,
         system_prompt=(
             "You are the Campaign Builder agent. Your input 'approved_contacts' is a "
             "filename and 'project_url' is a URL string.\n\n"
-            "WORKFLOW:\n"
-            "1. Use load_data to read the approved contacts from the file\n"
-            "2. Load the campaign template using load_campaign_template\n"
-            "3. For each approved contact, customize the email:\n"
-            "   - Fill in their name and relevant details\n"
-            "   - Add a personalized hook based on their profile/interests\n"
-            "4. Format as a JSON array of email objects with: recipient, subject, body\n"
-            "5. Use save_data('draft_emails.json', <json>) to write the drafts\n"
-            "6. Call set_output(key='draft_emails', value='draft_emails.json')\n\n"
-            "Make each email feel personal and relevant."
+            "ITERATIVE BATCH WORKFLOW:\n"
+            "You build draft emails in batches of up to 10 contacts at a time, "
+            "presenting each batch to the operator for review before continuing.\n\n"
+            "STEP 1 — SETUP:\n"
+            "- Use load_data to read the approved contacts from the file\n"
+            "- Load the campaign template using load_campaign_template\n"
+            "- Count total contacts and plan batches of up to 10\n\n"
+            "STEP 2 — DRAFT A BATCH (max 10 emails):\n"
+            "- For each contact in the current batch, write a personalized email:\n"
+            "  * Fill in their name and relevant details from their profile\n"
+            "  * Add a personalized hook based on their interests/contributions\n"
+            "  * Format: {recipient, subject, body}\n"
+            "- Present the drafted emails to the operator clearly, showing:\n"
+            "  * Batch number (e.g. 'Batch 1 of 4')\n"
+            "  * Each email with recipient, subject, and body preview\n"
+            "  * How many contacts remain\n\n"
+            "STEP 3 — ASK THE OPERATOR:\n"
+            "After presenting each batch, ask:\n"
+            "  'Create more drafts for the next batch, or submit all drafts "
+            "for outbound email?'\n\n"
+            "  IF 'create more' → go back to STEP 2 for the next batch of contacts\n"
+            "  IF 'submit' → go to STEP 4\n\n"
+            "STEP 4 — FINALIZE:\n"
+            "- Combine ALL drafted batches into a single JSON array\n"
+            "- Use save_data('draft_emails.json', <json>) to write them\n"
+            "- Call set_output(key='draft_emails', value='draft_emails.json')\n\n"
+            "RULES:\n"
+            "- Never draft more than 10 emails at once — always pause for operator input\n"
+            "- Keep a running total of emails drafted across batches\n"
+            "- Make each email feel personal and relevant\n"
+            "- Do NOT call set_output until the operator says to submit"
         ),
     ),
     "approval": NodeSpec(
@@ -1016,6 +787,12 @@ def _send_email_via_resend(
     if not api_key:
         return {"error": "Resend API key not configured"}
 
+    # Testing override: redirect all recipients to a single address
+    override_to = os.getenv("EMAIL_OVERRIDE_TO")
+    if override_to:
+        subject = f"[TEST -> {to}] {subject}"
+        to = override_to
+
     try:
         resp = httpx.post(
             "https://api.resend.com/emails",
@@ -1118,7 +895,7 @@ def send_emails(approved_emails: str = "") -> str:
 
 
 # =========================================================================
-# Judges (Hybrid: SchemaJudge + CheckpointJudge)
+# Judges (SchemaJudge for output validation)
 # =========================================================================
 
 
@@ -1160,9 +937,13 @@ class SchemaJudge:
                 if value is None:
                     continue
                 if isinstance(value, str):
-                    try:
-                        parsed[key] = json.loads(value)
-                    except json.JSONDecodeError:
+                    stripped = value.strip()
+                    if stripped and stripped[0] in ("{", "["):
+                        try:
+                            parsed[key] = json.loads(value)
+                        except json.JSONDecodeError:
+                            parsed[key] = value
+                    else:
                         parsed[key] = value
                 else:
                     parsed[key] = value
@@ -1205,91 +986,6 @@ class SchemaJudge:
                 pass  # File exists but can't be parsed — let it through
 
         return JudgeVerdict(action="ACCEPT")
-
-
-class CheckpointJudge:
-    """Judge for client-facing HITL nodes.
-
-    Combines ChatJudge blocking pattern with optional schema validation:
-    - Blocks between user messages (via asyncio.Event)
-    - When LLM sets any output key → validates against Pydantic model (if provided)
-    - ACCEPT on valid output, RETRY on invalid or no output yet
-    """
-
-    def __init__(
-        self,
-        event_bus: EventBus,
-        node_id: str,
-        output_model: type[BaseModel] | None = None,
-    ):
-        self._bus = event_bus
-        self._node_id = node_id
-        self._model = output_model
-        self._message_ready = asyncio.Event()
-        self._shutdown = False
-
-    async def evaluate(self, context: dict) -> JudgeVerdict:
-        accumulator = context.get("output_accumulator", {})
-
-        # Check if any output key has a real (non-None, non-empty) value
-        def _is_set(v: Any) -> bool:
-            if v is None:
-                return False
-            if isinstance(v, str) and len(v.strip()) == 0:
-                return False
-            return True
-
-        set_keys = [k for k, v in accumulator.items() if _is_set(v)]
-
-        if set_keys:
-            # Validate against schema if provided
-            if self._model is not None:
-                try:
-                    parsed = {}
-                    for k, v in accumulator.items():
-                        if not _is_set(v):
-                            continue
-                        if isinstance(v, str):
-                            try:
-                                parsed[k] = json.loads(v)
-                            except json.JSONDecodeError:
-                                parsed[k] = v
-                        else:
-                            parsed[k] = v
-                    self._model.model_validate(parsed)
-                except (ValidationError, json.JSONDecodeError) as e:
-                    return JudgeVerdict(
-                        action="RETRY",
-                        feedback=f"Output validation failed: {e}. Fix and re-set.",
-                    )
-            return JudgeVerdict(action="ACCEPT")
-
-        if self._shutdown:
-            return JudgeVerdict(action="ACCEPT")
-
-        # Emit awaiting_input event for UI
-        await self._bus.publish(
-            AgentEvent(
-                type=EventType.CUSTOM,
-                stream_id="pipeline",
-                node_id=self._node_id,
-                data={"custom_type": "awaiting_input", "node_id": self._node_id},
-            )
-        )
-
-        # Block until next user message
-        self._message_ready.clear()
-        await self._message_ready.wait()
-        return JudgeVerdict(action="RETRY")
-
-    def signal_message(self):
-        """Unblock the judge — a new user message has been injected."""
-        self._message_ready.set()
-
-    def signal_shutdown(self):
-        """Unblock the judge and let the loop exit cleanly."""
-        self._shutdown = True
-        self._message_ready.set()
 
 
 # =========================================================================
@@ -1369,7 +1065,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .node-scorer .node-tag { color: #bc8cff; }
   .node-extractor .node-tag { color: #d29922; }
   .node-review .node-tag { color: #58a6ff; }
-  .node-campaign_builder .node-tag { color: #d29922; }
+  .node-campaign_builder .node-tag { color: #58a6ff; }
   .node-approval .node-tag { color: #58a6ff; }
   .node-sender .node-tag { color: #3fb950; }
   .result-banner {
@@ -1467,7 +1163,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .activity-card.node-profiler .card-label { color: #bc8cff; }
   .activity-card.node-scorer .card-label { color: #bc8cff; }
   .activity-card.node-extractor .card-label { color: #d29922; }
-  .activity-card.node-campaign_builder .card-label { color: #d29922; }
+  .activity-card.node-campaign_builder .card-label { color: #58a6ff; }
 </style>
 </head>
 <body>
@@ -1796,7 +1492,7 @@ const NODE_SPECS = {
   intake: {client_facing: true}, scanner: {client_facing: false},
   profiler: {client_facing: false}, scorer: {client_facing: false},
   extractor: {client_facing: false}, review: {client_facing: true},
-  campaign_builder: {client_facing: false}, approval: {client_facing: true},
+  campaign_builder: {client_facing: true}, approval: {client_facing: true},
   sender: {client_facing: false}
 };
 
@@ -2013,7 +1709,6 @@ async def _run_pipeline(websocket, initial_message: str):
     bus = EventBus()
 
     # State for routing user messages to active client-facing node
-    active_checkpoint: CheckpointJudge | None = None
     active_node: EventLoopNode | None = None
     pending_messages: list[str] = []
 
@@ -2021,14 +1716,17 @@ async def _run_pipeline(websocket, initial_message: str):
 
     pipeline_config: dict[str, Any] = {"min_leads": 50}  # default
 
-    # --- Build judges (hybrid approach — Option C) ---
+    # --- Build judges ---
+    # Client-facing nodes (intake, review, approval) have client_facing=True
+    # in their NodeSpec — EventLoopNode blocks for user input natively.
+    # Only nodes that need output schema validation get a judge.
 
-    # Client-facing: CheckpointJudge (blocks for user, optional schema)
-    checkpoint_judges: dict[str, CheckpointJudge] = {
-        "intake": CheckpointJudge(bus, "intake", output_model=IntakeOutput),
-        "review": CheckpointJudge(bus, "review"),
-        "approval": CheckpointJudge(bus, "approval"),
+    # Intake needs schema validation for its structured outputs
+    client_judges: dict[str, SchemaJudge] = {
+        "intake": SchemaJudge(IntakeOutput),
     }
+    # review & approval: no judge — implicit judge checks output keys,
+    # and client_facing blocking is handled by the node itself.
 
     # Internal: SchemaJudge (validates output structure)
     schema_judges: dict[str, SchemaJudge] = {
@@ -2040,10 +1738,11 @@ async def _run_pipeline(websocket, initial_message: str):
         "profiler": SchemaJudge(ProfilerOutput),
         "scorer": SchemaJudge(ScorerOutput),
         "extractor": SchemaJudge(ExtractorOutput),
-        "campaign_builder": SchemaJudge(CampaignOutput),
+        # campaign_builder is now client_facing — implicit judge + native
+        # blocking handle termination (same pattern as review/approval).
     }
 
-    all_judges: dict = {**checkpoint_judges, **schema_judges}
+    all_judges: dict = {**client_judges, **schema_judges}
 
     # --- Build EventLoopNode for each event_loop node ---
 
@@ -2095,6 +1794,10 @@ async def _run_pipeline(websocket, initial_message: str):
             if event.type == EventType.CUSTOM and "custom_type" in event.data:
                 payload["type"] = event.data["custom_type"]
 
+            # Remap CLIENT_INPUT_REQUESTED to awaiting_input for JS compatibility
+            if event.type == EventType.CLIENT_INPUT_REQUESTED:
+                payload["type"] = "awaiting_input"
+
             await websocket.send(json.dumps(payload))
         except Exception:
             pass
@@ -2108,6 +1811,7 @@ async def _run_pipeline(websocket, initial_message: str):
             EventType.TOOL_CALL_STARTED,
             EventType.TOOL_CALL_COMPLETED,
             EventType.CLIENT_OUTPUT_DELTA,
+            EventType.CLIENT_INPUT_REQUESTED,
             EventType.NODE_STALLED,
             EventType.CUSTOM,
         ],
@@ -2115,26 +1819,25 @@ async def _run_pipeline(websocket, initial_message: str):
     )
 
     # --- Track active client-facing node for message routing ---
+    # EventLoopNode publishes CLIENT_INPUT_REQUESTED when a client_facing
+    # node blocks for user input (native blocking, no judge needed).
+
+    CLIENT_FACING_NODES = {"intake", "review", "approval"}
 
     async def on_awaiting_input(event: AgentEvent):
-        nonlocal active_checkpoint, active_node
-        if event.type != EventType.CUSTOM:
+        nonlocal active_node
+        nid = event.node_id or ""
+        if nid not in CLIENT_FACING_NODES:
             return
-        if event.data.get("custom_type") != "awaiting_input":
-            return
-        nid = event.data.get("node_id", "")
-        if nid in checkpoint_judges:
-            active_checkpoint = checkpoint_judges[nid]
-            active_node = nodes.get(nid)
-            logger.info("Active HITL node: %s", nid)
-            # Deliver any pending messages
-            while pending_messages:
-                msg_text = pending_messages.pop(0)
-                if active_node:
-                    await active_node.inject_event(msg_text)
-                    active_checkpoint.signal_message()
+        active_node = nodes.get(nid)
+        logger.info("Active HITL node: %s", nid)
+        # Deliver any pending messages
+        while pending_messages:
+            msg_text = pending_messages.pop(0)
+            if active_node:
+                await active_node.inject_event(msg_text)
 
-    bus.subscribe(event_types=[EventType.CUSTOM], handler=on_awaiting_input)
+    bus.subscribe(event_types=[EventType.CLIENT_INPUT_REQUESTED], handler=on_awaiting_input)
 
     # --- Capture min_leads from Intake's set_output tool call ---
 
@@ -2192,9 +1895,8 @@ async def _run_pipeline(websocket, initial_message: str):
                     )
                 )
 
-                if active_node and active_checkpoint:
+                if active_node:
                     await active_node.inject_event(text)
-                    active_checkpoint.signal_message()
                 else:
                     pending_messages.append(text)
         except websockets.exceptions.ConnectionClosed:
@@ -2205,10 +1907,11 @@ async def _run_pipeline(websocket, initial_message: str):
     # --- Wait for pipeline to complete ---
 
     try:
-        result = await asyncio.wait_for(pipeline_task, timeout=600)
+        result = await asyncio.wait_for(pipeline_task, timeout=1800)
     except TimeoutError:
-        for judge in checkpoint_judges.values():
-            judge.signal_shutdown()
+        for nid in CLIENT_FACING_NODES:
+            if nid in nodes:
+                nodes[nid].signal_shutdown()
         reader_task.cancel()
         await websocket.send(
             json.dumps({"type": "error", "message": "Pipeline timed out (10 min)"})

@@ -446,10 +446,170 @@ class TestEventBusLifecycle:
 
         ctx = build_ctx(runtime, spec, memory, llm)
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        # client_facing + text-only blocks for user input; use shutdown to unblock
+        async def auto_shutdown():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(auto_shutdown())
         await node.execute(ctx)
+        await task
 
         assert EventType.CLIENT_OUTPUT_DELTA in received_types
         assert EventType.LLM_TEXT_DELTA not in received_types
+
+
+# ===========================================================================
+# Client-facing blocking
+# ===========================================================================
+
+
+class TestClientFacingBlocking:
+    """Tests for native client_facing input blocking in EventLoopNode."""
+
+    @pytest.fixture
+    def client_spec(self):
+        return NodeSpec(
+            id="chat",
+            name="Chat",
+            description="chat node",
+            node_type="event_loop",
+            output_keys=[],
+            client_facing=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_client_facing_blocks_on_text(self, runtime, memory, client_spec):
+        """client_facing + text-only response blocks until inject_event."""
+        llm = MockStreamingLLM(
+            scenarios=[
+                text_scenario("Hello!"),
+                text_scenario("Got your message."),
+            ]
+        )
+        bus = EventBus()
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+        ctx = build_ctx(runtime, client_spec, memory, llm)
+
+        async def user_responds():
+            await asyncio.sleep(0.05)
+            await node.inject_event("I need help")
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        user_task = asyncio.create_task(user_responds())
+        result = await node.execute(ctx)
+        await user_task
+
+        assert result.success is True
+        # LLM should have been called at least twice (first response + after inject)
+        assert llm._call_index >= 2
+
+    @pytest.mark.asyncio
+    async def test_client_facing_does_not_block_on_tools(self, runtime, memory):
+        """client_facing + tool calls should NOT block — judge evaluates normally."""
+        spec = NodeSpec(
+            id="chat",
+            name="Chat",
+            description="chat node",
+            node_type="event_loop",
+            output_keys=["result"],
+            client_facing=True,
+        )
+        # Scenario 1: LLM calls set_output (tool call present → no blocking, judge RETRYs)
+        # Scenario 2: LLM produces text (implicit judge sees output key set → ACCEPT)
+        # But scenario 2 is text-only on client_facing → would block.
+        # So we need shutdown to handle that case.
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("set_output", {"key": "result", "value": "done"}),
+                text_scenario("All set!"),
+            ]
+        )
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+        ctx = build_ctx(runtime, spec, memory, llm)
+
+        # After set_output, implicit judge RETRYs (tool calls present).
+        # Next turn: text-only on client_facing → blocks.
+        # But implicit judge should ACCEPT first (output key is set, no tools).
+        # Actually, client_facing check happens BEFORE judge, so it blocks.
+        # Use shutdown as safety net.
+        async def auto_shutdown():
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(auto_shutdown())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["result"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_non_client_facing_unchanged(self, runtime, memory):
+        """client_facing=False should not block — existing behavior."""
+        spec = NodeSpec(
+            id="internal",
+            name="Internal",
+            description="internal node",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("thinking...")])
+        node = EventLoopNode(config=LoopConfig(max_iterations=2))
+        ctx = build_ctx(runtime, spec, memory, llm)
+
+        # Should complete without blocking (implicit judge ACCEPTs on no tools + no keys)
+        result = await node.execute(ctx)
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_signal_shutdown_unblocks(self, runtime, memory, client_spec):
+        """signal_shutdown should unblock a waiting client_facing node."""
+        llm = MockStreamingLLM(scenarios=[text_scenario("Waiting...")])
+        bus = EventBus()
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, client_spec, memory, llm)
+
+        async def shutdown_after_delay():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown_after_delay())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_client_input_requested_event_published(self, runtime, memory, client_spec):
+        """CLIENT_INPUT_REQUESTED should be published when blocking."""
+        llm = MockStreamingLLM(scenarios=[text_scenario("Hello!")])
+        bus = EventBus()
+        received = []
+
+        async def capture(e):
+            received.append(e)
+
+        bus.subscribe(
+            event_types=[EventType.CLIENT_INPUT_REQUESTED],
+            handler=capture,
+        )
+
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+        ctx = build_ctx(runtime, client_spec, memory, llm)
+
+        async def shutdown():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown())
+        await node.execute(ctx)
+        await task
+
+        assert len(received) >= 1
+        assert received[0].type == EventType.CLIENT_INPUT_REQUESTED
 
 
 # ===========================================================================
