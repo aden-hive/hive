@@ -38,6 +38,7 @@ from .file_system_toolkits.write_to_file import register_tools as register_write
 from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
+from .twilio_tool import register_tools as register_twilio
 
 
 def register_all_tools(
@@ -74,6 +75,9 @@ def register_all_tools(
     register_grep_search(mcp)
     register_execute_command(mcp)
     register_csv(mcp)
+    
+    # Register Twilio tools
+    register_twilio(mcp, credentials=credentials)
 
     return [
         "example_tool",
@@ -93,6 +97,11 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        # Twilio tools
+        "send_sms",
+        "send_whatsapp",
+        "fetch_history",
+        "validate_number",
     ]
 
 
