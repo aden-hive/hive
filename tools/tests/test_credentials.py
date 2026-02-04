@@ -10,6 +10,17 @@ from aden_tools.credentials import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_dotenv(tmp_path, monkeypatch):
+    """Isolate tests from the project .env file.
+
+    EnvVarStorage falls back to reading Path.cwd()/.env when a key is
+    missing from os.environ.  Changing cwd to a temp dir ensures
+    monkeypatch.delenv() truly simulates a missing credential.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 class TestCredentialStoreAdapter:
     """Tests for CredentialStoreAdapter class."""
 
