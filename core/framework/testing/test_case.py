@@ -6,12 +6,14 @@ but require mandatory user approval before being stored.
 """
 
 from datetime import datetime
-# from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from enum import StrEnum
+# from enum import Enum
+
+
 class ApprovalStatus(StrEnum):
     """Status of user approval for a generated test."""
 

@@ -79,7 +79,7 @@ This document describes the design for a production-ready credential store for t
 ```python
 from enum import Enum
 
-class CredentialType(str, Enum):
+class CredentialType(StrEnum):
     """Types of credentials the store can manage."""
     API_KEY = "api_key"           # Simple API key (e.g., Brave Search)
     OAUTH2 = "oauth2"             # OAuth2 with refresh support
