@@ -1,7 +1,7 @@
 """
 Integration credentials.
 
-Contains credentials for third-party service integrations (HubSpot, etc.).
+Contains credentials for third-party service integrations (HubSpot, Linear, etc.).
 """
 
 from .base import CredentialSpec
@@ -49,5 +49,50 @@ INTEGRATION_CREDENTIALS = {
         # Credential store mapping
         credential_id="hubspot",
         credential_key="access_token",
+    ),
+    "linear": CredentialSpec(
+        env_var="LINEAR_API_KEY",
+        tools=[
+            "linear_issue_create",
+            "linear_issue_get",
+            "linear_issue_update",
+            "linear_issue_delete",
+            "linear_issue_search",
+            "linear_issue_add_comment",
+            "linear_project_create",
+            "linear_project_get",
+            "linear_project_update",
+            "linear_project_list",
+            "linear_teams_list",
+            "linear_team_get",
+            "linear_workflow_states_get",
+            "linear_label_create",
+            "linear_labels_list",
+            "linear_users_list",
+            "linear_user_get",
+            "linear_viewer",
+        ],
+        required=True,
+        startup_required=False,
+        help_url="https://linear.app/settings/api",
+        description="Linear API key for project management integration",
+        # Auth method support
+        aden_supported=False,
+        direct_api_key_supported=True,
+        api_key_instructions="""To get a Linear API key:
+1. Go to Linear Settings > API (https://linear.app/settings/api)
+2. Click "Create key" under "Personal API keys"
+3. Give your key a descriptive label (e.g., "Hive Agent")
+4. Copy the generated key (starts with 'lin_api_')
+5. Store it securely - you won't be able to see it again!
+
+Note: Personal API keys have the same permissions as your user account.
+For workspace-wide access, consider using OAuth2 (coming soon).""",
+        # Health check configuration
+        health_check_endpoint="https://api.linear.app/graphql",
+        health_check_method="POST",
+        # Credential store mapping
+        credential_id="linear",
+        credential_key="api_key",
     ),
 }
