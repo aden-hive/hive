@@ -14,12 +14,16 @@ dependencies = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "pytest-xdist>=3.0",
+  "tools",
 ]
 
 # [project.optional-dependencies]
 
 [project.scripts]
 hive = "framework.cli:main"
+
+[tool.uv.sources]
+tools = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

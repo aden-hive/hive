@@ -411,25 +411,8 @@ class AgentRunner:
         return self._tool_registry.register_mcp_server(server_config)
 
     def _load_mcp_servers_from_config(self, config_path: Path) -> None:
-        """
-        Load and register MCP servers from a configuration file.
-
-        Args:
-            config_path: Path to mcp_servers.json file
-        """
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-
-            servers = config.get("servers", [])
-            for server_config in servers:
-                try:
-                    self._tool_registry.register_mcp_server(server_config)
-                except Exception as e:
-                    server_name = server_config.get("name", "unknown")
-                    logger.warning(f"Failed to register MCP server '{server_name}': {e}")
-        except Exception as e:
-            logger.warning(f"Failed to load MCP servers config from {config_path}: {e}")
+        """Load and register MCP servers from a configuration file."""
+        self._tool_registry.load_mcp_config(config_path)
 
     def set_approval_callback(self, callback: Callable) -> None:
         """
