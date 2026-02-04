@@ -444,6 +444,49 @@ class _GitHubClient:
         )
         return self._handle_response(response)
 
+    def get_user_emails(
+        self,
+        username: str,
+    ) -> dict[str, Any]:
+        """Find a user's email addresses from their public activity.
+
+        The /users/{username} endpoint only returns the public email
+        (which most users leave blank). This method also checks the
+        user's recent public events for commit-author emails.
+        """
+        username = _sanitize_path_param(username, "username")
+
+        emails: dict[str, str] = {}  # email -> source
+
+        # 1. Check profile for public email
+        profile = self.get_user_profile(username)
+        if isinstance(profile, dict) and "error" not in profile:
+            if profile.get("email"):
+                emails[profile["email"]] = "profile"
+
+        # 2. Check recent public events for commit emails
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/users/{username}/events/public",
+            headers=self._headers,
+            params={"per_page": 30},
+            timeout=30.0,
+        )
+        if response.status_code == 200:
+            for event in response.json():
+                if event.get("type") != "PushEvent":
+                    continue
+                for commit in event.get("payload", {}).get("commits", []):
+                    author = commit.get("author", {})
+                    email = author.get("email", "")
+                    if email and "@" in email and "noreply" not in email.lower():
+                        emails[email] = "commit"
+
+        return {
+            "username": username,
+            "emails": [{"email": e, "source": s} for e, s in emails.items()],
+            "total": len(emails),
+        }
+
 
 def register_tools(
     mcp: FastMCP,
@@ -916,6 +959,32 @@ def register_tools(
             return client
         try:
             return client.get_user_profile(username)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    @mcp.tool()
+    def github_get_user_emails(
+        username: str,
+    ) -> dict:
+        """
+        Find a GitHub user's email addresses from their public activity.
+
+        Checks both the user's profile (public email) and their recent
+        push events for commit-author emails. Filters out noreply addresses.
+
+        Args:
+            username: GitHub username
+
+        Returns:
+            Dict with emails list (each with email and source), total count
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_user_emails(username)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

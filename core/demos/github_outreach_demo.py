@@ -290,9 +290,21 @@ def load_data(filename: str, offset: int = 0, limit: int = 50) -> dict:
     if not path.exists():
         return {"error": f"File not found: {filename}"}
     content = path.read_text(encoding="utf-8")
-    all_lines = content.split("\n")
-    total = len(all_lines)
     size_bytes = len(content.encode("utf-8"))
+
+    # If content is a single long line, try to pretty-print JSON so
+    # line-based pagination actually works.  Handles spillover files
+    # written before the pretty-print fix in _truncate_tool_result().
+    all_lines = content.split("\n")
+    if len(all_lines) <= 2 and size_bytes > 500:
+        try:
+            parsed = json.loads(content)
+            content = json.dumps(parsed, indent=2, ensure_ascii=False)
+            all_lines = content.split("\n")
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass  # Not JSON — keep original lines
+
+    total = len(all_lines)
 
     start = min(offset, total)
     end = min(start + limit, total)
@@ -487,7 +499,13 @@ NODE_SPECS = {
         node_type="event_loop",
         input_keys=["user_profiles", "relevance_scores"],
         output_keys=["contact_list"],
-        tools=["web_search", "web_scrape", "load_data", "save_data"],
+        tools=[
+            "github_get_user_emails",
+            "web_search",
+            "web_scrape",
+            "load_data",
+            "save_data",
+        ],
         max_node_visits=3,
         system_prompt=(
             "You are a Contact Extractor agent. Your inputs 'user_profiles' and "
@@ -497,7 +515,9 @@ NODE_SPECS = {
             "use offset and limit to page through them incrementally "
             "(e.g. load_data('file.json', offset=0, limit=30))\n"
             "2. For each user with relevance score >= 0.3, enrich their contact info:\n"
-            "   - Use web_search to find contact details ('{username} github email', etc.)\n"
+            "   - Use github_get_user_emails(username) to find emails from their "
+            "public commits and profile (this is the BEST source for GitHub emails)\n"
+            "   - If no email found, try web_search ('{username} github email')\n"
             "   - If results include personal sites, use web_scrape to extract details\n"
             "   - Look for: email addresses, Twitter/X handles, LinkedIn profiles\n"
             "3. Compile a JSON array of contacts with: username, name, email, twitter, "
@@ -724,6 +744,12 @@ def _send_email_via_resend(
     api_key = CREDENTIALS.get("resend") or os.getenv("RESEND_API_KEY")
     if not api_key:
         return {"error": "Resend API key not configured"}
+
+    # Testing override: redirect all recipients to a single address
+    override_to = os.getenv("EMAIL_OVERRIDE_TO")
+    if override_to:
+        subject = f"[TEST -> {to}] {subject}"
+        to = override_to
 
     try:
         resp = httpx.post(
@@ -1838,7 +1864,7 @@ async def _run_pipeline(websocket, initial_message: str):
     # --- Wait for pipeline to complete ---
 
     try:
-        result = await asyncio.wait_for(pipeline_task, timeout=600)
+        result = await asyncio.wait_for(pipeline_task, timeout=1800)
     except TimeoutError:
         for nid in CLIENT_FACING_NODES:
             if nid in nodes:

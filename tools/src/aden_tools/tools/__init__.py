@@ -117,6 +117,7 @@ def register_all_tools(
         "github_get_branch",
         "github_list_stargazers",
         "github_get_user_profile",
+        "github_get_user_emails",
         "send_email",
         "send_budget_alert_email",
         "hubspot_search_contacts",

@@ -366,13 +366,32 @@ class EventLoopNode(NodeProtocol):
                 # the LLM may generate text like "Ready to proceed!" without
                 # ever calling set_output, and the judge feedback never reaches it.
                 #
-                # For nodes without a judge (HITL review/approval), skip the
-                # judge — the implicit judge would incorrectly ACCEPT when all
-                # output keys are nullable.
+                # For nodes without a judge (HITL review/approval with all-
+                # nullable keys), keep conversing UNLESS the LLM has already
+                # set an output — in that case fall through to the implicit
+                # judge which will ACCEPT and terminate the node.
                 if self._judge is None:
-                    logger.info("[%s] iter=%d: no judge, continuing", node_id, iteration)
-                    continue
-                logger.info("[%s] iter=%d: has judge, falling through to 6i", node_id, iteration)
+                    has_outputs = accumulator and any(
+                        v is not None for v in accumulator.to_dict().values()
+                    )
+                    if not has_outputs:
+                        logger.info(
+                            "[%s] iter=%d: no judge, no outputs, continuing",
+                            node_id,
+                            iteration,
+                        )
+                        continue
+                    logger.info(
+                        "[%s] iter=%d: no judge, outputs set — implicit judge",
+                        node_id,
+                        iteration,
+                    )
+                else:
+                    logger.info(
+                        "[%s] iter=%d: has judge, falling through to 6i",
+                        node_id,
+                        iteration,
+                    )
 
             # 6i. Judge evaluation
             should_judge = (
@@ -979,7 +998,18 @@ class EventLoopNode(NodeProtocol):
             # Use tool_use_id for uniqueness, sanitise for filesystem
             safe_id = result.tool_use_id.replace("/", "_")[:60]
             filename = f"tool_{tool_name}_{safe_id}.txt"
-            (spill_path / filename).write_text(result.content, encoding="utf-8")
+
+            # Pretty-print JSON content so load_data's line-based
+            # pagination works correctly.  Compact JSON (no newlines)
+            # would produce a single line that defeats pagination.
+            write_content = result.content
+            try:
+                parsed = json.loads(result.content)
+                write_content = json.dumps(parsed, indent=2, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass  # Not JSON — write as-is
+
+            (spill_path / filename).write_text(write_content, encoding="utf-8")
 
             truncated = (
                 f"[Result from {tool_name}: {len(result.content)} chars — "
