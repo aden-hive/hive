@@ -43,7 +43,7 @@ async def initiate_statement(stmt_id: str, text: str) -> str:
         return f"Statement {stmt_id} initiated successfully."
     except sqlite3.IntegrityError:
         return "Error: Statement ID already exists."
-
+# Tensorflow Neural Network Keras for training, test and validation data
 @mcp.tool()
 async def update_statement_lifecycle(stmt_id: str, new_status: str, score: float = 0.0) -> str:
     """
