@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 # from enum import Enum
 
+
 class ApprovalStatus(StrEnum):
     """Status of user approval for a generated test."""
 
