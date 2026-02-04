@@ -11,11 +11,12 @@ The executor:
 
 import asyncio
 import logging
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from framework.graph.edge import EdgeSpec, GraphSpec
+from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import (
     FunctionNode,
@@ -53,6 +54,9 @@ class ExecutionResult:
     retry_details: dict[str, int] = field(default_factory=dict)  # {node_id: retry_count}
     had_partial_failures: bool = False  # True if any node failed but eventually succeeded
     execution_quality: str = "clean"  # "clean", "degraded", or "failed"
+
+    # Visit tracking (for feedback/callback edges)
+    node_visit_counts: dict[str, int] = field(default_factory=dict)  # {node_id: visit_count}
 
     @property
     def is_clean_success(self) -> bool:
@@ -250,6 +254,8 @@ class GraphExecutor:
         total_tokens = 0
         total_latency = 0
         node_retry_counts: dict[str, int] = {}  # Track retries per node
+        node_visit_counts: dict[str, int] = {}  # Track visits for feedback loops
+        _is_retry = False  # True when looping back for a retry (not a new visit)
 
         # Determine entry point (may differ if resuming)
         current_node_id = graph.get_entry_point(session_state)
@@ -277,6 +283,34 @@ class GraphExecutor:
                 node_spec = graph.get_node(current_node_id)
                 if node_spec is None:
                     raise RuntimeError(f"Node not found: {current_node_id}")
+
+                # Enforce max_node_visits (feedback/callback edge support)
+                # Don't increment visit count on retries — retries are not new visits
+                if not _is_retry:
+                    cnt = node_visit_counts.get(current_node_id, 0) + 1
+                    node_visit_counts[current_node_id] = cnt
+                _is_retry = False
+                max_visits = getattr(node_spec, "max_node_visits", 1)
+                if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
+                    self.logger.warning(
+                        f"   ⊘ Node '{node_spec.name}' visit limit reached "
+                        f"({node_visit_counts[current_node_id]}/{max_visits}), skipping"
+                    )
+                    # Skip execution — follow outgoing edges using current memory
+                    skip_result = NodeResult(success=True, output=memory.read_all())
+                    next_node = self._follow_edges(
+                        graph=graph,
+                        goal=goal,
+                        current_node_id=current_node_id,
+                        current_node_spec=node_spec,
+                        result=skip_result,
+                        memory=memory,
+                    )
+                    if next_node is None:
+                        self.logger.info("   → No more edges after visit limit, ending")
+                        break
+                    current_node_id = next_node
+                    continue
 
                 path.append(current_node_id)
 
@@ -380,6 +414,15 @@ class GraphExecutor:
                     # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
                     max_retries = getattr(node_spec, "max_retries", 3)
 
+                    # Event loop nodes handle retry internally via judge —
+                    # executor retry is catastrophic (retry multiplication)
+                    if node_spec.node_type == "event_loop" and max_retries > 0:
+                        self.logger.warning(
+                            f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
+                            "Overriding to 0 — event loop nodes handle retry internally via judge."
+                        )
+                        max_retries = 0
+
                     if node_retry_counts[current_node_id] < max_retries:
                         # Retry - don't increment steps for retries
                         steps -= 1
@@ -395,6 +438,7 @@ class GraphExecutor:
                         self.logger.info(
                             f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
                         )
+                        _is_retry = True
                         continue
                     else:
                         # Max retries exceeded - fail the execution
@@ -437,6 +481,7 @@ class GraphExecutor:
                             retry_details=dict(node_retry_counts),
                             had_partial_failures=len(nodes_failed) > 0,
                             execution_quality="failed",
+                            node_visit_counts=dict(node_visit_counts),
                         )
 
                 # Check if we just executed a pause node - if so, save state and return
@@ -476,6 +521,7 @@ class GraphExecutor:
                         retry_details=dict(node_retry_counts),
                         had_partial_failures=len(nodes_failed) > 0,
                         execution_quality=exec_quality,
+                        node_visit_counts=dict(node_visit_counts),
                     )
 
                 # Check if this is a terminal node - if so, we're done
@@ -596,6 +642,7 @@ class GraphExecutor:
                 retry_details=dict(node_retry_counts),
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality=exec_quality,
+                node_visit_counts=dict(node_visit_counts),
             )
 
         except Exception as e:
@@ -622,6 +669,7 @@ class GraphExecutor:
                 retry_details=dict(node_retry_counts),
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality="failed",
+                node_visit_counts=dict(node_visit_counts),
             )
 
     def _build_context(
@@ -658,7 +706,15 @@ class GraphExecutor:
         )
 
     # Valid node types - no ambiguous "llm" type allowed
-    VALID_NODE_TYPES = {"llm_tool_use", "llm_generate", "router", "function", "human_input"}
+    VALID_NODE_TYPES = {
+        "llm_tool_use",
+        "llm_generate",
+        "router",
+        "function",
+        "human_input",
+        "event_loop",
+    }
+    DEPRECATED_NODE_TYPES = {"llm_tool_use": "event_loop", "llm_generate": "event_loop"}
 
     def _get_node_implementation(
         self, node_spec: NodeSpec, cleanup_llm_model: str | None = None
@@ -674,6 +730,17 @@ class GraphExecutor:
                 f"Invalid node type '{node_spec.node_type}' for node '{node_spec.id}'. "
                 f"Must be one of: {sorted(self.VALID_NODE_TYPES)}. "
                 f"Use 'llm_tool_use' for nodes that call tools, 'llm_generate' for text generation."
+            )
+
+        # Warn on deprecated node types
+        if node_spec.node_type in self.DEPRECATED_NODE_TYPES:
+            replacement = self.DEPRECATED_NODE_TYPES[node_spec.node_type]
+            warnings.warn(
+                f"Node type '{node_spec.node_type}' is deprecated. "
+                f"Use '{replacement}' instead. "
+                f"Node: '{node_spec.id}'",
+                DeprecationWarning,
+                stacklevel=2,
             )
 
         # Create based on type
@@ -711,6 +778,13 @@ class GraphExecutor:
                 tool_executor=None,
                 require_tools=False,
                 cleanup_llm_model=cleanup_llm_model,
+            )
+
+        if node_spec.node_type == "event_loop":
+            # Event loop nodes must be pre-registered (like function nodes)
+            raise RuntimeError(
+                f"EventLoopNode '{node_spec.id}' not found in registry. "
+                "Register it with executor.register_node() before execution."
             )
 
         # Should never reach here due to validation above
@@ -823,6 +897,21 @@ class GraphExecutor:
             ):
                 traversable.append(edge)
 
+        # Priority filtering for CONDITIONAL edges:
+        # When multiple CONDITIONAL edges match, keep only the highest-priority
+        # group.  This prevents mutually-exclusive conditional branches (e.g.
+        # forward vs. feedback) from incorrectly triggering fan-out.
+        # ON_SUCCESS / other edge types are unaffected.
+        if len(traversable) > 1:
+            conditionals = [e for e in traversable if e.condition == EdgeCondition.CONDITIONAL]
+            if len(conditionals) > 1:
+                max_prio = max(e.priority for e in conditionals)
+                traversable = [
+                    e
+                    for e in traversable
+                    if e.condition != EdgeCondition.CONDITIONAL or e.priority == max_prio
+                ]
+
         return traversable
 
     def _find_convergence_node(
@@ -909,6 +998,17 @@ class GraphExecutor:
                 branch.status = "failed"
                 branch.error = f"Node {branch.node_id} not found in graph"
                 return branch, RuntimeError(branch.error)
+
+            effective_max_retries = node_spec.max_retries
+            if node_spec.node_type == "event_loop":
+                if effective_max_retries > 1:
+                    self.logger.warning(
+                        f"EventLoopNode '{node_spec.id}' has "
+                        f"max_retries={effective_max_retries}. Overriding "
+                        "to 1 — event loop nodes handle retry internally."
+                    )
+                effective_max_retries = 1
+
             branch.status = "running"
 
             try:
@@ -942,7 +1042,7 @@ class GraphExecutor:
 
                 # Execute with retries
                 last_result = None
-                for attempt in range(node_spec.max_retries):
+                for attempt in range(effective_max_retries):
                     branch.retry_count = attempt
 
                     # Build context for this branch
@@ -970,7 +1070,7 @@ class GraphExecutor:
 
                     self.logger.warning(
                         f"      ↻ Branch {node_spec.name}: "
-                        f"retry {attempt + 1}/{node_spec.max_retries}"
+                        f"retry {attempt + 1}/{effective_max_retries}"
                     )
 
                 # All retries exhausted
@@ -979,7 +1079,7 @@ class GraphExecutor:
                 branch.result = last_result
                 self.logger.error(
                     f"      ✗ Branch {node_spec.name}: "
-                    f"failed after {node_spec.max_retries} attempts"
+                    f"failed after {effective_max_retries} attempts"
                 )
                 return branch, last_result
 
