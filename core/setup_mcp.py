@@ -11,6 +11,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import base64
+import torch
+import numpy as np
+from mcp.server.fastmcp import FastMCP
+from robotics.perception import OpenVisionEncoder
+from robotics.control import LaplaceTransformer
+
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +171,36 @@ def main():
     logger.info(json.dumps(example_config, indent=2))
     logger.info("")
 
+# Initialize the robotics stack
+mcp = FastMCP("RoboticsController")
+vision_encoder = OpenVisionEncoder()
+control_module = LaplaceTransformer()
+
+@mcp.tool()
+async def vision_language_action(image_b64: str, instruction: str) -> dict:
+    """
+    VLA Tool: Takes a camera frame and a command to generate 
+    a smooth robotic trajectory using Laplace s-domain control.
+    """
+    # 1. Perception: Convert Image to Spatial Embeddings
+    image_data = base64.b64decode(image_b64)
+    visual_context = vision_encoder.encode(image_data)
+    
+    # 2. Reasoning: Combine Vision + Language
+    # (Typically involves a transformer cross-attention layer)
+    multimodal_state = f"{instruction} | Context: {visual_context.shape}"
+
+    # 3. Action: Generate Laplace Trajectory
+    # Maps instructions to s-domain algebraic motor commands
+    action_chunk = control_module.generate_trajectory(visual_context, instruction)
+    
+    return {
+        "status": "success",
+        "action_type": "trajectory_chunk",
+        "commands": action_chunk.tolist(),
+        "metadata": {"control_mode": "Laplace_s_domain"}
+    }
+    
 
 if __name__ == "__main__":
     main()
