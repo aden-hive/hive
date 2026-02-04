@@ -28,6 +28,7 @@ dependencies = [
     "fastmcp>=2.0.0",
     "diff-match-patch>=20230430",
     "python-dotenv>=1.0.0",
+    "youtube-transcript-api>=0.6.0",
 ]
 
 [project.optional-dependencies]
