@@ -207,7 +207,7 @@ class OutputValidator:
     def validate_no_hallucination(
         self,
         output: dict[str, Any],
-        max_length: int = 10000,
+        max_length: int = 50000,
     ) -> ValidationResult:
         """
         Check for signs of LLM hallucination in output values.

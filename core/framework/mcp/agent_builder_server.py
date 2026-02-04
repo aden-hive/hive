@@ -44,6 +44,7 @@ class BuildSession:
         self.nodes: list[NodeSpec] = []
         self.edges: list[EdgeSpec] = []
         self.mcp_servers: list[dict] = []  # MCP server configurations
+        self.loop_config: dict = {}  # LoopConfig parameters for EventLoopNodes
         self.created_at = datetime.now().isoformat()
         self.last_modified = datetime.now().isoformat()
 
@@ -56,6 +57,7 @@ class BuildSession:
             "nodes": [n.model_dump() for n in self.nodes],
             "edges": [e.model_dump() for e in self.edges],
             "mcp_servers": self.mcp_servers,
+            "loop_config": self.loop_config,
             "created_at": self.created_at,
             "last_modified": self.last_modified,
         }
@@ -101,6 +103,9 @@ class BuildSession:
 
         # Restore MCP servers
         session.mcp_servers = data.get("mcp_servers", [])
+
+        # Restore loop config
+        session.loop_config = data.get("loop_config", {})
 
         return session
 
@@ -551,14 +556,28 @@ def add_node(
     node_id: Annotated[str, "Unique identifier for the node"],
     name: Annotated[str, "Human-readable name"],
     description: Annotated[str, "What this node does"],
-    node_type: Annotated[str, "Type: llm_generate, llm_tool_use, router, or function"],
+    node_type: Annotated[
+        str,
+        "Type: event_loop (recommended), function, router. "
+        "Deprecated: llm_generate, llm_tool_use (use event_loop instead)",
+    ],
     input_keys: Annotated[str, "JSON array of keys this node reads from shared memory"],
     output_keys: Annotated[str, "JSON array of keys this node writes to shared memory"],
     system_prompt: Annotated[str, "Instructions for LLM nodes"] = "",
-    tools: Annotated[str, "JSON array of tool names for llm_tool_use nodes"] = "[]",
+    tools: Annotated[str, "JSON array of tool names for event_loop or llm_tool_use nodes"] = "[]",
     routes: Annotated[
         str, "JSON object mapping conditions to target node IDs for router nodes"
     ] = "{}",
+    client_facing: Annotated[
+        bool, "If True, node streams output to user and blocks for input between turns"
+    ] = False,
+    nullable_output_keys: Annotated[
+        str, "JSON array of output keys that may remain unset (for mutually exclusive outputs)"
+    ] = "[]",
+    max_node_visits: Annotated[
+        int,
+        "Max times this node executes per graph run. Set >1 for feedback loop targets. 0=unlimited",
+    ] = 1,
 ) -> str:
     """Add a node to the agent graph. Nodes process inputs and produce outputs."""
     session = get_session()
@@ -569,6 +588,7 @@ def add_node(
         output_keys_list = json.loads(output_keys)
         tools_list = json.loads(tools)
         routes_dict = json.loads(routes)
+        nullable_output_keys_list = json.loads(nullable_output_keys)
     except json.JSONDecodeError as e:
         return json.dumps(
             {
@@ -597,6 +617,9 @@ def add_node(
         system_prompt=system_prompt or None,
         tools=tools_list,
         routes=routes_dict,
+        client_facing=client_facing,
+        nullable_output_keys=nullable_output_keys_list,
+        max_node_visits=max_node_visits,
     )
 
     session.nodes.append(node)
@@ -615,6 +638,26 @@ def add_node(
         errors.append(f"Router node '{node_id}' must specify routes")
     if node_type in ("llm_generate", "llm_tool_use") and not system_prompt:
         warnings.append(f"LLM node '{node_id}' should have a system_prompt")
+
+    # EventLoopNode validation
+    if node_type == "event_loop" and not system_prompt:
+        warnings.append(f"Event loop node '{node_id}' should have a system_prompt")
+
+    # Deprecated type warnings
+    if node_type in ("llm_generate", "llm_tool_use"):
+        warnings.append(
+            f"Node type '{node_type}' is deprecated. Use 'event_loop' instead. "
+            "EventLoopNode supports tool use, streaming, and judge-based evaluation."
+        )
+
+    # nullable_output_keys must be a subset of output_keys
+    if nullable_output_keys_list:
+        invalid_nullable = [k for k in nullable_output_keys_list if k not in output_keys_list]
+        if invalid_nullable:
+            errors.append(
+                f"nullable_output_keys {invalid_nullable} must be a subset of "
+                f"output_keys {output_keys_list}"
+            )
 
     _save_session(session)  # Auto-save
 
@@ -692,6 +735,7 @@ def add_edge(
 
     # Validate
     errors = []
+    warnings = []
 
     if not any(n.id == source for n in session.nodes):
         errors.append(f"Source node '{source}' not found")
@@ -700,12 +744,24 @@ def add_edge(
     if edge_condition == EdgeCondition.CONDITIONAL and not condition_expr:
         errors.append(f"Conditional edge '{edge_id}' needs condition_expr")
 
+    # Feedback edge validation
+    if priority < 0:
+        target_node = next((n for n in session.nodes if n.id == target), None)
+        if target_node and target_node.max_node_visits <= 1:
+            warnings.append(
+                f"Edge '{edge_id}' has negative priority (feedback edge) "
+                f"targeting '{target}', but node '{target}' has "
+                f"max_node_visits={target_node.max_node_visits}. "
+                "Consider increasing max_node_visits on the target node."
+            )
+
     _save_session(session)  # Auto-save
 
     return json.dumps(
         {
             "valid": len(errors) == 0,
             "errors": errors,
+            "warnings": warnings,
             "edge": edge.model_dump(),
             "total_edges": len(session.edges),
             "approval_required": True,
@@ -739,12 +795,23 @@ def update_node(
     node_id: Annotated[str, "ID of the node to update"],
     name: Annotated[str, "Updated human-readable name"] = "",
     description: Annotated[str, "Updated description"] = "",
-    node_type: Annotated[str, "Updated type: llm_generate, llm_tool_use, router, or function"] = "",
+    node_type: Annotated[
+        str,
+        "Updated type: event_loop (recommended), function, router. "
+        "Deprecated: llm_generate, llm_tool_use",
+    ] = "",
     input_keys: Annotated[str, "Updated JSON array of input keys"] = "",
     output_keys: Annotated[str, "Updated JSON array of output keys"] = "",
     system_prompt: Annotated[str, "Updated instructions for LLM nodes"] = "",
     tools: Annotated[str, "Updated JSON array of tool names"] = "",
     routes: Annotated[str, "Updated JSON object mapping conditions to target node IDs"] = "",
+    client_facing: Annotated[
+        str, "Updated client-facing flag ('true'/'false', empty=no change)"
+    ] = "",
+    nullable_output_keys: Annotated[
+        str, "Updated JSON array of nullable output keys (empty=no change)"
+    ] = "",
+    max_node_visits: Annotated[int, "Updated max node visits per graph run. 0=no change"] = 0,
 ) -> str:
     """Update an existing node in the agent graph. Only provided fields will be updated."""
     session = get_session()
@@ -765,6 +832,9 @@ def update_node(
         output_keys_list = json.loads(output_keys) if output_keys else None
         tools_list = json.loads(tools) if tools else None
         routes_dict = json.loads(routes) if routes else None
+        nullable_output_keys_list = (
+            json.loads(nullable_output_keys) if nullable_output_keys else None
+        )
     except json.JSONDecodeError as e:
         return json.dumps(
             {
@@ -797,6 +867,12 @@ def update_node(
         node.tools = tools_list
     if routes_dict is not None:
         node.routes = routes_dict
+    if client_facing:
+        node.client_facing = client_facing.lower() == "true"
+    if nullable_output_keys_list is not None:
+        node.nullable_output_keys = nullable_output_keys_list
+    if max_node_visits > 0:
+        node.max_node_visits = max_node_visits
 
     # Validate
     errors = []
@@ -808,6 +884,26 @@ def update_node(
         errors.append(f"Router node '{node_id}' must specify routes")
     if node.node_type in ("llm_generate", "llm_tool_use") and not node.system_prompt:
         warnings.append(f"LLM node '{node_id}' should have a system_prompt")
+
+    # EventLoopNode validation
+    if node.node_type == "event_loop" and not node.system_prompt:
+        warnings.append(f"Event loop node '{node_id}' should have a system_prompt")
+
+    # Deprecated type warnings
+    if node.node_type in ("llm_generate", "llm_tool_use"):
+        warnings.append(
+            f"Node type '{node.node_type}' is deprecated. Use 'event_loop' instead. "
+            "EventLoopNode supports tool use, streaming, and judge-based evaluation."
+        )
+
+    # nullable_output_keys must be a subset of output_keys
+    if node.nullable_output_keys:
+        invalid_nullable = [k for k in node.nullable_output_keys if k not in node.output_keys]
+        if invalid_nullable:
+            errors.append(
+                f"nullable_output_keys {invalid_nullable} must be a subset of "
+                f"output_keys {node.output_keys}"
+            )
 
     _save_session(session)  # Auto-save
 
@@ -1147,6 +1243,87 @@ def validate_graph() -> str:
     errors.extend(context_errors)
     warnings.extend(context_warnings)
 
+    # === EventLoopNode-specific validation ===
+    from collections import defaultdict
+
+    # Detect fan-out: multiple ON_SUCCESS edges from same source
+    outgoing_success: dict[str, list[str]] = defaultdict(list)
+    for edge in session.edges:
+        cond = edge.condition.value if hasattr(edge.condition, "value") else edge.condition
+        if cond == "on_success":
+            outgoing_success[edge.source].append(edge.target)
+
+    for source_id, targets in outgoing_success.items():
+        if len(targets) > 1:
+            # Client-facing fan-out: cannot target multiple client_facing nodes
+            cf_targets = [
+                t for t in targets if any(n.id == t and n.client_facing for n in session.nodes)
+            ]
+            if len(cf_targets) > 1:
+                errors.append(
+                    f"Fan-out from '{source_id}' targets multiple client_facing "
+                    f"nodes: {cf_targets}. Only one branch may be client-facing."
+                )
+
+            # Output key overlap on parallel event_loop nodes
+            el_targets = [
+                t
+                for t in targets
+                if any(n.id == t and n.node_type == "event_loop" for n in session.nodes)
+            ]
+            if len(el_targets) > 1:
+                seen_keys: dict[str, str] = {}
+                for nid in el_targets:
+                    node_obj = next((n for n in session.nodes if n.id == nid), None)
+                    if node_obj:
+                        for key in node_obj.output_keys:
+                            if key in seen_keys:
+                                errors.append(
+                                    f"Fan-out from '{source_id}': event_loop "
+                                    f"nodes '{seen_keys[key]}' and '{nid}' both "
+                                    f"write to output_key '{key}'. Parallel "
+                                    "nodes must have disjoint output_keys."
+                                )
+                            else:
+                                seen_keys[key] = nid
+
+    # Feedback loop validation: targets should allow re-visits
+    for edge in session.edges:
+        if edge.priority < 0:
+            target_node = next((n for n in session.nodes if n.id == edge.target), None)
+            if target_node and target_node.max_node_visits <= 1:
+                warnings.append(
+                    f"Feedback edge '{edge.id}' targets '{edge.target}' "
+                    f"which has max_node_visits={target_node.max_node_visits}. "
+                    "Consider setting max_node_visits > 1."
+                )
+
+    # nullable_output_keys must be subset of output_keys
+    for node in session.nodes:
+        if node.nullable_output_keys:
+            invalid = [k for k in node.nullable_output_keys if k not in node.output_keys]
+            if invalid:
+                errors.append(
+                    f"Node '{node.id}': nullable_output_keys {invalid} "
+                    f"must be a subset of output_keys {node.output_keys}"
+                )
+
+    # Deprecated node type warnings
+    deprecated_nodes = [
+        {"node_id": n.id, "type": n.node_type, "replacement": "event_loop"}
+        for n in session.nodes
+        if n.node_type in ("llm_generate", "llm_tool_use")
+    ]
+    for dn in deprecated_nodes:
+        warnings.append(
+            f"Node '{dn['node_id']}' uses deprecated type '{dn['type']}'. Use 'event_loop' instead."
+        )
+
+    # Collect summary info
+    event_loop_nodes = [n.id for n in session.nodes if n.node_type == "event_loop"]
+    client_facing_nodes = [n.id for n in session.nodes if n.client_facing]
+    feedback_edges = [e.id for e in session.edges if e.priority < 0]
+
     return json.dumps(
         {
             "valid": len(errors) == 0,
@@ -1163,6 +1340,10 @@ def validate_graph() -> str:
             "context_flow": {node_id: list(keys) for node_id, keys in available_context.items()}
             if available_context
             else None,
+            "event_loop_nodes": event_loop_nodes,
+            "client_facing_nodes": client_facing_nodes,
+            "feedback_edges": feedback_edges,
+            "deprecated_node_types": deprecated_nodes,
         }
     )
 
@@ -1213,6 +1394,12 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
         if node.routes:
             routes_str = ", ".join([f"{k}→{v}" for k, v in node.routes.items()])
             node_info.append(f"   - Routes: {routes_str}")
+        if node.client_facing:
+            node_info.append("   - Client-facing: Yes (blocks for user input)")
+        if node.nullable_output_keys:
+            node_info.append(f"   - Nullable outputs: `{', '.join(node.nullable_output_keys)}`")
+        if node.max_node_visits > 1:
+            node_info.append(f"   - Max visits: {node.max_node_visits}")
         nodes_section.append("\n".join(node_info))
 
     # Build success criteria section
@@ -1266,7 +1453,12 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
 
     for edge in edges:
         cond = edge.condition.value if hasattr(edge.condition, "value") else edge.condition
-        readme += f"- `{edge.source}` → `{edge.target}` (condition: {cond})\n"
+        priority_note = f", priority={edge.priority}" if edge.priority != 0 else ""
+        feedback_note = " **[FEEDBACK]**" if edge.priority < 0 else ""
+        readme += (
+            f"- `{edge.source}` → `{edge.target}` "
+            f"(condition: {cond}{priority_note}){feedback_note}\n"
+        )
 
     readme += f"""
 
@@ -1481,6 +1673,10 @@ def export_graph() -> str:
         "created_at": datetime.now().isoformat(),
     }
 
+    # Include loop config if configured
+    if session.loop_config:
+        graph_spec["loop_config"] = session.loop_config
+
     # Collect all tools referenced by nodes
     all_tools = set()
     for node in session.nodes:
@@ -1596,6 +1792,50 @@ def get_session_status() -> str:
             "nodes": [n.id for n in session.nodes],
             "edges": [(e.source, e.target) for e in session.edges],
             "mcp_servers": [s["name"] for s in session.mcp_servers],
+            "event_loop_nodes": [n.id for n in session.nodes if n.node_type == "event_loop"],
+            "client_facing_nodes": [n.id for n in session.nodes if n.client_facing],
+            "deprecated_nodes": [
+                n.id for n in session.nodes if n.node_type in ("llm_generate", "llm_tool_use")
+            ],
+            "feedback_edges": [e.id for e in session.edges if e.priority < 0],
+        }
+    )
+
+
+@mcp.tool()
+def configure_loop(
+    max_iterations: Annotated[int, "Maximum loop iterations per node execution (default 50)"] = 50,
+    max_tool_calls_per_turn: Annotated[int, "Maximum tool calls per LLM turn (default 10)"] = 10,
+    stall_detection_threshold: Annotated[
+        int, "Consecutive identical responses before stall detection triggers (default 3)"
+    ] = 3,
+    max_history_tokens: Annotated[
+        int, "Maximum conversation history tokens before compaction (default 32000)"
+    ] = 32000,
+) -> str:
+    """Configure event loop parameters for EventLoopNode execution.
+
+    These settings control how EventLoopNodes behave at runtime:
+    - max_iterations: prevents infinite loops
+    - max_tool_calls_per_turn: limits tool calls per LLM response
+    - stall_detection_threshold: detects when LLM repeats itself
+    - max_history_tokens: triggers conversation compaction
+    """
+    session = get_session()
+
+    session.loop_config = {
+        "max_iterations": max_iterations,
+        "max_tool_calls_per_turn": max_tool_calls_per_turn,
+        "stall_detection_threshold": stall_detection_threshold,
+        "max_history_tokens": max_history_tokens,
+    }
+
+    _save_session(session)
+
+    return json.dumps(
+        {
+            "success": True,
+            "loop_config": session.loop_config,
         }
     )
 
@@ -1891,10 +2131,41 @@ def test_node(
         result["routing_options"] = node_spec.routes
         result["simulation"] = "Router would evaluate routes based on input and select target node"
 
-    elif node_spec.node_type in ("llm_generate", "llm_tool_use"):
-        # Show what prompt would be sent
+    elif node_spec.node_type == "event_loop":
+        # EventLoopNode simulation
         result["system_prompt"] = node_spec.system_prompt
         result["available_tools"] = node_spec.tools
+        result["client_facing"] = node_spec.client_facing
+        result["nullable_output_keys"] = node_spec.nullable_output_keys
+        result["max_node_visits"] = node_spec.max_node_visits
+
+        if mock_llm_response:
+            result["mock_response"] = mock_llm_response
+            result["simulation"] = (
+                "EventLoopNode would run a multi-turn streaming loop. "
+                "Each iteration: LLM call -> tool execution -> judge evaluation. "
+                "Loop continues until judge ACCEPTs or max_iterations reached."
+            )
+        else:
+            cf_note = (
+                "Node is client-facing: will block for user input between turns. "
+                if node_spec.client_facing
+                else ""
+            )
+            result["simulation"] = (
+                "EventLoopNode would stream LLM responses, execute tool calls, "
+                "and use judge evaluation to decide when to stop. "
+                + cf_note
+                + f"Max visits per graph run: {node_spec.max_node_visits}."
+            )
+
+    elif node_spec.node_type in ("llm_generate", "llm_tool_use"):
+        # Legacy LLM node types
+        result["system_prompt"] = node_spec.system_prompt
+        result["available_tools"] = node_spec.tools
+        result["deprecation_warning"] = (
+            f"Node type '{node_spec.node_type}' is deprecated. Use 'event_loop' instead."
+        )
 
         if mock_llm_response:
             result["mock_response"] = mock_llm_response
@@ -1909,6 +2180,7 @@ def test_node(
     result["expected_memory_state"] = {
         "inputs_available": {k: input_data.get(k, "<not provided>") for k in node_spec.input_keys},
         "outputs_to_write": node_spec.output_keys,
+        "nullable_outputs": node_spec.nullable_output_keys or [],
     }
 
     return json.dumps(
@@ -1997,13 +2269,19 @@ def test_graph(
             "writes": current_node.output_keys,
         }
 
-        if current_node.node_type in ("llm_generate", "llm_tool_use"):
+        if current_node.node_type in ("llm_generate", "llm_tool_use", "event_loop"):
             step_info["prompt_preview"] = (
                 current_node.system_prompt[:200] + "..."
                 if current_node.system_prompt and len(current_node.system_prompt) > 200
                 else current_node.system_prompt
             )
             step_info["tools_available"] = current_node.tools
+            if current_node.node_type == "event_loop":
+                step_info["event_loop_config"] = {
+                    "client_facing": current_node.client_facing,
+                    "max_node_visits": current_node.max_node_visits,
+                    "nullable_output_keys": current_node.nullable_output_keys,
+                }
 
         execution_trace.append(step_info)
 
@@ -2012,16 +2290,32 @@ def test_graph(
             step_info["is_terminal"] = True
             break
 
-        # Find next node via edges
+        # Find next node via edges (sorted by priority, highest first)
+        outgoing = sorted(
+            [e for e in session.edges if e.source == current_node_id],
+            key=lambda e: -e.priority,
+        )
         next_node = None
-        for edge in session.edges:
-            if edge.source == current_node_id:
-                # In dry run, assume success path
-                if edge.condition.value in ("always", "on_success"):
-                    next_node = edge.target
-                    step_info["next_node"] = next_node
-                    step_info["edge_condition"] = edge.condition.value
-                    break
+        for edge in outgoing:
+            # In dry run, follow success/always edges (highest priority first)
+            if edge.condition.value in ("always", "on_success"):
+                next_node = edge.target
+                step_info["next_node"] = next_node
+                step_info["edge_condition"] = edge.condition.value
+                step_info["edge_priority"] = edge.priority
+                break
+
+        # Note any feedback edges from this node
+        feedback = [e for e in outgoing if e.priority < 0]
+        if feedback:
+            step_info["feedback_edges"] = [
+                {
+                    "target": e.target,
+                    "condition_expr": e.condition_expr,
+                    "priority": e.priority,
+                }
+                for e in feedback
+            ]
 
         if next_node is None:
             step_info["note"] = "No outgoing edge found (end of path)"
