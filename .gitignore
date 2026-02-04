@@ -69,4 +69,9 @@ exports/*
 
 .agent-builder-sessions/*
 
+.claude/settings.local.json
+
 .venv
+
+docs/github-issues/*
+core/tests/*dumps/*
