@@ -578,25 +578,48 @@ NODE_SPECS = {
     "campaign_builder": NodeSpec(
         id="campaign_builder",
         name="Campaign Builder",
-        description="Build personalized outreach emails from approved contacts",
+        description="Iteratively build personalized outreach emails in batches",
         node_type="event_loop",
+        client_facing=True,
         input_keys=["approved_contacts", "project_url"],
         output_keys=["draft_emails"],
+        nullable_output_keys=["draft_emails"],
         tools=["load_campaign_template", "load_data", "save_data"],
-        max_node_visits=3,
+        max_node_visits=5,
         system_prompt=(
             "You are the Campaign Builder agent. Your input 'approved_contacts' is a "
             "filename and 'project_url' is a URL string.\n\n"
-            "WORKFLOW:\n"
-            "1. Use load_data to read the approved contacts from the file\n"
-            "2. Load the campaign template using load_campaign_template\n"
-            "3. For each approved contact, customize the email:\n"
-            "   - Fill in their name and relevant details\n"
-            "   - Add a personalized hook based on their profile/interests\n"
-            "4. Format as a JSON array of email objects with: recipient, subject, body\n"
-            "5. Use save_data('draft_emails.json', <json>) to write the drafts\n"
-            "6. Call set_output(key='draft_emails', value='draft_emails.json')\n\n"
-            "Make each email feel personal and relevant."
+            "ITERATIVE BATCH WORKFLOW:\n"
+            "You build draft emails in batches of up to 10 contacts at a time, "
+            "presenting each batch to the operator for review before continuing.\n\n"
+            "STEP 1 — SETUP:\n"
+            "- Use load_data to read the approved contacts from the file\n"
+            "- Load the campaign template using load_campaign_template\n"
+            "- Count total contacts and plan batches of up to 10\n\n"
+            "STEP 2 — DRAFT A BATCH (max 10 emails):\n"
+            "- For each contact in the current batch, write a personalized email:\n"
+            "  * Fill in their name and relevant details from their profile\n"
+            "  * Add a personalized hook based on their interests/contributions\n"
+            "  * Format: {recipient, subject, body}\n"
+            "- Present the drafted emails to the operator clearly, showing:\n"
+            "  * Batch number (e.g. 'Batch 1 of 4')\n"
+            "  * Each email with recipient, subject, and body preview\n"
+            "  * How many contacts remain\n\n"
+            "STEP 3 — ASK THE OPERATOR:\n"
+            "After presenting each batch, ask:\n"
+            "  'Create more drafts for the next batch, or submit all drafts "
+            "for outbound email?'\n\n"
+            "  IF 'create more' → go back to STEP 2 for the next batch of contacts\n"
+            "  IF 'submit' → go to STEP 4\n\n"
+            "STEP 4 — FINALIZE:\n"
+            "- Combine ALL drafted batches into a single JSON array\n"
+            "- Use save_data('draft_emails.json', <json>) to write them\n"
+            "- Call set_output(key='draft_emails', value='draft_emails.json')\n\n"
+            "RULES:\n"
+            "- Never draft more than 10 emails at once — always pause for operator input\n"
+            "- Keep a running total of emails drafted across batches\n"
+            "- Make each email feel personal and relevant\n"
+            "- Do NOT call set_output until the operator says to submit"
         ),
     ),
     "approval": NodeSpec(
@@ -1042,7 +1065,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .node-scorer .node-tag { color: #bc8cff; }
   .node-extractor .node-tag { color: #d29922; }
   .node-review .node-tag { color: #58a6ff; }
-  .node-campaign_builder .node-tag { color: #d29922; }
+  .node-campaign_builder .node-tag { color: #58a6ff; }
   .node-approval .node-tag { color: #58a6ff; }
   .node-sender .node-tag { color: #3fb950; }
   .result-banner {
@@ -1140,7 +1163,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .activity-card.node-profiler .card-label { color: #bc8cff; }
   .activity-card.node-scorer .card-label { color: #bc8cff; }
   .activity-card.node-extractor .card-label { color: #d29922; }
-  .activity-card.node-campaign_builder .card-label { color: #d29922; }
+  .activity-card.node-campaign_builder .card-label { color: #58a6ff; }
 </style>
 </head>
 <body>
@@ -1469,7 +1492,7 @@ const NODE_SPECS = {
   intake: {client_facing: true}, scanner: {client_facing: false},
   profiler: {client_facing: false}, scorer: {client_facing: false},
   extractor: {client_facing: false}, review: {client_facing: true},
-  campaign_builder: {client_facing: false}, approval: {client_facing: true},
+  campaign_builder: {client_facing: true}, approval: {client_facing: true},
   sender: {client_facing: false}
 };
 
@@ -1715,7 +1738,8 @@ async def _run_pipeline(websocket, initial_message: str):
         "profiler": SchemaJudge(ProfilerOutput),
         "scorer": SchemaJudge(ScorerOutput),
         "extractor": SchemaJudge(ExtractorOutput),
-        "campaign_builder": SchemaJudge(CampaignOutput),
+        # campaign_builder is now client_facing — implicit judge + native
+        # blocking handle termination (same pattern as review/approval).
     }
 
     all_judges: dict = {**client_judges, **schema_judges}
