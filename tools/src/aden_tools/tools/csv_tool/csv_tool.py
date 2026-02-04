@@ -34,6 +34,8 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             dict with success status, data, and metadata
         """
+        if offset < 0 or (limit is not None and limit < 0):
+            return {"error": "offset and limit must be non-negative"}
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
 
@@ -63,7 +65,8 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Get total row count (re-read for accurate count)
             with open(secure_path, encoding="utf-8", newline="") as f:
-                total_rows = sum(1 for _ in f) - 1  # Subtract header
+                reader = csv.reader(f)
+                total_rows = sum(1 for row in reader if any(row)) - 1
 
             return {
                 "success": True,
@@ -117,7 +120,9 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": "columns cannot be empty"}
 
             # Create parent directories if needed
-            os.makedirs(os.path.dirname(secure_path), exist_ok=True)
+            parent_dir = os.path.dirname(secure_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
 
             # Write CSV
             with open(secure_path, "w", encoding="utf-8", newline="") as f:
@@ -189,7 +194,8 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Get new total row count
             with open(secure_path, encoding="utf-8", newline="") as f:
-                total_rows = sum(1 for _ in f) - 1  # Subtract header
+                reader = csv.reader(f)
+                total_rows = sum(1 for row in reader if any(row)) - 1  # Subtract header
 
             return {
                 "success": True,

@@ -18,10 +18,10 @@ The fastest way to get started:
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# 2. Run automated Python setup
-./scripts/setup-python.sh
+# 2. Run automated setup
+./quickstart.sh
 
-# 3. Verify installation
+# 3. Verify installation (optional, quickstart.sh already verifies)
 python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
@@ -44,8 +44,7 @@ This is the recommended way to create your first agent.
 - Unix-based shell (macOS, Linux, or Windows via WSL)
 
 ```bash
-# Install Claude Code skills (one-time)
-./quickstart.sh
+# Setup already done via quickstart.sh above
 
 # Start Claude Code and build an agent
 claude> /building-agents-construction
@@ -94,15 +93,20 @@ This demonstrates the core runtime loop using pure Python functions, skipping th
 hive/
 ├── core/                   # Core Framework
 │   ├── framework/          # Agent runtime, graph executor
-│   │   ├── runner/         # AgentRunner - loads and runs agents
-│   │   ├── executor/       # GraphExecutor - executes node graphs
-│   │   ├── protocols/      # Standard protocols (hooks, tracing)
+│   │   ├── builder/        # Agent builder utilities
+│   │   ├── credentials/    # Credential management
+│   │   ├── graph/          # GraphExecutor - executes node graphs
 │   │   ├── llm/            # LLM provider integrations
-│   │   └── memory/         # Memory systems (STM, LTM/RLM)
+│   │   ├── mcp/            # MCP server integration
+│   │   ├── runner/         # AgentRunner - loads and runs agents
+│   │   ├── runtime/        # Runtime environment
+│   │   ├── schemas/        # Data schemas
+│   │   ├── storage/        # File-based persistence
+│   │   └── testing/        # Testing utilities
 │   └── pyproject.toml      # Package metadata
 │
 ├── tools/                  # MCP Tools Package
-│   └── src/aden_tools/     # 19 tools for agent capabilities
+│   └── src/aden_tools/     # Tools for agent capabilities
 │       ├── tools/          # Individual tool implementations
 │       │   ├── web_search_tool/
 │       │   ├── web_scrape_tool/
@@ -213,7 +217,7 @@ PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
 ```bash
 # Remove and reinstall
 pip uninstall -y framework tools
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 ## Getting Help

@@ -11,7 +11,6 @@ our edges can be created dynamically by a Builder agent based on the goal.
 
 Edge Types:
 - always: Always traverse after source completes
-- always: Always traverse after source completes
 - on_success: Traverse only if source succeeds
 - on_failure: Traverse only if source fails
 - conditional: Traverse based on expression evaluation (SAFE SUBSET ONLY)
@@ -22,7 +21,7 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -30,7 +29,7 @@ from pydantic import BaseModel, Field
 from framework.graph.safe_eval import safe_eval
 
 
-class EdgeCondition(str, Enum):
+class EdgeCondition(StrEnum):
     """When an edge should be traversed."""
 
     ALWAYS = "always"  # Always after source completes

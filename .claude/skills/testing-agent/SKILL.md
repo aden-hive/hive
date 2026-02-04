@@ -117,22 +117,47 @@ async def test_happy_path(mock_mode):
 5. **Debug failures** - `debug_test(goal_id, test_name, agent_path)`
 6. **Iterate** - Repeat steps 4-5 until all pass
 
-## ⚠️ API Key Requirement for Real Testing
+## ⚠️ Credential Requirements for Testing
 
-**CRITICAL: Real LLM testing requires an API key.** Mock mode only validates structure and does NOT test actual agent behavior.
+**CRITICAL: Testing requires ALL credentials the agent depends on.** This includes both the LLM API key AND any tool-specific credentials (HubSpot, Brave Search, etc.).
 
 ### Prerequisites
 
-Before running agent tests, you MUST set your API key:
+Before running agent tests, you MUST collect ALL required credentials from the user.
 
+**Step 1: LLM API Key (always required)**
 ```bash
 export ANTHROPIC_API_KEY="your-key-here"
 ```
 
-**Why API keys are required:**
+**Step 2: Tool-specific credentials (depends on agent's tools)**
+
+Inspect the agent's `mcp_servers.json` and tool configuration to determine which tools the agent uses, then check for all required credentials:
+
+```python
+from aden_tools.credentials import CredentialManager, CREDENTIAL_SPECS
+
+creds = CredentialManager()
+
+# Determine which tools the agent uses (from agent.json or mcp_servers.json)
+agent_tools = [...]  # e.g., ["hubspot_search_contacts", "web_search", ...]
+
+# Find all missing credentials for those tools
+missing = creds.get_missing_for_tools(agent_tools)
+```
+
+Common tool credentials:
+| Tool | Env Var | Help URL |
+|------|---------|----------|
+| HubSpot CRM | `HUBSPOT_ACCESS_TOKEN` | https://developers.hubspot.com/docs/api/private-apps |
+| Brave Search | `BRAVE_SEARCH_API_KEY` | https://brave.com/search/api/ |
+| Google Search | `GOOGLE_SEARCH_API_KEY` + `GOOGLE_SEARCH_CX` | https://developers.google.com/custom-search |
+
+**Why ALL credentials are required:**
 - Tests need to execute the agent's LLM nodes to validate behavior
-- Mock mode bypasses LLM calls, providing no confidence in real-world performance
-- Success criteria (personalization, reasoning quality, constraint adherence) can only be tested with real LLM calls
+- Tools with missing credentials will return error dicts instead of real data
+- Mock mode bypasses everything, providing no confidence in real-world performance
+- The `AgentRunner.run()` method validates credentials at startup and will fail fast if any are missing
 
 ### Mock Mode Limitations
 
@@ -146,11 +171,11 @@ Mock mode (`--mock` flag or `mock_mode=True`) is **ONLY for structure validation
 ✗ Does NOT test real API integrations or tool use
 ✗ Does NOT test personalization or content quality
 
-**Bottom line:** If you're testing whether an agent achieves its goal, you MUST use a real API key.
+**Bottom line:** If you're testing whether an agent achieves its goal, you MUST use real credentials for ALL services.
 
-### Enforcing API Key in Tests
+### Enforcing Credentials in Tests
 
-When generating tests, **ALWAYS include API key checks**:
+When generating tests, **ALWAYS include credential checks for ALL required services**:
 
 ```python
 import os
@@ -165,11 +190,14 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(scope="session", autouse=True)
-def check_api_key():
-    """Ensure API key is set for real testing."""
+def check_credentials():
+    """Ensure ALL required credentials are set for real testing."""
     creds = CredentialManager()
+    mock_mode = os.environ.get("MOCK_MODE")
+
+    # Always check LLM key
     if not creds.is_available("anthropic"):
-        if os.environ.get("MOCK_MODE"):
+        if mock_mode:
             print("\n⚠️  Running in MOCK MODE - structure validation only")
             print("   This does NOT test LLM behavior or agent quality")
             print("   Set ANTHROPIC_API_KEY for real testing\n")
@@ -183,38 +211,68 @@ def check_api_key():
                 "   MOCK_MODE=1 pytest exports/{agent}/tests/\n\n"
                 "Note: Mock mode does NOT validate agent behavior or quality."
             )
+
+    # Check tool-specific credentials (skip in mock mode)
+    if not mock_mode:
+        # List the tools this agent uses - update per agent
+        agent_tools = []  # e.g., ["hubspot_search_contacts", "hubspot_get_contact"]
+        missing = creds.get_missing_for_tools(agent_tools)
+        if missing:
+            lines = ["\n❌ Missing tool credentials!\n"]
+            for name in missing:
+                spec = creds.specs.get(name)
+                if spec:
+                    lines.append(f"  {spec.env_var} - {spec.description}")
+                    if spec.help_url:
+                        lines.append(f"    Setup: {spec.help_url}")
+            lines.append("\nSet the required environment variables and re-run.")
+            pytest.fail("\n".join(lines))
 ```
 
 ### User Communication
 
-When the user asks to test an agent, **ALWAYS check for the API key first**:
+When the user asks to test an agent, **ALWAYS check for ALL credentials first** — not just the LLM key:
+
+1. **Identify the agent's tools** from `agent.json` or `mcp_servers.json`
+2. **Check ALL required credentials** using `CredentialManager`
+3. **Ask the user to provide any missing credentials** before proceeding
 
 ```python
-from aden_tools.credentials import CredentialManager
+from aden_tools.credentials import CredentialManager, CREDENTIAL_SPECS
 
-# Before running any tests
 creds = CredentialManager()
-if not creds.is_available("anthropic"):
-    print("⚠️  No ANTHROPIC_API_KEY found!")
-    print()
-    print("Testing requires a real API key to validate agent behavior.")
-    print()
-    print("Options:")
-    print("1. Set your API key (RECOMMENDED):")
-    print("   export ANTHROPIC_API_KEY='your-key-here'")
-    print()
-    print("2. Run in mock mode (structure validation only):")
-    print("   MOCK_MODE=1 pytest exports/{agent}/tests/")
-    print()
-    print("Mock mode does NOT test:")
-    print("  - LLM message generation")
-    print("  - Reasoning or decision quality")
-    print("  - Constraint validation")
-    print("  - Real API integrations")
 
-    # Ask user what to do
+# 1. Check LLM key
+missing_creds = []
+if not creds.is_available("anthropic"):
+    missing_creds.append(("ANTHROPIC_API_KEY", "Anthropic API key for LLM calls"))
+
+# 2. Check tool-specific credentials
+agent_tools = [...]  # Determined from agent config
+missing_tools = creds.get_missing_for_tools(agent_tools)
+for name in missing_tools:
+    spec = CREDENTIAL_SPECS.get(name)
+    if spec:
+        missing_creds.append((spec.env_var, spec.description))
+
+# 3. Present ALL missing credentials to the user at once
+if missing_creds:
+    print("⚠️  Missing credentials required by this agent:\n")
+    for env_var, description in missing_creds:
+        print(f"  • {env_var} — {description}")
+    print()
+    print("Please set the missing environment variables:")
+    for env_var, _ in missing_creds:
+        print(f"  export {env_var}='your-value-here'")
+    print()
+    print("Or run in mock mode (structure validation only):")
+    print("  MOCK_MODE=1 pytest exports/{agent}/tests/")
+
+    # Ask user to provide credentials or choose mock mode
     AskUserQuestion(...)
 ```
+
+**IMPORTANT:** Do NOT skip credential collection. If an agent uses HubSpot tools, the user MUST provide `HUBSPOT_ACCESS_TOKEN`. If it uses web search, the user MUST provide the appropriate search API key. Collect ALL missing credentials in a single prompt rather than discovering them one at a time during test failures.
 
 ## The Three-Stage Flow
 

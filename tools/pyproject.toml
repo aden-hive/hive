@@ -5,17 +5,15 @@ description = "Tools library for the Aden agent framework"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
-authors = [
-    { name = "Aden", email = "team@aden.ai" }
-]
+authors = [{ name = "Aden", email = "team@aden.ai" }]
 keywords = ["ai", "agents", "tools", "llm"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
@@ -28,6 +26,11 @@ dependencies = [
     "fastmcp>=2.0.0",
     "diff-match-patch>=20230430",
     "python-dotenv>=1.0.0",
+    "playwright>=1.40.0",
+    "playwright-stealth>=1.0.5",
+    "litellm>=1.81.0",
+    "resend>=2.0.0",
+    "framework",
     "youtube-transcript-api>=0.6.0",
 ]
 
@@ -52,6 +55,9 @@ all = [
     "pillow>=10.0.0",
     "duckdb>=1.0.0",
 ]
+
+[tool.uv.sources]
+framework = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -88,3 +94,6 @@ lint.isort.section-order = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = ["ty>=0.0.13", "ruff>=0.14.14"]
