@@ -21,6 +21,14 @@ A multi-channel marketing content generator. Given a product and audience, this 
 | `generate-content` | `llm_generate` | Creates per-channel copy with A/B variants |
 | `review-and-refine` | `llm_generate` | Reviews and optionally revises content |
 
+## Prerequisites
+
+- **Python 3.11+**
+- **Anthropic API Key**: This agent uses Claude. Set your key in your environment:
+  ```bash
+  export ANTHROPIC_API_KEY="sk-ant-..."
+  ```
+
 ## Usage
 
 ```bash
@@ -34,6 +42,32 @@ PYTHONPATH=core python -m examples.templates.marketing_agent --input '{
   "brand_voice": "Energetic and motivational",
   "channels": ["instagram", "email"]
 }'
+```
+
+## Example Output
+
+When successful, the agent returns a JSON object containing the audience analysis and generated content:
+
+```json
+{
+  "success": true,
+  "output": {
+    "audience_analysis": {
+      "demographics": "Millennials, aged 25-40...",
+      "pain_points": ["Lack of time", "Difficulty staying motivated"],
+      ...
+    },
+    "content": [
+      {
+        "channel": "instagram",
+        "variant_a": "Struggling to find time for the gym? Our app makes it easy...",
+        "variant_b": "Your fitness journey starts with a single tap. Download now..."
+      }
+    ]
+  },
+  "steps": 3,
+  "path": ["analyze-audience", "generate-content", "review-and-refine"]
+}
 ```
 
 ## Customization ideas
