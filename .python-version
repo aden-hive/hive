@@ -7,7 +7,7 @@ from tensorflow.keras import layers, models
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("HiveStringDB")
-
+# data base initi
 # --- Persistence Setup ---
 def init_db():
     conn = sqlite3.connect("hive_business.db")
