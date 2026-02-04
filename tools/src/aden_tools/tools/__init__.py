@@ -39,6 +39,9 @@ from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
+# [NEW] Import Stripe tool
+from .stripe_tool import register_tools as register_stripe
+
 
 def register_all_tools(
     mcp: FastMCP,
@@ -50,7 +53,7 @@ def register_all_tools(
     Args:
         mcp: FastMCP server instance
         credentials: Optional CredentialManager for centralized credential access.
-                     If not provided, tools fall back to direct os.getenv() calls.
+                      If not provided, tools fall back to direct os.getenv() calls.
 
     Returns:
         List of registered tool names
@@ -63,6 +66,9 @@ def register_all_tools(
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
+    
+    # [NEW] Register Stripe tool
+    register_stripe(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -93,6 +99,10 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        # [NEW] Stripe Functions
+        "get_customer_by_email",
+        "get_subscription_status",
+        "create_payment_link",
     ]
 
 

@@ -39,6 +39,7 @@ For advanced usage with the new credential store:
 Credential categories:
 - llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
+- stripe.py: Payment and billing credentials
 
 To add a new credential:
 1. Find the appropriate category file (or create a new one)
@@ -49,12 +50,14 @@ To add a new credential:
 from .base import CredentialError, CredentialManager, CredentialSpec
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
+from .stripe import STRIPE_CREDENTIALS  # <--- Added this import
 from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
+    **STRIPE_CREDENTIALS,  # <--- Added this to registry
 }
 
 __all__ = [
@@ -69,4 +72,5 @@ __all__ = [
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
+    "STRIPE_CREDENTIALS",  # <--- Added this to exports
 ]
