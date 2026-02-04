@@ -75,9 +75,10 @@ INTEGRATION_CREDENTIALS = {
         required=True,
         startup_required=False,
         help_url="https://linear.app/settings/api",
-        description="Linear API key for project management integration",
+        description="Linear API key or OAuth2 token for project management integration",
         # Auth method support
-        aden_supported=False,
+        aden_supported=True,
+        aden_provider_name="linear",
         direct_api_key_supported=True,
         api_key_instructions="""To get a Linear API key:
 1. Go to Linear Settings > API (https://linear.app/settings/api)
@@ -87,7 +88,16 @@ INTEGRATION_CREDENTIALS = {
 5. Store it securely - you won't be able to see it again!
 
 Note: Personal API keys have the same permissions as your user account.
-For workspace-wide access, consider using OAuth2 (coming soon).""",
+
+To create an OAuth application (for automatic token refresh via Aden):
+1. Go to Linear Settings > API (https://linear.app/settings/api)
+2. Click "New OAuth application"
+3. Fill in the required information:
+   - Application name (e.g., "Hive Agent")
+   - Developer name
+   - Other required fields
+4. Click "Create"
+5. Copy your client ID and client secret""",
         # Health check configuration
         health_check_endpoint="https://api.linear.app/graphql",
         health_check_method="POST",
