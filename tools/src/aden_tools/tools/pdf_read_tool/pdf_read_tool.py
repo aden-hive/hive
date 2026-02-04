@@ -4,10 +4,11 @@ PDF Read Tool - Parse and extract text from PDF files.
 Uses pypdf to read PDF documents and extract text content
 along with metadata.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from fastmcp import FastMCP
 from pypdf import PdfReader
@@ -17,16 +18,27 @@ def register_tools(mcp: FastMCP) -> None:
     """Register PDF read tools with the MCP server."""
 
     def parse_page_range(
-        pages: str | None, total_pages: int, max_pages: int
-    ) -> List[int] | dict:
+        pages: str | None,
+        total_pages: int,
+        max_pages: int,
+    ) -> dict[str, Any]:
         """
         Parse page range string into list of 0-indexed page numbers.
 
-        Returns list of indices or error dict.
+        Returns:
+            Dict with either:
+            - {"indices": [...], "truncated": bool, "requested_pages": int}
+            - {"error": "..."} on invalid input
         """
         if pages is None or pages.lower() == "all":
-            indices = list(range(min(total_pages, max_pages)))
-            return indices
+            requested_pages = total_pages
+            limited = min(total_pages, max_pages)
+            indices = list(range(limited))
+            return {
+                "indices": indices,
+                "truncated": requested_pages > max_pages,
+                "requested_pages": requested_pages,
+            }
 
         try:
             # Single page: "5"
@@ -34,7 +46,7 @@ def register_tools(mcp: FastMCP) -> None:
                 page_num = int(pages)
                 if page_num < 1 or page_num > total_pages:
                     return {"error": f"Page {page_num} out of range. PDF has {total_pages} pages."}
-                return [page_num - 1]
+                return {"indices": [page_num - 1], "truncated": False, "requested_pages": 1}
 
             # Range: "1-10"
             if "-" in pages and "," not in pages:
@@ -46,8 +58,14 @@ def register_tools(mcp: FastMCP) -> None:
                     return {"error": f"Page numbers start at 1, got {start}."}
                 if end > total_pages:
                     return {"error": f"Page {end} out of range. PDF has {total_pages} pages."}
-                indices = list(range(start - 1, min(end, start - 1 + max_pages)))
-                return indices
+                requested_pages = end - start + 1
+                limited_end = min(end, start - 1 + max_pages)
+                indices = list(range(start - 1, limited_end))
+                return {
+                    "indices": indices,
+                    "truncated": requested_pages > max_pages,
+                    "requested_pages": requested_pages,
+                }
 
             # Comma-separated: "1,3,5"
             if "," in pages:
@@ -55,8 +73,13 @@ def register_tools(mcp: FastMCP) -> None:
                 for p in page_nums:
                     if p < 1 or p > total_pages:
                         return {"error": f"Page {p} out of range. PDF has {total_pages} pages."}
+                requested_pages = len(page_nums)
                 indices = [p - 1 for p in page_nums[:max_pages]]
-                return indices
+                return {
+                    "indices": indices,
+                    "truncated": requested_pages > max_pages,
+                    "requested_pages": requested_pages,
+                }
 
             return {"error": f"Invalid page format: '{pages}'. Use 'all', '5', '1-10', or '1,3,5'."}
 
@@ -78,7 +101,8 @@ def register_tools(mcp: FastMCP) -> None:
 
         Args:
             file_path: Path to the PDF file to read (absolute or relative)
-            pages: Page range to extract - 'all'/None for all, '5' for single, '1-10' for range, '1,3,5' for specific
+            pages: Page range - 'all'/None for all, '5' for single,
+                '1-10' for range, '1,3,5' for specific
             max_pages: Maximum number of pages to process (1-1000, memory safety)
             include_metadata: Include PDF metadata (author, title, creation date, etc.)
 
@@ -115,9 +139,11 @@ def register_tools(mcp: FastMCP) -> None:
             total_pages = len(reader.pages)
 
             # Parse page range
-            page_indices = parse_page_range(pages, total_pages, max_pages)
-            if isinstance(page_indices, dict):  # Error dict
-                return page_indices
+            page_info = parse_page_range(pages, total_pages, max_pages)
+            if "error" in page_info:
+                return page_info
+
+            page_indices = page_info["indices"]
 
             # Extract text from pages
             content_parts = []
@@ -136,6 +162,15 @@ def register_tools(mcp: FastMCP) -> None:
                 "char_count": len(content),
             }
 
+            # Surface truncation information when requested pages exceed max_pages
+            if page_info.get("truncated"):
+                requested = page_info.get("requested_pages", len(page_indices))
+                result["truncated"] = True
+                result["truncation_warning"] = (
+                    f"Requested {requested} page(s), but max_pages={max_pages}. "
+                    f"Only the first {len(page_indices)} page(s) were processed."
+                )
+
             # Add metadata if requested
             if include_metadata and reader.metadata:
                 meta = reader.metadata
@@ -145,7 +180,9 @@ def register_tools(mcp: FastMCP) -> None:
                     "subject": meta.get("/Subject"),
                     "creator": meta.get("/Creator"),
                     "producer": meta.get("/Producer"),
-                    "created": str(meta.get("/CreationDate")) if meta.get("/CreationDate") else None,
+                    "created": str(meta.get("/CreationDate"))
+                    if meta.get("/CreationDate")
+                    else None,
                     "modified": str(meta.get("/ModDate")) if meta.get("/ModDate") else None,
                 }
 

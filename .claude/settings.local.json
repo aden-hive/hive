@@ -24,7 +24,23 @@
       "Bash(done)",
       "Bash(xargs cat:*)",
       "mcp__agent-builder__list_mcp_tools",
-      "mcp__agent-builder__add_mcp_server"
+      "mcp__agent-builder__add_mcp_server",
+      "Bash(gh issue list:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat\\(tools\\): Add Excel tool for spreadsheet operations\n\nAdds a new Excel tool for reading and manipulating .xlsx/.xlsm files:\n- excel_read: Read Excel files with pagination and sheet selection\n- excel_write: Create new Excel files with data\n- excel_append: Append rows to existing files\n- excel_info: Get metadata about Excel files \\(sheets, columns, row counts\\)\n- excel_sheet_list: List all sheets in a workbook\n\nIncludes comprehensive test coverage \\(37 tests\\) and documentation.\n\nReferences #2805\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(git merge:*)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "agent-builder",
+    "tools"
+  ]
 }
