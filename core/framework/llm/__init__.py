@@ -42,8 +42,13 @@ except ImportError:
     pass
 
 try:
-    from framework.llm.mock import MockLLMProvider  # noqa: F401
+    from framework.llm.mock import (  # noqa: F401
+        MockLLMProvider,
+        error_scenario,
+        text_scenario,
+        tool_call_scenario,
+    )
 
-    __all__.append("MockLLMProvider")
+    __all__.extend(["MockLLMProvider", "text_scenario", "tool_call_scenario", "error_scenario"])
 except ImportError:
     pass
