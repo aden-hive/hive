@@ -21,42 +21,18 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
-## Quick Setup (Windows – PowerShell)
+## Windows Setup
 
-Windows users can use the native PowerShell setup script.
+Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run agents.
 
-Before running the script, allow script execution for the current session:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-Run setup from the project root:
-
-```powershell
-./scripts/setup-python.ps1
-```
-
-This will:
-
-- Check Python version (requires 3.11+)
-- Create a local `.venv` virtual environment
-- Install the core framework package (`framework`)
-- Install the tools package (`aden_tools`)
-- Fix package compatibility issues (openai + litellm)
-- Verify all installations
-
-After setup, activate the virtual environment:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-Set `PYTHONPATH` (required in every new PowerShell session):
-
-```powershell
-$env:PYTHONPATH="core;exports"
-```
+1. [Install WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install) if you haven't already:
+   ```powershell
+   wsl --install
+   ```
+2. Open your WSL terminal, clone the repo, and run the quickstart script:
+   ```bash
+   ./quickstart.sh
+   ```
 
 ## Alpine Linux Setup
 
@@ -326,12 +302,6 @@ Or run the setup script:
 ./quickstart.sh
 ```
 
-Windows:
-
-```powershell
-./scripts/setup-python.ps1
-```
-
 ### "ModuleNotFoundError: No module named 'openai.\_models'"
 
 **Cause:** Outdated `openai` package (0.27.x) incompatible with `litellm`
@@ -373,12 +343,6 @@ pip uninstall -y framework tools
 
 # Reinstall correctly
 ./quickstart.sh
-```
-
-Windows:
-
-```powershell
-./scripts/setup-python.ps1
 ```
 
 ## Package Structure
@@ -477,12 +441,6 @@ This design allows agents in `exports/` to be:
 
 ```bash
 ./quickstart.sh
-```
-
-Windows:
-
-```powershell
-./scripts/setup-python.ps1
 ```
 
 ### 2. Build Agent (Claude Code)
