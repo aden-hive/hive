@@ -80,3 +80,34 @@ class TestPdfReadTool:
 
         result = pdf_read_fn(file_path=str(pdf_file), include_metadata=True)
         assert isinstance(result, dict)
+
+    def test_truncation_flag_for_page_range(self, pdf_read_fn, tmp_path: Path, monkeypatch):
+        """When requested pages exceed max_pages, response includes truncation metadata."""
+
+        class FakePage:
+            def __init__(self, text: str) -> None:
+                self._text = text
+
+            def extract_text(self) -> str:
+                return self._text
+
+        class FakePdfReader:
+            def __init__(self, path: Path) -> None:  # noqa: ARG002
+                self.pages = [FakePage(f"Page {i + 1}") for i in range(50)]
+                self.is_encrypted = False
+                self.metadata = None
+
+        # Patch PdfReader used inside the tool so we don't need a real PDF
+        from aden_tools.tools.pdf_read_tool import pdf_read_tool
+
+        monkeypatch.setattr(pdf_read_tool, "PdfReader", FakePdfReader)
+
+        pdf_file = tmp_path / "test.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+
+        result = pdf_read_fn(file_path=str(pdf_file), pages="1-20", max_pages=10)
+
+        assert result["pages_extracted"] == 10
+        # New behavior: explicit truncation metadata instead of silent truncation
+        assert result.get("truncated") is True
+        assert "truncation_warning" in result
