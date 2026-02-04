@@ -23,7 +23,7 @@ See `framework.testing` for details.
 """
 
 from framework.builder.query import BuilderQuery
-from framework.llm import AnthropicProvider, LLMProvider
+from framework.llm import AnthropicProvider, KimiProvider, LLMProvider
 from framework.runner import AgentOrchestrator, AgentRunner
 from framework.runtime.core import Runtime
 from framework.schemas.decision import Decision, DecisionEvaluation, Option, Outcome
@@ -56,6 +56,7 @@ __all__ = [
     # LLM
     "LLMProvider",
     "AnthropicProvider",
+    "KimiProvider",
     # Runner
     "AgentRunner",
     "AgentOrchestrator",

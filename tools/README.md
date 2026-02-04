@@ -28,6 +28,8 @@ cp .env.example .env
 | `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
 | `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
 | `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+| `KIMI_API_KEY`         | Kimi (Moonshot AI) models     | [platform.moonshot.cn](https://platform.moonshot.cn/console/api-keys) |
+| `MOONSHOT_API_KEY`     | Kimi (Moonshot AI) models     | [platform.moonshot.cn](https://platform.moonshot.cn/console/api-keys) |
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 

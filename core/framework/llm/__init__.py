@@ -12,6 +12,13 @@ except ImportError:
     pass
 
 try:
+    from framework.llm.kimi import KimiProvider  # noqa: F401
+
+    __all__.append("KimiProvider")
+except ImportError:
+    pass
+
+try:
     from framework.llm.litellm import LiteLLMProvider  # noqa: F401
 
     __all__.append("LiteLLMProvider")

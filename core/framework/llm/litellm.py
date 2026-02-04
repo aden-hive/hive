@@ -135,8 +135,10 @@ class LiteLLMProvider(LLMProvider):
         # Make the call
         response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
-        # Extract content
-        content = response.choices[0].message.content or ""
+        # Extract content and reasoning_content
+        message = response.choices[0].message
+        content = message.content or ""
+        reasoning_content = getattr(message, "reasoning_content", None)
 
         # Get usage info
         usage = response.usage
@@ -149,6 +151,7 @@ class LiteLLMProvider(LLMProvider):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             stop_reason=response.choices[0].finish_reason or "",
+            reasoning_content=reasoning_content,
             raw_response=response,
         )
 
@@ -208,6 +211,7 @@ class LiteLLMProvider(LLMProvider):
                     input_tokens=total_input_tokens,
                     output_tokens=total_output_tokens,
                     stop_reason=choice.finish_reason or "stop",
+                    reasoning_content=getattr(message, "reasoning_content", None),
                     raw_response=response,
                 )
 

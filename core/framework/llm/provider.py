@@ -15,6 +15,7 @@ class LLMResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     stop_reason: str = ""
+    reasoning_content: str | None = None
     raw_response: Any = None
 
 

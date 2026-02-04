@@ -16,11 +16,19 @@ LLM_CREDENTIALS = {
         help_url="https://console.anthropic.com/settings/keys",
         description="API key for Anthropic Claude models",
     ),
-    # Future LLM providers:
+    "kimi": CredentialSpec(
+        env_var="KIMI_API_KEY",
+        tools=[],
+        node_types=["llm_generate", "llm_tool_use"],
+        required=False,
+        startup_required=False,
+        help_url="https://platform.moonshot.cn/console/api-keys",
+        description="API key for Kimi (Moonshot AI) models",
+    ),
     # "openai": CredentialSpec(
     #     env_var="OPENAI_API_KEY",
     #     tools=[],
-    #     node_types=["openai_generate"],
+    #     node_types=["llm_generate", "llm_tool_use"],
     #     required=False,
     #     startup_required=False,
     #     help_url="https://platform.openai.com/api-keys",
