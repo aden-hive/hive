@@ -17,7 +17,9 @@ class AgentMetadata:
     version: str = "0.1.0"
     description: str = "Multi-channel marketing content generator"
     author: str = ""
-    tags: list[str] = field(default_factory=lambda: ["marketing", "content", "template"])
+    tags: list[str] = field(
+        default_factory=lambda: ["marketing", "content", "template"]
+    )
 
 
 default_config = RuntimeConfig()

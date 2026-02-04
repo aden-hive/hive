@@ -1,10 +1,10 @@
 ---
 name: setup-credentials
-description: Set up and install credentials for an agent. Detects missing credentials from agent config, collects them from the user, and stores them securely in the encrypted credential store at ~/.hive/credentials.
+description: Set up and install credentials for an agent. Detects missing credentials from agent config, collects them from the user, and stores them securely in the local encrypted store at ~/.hive/credentials.
 license: Apache-2.0
 metadata:
   author: hive
-  version: "2.1"
+  version: "2.2"
   type: utility
 ---
 
@@ -31,47 +31,95 @@ Determine which agent needs credentials. The user will either:
 
 Locate the agent's directory under `exports/{agent_name}/`.
 
-### Step 2: Detect Required Credentials
+### Step 2: Detect Required Credentials (Bash-First)
 
-Read the agent's configuration to determine which tools and node types it uses:
+Use bash commands to determine what the agent needs and what's already configured. This avoids Python import issues and works even when `HIVE_CREDENTIAL_KEY` is not set.
 
-```python
-from core.framework.runner import AgentRunner
+#### Step 2a: Read Agent Requirements
 
-runner = AgentRunner.load("exports/{agent_name}")
-validation = runner.validate()
+Extract `required_tools` and node types from the agent config:
 
-# validation.missing_credentials contains env var names
-# validation.warnings contains detailed messages with help URLs
+```bash
+# Get required tools
+jq -r '.required_tools[]?' exports/{agent_name}/agent.json 2>/dev/null
+
+# Get node types from graph nodes
+jq -r '.graph.nodes[]?.node_type' exports/{agent_name}/agent.json 2>/dev/null | sort -u
 ```
 
-Alternatively, check the credential store directly:
+Map the extracted tools and node types to credentials by reading the spec files directly:
 
-```python
-from core.framework.credentials import CredentialStore
-
-# Use encrypted storage (default: ~/.hive/credentials)
-store = CredentialStore.with_encrypted_storage()
-
-# Check what's available
-available = store.list_credentials()
-print(f"Available credentials: {available}")
-
-# Check if specific credential exists
-if store.is_available("hubspot"):
-    print("HubSpot credential found")
-else:
-    print("HubSpot credential missing")
+```bash
+# Read all credential specs — each file defines tools, node_types, env_var, and credential_id
+cat tools/src/aden_tools/credentials/llm.py tools/src/aden_tools/credentials/search.py tools/src/aden_tools/credentials/email.py tools/src/aden_tools/credentials/integrations.py
 ```
 
-To see all known credential specs (for help URLs and setup instructions):
+For each `CredentialSpec`, match its `tools` and `node_types` lists against the agent's required tools and node types. Extract the `env_var`, `credential_id`, and `credential_group` for every match. This is the list of needed credentials.
 
-```python
-from aden_tools.credentials import CREDENTIAL_SPECS
+#### Step 2b: Check Existing Credential Sources
 
-for name, spec in CREDENTIAL_SPECS.items():
-    print(f"{name}: env_var={spec.env_var}, aden={spec.aden_supported}")
+For each needed credential, check three sources. A credential is "found" if it exists in ANY of them:
+
+**1. Encrypted store metadata index** (unencrypted JSON — no decryption key needed):
+
+```bash
+cat ~/.hive/credentials/metadata/index.json 2>/dev/null | jq -r '.credentials | keys[]'
 ```
+
+If a credential ID appears in this list, it is stored in the encrypted store.
+
+**2. Environment variables:**
+
+```bash
+# Check each needed env var, e.g.:
+printenv ANTHROPIC_API_KEY > /dev/null 2>&1 && echo "ANTHROPIC_API_KEY: set" || echo "ANTHROPIC_API_KEY: not set"
+printenv BRAVE_SEARCH_API_KEY > /dev/null 2>&1 && echo "BRAVE_SEARCH_API_KEY: set" || echo "BRAVE_SEARCH_API_KEY: not set"
+```
+
+**3. Project `.env` file:**
+
+```bash
+# Check each needed env var, e.g.:
+grep -q '^ANTHROPIC_API_KEY=' .env 2>/dev/null && echo "ANTHROPIC_API_KEY: in .env" || echo "ANTHROPIC_API_KEY: not in .env"
+grep -q '^BRAVE_SEARCH_API_KEY=' .env 2>/dev/null && echo "BRAVE_SEARCH_API_KEY: in .env" || echo "BRAVE_SEARCH_API_KEY: not in .env"
+```
+
+#### Step 2c: HIVE_CREDENTIAL_KEY Check
+
+If any credentials were found in the encrypted store metadata index, verify the encryption key is available. The key is typically persisted to shell config by a previous setup-credentials run.
+
+Check both the current session AND shell config files:
+
+```bash
+# Check 1: Current session
+printenv HIVE_CREDENTIAL_KEY > /dev/null 2>&1 && echo "session: set" || echo "session: not set"
+
+# Check 2: Shell config files (where setup-credentials persists it)
+# Note: check each file individually to avoid non-zero exit when one doesn't exist
+for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTIAL_KEY' "$f" && echo "$f"; done
+```
+
+Decision logic:
+- **In current session** — no action needed, credentials in the store are usable
+- **In shell config but NOT in current session** — the key is persisted but this shell hasn't sourced it. Run `source ~/.zshrc` (or `~/.bashrc`), then re-check. Credentials in the store are usable after sourcing.
+- **Not in session AND not in shell config** — the key was never persisted. Warn the user that credentials in the store cannot be decrypted. Help fix the key situation (recover/re-persist), do NOT re-collect credential values that are already stored.
+
+#### Step 2d: Compute Missing & Group
+
+Diff the "needed" credentials against the "found" credentials to get the truly missing list.
+
+Group related credentials by their `credential_group` field from the spec files. Credentials that share the same non-empty `credential_group` value should be presented as a single setup step rather than asking for each one individually.
+
+**If nothing is missing and there's no HIVE_CREDENTIAL_KEY issue:** Report all credentials as configured and skip Steps 3-5. Example:
+
+```
+All required credentials are already configured:
+  ✓ anthropic (ANTHROPIC_API_KEY) — found in encrypted store
+  ✓ brave_search (BRAVE_SEARCH_API_KEY) — found in environment
+Your agent is ready to run!
+```
+
+**If credentials are missing:** Continue to Step 3 with only the missing ones.
 
 ### Step 3: Present Auth Options for Each Missing Credential
 
@@ -104,7 +152,7 @@ Present the available options using AskUserQuestion:
 ```
 Choose how to configure HUBSPOT_ACCESS_TOKEN:
 
-  1) Aden Authorization Server (Recommended)
+  1) Aden Platform (OAuth) (Recommended)
      Secure OAuth2 flow via integration.adenhq.com
      - Quick setup with automatic token refresh
      - No need to manage API keys manually
@@ -114,7 +162,7 @@ Choose how to configure HUBSPOT_ACCESS_TOKEN:
      - Requires creating a HubSpot Private App
      - Full control over scopes and permissions
 
-  3) Custom Credential Store (Advanced)
+  3) Local Credential Setup (Advanced)
      Programmatic configuration for CI/CD
      - For automated deployments
      - Requires manual API calls
@@ -122,7 +170,7 @@ Choose how to configure HUBSPOT_ACCESS_TOKEN:
 
 ### Step 4: Execute Auth Flow Based on User Choice
 
-#### Option 1: Aden Authorization Server
+#### Option 1: Aden Platform (OAuth)
 
 This is the recommended flow for supported integrations (HubSpot, etc.).
 
@@ -174,7 +222,7 @@ shell_type = detect_shell()  # 'bash', 'zsh', or 'unknown'
 success, config_path = add_env_var_to_shell_config(
     "ADEN_API_KEY",
     user_provided_key,
-    comment="Aden authorization server API key"
+    comment="Aden Platform (OAuth) API key"
 )
 
 if success:
@@ -313,7 +361,7 @@ if not result.valid:
     # 2. Continue anyway (not recommended)
 ```
 
-**4.2d. Store in Encrypted Credential Store**
+**4.2d. Store in Local Encrypted Store**
 
 ```python
 from core.framework.credentials import CredentialStore, CredentialObject, CredentialKey
@@ -340,7 +388,7 @@ store.save_credential(cred)
 export HUBSPOT_ACCESS_TOKEN="the-value"
 ```
 
-#### Option 3: Custom Credential Store (Advanced)
+#### Option 3: Local Credential Setup (Advanced)
 
 For programmatic/CI/CD setups.
 
@@ -408,10 +456,14 @@ Report the result to the user.
 
 Health checks validate credentials by making lightweight API calls:
 
-| Credential     | Endpoint                                | What It Checks                    |
-| -------------- | --------------------------------------- | --------------------------------- |
-| `hubspot`      | `GET /crm/v3/objects/contacts?limit=1`  | Bearer token validity, CRM scopes |
-| `brave_search` | `GET /res/v1/web/search?q=test&count=1` | API key validity                  |
+| Credential      | Endpoint                                | What It Checks                     |
+| --------------- | --------------------------------------- | ---------------------------------- |
+| `anthropic`     | `POST /v1/messages`                     | API key validity                   |
+| `brave_search`  | `GET /res/v1/web/search?q=test&count=1` | API key validity                   |
+| `google_search` | `GET /customsearch/v1?q=test&num=1`     | API key + CSE ID validity          |
+| `github`        | `GET /user`                             | Token validity, user identity      |
+| `hubspot`       | `GET /crm/v3/objects/contacts?limit=1`  | Bearer token validity, CRM scopes  |
+| `resend`        | `GET /domains`                          | API key validity                   |
 
 ```python
 from aden_tools.credentials import check_credential_health, HealthCheckResult
@@ -424,7 +476,7 @@ result: HealthCheckResult = check_credential_health("hubspot", token_value)
 
 ## Encryption Key (HIVE_CREDENTIAL_KEY)
 
-The encrypted credential store requires `HIVE_CREDENTIAL_KEY` to encrypt/decrypt credentials.
+The local encrypted store requires `HIVE_CREDENTIAL_KEY` to encrypt/decrypt credentials.
 
 - If the user doesn't have one, `EncryptedFileStorage` will auto-generate one and log it
 - The user MUST persist this key (e.g., in `~/.bashrc` or a secrets manager)
@@ -443,7 +495,7 @@ If `HIVE_CREDENTIAL_KEY` is not set:
 - **NEVER** store credentials in plaintext files, git-tracked files, or agent configs
 - **NEVER** hardcode credentials in source code
 - **ALWAYS** use `SecretStr` from Pydantic when handling credential values in Python
-- **ALWAYS** use the encrypted credential store (`~/.hive/credentials`) for persistence
+- **ALWAYS** use the local encrypted store (`~/.hive/credentials`) for persistence
 - **ALWAYS** run health checks before storing credentials (when possible)
 - **ALWAYS** verify credentials were stored by re-running validation, not by reading them back
 - When modifying `~/.bashrc` or `~/.zshrc`, confirm with the user first
@@ -456,7 +508,8 @@ All credential specs are defined in `tools/src/aden_tools/credentials/`:
 | ----------------- | ------------- | --------------------------------------------- | -------------- |
 | `llm.py`          | LLM Providers | `anthropic`                                   | No             |
 | `search.py`       | Search Tools  | `brave_search`, `google_search`, `google_cse` | No             |
-| `integrations.py` | Integrations  | `hubspot`                                     | Yes            |
+| `email.py`        | Email         | `resend`                                      | No             |
+| `integrations.py` | Integrations  | `github`, `hubspot`                           | No / Yes       |
 
 **Note:** Additional LLM providers (Cerebras, Groq, OpenAI) are handled by LiteLLM via environment
 variables (`CEREBRAS_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`) but are not yet in CREDENTIAL_SPECS.
@@ -507,66 +560,90 @@ token = store.get_key("hubspot", "access_token")
 ## Example Session
 
 ```
-User: /setup-credentials for my hubspot-agent
+User: /setup-credentials for my research-agent
 
-Agent: Let me check what credentials your hubspot-agent needs.
+Agent: Let me check what credentials your research-agent needs.
 
-[Runs validation, finds ANTHROPIC_API_KEY and HUBSPOT_ACCESS_TOKEN missing]
+[Reads agent config]
+$ jq -r '.required_tools[]?' exports/research-agent/agent.json
+web_search
+google_search
 
-Agent: Your hubspot-agent requires 2 credentials:
+$ jq -r '.graph.nodes[]?.node_type' exports/research-agent/agent.json | sort -u
+llm_tool_use
 
-  1. ANTHROPIC_API_KEY - Anthropic API key for LLM calls
-  2. HUBSPOT_ACCESS_TOKEN - HubSpot access token
+[Maps tools/nodes to credentials using lookup table]
+Needed: anthropic, brave_search, google_search, google_cse
 
-Let's set these up one at a time.
+[Checks encrypted store metadata index]
+$ cat ~/.hive/credentials/metadata/index.json | jq -r '.credentials | keys[]'
+anthropic
+brave_search
 
---- Setting up ANTHROPIC_API_KEY ---
+[Checks environment variables]
+$ printenv ANTHROPIC_API_KEY > /dev/null 2>&1 && echo "set" || echo "not set"
+not set
+$ printenv BRAVE_SEARCH_API_KEY > /dev/null 2>&1 && echo "set" || echo "not set"
+not set
+$ printenv GOOGLE_API_KEY > /dev/null 2>&1 && echo "set" || echo "not set"
+not set
+$ printenv GOOGLE_CSE_ID > /dev/null 2>&1 && echo "set" || echo "not set"
+not set
 
-This credential only supports direct API key entry.
+[Checks HIVE_CREDENTIAL_KEY since credentials found in store]
+$ printenv HIVE_CREDENTIAL_KEY > /dev/null 2>&1 && echo "session: set" || echo "session: not set"
+session: not set
+$ for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTIAL_KEY' "$f" && echo "$f"; done
+/Users/user/.zshrc
 
-[Shows instructions for getting Anthropic API key]
-[AskUserQuestion: "Please provide your Anthropic API key:"]
+[Key is in shell config but not current session — sourcing it]
+$ source ~/.zshrc
+
+[Computes missing credentials]
+Found:
+  ✓ anthropic (ANTHROPIC_API_KEY) — in encrypted store
+  ✓ brave_search (BRAVE_SEARCH_API_KEY) — in encrypted store
+Missing:
+  ✗ google_search (GOOGLE_API_KEY)
+  ✗ google_cse (GOOGLE_CSE_ID)
+
+Agent: 2 of 4 required credentials are already configured. Only Google Custom
+Search needs setup (2 values as a single group).
+
+--- Setting up Google Custom Search (google_search + google_cse) ---
+
+This requires two values that work together.
+
+First, the Google API Key:
+1. Go to https://console.cloud.google.com/apis/credentials
+2. Create a new project (or select an existing one)
+3. Enable the "Custom Search API" from the API Library
+4. Go to Credentials > Create Credentials > API Key
+5. Copy the generated API key
+
+[AskUserQuestion: "Please provide your Google API key:"]
 [User provides key]
-[Stores in credential store, exports to env]
 
---- Setting up HUBSPOT_ACCESS_TOKEN ---
+Now, the Custom Search Engine ID:
+1. Go to https://programmablesearchengine.google.com/controlpanel/all
+2. Click "Add" to create a new search engine
+3. Under "What to search", select "Search the entire web"
+4. Give your search engine a name
+5. Click "Create"
+6. Copy the Search Engine ID (cx value)
 
-[AskUserQuestion with 3 options]
+[AskUserQuestion: "Please provide your Google CSE ID:"]
+[User provides ID]
 
-Choose how to configure HUBSPOT_ACCESS_TOKEN:
-  1) Aden Authorization Server (Recommended)
-  2) Direct API Key
-  3) Custom Credential Store (Advanced)
+[Runs health check with both values - GET /customsearch/v1?q=test&num=1 → 200 OK]
+[Stores both in local encrypted store, exports to env]
 
-User: 1 (Aden)
-
-Agent: Great! Let me check if you have an Aden API key configured...
-
-[Checks for ADEN_API_KEY, not found]
-[Opens browser to integration.adenhq.com/setup]
-
-Agent: I've opened Aden's setup page. Please:
-  1. Sign in or create an account
-  2. Connect your HubSpot account (OAuth happens on Aden's site)
-  3. Copy the API key shown after setup
-
-[AskUserQuestion: "Please provide your Aden API key:"]
-[User provides key]
-
-Agent: Would you like me to save this to your shell config (~/.zshrc) for future sessions?
-
-[User approves]
-[Saves to ~/.zshrc and ~/.hive/configuration.json]
-
-Agent: Let me sync your credentials from Aden...
-
-[Syncs credentials from Aden server - OAuth already done on Aden's side]
-[Runs health check]
-
-Agent: HubSpot credentials validated successfully!
+✓ Google Custom Search credentials valid
 
 All credentials are now configured:
-  - ANTHROPIC_API_KEY: Stored in encrypted credential store
-  - HUBSPOT_ACCESS_TOKEN: Synced from Aden (OAuth completed on Aden)
-  - Validation passed - your agent is ready to run!
+  ✓ anthropic (ANTHROPIC_API_KEY) — already in encrypted store
+  ✓ brave_search (BRAVE_SEARCH_API_KEY) — already in encrypted store
+  ✓ google_search (GOOGLE_API_KEY) — stored in encrypted store
+  ✓ google_cse (GOOGLE_CSE_ID) — stored in encrypted store
+  Your agent is ready to run!
 ```

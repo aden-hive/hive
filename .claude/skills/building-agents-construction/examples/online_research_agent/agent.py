@@ -218,19 +218,9 @@ class OnlineResearchAgent:
         tool_registry = ToolRegistry()
 
         # Load MCP servers (always load, needed for tool validation)
-        agent_dir = Path(__file__).parent
-        mcp_config_path = agent_dir / "mcp_servers.json"
-
+        mcp_config_path = Path(__file__).parent / "mcp_servers.json"
         if mcp_config_path.exists():
-            with open(mcp_config_path) as f:
-                mcp_servers = json.load(f)
-
-            for server_config in mcp_servers.get("servers", []):
-                # Resolve relative cwd paths
-                cwd = server_config.get("cwd")
-                if cwd and not Path(cwd).is_absolute():
-                    server_config["cwd"] = str(agent_dir / cwd)
-                tool_registry.register_mcp_server(server_config)
+            tool_registry.load_mcp_config(mcp_config_path)
 
         llm = None
         if not mock_mode:

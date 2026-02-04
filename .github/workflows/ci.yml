@@ -83,8 +83,7 @@ jobs:
         run: |
           cd tools
           uv sync --extra dev
-          uv pip install --python .venv/bin/python -e ../core
-          uv run --extra dev pytest tests/ -v
+          uv run pytest tests/ -v
 
   validate:
     name: Validate Agent Exports
