@@ -126,14 +126,16 @@ class OutputValidator:
 
         for key in expected_keys:
             if key not in output:
-                errors.append(f"Missing required output key: '{key}'")
+                if key not in nullable_keys:
+                    errors.append(f"Missing required output key: '{key}'")
             elif not allow_empty:
                 value = output[key]
                 if value is None:
                     if key not in nullable_keys:
                         errors.append(f"Output key '{key}' is None")
                 elif isinstance(value, str) and len(value.strip()) == 0:
-                    errors.append(f"Output key '{key}' is empty string")
+                    if key not in nullable_keys:
+                        errors.append(f"Output key '{key}' is empty string")
 
         return ValidationResult(success=len(errors) == 0, errors=errors)
 
