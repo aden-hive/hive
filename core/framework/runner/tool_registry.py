@@ -262,6 +262,34 @@ class ToolRegistry:
         """
         self._session_context.update(context)
 
+    def load_mcp_config(self, config_path: Path) -> None:
+        """
+        Load and register MCP servers from a config file.
+
+        Resolves relative ``cwd`` paths against the config file's parent
+        directory so callers never need to handle path resolution themselves.
+
+        Args:
+            config_path: Path to an ``mcp_servers.json`` file.
+        """
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load MCP config from {config_path}: {e}")
+            return
+
+        base_dir = config_path.parent
+        for server_config in config.get("servers", []):
+            cwd = server_config.get("cwd")
+            if cwd and not Path(cwd).is_absolute():
+                server_config["cwd"] = str((base_dir / cwd).resolve())
+            try:
+                self.register_mcp_server(server_config)
+            except Exception as e:
+                name = server_config.get("name", "unknown")
+                logger.warning(f"Failed to register MCP server '{name}': {e}")
+
     def register_mcp_server(
         self,
         server_config: dict[str, Any],
@@ -310,9 +338,6 @@ class ToolRegistry:
             # Register each tool
             count = 0
             for mcp_tool in client.list_tools():
-                # Capture the full set of params this tool accepts (before schema stripping)
-                accepted_params = set(mcp_tool.input_schema.get("properties", {}).keys())
-
                 # Convert MCP tool to framework Tool (strips context params from LLM schema)
                 tool = self._convert_mcp_tool_to_framework_tool(mcp_tool)
 
@@ -320,19 +345,18 @@ class ToolRegistry:
                 def make_mcp_executor(
                     client_ref: MCPClient,
                     tool_name: str,
-                    registry_ref: "ToolRegistry",
-                    tool_params: set,
+                    registry_ref,
+                    tool_params: set[str],
                 ):
                     def executor(inputs: dict) -> Any:
                         try:
-                            # Only inject context params the tool actually accepts
+                            # Only inject session context params the tool accepts
                             filtered_context = {
                                 k: v
                                 for k, v in registry_ref._session_context.items()
                                 if k in tool_params
                             }
-                            # Context overrides inputs so framework values always win
-                            merged_inputs = {**inputs, **filtered_context}
+                            merged_inputs = {**filtered_context, **inputs}
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP tools return content array, extract the result
                             if isinstance(result, list) and len(result) > 0:
@@ -346,10 +370,11 @@ class ToolRegistry:
 
                     return executor
 
+                tool_params = set(mcp_tool.input_schema.get("properties", {}).keys())
                 self.register(
                     mcp_tool.name,
                     tool,
-                    make_mcp_executor(client, mcp_tool.name, self, accepted_params),
+                    make_mcp_executor(client, mcp_tool.name, self, tool_params),
                 )
                 count += 1
 

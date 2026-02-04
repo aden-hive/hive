@@ -8,6 +8,7 @@ Set HIVE_TEST_LLM_MODEL=<model> to override the real model.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -950,7 +951,15 @@ async def test_client_facing_node_streams_output():
         event_bus=bus,
         config=LoopConfig(max_iterations=5),
     )
+
+    # client_facing + text-only blocks for user input; use shutdown to unblock
+    async def auto_shutdown():
+        await asyncio.sleep(0.05)
+        node.signal_shutdown()
+
+    task = asyncio.create_task(auto_shutdown())
     result = await node.execute(ctx)
+    await task
 
     assert result.success
 
