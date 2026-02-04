@@ -28,6 +28,8 @@ cp .env.example .env
 | `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
 | `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
 | `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+| `QUICKBOOKS_ACCESS_TOKEN` | `quickbooks` tools          | [developer.intuit.com](https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization) |
+| `QUICKBOOKS_REALM_ID`    | `quickbooks` tools          | [developer.intuit.com](https://developer.intuit.com/app/developer/qbo/docs/get-started/get-company-id) |
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
@@ -39,6 +41,9 @@ export BRAVE_SEARCH_API_KEY=your-key-here
 ```
 
 See [.env.example](.env.example) for details.
+
+### QuickBooks OAuth Token Refresh
+QuickBooks Online use OAuth 2.0. Access tokens are valid for 1 hour. For the MVP, you should manually refresh your token using the [Intuit OAuth Playground](https://developer.intuit.com/app/developer/playground) and update your `.env` file when it expires.
 
 ## Quick Start
 
@@ -75,6 +80,7 @@ python mcp_server.py
 | `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
+| `quickbooks`           | Manage accounting and financial operations     |
 
 ## Project Structure
 

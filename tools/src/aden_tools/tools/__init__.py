@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
 from .example_tool import register_tools as register_example
+from .quickbooks_tool import register_tools as register_quickbooks
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.execute_command_tool import (
@@ -75,6 +76,9 @@ def register_all_tools(
     register_execute_command(mcp)
     register_csv(mcp)
 
+    # Register QuickBooks tools
+    register_quickbooks(mcp, credentials=credentials)
+
     return [
         "example_tool",
         "web_search",
@@ -93,6 +97,13 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        # QuickBooks tools
+        "quickbooks_create_invoice",
+        "quickbooks_get_invoice",
+        "quickbooks_search_customers",
+        "quickbooks_create_customer",
+        "quickbooks_record_payment",
+        "quickbooks_create_expense",
     ]
 
 
