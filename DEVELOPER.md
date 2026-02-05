@@ -20,12 +20,12 @@ This guide covers everything you need to know to develop with the Aden Agent Fra
 
 Aden Agent Framework is a Python-based system for building goal-driven, self-improving AI agents.
 
-| Package       | Directory  | Description                             | Tech Stack   |
-| ------------- | ---------- | --------------------------------------- | ------------ |
-| **framework** | `/core`    | Core runtime, graph executor, protocols | Python 3.11+ |
-| **tools**     | `/tools`   | MCP tools for agent capabilities        | Python 3.11+ |
+| Package       | Directory  | Description                               | Tech Stack   |
+| ------------- | ---------- | ----------------------------------------- | ------------ |
+| **framework** | `/core`    | Core runtime, graph executor, protocols   | Python 3.11+ |
+| **tools**     | `/tools`   | MCP tools for agent capabilities          | Python 3.11+ |
 | **exports**   | `/exports` | Agent packages (user-created, gitignored) | Python 3.11+ |
-| **skills**    | `.claude`  | Claude Code skills for building/testing | Markdown     |
+| **skills**    | `.claude`  | Claude Code skills for building/testing   | Markdown     |
 
 ### Key Principles
 
@@ -102,7 +102,7 @@ Get API keys:
 This installs agent-related Claude Code skills:
 
 - `/building-agents-core` - Fundamental agent concepts
-- `/building-agents-construction` - Step-by-step agent building
+- `/hive-create` - Step-by-step agent building
 - `/building-agents-patterns` - Best practices and design patterns
 - `/testing-agent` - Test and validate agents
 - `/agent-workflow` - End-to-end guided workflow
@@ -115,7 +115,7 @@ uv run python -c "import framework; print('✓ framework OK')"
 uv run python -c "import aden_tools; print('✓ aden_tools OK')"
 uv run python -c "import litellm; print('✓ litellm OK')"
 
-# Run an agent (after building one via /building-agents-construction)
+# Run an agent (after building one via /hive-create)
 PYTHONPATH=exports uv run python -m your_agent_name validate
 ```
 
@@ -152,7 +152,7 @@ hive/                                    # Repository root
 │       ├── testing-agent/               # Skills for testing agents
 │       │   ├── SKILL.md
 │       |   └── examples
-│       └── agent-workflow/              # Complete workflow 
+│       └── agent-workflow/              # Complete workflow
 |           ├── SKILL.md
 │           └── examples
 │
@@ -188,7 +188,7 @@ hive/                                    # Repository root
 │   └── README.md                        # Tools documentation
 │
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
-│   └── your_agent_name/                 # Created via /building-agents-construction
+│   └── your_agent_name/                 # Created via /hive-create
 │
 ├── docs/                                # Documentation
 │   ├── getting-started.md               # Quick start guide
@@ -226,7 +226,7 @@ The fastest way to build agents is using the Claude Code skills:
 ./quickstart.sh
 
 # Build a new agent
-claude> /building-agents-construction
+claude> /hive
 
 # Test the agent
 claude> /testing-agent
@@ -237,7 +237,7 @@ claude> /testing-agent
 1. **Define Your Goal**
 
    ```
-   claude> /building-agents-construction
+   claude> /hive
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
@@ -542,7 +542,7 @@ uv add <package>
 
 ```bash
 # Option 1: Use Claude Code skill (recommended)
-claude> /building-agents-construction
+claude> /hive
 
 # Option 2: Create manually
 # Note: exports/ is initially empty (gitignored). Create your agent directory:
@@ -657,8 +657,6 @@ kill -9 <PID>
 # Or change ports in config.yaml and regenerate
 ```
 
-
-
 ### Environment Variables Not Loading
 
 ```bash
@@ -671,8 +669,6 @@ echo $ANTHROPIC_API_KEY
 # Create .env if needed
 # Then add your API keys
 ```
-
-
 
 ---
 
