@@ -88,6 +88,9 @@ def tui(mock, verbose, debug):
         agent._event_bus = EventBus()
         agent._tool_registry = ToolRegistry()
 
+        storage_path = Path.home() / ".hive" / "deep_research_agent"
+        storage_path.mkdir(parents=True, exist_ok=True)
+
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
         if mcp_config_path.exists():
             agent._tool_registry.load_mcp_config(mcp_config_path)
@@ -103,9 +106,6 @@ def tui(mock, verbose, debug):
         tools = list(agent._tool_registry.get_tools().values())
         tool_executor = agent._tool_registry.get_executor()
         graph = agent._build_graph()
-
-        storage_path = Path.home() / ".hive" / "deep_research_agent"
-        storage_path.mkdir(parents=True, exist_ok=True)
 
         runtime = create_agent_runtime(
             graph=graph,

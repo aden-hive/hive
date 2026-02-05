@@ -331,8 +331,11 @@ class ExecutionStream:
                 runtime_adapter = StreamRuntimeAdapter(self._runtime, execution_id)
 
                 # Create executor for this execution.
-                # Scope storage by execution_id so each execution gets
-                # fresh conversations and spillover directories.
+                # Each execution gets its own storage under sessions/{exec_id}/
+                # so conversations, spillover, and data files are all scoped
+                # to this execution.  The executor sets data_dir via execution
+                # context (contextvars) so data tools and spillover share the
+                # same session-scoped directory.
                 exec_storage = self._storage.base_path / "sessions" / execution_id
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
@@ -342,6 +345,7 @@ class ExecutionStream:
                     event_bus=self._event_bus,
                     stream_id=self.stream_id,
                     storage_path=exec_storage,
+                    loop_config=self.graph.loop_config,
                 )
                 # Track executor so inject_input() can reach EventLoopNode instances
                 self._active_executors[execution_id] = executor
