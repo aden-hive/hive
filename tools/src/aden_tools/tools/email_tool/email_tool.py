@@ -121,11 +121,11 @@ def register_tools(
         if credentials is not None:
             return {
                 "resend_api_key": credentials.get("resend"),
-                "gmail_access_token": credentials.get("gmail"),
+                "gmail_access_token": credentials.get("google"),  # Google OAuth for Gmail
             }
         return {
             "resend_api_key": os.getenv("RESEND_API_KEY"),
-            "gmail_access_token": os.getenv("GMAIL_ACCESS_TOKEN"),
+            "gmail_access_token": os.getenv("GOOGLE_ACCESS_TOKEN"),
         }
 
     def _resolve_from_email(from_email: str | None) -> str | None:
