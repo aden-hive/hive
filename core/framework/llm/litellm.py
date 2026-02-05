@@ -147,7 +147,7 @@ class LiteLLMProvider(LLMProvider):
 
         if litellm is None:
             raise ImportError(
-                "LiteLLM is not installed. Please install it with: pip install litellm"
+                "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
     def _completion_with_rate_limit_retry(self, **kwargs: Any) -> Any:

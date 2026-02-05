@@ -581,10 +581,76 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Verify Setup
+# Step 5: Initialize Credential Store
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 4: Verifying installation...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Initializing credential store...${NC}"
+echo ""
+echo -e "${DIM}The credential store encrypts API keys and secrets for your agents.${NC}"
+echo ""
+
+HIVE_CRED_DIR="$HOME/.hive/credentials"
+
+# Check if HIVE_CREDENTIAL_KEY already exists (from env or .env)
+if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
+    echo -e "${GREEN}  ✓ HIVE_CREDENTIAL_KEY already set${NC}"
+else
+    # Generate a new Fernet encryption key
+    echo -n "  Generating encryption key... "
+    GENERATED_KEY=$(uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null)
+
+    if [ -z "$GENERATED_KEY" ]; then
+        echo -e "${RED}failed${NC}"
+        echo -e "${YELLOW}  ⚠ Credential store will not be available.${NC}"
+        echo -e "${YELLOW}    You can set HIVE_CREDENTIAL_KEY manually later.${NC}"
+    else
+        echo -e "${GREEN}ok${NC}"
+
+        # Save to .env file
+        if [ ! -f "$SCRIPT_DIR/.env" ]; then
+            touch "$SCRIPT_DIR/.env"
+        fi
+        echo "" >> "$SCRIPT_DIR/.env"
+        echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SCRIPT_DIR/.env"
+        echo "HIVE_CREDENTIAL_KEY=$GENERATED_KEY" >> "$SCRIPT_DIR/.env"
+        export HIVE_CREDENTIAL_KEY="$GENERATED_KEY"
+
+        echo -e "${GREEN}  ✓ Encryption key saved to .env${NC}"
+    fi
+fi
+
+# Create credential store directories
+if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
+    mkdir -p "$HIVE_CRED_DIR/credentials"
+    mkdir -p "$HIVE_CRED_DIR/metadata"
+
+    # Initialize the metadata index
+    if [ ! -f "$HIVE_CRED_DIR/metadata/index.json" ]; then
+        echo '{}' > "$HIVE_CRED_DIR/metadata/index.json"
+    fi
+
+    echo -e "${GREEN}  ✓ Credential store initialized at ~/.hive/credentials/${NC}"
+
+    # Verify the store works
+    echo -n "  Verifying credential store... "
+    if uv run python -c "
+from framework.credentials.storage import EncryptedFileStorage
+storage = EncryptedFileStorage()
+print('ok')
+" 2>/dev/null | grep -q "ok"; then
+        echo -e "${GREEN}ok${NC}"
+    else
+        echo -e "${YELLOW}--${NC}"
+    fi
+fi
+
+echo ""
+
+# ============================================================
+# Step 6: Verify Setup
+# ============================================================
+
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Verifying installation...${NC}"
 echo ""
 
 ERRORS=0
@@ -628,6 +694,13 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ credential store... "
+if [ -n "$HIVE_CREDENTIAL_KEY" ] && [ -d "$HOME/.hive/credentials/credentials" ]; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
 echo ""
 
 if [ $ERRORS -gt 0 ]; then
@@ -656,6 +729,14 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     SELECTED_MODEL="$(get_default_model "$SELECTED_PROVIDER_ID")"
     echo -e "${BOLD}Default LLM:${NC}"
     echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
+    echo ""
+fi
+
+# Show credential store status
+if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
+    echo -e "${BOLD}Credential Store:${NC}"
+    echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted)"
+    echo -e "  ${DIM}Set up agent credentials with:${NC} ${CYAN}/setup-credentials${NC}"
     echo ""
 fi
 
