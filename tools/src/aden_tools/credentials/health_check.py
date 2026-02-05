@@ -240,7 +240,7 @@ class SlackHealthChecker:
     def check(self, bot_token: str) -> HealthCheckResult:
         """
         Validate Slack bot token by calling auth.test.
-        
+
         Makes a POST request to auth.test to verify the token works.
         """
         try:
