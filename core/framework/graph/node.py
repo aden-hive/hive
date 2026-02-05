@@ -583,6 +583,8 @@ class NodeProtocol(ABC):
     3. Register with the executor
 
     Example:
+        from framework.graph.safe_eval import safe_eval
+
         class CalculatorNode(NodeProtocol):
             async def execute(self, ctx: NodeContext) -> NodeResult:
                 expression = ctx.input_data.get("expression")
@@ -596,7 +598,7 @@ class NodeProtocol(ABC):
                 )
 
                 # Do the work
-                result = eval(expression)
+                result = safe_eval(expression, context={"x": 10, "y": 20})
 
                 # Record outcome
                 ctx.runtime.record_outcome(decision_id, success=True, result=result)
