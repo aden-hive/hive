@@ -46,15 +46,21 @@ Follow the interactive prompts to:
 
 > **Note:** The `exports/` directory is where your agents are created. It is not included in the repository (gitignored) because agents are user-generated via Claude Code skills or created manually.
 
+Agents are Python packages. Create the standard layout (see [DEVELOPER.md](../DEVELOPER.md) for full structure):
+
 ```bash
-# Create exports directory if it doesn't exist
-mkdir -p exports/my_agent
+# Create exports directory and agent package
+mkdir -p exports/my_agent/nodes
 
-# Create your agent structure
-cd exports/my_agent
-# Create agent.json, tools.py, README.md (see DEVELOPER.md for structure)
+# Create your agent structure (Python-package layout)
+# exports/my_agent/agent.py      - goal, nodes, edges, agent class
+# exports/my_agent/nodes/__init__.py - NodeSpec definitions
+# exports/my_agent/config.py     - runtime config
+# exports/my_agent/__main__.py   - CLI entry point
+# exports/my_agent/__init__.py   - package exports
+# See .claude/skills/building-agents-core/SKILL.md or examples/templates/
 
-# Validate the agent
+# Validate the agent (from repo root)
 PYTHONPATH=exports uv run python -m my_agent validate
 ```
 

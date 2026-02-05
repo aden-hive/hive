@@ -34,6 +34,35 @@ Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run
    ./quickstart.sh
    ```
 
+### Windows (Native PowerShell, without WSL)
+
+If you cannot use WSL, use manual setup from the repository root in PowerShell:
+
+```powershell
+# From repo root (e.g. C:\Users\You\hive)
+uv pip install -e core/ -e tools/
+uv pip install --upgrade "openai>=1.0.0"
+
+# Verify
+python -c "import framework; print('✓ framework OK')"
+python -c "import aden_tools; print('✓ aden_tools OK')"
+python -c "import litellm; print('✓ litellm OK')"
+
+# Run agents (set PYTHONPATH for each session or add to your profile)
+$env:PYTHONPATH = "core;exports"
+python -m your_agent_name validate
+```
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first if needed. For LLM API keys, use `$env:ANTHROPIC_API_KEY = "your-key"` (or the appropriate provider).
+
+## Non-Interactive and CI Setup
+
+The default `./quickstart.sh` is **interactive** (prompts for LLM provider, API keys, credential store). For CI or scripted environments:
+
+1. **Use manual setup** (no prompts): from repo root run `uv sync` (or `uv pip install -e core/ -e tools/`), then `uv pip install --upgrade "openai>=1.0.0"`. Verify with the import checks above.
+2. **API keys**: Set via environment variables (e.g. `ANTHROPIC_API_KEY`) in your CI config; no need to run the interactive key configuration.
+3. **Future improvement:** A `--ci` (or `--non-interactive`) flag for `quickstart.sh` could skip all prompts and only install dependencies and verify imports; this is recommended for CI pipelines.
+
 ## Alpine Linux Setup
 
 If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:

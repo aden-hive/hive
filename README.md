@@ -106,6 +106,19 @@ cd hive
 ./quickstart.sh
 ```
 
+**Windows (PowerShell, without WSL):** If you cannot use WSL, install from the repo root:
+
+```powershell
+# From repo root (e.g. C:\...\hive)
+uv pip install -e core/ -e tools/
+uv pip install --upgrade "openai>=1.0.0"
+$env:PYTHONPATH = "core;exports"
+# Verify:
+python -c "import framework; import aden_tools; print('OK')"
+```
+
+See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for full Windows and non-interactive options.
+
 This sets up:
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)

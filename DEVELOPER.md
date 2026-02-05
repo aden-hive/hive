@@ -265,36 +265,17 @@ claude> /testing-agent
 
 ### Manual Agent Development
 
-If you prefer to build agents manually:
+The recommended path is to use the **building-agents skills** (e.g. `/building-agents-construction`), which produce a Python package under `exports/my_agent/` with `agent.py`, `nodes/__init__.py`, and `config.py`. See **Agent Package Structure** above.
+
+If you build from scratch, define the goal and graph in Python (see `.claude/skills/building-agents-core/SKILL.md` and the `examples/templates/` agents). A minimal JSON-style description is below for reference; the runtime supports both Python-based and exported `agent.json` definitions.
 
 ```python
-# exports/my_agent/agent.json
-{
-  "goal": {
-    "goal_id": "support_ticket",
-    "name": "Support Ticket Handler",
-    "description": "Process customer support tickets",
-    "success_criteria": "Ticket is categorized, prioritized, and routed correctly"
-  },
-  "nodes": [
-    {
-      "node_id": "analyze",
-      "name": "Analyze Ticket",
-      "node_type": "llm_generate",
-      "system_prompt": "Analyze this support ticket...",
-      "input_keys": ["ticket_content"],
-      "output_keys": ["category", "priority"]
-    }
-  ],
-  "edges": [
-    {
-      "edge_id": "start_to_analyze",
-      "source": "START",
-      "target": "analyze",
-      "condition": "on_success"
-    }
-  ]
-}
+# Conceptual structure (Python package is canonical)
+# exports/my_agent/agent.py holds Goal, NodeSpecs, EdgeSpecs, and the agent class.
+# Example goal shape:
+#   goal = Goal(id="support_ticket", name="Support Ticket Handler", ...)
+#   nodes = [NodeSpec(id="analyze", node_type="event_loop", ...)]
+#   edges = [EdgeSpec(source="START", target="analyze", condition=EdgeCondition.ON_SUCCESS)]
 ```
 
 ### Running Agents
@@ -411,19 +392,23 @@ def process_ticket(ticket_content, customer_id, priority=None):
 
 ### Agent Package Structure
 
+Agents are built as **Python packages**. The building-agents skills (e.g. `/building-agents-construction`) produce this layout:
+
 ```
-my_agent/
-├── __init__.py              # Package initialization
-├── __main__.py              # CLI entry point
-├── agent.json               # Agent definition (nodes, edges, goal)
-├── tools.py                 # Custom tools (optional)
-├── mcp_servers.json         # MCP server config (optional)
+exports/my_agent/
+├── __init__.py              # Package exports
+├── __main__.py              # CLI (run, info, validate, shell)
+├── agent.py                 # Graph construction (goal, edges, agent class)
+├── nodes/__init__.py        # Node definitions (NodeSpec)
+├── config.py                # Runtime config
 ├── README.md                # Agent documentation
 └── tests/                   # Test files
     ├── __init__.py
     ├── test_constraint.py   # Constraint tests
     └── test_success.py      # Success criteria tests
 ```
+
+Optional: `tools.py` (custom tools), `mcp_servers.json` (MCP server config). The MCP agent-builder can also export `agent.json` for compatibility; the canonical definition lives in `agent.py` and `nodes/__init__.py`.
 
 ### File Naming
 
