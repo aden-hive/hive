@@ -10,6 +10,7 @@ API Reference: https://developers.hubspot.com/docs/api/crm
 
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -49,7 +50,7 @@ class _HubSpotClient:
         if response.status_code >= 400:
             try:
                 detail = response.json().get("message", response.text)
-            except Exception:
+            except json.JSONDecodeError:
                 detail = response.text
             return {"error": f"HubSpot API error (HTTP {response.status_code}): {detail}"}
         return response.json()

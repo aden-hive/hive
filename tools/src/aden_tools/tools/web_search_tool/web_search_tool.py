@@ -178,6 +178,7 @@ def register_tools(
         Returns:
             Dict with search results, total count, and provider used
         """
+        query = query.strip() if query else ""
         if not query or len(query) > 500:
             return {"error": "Query must be 1-500 characters"}
 

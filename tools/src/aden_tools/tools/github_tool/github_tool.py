@@ -10,6 +10,7 @@ API Reference: https://docs.github.com/en/rest
 
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -86,19 +87,19 @@ class _GitHubClient:
         if response.status_code == 422:
             try:
                 detail = response.json().get("message", "Validation failed")
-            except Exception:
+            except json.JSONDecodeError:
                 detail = "Validation failed"
             return {"error": f"Validation error: {detail}"}
         if response.status_code >= 400:
             try:
                 detail = response.json().get("message", response.text)
-            except Exception:
+            except json.JSONDecodeError:
                 detail = response.text
             return {"error": f"GitHub API error (HTTP {response.status_code}): {detail}"}
 
         try:
             return {"success": True, "data": response.json()}
-        except Exception:
+        except json.JSONDecodeError:
             return {"success": True, "data": {}}
 
     # --- Repositories ---

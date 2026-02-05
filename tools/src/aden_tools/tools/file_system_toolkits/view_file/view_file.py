@@ -67,7 +67,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "success": True,
                 "path": path,
                 "content": content,
-                "size_bytes": len(content.encode("utf-8")),
+                "size_bytes": len(content.encode(encoding)),
                 "lines": len(content.splitlines()),
             }
         except Exception as e:

@@ -103,8 +103,8 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": "data_dir is required"}
 
         try:
-            offset = int(offset)
-            limit = int(limit)
+            offset = max(0, int(offset))
+            limit = max(1, int(limit))
             path = Path(data_dir) / filename
             if not path.exists():
                 return {"error": f"File not found: {filename}"}
