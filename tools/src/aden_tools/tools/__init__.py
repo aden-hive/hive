@@ -42,6 +42,7 @@ from .file_system_toolkits.write_to_file import register_tools as register_write
 from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
+from .n8n_tool import register_tools as register_n8n
 from .slack_tool import register_tools as register_slack
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
@@ -75,6 +76,7 @@ def register_all_tools(
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_n8n(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -196,6 +198,14 @@ def register_all_tools(
         "slack_kick_user_from_channel",
         "slack_delete_file",
         "slack_get_team_stats",
+        # n8n Workflow Automation
+        "n8n_execute_workflow",
+        "n8n_trigger_webhook",
+        "n8n_get_execution_status",
+        "n8n_list_executions",
+        "n8n_list_workflows",
+        "n8n_get_workflow",
+        "n8n_activate_workflow",
     ]
 
 
