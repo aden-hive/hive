@@ -100,6 +100,7 @@ class AgentRuntime:
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
         config: AgentRuntimeConfig | None = None,
+        runtime_log_store: Any = None,
     ):
         """
         Initialize agent runtime.
@@ -112,10 +113,12 @@ class AgentRuntime:
             tools: Available tools
             tool_executor: Function to execute tools
             config: Optional runtime configuration
+            runtime_log_store: Optional RuntimeLogStore for per-execution logging
         """
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
+        self._runtime_log_store = runtime_log_store
 
         # Initialize storage
         self._storage = ConcurrentStorage(
@@ -212,6 +215,7 @@ class AgentRuntime:
                     tool_executor=self._tool_executor,
                     result_retention_max=self._config.execution_result_max,
                     result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
+                    runtime_log_store=self._runtime_log_store,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -295,6 +299,25 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
+
+    async def inject_input(self, node_id: str, content: str) -> bool:
+        """Inject user input into a running client-facing node.
+
+        Routes input to the EventLoopNode identified by ``node_id``
+        across all active streams. Used by the TUI ChatRepl to deliver
+        user responses during client-facing node execution.
+
+        Args:
+            node_id: The node currently waiting for input
+            content: The user's input text
+
+        Returns:
+            True if input was delivered, False if no matching node found
+        """
+        for stream in self._streams.values():
+            if await stream.inject_input(node_id, content):
+                return True
+        return False
 
     async def get_goal_progress(self) -> dict[str, Any]:
         """
@@ -429,6 +452,7 @@ def create_agent_runtime(
     tools: list["Tool"] | None = None,
     tool_executor: Callable | None = None,
     config: AgentRuntimeConfig | None = None,
+    runtime_log_store: Any = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -456,6 +480,7 @@ def create_agent_runtime(
         tools=tools,
         tool_executor=tool_executor,
         config=config,
+        runtime_log_store=runtime_log_store,
     )
 
     for spec in entry_points:

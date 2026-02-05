@@ -26,6 +26,7 @@ from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
+from .file_system_toolkits.data_tools import register_tools as register_data_tools
 from .file_system_toolkits.execute_command_tool import (
     register_tools as register_execute_command,
 )
@@ -84,6 +85,7 @@ def register_all_tools(
     register_apply_patch(mcp)
     register_grep_search(mcp)
     register_execute_command(mcp)
+    register_data_tools(mcp)
     register_csv(mcp)
 
     return [
@@ -99,6 +101,9 @@ def register_all_tools(
         "apply_patch",
         "grep_search",
         "execute_command_tool",
+        "load_data",
+        "save_data",
+        "list_data_files",
         "csv_read",
         "csv_write",
         "csv_append",

@@ -372,7 +372,9 @@ class AdenTUI(App):
             elif et == EventType.EXECUTION_FAILED:
                 self.chat_repl.handle_execution_failed(event.data.get("error", "Unknown error"))
             elif et == EventType.CLIENT_INPUT_REQUESTED:
-                self.chat_repl.handle_input_requested(event.data.get("prompt", ""))
+                self.chat_repl.handle_input_requested(
+                    event.node_id or event.data.get("node_id", ""),
+                )
 
             # --- Graph view events ---
             if et in (
