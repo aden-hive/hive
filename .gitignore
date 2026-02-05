@@ -69,5 +69,6 @@ temp/
 
 docs/github-issues/*
 core/tests/*dumps/*
+.agent-builder-sessions/*
 .agent_runs/
 agent_demo.mov
