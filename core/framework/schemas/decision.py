@@ -10,13 +10,13 @@ This is MORE important than actions because:
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
 
 
-class DecisionType(str, Enum):
+class DecisionType(StrEnum):
     """Types of decisions an agent can make."""
 
     TOOL_SELECTION = "tool_selection"  # Which tool to use

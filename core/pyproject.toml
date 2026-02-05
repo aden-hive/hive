@@ -11,15 +11,21 @@ dependencies = [
   "litellm>=1.81.0",
   "mcp>=1.0.0",
   "fastmcp>=2.0.0",
+  "textual>=1.0.0",
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "pytest-xdist>=3.0",
+  "tools",
 ]
 
-# [project.optional-dependencies]
+[project.optional-dependencies]
+tui = ["textual>=0.75.0"]
 
 [project.scripts]
 hive = "framework.cli:main"
+
+[tool.uv.sources]
+tools = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -43,6 +49,7 @@ lint.select = [
   "W", # pycodestyle warnings
 ]
 
+lint.per-file-ignores."demos/*" = ["E501"]
 lint.isort.combine-as-imports = true
 lint.isort.known-first-party = ["framework"]
 lint.isort.section-order = [

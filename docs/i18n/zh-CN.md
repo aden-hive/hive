@@ -42,7 +42,7 @@
 ## 什么是 Aden
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Aden 是一个用于构建、部署、运营和适应 AI 智能体的平台：
@@ -97,7 +97,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # 运行您的智能体
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 完整设置指南](ENVIRONMENT_SETUP.md)** - 智能体开发的详细说明
@@ -243,7 +243,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # 运行智能体
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 完整设置说明请参阅 [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)。

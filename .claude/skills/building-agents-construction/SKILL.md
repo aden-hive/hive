@@ -124,11 +124,14 @@ AskUserQuestion(questions=[{
 - node_id (kebab-case)
 - name
 - description
-- node_type: `"llm_generate"` (no tools) or `"llm_tool_use"` (uses tools)
+- node_type: `"event_loop"` (recommended for all LLM work) or `"function"` (deterministic, no LLM)
 - input_keys (what data this node receives)
 - output_keys (what data this node produces)
-- tools (ONLY tools that exist - empty list for llm_generate)
-- system_prompt
+- tools (ONLY tools that exist - empty list if no tools needed)
+- system_prompt (should mention `set_output` for producing structured outputs)
+- client_facing: True if this node interacts with the user
+- nullable_output_keys (for mutually exclusive outputs)
+- max_node_visits (>1 if this node is a feedback loop target)
 
 **PRESENT the workflow to the user:**
 
@@ -136,7 +139,7 @@ AskUserQuestion(questions=[{
 >
 > 1. **[node-id]** - [description]
 >
->    - Type: [llm_generate/llm_tool_use]
+>    - Type: event_loop [client-facing] / function
 >    - Input: [keys]
 >    - Output: [keys]
 >    - Tools: [tools or "none"]
@@ -211,8 +214,8 @@ mcp__agent-builder__get_session_status()
 - source (node that outputs)
 - target (node that receives)
 - condition: `"on_success"`, `"always"`, `"on_failure"`, or `"conditional"`
-- condition_expr (Python expression, only if conditional)
-- priority (integer, lower = higher priority)
+- condition_expr (Python expression using `output.get(...)`, only if conditional)
+- priority (positive = forward edge evaluated first, negative = feedback edge)
 
 **FOR EACH edge, call:**
 
@@ -264,7 +267,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 - NOT: `{"first-node-id": ["input_keys"]}` (WRONG)
 - NOT: `{"first-node-id"}` (WRONG - this is a set)
 
-**Use the example agent** at `.claude/skills/building-agents-construction/examples/online_research_agent/` as a template for file structure and patterns.
+**Use the example agent** at `.claude/skills/building-agents-construction/examples/deep_research_agent/` as a template for file structure and patterns. It demonstrates: STEP 1/STEP 2 prompts, client-facing nodes, feedback loops, nullable_output_keys, and data tools.
 
 **AFTER writing all files, tell the user:**
 
@@ -284,8 +287,8 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 >
 > ```bash
 > cd /home/timothy/oss/hive
-> PYTHONPATH=core:exports python -m AGENT_NAME validate
-> PYTHONPATH=core:exports python -m AGENT_NAME info
+> PYTHONPATH=exports uv run python -m AGENT_NAME validate
+> PYTHONPATH=exports uv run python -m AGENT_NAME info
 > ```
 
 ---
@@ -295,7 +298,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 **RUN validation:**
 
 ```bash
-cd /home/timothy/oss/hive && PYTHONPATH=core:exports python -m AGENT_NAME validate
+cd /home/timothy/oss/hive && PYTHONPATH=exports uv run python -m AGENT_NAME validate
 ```
 
 - If valid: Agent is complete!
@@ -317,38 +320,85 @@ mcp__agent-builder__get_session_status()
 
 ## REFERENCE: Node Types
 
-| Type           | tools param            | Use when                                       |
-| -------------- | ---------------------- | ---------------------------------------------- |
-| `llm_generate` | `'[]'`                 | Pure reasoning, JSON output, no external calls |
-| `llm_tool_use` | `'["tool1", "tool2"]'` | Needs to call MCP tools                        |
+| Type | tools param | Use when |
+|------|-------------|----------|
+| `event_loop` | `'["tool1"]'` or `'[]'` | LLM-powered work with or without tools |
+| `function` | N/A | Deterministic Python operations, no LLM |
 
 ---
 
-## REFERENCE: Edge Conditions
+## REFERENCE: NodeSpec New Fields
 
-| Condition     | When edge is followed                 |
-| ------------- | ------------------------------------- |
-| `on_success`  | Source node completed successfully    |
-| `on_failure`  | Source node failed                    |
-| `always`      | Always, regardless of success/failure |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `client_facing` | `False` | Streams output to user, blocks for input between turns |
+| `nullable_output_keys` | `[]` | Output keys that may remain unset (mutually exclusive outputs) |
+| `max_node_visits` | `1` | Max executions per run. Set >1 for feedback loop targets. 0=unlimited |
+
+---
+
+## REFERENCE: Edge Conditions & Priority
+
+| Condition | When edge is followed |
+|-----------|--------------------------------------|
+| `on_success` | Source node completed successfully |
+| `on_failure` | Source node failed |
+| `always` | Always, regardless of success/failure |
 | `conditional` | When condition_expr evaluates to True |
+
+**Priority:** Positive = forward edge (evaluated first). Negative = feedback edge (loops back to earlier node). Multiple ON_SUCCESS edges from same source = parallel execution (fan-out).
 
 ---
 
 ## REFERENCE: System Prompt Best Practice
 
-For nodes with JSON output, include this in the system_prompt:
+For **internal** event_loop nodes (not client-facing), instruct the LLM to use `set_output`:
 
 ```
-CRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks.
-Just the JSON object starting with { and ending with }.
+Use set_output(key, value) to store your results. For example:
+- set_output("search_results", <your results as a JSON string>)
 
-Return this exact structure:
-{
-  "key1": "...",
-  "key2": "..."
-}
+Do NOT return raw JSON. Use the set_output tool to produce outputs.
 ```
+
+For **client-facing** event_loop nodes, use the STEP 1/STEP 2 pattern:
+
+```
+**STEP 1 — Respond to the user (text only, NO tool calls):**
+[Present information, ask questions, etc.]
+
+**STEP 2 — After the user responds, call set_output:**
+- set_output("key", "value based on user's response")
+```
+
+This prevents the LLM from calling `set_output` before the user has had a chance to respond. The "NO tool calls" instruction in STEP 1 ensures the node blocks for user input before proceeding.
+
+---
+
+## EventLoopNode Runtime
+
+EventLoopNodes are **auto-created** by `GraphExecutor` at runtime. Both direct `GraphExecutor` and `AgentRuntime` / `create_agent_runtime()` handle event_loop nodes automatically. No manual `node_registry` setup is needed.
+
+```python
+# Direct execution
+from framework.graph.executor import GraphExecutor
+from framework.runtime.core import Runtime
+
+storage_path = Path.home() / ".hive" / "my_agent"
+storage_path.mkdir(parents=True, exist_ok=True)
+runtime = Runtime(storage_path)
+
+executor = GraphExecutor(
+    runtime=runtime,
+    llm=llm,
+    tools=tools,
+    tool_executor=tool_executor,
+    storage_path=storage_path,
+)
+result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
+```
+
+**DO NOT pass `runtime=None` to `GraphExecutor`** — it will crash with `'NoneType' object has no attribute 'start_run'`.
 
 ---
 
@@ -359,3 +409,7 @@ Return this exact structure:
 3. **Skipping validation** - Always validate nodes and graph before proceeding
 4. **Not waiting for approval** - Always ask user before major steps
 5. **Displaying this file** - Execute the steps, don't show documentation
+6. **Too many thin nodes** - Prefer fewer, richer nodes (4 nodes > 8 nodes)
+7. **Missing STEP 1/STEP 2 in client-facing prompts** - Client-facing nodes need explicit phases to prevent premature set_output
+8. **Forgetting nullable_output_keys** - Mark input_keys that only arrive on certain edges (e.g., feedback) as nullable on the receiving node
+9. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code

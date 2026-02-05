@@ -1,5 +1,5 @@
 """
-CLI entry point for Online Research Agent.
+CLI entry point for Deep Research Agent.
 
 Uses AgentRuntime for multi-entrypoint support with HITL pause/resume.
 """
@@ -10,7 +10,7 @@ import logging
 import sys
 import click
 
-from .agent import default_agent, OnlineResearchAgent
+from .agent import default_agent, DeepResearchAgent
 
 
 def setup_logging(verbose=False, debug=False):
@@ -28,7 +28,7 @@ def setup_logging(verbose=False, debug=False):
 @click.group()
 @click.version_option(version="1.0.0")
 def cli():
-    """Online Research Agent - Deep-dive research with narrative reports."""
+    """Deep Research Agent - Interactive, rigorous research with TUI conversation."""
     pass
 
 
@@ -60,6 +60,83 @@ def run(topic, mock, quiet, verbose, debug):
 
 
 @cli.command()
+@click.option("--mock", is_flag=True, help="Run in mock mode")
+@click.option("--verbose", "-v", is_flag=True, help="Show execution details")
+@click.option("--debug", is_flag=True, help="Show debug logging")
+def tui(mock, verbose, debug):
+    """Launch the TUI dashboard for interactive research."""
+    setup_logging(verbose=verbose, debug=debug)
+
+    try:
+        from framework.tui.app import AdenTUI
+    except ImportError:
+        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
+        sys.exit(1)
+
+    from pathlib import Path
+
+    from framework.llm import LiteLLMProvider
+    from framework.runner.tool_registry import ToolRegistry
+    from framework.runtime.agent_runtime import create_agent_runtime
+    from framework.runtime.event_bus import EventBus
+    from framework.runtime.execution_stream import EntryPointSpec
+
+    async def run_with_tui():
+        agent = DeepResearchAgent()
+
+        # Build graph and tools
+        agent._event_bus = EventBus()
+        agent._tool_registry = ToolRegistry()
+
+        mcp_config_path = Path(__file__).parent / "mcp_servers.json"
+        if mcp_config_path.exists():
+            agent._tool_registry.load_mcp_config(mcp_config_path)
+
+        llm = None
+        if not mock:
+            llm = LiteLLMProvider(
+                model=agent.config.model,
+                api_key=agent.config.api_key,
+                api_base=agent.config.api_base,
+            )
+
+        tools = list(agent._tool_registry.get_tools().values())
+        tool_executor = agent._tool_registry.get_executor()
+        graph = agent._build_graph()
+
+        storage_path = Path.home() / ".hive" / "deep_research_agent"
+        storage_path.mkdir(parents=True, exist_ok=True)
+
+        runtime = create_agent_runtime(
+            graph=graph,
+            goal=agent.goal,
+            storage_path=storage_path,
+            entry_points=[
+                EntryPointSpec(
+                    id="start",
+                    name="Start Research",
+                    entry_node="intake",
+                    trigger_type="manual",
+                    isolation_level="isolated",
+                ),
+            ],
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor,
+        )
+
+        await runtime.start()
+
+        try:
+            app = AdenTUI(runtime)
+            await app.run_async()
+        finally:
+            await runtime.stop()
+
+    asyncio.run(run_with_tui())
+
+
+@cli.command()
 @click.option("--json", "output_json", is_flag=True)
 def info(output_json):
     """Show agent information."""
@@ -71,6 +148,7 @@ def info(output_json):
         click.echo(f"Version: {info_data['version']}")
         click.echo(f"Description: {info_data['description']}")
         click.echo(f"\nNodes: {', '.join(info_data['nodes'])}")
+        click.echo(f"Client-facing: {', '.join(info_data['client_facing_nodes'])}")
         click.echo(f"Entry: {info_data['entry_node']}")
         click.echo(f"Terminal: {', '.join(info_data['terminal_nodes'])}")
 
@@ -81,6 +159,9 @@ def validate():
     validation = default_agent.validate()
     if validation["valid"]:
         click.echo("Agent is valid")
+        if validation["warnings"]:
+            for warning in validation["warnings"]:
+                click.echo(f"  WARNING: {warning}")
     else:
         click.echo("Agent has errors:")
         for error in validation["errors"]:
@@ -91,7 +172,7 @@ def validate():
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True)
 def shell(verbose):
-    """Interactive research session."""
+    """Interactive research session (CLI, no TUI)."""
     asyncio.run(_interactive_shell(verbose))
 
 
@@ -99,10 +180,10 @@ async def _interactive_shell(verbose=False):
     """Async interactive shell."""
     setup_logging(verbose=verbose)
 
-    click.echo("=== Online Research Agent ===")
+    click.echo("=== Deep Research Agent ===")
     click.echo("Enter a topic to research (or 'quit' to exit):\n")
 
-    agent = OnlineResearchAgent()
+    agent = DeepResearchAgent()
     await agent.start()
 
     try:
@@ -118,7 +199,7 @@ async def _interactive_shell(verbose=False):
                 if not topic.strip():
                     continue
 
-                click.echo("\nResearching... (this may take a few minutes)\n")
+                click.echo("\nResearching...\n")
 
                 result = await agent.trigger_and_wait("start", {"topic": topic})
 
@@ -128,16 +209,14 @@ async def _interactive_shell(verbose=False):
 
                 if result.success:
                     output = result.output
-                    if "file_path" in output:
-                        click.echo(f"\nReport saved to: {output['file_path']}\n")
-                    if "final_report" in output:
-                        click.echo("\n--- Report Preview ---\n")
-                        preview = (
-                            output["final_report"][:500] + "..."
-                            if len(output.get("final_report", "")) > 500
-                            else output.get("final_report", "")
-                        )
-                        click.echo(preview)
+                    if "report_content" in output:
+                        click.echo("\n--- Report ---\n")
+                        click.echo(output["report_content"])
+                        click.echo("\n")
+                    if "references" in output:
+                        click.echo("--- References ---\n")
+                        for ref in output.get("references", []):
+                            click.echo(f"  [{ref.get('number', '?')}] {ref.get('title', '')} - {ref.get('url', '')}")
                         click.echo("\n")
                 else:
                     click.echo(f"\nResearch failed: {result.error}\n")
@@ -148,7 +227,6 @@ async def _interactive_shell(verbose=False):
             except Exception as e:
                 click.echo(f"Error: {e}", err=True)
                 import traceback
-
                 traceback.print_exc()
     finally:
         await agent.stop()

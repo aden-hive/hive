@@ -4,7 +4,6 @@
 - **Added empty response retry logic** — LLM provider now detects empty responses (e.g. Gemini returning 200 with no content on rate limit) and retries with exponential backoff, preventing hallucinated output from the cleanup LLM
 - **Added context-aware input compaction** — LLM nodes now estimate input token count before calling the model and progressively truncate the largest values if they exceed the context window budget
 - **Increased rate limit retries to 10** with verbose `[retry]` and `[compaction]` logging that includes model name, finish reason, and attempt count
-- **Updated setup scripts** — `scripts/setup-python.sh` now installs Playwright Chromium browser automatically for web scraping support
 - **Interactive quickstart onboarding** — `quickstart.sh` rewritten as bee-themed interactive wizard that detects existing API keys (including Claude Code subscription), lets user pick ONE default LLM provider, and saves configuration to `~/.hive/configuration.json`
 - **Fixed lint errors** across `hubspot_tool.py` (line length) and `agent_builder_server.py` (unused variable)
 
@@ -24,8 +23,6 @@
 - `tools/src/aden_tools/tools/web_scrape_tool/README.md` — Updated docs
 - `tools/pyproject.toml` — Added `playwright`, `playwright-stealth` deps
 - `tools/Dockerfile` — Added `playwright install chromium --with-deps`
-- `scripts/setup-python.sh` — Added Playwright Chromium browser install step
-
 ### LLM Reliability
 - `core/framework/llm/litellm.py` — Empty response retry + max retries 10 + verbose logging
 - `core/framework/graph/node.py` — Input compaction via `_compact_inputs()`, `_estimate_tokens()`, `_get_context_limit()`
@@ -41,7 +38,6 @@
 ## Test plan
 - [ ] Run `make lint` — passes clean
 - [ ] Run `./quickstart.sh` and verify interactive flow works, config saved to `~/.hive/configuration.json`
-- [ ] Run `./scripts/setup-python.sh` and verify Playwright Chromium installs
 - [ ] Run `pytest tests/tools/test_web_scrape_tool.py -v`
 - [ ] Run agent against a JS-heavy site and verify `web_scrape` returns rendered content
 - [ ] Set `HUBSPOT_ACCESS_TOKEN` and verify HubSpot tool CRUD operations work

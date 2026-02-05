@@ -28,6 +28,33 @@ logger = logging.getLogger(__name__)
 
 # Configuration paths
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+
+
+def _ensure_credential_key_env() -> None:
+    """Load HIVE_CREDENTIAL_KEY from shell config if not already in environment.
+
+    The setup-credentials skill writes the encryption key to ~/.zshrc or ~/.bashrc.
+    If the user hasn't sourced their config in the current shell, this reads it
+    directly so the runner (and any MCP subprocesses it spawns) can unlock the
+    encrypted credential store.
+
+    Only HIVE_CREDENTIAL_KEY is loaded this way — all other secrets (API keys, etc.)
+    come from the credential store itself.
+    """
+    if os.environ.get("HIVE_CREDENTIAL_KEY"):
+        return
+
+    try:
+        from aden_tools.credentials.shell_config import check_env_var_in_shell_config
+
+        found, value = check_env_var_in_shell_config("HIVE_CREDENTIAL_KEY")
+        if found and value:
+            os.environ["HIVE_CREDENTIAL_KEY"] = value
+            logger.debug("Loaded HIVE_CREDENTIAL_KEY from shell config")
+    except ImportError:
+        pass
+
+
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
 
 
@@ -236,6 +263,15 @@ class AgentRunner:
         result = await runner.run({"lead_id": "123"})
     """
 
+    @staticmethod
+    def _resolve_default_model() -> str:
+        """Resolve the default model from ~/.hive/configuration.json."""
+        config = get_hive_config()
+        llm = config.get("llm", {})
+        if llm.get("provider") and llm.get("model"):
+            return f"{llm['provider']}/{llm['model']}"
+        return "anthropic/claude-sonnet-4-20250514"
+
     def __init__(
         self,
         agent_path: Path,
@@ -243,7 +279,8 @@ class AgentRunner:
         goal: Goal,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "cerebras/zai-glm-4.7",
+        model: str | None = None,
+        enable_tui: bool = False,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -254,14 +291,15 @@ class AgentRunner:
             goal: Loaded Goal object
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to temp)
-            model: Model to use - any LiteLLM-compatible model name
-                   (e.g., "claude-sonnet-4-20250514", "gpt-4o-mini", "gemini/gemini-pro")
+            model: Model to use (reads from agent config or ~/.hive/configuration.json if None)
+            enable_tui: If True, forces use of AgentRuntime with EventBus
         """
         self.agent_path = agent_path
         self.graph = graph
         self.goal = goal
         self.mock_mode = mock_mode
-        self.model = model
+        self.model = model or self._resolve_default_model()
+        self.enable_tui = enable_tui
 
         # Set up storage
         if storage_path:
@@ -274,6 +312,10 @@ class AgentRunner:
             default_storage.mkdir(parents=True, exist_ok=True)
             self._storage_path = default_storage
             self._temp_dir = None
+
+        # Load HIVE_CREDENTIAL_KEY from shell config if not in env.
+        # Must happen before MCP subprocesses are spawned so they inherit it.
+        _ensure_credential_key_env()
 
         # Initialize components
         self._tool_registry = ToolRegistry()
@@ -296,32 +338,121 @@ class AgentRunner:
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
 
+    @staticmethod
+    def _import_agent_module(agent_path: Path):
+        """Import an agent package from its directory path.
+
+        Tries package import first (works when exports/ is on sys.path,
+        which cli.py:_configure_paths() ensures). Falls back to direct
+        file import of agent.py via importlib.util.
+        """
+        import importlib
+
+        package_name = agent_path.name
+
+        # Try importing as a package (works when exports/ is on sys.path)
+        try:
+            return importlib.import_module(package_name)
+        except ImportError:
+            pass
+
+        # Fallback: import agent.py directly via file path
+        import importlib.util
+
+        agent_py = agent_path / "agent.py"
+        if not agent_py.exists():
+            raise FileNotFoundError(
+                f"No importable agent found at {agent_path}. "
+                f"Expected a Python package with agent.py."
+            )
+        spec = importlib.util.spec_from_file_location(
+            f"{package_name}.agent",
+            agent_py,
+            submodule_search_locations=[str(agent_path)],
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     @classmethod
     def load(
         cls,
         agent_path: str | Path,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "cerebras/zai-glm-4.7",
+        model: str | None = None,
+        enable_tui: bool = False,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
 
+        Imports the agent's Python package and reads module-level variables
+        (goal, nodes, edges, etc.) to build a GraphSpec. Falls back to
+        agent.json if no Python module is found.
+
         Args:
-            agent_path: Path to agent folder (containing agent.json)
+            agent_path: Path to agent folder
             mock_mode: If True, use mock LLM responses
-            storage_path: Path for runtime storage (defaults to temp)
-            model: LLM model to use (any LiteLLM-compatible model name)
+            storage_path: Path for runtime storage (defaults to ~/.hive/storage/{name})
+            model: LLM model to use (reads from agent's default_config if None)
+            enable_tui: If True, forces use of AgentRuntime with EventBus
 
         Returns:
             AgentRunner instance ready to run
         """
         agent_path = Path(agent_path)
 
-        # Load agent.json
+        # Try loading from Python module first (code-based agents)
+        agent_py = agent_path / "agent.py"
+        if agent_py.exists():
+            agent_module = cls._import_agent_module(agent_path)
+
+            goal = getattr(agent_module, "goal", None)
+            nodes = getattr(agent_module, "nodes", None)
+            edges = getattr(agent_module, "edges", None)
+
+            if goal is None or nodes is None or edges is None:
+                raise ValueError(
+                    f"Agent at {agent_path} must define 'goal', 'nodes', and 'edges' "
+                    f"in agent.py (or __init__.py)"
+                )
+
+            # Read model and max_tokens from agent's config if not explicitly provided
+            agent_config = getattr(agent_module, "default_config", None)
+            if model is None:
+                if agent_config and hasattr(agent_config, "model"):
+                    model = agent_config.model
+
+            max_tokens = getattr(agent_config, "max_tokens", 1024) if agent_config else 1024
+
+            # Build GraphSpec from module-level variables
+            graph = GraphSpec(
+                id=f"{agent_path.name}-graph",
+                goal_id=goal.id,
+                version="1.0.0",
+                entry_node=getattr(agent_module, "entry_node", nodes[0].id),
+                entry_points=getattr(agent_module, "entry_points", {}),
+                terminal_nodes=getattr(agent_module, "terminal_nodes", []),
+                pause_nodes=getattr(agent_module, "pause_nodes", []),
+                nodes=nodes,
+                edges=edges,
+                max_tokens=max_tokens,
+            )
+
+            return cls(
+                agent_path=agent_path,
+                graph=graph,
+                goal=goal,
+                mock_mode=mock_mode,
+                storage_path=storage_path,
+                model=model,
+                enable_tui=enable_tui,
+            )
+
+        # Fallback: load from agent.json (legacy JSON-based agents)
         agent_json_path = agent_path / "agent.json"
         if not agent_json_path.exists():
-            raise FileNotFoundError(f"agent.json not found in {agent_path}")
+            raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
         with open(agent_json_path) as f:
             graph, goal = load_agent_export(f.read())
@@ -333,6 +464,7 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+            enable_tui=enable_tui,
         )
 
     def register_tool(
@@ -411,25 +543,8 @@ class AgentRunner:
         return self._tool_registry.register_mcp_server(server_config)
 
     def _load_mcp_servers_from_config(self, config_path: Path) -> None:
-        """
-        Load and register MCP servers from a configuration file.
-
-        Args:
-            config_path: Path to mcp_servers.json file
-        """
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-
-            servers = config.get("servers", [])
-            for server_config in servers:
-                try:
-                    self._tool_registry.register_mcp_server(server_config)
-                except Exception as e:
-                    server_name = server_config.get("name", "unknown")
-                    logger.warning(f"Failed to register MCP server '{server_name}': {e}")
-        except Exception as e:
-            logger.warning(f"Failed to load MCP servers config from {config_path}: {e}")
+        """Load and register MCP servers from a configuration file."""
+        self._tool_registry.load_mcp_config(config_path)
 
     def set_approval_callback(self, callback: Callable) -> None:
         """
@@ -488,16 +603,25 @@ class AgentRunner:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and os.environ.get(api_key_env):
                     self._llm = LiteLLMProvider(model=self.model)
-                elif api_key_env:
-                    print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                    print(f"Set it with: export {api_key_env}=your-api-key")
+                else:
+                    # Fall back to credential store
+                    api_key = self._get_api_key_from_credential_store()
+                    if api_key:
+                        self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+                        # Set env var so downstream code (e.g. cleanup LLM in
+                        # node._extract_json) can also find it
+                        if api_key_env:
+                            os.environ[api_key_env] = api_key
+                    elif api_key_env:
+                        print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                        print(f"Set it with: export {api_key_env}=your-api-key")
 
         # Get tools for executor/runtime
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
-        if self._uses_async_entry_points:
-            # Multi-entry-point mode: use AgentRuntime
+        if self._uses_async_entry_points or self.enable_tui:
+            # Multi-entry-point mode or TUI mode: use AgentRuntime
             self._setup_agent_runtime(tools, tool_executor)
         else:
             # Single-entry-point mode: use legacy GraphExecutor
@@ -535,6 +659,33 @@ class AgentRunner:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
 
+    def _get_api_key_from_credential_store(self) -> str | None:
+        """Get the LLM API key from the encrypted credential store.
+
+        Maps model name to credential store ID (e.g. "anthropic/..." -> "anthropic")
+        and retrieves the key via CredentialStore.get().
+        """
+        if not os.environ.get("HIVE_CREDENTIAL_KEY"):
+            return None
+
+        # Map model prefix to credential store ID
+        model_lower = self.model.lower()
+        cred_id = None
+        if model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
+            cred_id = "anthropic"
+        # Add more mappings as providers are added to LLM_CREDENTIALS
+
+        if cred_id is None:
+            return None
+
+        try:
+            from framework.credentials import CredentialStore
+
+            store = CredentialStore.with_encrypted_storage()
+            return store.get(cred_id)
+        except Exception:
+            return None
+
     def _setup_legacy_executor(self, tools: list, tool_executor: Callable | None) -> None:
         """Set up legacy single-entry-point execution using GraphExecutor."""
         # Create runtime
@@ -565,6 +716,19 @@ class AgentRunner:
                 max_concurrent=async_ep.max_concurrent,
             )
             entry_points.append(ep)
+
+        # If TUI enabled but no entry points (single-entry agent), create default
+        if not entry_points and self.enable_tui and self.graph.entry_node:
+            logger.info("Creating default entry point for TUI")
+            entry_points.append(
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=self.graph.entry_node,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                )
+            )
 
         # Create AgentRuntime with all entry points
         self._agent_runtime = create_agent_runtime(
@@ -616,7 +780,7 @@ class AgentRunner:
                 error=error_msg,
             )
 
-        if self._uses_async_entry_points:
+        if self._uses_async_entry_points or self.enable_tui:
             # Multi-entry-point mode: use AgentRuntime
             return await self._run_with_agent_runtime(
                 input_data=input_data or {},
@@ -908,15 +1072,25 @@ class AgentRunner:
                 EnvVarStorage,
             )
 
-            # Build env mapping for fallback
+            # Build env mapping for credential lookup
             env_mapping = {
                 (spec.credential_id or name): spec.env_var
                 for name, spec in CREDENTIAL_SPECS.items()
             }
-            storage = CompositeStorage(
-                primary=EncryptedFileStorage(),
-                fallbacks=[EnvVarStorage(env_mapping=env_mapping)],
-            )
+
+            # Only use EncryptedFileStorage if the encryption key is configured;
+            # otherwise just check env vars (avoids generating a throwaway key)
+            storages: list = [EnvVarStorage(env_mapping=env_mapping)]
+            if os.environ.get("HIVE_CREDENTIAL_KEY"):
+                storages.insert(0, EncryptedFileStorage())
+
+            if len(storages) == 1:
+                storage = storages[0]
+            else:
+                storage = CompositeStorage(
+                    primary=storages[0],
+                    fallbacks=storages[1:],
+                )
             store = CredentialStore(storage=storage)
 
             # Build reverse mappings
