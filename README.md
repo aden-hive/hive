@@ -126,6 +126,8 @@ PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
 
+**[🐍 Python-Only Quick Start](docs/python-quickstart.md)** - Minimal guide for Python developers (no Claude Code or API keys required)
+
 ### Cursor IDE Support
 
 Skills are also available in Cursor. To enable:

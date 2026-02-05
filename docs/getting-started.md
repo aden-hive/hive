@@ -72,6 +72,8 @@ uv run python core/examples/manual_agent.py
 
 This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
 
+> **📚 Want a comprehensive code-first tutorial?** See [Python-Only Quick Start](python-quickstart.md) for a detailed, step-by-step guide to building agents with pure Python.
+
 ## Project Structure
 
 ```
