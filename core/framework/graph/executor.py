@@ -130,6 +130,7 @@ class GraphExecutor:
         parallel_config: ParallelExecutionConfig | None = None,
         event_bus: Any | None = None,
         stream_id: str = "",
+        runtime_logger: Any = None,
     ):
         """
         Initialize the executor.
@@ -146,6 +147,7 @@ class GraphExecutor:
             parallel_config: Configuration for parallel execution behavior
             event_bus: Optional event bus for emitting node lifecycle events
             stream_id: Stream ID for event correlation
+            runtime_logger: Optional RuntimeLogger for per-graph-run logging
         """
         self.runtime = runtime
         self.llm = llm
@@ -157,6 +159,7 @@ class GraphExecutor:
         self.logger = logging.getLogger(__name__)
         self._event_bus = event_bus
         self._stream_id = stream_id
+        self.runtime_logger = runtime_logger
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -277,6 +280,9 @@ class GraphExecutor:
             input_data=input_data or {},
         )
 
+        if self.runtime_logger:
+            self.runtime_logger.start_run(goal_id=goal.id)
+
         self.logger.info(f"🚀 Starting execution: {goal.name}")
         self.logger.info(f"   Goal: {goal.description}")
         self.logger.info(f"   Entry node: {graph.entry_node}")
@@ -377,6 +383,18 @@ class GraphExecutor:
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_completed(
                         stream_id=self._stream_id, node_id=current_node_id, iterations=1
+                    )
+
+                # Ensure runtime logging has an L2 entry for this node
+                if self.runtime_logger:
+                    self.runtime_logger.ensure_node_logged(
+                        node_id=node_spec.id,
+                        node_name=node_spec.name,
+                        node_type=node_spec.node_type,
+                        success=result.success,
+                        error=result.error,
+                        tokens_used=result.tokens_used,
+                        latency_ms=result.latency_ms,
                     )
 
                 if result.success:
@@ -483,6 +501,14 @@ class GraphExecutor:
                         total_retries_count = sum(node_retry_counts.values())
                         nodes_failed = list(node_retry_counts.keys())
 
+                        if self.runtime_logger:
+                            await self.runtime_logger.end_run(
+                                status="failure",
+                                duration_ms=total_latency,
+                                node_path=path,
+                                execution_quality="failed",
+                            )
+
                         return ExecutionResult(
                             success=False,
                             error=(
@@ -524,6 +550,14 @@ class GraphExecutor:
                     total_retries_count = sum(node_retry_counts.values())
                     nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
                     exec_quality = "degraded" if total_retries_count > 0 else "clean"
+
+                    if self.runtime_logger:
+                        await self.runtime_logger.end_run(
+                            status="success",
+                            duration_ms=total_latency,
+                            node_path=path,
+                            execution_quality=exec_quality,
+                        )
 
                     return ExecutionResult(
                         success=True,
@@ -648,6 +682,14 @@ class GraphExecutor:
                 ),
             )
 
+            if self.runtime_logger:
+                await self.runtime_logger.end_run(
+                    status="success" if exec_quality != "failed" else "failure",
+                    duration_ms=total_latency,
+                    node_path=path,
+                    execution_quality=exec_quality,
+                )
+
             return ExecutionResult(
                 success=True,
                 output=output,
@@ -676,6 +718,14 @@ class GraphExecutor:
             # Calculate quality metrics even for exceptions
             total_retries_count = sum(node_retry_counts.values())
             nodes_failed = list(node_retry_counts.keys())
+
+            if self.runtime_logger:
+                await self.runtime_logger.end_run(
+                    status="failure",
+                    duration_ms=total_latency,
+                    node_path=path,
+                    execution_quality="failed",
+                )
 
             return ExecutionResult(
                 success=False,
@@ -721,6 +771,7 @@ class GraphExecutor:
             goal_context=goal.to_prompt_context(),
             goal=goal,  # Pass Goal object for LLM-powered routers
             max_tokens=max_tokens,
+            runtime_logger=self.runtime_logger,
         )
 
     # Valid node types - no ambiguous "llm" type allowed
