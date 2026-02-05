@@ -314,7 +314,7 @@ def register_tools(mcp: FastMCP) -> None:
             return {
                 "error": (
                     "DuckDB not installed. Install with: "
-                    "pip install duckdb  or  pip install tools[sql]"
+                    "uv pip install duckdb  or  uv pip install tools[sql]"
                 )
             }
 

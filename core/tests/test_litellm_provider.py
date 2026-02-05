@@ -2,7 +2,7 @@
 
 Run with:
     cd core
-    pip install litellm pytest
+    uv pip install litellm pytest
     pytest tests/test_litellm_provider.py -v
 
 For live tests (requires API keys):

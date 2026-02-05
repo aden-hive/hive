@@ -125,7 +125,7 @@ feat(component): add new feature description
 > **Note:** When testing agents in `exports/`, always set PYTHONPATH:
 >
 > ```bash
-> PYTHONPATH=core:exports python -m agent_name test
+> PYTHONPATH=exports uv run python -m agent_name test
 > ```
 
 ```bash
@@ -139,7 +139,7 @@ make test
 cd core && pytest tests/ -v
 
 # Run tests for a specific agent
-PYTHONPATH=core:exports python -m agent_name test
+PYTHONPATH=exports uv run python -m agent_name test
 ```
 
 > **CI also validates** that all exported agent JSON files (`exports/*/agent.json`) are well-formed JSON. Ensure your agent exports are valid before submitting.

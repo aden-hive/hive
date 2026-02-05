@@ -162,7 +162,7 @@ Add to `.vscode/settings.json`:
 Install the core package:
 
 ```bash
-cd core && pip install -e .
+cd core && uv pip install -e .
 ```
 
 ### API key not found
@@ -184,7 +184,7 @@ $env:ANTHROPIC_API_KEY = "sk-ant-..."
 Run from the project root with PYTHONPATH:
 
 ```bash
-PYTHONPATH=core:exports python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
 See [Environment Setup](../ENVIRONMENT_SETUP.md) for detailed installation instructions.
