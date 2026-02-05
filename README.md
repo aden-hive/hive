@@ -88,6 +88,18 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## Quick Start
 
+### High-Level Flow (Before You Start)
+
+If you’re new to Hive, here’s the conceptual flow before diving into setup:
+
+1. Describe your goal in natural language (what you want the agent to achieve)
+2. A coding agent generates the agent graph and execution logic
+3. Worker agents execute tasks with built-in tools and memory
+4. The system monitors execution and evaluates outcomes
+5. On failure, the agent graph evolves automatically and redeploys
+
+This mental model helps understand how Hive works before installing or running anything locally.
+
 ## Prerequisites
 
 - Python 3.11+ for agent development
