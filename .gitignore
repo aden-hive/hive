@@ -69,4 +69,3 @@ temp/
 .agent-builder-sessions/*
 
 .venv.agent_runs/
-agent_demo.mov
