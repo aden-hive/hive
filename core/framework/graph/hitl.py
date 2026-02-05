@@ -37,6 +37,17 @@ class HITLQuestion:
     # Metadata
     required: bool = True
     help_text: str = ""
+    def __post_init__(self):
+    if self.input_type == HITLInputType.SELECTION and not self.options:
+        raise ValueError(
+            "HITLQuestion with input_type=SELECTION must define non-empty options."
+        )
+    elif self.input_type == HITLInputType.STRUCTURED and not self.fields:
+        raise ValueError(
+            "HITLQuestion with input_type=STRUCTURED must define non-empty fields."
+        )
+
+
 
 
 @dataclass
