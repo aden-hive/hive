@@ -15,10 +15,19 @@ Usage:
         AdenCachedStorage,
     )
 
-    # Configure
+    # Configure -- API key loaded from ADEN_API_KEY env var
+    # Raise ValueError if ADEN_API_URL is not set
+    base_url = os.environ.get("ADEN_API_URL")
+    if not base_url:
+        raise EnvironmentError("ADEN_API_URL environment variable is required")
+
+    api_key = os.environ.get("ADEN_API_KEY")
+    if not api_key:
+        raise EnvironmentError("ADEN_API_KEY environment variable is required")
+
     client = AdenCredentialClient(AdenClientConfig(
-        base_url=os.environ["ADEN_API_URL"],
-        api_key=os.environ["ADEN_API_KEY"],
+        base_url=base_url,
+        api_key=api_key,
     ))
     provider = AdenSyncProvider(client=client)
 

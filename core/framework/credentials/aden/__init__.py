@@ -13,6 +13,7 @@ Components:
 - AdenCachedStorage: Storage with local cache + Aden fallback
 
 Quick Start:
+    import os
     from core.framework.credentials import CredentialStore
     from core.framework.credentials.storage import EncryptedFileStorage
     from core.framework.credentials.aden import (
@@ -22,8 +23,12 @@ Quick Start:
     )
 
     # Configure (API key loaded from ADEN_API_KEY env var)
+    base_url = os.environ.get("ADEN_API_URL")
+    if not base_url:
+        raise EnvironmentError("ADEN_API_URL environment variable is required")
+
     client = AdenCredentialClient(AdenClientConfig(
-        base_url=os.environ["ADEN_API_URL"],
+        base_url=base_url,
     ))
 
     provider = AdenSyncProvider(client=client)
