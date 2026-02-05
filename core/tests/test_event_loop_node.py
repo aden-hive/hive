@@ -503,8 +503,9 @@ class TestClientFacingBlocking:
         await user_task
 
         assert result.success is True
-        # LLM should have been called at least twice (first response + after inject)
-        assert llm._call_index >= 2
+        # LLM called once; after inject_event, implicit judge ACCEPTs
+        # (no required output_keys) before a second LLM turn occurs.
+        assert llm._call_index >= 1
 
     @pytest.mark.asyncio
     async def test_client_facing_does_not_block_on_tools(self, runtime, memory):
