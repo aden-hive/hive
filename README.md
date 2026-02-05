@@ -106,6 +106,9 @@ cd hive
 ./quickstart.sh
 ```
 
+> 📌 Before running agents, see [Environment Variables Setup](docs/getting-started.md#environment-variables).
+
+
 This sets up:
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
