@@ -238,7 +238,18 @@ class TestEventBus:
         )
 
         # Allow handler to run
-        await asyncio.sleep(0.1)
+        import time
+
+        async def wait_until(predicate, timeout=2.0, interval=0.02):
+            start = time.monotonic()
+            while time.monotonic() - start < timeout:
+                if predicate():
+                    return
+                await asyncio.sleep(interval)
+            raise AssertionError("Timed out waiting for condition")
+
+        # Allow handler to run (wait deterministically instead of sleeping)
+        await wait_until(lambda: len(received_events) == 1, timeout=2.0)
 
         assert len(received_events) == 1
         assert received_events[0].type == EventType.EXECUTION_STARTED
@@ -274,9 +285,17 @@ class TestEventBus:
                 stream_id="api",
             )
         )
+        import time
 
-        await asyncio.sleep(0.1)
+        async def wait_until(predicate, timeout=2.0, interval=0.02):
+            start = time.monotonic()
+            while time.monotonic() - start < timeout:
+                if predicate():
+                    return
+                await asyncio.sleep(interval)
+            raise AssertionError("Timed out waiting for condition")
 
+        await wait_until(lambda: len(received_events) == 1, timeout=2.0)
         assert len(received_events) == 1
         assert received_events[0].stream_id == "webhook"
 
@@ -315,7 +334,7 @@ class TestEventBus:
         wait_task = asyncio.create_task(wait_and_check())
 
         # Publish the event
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0)
         await bus.publish(
             AgentEvent(
                 type=EventType.EXECUTION_COMPLETED,
