@@ -9,6 +9,7 @@ Usage:
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -31,6 +32,8 @@ mcp = FastMCP("agent-builder")
 # Session persistence directory
 SESSIONS_DIR = Path(".agent-builder-sessions")
 ACTIVE_SESSION_FILE = SESSIONS_DIR / ".active"
+
+SAFE_SESSION_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 # Session storage
@@ -138,11 +141,19 @@ def _save_session(session: BuildSession):
 
 def _load_session(session_id: str) -> BuildSession:
     """Load session from disk."""
-    session_file = SESSIONS_DIR / f"{session_id}.json"
+    if not SAFE_SESSION_ID.match(session_id):
+        raise ValueError(f"Invalid session ID format: {session_id}")
+
+    sessions_dir = SESSIONS_DIR.resolve()
+    session_file = (sessions_dir / f"{session_id}.json").resolve()
+
+    if not session_file.is_relative_to(sessions_dir):
+        raise ValueError("Access denied: invalid session path")
+
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file) as f:
+    with open(session_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     return BuildSession.from_dict(data)
@@ -277,7 +288,15 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
     """Delete a saved agent building session."""
     global _session
 
-    session_file = SESSIONS_DIR / f"{session_id}.json"
+    if not SAFE_SESSION_ID.match(session_id):
+        return json.dumps({"success": False, "error": f"Invalid session ID format: {session_id}"})
+
+    sessions_dir = SESSIONS_DIR.resolve()
+    session_file = (sessions_dir / f"{session_id}.json").resolve()
+
+    if not session_file.is_relative_to(sessions_dir):
+        return json.dumps({"success": False, "error": "Access denied: invalid session path"})
+
     if not session_file.exists():
         return json.dumps({"success": False, "error": f"Session '{session_id}' not found"})
 
@@ -290,7 +309,7 @@ def delete_session(session_id: Annotated[str, "ID of the session to delete"]) ->
             _session = None
 
         if ACTIVE_SESSION_FILE.exists():
-            with open(ACTIVE_SESSION_FILE) as f:
+            with open(ACTIVE_SESSION_FILE, "r", encoding="utf-8") as f:
                 active_id = f.read().strip()
                 if active_id == session_id:
                     ACTIVE_SESSION_FILE.unlink()
