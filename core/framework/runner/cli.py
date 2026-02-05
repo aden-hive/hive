@@ -56,6 +56,18 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
     )
+    run_parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Launch interactive terminal dashboard",
+    )
+    run_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model to use (any LiteLLM-compatible name)",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -205,38 +217,83 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"Error reading input file: {e}", file=sys.stderr)
             return 1
 
-    # Load and run agent
-    try:
-        runner = AgentRunner.load(
-            args.agent_path,
-            mock_mode=args.mock,
-            model=getattr(args, "model", "claude-haiku-4-5-20251001"),
-        )
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+    # Run the agent (with TUI or standard)
+    if getattr(args, "tui", False):
+        from framework.tui.app import AdenTUI
 
-    # Auto-inject user_id if the agent expects it but it's not provided
-    entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
-    if "user_id" in entry_input_keys and context.get("user_id") is None:
-        import os
+        async def run_with_tui():
+            try:
+                # Load runner inside the async loop to ensure strict loop affinity
+                # (only one load — avoids spawning duplicate MCP subprocesses)
+                try:
+                    runner = AgentRunner.load(
+                        args.agent_path,
+                        mock_mode=args.mock,
+                        model=args.model,
+                        enable_tui=True,
+                    )
+                except Exception as e:
+                    print(f"Error loading agent: {e}")
+                    return
 
-        context["user_id"] = os.environ.get("USER", "default_user")
+                # Force setup inside the loop
+                if runner._agent_runtime is None:
+                    runner._setup()
 
-    if not args.quiet:
-        info = runner.info()
-        print(f"Agent: {info.name}")
-        print(f"Goal: {info.goal_name}")
-        print(f"Steps: {info.node_count}")
-        print(f"Input: {json.dumps(context)}")
-        print()
-        print("=" * 60)
-        print("Executing agent...")
-        print("=" * 60)
-        print()
+                # Start runtime before TUI so it's ready for user input
+                if runner._agent_runtime and not runner._agent_runtime.is_running:
+                    await runner._agent_runtime.start()
 
-    # Run the agent
-    result = asyncio.run(runner.run(context))
+                app = AdenTUI(runner._agent_runtime)
+
+                # TUI handles execution via ChatRepl — user submits input,
+                # ChatRepl calls runtime.trigger_and_wait(). No auto-launch.
+                await app.run_async()
+            except Exception as e:
+                import traceback
+
+                traceback.print_exc()
+                print(f"TUI error: {e}")
+
+            await runner.cleanup_async()
+            return None
+
+        asyncio.run(run_with_tui())
+        print("TUI session ended.")
+        return 0
+    else:
+        # Standard execution — load runner here (not shared with TUI path)
+        try:
+            runner = AgentRunner.load(
+                args.agent_path,
+                mock_mode=args.mock,
+                model=args.model,
+                enable_tui=False,
+            )
+        except FileNotFoundError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+        # Auto-inject user_id if the agent expects it but it's not provided
+        entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
+        if "user_id" in entry_input_keys and context.get("user_id") is None:
+            import os
+
+            context["user_id"] = os.environ.get("USER", "default_user")
+
+        if not args.quiet:
+            info = runner.info()
+            print(f"Agent: {info.name}")
+            print(f"Goal: {info.goal_name}")
+            print(f"Steps: {info.node_count}")
+            print(f"Input: {json.dumps(context)}")
+            print()
+            print("=" * 60)
+            print("Executing agent...")
+            print("=" * 60)
+            print()
+
+        result = asyncio.run(runner.run(context))
 
     # Format output
     output = {

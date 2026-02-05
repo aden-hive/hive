@@ -198,9 +198,8 @@ hive/                                    # Repository root
 │   ├── quizzes/                         # Developer quizzes
 │   └── i18n/                            # Translations
 │
-├── scripts/                             # Build & utility scripts
-│   ├── setup-python.sh                  # Python environment setup
-│   └── setup.sh                         # Legacy setup script
+├── scripts/                             # Utility scripts
+│   └── auto-close-duplicates.ts         # GitHub duplicate issue closer
 │
 ├── quickstart.sh                        # Interactive setup wizard
 ├── ENVIRONMENT_SETUP.md                 # Complete Python setup guide

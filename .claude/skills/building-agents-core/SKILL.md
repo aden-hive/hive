@@ -158,6 +158,43 @@ intake_node = NodeSpec(
 
 > **Legacy Note:** The old `pause_nodes` / `entry_points` pattern still works but `client_facing=True` is preferred for new agents.
 
+**STEP 1 / STEP 2 Prompt Pattern:** For client-facing nodes, structure the system prompt with two explicit phases:
+
+```python
+system_prompt="""\
+**STEP 1 — Respond to the user (text only, NO tool calls):**
+[Present information, ask questions, etc.]
+
+**STEP 2 — After the user responds, call set_output:**
+[Call set_output with the structured outputs]
+"""
+```
+
+This prevents the LLM from calling `set_output` prematurely before the user has had a chance to respond.
+
+### Node Design: Fewer, Richer Nodes
+
+Prefer fewer nodes that do more work over many thin single-purpose nodes:
+
+- **Bad**: 8 thin nodes (parse query → search → fetch → evaluate → synthesize → write → check → save)
+- **Good**: 4 rich nodes (intake → research → review → report)
+
+Why: Each node boundary requires serializing outputs and passing context. Fewer nodes means the LLM retains full context of its work within the node. A research node that searches, fetches, and analyzes keeps all the source material in its conversation history.
+
+### nullable_output_keys for Cross-Edge Inputs
+
+When a node receives inputs that only arrive on certain edges (e.g., `feedback` only comes from a review → research feedback loop, not from intake → research), mark those keys as `nullable_output_keys`:
+
+```python
+research_node = NodeSpec(
+    id="research",
+    input_keys=["research_brief", "feedback"],
+    nullable_output_keys=["feedback"],  # Not present on first visit
+    max_node_visits=3,
+    ...
+)
+```
+
 ## Event Loop Architecture Concepts
 
 ### How EventLoopNode Works
@@ -169,40 +206,30 @@ An event loop node runs a multi-turn loop:
 4. Judge evaluates: ACCEPT (exit loop), RETRY (loop again), or ESCALATE
 5. Repeat until judge ACCEPTs or max_iterations reached
 
-### CRITICAL: EventLoopNode Runtime Requirements
+### EventLoopNode Runtime
 
-EventLoopNodes are **not auto-created** by the graph executor. They must be explicitly instantiated and registered in a `node_registry` dict before execution.
-
-**Required components:**
-1. **`EventLoopNode` instances** — One per event_loop NodeSpec, registered in `node_registry`
-2. **`Runtime` instance** — `GraphExecutor` calls `runtime.start_run()` internally. Passing `None` crashes the executor
-3. **`GraphExecutor` (not `AgentRuntime`)** — `AgentRuntime`/`create_agent_runtime()` does NOT pass `node_registry` to the internal `GraphExecutor`, so all event_loop nodes fail with "not found in registry"
+EventLoopNodes are **auto-created** by `GraphExecutor` at runtime. You do NOT need to manually register them. Both `GraphExecutor` (direct) and `AgentRuntime` / `create_agent_runtime()` handle event_loop nodes automatically.
 
 ```python
+# Direct execution — executor auto-creates EventLoopNodes
 from framework.graph.executor import GraphExecutor
-from framework.graph.event_loop_node import EventLoopNode, LoopConfig
-from framework.runtime.event_bus import EventBus
 from framework.runtime.core import Runtime
 
-# Build node_registry
-event_bus = EventBus()
-node_registry = {}
-for node_spec in nodes:
-    if node_spec.node_type == "event_loop":
-        node_registry[node_spec.id] = EventLoopNode(
-            event_bus=event_bus,
-            config=LoopConfig(max_iterations=50, max_tool_calls_per_turn=15),
-            tool_executor=tool_executor,
-        )
-
-# Create executor with Runtime and node_registry
 runtime = Runtime(storage_path)
 executor = GraphExecutor(
     runtime=runtime,
     llm=llm,
     tools=tools,
     tool_executor=tool_executor,
-    node_registry=node_registry,
+    storage_path=storage_path,
+)
+result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
+
+# TUI execution — AgentRuntime also works
+from framework.runtime.agent_runtime import create_agent_runtime
+runtime = create_agent_runtime(
+    graph=graph, goal=goal, storage_path=storage_path,
+    entry_points=[...], llm=llm, tools=tools, tool_executor=tool_executor,
 )
 ```
 
@@ -210,7 +237,11 @@ executor = GraphExecutor(
 
 Nodes produce structured outputs by calling `set_output(key, value)` — a synthetic tool injected by the framework. When the LLM calls `set_output`, the value is stored in the output accumulator and made available to downstream nodes via shared memory.
 
+`set_output` is NOT a real tool — it is excluded from `real_tool_results`. For client-facing nodes, this means a turn where the LLM only calls `set_output` (no other tools) is treated as a conversational boundary and will block for user input.
+
 ### JudgeProtocol
+
+**The judge is the SOLE mechanism for acceptance decisions.** Do not add ad-hoc framework gating, output rollback, or premature rejection logic. If the LLM calls `set_output` too early, fix it with better prompts or a custom judge — not framework-level guards.
 
 The judge controls when a node's loop exits:
 - **Implicit judge** (default, no judge configured): ACCEPTs when the LLM finishes with no tool calls and all required output keys are set
@@ -224,6 +255,23 @@ Controls loop behavior:
 - `max_tool_calls_per_turn` (default 10) — limits tool calls per LLM response
 - `stall_detection_threshold` (default 3) — detects repeated identical responses
 - `max_history_tokens` (default 32000) — triggers conversation compaction
+
+### Data Tools (Spillover Management)
+
+When tool results exceed the context window, the framework automatically saves them to a spillover directory and truncates with a hint. Nodes that produce or consume large data should include the data tools:
+
+- `save_data(filename, data, data_dir)` — Write data to a file in the data directory
+- `load_data(filename, data_dir, offset=0, limit=50)` — Read data with line-based pagination
+- `list_data_files(data_dir)` — List available data files
+
+These are real MCP tools (not synthetic). Add them to nodes that handle large tool results:
+
+```python
+research_node = NodeSpec(
+    ...
+    tools=["web_search", "web_scrape", "load_data", "save_data", "list_data_files"],
+)
+```
 
 ### Fan-Out / Fan-In
 
