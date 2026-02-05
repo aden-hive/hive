@@ -53,6 +53,7 @@ To add a new credential:
 from .apollo import APOLLO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
+from .discord import discord_credential_spec
 from .email import EMAIL_CREDENTIALS
 from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
@@ -85,6 +86,7 @@ CREDENTIAL_SPECS = {
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
     **TELEGRAM_CREDENTIALS,
+    "discord": discord_credential_spec,
 }
 
 __all__ = [
