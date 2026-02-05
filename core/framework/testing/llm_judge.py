@@ -41,17 +41,18 @@ class LLMJudge:
     def _get_fallback_provider(self) -> LLMProvider | None:
         """
         Auto-detects available API keys and returns the appropriate provider.
-        Priority: OpenAI -> Anthropic.
+        Priority: OpenAI -> Anthropic -> Google.
         """
-        if os.environ.get("OPENAI_API_KEY"):
-            from framework.llm.openai import OpenAIProvider
+        from framework.llm.litellm import LiteLLMProvider
 
-            return OpenAIProvider(model="gpt-4o-mini")
+        if os.environ.get("OPENAI_API_KEY"):
+            return LiteLLMProvider(model="gpt-4o-mini")
 
         if os.environ.get("ANTHROPIC_API_KEY"):
-            from framework.llm.anthropic import AnthropicProvider
+            return LiteLLMProvider(model="claude-3-haiku-20240307")
 
-            return AnthropicProvider(model="claude-3-haiku-20240307")
+        if os.environ.get("GOOGLE_API_KEY"):
+            return LiteLLMProvider(model="gemini-2.0-flash")
 
         return None
 

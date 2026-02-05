@@ -67,7 +67,7 @@ subgraph Expansion
         j1["Claude Code"]
         j2["Cursor"]
         j3["Opencode"]
-        j4["Antigravity"]
+        j4["Antigravity"]:::done
     end
     subgraph plat["Platform"]
         k1["JavaScript/TypeScript SDK"]
@@ -253,7 +253,7 @@ classDef done fill:#9e9e9e,color:#fff,stroke:#757575
 - [ ] Claude Code
 - [ ] Cursor
 - [ ] Opencode
-- [ ] Antigravity
+- [x] Antigravity
 
 ### File System Enhancement
 - [ ] Semantic Search integration
