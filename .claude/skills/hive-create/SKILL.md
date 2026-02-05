@@ -4,7 +4,7 @@ description: Step-by-step guide for building goal-driven agents. Creates package
 license: Apache-2.0
 metadata:
   author: hive
-  version: "2.0"
+  version: "2.1"
   type: procedural
   part_of: hive
   requires: hive-concepts
@@ -20,7 +20,7 @@ metadata:
 
 ## STEP 1: Initialize Build Environment
 
-**EXECUTE THESE TOOL CALLS NOW:**
+**EXECUTE THESE TOOL CALLS NOW** (silent setup — no user interaction needed):
 
 1. Register the hive-tools MCP server:
 
@@ -49,26 +49,31 @@ mcp__agent-builder__list_mcp_tools()
 
 4. Create the package directory:
 
-```
+```bash
 mkdir -p exports/AGENT_NAME/nodes
 ```
 
-**AFTER completing these calls**, tell the user:
+**Save the tool list for step 3** — you will need it for node design in STEP 3.
 
-> ✅ Build environment initialized
->
-> - Session created
-> - Available tools: [list the tools from step 3]
->
-> Proceeding to define the agent goal...
-
-**THEN immediately proceed to STEP 2.**
+**THEN immediately proceed to STEP 2** (do NOT display setup results to the user — just move on).
 
 ---
 
-## STEP 2: Define and Approve Goal
+## STEP 2: Define Goal Together with User
 
-**PROPOSE a goal to the user.** Based on what they asked for, propose:
+**DO NOT propose a complete goal on your own.** Instead, collaborate with the user to define it.
+
+**START by asking the user to help shape the goal:**
+
+> I've set up the build environment and discovered [N] available tools. Let's define the goal for your agent together.
+>
+> To get started, can you help me understand:
+>
+> 1. **What should this agent accomplish?** (the core purpose)
+> 2. **How will we know it succeeded?** (what does "done" look like)
+> 3. **Are there any hard constraints?** (things it must never do, quality bars, etc.)
+
+**WAIT for the user to respond.** Use their input to draft:
 
 - Goal ID (kebab-case)
 - Goal name
@@ -76,7 +81,7 @@ mkdir -p exports/AGENT_NAME/nodes
 - 3-5 success criteria (each with: id, description, metric, target, weight)
 - 2-4 constraints (each with: id, description, constraint_type, category)
 
-**FORMAT your proposal as a clear summary, then ask for approval:**
+**PRESENT the draft goal for approval:**
 
 > **Proposed Goal: [Name]**
 >
@@ -101,7 +106,7 @@ AskUserQuestion(questions=[{
     "question": "Do you approve this goal definition?",
     "header": "Goal",
     "options": [
-        {"label": "Approve", "description": "Goal looks good, proceed"},
+        {"label": "Approve", "description": "Goal looks good, proceed to workflow design"},
         {"label": "Modify", "description": "I want to change something"}
     ],
     "multiSelect": false
@@ -111,11 +116,11 @@ AskUserQuestion(questions=[{
 **WAIT for user response.**
 
 - If **Approve**: Call `mcp__agent-builder__set_goal(...)` with the goal details, then proceed to STEP 3
-- If **Modify**: Ask what they want to change, update proposal, ask again
+- If **Modify**: Ask what they want to change, update the draft, ask again
 
 ---
 
-## STEP 3: Design Node Workflow
+## STEP 3: Design Conceptual Nodes
 
 **BEFORE designing nodes**, review the available tools from Step 1. Nodes can ONLY use tools that exist.
 
@@ -127,37 +132,40 @@ AskUserQuestion(questions=[{
 - node_type: `"event_loop"` (recommended for all LLM work) or `"function"` (deterministic, no LLM)
 - input_keys (what data this node receives)
 - output_keys (what data this node produces)
-- tools (ONLY tools that exist - empty list if no tools needed)
-- system_prompt (should mention `set_output` for producing structured outputs)
+- tools (ONLY tools that exist from Step 1 — empty list if no tools needed)
 - client_facing: True if this node interacts with the user
-- nullable_output_keys (for mutually exclusive outputs)
+- nullable_output_keys (for mutually exclusive outputs or feedback-only inputs)
 - max_node_visits (>1 if this node is a feedback loop target)
 
-**PRESENT the workflow to the user:**
+**Prefer fewer, richer nodes** (4 nodes > 8 thin nodes). Each node boundary requires serializing outputs. A research node that searches, fetches, and analyzes keeps all source material in its conversation history.
 
-> **Proposed Workflow: [N] nodes**
+**PRESENT the nodes to the user for review:**
+
+> **Proposed Nodes ([N] total):**
 >
-> 1. **[node-id]** - [description]
+> | #   | Node ID    | Type       | Description                   | Tools                  | Client-Facing |
+> | --- | ---------- | ---------- | ----------------------------- | ---------------------- | :-----------: |
+> | 1   | `intake`   | event_loop | Gather requirements from user | —                      |      Yes      |
+> | 2   | `research` | event_loop | Search and analyze sources    | web_search, web_scrape |      No       |
+> | 3   | `review`   | event_loop | Present findings for approval | —                      |      Yes      |
+> | 4   | `report`   | event_loop | Generate final report         | save_data              |      No       |
 >
->    - Type: event_loop [client-facing] / function
->    - Input: [keys]
->    - Output: [keys]
->    - Tools: [tools or "none"]
+> **Data Flow:**
 >
-> 2. **[node-id]** - [description]
->    ...
->
-> **Flow:** node1 → node2 → node3 → ...
+> - `intake` produces: `research_brief`
+> - `research` receives: `research_brief` → produces: `findings`, `sources`
+> - `review` receives: `findings`, `sources` → produces: `approved_findings` or `feedback`
+> - `report` receives: `approved_findings` → produces: `final_report`
 
 **THEN call AskUserQuestion:**
 
 ```
 AskUserQuestion(questions=[{
-    "question": "Do you approve this workflow design?",
-    "header": "Workflow",
+    "question": "Do you approve these nodes?",
+    "header": "Nodes",
     "options": [
-        {"label": "Approve", "description": "Workflow looks good, proceed to build nodes"},
-        {"label": "Modify", "description": "I want to change the workflow"}
+        {"label": "Approve", "description": "Nodes look good, proceed to graph design"},
+        {"label": "Modify", "description": "I want to change the nodes"}
     ],
     "multiSelect": false
 }])
@@ -170,54 +178,146 @@ AskUserQuestion(questions=[{
 
 ---
 
-## STEP 4: Build Nodes One by One
+## STEP 4: Design Full Graph and Review
 
-**FOR EACH node in the approved workflow:**
+**DETERMINE the edges** connecting the approved nodes. For each edge:
 
-1. **Call** `mcp__agent-builder__add_node(...)` with the node details
+- edge_id (kebab-case)
+- source → target
+- condition: `on_success`, `on_failure`, `always`, or `conditional`
+- condition_expr (Python expression, only if conditional)
+- priority (positive = forward, negative = feedback/loop-back)
 
-   - input_keys and output_keys must be JSON strings: `'["key1", "key2"]'`
-   - tools must be a JSON string: `'["tool1"]'` or `'[]'`
+**RENDER the complete graph as ASCII art.** Make it large and clear — the user needs to see and understand the full workflow at a glance.
 
-2. **Call** `mcp__agent-builder__test_node(...)` to validate:
-
-```
-mcp__agent-builder__test_node(
-    node_id="the-node-id",
-    test_input='{"key": "test value"}',
-    mock_llm_response='{"output_key": "test output"}'
-)
-```
-
-3. **Check result:**
-
-   - If valid: Tell user "✅ Node [id] validated" and continue to next node
-   - If invalid: Show errors, fix the node, re-validate
-
-4. **Show progress** after each node:
+**IMPORTANT: Make the ASCII art BIG and READABLE.** Use a box-and-arrow style with generous spacing. Do NOT make it tiny or compressed. Example format:
 
 ```
-mcp__agent-builder__get_session_status()
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           AGENT: Research Agent                            │
+│                                                                            │
+│  Goal: Thoroughly research technical topics and produce verified reports   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────┐
+    │       INTAKE          │
+    │  (client-facing)      │
+    │                       │
+    │  in:  topic           │
+    │  out: research_brief  │
+    └───────────┬───────────┘
+                │ on_success
+                ▼
+    ┌───────────────────────┐
+    │      RESEARCH         │
+    │                       │
+    │  tools: web_search,   │
+    │         web_scrape    │
+    │                       │
+    │  in:  research_brief  │
+    │       [feedback]      │
+    │  out: findings,       │
+    │       sources         │
+    └───────────┬───────────┘
+                │ on_success
+                ▼
+    ┌───────────────────────┐
+    │       REVIEW          │
+    │  (client-facing)      │
+    │                       │
+    │  in:  findings,       │
+    │       sources         │
+    │  out: approved_findings│
+    │       OR feedback     │
+    └───────┬───────┬───────┘
+            │       │
+   approved │       │ feedback (priority: -1)
+            │       │
+            ▼       └──────────────────┐
+    ┌───────────────────────┐          │
+    │       REPORT          │          │
+    │                       │          │
+    │  tools: save_data     │          │
+    │                       │          │
+    │  in:  approved_       │          │
+    │       findings        │          │
+    │  out: final_report    │          │
+    └───────────────────────┘          │
+                                       │
+            ┌──────────────────────────┘
+            │ loops back to RESEARCH
+            ▼ (max_node_visits: 3)
+
+
+    EDGES:
+    ──────
+    1. intake → research         [on_success, priority: 1]
+    2. research → review         [on_success, priority: 1]
+    3. review → report           [conditional: approved_findings is not None, priority: 1]
+    4. review → research         [conditional: feedback is not None, priority: -1]
 ```
 
-> ✅ Node [X] of [Y] complete: [node-id]
+**PRESENT the graph and edges to the user:**
 
-**AFTER all nodes are added and validated**, proceed to STEP 5.
+> Here is the complete workflow graph:
+>
+> [ASCII art above]
+>
+> **Edge Summary:**
+>
+> | #   | Edge              | Condition                                    | Priority |
+> | --- | ----------------- | -------------------------------------------- | -------- |
+> | 1   | intake → research | on_success                                   | 1        |
+> | 2   | research → review | on_success                                   | 1        |
+> | 3   | review → report   | conditional: `approved_findings is not None` | 1        |
+> | 4   | review → research | conditional: `feedback is not None`          | -1       |
+
+**THEN call AskUserQuestion:**
+
+```
+AskUserQuestion(questions=[{
+    "question": "Do you approve this workflow graph?",
+    "header": "Graph",
+    "options": [
+        {"label": "Approve", "description": "Graph looks good, proceed to build the agent"},
+        {"label": "Modify", "description": "I want to change the graph"}
+    ],
+    "multiSelect": false
+}])
+```
+
+**WAIT for user response.**
+
+- If **Approve**: Proceed to STEP 5
+- If **Modify**: Ask what they want to change, update the graph, re-render, ask again
 
 ---
 
-## STEP 5: Connect Edges
+## STEP 5: Build the Agent
 
-**DETERMINE the edges** based on the workflow flow. For each connection:
+**NOW — and only now — write the actual code.** The user has approved the goal, nodes, and graph.
 
-- edge_id (kebab-case)
-- source (node that outputs)
-- target (node that receives)
-- condition: `"on_success"`, `"always"`, `"on_failure"`, or `"conditional"`
-- condition_expr (Python expression using `output.get(...)`, only if conditional)
-- priority (positive = forward edge evaluated first, negative = feedback edge)
+### 5a: Register nodes and edges with MCP
 
-**FOR EACH edge, call:**
+**FOR EACH approved node**, call:
+
+```
+mcp__agent-builder__add_node(
+    node_id="...",
+    name="...",
+    description="...",
+    node_type="event_loop",
+    input_keys='["key1", "key2"]',
+    output_keys='["key1"]',
+    tools='["tool1"]',
+    system_prompt="...",
+    client_facing=True/False,
+    nullable_output_keys='["key"]',
+    max_node_visits=1
+)
+```
+
+**FOR EACH approved edge**, call:
 
 ```
 mcp__agent-builder__add_edge(
@@ -230,26 +330,22 @@ mcp__agent-builder__add_edge(
 )
 ```
 
-**AFTER all edges are added, validate the graph:**
+**VALIDATE the graph:**
 
 ```
 mcp__agent-builder__validate_graph()
 ```
 
-- If valid: Tell user "✅ Graph structure validated" and proceed to STEP 6
-- If invalid: Show errors, fix edges, re-validate
+- If invalid: Fix the issues and re-validate
+- If valid: Continue to 5b
 
----
-
-## STEP 6: Generate Agent Package
+### 5b: Write Python package files
 
 **EXPORT the graph data:**
 
 ```
 mcp__agent-builder__export_graph()
 ```
-
-This returns JSON with all the goal, nodes, edges, and MCP server configurations.
 
 **THEN write the Python package files** using the exported data. Create these files in `exports/AGENT_NAME/`:
 
@@ -271,7 +367,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 
 **AFTER writing all files, tell the user:**
 
-> ✅ Agent package created: `exports/AGENT_NAME/`
+> Agent package created: `exports/AGENT_NAME/`
 >
 > **Files generated:**
 >
@@ -282,18 +378,10 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 > - `nodes/__init__.py` - Node definitions
 > - `mcp_servers.json` - MCP server config
 > - `README.md` - Usage documentation
->
-> **Test your agent:**
->
-> ```bash
-> cd /home/timothy/oss/hive
-> PYTHONPATH=exports uv run python -m AGENT_NAME validate
-> PYTHONPATH=exports uv run python -m AGENT_NAME info
-> ```
 
 ---
 
-## STEP 7: Verify and Test
+## STEP 6: Verify and Test
 
 **RUN validation:**
 
@@ -303,12 +391,6 @@ cd /home/timothy/oss/hive && PYTHONPATH=exports uv run python -m AGENT_NAME vali
 
 - If valid: Agent is complete!
 - If errors: Fix the issues and re-run
-
-**SHOW final session summary:**
-
-```
-mcp__agent-builder__get_session_status()
-```
 
 **TELL the user the agent is ready** and suggest next steps:
 
@@ -320,30 +402,30 @@ mcp__agent-builder__get_session_status()
 
 ## REFERENCE: Node Types
 
-| Type | tools param | Use when |
-|------|-------------|----------|
-| `event_loop` | `'["tool1"]'` or `'[]'` | LLM-powered work with or without tools |
-| `function` | N/A | Deterministic Python operations, no LLM |
+| Type         | tools param             | Use when                                |
+| ------------ | ----------------------- | --------------------------------------- |
+| `event_loop` | `'["tool1"]'` or `'[]'` | LLM-powered work with or without tools  |
+| `function`   | N/A                     | Deterministic Python operations, no LLM |
 
 ---
 
-## REFERENCE: NodeSpec New Fields
+## REFERENCE: NodeSpec Fields
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `client_facing` | `False` | Streams output to user, blocks for input between turns |
-| `nullable_output_keys` | `[]` | Output keys that may remain unset (mutually exclusive outputs) |
-| `max_node_visits` | `1` | Max executions per run. Set >1 for feedback loop targets. 0=unlimited |
+| Field                  | Default | Description                                                           |
+| ---------------------- | ------- | --------------------------------------------------------------------- |
+| `client_facing`        | `False` | Streams output to user, blocks for input between turns                |
+| `nullable_output_keys` | `[]`    | Output keys that may remain unset (mutually exclusive outputs)        |
+| `max_node_visits`      | `1`     | Max executions per run. Set >1 for feedback loop targets. 0=unlimited |
 
 ---
 
 ## REFERENCE: Edge Conditions & Priority
 
-| Condition | When edge is followed |
-|-----------|--------------------------------------|
-| `on_success` | Source node completed successfully |
-| `on_failure` | Source node failed |
-| `always` | Always, regardless of success/failure |
+| Condition     | When edge is followed                 |
+| ------------- | ------------------------------------- |
+| `on_success`  | Source node completed successfully    |
+| `on_failure`  | Source node failed                    |
+| `always`      | Always, regardless of success/failure |
 | `conditional` | When condition_expr evaluates to True |
 
 **Priority:** Positive = forward edge (evaluated first). Negative = feedback edge (loops back to earlier node). Multiple ON_SUCCESS edges from same source = parallel execution (fan-out).
@@ -413,3 +495,4 @@ result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
 7. **Missing STEP 1/STEP 2 in client-facing prompts** - Client-facing nodes need explicit phases to prevent premature set_output
 8. **Forgetting nullable_output_keys** - Mark input_keys that only arrive on certain edges (e.g., feedback) as nullable on the receiving node
 9. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code
+10. **Writing code before user approves the graph** - Always get approval on goal, nodes, and graph BEFORE writing any agent code
