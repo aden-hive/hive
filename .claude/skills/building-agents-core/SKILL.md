@@ -73,10 +73,8 @@ Unit of work (written to nodes/__init__.py)
 
 **Node Types:**
 
-- `event_loop` — **Recommended for all LLM-powered work.** Multi-turn streaming loop with tool execution and judge-based evaluation. Works with or without tools.
+- `event_loop` — Multi-turn streaming loop with tool execution and judge-based evaluation. Works with or without tools.
 - `function` — Deterministic Python operations. No LLM involved.
-
-> **Legacy Note:** `llm_generate` and `llm_tool_use` still function but are deprecated. Use `event_loop` instead, which handles both cases in a single multi-turn streaming loop.
 
 ```python
 search_node = NodeSpec(

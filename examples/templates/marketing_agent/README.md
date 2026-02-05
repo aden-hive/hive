@@ -25,10 +25,10 @@ A multi-channel marketing content generator. Given a product and audience, this 
 
 ```bash
 # From the repo root
-PYTHONPATH=core python -m examples.templates.marketing_agent
+uv run python -m examples.templates.marketing_agent
 
 # With custom input
-PYTHONPATH=core python -m examples.templates.marketing_agent --input '{
+uv run python -m examples.templates.marketing_agent --input '{
   "product_description": "A fitness tracking app",
   "target_audience": "Health-conscious millennials",
   "brand_voice": "Energetic and motivational",

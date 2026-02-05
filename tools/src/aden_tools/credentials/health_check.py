@@ -231,6 +231,64 @@ class GoogleSearchHealthChecker:
             )
 
 
+class SlackHealthChecker:
+    """Health checker for Slack bot tokens."""
+
+    ENDPOINT = "https://slack.com/api/auth.test"
+    TIMEOUT = 10.0
+
+    def check(self, bot_token: str) -> HealthCheckResult:
+        """
+        Validate Slack bot token by calling auth.test.
+
+        Makes a POST request to auth.test to verify the token works.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.post(
+                    self.ENDPOINT,
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                )
+
+                if response.status_code != 200:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Slack API returned HTTP {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+
+                data = response.json()
+                if data.get("ok"):
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Slack bot token valid",
+                        details={
+                            "team": data.get("team"),
+                            "user": data.get("user"),
+                            "bot_id": data.get("bot_id"),
+                        },
+                    )
+                else:
+                    error = data.get("error", "unknown_error")
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Slack token invalid: {error}",
+                        details={"error": error},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Slack API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Slack: {e}",
+                details={"error": str(e)},
+            )
+
+
 class AnthropicHealthChecker:
     """Health checker for Anthropic API credentials."""
 
@@ -434,6 +492,7 @@ class ResendHealthChecker:
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
+    "slack": SlackHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),

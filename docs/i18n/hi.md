@@ -104,7 +104,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # अपने एजेंट को चलाएँ
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 पूर्ण कॉन्फ़िगरेशन गाइड](ENVIRONMENT_SETUP.md)** - एजेंट विकास के लिए विस्तृत निर्देश
@@ -250,7 +250,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # एजेंट चलाएँ
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 पूरी कॉन्फ़िगरेशन निर्देशों के लिए ENVIRONMENT_SETUP.md देखें।
