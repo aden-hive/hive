@@ -1,19 +1,19 @@
 ---
-name: building-agents-patterns
+name: hive-patterns
 description: Best practices, patterns, and examples for building goal-driven agents. Includes client-facing interaction, feedback edges, judge patterns, fan-out/fan-in, context management, and anti-patterns.
 license: Apache-2.0
 metadata:
   author: hive
   version: "2.0"
   type: reference
-  part_of: building-agents
+  part_of: hive
 ---
 
 # Building Agents - Patterns & Best Practices
 
 Design patterns, examples, and best practices for building robust goal-driven agents.
 
-**Prerequisites:** Complete agent structure using `building-agents-construction`.
+**Prerequisites:** Complete agent structure using `hive-create`.
 
 ## Practical Example: Hybrid Workflow
 
@@ -375,10 +375,10 @@ When agent is complete, transition to testing phase:
 
 ## Related Skills
 
-- **building-agents-core** — Fundamental concepts (node types, edges, event loop architecture)
-- **building-agents-construction** — Step-by-step building process
-- **testing-agent** — Test and validate agents
-- **agent-workflow** — Complete workflow orchestrator
+- **hive-concepts** — Fundamental concepts (node types, edges, event loop architecture)
+- **hive-create** — Step-by-step building process
+- **hive-test** — Test and validate agents
+- **hive** — Complete workflow orchestrator
 
 ---
 

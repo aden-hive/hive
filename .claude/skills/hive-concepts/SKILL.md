@@ -1,12 +1,12 @@
 ---
-name: building-agents-core
+name: hive-concepts
 description: Core concepts for goal-driven agents - architecture, node types (event_loop, function), tool discovery, and workflow overview. Use when starting agent development or need to understand agent fundamentals.
 license: Apache-2.0
 metadata:
   author: hive
   version: "2.0"
   type: foundational
-  part_of: building-agents
+  part_of: hive
 ---
 
 # Building Agents - Core Concepts
@@ -350,15 +350,15 @@ Before writing a node with `tools=[...]`:
 
 ## When to Use This Skill
 
-Use building-agents-core when:
+Use hive-concepts when:
 - Starting a new agent project and need to understand fundamentals
 - Need to understand agent architecture before building
 - Want to validate tool availability before proceeding
 - Learning about node types, edges, and graph execution
 
 **Next Steps:**
-- Ready to build? → Use `building-agents-construction` skill
-- Need patterns and examples? → Use `building-agents-patterns` skill
+- Ready to build? → Use `hive-create` skill
+- Need patterns and examples? → Use `hive-patterns` skill
 
 ## MCP Tools for Validation
 
@@ -393,7 +393,7 @@ mcp__agent-builder__configure_loop(
 
 ## Related Skills
 
-- **building-agents-construction** - Step-by-step building process
-- **building-agents-patterns** - Best practices: judges, feedback edges, fan-out, context management
-- **agent-workflow** - Complete workflow orchestrator
-- **testing-agent** - Test and validate completed agents
+- **hive-create** - Step-by-step building process
+- **hive-patterns** - Best practices: judges, feedback edges, fan-out, context management
+- **hive** - Complete workflow orchestrator
+- **hive-test** - Test and validate completed agents

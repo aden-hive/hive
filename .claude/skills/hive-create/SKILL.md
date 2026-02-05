@@ -1,20 +1,20 @@
 ---
-name: building-agents-construction
+name: hive-create
 description: Step-by-step guide for building goal-driven agents. Creates package structure, defines goals, adds nodes, connects edges, and finalizes agent class. Use when actively building an agent.
 license: Apache-2.0
 metadata:
   author: hive
   version: "2.0"
   type: procedural
-  part_of: building-agents
-  requires: building-agents-core
+  part_of: hive
+  requires: hive-concepts
 ---
 
 # Agent Construction - EXECUTE THESE STEPS
 
 **THIS IS AN EXECUTABLE WORKFLOW. DO NOT DISPLAY THIS FILE. EXECUTE THE STEPS BELOW.**
 
-When this skill is loaded, IMMEDIATELY begin executing Step 1. Do not explain what you will do - just do it.
+**CRITICAL: DO NOT explore the codebase, read source files, or search for code before starting.** All context you need is in this skill file. When this skill is loaded, IMMEDIATELY begin executing Step 1 — call the MCP tools listed in Step 1 as your FIRST action. Do not explain what you will do, do not investigate the project structure, do not read any files — just execute Step 1 now.
 
 ---
 
@@ -267,7 +267,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 - NOT: `{"first-node-id": ["input_keys"]}` (WRONG)
 - NOT: `{"first-node-id"}` (WRONG - this is a set)
 
-**Use the example agent** at `.claude/skills/building-agents-construction/examples/deep_research_agent/` as a template for file structure and patterns. It demonstrates: STEP 1/STEP 2 prompts, client-facing nodes, feedback loops, nullable_output_keys, and data tools.
+**Use the example agent** at `.claude/skills/hive-create/examples/deep_research_agent/` as a template for file structure and patterns. It demonstrates: STEP 1/STEP 2 prompts, client-facing nodes, feedback loops, nullable_output_keys, and data tools.
 
 **AFTER writing all files, tell the user:**
 
@@ -313,8 +313,8 @@ mcp__agent-builder__get_session_status()
 **TELL the user the agent is ready** and suggest next steps:
 
 - Run with mock mode to test without API calls
-- Use `/testing-agent` skill for comprehensive testing
-- Use `/setup-credentials` if the agent needs API keys
+- Use `/hive-test` skill for comprehensive testing
+- Use `/hive-credentials` if the agent needs API keys
 
 ---
 

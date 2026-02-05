@@ -4,7 +4,7 @@ This example walks through testing a YouTube research agent that finds relevant 
 
 ## Prerequisites
 
-- Agent built with building-agents skill at `exports/youtube-research/`
+- Agent built with hive-create skill at `exports/youtube-research/`
 - Goal defined with success criteria and constraints
 
 ## Step 1: Load the Goal
@@ -283,11 +283,11 @@ result = debug_test(
 Since this is an **IMPLEMENTATION_ERROR**, we:
 
 1. **Don't restart** the Goal → Agent → Eval flow
-2. **Fix the agent** using building-agents skill:
+2. **Fix the agent** using hive-create skill:
    - Modify `filter_node` to handle null results
 3. **Re-run Eval** (tests only)
 
-### Fix in building-agents:
+### Fix in hive-create:
 
 ```python
 # Update the filter_node to handle null

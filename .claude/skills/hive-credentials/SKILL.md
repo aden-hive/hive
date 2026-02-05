@@ -1,5 +1,5 @@
 ---
-name: setup-credentials
+name: hive-credentials
 description: Set up and install credentials for an agent. Detects missing credentials from agent config, collects them from the user, and stores them securely in the local encrypted store at ~/.hive/credentials.
 license: Apache-2.0
 metadata:
@@ -86,7 +86,7 @@ grep -q '^BRAVE_SEARCH_API_KEY=' .env 2>/dev/null && echo "BRAVE_SEARCH_API_KEY:
 
 #### Step 2c: HIVE_CREDENTIAL_KEY Check
 
-If any credentials were found in the encrypted store metadata index, verify the encryption key is available. The key is typically persisted to shell config by a previous setup-credentials run.
+If any credentials were found in the encrypted store metadata index, verify the encryption key is available. The key is typically persisted to shell config by a previous hive-credentials run.
 
 Check both the current session AND shell config files:
 
@@ -94,7 +94,7 @@ Check both the current session AND shell config files:
 # Check 1: Current session
 printenv HIVE_CREDENTIAL_KEY > /dev/null 2>&1 && echo "session: set" || echo "session: not set"
 
-# Check 2: Shell config files (where setup-credentials persists it)
+# Check 2: Shell config files (where hive-credentials persists it)
 # Note: check each file individually to avoid non-zero exit when one doesn't exist
 for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTIAL_KEY' "$f" && echo "$f"; done
 ```
@@ -561,7 +561,7 @@ token = store.get_key("hubspot", "access_token")
 ## Example Session
 
 ```
-User: /setup-credentials for my research-agent
+User: /hive-credentials for my research-agent
 
 Agent: Let me check what credentials your research-agent needs.
 
