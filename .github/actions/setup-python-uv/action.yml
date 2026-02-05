@@ -1,0 +1,21 @@
+name: Setup Python & uv
+description: Shared setup for Python and uv with caching
+
+inputs:
+  python-version:
+    description: "Python version to install"
+    required: true
+    default: "3.11"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
