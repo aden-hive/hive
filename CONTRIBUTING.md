@@ -35,9 +35,16 @@ You may submit PRs without prior assignment for:
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/hive.git`
-3. Create a feature branch: `git checkout -b feature/your-feature-name`
-4. Make your changes
-5. Run checks and tests:
+3. Add the upstream repository: `git remote add upstream https://github.com/adenhq/hive.git`
+4. Sync with upstream to ensure you're starting from the latest code:
+   ```bash
+   git fetch upstream
+   git checkout main
+   git merge upstream/main
+   ```
+5. Create a feature branch: `git checkout -b feature/your-feature-name`
+6. Make your changes
+7. Run checks and tests:
    ```bash
    make check    # Lint and format checks (ruff check + ruff format --check on core/ and tools/)
    make test     # Core tests (cd core && pytest tests/ -v)
