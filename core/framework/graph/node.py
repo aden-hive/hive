@@ -477,6 +477,9 @@ class NodeContext:
     attempt: int = 1
     max_attempts: int = 3
 
+    # Runtime logging (optional)
+    runtime_logger: Any = None  # RuntimeLogger | None — uses Any to avoid import
+
 
 @dataclass
 class NodeResult:
@@ -854,6 +857,8 @@ Keep the same JSON structure but with shorter content values.
         )
 
         start = time.time()
+        _step_index = 0
+        _captured_tool_calls: list[dict] = []
 
         try:
             # Build messages
@@ -893,6 +898,16 @@ Keep the same JSON structure but with shorter content values.
                     if len(str(result.content)) > 150:
                         result_str += "..."
                     logger.info(f"         ✓ Tool result: {result_str}")
+                    # Capture for runtime logging
+                    _captured_tool_calls.append(
+                        {
+                            "tool_use_id": tool_use.id,
+                            "tool_name": tool_use.name,
+                            "tool_input": tool_use.input,
+                            "content": result.content,
+                            "is_error": result.is_error,
+                        }
+                    )
                     return result
 
                 response = ctx.llm.complete_with_tools(
@@ -1072,6 +1087,29 @@ Keep the same JSON structure but with shorter content values.
                                     f"Pydantic validation failed after "
                                     f"{max_validation_retries} retries: {err}"
                                 )
+                                if ctx.runtime_logger:
+                                    ctx.runtime_logger.log_step(
+                                        node_id=ctx.node_id,
+                                        node_type=ctx.node_spec.node_type,
+                                        step_index=_step_index,
+                                        llm_text=response.content,
+                                        tool_calls=_captured_tool_calls,
+                                        input_tokens=total_input_tokens,
+                                        output_tokens=total_output_tokens,
+                                        latency_ms=latency_ms,
+                                    )
+                                    ctx.runtime_logger.log_node_complete(
+                                        node_id=ctx.node_id,
+                                        node_name=ctx.node_spec.name,
+                                        node_type=ctx.node_spec.node_type,
+                                        success=False,
+                                        error=error_msg,
+                                        total_steps=_step_index + 1,
+                                        tokens_used=total_input_tokens + total_output_tokens,
+                                        input_tokens=total_input_tokens,
+                                        output_tokens=total_output_tokens,
+                                        latency_ms=latency_ms,
+                                    )
                                 return NodeResult(
                                     success=False,
                                     error=error_msg,
@@ -1161,12 +1199,36 @@ Keep the same JSON structure but with shorter content values.
                     )
 
                     # Return failure instead of writing garbage to all keys
+                    _extraction_error = (
+                        f"Output extraction failed: {e}. LLM returned non-JSON response. "
+                        f"Expected keys: {ctx.node_spec.output_keys}"
+                    )
+                    if ctx.runtime_logger:
+                        ctx.runtime_logger.log_step(
+                            node_id=ctx.node_id,
+                            node_type=ctx.node_spec.node_type,
+                            step_index=_step_index,
+                            llm_text=response.content,
+                            tool_calls=_captured_tool_calls,
+                            input_tokens=response.input_tokens,
+                            output_tokens=response.output_tokens,
+                            latency_ms=latency_ms,
+                        )
+                        ctx.runtime_logger.log_node_complete(
+                            node_id=ctx.node_id,
+                            node_name=ctx.node_spec.name,
+                            node_type=ctx.node_spec.node_type,
+                            success=False,
+                            error=_extraction_error,
+                            total_steps=_step_index + 1,
+                            tokens_used=response.input_tokens + response.output_tokens,
+                            input_tokens=response.input_tokens,
+                            output_tokens=response.output_tokens,
+                            latency_ms=latency_ms,
+                        )
                     return NodeResult(
                         success=False,
-                        error=(
-                            f"Output extraction failed: {e}. LLM returned non-JSON response. "
-                            f"Expected keys: {ctx.node_spec.output_keys}"
-                        ),
+                        error=_extraction_error,
                         output={},
                         tokens_used=response.input_tokens + response.output_tokens,
                         latency_ms=latency_ms,
@@ -1184,6 +1246,29 @@ Keep the same JSON structure but with shorter content values.
                     ctx.memory.write(key, stripped_content, validate=False)
                     output[key] = stripped_content
 
+            if ctx.runtime_logger:
+                ctx.runtime_logger.log_step(
+                    node_id=ctx.node_id,
+                    node_type=ctx.node_spec.node_type,
+                    step_index=_step_index,
+                    llm_text=response.content,
+                    tool_calls=_captured_tool_calls,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
+                    latency_ms=latency_ms,
+                )
+                ctx.runtime_logger.log_node_complete(
+                    node_id=ctx.node_id,
+                    node_name=ctx.node_spec.name,
+                    node_type=ctx.node_spec.node_type,
+                    success=True,
+                    total_steps=_step_index + 1,
+                    tokens_used=response.input_tokens + response.output_tokens,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
+                    latency_ms=latency_ms,
+                )
+
             return NodeResult(
                 success=True,
                 output=output,
@@ -1199,6 +1284,15 @@ Keep the same JSON structure but with shorter content values.
                 error=str(e),
                 latency_ms=latency_ms,
             )
+            if ctx.runtime_logger:
+                ctx.runtime_logger.log_node_complete(
+                    node_id=ctx.node_id,
+                    node_name=ctx.node_spec.name,
+                    node_type=ctx.node_spec.node_type,
+                    success=False,
+                    error=str(e),
+                    latency_ms=latency_ms,
+                )
             return NodeResult(success=False, error=str(e), latency_ms=latency_ms)
 
     def _parse_output(self, content: str, node_spec: NodeSpec) -> dict[str, Any]:
@@ -1591,6 +1685,9 @@ class RouterNode(NodeProtocol):
 
     async def execute(self, ctx: NodeContext) -> NodeResult:
         """Execute routing logic."""
+        import time as _time
+
+        start = _time.time()
         ctx.runtime.set_node(ctx.node_id)
 
         # Build options from routes
@@ -1635,10 +1732,30 @@ class RouterNode(NodeProtocol):
             summary=f"Routing to {chosen_route[1]}",
         )
 
+        latency_ms = int((_time.time() - start) * 1000)
+
+        if ctx.runtime_logger:
+            ctx.runtime_logger.log_step(
+                node_id=ctx.node_id,
+                node_type="router",
+                step_index=0,
+                llm_text=f"Route: {chosen_route[0]} -> {chosen_route[1]}",
+                latency_ms=latency_ms,
+            )
+            ctx.runtime_logger.log_node_complete(
+                node_id=ctx.node_id,
+                node_name=ctx.node_spec.name,
+                node_type="router",
+                success=True,
+                total_steps=1,
+                latency_ms=latency_ms,
+            )
+
         return NodeResult(
             success=True,
             next_node=chosen_route[1],
             route_reason=f"Chose route: {chosen_route[0]}",
+            latency_ms=latency_ms,
         )
 
     async def _llm_route(
@@ -1800,6 +1917,22 @@ class FunctionNode(NodeProtocol):
             else:
                 output = {"result": result}
 
+            if ctx.runtime_logger:
+                ctx.runtime_logger.log_step(
+                    node_id=ctx.node_id,
+                    node_type="function",
+                    step_index=0,
+                    latency_ms=latency_ms,
+                )
+                ctx.runtime_logger.log_node_complete(
+                    node_id=ctx.node_id,
+                    node_name=ctx.node_spec.name,
+                    node_type="function",
+                    success=True,
+                    total_steps=1,
+                    latency_ms=latency_ms,
+                )
+
             return NodeResult(success=True, output=output, latency_ms=latency_ms)
 
         except Exception as e:
@@ -1810,4 +1943,22 @@ class FunctionNode(NodeProtocol):
                 error=str(e),
                 latency_ms=latency_ms,
             )
+
+            if ctx.runtime_logger:
+                ctx.runtime_logger.log_step(
+                    node_id=ctx.node_id,
+                    node_type="function",
+                    step_index=0,
+                    latency_ms=latency_ms,
+                )
+                ctx.runtime_logger.log_node_complete(
+                    node_id=ctx.node_id,
+                    node_name=ctx.node_spec.name,
+                    node_type="function",
+                    success=False,
+                    error=str(e),
+                    total_steps=1,
+                    latency_ms=latency_ms,
+                )
+
             return NodeResult(success=False, error=str(e), latency_ms=latency_ms)
