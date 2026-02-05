@@ -14,6 +14,7 @@ import logging
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
@@ -130,6 +131,7 @@ class GraphExecutor:
         parallel_config: ParallelExecutionConfig | None = None,
         event_bus: Any | None = None,
         stream_id: str = "",
+        storage_path: str | Path | None = None,
     ):
         """
         Initialize the executor.
@@ -146,6 +148,7 @@ class GraphExecutor:
             parallel_config: Configuration for parallel execution behavior
             event_bus: Optional event bus for emitting node lifecycle events
             stream_id: Stream ID for event correlation
+            storage_path: Optional base path for conversation persistence
         """
         self.runtime = runtime
         self.llm = llm
@@ -157,6 +160,7 @@ class GraphExecutor:
         self.logger = logging.getLogger(__name__)
         self._event_bus = event_bus
         self._stream_id = stream_id
+        self._storage_path = Path(storage_path) if storage_path else None
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -380,8 +384,16 @@ class GraphExecutor:
                     )
 
                 if result.success:
-                    # Validate output before accepting it
-                    if result.output and node_spec.output_keys:
+                    # Validate output before accepting it.
+                    # Skip for event_loop nodes — their judge system is
+                    # the sole acceptance mechanism (see WP-8).  Empty
+                    # strings and other flexible outputs are legitimate
+                    # for LLM-driven nodes that already passed the judge.
+                    if (
+                        result.output
+                        and node_spec.output_keys
+                        and node_spec.node_type != "event_loop"
+                    ):
                         validation = self.validator.validate_all(
                             output=result.output,
                             expected_keys=node_spec.output_keys,
@@ -817,11 +829,43 @@ class GraphExecutor:
             )
 
         if node_spec.node_type == "event_loop":
-            # Event loop nodes must be pre-registered (like function nodes)
-            raise RuntimeError(
-                f"EventLoopNode '{node_spec.id}' not found in registry. "
-                "Register it with executor.register_node() before execution."
+            # Auto-create EventLoopNode with sensible defaults.
+            # Custom configs can still be pre-registered via node_registry.
+            from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+
+            # Create a FileConversationStore if a storage path is available
+            conv_store = None
+            if self._storage_path:
+                from framework.storage.conversation_store import FileConversationStore
+
+                store_path = self._storage_path / "conversations" / node_spec.id
+                conv_store = FileConversationStore(base_path=store_path)
+
+            # Auto-configure spillover directory for large tool results.
+            # When a tool result exceeds max_tool_result_chars, the full
+            # content is written to spillover_dir and the agent gets a
+            # truncated preview with instructions to use load_data().
+            spillover = None
+            if self._storage_path:
+                spillover = str(self._storage_path / "data")
+
+            node = EventLoopNode(
+                event_bus=self._event_bus,
+                judge=None,  # implicit judge: accept when output_keys are filled
+                config=LoopConfig(
+                    max_iterations=100 if node_spec.client_facing else 50,
+                    max_tool_calls_per_turn=10,
+                    stall_detection_threshold=3,
+                    max_history_tokens=32000,
+                    max_tool_result_chars=3_000,
+                    spillover_dir=spillover,
+                ),
+                tool_executor=self.tool_executor,
+                conversation_store=conv_store,
             )
+            # Cache so inject_event() is reachable for client-facing input
+            self.node_registry[node_spec.id] = node
+            return node
 
         # Should never reach here due to validation above
         raise RuntimeError(f"Unhandled node type: {node_spec.node_type}")
@@ -850,9 +894,12 @@ class GraphExecutor:
                 source_node_name=current_node_spec.name if current_node_spec else current_node_id,
                 target_node_name=target_node_spec.name if target_node_spec else edge.target,
             ):
-                # Validate and clean output before mapping inputs
+                # Validate and clean output before mapping inputs.
+                # Use full memory state (not just result.output) because
+                # target input_keys may come from earlier nodes in the
+                # graph, not only from the immediate source node.
                 if self.cleansing_config.enabled and target_node_spec:
-                    output_to_validate = result.output
+                    output_to_validate = memory.read_all()
 
                     validation = self.output_cleaner.validate_output(
                         output=output_to_validate,
@@ -1048,10 +1095,13 @@ class GraphExecutor:
             branch.status = "running"
 
             try:
-                # Validate and clean output before mapping inputs (same as _follow_edges)
+                # Validate and clean output before mapping inputs (same as _follow_edges).
+                # Use full memory state since target input_keys may come
+                # from earlier nodes, not just the immediate source.
                 if self.cleansing_config.enabled and node_spec:
+                    mem_snapshot = memory.read_all()
                     validation = self.output_cleaner.validate_output(
-                        output=source_result.output,
+                        output=mem_snapshot,
                         source_node_id=source_node_spec.id if source_node_spec else "unknown",
                         target_node_spec=node_spec,
                     )
@@ -1062,7 +1112,7 @@ class GraphExecutor:
                             f"{branch.node_id}: {validation.errors}"
                         )
                         cleaned_output = self.output_cleaner.clean_output(
-                            output=source_result.output,
+                            output=mem_snapshot,
                             source_node_id=source_node_spec.id if source_node_spec else "unknown",
                             target_node_spec=node_spec,
                             validation_errors=validation.errors,

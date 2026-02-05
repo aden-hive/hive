@@ -32,12 +32,15 @@ class RuntimeConfig:
 default_config = RuntimeConfig()
 
 
-# Agent metadata
 @dataclass
 class AgentMetadata:
-    name: str = "Online Research Agent"
+    name: str = "Deep Research Agent"
     version: str = "1.0.0"
-    description: str = "Research any topic by searching multiple sources, synthesizing information, and producing a well-structured narrative report with citations."
+    description: str = (
+        "Interactive research agent that rigorously investigates topics through "
+        "multi-source search, quality evaluation, and synthesis - with TUI conversation "
+        "at key checkpoints for user guidance and feedback."
+    )
 
 
 metadata = AgentMetadata()

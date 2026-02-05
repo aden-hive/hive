@@ -104,8 +104,10 @@ def test_event_loop_node_spec_accepted():
 # --- _get_node_implementation() tests ---
 
 
-def test_unregistered_event_loop_raises(runtime):
-    """An event_loop node not in the registry should raise RuntimeError."""
+def test_unregistered_event_loop_auto_creates(runtime):
+    """An event_loop node not in the registry should be auto-created."""
+    from framework.graph.event_loop_node import EventLoopNode
+
     spec = NodeSpec(
         id="el1",
         name="Event Loop",
@@ -114,8 +116,10 @@ def test_unregistered_event_loop_raises(runtime):
     )
     executor = GraphExecutor(runtime=runtime)
 
-    with pytest.raises(RuntimeError, match="not found in registry"):
-        executor._get_node_implementation(spec)
+    result = executor._get_node_implementation(spec)
+    assert isinstance(result, EventLoopNode)
+    # Auto-created node should be cached in registry
+    assert "el1" in executor.node_registry
 
 
 def test_registered_event_loop_returns_impl(runtime):

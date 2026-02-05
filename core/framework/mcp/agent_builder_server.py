@@ -1105,17 +1105,30 @@ def validate_graph() -> str:
                 errors.append(f"Unreachable nodes: {unreachable}")
 
     # === CONTEXT FLOW VALIDATION ===
-    # Build dependency map (node_id -> list of nodes it depends on)
+    # Build dependency maps — separate forward edges from feedback edges.
+    # Feedback edges (priority < 0) create cycles; they must not block the
+    # topological sort.  Context they carry arrives on *revisits*, not on
+    # the first execution of a node.
+    feedback_edge_ids = {e.id for e in session.edges if e.priority < 0}
+    forward_dependencies: dict[str, list[str]] = {node.id: [] for node in session.nodes}
+    feedback_sources: dict[str, list[str]] = {node.id: [] for node in session.nodes}
+    # Combined map kept for error-message generation (all deps)
     dependencies: dict[str, list[str]] = {node.id: [] for node in session.nodes}
+
     for edge in session.edges:
-        if edge.target in dependencies:
-            dependencies[edge.target].append(edge.source)
+        if edge.target not in forward_dependencies:
+            continue
+        dependencies[edge.target].append(edge.source)
+        if edge.id in feedback_edge_ids:
+            feedback_sources[edge.target].append(edge.source)
+        else:
+            forward_dependencies[edge.target].append(edge.source)
 
     # Build output map (node_id -> keys it produces)
     node_outputs: dict[str, set[str]] = {node.id: set(node.output_keys) for node in session.nodes}
 
     # Compute available context for each node (what keys it can read)
-    # Using topological order
+    # Using topological order on the forward-edge DAG
     available_context: dict[str, set[str]] = {}
     computed = set()
     nodes_by_id = {n.id: n for n in session.nodes}
@@ -1125,7 +1138,8 @@ def validate_graph() -> str:
     # Entry nodes can only read from initial context
     initial_context_keys: set[str] = set()
 
-    # Compute in topological order
+    # Compute in topological order (forward edges only — feedback edges
+    # don't block, since their context arrives on revisits)
     remaining = {n.id for n in session.nodes}
     max_iterations = len(session.nodes) * 2
 
@@ -1134,17 +1148,22 @@ def validate_graph() -> str:
             break
 
         for node_id in list(remaining):
-            deps = dependencies.get(node_id, [])
+            fwd_deps = forward_dependencies.get(node_id, [])
 
-            # Can compute if all dependencies are computed (or no dependencies)
-            if all(d in computed for d in deps):
-                # Collect outputs from all dependencies
+            # Can compute if all FORWARD dependencies are computed
+            if all(d in computed for d in fwd_deps):
+                # Collect outputs from all forward dependencies
                 available = set(initial_context_keys)
-                for dep_id in deps:
-                    # Add outputs from dependency
+                for dep_id in fwd_deps:
                     available.update(node_outputs.get(dep_id, set()))
-                    # Also add what was available to the dependency (transitive)
                     available.update(available_context.get(dep_id, set()))
+
+                # Also include context from already-computed feedback
+                # sources (bonus, not blocking)
+                for fb_src in feedback_sources.get(node_id, []):
+                    if fb_src in computed:
+                        available.update(node_outputs.get(fb_src, set()))
+                        available.update(available_context.get(fb_src, set()))
 
                 available_context[node_id] = available
                 computed.add(node_id)
@@ -1155,15 +1174,37 @@ def validate_graph() -> str:
     context_errors = []
     context_warnings = []
     missing_inputs: dict[str, list[str]] = {}
+    feedback_only_inputs: dict[str, list[str]] = {}
 
     for node in session.nodes:
         available = available_context.get(node.id, set())
 
         for input_key in node.input_keys:
             if input_key not in available:
-                if node.id not in missing_inputs:
-                    missing_inputs[node.id] = []
-                missing_inputs[node.id].append(input_key)
+                # Check if this input is provided by a feedback source
+                fb_provides = set()
+                for fb_src in feedback_sources.get(node.id, []):
+                    fb_provides.update(node_outputs.get(fb_src, set()))
+                    fb_provides.update(available_context.get(fb_src, set()))
+
+                if input_key in fb_provides:
+                    # Input arrives via feedback edge — warn, don't error
+                    if node.id not in feedback_only_inputs:
+                        feedback_only_inputs[node.id] = []
+                    feedback_only_inputs[node.id].append(input_key)
+                else:
+                    if node.id not in missing_inputs:
+                        missing_inputs[node.id] = []
+                    missing_inputs[node.id].append(input_key)
+
+    # Warn about feedback-only inputs (available on revisits, not first run)
+    for node_id, fb_keys in feedback_only_inputs.items():
+        fb_srcs = feedback_sources.get(node_id, [])
+        context_warnings.append(
+            f"Node '{node_id}' input(s) {fb_keys} are only provided via "
+            f"feedback edge(s) from {fb_srcs}. These will be available on "
+            f"revisits but not on the first execution."
+        )
 
     # Generate helpful error messages
     for node_id, missing in missing_inputs.items():
