@@ -42,7 +42,7 @@
 ## Aden이란 무엇인가
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Aden은 AI 에이전트를 구축, 배포, 운영, 적응시키기 위한 플랫폼입니다:
@@ -97,7 +97,7 @@ claude> /building-agents
 claude> /testing-agent
 
 # 에이전트 실행
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 전체 설정 가이드](ENVIRONMENT_SETUP.md)** - 에이전트 개발을 위한 상세한 설명
@@ -254,7 +254,7 @@ claude> /building-agents
 claude> /testing-agent
 
 # 에이전트 실행
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 전체 설정 방법은 [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) 를 참고하세요.

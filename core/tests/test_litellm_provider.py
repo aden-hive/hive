@@ -2,7 +2,7 @@
 
 Run with:
     cd core
-    pip install litellm pytest
+    uv pip install litellm pytest
     pytest tests/test_litellm_provider.py -v
 
 For live tests (requires API keys):
@@ -208,6 +208,62 @@ class TestLiteLLMProviderToolUse:
         assert result.input_tokens == 50  # 20 + 30
         assert result.output_tokens == 25  # 15 + 10
         assert mock_completion.call_count == 2
+
+    @patch("litellm.completion")
+    def test_complete_with_tools_invalid_json_arguments_are_handled(self, mock_completion):
+        """Test that invalid JSON tool arguments do not execute the tool."""
+        # Mock response with invalid JSON arguments
+        tool_call_response = MagicMock()
+        tool_call_response.choices = [MagicMock()]
+        tool_call_response.choices[0].message.content = None
+        tool_call_response.choices[0].message.tool_calls = [MagicMock()]
+        tool_call_response.choices[0].message.tool_calls[0].id = "call_123"
+        tool_call_response.choices[0].message.tool_calls[0].function.name = "test_tool"
+        tool_call_response.choices[0].message.tool_calls[0].function.arguments = "{invalid json"
+        tool_call_response.choices[0].finish_reason = "tool_calls"
+        tool_call_response.model = "gpt-4o-mini"
+        tool_call_response.usage.prompt_tokens = 10
+        tool_call_response.usage.completion_tokens = 5
+
+        # Final response (LLM continues after tool error)
+        final_response = MagicMock()
+        final_response.choices = [MagicMock()]
+        final_response.choices[0].message.content = "Handled error"
+        final_response.choices[0].message.tool_calls = None
+        final_response.choices[0].finish_reason = "stop"
+        final_response.model = "gpt-4o-mini"
+        final_response.usage.prompt_tokens = 5
+        final_response.usage.completion_tokens = 5
+
+        mock_completion.side_effect = [tool_call_response, final_response]
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+
+        tools = [
+            Tool(
+                name="test_tool",
+                description="Test tool",
+                parameters={"properties": {}, "required": []},
+            )
+        ]
+
+        called = {"value": False}
+
+        def tool_executor(tool_use: ToolUse) -> ToolResult:
+            called["value"] = True
+            return ToolResult(
+                tool_use_id=tool_use.id, content="should not be called", is_error=False
+            )
+
+        result = provider.complete_with_tools(
+            messages=[{"role": "user", "content": "Run tool"}],
+            system="You are a test assistant.",
+            tools=tools,
+            tool_executor=tool_executor,
+        )
+
+        assert called["value"] is False
+        assert result.content == "Handled error"
 
 
 class TestToolConversion:

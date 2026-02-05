@@ -144,8 +144,11 @@ class OutputCleaner:
         errors = []
         warnings = []
 
-        # Check 1: Required input keys present
+        # Check 1: Required input keys present (skip nullable keys)
+        nullable = set(getattr(target_node_spec, "nullable_output_keys", None) or [])
         for key in target_node_spec.input_keys:
+            if key in nullable:
+                continue
             if key not in output:
                 errors.append(f"Missing required key: '{key}'")
                 continue
