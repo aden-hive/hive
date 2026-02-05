@@ -28,7 +28,7 @@ class TestSendEmail:
     def test_no_credentials_returns_error(self, send_email_fn, monkeypatch):
         """Send without credentials returns helpful error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
-        monkeypatch.delenv("GMAIL_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
@@ -40,7 +40,7 @@ class TestSendEmail:
     def test_resend_explicit_missing_key(self, send_email_fn, monkeypatch):
         """Explicit resend provider without key returns error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
-        monkeypatch.delenv("GMAIL_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_email_fn(
@@ -54,7 +54,7 @@ class TestSendEmail:
     def test_missing_from_email_returns_error(self, send_email_fn, monkeypatch):
         """No from_email and no EMAIL_FROM env var returns error when using Resend."""
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
-        monkeypatch.delenv("GMAIL_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.delenv("EMAIL_FROM", raising=False)
 
         result = send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
@@ -336,7 +336,7 @@ class TestSendBudgetAlertEmail:
     def test_no_credentials_returns_error(self, send_budget_alert_fn, monkeypatch):
         """Budget alert without credentials returns error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
-        monkeypatch.delenv("GMAIL_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_budget_alert_fn(
@@ -455,7 +455,7 @@ class TestGmailProvider:
 
     def test_gmail_success(self, send_email_fn, monkeypatch):
         """Successful Gmail send returns success dict with message ID."""
-        monkeypatch.setenv("GMAIL_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "user@gmail.com")
 
@@ -487,7 +487,7 @@ class TestGmailProvider:
 
     def test_gmail_missing_credentials(self, send_email_fn, monkeypatch):
         """Explicit Gmail provider without token returns error."""
-        monkeypatch.delenv("GMAIL_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
@@ -504,7 +504,7 @@ class TestGmailProvider:
 
     def test_gmail_api_error(self, send_email_fn, monkeypatch):
         """Gmail API non-200 response returns error dict."""
-        monkeypatch.setenv("GMAIL_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "user@gmail.com")
 
@@ -525,7 +525,7 @@ class TestGmailProvider:
 
     def test_gmail_token_expired(self, send_email_fn, monkeypatch):
         """Gmail 401 response returns token expiry error with help."""
-        monkeypatch.setenv("GMAIL_ACCESS_TOKEN", "expired_token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "expired_token")
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "user@gmail.com")
 
@@ -547,7 +547,7 @@ class TestGmailProvider:
 
     def test_auto_prefers_gmail_over_resend(self, send_email_fn, monkeypatch):
         """Auto mode uses Gmail when both Gmail and Resend are available."""
-        monkeypatch.setenv("GMAIL_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
         monkeypatch.setenv("EMAIL_FROM", "user@gmail.com")
 
@@ -571,7 +571,7 @@ class TestGmailProvider:
 
     def test_auto_falls_back_to_resend(self, send_email_fn, monkeypatch):
         """Auto mode falls back to Resend when Gmail is not available."""
-        monkeypatch.delenv("GMAIL_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
@@ -588,7 +588,7 @@ class TestGmailProvider:
 
     def test_gmail_no_from_email_ok(self, send_email_fn, monkeypatch):
         """Gmail works without from_email (defaults to authenticated user)."""
-        monkeypatch.setenv("GMAIL_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
         monkeypatch.delenv("EMAIL_FROM", raising=False)
 

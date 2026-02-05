@@ -2,7 +2,7 @@
 Email Tool - Send emails using multiple providers.
 
 Supports:
-- Gmail (GMAIL_ACCESS_TOKEN, via Aden OAuth2)
+- Gmail (GOOGLE_ACCESS_TOKEN, via Aden OAuth2)
 - Resend (RESEND_API_KEY)
 
 Auto-detection: If provider="auto", tries Gmail first, then Resend.
@@ -121,11 +121,11 @@ def register_tools(
         if credentials is not None:
             return {
                 "resend_api_key": credentials.get("resend"),
-                "gmail_access_token": credentials.get("gmail"),
+                "gmail_access_token": credentials.get("google"),  # Google OAuth for Gmail
             }
         return {
             "resend_api_key": os.getenv("RESEND_API_KEY"),
-            "gmail_access_token": os.getenv("GMAIL_ACCESS_TOKEN"),
+            "gmail_access_token": os.getenv("GOOGLE_ACCESS_TOKEN"),
         }
 
     def _resolve_from_email(from_email: str | None) -> str | None:
