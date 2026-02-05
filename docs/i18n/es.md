@@ -14,7 +14,6 @@
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
 [![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
-[![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
 [![Discord](https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb)](https://discord.com/invite/MXE49hrKDk)
 [![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
 [![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
@@ -42,7 +41,7 @@ Visita [adenhq.com](https://adenhq.com) para documentación completa, ejemplos y
 ## ¿Qué es Aden?
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Aden es una plataforma para construir, desplegar, operar y adaptar agentes de IA:
@@ -66,7 +65,6 @@ Aden es una plataforma para construir, desplegar, operar y adaptar agentes de IA
 ### Prerrequisitos
 
 - [Python 3.11+](https://www.python.org/downloads/) - Para desarrollo de agentes
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Opcional, para herramientas en contenedores
 
 ### Instalación
 
@@ -97,7 +95,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # Ejecutar tu agente
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Guía de Configuración Completa](ENVIRONMENT_SETUP.md)** - Instrucciones detalladas para desarrollo de agentes
@@ -243,7 +241,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # Ejecutar agentes
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 Consulta [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instrucciones de configuración completas.

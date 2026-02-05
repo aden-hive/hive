@@ -113,6 +113,16 @@ def register_tools(
         cc_list = _normalize_recipients(cc)
         bcc_list = _normalize_recipients(bcc)
 
+        # Testing override: redirect all recipients to a single address.
+        # Set EMAIL_OVERRIDE_TO=you@example.com to intercept all outbound mail.
+        override_to = os.getenv("EMAIL_OVERRIDE_TO")
+        if override_to:
+            original_to = to_list
+            to_list = [override_to]
+            cc_list = None
+            bcc_list = None
+            subject = f"[TEST -> {', '.join(original_to)}] {subject}"
+
         creds = _get_credentials()
         resend_available = bool(creds["resend_api_key"])
 

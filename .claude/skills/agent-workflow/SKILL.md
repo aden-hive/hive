@@ -46,6 +46,7 @@ Use this meta-skill when:
 "Need to understand agent concepts" → building-agents-core
 "Build a new agent" → building-agents-construction
 "Optimize my agent design" → building-agents-patterns
+"Need client-facing nodes or feedback loops" → building-agents-patterns
 "Set up API keys for my agent" → setup-credentials
 "Test my agent" → testing-agent
 "Not sure what I need" → Read phases below, then decide
@@ -63,12 +64,12 @@ Use this meta-skill when:
 - First time building an agent
 - Need to understand node types, edges, goals
 - Want to validate tool availability
-- Learning about pause/resume architecture
+- Learning about event loop architecture and client-facing nodes
 
 ### What This Phase Provides
 
 - Architecture overview (Python packages, not JSON)
-- Core concepts (Goal, Node, Edge, Pause/Resume)
+- Core concepts (Goal, Node, Edge, Event Loop, Judges)
 - Tool discovery and validation procedures
 - Workflow overview
 
@@ -106,7 +107,7 @@ Creates the complete agent architecture:
 - ✅ 1-5 constraints defined
 - ✅ 5-10 nodes specified in nodes/__init__.py
 - ✅ 8-15 edges connecting workflow
-- ✅ Validated structure (passes `python -m agent_name validate`)
+- ✅ Validated structure (passes `uv run python -m agent_name validate`)
 - ✅ README.md with usage instructions
 - ✅ CLI commands (info, validate, run, shell)
 
@@ -153,19 +154,20 @@ exports/agent_name/
 
 ### When to Use
 
-- Want to add pause/resume functionality
+- Want to add client-facing blocking or feedback edges
+- Need judge patterns for output validation
+- Want fan-out/fan-in (parallel execution)
 - Need error handling patterns
-- Want to optimize performance
-- Need examples of complex routing
 - Want best practices guidance
 
 ### What This Phase Provides
 
-- Practical examples and patterns
-- Pause/resume architecture
-- Error handling strategies
+- Client-facing interaction patterns
+- Feedback edge routing with nullable output keys
+- Judge patterns (implicit, SchemaJudge)
+- Fan-out/fan-in parallel execution
+- Context management and spillover patterns
 - Anti-patterns to avoid
-- Performance optimization techniques
 
 **Skip this phase** if your agent design is straightforward.
 
@@ -291,15 +293,15 @@ User: "Build an agent"
 → Done: Working agent
 ```
 
-### Pattern 4: Complex Agent with Patterns
+### Pattern 4: Agent with Review Loops and HITL Checkpoints
 
 ```
-User: "Build an agent with multi-turn conversations"
-→ Use /building-agents-core (learn pause/resume)
-→ Use /building-agents-construction (build structure)
-→ Use /building-agents-patterns (implement pause/resume pattern)
-→ Use /testing-agent (validate conversation flows)
-→ Done: Complex conversational agent
+User: "Build an agent with human review and feedback loops"
+→ Use /building-agents-core (learn event loop, client-facing nodes)
+→ Use /building-agents-construction (build structure with feedback edges)
+→ Use /building-agents-patterns (implement client-facing + feedback patterns)
+→ Use /testing-agent (validate review flows and edge routing)
+→ Done: Agent with HITL checkpoints and review loops
 ```
 
 ## Skill Dependencies
@@ -308,25 +310,26 @@ User: "Build an agent with multi-turn conversations"
 agent-workflow (meta-skill)
     │
     ├── building-agents-core (foundational)
-    │   ├── Architecture concepts
-    │   ├── Node/Edge/Goal definitions
+    │   ├── Architecture concepts (event loop, judges)
+    │   ├── Node types (event_loop, function)
+    │   ├── Edge routing and priority
     │   ├── Tool discovery procedures
     │   └── Workflow overview
     │
     ├── building-agents-construction (procedural)
     │   ├── Creates package structure
     │   ├── Defines goal
-    │   ├── Adds nodes incrementally
-    │   ├── Connects edges
+    │   ├── Adds nodes (event_loop, function)
+    │   ├── Connects edges with priority routing
     │   ├── Finalizes agent class
     │   └── Requires: building-agents-core
     │
     ├── building-agents-patterns (reference)
-    │   ├── Best practices
-    │   ├── Pause/resume patterns
-    │   ├── Error handling
-    │   ├── Anti-patterns
-    │   └── Performance optimization
+    │   ├── Client-facing interaction patterns
+    │   ├── Feedback edges and review loops
+    │   ├── Judge patterns (implicit, SchemaJudge)
+    │   ├── Fan-out/fan-in parallel execution
+    │   └── Context management and anti-patterns
     │
     └── testing-agent
         ├── Reads agent goal
@@ -342,7 +345,7 @@ agent-workflow (meta-skill)
 - Check node IDs match between nodes/__init__.py and agent.py
 - Verify all edges reference valid node IDs
 - Ensure entry_node exists in nodes list
-- Run: `PYTHONPATH=core:exports python -m agent_name validate`
+- Run: `PYTHONPATH=exports uv run python -m agent_name validate`
 
 ### "Agent has structure but won't run"
 
@@ -368,7 +371,7 @@ Run these checks:
 ls exports/my_agent/agent.py
 
 # Check if it validates
-PYTHONPATH=core:exports python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent validate
 
 # Check if tests exist
 ls exports/my_agent/tests/
@@ -439,9 +442,9 @@ The workflow is **flexible** - skip phases as needed, iterate freely, and adapt 
 
 **Choose building-agents-core when:**
 - First time building agents
-- Need to understand architecture
+- Need to understand event loop architecture
 - Validating tool availability
-- Learning about node types and edges
+- Learning about node types, edges, and judges
 
 **Choose building-agents-construction when:**
 - Actually building an agent
@@ -451,13 +454,13 @@ The workflow is **flexible** - skip phases as needed, iterate freely, and adapt 
 
 **Choose building-agents-patterns when:**
 - Agent structure complete
-- Need advanced patterns
-- Implementing pause/resume
-- Optimizing performance
+- Need client-facing nodes or feedback edges
+- Implementing review loops or fan-out/fan-in
+- Want judge patterns or context management
 - Want best practices
 
 **Choose testing-agent when:**
 - Agent structure complete
 - Ready to validate functionality
 - Need comprehensive test coverage
-- Debugging agent behavior
+- Testing feedback loops, output keys, or fan-out

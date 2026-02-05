@@ -44,7 +44,7 @@
 # Aden क्या है?
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Aden एक ऐसा प्लेटफ़ॉर्म है जो AI एजेंट्स को बनाने, डिप्लॉय करने, ऑपरेट करने और अनुकूलित करने के लिए उपयोग होता है:
@@ -83,7 +83,7 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Python वातावरण कॉन्फ़िगरेशन चलाएँ
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 यह इंस्टॉल करता है:
@@ -104,7 +104,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # अपने एजेंट को चलाएँ
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 पूर्ण कॉन्फ़िगरेशन गाइड](ENVIRONMENT_SETUP.md)** - एजेंट विकास के लिए विस्तृत निर्देश
@@ -236,7 +236,7 @@ hive/
 
 ```bash
 # एक-बार का कॉन्फ़िगरेशन
-./scripts/setup-python.sh
+./quickstart.sh
 
 # यह इंस्टॉल करता है:
 # - फ्रेमवर्क पैकेज (मुख्य रनटाइम)
@@ -250,7 +250,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # एजेंट चलाएँ
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 पूरी कॉन्फ़िगरेशन निर्देशों के लिए ENVIRONMENT_SETUP.md देखें।

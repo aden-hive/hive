@@ -15,7 +15,6 @@
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
 [![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
-[![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
 [![Discord](https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb)](https://discord.com/invite/MXE49hrKDk)
 [![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
 [![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
@@ -39,6 +38,31 @@
 Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
+
+## Who Is Hive For?
+
+Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
+
+Hive is a good fit if you:
+
+- Want AI agents that **execute real business processes**, not demos
+- Prefer **goal-driven development** over hardcoded workflows
+- Need **self-healing and adaptive agents** that improve over time
+- Require **human-in-the-loop control**, observability, and cost limits
+- Plan to run agents in **production environments**
+
+Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
+
+## When Should You Use Hive?
+
+Use Hive when you need:
+
+- Long-running, autonomous agents
+- Multi-agent coordination
+- Continuous improvement based on failures
+- Strong monitoring, safety, and budget controls
+- A framework that evolves with your goals
+
 
 ## What is Aden
 
@@ -64,10 +88,12 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## Quick Start
 
-### Prerequisites
+## Prerequisites
 
-- [Python 3.11+](https://www.python.org/downloads/) for agent development
+- Python 3.11+ for agent development
 - Claude Code or Cursor for utilizing agent skills
+
+> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
 ### Installation
 
@@ -95,7 +121,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # Run your agent
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
@@ -181,7 +207,7 @@ flowchart LR
 Aden Hive provides a list of featured agents that you can use and build on top of.
 
 ### Run an agent shared by others
-Put the agent in `exports/` and run `PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'`
+Put the agent in `exports/` and run `PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'`
 
 
 For building and running goal-driven agents with the framework:
@@ -202,7 +228,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # Run agents
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.
