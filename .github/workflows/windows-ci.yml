@@ -1,0 +1,8 @@
+name: Windows Check
+on: [push]
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python --version
