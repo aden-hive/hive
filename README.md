@@ -35,7 +35,8 @@
 
 ## Overview
 
-Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
+Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures structured failure data and provides analysis and guidance that help evolve the agent through a coding agent or human-in-the-loop workflow, enabling iterative improvement and redeployment. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
+
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
@@ -63,6 +64,17 @@ Use Hive when you need:
 - Strong monitoring, safety, and budget controls
 - A framework that evolves with your goals
 
+## What Does “Self-Improving” Mean in Practice?
+
+Hive is designed to support continuous improvement of AI agents through **instrumentation, evaluation, and guided iteration**.
+
+Today, this includes:
+- Automatic capture of decisions, outcomes, and failures during agent runs
+- Goal- and constraint-based testing to surface where agents do not meet expectations
+- Builder tools that analyze failures and suggest improvements to agent graphs, prompts, or logic
+- Human- or coding-agent–driven updates to apply those improvements and redeploy agents
+
+This approach emphasizes **reliable evolution with oversight**, rather than opaque, fully autonomous self-modification. The framework is built so that more automated evolution loops can be layered on top as these capabilities mature.
 
 ## What is Aden
 
@@ -431,7 +443,8 @@ Contributions are welcome! Fork the repository, create your feature branch, impl
 
 **Q: When will my team start seeing results from Aden's adaptive agents?**
 
-Aden's adaptation loop begins working from the first execution. When an agent fails, the framework captures the failure data, helping developers evolve the agent graph through the coding agent. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your goal definitions, and the volume of executions generating feedback.
+When an agent fails, the framework captures structured failure data and provides analysis that helps developers or coding agents evolve the agent graph and redeploy improvements. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your goal definitions, and the volume of executions generating feedback.
+
 
 **Q: How does Hive compare to other agent frameworks?**
 
