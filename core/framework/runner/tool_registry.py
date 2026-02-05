@@ -1,5 +1,6 @@
 """Tool discovery and registration for agent runner."""
 
+import contextvars
 import importlib.util
 import inspect
 import json
@@ -12,6 +13,13 @@ from typing import Any
 from framework.llm.provider import Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
+
+# Per-execution context overrides.  Each asyncio task (and thus each
+# concurrent graph execution) gets its own copy, so there are no races
+# when multiple ExecutionStreams run in parallel.
+_execution_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_execution_context", default=None
+)
 
 
 @dataclass
@@ -36,7 +44,7 @@ class ToolRegistry:
     # Framework-internal context keys injected into tool calls.
     # Stripped from LLM-facing schemas (the LLM doesn't know these values)
     # and auto-injected at call time for tools that accept them.
-    CONTEXT_PARAMS = frozenset({"workspace_id", "agent_id", "session_id"})
+    CONTEXT_PARAMS = frozenset({"workspace_id", "agent_id", "session_id", "data_dir"})
 
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
@@ -262,6 +270,24 @@ class ToolRegistry:
         """
         self._session_context.update(context)
 
+    @staticmethod
+    def set_execution_context(**context) -> contextvars.Token:
+        """Set per-execution context overrides (concurrency-safe via contextvars).
+
+        Values set here take precedence over session context.  Each asyncio
+        task gets its own copy, so concurrent executions don't interfere.
+
+        Returns a token that must be passed to :meth:`reset_execution_context`
+        to restore the previous state.
+        """
+        current = _execution_context.get() or {}
+        return _execution_context.set({**current, **context})
+
+    @staticmethod
+    def reset_execution_context(token: contextvars.Token) -> None:
+        """Restore execution context to its previous state."""
+        _execution_context.reset(token)
+
     def load_mcp_config(self, config_path: Path) -> None:
         """
         Load and register MCP servers from a config file.
@@ -359,11 +385,15 @@ class ToolRegistry:
                 ):
                     def executor(inputs: dict) -> Any:
                         try:
-                            # Only inject session context params the tool accepts
+                            # Build base context: session < execution (execution wins)
+                            base_context = dict(registry_ref._session_context)
+                            exec_ctx = _execution_context.get()
+                            if exec_ctx:
+                                base_context.update(exec_ctx)
+
+                            # Only inject context params the tool accepts
                             filtered_context = {
-                                k: v
-                                for k, v in registry_ref._session_context.items()
-                                if k in tool_params
+                                k: v for k, v in base_context.items() if k in tool_params
                             }
                             merged_inputs = {**filtered_context, **inputs}
                             result = client_ref.call_tool(tool_name, merged_inputs)
