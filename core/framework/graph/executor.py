@@ -745,6 +745,16 @@ class GraphExecutor:
                 narrative=f"Failed at step {steps}: {e}",
             )
 
+            # Log the crashing node to L2
+            if self.runtime_logger and node_spec is not None:
+                self.runtime_logger.ensure_node_logged(
+                    node_id=node_spec.id,
+                    node_name=node_spec.name,
+                    node_type=node_spec.node_type,
+                    success=False,
+                    error=str(e),
+                )
+
             # Calculate quality metrics even for exceptions
             total_retries_count = sum(node_retry_counts.values())
             nodes_failed = list(node_retry_counts.keys())
@@ -1198,6 +1208,18 @@ class GraphExecutor:
                     result = await node_impl.execute(ctx)
                     last_result = result
 
+                    # Ensure L2 entry for this branch node
+                    if self.runtime_logger:
+                        self.runtime_logger.ensure_node_logged(
+                            node_id=node_spec.id,
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                            success=result.success,
+                            error=result.error,
+                            tokens_used=result.tokens_used,
+                            latency_ms=result.latency_ms,
+                        )
+
                     # Emit node-completed event (skip event_loop nodes)
                     if self._event_bus and node_spec.node_type != "event_loop":
                         await self._event_bus.emit_node_loop_completed(
@@ -1236,6 +1258,17 @@ class GraphExecutor:
                 branch.status = "failed"
                 branch.error = str(e)
                 self.logger.error(f"      ✗ Branch {branch.node_id}: exception - {e}")
+
+                # Log the crashing branch node to L2
+                if self.runtime_logger and node_spec is not None:
+                    self.runtime_logger.ensure_node_logged(
+                        node_id=node_spec.id,
+                        node_name=node_spec.name,
+                        node_type=node_spec.node_type,
+                        success=False,
+                        error=str(e),
+                    )
+
                 return branch, e
 
         # Execute all branches concurrently
