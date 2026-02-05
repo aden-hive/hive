@@ -589,6 +589,149 @@ class TestAdenCachedStorage:
         assert info["stale"]["is_fresh"] is False
         assert info["stale"]["ttl_remaining_seconds"] == 0
 
+    def test_save_indexes_provider(self, cached_storage):
+        """Test save builds the provider index from _integration_type key."""
+        cred = CredentialObject(
+            id="aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1",
+            credential_type=CredentialType.OAUTH2,
+            keys={
+                "access_token": CredentialKey(
+                    name="access_token",
+                    value=SecretStr("token-value"),
+                ),
+                "_integration_type": CredentialKey(
+                    name="_integration_type",
+                    value=SecretStr("hubspot"),
+                ),
+            },
+        )
+
+        cached_storage.save(cred)
+
+        assert cached_storage._provider_index["hubspot"] == "aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1"
+
+    def test_load_by_provider_name(self, cached_storage):
+        """Test load resolves provider name to hash-based credential ID."""
+        hash_id = "aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1"
+        cred = CredentialObject(
+            id=hash_id,
+            credential_type=CredentialType.OAUTH2,
+            keys={
+                "access_token": CredentialKey(
+                    name="access_token",
+                    value=SecretStr("hubspot-token"),
+                ),
+                "_integration_type": CredentialKey(
+                    name="_integration_type",
+                    value=SecretStr("hubspot"),
+                ),
+            },
+        )
+
+        # Save builds the index
+        cached_storage.save(cred)
+
+        # Load by provider name should resolve to the hash ID
+        loaded = cached_storage.load("hubspot")
+
+        assert loaded is not None
+        assert loaded.id == hash_id
+        assert loaded.keys["access_token"].value.get_secret_value() == "hubspot-token"
+
+    def test_load_by_direct_id_still_works(self, cached_storage):
+        """Test load by direct hash ID still works as before."""
+        hash_id = "aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1"
+        cred = CredentialObject(
+            id=hash_id,
+            credential_type=CredentialType.OAUTH2,
+            keys={
+                "access_token": CredentialKey(
+                    name="access_token",
+                    value=SecretStr("token"),
+                ),
+                "_integration_type": CredentialKey(
+                    name="_integration_type",
+                    value=SecretStr("hubspot"),
+                ),
+            },
+        )
+
+        cached_storage.save(cred)
+
+        # Direct ID lookup should still work
+        loaded = cached_storage.load(hash_id)
+
+        assert loaded is not None
+        assert loaded.id == hash_id
+
+    def test_exists_by_provider_name(self, cached_storage):
+        """Test exists resolves provider name to hash-based credential ID."""
+        hash_id = "c2xhY2s6dGVzdDo5OTk="
+        cred = CredentialObject(
+            id=hash_id,
+            credential_type=CredentialType.OAUTH2,
+            keys={
+                "access_token": CredentialKey(
+                    name="access_token",
+                    value=SecretStr("slack-token"),
+                ),
+                "_integration_type": CredentialKey(
+                    name="_integration_type",
+                    value=SecretStr("slack"),
+                ),
+            },
+        )
+
+        cached_storage.save(cred)
+
+        assert cached_storage.exists("slack") is True
+        assert cached_storage.exists(hash_id) is True
+        assert cached_storage.exists("nonexistent") is False
+
+    def test_rebuild_provider_index(self, cached_storage, local_storage):
+        """Test rebuild_provider_index reconstructs from local storage."""
+        # Manually save credentials to local storage (bypassing cached_storage.save)
+        for provider_name, hash_id in [("hubspot", "hash_hub"), ("slack", "hash_slack")]:
+            cred = CredentialObject(
+                id=hash_id,
+                credential_type=CredentialType.OAUTH2,
+                keys={
+                    "_integration_type": CredentialKey(
+                        name="_integration_type",
+                        value=SecretStr(provider_name),
+                    ),
+                },
+            )
+            local_storage.save(cred)
+
+        # Index should be empty (we bypassed save)
+        assert len(cached_storage._provider_index) == 0
+
+        # Rebuild
+        indexed = cached_storage.rebuild_provider_index()
+
+        assert indexed == 2
+        assert cached_storage._provider_index["hubspot"] == "hash_hub"
+        assert cached_storage._provider_index["slack"] == "hash_slack"
+
+    def test_save_without_integration_type_no_index(self, cached_storage):
+        """Test save does not index credentials without _integration_type key."""
+        cred = CredentialObject(
+            id="plain-cred",
+            credential_type=CredentialType.API_KEY,
+            keys={
+                "api_key": CredentialKey(
+                    name="api_key",
+                    value=SecretStr("key-value"),
+                ),
+            },
+        )
+
+        cached_storage.save(cred)
+
+        assert "plain-cred" not in cached_storage._provider_index
+        assert len(cached_storage._provider_index) == 0
+
 
 # =============================================================================
 # Integration Tests

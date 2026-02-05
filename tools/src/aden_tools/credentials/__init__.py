@@ -15,8 +15,8 @@ Usage:
     store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
     credentials = CredentialStoreAdapter(store)
 
-    # With env vars only (simple setup)
-    credentials = CredentialStoreAdapter.with_env_storage()
+    # With composite storage (encrypted primary + env fallback)
+    credentials = CredentialStoreAdapter.default()
 
     # In agent runner (validate at agent load time)
     credentials.validate_for_tools(["web_search", "file_read"])
