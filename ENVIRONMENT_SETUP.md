@@ -8,6 +8,15 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 # Run the automated setup script
 ./quickstart.sh
 ```
+### After Quickstart: Verify `uv` is on your PATH (Linux/macOS)
+
+`quickstart.sh` may install `uv` into `~/.local/bin`.  
+If `uv` is not found in a new shell, run:
+
+```bash
+source $HOME/.local/bin/env
+command -v uv
+uv --version
 
 > **Note for Windows Users:**  
 > Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.  
@@ -351,16 +360,9 @@ The Hive framework consists of three Python packages:
 
 ```
 hive/
-├── core/                    # Core framework (runtime, graph executor, LLM providers)
-│   ├── framework/
-│   ├── .venv/              # Created by quickstart.sh
-│   └── pyproject.toml
-│
-├── tools/                   # Tools and MCP servers
-│   ├── src/
-│   │   └── aden_tools/     # Actual package location
-│   ├── .venv/              # Created by quickstart.sh
-│   └── pyproject.toml
+├── .venv/                  # created by quickstart.sh (shared dev environment)
+├── core/                   # core framework package
+├── tools/                  # tools and MCP servers
 │
 └── exports/                 # Agent packages (user-created, gitignored)
     └── your_agent_name/     # Created via /building-agents-construction
