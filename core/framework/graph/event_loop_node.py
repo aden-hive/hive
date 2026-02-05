@@ -305,6 +305,7 @@ class EventLoopNode(NodeProtocol):
                 real_tool_results,
                 outputs_set,
                 turn_tokens,
+                logged_tool_calls,
             ) = await self._run_single_turn(ctx, conversation, tools, iteration, accumulator)
             logger.info(
                 "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
@@ -370,7 +371,7 @@ class EventLoopNode(NodeProtocol):
                         step_index=iteration,
                         verdict="CONTINUE",
                         verdict_feedback="Stall detected before judge evaluation",
-                        tool_calls=real_tool_results,
+                        tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
                         input_tokens=turn_tokens.get("input", 0),
                         output_tokens=turn_tokens.get("output", 0),
@@ -430,7 +431,7 @@ class EventLoopNode(NodeProtocol):
                             step_index=iteration,
                             verdict="CONTINUE",
                             verdict_feedback="Shutdown signaled (client-facing)",
-                            tool_calls=real_tool_results,
+                            tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
                             input_tokens=turn_tokens.get("input", 0),
                             output_tokens=turn_tokens.get("output", 0),
@@ -474,7 +475,7 @@ class EventLoopNode(NodeProtocol):
                             step_index=iteration,
                             verdict="CONTINUE",
                             verdict_feedback="No input received (shutdown during wait)",
-                            tool_calls=real_tool_results,
+                            tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
                             input_tokens=turn_tokens.get("input", 0),
                             output_tokens=turn_tokens.get("output", 0),
@@ -524,7 +525,7 @@ class EventLoopNode(NodeProtocol):
                         step_index=iteration,
                         verdict="CONTINUE",
                         verdict_feedback="Unjudged (judge_every_n_turns skip)",
-                        tool_calls=real_tool_results,
+                        tool_calls=logged_tool_calls,
                         llm_text=assistant_text,
                         input_tokens=turn_tokens.get("input", 0),
                         output_tokens=turn_tokens.get("output", 0),
@@ -579,7 +580,7 @@ class EventLoopNode(NodeProtocol):
                                 verdict_feedback=(
                                     f"Judge accepted but missing output keys: {missing}"
                                 ),
-                                tool_calls=real_tool_results,
+                                tool_calls=logged_tool_calls,
                                 llm_text=assistant_text,
                                 input_tokens=turn_tokens.get("input", 0),
                                 output_tokens=turn_tokens.get("output", 0),
@@ -603,7 +604,7 @@ class EventLoopNode(NodeProtocol):
                             step_index=iteration,
                             verdict="ACCEPT",
                             verdict_feedback=verdict.feedback,
-                            tool_calls=real_tool_results,
+                            tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
                             input_tokens=turn_tokens.get("input", 0),
                             output_tokens=turn_tokens.get("output", 0),
@@ -645,7 +646,7 @@ class EventLoopNode(NodeProtocol):
                             step_index=iteration,
                             verdict="ESCALATE",
                             verdict_feedback=verdict.feedback,
-                            tool_calls=real_tool_results,
+                            tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
                             input_tokens=turn_tokens.get("input", 0),
                             output_tokens=turn_tokens.get("output", 0),
@@ -686,7 +687,7 @@ class EventLoopNode(NodeProtocol):
                             step_index=iteration,
                             verdict="RETRY",
                             verdict_feedback=verdict.feedback,
-                            tool_calls=real_tool_results,
+                            tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
                             input_tokens=turn_tokens.get("input", 0),
                             output_tokens=turn_tokens.get("output", 0),
@@ -774,16 +775,21 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int]]:
+    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict]]:
         """Run a single LLM turn with streaming and tool execution.
 
-        Returns (assistant_text, real_tool_results, outputs_set, token_counts).
+        Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from the synthetic ``set_output`` tool.  ``outputs_set`` lists
         the output keys written via ``set_output`` during this turn.  This
         separation lets the caller treat set_output as a framework concern
         rather than a tool-execution concern.
+
+        ``logged_tool_calls`` accumulates ALL tool calls across inner iterations
+        (real tools, set_output, and discarded calls) for L3 logging.  Unlike
+        ``real_tool_results`` which resets each inner iteration, this list grows
+        across the entire turn.
         """
         stream_id = ctx.node_id
         node_id = ctx.node_id
@@ -792,6 +798,9 @@ class EventLoopNode(NodeProtocol):
         final_text = ""
         # Track output keys set via set_output across all inner iterations
         outputs_set_this_turn: list[str] = []
+        # Accumulate ALL tool calls across inner iterations for L3 logging.
+        # Unlike real_tool_results (reset each inner iteration), this persists.
+        logged_tool_calls: list[dict] = []
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
@@ -862,7 +871,7 @@ class EventLoopNode(NodeProtocol):
 
             # If no tool calls, turn is complete
             if not tool_calls:
-                return final_text, [], outputs_set_this_turn, token_counts
+                return final_text, [], outputs_set_this_turn, token_counts, logged_tool_calls
 
             # Execute tool calls — separate real tools from set_output
             real_tool_results: list[dict] = []
@@ -909,18 +918,28 @@ class EventLoopNode(NodeProtocol):
                                 pass
                         await accumulator.set(tc.tool_input["key"], value)
                         outputs_set_this_turn.append(tc.tool_input["key"])
-                else:
-                    # --- Real tool execution ---
-                    result = await self._execute_tool(tc)
-                    result = self._truncate_tool_result(result, tc.tool_name)
-                    real_tool_results.append(
+                    logged_tool_calls.append(
                         {
                             "tool_use_id": tc.tool_use_id,
-                            "tool_name": tc.tool_name,
+                            "tool_name": "set_output",
+                            "tool_input": tc.tool_input,
                             "content": result.content,
                             "is_error": result.is_error,
                         }
                     )
+                else:
+                    # --- Real tool execution ---
+                    result = await self._execute_tool(tc)
+                    result = self._truncate_tool_result(result, tc.tool_name)
+                    tool_entry = {
+                        "tool_use_id": tc.tool_use_id,
+                        "tool_name": tc.tool_name,
+                        "tool_input": tc.tool_input,
+                        "content": result.content,
+                        "is_error": result.is_error,
+                    }
+                    real_tool_results.append(tool_entry)
+                    logged_tool_calls.append(tool_entry)
 
                 # Record tool result in conversation (both real and set_output
                 # go into the conversation for LLM context continuity)
@@ -967,15 +986,15 @@ class EventLoopNode(NodeProtocol):
                     )
                     # Discarded calls go into real_tool_results so the
                     # caller sees they were attempted (for judge context).
-                    real_tool_results.append(
-                        {
-                            "tool_use_id": tc.tool_use_id,
-                            "tool_name": tc.tool_name,
-                            "tool_input": tc.tool_input,
-                            "content": discard_msg,
-                            "is_error": True,
-                        }
-                    )
+                    discard_entry = {
+                        "tool_use_id": tc.tool_use_id,
+                        "tool_name": tc.tool_name,
+                        "tool_input": tc.tool_input,
+                        "content": discard_msg,
+                        "is_error": True,
+                    }
+                    real_tool_results.append(discard_entry)
+                    logged_tool_calls.append(discard_entry)
                 # Prune old tool results NOW to prevent context bloat on the
                 # next turn.  The char-based token estimator underestimates
                 # actual API tokens, so the standard compaction check in the
@@ -993,7 +1012,13 @@ class EventLoopNode(NodeProtocol):
                     )
                 # Limit hit — return from this turn so the judge can
                 # evaluate instead of looping back for another stream.
-                return final_text, real_tool_results, outputs_set_this_turn, token_counts
+                return (
+                    final_text,
+                    real_tool_results,
+                    outputs_set_this_turn,
+                    token_counts,
+                    logged_tool_calls,
+                )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
             if conversation.usage_ratio() >= 0.6:

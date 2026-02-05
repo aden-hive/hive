@@ -468,6 +468,7 @@ def create_agent_runtime(
         tools: Available tools
         tool_executor: Tool executor function
         config: Runtime configuration
+        runtime_log_store: Optional RuntimeLogStore for per-execution logging
 
     Returns:
         Configured AgentRuntime (not yet started)
