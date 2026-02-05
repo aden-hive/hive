@@ -18,7 +18,7 @@ def _get_api_key_from_credential_store() -> str | None:
     try:
         from aden_tools.credentials import CredentialStoreAdapter
 
-        creds = CredentialStoreAdapter.with_env_storage()
+        creds = CredentialStoreAdapter.default()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
     except ImportError:

@@ -8,7 +8,7 @@ containing one or more keys (e.g., api_key, access_token, refresh_token).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr
@@ -19,7 +19,7 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class CredentialType(str, Enum):
+class CredentialType(StrEnum):
     """Types of credentials the store can manage."""
 
     API_KEY = "api_key"

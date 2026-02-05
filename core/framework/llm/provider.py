@@ -1,7 +1,7 @@
 """LLM Provider abstraction for pluggable LLM backends."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -108,3 +108,45 @@ class LLMProvider(ABC):
             Final LLMResponse after tool use completes
         """
         pass
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator["StreamEvent"]:
+        """
+        Stream a completion as an async iterator of StreamEvents.
+
+        Default implementation wraps complete() with synthetic events.
+        Subclasses SHOULD override for true streaming.
+
+        Tool orchestration is the CALLER's responsibility:
+        - Caller detects ToolCallEvent, executes tool, adds result
+          to messages, calls stream() again.
+        """
+        from framework.llm.stream_events import (
+            FinishEvent,
+            TextDeltaEvent,
+            TextEndEvent,
+        )
+
+        response = self.complete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
+        )
+        yield TextDeltaEvent(content=response.content, snapshot=response.content)
+        yield TextEndEvent(full_text=response.content)
+        yield FinishEvent(
+            stop_reason=response.stop_reason,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            model=response.model,
+        )
+
+
+# Deferred import target for type annotation
+from framework.llm.stream_events import StreamEvent as StreamEvent  # noqa: E402, F401

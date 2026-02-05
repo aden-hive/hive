@@ -22,7 +22,7 @@ cd hive
 ./quickstart.sh
 
 # 3. Verify installation (optional, quickstart.sh already verifies)
-python -c "import framework; import aden_tools; print('✓ Setup complete')"
+uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
 ## Building Your First Agent
@@ -55,7 +55,7 @@ cd exports/my_agent
 # Create agent.json, tools.py, README.md (see DEVELOPER.md for structure)
 
 # Validate the agent
-PYTHONPATH=core:exports python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
 ### Option 3: Manual Code-First (Minimal Example)
@@ -67,7 +67,7 @@ If you prefer to start with code rather than CLI wizards, check out the manual a
 cat core/examples/manual_agent.py
 
 # Run it (no API keys required)
-PYTHONPATH=core python core/examples/manual_agent.py
+uv run python core/examples/manual_agent.py
 ```
 
 This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
@@ -116,18 +116,18 @@ hive/
 
 ```bash
 # Validate agent structure
-PYTHONPATH=core:exports python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent validate
 
 # Show agent information
-PYTHONPATH=core:exports python -m my_agent info
+PYTHONPATH=exports uv run python -m my_agent info
 
 # Run agent with input
-PYTHONPATH=core:exports python -m my_agent run --input '{
+PYTHONPATH=exports uv run python -m my_agent run --input '{
   "task": "Your input here"
 }'
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
+PYTHONPATH=exports uv run python -m my_agent run --mock --input '{...}'
 ```
 
 ## API Keys Setup
@@ -153,11 +153,11 @@ Get your API keys:
 claude> /testing-agent
 
 # Or manually
-PYTHONPATH=core:exports python -m my_agent test
+PYTHONPATH=exports uv run python -m my_agent test
 
 # Run with specific test type
-PYTHONPATH=core:exports python -m my_agent test --type constraint
-PYTHONPATH=core:exports python -m my_agent test --type success
+PYTHONPATH=exports uv run python -m my_agent test --type constraint
+PYTHONPATH=exports uv run python -m my_agent test --type success
 ```
 
 ## Next Steps
@@ -175,7 +175,7 @@ PYTHONPATH=core:exports python -m my_agent test --type success
 ```bash
 # Reinstall framework package
 cd core
-pip install -e .
+uv pip install -e .
 ```
 
 ### ModuleNotFoundError: No module named 'aden_tools'
@@ -183,7 +183,7 @@ pip install -e .
 ```bash
 # Reinstall tools package
 cd tools
-pip install -e .
+uv pip install -e .
 ```
 
 ### LLM API Errors
@@ -193,7 +193,7 @@ pip install -e .
 echo $ANTHROPIC_API_KEY
 
 # Run in mock mode to test without API
-PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
+PYTHONPATH=exports uv run python -m my_agent run --mock --input '{...}'
 ```
 
 ### Package Installation Issues
