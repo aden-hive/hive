@@ -1853,12 +1853,19 @@ def configure_loop(
     max_history_tokens: Annotated[
         int, "Maximum conversation history tokens before compaction (default 32000)"
     ] = 32000,
+    tool_call_overflow_margin: Annotated[
+        float,
+        "Overflow margin for max_tool_calls_per_turn. "
+        "Tool calls are only discarded when count exceeds "
+        "max_tool_calls_per_turn * (1 + margin). Default 0.5 (50% wiggle room)",
+    ] = 0.5,
 ) -> str:
     """Configure event loop parameters for EventLoopNode execution.
 
     These settings control how EventLoopNodes behave at runtime:
     - max_iterations: prevents infinite loops
     - max_tool_calls_per_turn: limits tool calls per LLM response
+    - tool_call_overflow_margin: wiggle room before tool calls are discarded (default 50%)
     - stall_detection_threshold: detects when LLM repeats itself
     - max_history_tokens: triggers conversation compaction
     """
@@ -1867,6 +1874,7 @@ def configure_loop(
     session.loop_config = {
         "max_iterations": max_iterations,
         "max_tool_calls_per_turn": max_tool_calls_per_turn,
+        "tool_call_overflow_margin": tool_call_overflow_margin,
         "stall_detection_threshold": stall_detection_threshold,
         "max_history_tokens": max_history_tokens,
     }

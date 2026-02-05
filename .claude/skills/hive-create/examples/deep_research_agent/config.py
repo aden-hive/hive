@@ -24,7 +24,7 @@ def _load_preferred_model() -> str:
 class RuntimeConfig:
     model: str = field(default_factory=_load_preferred_model)
     temperature: float = 0.7
-    max_tokens: int = 8192
+    max_tokens: int = 40000
     api_key: str | None = None
     api_base: str | None = None
 

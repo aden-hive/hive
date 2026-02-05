@@ -698,6 +698,7 @@ class AgentRunner:
             tools=tools,
             tool_executor=tool_executor,
             approval_callback=self._approval_callback,
+            loop_config=self.graph.loop_config,
         )
 
     def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:

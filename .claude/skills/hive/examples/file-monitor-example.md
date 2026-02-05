@@ -1,6 +1,6 @@
 # Example: File Monitor Agent
 
-This example shows the complete agent-workflow in action for building a file monitoring agent.
+This example shows the complete /hive workflow in action for building a file monitoring agent.
 
 ## Initial Request
 
@@ -12,7 +12,7 @@ User: "Build an agent that monitors ~/Downloads and copies new files to ~/Docume
 
 ### Step 1: Create Structure
 
-Agent invokes `/building-agents` skill and:
+Agent invokes `/hive-create` skill and:
 
 1. Creates `exports/file_monitor_agent/` package
 2. Writes skeleton files (__init__.py, __main__.py, agent.py, etc.)
@@ -107,7 +107,7 @@ exports/file_monitor_agent/
 
 ### Step 1: Analyze Agent
 
-Agent invokes `/testing-agent` skill and:
+Agent invokes `/hive-test` skill and:
 
 1. Reads goal from `exports/file_monitor_agent/agent.py`
 2. Identifies 4 success criteria to test
