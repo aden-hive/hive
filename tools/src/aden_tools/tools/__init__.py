@@ -4,25 +4,22 @@ Aden Tools - Tool implementations for FastMCP.
 Usage:
     from fastmcp import FastMCP
     from aden_tools.tools import register_all_tools
-    from aden_tools.credentials import CredentialStoreAdapter
+    from aden_tools.credentials import CredentialManager
 
     mcp = FastMCP("my-server")
-    credentials = CredentialStoreAdapter.default()
+    credentials = CredentialManager()
     register_all_tools(mcp, credentials=credentials)
 """
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from aden_tools.credentials import CredentialStoreAdapter
+    from aden_tools.credentials import CredentialManager
 
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
-from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
@@ -38,24 +35,28 @@ from .file_system_toolkits.replace_file_content import (
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
-from .github_tool import register_tools as register_github
-from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
+# [NEW] Import Stripe tool
+from .stripe_tool import register_tools as register_stripe
+
+# [NEW] Import Zoom tool
+from .zoom_tool import register_tools as register_zoom
+
 
 def register_all_tools(
     mcp: FastMCP,
-    credentials: CredentialStoreAdapter | None = None,
+    credentials: Optional["CredentialManager"] = None,
 ) -> list[str]:
     """
     Register all tools with a FastMCP server.
 
     Args:
         mcp: FastMCP server instance
-        credentials: Optional CredentialStoreAdapter instance.
-                     If not provided, tools fall back to direct os.getenv() calls.
+        credentials: Optional CredentialManager for centralized credential access.
+                      If not provided, tools fall back to direct os.getenv() calls.
 
     Returns:
         List of registered tool names
@@ -68,11 +69,13 @@ def register_all_tools(
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
-    register_github(mcp, credentials=credentials)
-    # email supports multiple providers (Resend) with auto-detection
-    register_email(mcp, credentials=credentials)
-    register_hubspot(mcp, credentials=credentials)
+    
+    # [NEW] Register Stripe tool
+    register_stripe(mcp, credentials=credentials)
 
+    # [NEW] Register Zoom tool
+    register_zoom(mcp, credentials=credentials)
+    
     # Register file system toolkits
     register_view_file(mcp)
     register_write_to_file(mcp)
@@ -102,33 +105,25 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
-        "github_list_repos",
-        "github_get_repo",
-        "github_search_repos",
-        "github_list_issues",
-        "github_get_issue",
-        "github_create_issue",
-        "github_update_issue",
-        "github_list_pull_requests",
-        "github_get_pull_request",
-        "github_create_pull_request",
-        "github_search_code",
-        "github_list_branches",
-        "github_get_branch",
-        "send_email",
-        "send_budget_alert_email",
-        "hubspot_search_contacts",
-        "hubspot_get_contact",
-        "hubspot_create_contact",
-        "hubspot_update_contact",
-        "hubspot_search_companies",
-        "hubspot_get_company",
-        "hubspot_create_company",
-        "hubspot_update_company",
-        "hubspot_search_deals",
-        "hubspot_get_deal",
-        "hubspot_create_deal",
-        "hubspot_update_deal",
+        # [NEW] Stripe Functions
+        "get_customer_by_email",
+        "create_customer",
+        "update_customer",
+        "list_customers",
+        "get_customer_by_id",
+        "get_subscription_status",
+        "create_subscription",
+        "update_subscription",
+        "cancel_subscription",
+        "list_subscriptions",
+        "list_invoices",
+        "retrieve_invoice",
+        "pay_invoice",
+        "list_payment_intents",
+        "create_checkout_session",
+        "create_payment_link",
+        "verify_webhook_signature",
+    
     ]
 
 
