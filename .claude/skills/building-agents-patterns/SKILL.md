@@ -61,28 +61,38 @@ For agents needing multi-turn conversations with users, use `client_facing=True`
 A client-facing node streams LLM output to the user and blocks for user input between conversational turns. This replaces the old pause/resume pattern.
 
 ```python
-# Client-facing node blocks for user input
+# Client-facing node with STEP 1/STEP 2 prompt pattern
 intake_node = NodeSpec(
     id="intake",
     name="Intake",
     description="Gather requirements from the user",
     node_type="event_loop",
     client_facing=True,
-    input_keys=[],
-    output_keys=["repo_url", "project_url"],
-    system_prompt="You are the intake agent. Ask the user for their repo URL and project URL. When you have both, call set_output for each.",
+    input_keys=["topic"],
+    output_keys=["research_brief"],
+    system_prompt="""\
+You are an intake specialist.
+
+**STEP 1 — Read and respond (text only, NO tool calls):**
+1. Read the topic provided
+2. If it's vague, ask 1-2 clarifying questions
+3. If it's clear, confirm your understanding
+
+**STEP 2 — After the user confirms, call set_output:**
+- set_output("research_brief", "Clear description of what to research")
+""",
 )
 
 # Internal node runs without user interaction
-scanner_node = NodeSpec(
-    id="scanner",
-    name="Scanner",
-    description="Scan the repository",
+research_node = NodeSpec(
+    id="research",
+    name="Research",
+    description="Search and analyze sources",
     node_type="event_loop",
-    input_keys=["repo_url"],
-    output_keys=["scan_results"],
-    system_prompt="Scan the repository at {repo_url}...",
-    tools=["scan_github_repo"],
+    input_keys=["research_brief"],
+    output_keys=["findings", "sources"],
+    system_prompt="Research the topic using web_search and web_scrape...",
+    tools=["web_search", "web_scrape", "load_data", "save_data"],
 )
 ```
 
@@ -91,6 +101,9 @@ scanner_node = NodeSpec(
 - User input is injected via `node.inject_event(text)`
 - When the LLM calls `set_output` to produce structured outputs, the judge evaluates and ACCEPTs
 - Internal nodes (non-client-facing) run their entire loop without blocking
+- `set_output` is a synthetic tool — a turn with only `set_output` calls (no real tools) triggers user input blocking
+
+**STEP 1/STEP 2 pattern:** Always structure client-facing prompts with explicit phases. STEP 1 is text-only conversation. STEP 2 calls `set_output` after user confirmation. This prevents the LLM from calling `set_output` prematurely before the user responds.
 
 ### When to Use client_facing
 
@@ -159,6 +172,12 @@ EdgeSpec(
 | Multi-way routing | Router with routes dict | Multiple conditional edges with priorities |
 
 ## Judge Patterns
+
+**Core Principle: The judge is the SOLE mechanism for acceptance decisions.** Never add ad-hoc framework gating to compensate for LLM behavior. If the LLM calls `set_output` prematurely, fix the system prompt or use a custom judge. Anti-patterns to avoid:
+- Output rollback logic
+- `_user_has_responded` flags
+- Premature set_output rejection
+- Interaction protocol injection into system prompts
 
 Judges control when an event_loop node's loop exits. Choose based on validation needs.
 
@@ -241,15 +260,34 @@ EventLoopNode automatically manages context window usage with tiered compaction:
 
 ### Spillover Pattern
 
-For large tool results, use `save_data()` to write to disk and pass the filename through `set_output`. This keeps the LLM context window small.
+The framework automatically truncates large tool results and saves full content to a spillover directory. The LLM receives a truncation message with instructions to use `load_data` to read the full result.
 
-```
-LLM calls save_data(filename, large_data) → file written to spillover/
-LLM calls set_output("results_file", filename) → filename stored in output
-Downstream node calls load_data(filename) → reads from spillover/
+For explicit data management, use the data tools (real MCP tools, not synthetic):
+
+```python
+# save_data, load_data, list_data_files are real MCP tools
+# Each takes a data_dir parameter since the MCP server is shared
+
+# Saving large results
+save_data(filename="sources.json", data=large_json_string, data_dir="/path/to/spillover")
+
+# Reading with pagination (line-based offset/limit)
+load_data(filename="sources.json", data_dir="/path/to/spillover", offset=0, limit=50)
+
+# Listing available files
+list_data_files(data_dir="/path/to/spillover")
 ```
 
-The `load_data()` tool supports `offset` and `limit` parameters for paginated reading of large files.
+Add data tools to nodes that handle large tool results:
+
+```python
+research_node = NodeSpec(
+    ...
+    tools=["web_search", "web_scrape", "load_data", "save_data", "list_data_files"],
+)
+```
+
+The `data_dir` is passed by the framework (from the node's spillover directory). The LLM sees `data_dir` in truncation messages and uses it when calling `load_data`.
 
 ## Anti-Patterns
 
@@ -259,6 +297,29 @@ The `load_data()` tool supports `offset` and `limit` parameters for paginated re
 - **Don't hide code in session** — Write to files as components are approved
 - **Don't wait to write files** — Agent visible from first step
 - **Don't batch everything** — Write incrementally, one component at a time
+- **Don't create too many thin nodes** — Prefer fewer, richer nodes (see below)
+- **Don't add framework gating for LLM behavior** — Fix prompts or use judges instead
+
+### Fewer, Richer Nodes
+
+A common mistake is splitting work into too many small single-purpose nodes. Each node boundary requires serializing outputs, losing in-context information, and adding edge complexity.
+
+| Bad (8 thin nodes) | Good (4 rich nodes) |
+|---------------------|---------------------|
+| parse-query | intake (client-facing) |
+| search-sources | research (search + fetch + analyze) |
+| fetch-content | review (client-facing) |
+| evaluate-sources | report (write + deliver) |
+| synthesize-findings | |
+| write-report | |
+| quality-check | |
+| save-report | |
+
+**Why fewer nodes are better:**
+- The LLM retains full context of its work within a single node
+- A research node that searches, fetches, and analyzes keeps all source material in its conversation history
+- Fewer edges means simpler graph and fewer failure points
+- Data tools (`save_data`/`load_data`) handle context window limits within a single node
 
 ### MCP Tools - Correct Usage
 

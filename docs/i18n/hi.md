@@ -83,7 +83,7 @@ git clone https://github.com/adenhq/hive.git
 cd hive
 
 # Python वातावरण कॉन्फ़िगरेशन चलाएँ
-./scripts/setup-python.sh
+./quickstart.sh
 ```
 
 यह इंस्टॉल करता है:
@@ -236,7 +236,7 @@ hive/
 
 ```bash
 # एक-बार का कॉन्फ़िगरेशन
-./scripts/setup-python.sh
+./quickstart.sh
 
 # यह इंस्टॉल करता है:
 # - फ्रेमवर्क पैकेज (मुख्य रनटाइम)

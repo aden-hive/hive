@@ -572,17 +572,21 @@ class LiteLLMProvider(LLMProvider):
                 # and we skip the retry path — nothing was yielded in vain.)
                 has_content = accumulated_text or tool_calls_acc
                 if not has_content and attempt < RATE_LIMIT_MAX_RETRIES:
-                    # If the conversation ends with an assistant message,
-                    # an empty stream is expected (nothing new to say).
-                    # Don't retry — just flush whatever we have.
+                    # If the conversation ends with an assistant or tool
+                    # message, an empty stream is expected — the LLM has
+                    # nothing new to say.  Don't burn retries on this;
+                    # let the caller (EventLoopNode) decide what to do.
+                    # Typical case: client_facing node where the LLM set
+                    # all outputs via set_output tool calls, and the tool
+                    # results are the last messages.
                     last_role = next(
                         (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
                         None,
                     )
-                    if last_role == "assistant":
+                    if last_role in ("assistant", "tool"):
                         logger.debug(
-                            "[stream] Empty response after assistant message — "
-                            "expected, not retrying."
+                            "[stream] Empty response after %s message — expected, not retrying.",
+                            last_role,
                         )
                         for event in tail_events:
                             yield event

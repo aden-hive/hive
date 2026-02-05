@@ -267,7 +267,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 - NOT: `{"first-node-id": ["input_keys"]}` (WRONG)
 - NOT: `{"first-node-id"}` (WRONG - this is a set)
 
-**Use the example agent** at `.claude/skills/building-agents-construction/examples/online_research_agent/` as a template for file structure and patterns.
+**Use the example agent** at `.claude/skills/building-agents-construction/examples/deep_research_agent/` as a template for file structure and patterns. It demonstrates: STEP 1/STEP 2 prompts, client-facing nodes, feedback loops, nullable_output_keys, and data tools.
 
 **AFTER writing all files, tell the user:**
 
@@ -354,7 +354,7 @@ mcp__agent-builder__get_session_status()
 
 ## REFERENCE: System Prompt Best Practice
 
-For event_loop nodes, instruct the LLM to use `set_output` for structured outputs:
+For **internal** event_loop nodes (not client-facing), instruct the LLM to use `set_output`:
 
 ```
 Use set_output(key, value) to store your results. For example:
@@ -363,60 +363,42 @@ Use set_output(key, value) to store your results. For example:
 Do NOT return raw JSON. Use the set_output tool to produce outputs.
 ```
 
+For **client-facing** event_loop nodes, use the STEP 1/STEP 2 pattern:
+
+```
+**STEP 1 — Respond to the user (text only, NO tool calls):**
+[Present information, ask questions, etc.]
+
+**STEP 2 — After the user responds, call set_output:**
+- set_output("key", "value based on user's response")
+```
+
+This prevents the LLM from calling `set_output` before the user has had a chance to respond. The "NO tool calls" instruction in STEP 1 ensures the node blocks for user input before proceeding.
+
 ---
 
-## CRITICAL: EventLoopNode Registration
+## EventLoopNode Runtime
 
-**`AgentRuntime` does NOT support `event_loop` nodes.** The `AgentRuntime` / `create_agent_runtime()` path creates `GraphExecutor` instances internally without passing a `node_registry`, causing all `event_loop` nodes to fail at runtime with:
-
-```
-EventLoopNode 'node-id' not found in registry. Register it with executor.register_node() before execution.
-```
-
-**The correct pattern**: Use `GraphExecutor` directly with a `node_registry` dict containing `EventLoopNode` instances:
+EventLoopNodes are **auto-created** by `GraphExecutor` at runtime. Both direct `GraphExecutor` and `AgentRuntime` / `create_agent_runtime()` handle event_loop nodes automatically. No manual `node_registry` setup is needed.
 
 ```python
-from framework.graph.executor import GraphExecutor, ExecutionResult
-from framework.graph.event_loop_node import EventLoopNode, LoopConfig
-from framework.runtime.event_bus import EventBus
-from framework.runtime.core import Runtime  # REQUIRED - executor calls runtime.start_run()
+# Direct execution
+from framework.graph.executor import GraphExecutor
+from framework.runtime.core import Runtime
 
-# 1. Build node_registry with EventLoopNode instances
-event_bus = EventBus()
-node_registry = {}
-for node_spec in nodes:
-    if node_spec.node_type == "event_loop":
-        node_registry[node_spec.id] = EventLoopNode(
-            event_bus=event_bus,
-            judge=None,  # implicit judge: accepts when output_keys are filled
-            config=LoopConfig(
-                max_iterations=50,
-                max_tool_calls_per_turn=15,
-                stall_detection_threshold=3,
-                max_history_tokens=32000,
-            ),
-            tool_executor=tool_executor,
-        )
-
-# 2. Create Runtime for run tracking (GraphExecutor calls runtime.start_run())
 storage_path = Path.home() / ".hive" / "my_agent"
 storage_path.mkdir(parents=True, exist_ok=True)
 runtime = Runtime(storage_path)
 
-# 3. Create GraphExecutor WITH node_registry and runtime
 executor = GraphExecutor(
-    runtime=runtime,       # NOT None - executor needs this for run tracking
+    runtime=runtime,
     llm=llm,
     tools=tools,
     tool_executor=tool_executor,
-    node_registry=node_registry,  # EventLoopNode instances
+    storage_path=storage_path,
 )
-
-# 4. Execute
 result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
 ```
-
-**DO NOT use `AgentRuntime` or `create_agent_runtime()` for agents with `event_loop` nodes.**
 
 **DO NOT pass `runtime=None` to `GraphExecutor`** — it will crash with `'NoneType' object has no attribute 'start_run'`.
 
@@ -424,10 +406,12 @@ result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
 
 ## COMMON MISTAKES TO AVOID
 
-1. **Using `AgentRuntime` with event_loop nodes** - `AgentRuntime` does not register EventLoopNodes. Use `GraphExecutor` directly with `node_registry`
-2. **Passing `runtime=None` to GraphExecutor** - The executor calls `runtime.start_run()` internally. Always provide a `Runtime(storage_path)` instance
-3. **Using tools that don't exist** - Always check `mcp__agent-builder__list_mcp_tools()` first
-4. **Wrong entry_points format** - Must be `{"start": "node-id"}`, NOT a set or list
-5. **Skipping validation** - Always validate nodes and graph before proceeding
-6. **Not waiting for approval** - Always ask user before major steps
-7. **Displaying this file** - Execute the steps, don't show documentation
+1. **Using tools that don't exist** - Always check `mcp__agent-builder__list_mcp_tools()` first
+2. **Wrong entry_points format** - Must be `{"start": "node-id"}`, NOT a set or list
+3. **Skipping validation** - Always validate nodes and graph before proceeding
+4. **Not waiting for approval** - Always ask user before major steps
+5. **Displaying this file** - Execute the steps, don't show documentation
+6. **Too many thin nodes** - Prefer fewer, richer nodes (4 nodes > 8 nodes)
+7. **Missing STEP 1/STEP 2 in client-facing prompts** - Client-facing nodes need explicit phases to prevent premature set_output
+8. **Forgetting nullable_output_keys** - Mark input_keys that only arrive on certain edges (e.g., feedback) as nullable on the receiving node
+9. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code
