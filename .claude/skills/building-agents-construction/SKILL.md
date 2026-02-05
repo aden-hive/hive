@@ -322,10 +322,8 @@ mcp__agent-builder__get_session_status()
 
 | Type | tools param | Use when |
 |------|-------------|----------|
-| `event_loop` | `'["tool1"]'` or `'[]'` | **Recommended.** LLM-powered work with or without tools |
+| `event_loop` | `'["tool1"]'` or `'[]'` | LLM-powered work with or without tools |
 | `function` | N/A | Deterministic Python operations, no LLM |
-| `llm_generate` (legacy) | `'[]'` | Deprecated — use `event_loop` instead |
-| `llm_tool_use` (legacy) | `'["tool1"]'` | Deprecated — use `event_loop` instead |
 
 ---
 
