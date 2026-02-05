@@ -22,8 +22,12 @@ def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str
         final_path = os.path.abspath(os.path.join(session_dir, path))
 
     # Verify path is within session_dir
-    common_prefix = os.path.commonpath([final_path, session_dir])
-    if common_prefix != session_dir:
-        raise ValueError(f"Access denied: Path '{path}' is outside the session sandbox.")
+    try:
+        common_prefix = os.path.commonpath([final_path, session_dir])
+        if common_prefix != session_dir:
+            raise ValueError(f"Access denied: Path '{path}' is outside the session sandbox.")
+    except ValueError:
+        # Catches both commonpath failure (different drives on Windows) and our explicit raise
+        raise ValueError(f"Access denied: Path '{path}' is outside the session sandbox.") from None
 
     return final_path
