@@ -459,48 +459,66 @@ class GraphExecutor:
                         _is_retry = True
                         continue
                     else:
-                        # Max retries exceeded - fail the execution
+                        # Max retries exceeded - check for failure handlers
                         self.logger.error(
                             f"   ✗ Max retries ({max_retries}) exceeded for node {current_node_id}"
                         )
-                        self.runtime.report_problem(
-                            severity="critical",
-                            description=(
-                                f"Node {current_node_id} failed after "
-                                f"{max_retries} attempts: {result.error}"
-                            ),
-                        )
-                        self.runtime.end_run(
-                            success=False,
-                            output_data=memory.read_all(),
-                            narrative=(
-                                f"Failed at {node_spec.name} after "
-                                f"{max_retries} retries: {result.error}"
-                            ),
+
+                        # Check if there's an ON_FAILURE edge to follow
+                        next_node = self._follow_edges(
+                            graph=graph,
+                            goal=goal,
+                            current_node_id=current_node_id,
+                            current_node_spec=node_spec,
+                            result=result,  # result.success=False triggers ON_FAILURE
+                            memory=memory,
                         )
 
-                        # Calculate quality metrics
-                        total_retries_count = sum(node_retry_counts.values())
-                        nodes_failed = list(node_retry_counts.keys())
+                        if next_node:
+                            # Found a failure handler - route to it
+                            self.logger.info(f"   → Routing to failure handler: {next_node}")
+                            current_node_id = next_node
+                            continue  # Continue execution with handler
+                        else:
+                            # No failure handler - terminate execution
+                            self.runtime.report_problem(
+                                severity="critical",
+                                description=(
+                                    f"Node {current_node_id} failed after "
+                                    f"{max_retries} attempts: {result.error}"
+                                ),
+                            )
+                            self.runtime.end_run(
+                                success=False,
+                                output_data=memory.read_all(),
+                                narrative=(
+                                    f"Failed at {node_spec.name} after "
+                                    f"{max_retries} retries: {result.error}"
+                                ),
+                            )
 
-                        return ExecutionResult(
-                            success=False,
-                            error=(
-                                f"Node '{node_spec.name}' failed after "
-                                f"{max_retries} attempts: {result.error}"
-                            ),
-                            output=memory.read_all(),
-                            steps_executed=steps,
-                            total_tokens=total_tokens,
-                            total_latency_ms=total_latency,
-                            path=path,
-                            total_retries=total_retries_count,
-                            nodes_with_failures=nodes_failed,
-                            retry_details=dict(node_retry_counts),
-                            had_partial_failures=len(nodes_failed) > 0,
-                            execution_quality="failed",
-                            node_visit_counts=dict(node_visit_counts),
-                        )
+                            # Calculate quality metrics
+                            total_retries_count = sum(node_retry_counts.values())
+                            nodes_failed = list(node_retry_counts.keys())
+
+                            return ExecutionResult(
+                                success=False,
+                                error=(
+                                    f"Node '{node_spec.name}' failed after "
+                                    f"{max_retries} attempts: {result.error}"
+                                ),
+                                output=memory.read_all(),
+                                steps_executed=steps,
+                                total_tokens=total_tokens,
+                                total_latency_ms=total_latency,
+                                path=path,
+                                total_retries=total_retries_count,
+                                nodes_with_failures=nodes_failed,
+                                retry_details=dict(node_retry_counts),
+                                had_partial_failures=len(nodes_failed) > 0,
+                                execution_quality="failed",
+                                node_visit_counts=dict(node_visit_counts),
+                            )
 
                 # Check if we just executed a pause node - if so, save state and return
                 # This must happen BEFORE determining next node, since pause nodes may have no edges
