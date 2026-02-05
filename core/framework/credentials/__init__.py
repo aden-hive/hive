@@ -12,7 +12,7 @@ Quick Start:
     from core.framework.credentials import CredentialStore, CredentialObject
 
     # Create store with encrypted storage
-    store = CredentialStore.with_encrypted_storage("/var/hive/credentials")
+    store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
 
     # Get a credential
     api_key = store.get("brave_search")

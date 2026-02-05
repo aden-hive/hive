@@ -118,7 +118,6 @@ class OutputCleaner:
                     self.llm = LiteLLMProvider(
                         api_key=api_key,
                         model=config.fast_model,
-                        temperature=0.0,  # Deterministic cleaning
                     )
                     logger.info(f"✓ Initialized OutputCleaner with {config.fast_model}")
                 else:
@@ -145,8 +144,11 @@ class OutputCleaner:
         errors = []
         warnings = []
 
-        # Check 1: Required input keys present
+        # Check 1: Required input keys present (skip nullable keys)
+        nullable = set(getattr(target_node_spec, "nullable_output_keys", None) or [])
         for key in target_node_spec.input_keys:
+            if key in nullable:
+                continue
             if key not in output:
                 errors.append(f"Missing required key: '{key}'")
                 continue
@@ -240,7 +242,7 @@ class OutputCleaner:
         for key, value in output.items():
             if isinstance(value, str):
                 repaired = _heuristic_repair(value)
-                if repaired and isinstance(repaired, (dict, list)):
+                if repaired and isinstance(repaired, dict | list):
                     # Check if this repaired structure looks like what we want
                     # e.g. if the key is 'data' and the string contained valid JSON
                     fixed_output[key] = repaired

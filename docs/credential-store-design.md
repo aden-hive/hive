@@ -751,7 +751,7 @@ class CredentialStore:
 
     Usage:
         store = CredentialStore(
-            storage=EncryptedFileStorage("/path/to/creds"),
+            storage=EncryptedFileStorage("~/.hive/credentials"),
             providers=[OAuth2Provider(), StaticProvider()]
         )
 
@@ -1202,7 +1202,7 @@ class HashiCorpVaultStorage(CredentialStorage):
     """
     HashiCorp Vault storage adapter.
 
-    Requires: pip install hvac
+    Requires: uv pip install hvac
 
     Features:
     - KV v2 secrets engine support
@@ -1243,7 +1243,7 @@ class HashiCorpVaultStorage(CredentialStorage):
         except ImportError:
             raise ImportError(
                 "HashiCorp Vault support requires 'hvac'. "
-                "Install with: pip install hvac"
+                "Install with: uv pip install hvac"
             )
 
         import os
@@ -1514,7 +1514,7 @@ from framework.credentials.storage import EncryptedFileStorage
 
 # Create store with encrypted storage
 store = CredentialStore(
-    storage=EncryptedFileStorage("/var/hive/credentials")
+    storage=EncryptedFileStorage("~/.hive/credentials")
 )
 
 # Tool specifies how to use credentials (bipartisan model)
@@ -1757,7 +1757,7 @@ tools/src/aden_tools/credentials/
 
 ### Manual Testing
 
-- [ ] Create encrypted credential store
+- [ ] Create local encrypted store
 - [ ] Save and load multi-key credentials
 - [ ] Verify template resolution in tool headers
 - [ ] Test OAuth2 token refresh
