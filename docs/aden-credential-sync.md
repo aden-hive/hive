@@ -467,11 +467,21 @@ store = CredentialStore(
 ```python
 def create_tenant_store(tenant_id: str) -> CredentialStore:
     # Explicit api_key for per-tenant credentials
-    client = AdenCredentialClient(AdenClientConfig(
-        base_url=os.environ["ADEN_API_URL"],
-        api_key=os.environ[f"ADEN_API_KEY_{tenant_id}"],
-        tenant_id=tenant_id,
-    ))
+   
+        base_url=os.getenv("ADEN_API_URL")
+        if not base_url:
+            raise ValueError("ADEN_API_URL environment is missing . Please set it before running." )
+        api_key=os.getenv(f"ADEN_API_KEY_{tenant_id}")
+        if not api_key:
+            raise ValueError("ADEN_API_KEY_{tenant_id} environment is missing . Please set it before running." )
+        client =AdenCredentialClient(
+            AdenClientConfig(
+                base_url=base_url,
+                api_key=api_key,
+                tenant_id=tenant_id,
+            )
+        )
+    
 
     provider = AdenSyncProvider(client=client, provider_id=f"aden_{tenant_id}")
 
