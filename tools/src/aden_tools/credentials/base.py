@@ -70,6 +70,9 @@ class CredentialSpec:
     credential_key: str = "access_token"
     """Key name within the credential (e.g., 'access_token', 'api_key')"""
 
+    credential_group: str = ""
+    """Group name for credentials that must be configured together (e.g., 'google_custom_search')"""
+
 
 class CredentialError(Exception):
     """Raised when required credentials are missing."""

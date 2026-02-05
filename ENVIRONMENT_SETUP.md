@@ -21,42 +21,18 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
-## Quick Setup (Windows – PowerShell)
+## Windows Setup
 
-Windows users can use the native PowerShell setup script.
+Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run agents.
 
-Before running the script, allow script execution for the current session:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-Run setup from the project root:
-
-```powershell
-./scripts/setup-python.ps1
-```
-
-This will:
-
-- Check Python version (requires 3.11+)
-- Create a local `.venv` virtual environment
-- Install the core framework package (`framework`)
-- Install the tools package (`aden_tools`)
-- Fix package compatibility issues (openai + litellm)
-- Verify all installations
-
-After setup, activate the virtual environment:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-Set `PYTHONPATH` (required in every new PowerShell session):
-
-```powershell
-$env:PYTHONPATH="core;exports"
-```
+1. [Install WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install) if you haven't already:
+   ```powershell
+   wsl --install
+   ```
+2. Open your WSL terminal, clone the repo, and run the quickstart script:
+   ```bash
+   ./quickstart.sh
+   ```
 
 ## Alpine Linux Setup
 
@@ -69,9 +45,9 @@ apk add bash git python3 py3-pip nodejs npm curl build-base python3-dev linux-he
 ```
 2. Set up Virtual Environment (Required for Python 3.12+):
 ```
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip setuptools wheel
+uv venv
+source .venv/bin/activate
+# uv handles pip/setuptools/wheel automatically
 ```
 3. Run the Quickstart Script:
 ```
@@ -86,29 +62,29 @@ If you prefer to set up manually or the script fails:
 
 ```bash
 cd core
-pip install -e .
+uv pip install -e .
 ```
 
 ### 2. Install Tools Package
 
 ```bash
 cd tools
-pip install -e .
+uv pip install -e .
 ```
 
 ### 3. Upgrade OpenAI Package
 
 ```bash
 # litellm requires openai >= 1.0.0
-pip install --upgrade "openai>=1.0.0"
+uv pip install --upgrade "openai>=1.0.0"
 ```
 
 ### 4. Verify Installation
 
 ```bash
-python -c "import framework; print('✓ framework OK')"
-python -c "import aden_tools; print('✓ aden_tools OK')"
-python -c "import litellm; print('✓ litellm OK')"
+uv run python -c "import framework; print('✓ framework OK')"
+uv run python -c "import aden_tools; print('✓ aden_tools OK')"
+uv run python -c "import litellm; print('✓ litellm OK')"
 ```
 
 > **Windows Tip:**  
@@ -149,7 +125,7 @@ All agent commands must be run from the project root with `PYTHONPATH` set:
 
 ```bash
 # From /hive/ directory
-PYTHONPATH=core:exports python -m agent_name COMMAND
+PYTHONPATH=exports uv run python -m agent_name COMMAND
 ```
 
 Windows (PowerShell):
@@ -163,18 +139,18 @@ python -m agent_name COMMAND
 
 ```bash
 # Validate agent structure
-PYTHONPATH=core:exports python -m your_agent_name validate
+PYTHONPATH=exports uv run python -m your_agent_name validate
 
 # Show agent information
-PYTHONPATH=core:exports python -m your_agent_name info
+PYTHONPATH=exports uv run python -m your_agent_name info
 
 # Run agent with input
-PYTHONPATH=core:exports python -m your_agent_name run --input '{
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{
   "task": "Your input here"
 }'
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=core:exports python -m your_agent_name run --mock --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --mock --input '{...}'
 ```
 
 ## Building New Agents and Run Flow
@@ -279,7 +255,7 @@ This workflow orchestrates all agent-building skills to take you from idea → p
 
 ```bash
 # Create virtual environment
-python3 -m venv .venv
+uv venv
 
 # Activate it
 source .venv/bin/activate  # macOS/Linux
@@ -293,7 +269,7 @@ Always activate the venv before running agents:
 
 ```bash
 source .venv/bin/activate
-PYTHONPATH=core:exports python -m your_agent_name demo
+PYTHONPATH=exports uv run python -m your_agent_name demo
 ```
 
 ### PowerShell: “running scripts is disabled on this system”
@@ -309,7 +285,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 **Solution:** Install the core package:
 
 ```bash
-cd core && pip install -e .
+cd core && uv pip install -e .
 ```
 
 ### "ModuleNotFoundError: No module named 'aden_tools'"
@@ -317,19 +293,13 @@ cd core && pip install -e .
 **Solution:** Install the tools package:
 
 ```bash
-cd tools && pip install -e .
+cd tools && uv pip install -e .
 ```
 
 Or run the setup script:
 
 ```bash
 ./quickstart.sh
-```
-
-Windows:
-
-```powershell
-./scripts/setup-python.ps1
 ```
 
 ### "ModuleNotFoundError: No module named 'openai.\_models'"
@@ -339,7 +309,7 @@ Windows:
 **Solution:** Upgrade openai:
 
 ```bash
-pip install --upgrade "openai>=1.0.0"
+uv pip install --upgrade "openai>=1.0.0"
 ```
 
 ### "No module named 'your_agent_name'"
@@ -351,7 +321,7 @@ pip install --upgrade "openai>=1.0.0"
 Linux/macOS:
 
 ```bash
-PYTHONPATH=core:exports python -m your_agent_name validate
+PYTHONPATH=exports uv run python -m your_agent_name validate
 ```
 
 Windows:
@@ -369,16 +339,10 @@ python -m support_ticket_agent validate
 
 ```bash
 # Remove broken installations
-pip uninstall -y framework tools
+uv pip uninstall framework tools
 
 # Reinstall correctly
 ./quickstart.sh
-```
-
-Windows:
-
-```powershell
-./scripts/setup-python.ps1
 ```
 
 ## Package Structure
@@ -429,12 +393,12 @@ If you need to use both packages in a single script (e.g., for testing), you hav
 
 ```bash
 # Option 1: Install both in a shared environment
-python -m venv .venv
+uv venv
 source .venv/bin/activate
-pip install -e core/ -e tools/
+uv pip install -e core/ -e tools/
 
 # Option 2: Use PYTHONPATH (for quick testing)
-PYTHONPATH=core:tools/src python your_script.py
+PYTHONPATH=tools/src uv run python your_script.py
 ```
 
 ### MCP Server Configuration
@@ -460,7 +424,7 @@ This ensures each MCP server runs with its correct dependencies.
 
 ### Why PYTHONPATH is Required
 
-The packages are installed in **editable mode** (`pip install -e`), which means:
+The packages are installed in **editable mode** (`uv pip install -e`), which means:
 
 - `framework` and `aden_tools` are globally importable (no PYTHONPATH needed)
 - `exports` is NOT installed as a package (PYTHONPATH required)
@@ -479,12 +443,6 @@ This design allows agents in `exports/` to be:
 ./quickstart.sh
 ```
 
-Windows:
-
-```powershell
-./scripts/setup-python.ps1
-```
-
 ### 2. Build Agent (Claude Code)
 
 ```
@@ -495,7 +453,7 @@ Enter goal: "Build an agent that processes customer support tickets"
 ### 3. Validate Agent
 
 ```bash
-PYTHONPATH=core:exports python -m your_agent_name validate
+PYTHONPATH=exports uv run python -m your_agent_name validate
 ```
 
 ### 4. Test Agent
@@ -507,7 +465,7 @@ claude> /testing-agent
 ### 5. Run Agent
 
 ```bash
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 ## IDE Setup

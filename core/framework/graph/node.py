@@ -16,10 +16,12 @@ Protocol:
 """
 
 import asyncio
+import inspect
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -153,7 +155,10 @@ class NodeSpec(BaseModel):
     # Node behavior type
     node_type: str = Field(
         default="llm_tool_use",
-        description="Type: 'llm_tool_use', 'llm_generate', 'function', 'router', 'human_input'",
+        description=(
+            "Type: 'event_loop', 'function', 'router', 'human_input'. "
+            "Deprecated: 'llm_tool_use', 'llm_generate' (use 'event_loop' instead)."
+        ),
     )
 
     # Data flow
@@ -205,6 +210,15 @@ class NodeSpec(BaseModel):
     max_retries: int = Field(default=3)
     retry_on: list[str] = Field(default_factory=list, description="Error types to retry on")
 
+    # Visit limits (for feedback/callback edges)
+    max_node_visits: int = Field(
+        default=1,
+        description=(
+            "Max times this node executes in one graph run. "
+            "Set >1 for feedback loops. 0 = unlimited (max_steps guards)."
+        ),
+    )
+
     # Pydantic model for output validation
     output_model: type[BaseModel] | None = Field(
         default=None,
@@ -216,6 +230,12 @@ class NodeSpec(BaseModel):
     max_validation_retries: int = Field(
         default=2,
         description="Maximum retries when Pydantic validation fails (with feedback to LLM)",
+    )
+
+    # Client-facing behavior
+    client_facing: bool = Field(
+        default=False,
+        description="If True, this node streams output to the end user and can request input.",
     )
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
@@ -1514,6 +1534,8 @@ Do NOT fabricate data or return empty objects."""
 
     def _build_system_prompt(self, ctx: NodeContext) -> str:
         """Build the system prompt."""
+        from datetime import datetime
+
         parts = []
 
         if ctx.node_spec.system_prompt:
@@ -1535,6 +1557,15 @@ Do NOT fabricate data or return empty objects."""
                     pass
 
             parts.append(prompt)
+
+        # Inject current datetime so LLM knows "now"
+        utc_dt = datetime.now(UTC)
+        local_dt = datetime.now().astimezone()
+        local_tz_name = local_dt.tzname() or "Unknown"
+        parts.append("\n## Runtime Context")
+        parts.append(f"- Current Date/Time (UTC): {utc_dt.isoformat()}")
+        parts.append(f"- Local Timezone: {local_tz_name}")
+        parts.append(f"- Current Date/Time (Local): {local_dt.isoformat()}")
 
         if ctx.goal_context:
             parts.append("\n# Goal Context")
@@ -1737,8 +1768,19 @@ class FunctionNode(NodeProtocol):
         start = time.time()
 
         try:
-            # Call the function
-            result = self.func(**ctx.input_data)
+            # Filter input_data to only declared input_keys to prevent
+            # leaking extra memory keys from upstream nodes.
+            if ctx.node_spec.input_keys:
+                filtered = {
+                    k: v for k, v in ctx.input_data.items() if k in ctx.node_spec.input_keys
+                }
+            else:
+                filtered = ctx.input_data
+
+            # Call the function (supports both sync and async)
+            result = self.func(**filtered)
+            if inspect.isawaitable(result):
+                result = await result
 
             latency_ms = int((time.time() - start) * 1000)
 
