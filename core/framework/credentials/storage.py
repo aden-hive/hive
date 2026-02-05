@@ -223,12 +223,21 @@ class EncryptedFileStorage(CredentialStorage):
 
     def list_all(self) -> list[str]:
         """List all credential IDs."""
+        import fcntl
+
         index_path = self.base_path / "metadata" / "index.json"
         if not index_path.exists():
             return []
-        with open(index_path) as f:
-            index = json.load(f)
-        return list(index.get("credentials", {}).keys())
+
+        lock_path = self.base_path / "metadata" / ".index.lock"
+        with open(lock_path, "a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                with open(index_path) as f:
+                    index = json.load(f)
+                return list(index.get("credentials", {}).keys())
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
 
     def exists(self, credential_id: str) -> bool:
         """Check if credential exists."""
@@ -264,11 +273,13 @@ class EncryptedFileStorage(CredentialStorage):
         credential_type: str | None = None,
     ) -> None:
         """Update the metadata index with file locking for concurrency safety."""
+        import fcntl
+
         index_path = self.base_path / "metadata" / "index.json"
         lock_path = self.base_path / "metadata" / ".index.lock"
 
-        with open(lock_path, "w") as lock_file:
-            self._acquire_lock(lock_file)
+        with open(lock_path, "a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
             try:
                 if index_path.exists():
                     with open(index_path) as f:
@@ -289,31 +300,7 @@ class EncryptedFileStorage(CredentialStorage):
                 with open(index_path, "w") as f:
                     json.dump(index, f, indent=2)
             finally:
-                self._release_lock(lock_file)
-
-    def _acquire_lock(self, lock_file) -> None:
-        """Acquire exclusive file lock (cross-platform)."""
-        try:
-            import fcntl
-
-            fcntl.flock(lock_file, fcntl.LOCK_EX)
-        except ImportError:
-            # Windows
-            import msvcrt
-
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
-
-    def _release_lock(self, lock_file) -> None:
-        """Release file lock (cross-platform)."""
-        try:
-            import fcntl
-
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
-        except ImportError:
-            # Windows
-            import msvcrt
-
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 class EnvVarStorage(CredentialStorage):
