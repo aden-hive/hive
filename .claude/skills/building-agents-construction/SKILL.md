@@ -286,7 +286,7 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 > **Test your agent:**
 >
 > ```bash
-> cd /home/timothy/oss/hive
+> # From the hive project root:
 > PYTHONPATH=exports uv run python -m AGENT_NAME validate
 > PYTHONPATH=exports uv run python -m AGENT_NAME info
 > ```
@@ -298,7 +298,8 @@ This returns JSON with all the goal, nodes, edges, and MCP server configurations
 **RUN validation:**
 
 ```bash
-cd /home/timothy/oss/hive && PYTHONPATH=exports uv run python -m AGENT_NAME validate
+# From the hive project root:
+PYTHONPATH=exports uv run python -m AGENT_NAME validate
 ```
 
 - If valid: Agent is complete!
