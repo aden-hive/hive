@@ -294,7 +294,7 @@ When agent is complete, transition to testing phase:
 
 ### Pre-Testing Checklist
 
-- [ ] Agent structure validates: `python -m agent_name validate`
+- [ ] Agent structure validates: `uv run python -m agent_name validate`
 - [ ] All nodes defined in nodes/__init__.py
 - [ ] All edges connect valid nodes with correct priorities
 - [ ] Feedback edge targets have `max_node_visits > 1`

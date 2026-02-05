@@ -11,6 +11,7 @@ dependencies = [
   "litellm>=1.81.0",
   "mcp>=1.0.0",
   "fastmcp>=2.0.0",
+  "textual>=1.0.0",
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "pytest-xdist>=3.0",

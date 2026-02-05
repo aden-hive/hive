@@ -126,7 +126,7 @@ jobs:
           for agent_dir in "${agent_dirs[@]}"; do
             if [ -f "$agent_dir/agent.json" ]; then
               echo "Validating $agent_dir"
-              python -c "import json; json.load(open('$agent_dir/agent.json'))"
+              uv run python -c "import json; json.load(open('$agent_dir/agent.json'))"
               validated=$((validated + 1))
             fi
           done

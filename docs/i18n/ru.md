@@ -97,7 +97,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # Запустить агента
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Полное руководство по настройке](ENVIRONMENT_SETUP.md)** - Подробные инструкции для разработки агентов
@@ -243,7 +243,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # Запустить агентов
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 Обратитесь к [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) для полных инструкций по настройке.

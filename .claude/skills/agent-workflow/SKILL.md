@@ -107,7 +107,7 @@ Creates the complete agent architecture:
 - ✅ 1-5 constraints defined
 - ✅ 5-10 nodes specified in nodes/__init__.py
 - ✅ 8-15 edges connecting workflow
-- ✅ Validated structure (passes `python -m agent_name validate`)
+- ✅ Validated structure (passes `uv run python -m agent_name validate`)
 - ✅ README.md with usage instructions
 - ✅ CLI commands (info, validate, run, shell)
 
@@ -345,7 +345,7 @@ agent-workflow (meta-skill)
 - Check node IDs match between nodes/__init__.py and agent.py
 - Verify all edges reference valid node IDs
 - Ensure entry_node exists in nodes list
-- Run: `PYTHONPATH=core:exports python -m agent_name validate`
+- Run: `PYTHONPATH=exports uv run python -m agent_name validate`
 
 ### "Agent has structure but won't run"
 
@@ -371,7 +371,7 @@ Run these checks:
 ls exports/my_agent/agent.py
 
 # Check if it validates
-PYTHONPATH=core:exports python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent validate
 
 # Check if tests exist
 ls exports/my_agent/tests/

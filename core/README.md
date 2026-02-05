@@ -14,7 +14,7 @@ Framework provides a runtime framework that captures **decisions**, not just act
 ## Installation
 
 ```bash
-pip install -e .
+uv pip install -e .
 ```
 
 ## MCP Server Setup
@@ -45,13 +45,13 @@ If you prefer manual setup:
 
 ```bash
 # Install framework
-pip install -e .
+uv pip install -e .
 
 # Install MCP dependencies
-pip install mcp fastmcp
+uv pip install mcp fastmcp
 
 # Test the server
-python -m framework.mcp.agent_builder_server
+uv run python -m framework.mcp.agent_builder_server
 ```
 
 ### Using with MCP Clients
@@ -86,13 +86,13 @@ Run an LLM-powered calculator:
 
 ```bash
 # Single calculation
-python -m framework calculate "2 + 3 * 4"
+uv run python -m framework calculate "2 + 3 * 4"
 
 # Interactive mode
-python -m framework interactive
+uv run python -m framework interactive
 
 # Analyze runs with Builder
-python -m framework analyze calculator
+uv run python -m framework analyze calculator
 ```
 
 ### Using the Runtime
@@ -136,13 +136,13 @@ Tests are generated using MCP tools (`generate_constraint_tests`, `generate_succ
 
 ```bash
 # Run tests against an agent
-python -m framework test-run <agent_path> --goal <goal_id> --parallel 4
+uv run python -m framework test-run <agent_path> --goal <goal_id> --parallel 4
 
 # Debug failed tests
-python -m framework test-debug <agent_path> <test_name>
+uv run python -m framework test-debug <agent_path> <test_name>
 
 # List tests for a goal
-python -m framework test-list <goal_id>
+uv run python -m framework test-list <goal_id>
 ```
 
 For detailed testing workflows, see the [testing-agent skill](../.claude/skills/testing-agent/SKILL.md).

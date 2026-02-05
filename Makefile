@@ -19,8 +19,8 @@ check: ## Run all checks without modifying files (CI-safe)
 	cd tools && ruff format --check .
 
 test: ## Run all tests
-	cd core && python -m pytest tests/ -v
+	cd core && uv run python -m pytest tests/ -v
 
 install-hooks: ## Install pre-commit hooks
-	pip install pre-commit
+	uv pip install pre-commit
 	pre-commit install

@@ -18,16 +18,16 @@ Deep-dive research agent that searches 10+ sources and produces comprehensive na
 
 ```bash
 # Show agent info
-python -m online_research_agent info
+uv run python -m online_research_agent info
 
 # Validate structure
-python -m online_research_agent validate
+uv run python -m online_research_agent validate
 
 # Run research on a topic
-python -m online_research_agent run --topic "impact of AI on healthcare"
+uv run python -m online_research_agent run --topic "impact of AI on healthcare"
 
 # Interactive shell
-python -m online_research_agent shell
+uv run python -m online_research_agent shell
 ```
 
 ### Python API
