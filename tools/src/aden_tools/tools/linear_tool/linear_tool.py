@@ -519,7 +519,7 @@ class _LinearClient:
     def get_workflow_states(self, team_id: str) -> dict[str, Any]:
         """Get workflow states for a team."""
         query = """
-        query WorkflowStates($teamId: String!) {
+        query WorkflowStates($teamId: ID!) {
             workflowStates(filter: { team: { id: { eq: $teamId } } }) {
                 nodes {
                     id
