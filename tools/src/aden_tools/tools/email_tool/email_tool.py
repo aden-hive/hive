@@ -2,7 +2,7 @@
 Email Tool - Send emails using multiple providers.
 
 Supports:
-- Gmail (GMAIL_ACCESS_TOKEN, via Aden OAuth2)
+- Gmail (GOOGLE_ACCESS_TOKEN, via Aden OAuth2)
 - Resend (RESEND_API_KEY)
 
 Auto-detection: If provider="auto", tries Gmail first, then Resend.
