@@ -186,6 +186,87 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     shell_parser.set_defaults(func=cmd_shell)
 
+    # history command
+    history_parser = subparsers.add_parser(
+        "history",
+        help="List past runs",
+        description="List past runs for an exported agent.",
+    )
+    history_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder (containing agent.json)",
+    )
+    history_parser.add_argument(
+        "--status",
+        type=str,
+        choices=["completed", "failed", "running", "stuck", "cancelled"],
+        help="Filter by run status",
+    )
+    history_parser.add_argument(
+        "--goal",
+        type=str,
+        help="Filter by goal ID",
+    )
+    history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Max number of runs to show (default: 10)",
+    )
+    history_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON",
+    )
+    history_parser.set_defaults(func=cmd_history)
+
+    # show command
+    show_parser = subparsers.add_parser(
+        "show",
+        help="Show full run details",
+        description="Display full details for a specific run.",
+    )
+    show_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder (containing agent.json)",
+    )
+    show_parser.add_argument(
+        "run_id",
+        type=str,
+        help="The run ID to inspect",
+    )
+    show_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON",
+    )
+    show_parser.set_defaults(func=cmd_show)
+
+    # stats command
+    stats_parser = subparsers.add_parser(
+        "stats",
+        help="Show aggregate statistics",
+        description="Display aggregate statistics for an agent's runs.",
+    )
+    stats_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder (containing agent.json)",
+    )
+    stats_parser.add_argument(
+        "--goal",
+        type=str,
+        help="Filter by goal ID",
+    )
+    stats_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON",
+    )
+    stats_parser.set_defaults(func=cmd_stats)
+
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
@@ -1127,4 +1208,240 @@ def _interactive_multi(agents_dir: Path) -> int:
         print()
 
     orchestrator.cleanup()
+    return 0
+
+
+def _get_storage(agent_path: str):
+    """Build a FileStorage instance for the given agent path."""
+    from framework.storage.backend import FileStorage
+
+    storage_path = Path.home() / ".hive" / "storage" / Path(agent_path).name
+    if not storage_path.exists():
+        print(f"No run data found for agent at {agent_path}", file=sys.stderr)
+        return None
+    return FileStorage(storage_path)
+
+
+def _format_duration(ms: int) -> str:
+    """Convert milliseconds to a readable duration string."""
+    if ms < 1000:
+        return f"{ms}ms"
+    return f"{ms / 1000:.1f}s"
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    """List past runs for an agent."""
+    storage = _get_storage(args.agent_path)
+    if storage is None:
+        return 1
+
+    # Get run IDs based on filters
+    if args.status:
+        run_ids = storage.get_runs_by_status(args.status)
+    elif args.goal:
+        run_ids = storage.get_runs_by_goal(args.goal)
+    else:
+        run_ids = storage.list_all_runs()
+
+    # Load summaries
+    summaries = []
+    for run_id in run_ids:
+        summary = storage.load_summary(run_id)
+        if summary is not None:
+            summaries.append(summary)
+
+    # Sort by run_id descending (IDs contain timestamps)
+    summaries.sort(key=lambda s: s.run_id, reverse=True)
+    total = len(summaries)
+    summaries = summaries[: args.limit]
+
+    if args.json:
+        output = [s.model_dump(mode="json") for s in summaries]
+        print(json.dumps(output, indent=2, default=str))
+        return 0
+
+    agent_name = Path(args.agent_path).name
+    print(f"\nRun History for {agent_name} (showing {len(summaries)} of {total}):\n")
+
+    if not summaries:
+        print("  No runs found.")
+        return 0
+
+    # Column header
+    print(
+        f"{'ID':<42} {'Status':<12} {'Duration':>10} {'Decisions':>10} {'Success Rate':>13}"
+    )
+    for s in summaries:
+        duration = _format_duration(s.duration_ms)
+        total_decisions = s.decision_count
+        succeeded = int(total_decisions * s.success_rate)
+        decisions_str = f"{succeeded}/{total_decisions}"
+        rate_str = f"{s.success_rate * 100:.0f}%"
+        print(
+            f"{s.run_id:<42} {s.status.value:<12} {duration:>10} {decisions_str:>10} {rate_str:>13}"
+        )
+
+    print()
+    return 0
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    """Display full details for a specific run."""
+    storage = _get_storage(args.agent_path)
+    if storage is None:
+        return 1
+
+    run = storage.load_run(args.run_id)
+    if run is None:
+        print(f"Run not found: {args.run_id}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(run.model_dump(mode="json"), indent=2, default=str))
+        return 0
+
+    # Header
+    print(f"\nRun: {run.id}")
+    print(f"Status: {run.status.value}")
+    print(f"Goal: {run.goal_id}")
+    print(f"Duration: {_format_duration(run.duration_ms)}")
+    print(f"Started: {run.started_at.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # Metrics
+    m = run.metrics
+    print("\nMetrics:")
+    print(
+        f"  Decisions: {m.total_decisions} total, {m.successful_decisions} succeeded,"
+        f" {m.failed_decisions} failed"
+    )
+    rate = m.success_rate * 100
+    print(f"  Success Rate: {rate:.0f}%")
+    print(f"  Tokens: {m.total_tokens}")
+    print(f"  Latency: {m.total_latency_ms}ms")
+    if m.nodes_executed:
+        print(f"  Nodes: {', '.join(m.nodes_executed)}")
+
+    # Decisions
+    print("\nDecisions:")
+    if run.decisions:
+        for d in run.decisions:
+            mark = "\u2713" if d.was_successful else "\u2717"
+            chosen = d.chosen_option
+            desc = chosen.description if chosen else "?"
+            print(f"  {mark} [{d.node_id}] {d.intent} \u2192 {desc}")
+    else:
+        print("  none")
+
+    # Problems
+    print("\nProblems:")
+    if run.problems:
+        for p in run.problems:
+            print(f"  [{p.severity}] {p.description}")
+    else:
+        print("  none")
+
+    # Narrative
+    print("\nNarrative:")
+    print(f"  {run.narrative or 'No narrative recorded.'}")
+
+    # Output
+    print("\nOutput:")
+    if run.output_data:
+        for key, value in run.output_data.items():
+            if isinstance(value, (dict, list)):
+                val_str = json.dumps(value, default=str)
+            else:
+                val_str = str(value)
+            if len(val_str) > 200:
+                val_str = val_str[:200] + "..."
+            print(f"  {key}: {val_str}")
+    else:
+        print("  none")
+
+    print()
+    return 0
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    """Display aggregate statistics for an agent's runs."""
+    storage = _get_storage(args.agent_path)
+    if storage is None:
+        return 1
+
+    # Get run IDs (optionally filtered by goal)
+    if args.goal:
+        run_ids = storage.get_runs_by_goal(args.goal)
+    else:
+        run_ids = storage.list_all_runs()
+
+    # Load summaries for basic counts
+    summaries = []
+    for run_id in run_ids:
+        summary = storage.load_summary(run_id)
+        if summary is not None:
+            summaries.append(summary)
+
+    total = len(summaries)
+    completed = sum(1 for s in summaries if s.status == "completed")
+    failed = sum(1 for s in summaries if s.status == "failed")
+
+    # Compute averages
+    avg_duration = sum(s.duration_ms for s in summaries) / total if total else 0
+
+    # Load full runs for token stats and failure node analysis
+    total_tokens = 0
+    failure_nodes: dict[str, int] = {}
+    full_run_count = 0
+    for s in summaries:
+        run = storage.load_run(s.run_id)
+        if run is None:
+            continue
+        full_run_count += 1
+        total_tokens += run.metrics.total_tokens
+        if s.status == "failed":
+            for d in run.decisions:
+                if not d.was_successful:
+                    failure_nodes[d.node_id] = failure_nodes.get(d.node_id, 0) + 1
+
+    avg_tokens = total_tokens / full_run_count if full_run_count else 0
+
+    # Sort failure nodes by count descending
+    sorted_failures = sorted(failure_nodes.items(), key=lambda x: x[1], reverse=True)
+
+    if args.json:
+        output = {
+            "total_runs": total,
+            "completed": completed,
+            "failed": failed,
+            "completed_pct": (completed / total * 100) if total else 0,
+            "failed_pct": (failed / total * 100) if total else 0,
+            "avg_duration_ms": round(avg_duration),
+            "avg_tokens": round(avg_tokens),
+            "common_failure_nodes": [
+                {"node_id": node, "failures": count} for node, count in sorted_failures
+            ],
+        }
+        print(json.dumps(output, indent=2, default=str))
+        return 0
+
+    agent_name = Path(args.agent_path).name
+    completed_pct = (completed / total * 100) if total else 0
+    failed_pct = (failed / total * 100) if total else 0
+
+    print(f"\nStatistics for {agent_name}:\n")
+    print(f"  Total Runs:   {total:>5}")
+    print(f"  Completed:    {completed:>5} ({completed_pct:.0f}%)")
+    print(f"  Failed:       {failed:>5} ({failed_pct:.0f}%)")
+    print()
+    print(f"  Avg Duration: {_format_duration(round(avg_duration)):>5}")
+    print(f"  Avg Tokens:   {round(avg_tokens):>5}")
+
+    if sorted_failures:
+        print()
+        print("  Common Failure Nodes:")
+        for node_id, count in sorted_failures:
+            label = "failure" if count == 1 else "failures"
+            print(f"    - {node_id} ({count} {label})")
+
+    print()
     return 0
