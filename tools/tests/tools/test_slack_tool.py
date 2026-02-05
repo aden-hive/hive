@@ -222,9 +222,7 @@ class TestSlackAddReaction:
             mock_response.json.return_value = {"ok": True}
             mock_post.return_value = mock_response
 
-            slack_add_reaction_fn(
-                channel="C123", timestamp="1234567890.123456", emoji=":thumbsup:"
-            )
+            slack_add_reaction_fn(channel="C123", timestamp="1234567890.123456", emoji=":thumbsup:")
 
         call_kwargs = mock_post.call_args[1]
         assert call_kwargs["json"]["name"] == "thumbsup"
@@ -270,8 +268,10 @@ class TestSlackGetUserInfo:
 def get_tool_fn(mcp: FastMCP):
     """Factory fixture to get any tool function by name."""
     register_tools(mcp)
+
     def _get(name: str):
         return mcp._tool_manager._tools[name].fn
+
     return _get
 
 
@@ -311,7 +311,11 @@ class TestSlackDeleteMessage:
         with patch("httpx.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 200
-            mock_response.json.return_value = {"ok": True, "channel": "C123", "ts": "1234567890.123456"}
+            mock_response.json.return_value = {
+                "ok": True,
+                "channel": "C123",
+                "ts": "1234567890.123456",
+            }
             mock_post.return_value = mock_response
 
             result = fn(channel="C123", ts="1234567890.123456")
@@ -457,8 +461,20 @@ class TestSlackListUsers:
             mock_response.json.return_value = {
                 "ok": True,
                 "members": [
-                    {"id": "U001", "name": "alice", "real_name": "Alice", "is_bot": False, "deleted": False},
-                    {"id": "U002", "name": "bob", "real_name": "Bob", "is_bot": False, "deleted": False},
+                    {
+                        "id": "U001",
+                        "name": "alice",
+                        "real_name": "Alice",
+                        "is_bot": False,
+                        "deleted": False,
+                    },
+                    {
+                        "id": "U002",
+                        "name": "bob",
+                        "real_name": "Bob",
+                        "is_bot": False,
+                        "deleted": False,
+                    },
                 ],
             }
             mock_get.return_value = mock_response
@@ -496,7 +512,9 @@ class TestSlackUploadFile:
             mock_complete_response.status_code = 200
             mock_complete_response.json.return_value = {
                 "ok": True,
-                "files": [{"id": "F123", "name": "test.csv", "title": "Test", "permalink": "https://..."}],
+                "files": [
+                    {"id": "F123", "name": "test.csv", "title": "Test", "permalink": "https://..."}
+                ],
             }
             mock_post.side_effect = [mock_upload_response, mock_complete_response]
 
@@ -527,8 +545,20 @@ class TestSlackSearchMessages:
                 "messages": {
                     "total": 2,
                     "matches": [
-                        {"text": "Hello world", "user": "U001", "ts": "123.456", "channel": {"name": "general"}, "permalink": "https://..."},
-                        {"text": "Hello there", "user": "U002", "ts": "123.457", "channel": {"name": "random"}, "permalink": "https://..."},
+                        {
+                            "text": "Hello world",
+                            "user": "U001",
+                            "ts": "123.456",
+                            "channel": {"name": "general"},
+                            "permalink": "https://...",
+                        },
+                        {
+                            "text": "Hello there",
+                            "user": "U002",
+                            "ts": "123.457",
+                            "channel": {"name": "random"},
+                            "permalink": "https://...",
+                        },
                     ],
                 },
             }
@@ -620,7 +650,11 @@ class TestSlackListPins:
             mock_response.json.return_value = {
                 "ok": True,
                 "items": [
-                    {"type": "message", "created": 1234567890, "message": {"text": "Important msg"}},
+                    {
+                        "type": "message",
+                        "created": 1234567890,
+                        "message": {"text": "Important msg"},
+                    },
                 ],
             }
             mock_get.return_value = mock_response
@@ -824,12 +858,11 @@ class TestSlackOpenModal:
             }
             mock_post.return_value = mock_response
 
-            blocks_json = '[{"type": "input", "element": {"type": "plain_text_input"}, "label": {"type": "plain_text", "text": "Name"}}]'
-            result = fn(
-                trigger_id="12345.67890.abcdef",
-                title="My Modal",
-                blocks=blocks_json
+            blocks_json = (
+                '[{"type": "input", "element": {"type": "plain_text_input"},'
+                ' "label": {"type": "plain_text", "text": "Name"}}]'
             )
+            result = fn(trigger_id="12345.67890.abcdef", title="My Modal", blocks=blocks_json)
 
         assert result["success"] is True
         assert result["view_id"] == "V123ABC"
@@ -913,6 +946,7 @@ class TestSlackGetConversationContext:
                         "user": {"id": user_id, "real_name": name},
                     }
                 return mock_response
+
             mock_get.side_effect = mock_get_response
 
             result = fn(channel="C123", limit=10, include_user_info=True)
@@ -1016,6 +1050,7 @@ class TestSlackGetTeamStats:
         fn = get_tool_fn("slack_get_team_stats")
 
         with patch("httpx.get") as mock_get:
+
             def mock_response(url, **kwargs):
                 response = MagicMock()
                 response.status_code = 200
@@ -1034,6 +1069,7 @@ class TestSlackGetTeamStats:
                         "members": [{"id": "U001"}, {"id": "U002"}],
                     }
                 return response
+
             mock_get.side_effect = mock_response
 
             result = fn()

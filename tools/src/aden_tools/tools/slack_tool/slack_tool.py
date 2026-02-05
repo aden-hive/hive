@@ -313,12 +313,12 @@ class _SlackClient:
         initial_comment: str | None = None,
     ) -> dict[str, Any]:
         """Upload a text file to channels using the new API (files.getUploadURLExternal).
-        
+
         Note: The old files.upload API was deprecated in March 2024.
         """
-        content_bytes = content.encode('utf-8')
+        content_bytes = content.encode("utf-8")
         length = len(content_bytes)
-        
+
         # Step 1: Get upload URL
         params = {
             "filename": filename,
@@ -333,13 +333,13 @@ class _SlackClient:
         url_result = self._handle_response(url_response)
         if "error" in url_result:
             return url_result
-        
+
         upload_url = url_result.get("upload_url")
         file_id = url_result.get("file_id")
-        
+
         if not upload_url or not file_id:
             return {"error": "Failed to get upload URL from Slack"}
-        
+
         # Step 2: Upload file content to the URL
         upload_response = httpx.post(
             upload_url,
@@ -349,7 +349,7 @@ class _SlackClient:
         )
         if upload_response.status_code != 200:
             return {"error": f"File upload failed: {upload_response.status_code}"}
-        
+
         # Step 3: Complete the upload
         complete_body: dict[str, Any] = {
             "files": [{"id": file_id, "title": title or filename}],
@@ -358,7 +358,7 @@ class _SlackClient:
             complete_body["channel_id"] = channels
         if initial_comment:
             complete_body["initial_comment"] = initial_comment
-            
+
         complete_response = httpx.post(
             f"{SLACK_API_BASE}/files.completeUploadExternal",
             headers=self._headers,
@@ -368,13 +368,12 @@ class _SlackClient:
         result = self._handle_response(complete_response)
         if "error" in result:
             return result
-            
+
         # Return in same format as old API for compatibility
         files = result.get("files", [])
         if files:
             return {"ok": True, "file": files[0]}
         return {"ok": True}
-
 
     def set_channel_topic(self, channel: str, topic: str) -> dict[str, Any]:
         """Set the topic for a channel."""
@@ -395,7 +394,7 @@ class _SlackClient:
         sort: str = "timestamp",
     ) -> dict[str, Any]:
         """Search for messages across the workspace.
-        
+
         Note: This API requires a User OAuth Token (xoxp-...), not a Bot Token.
         Set SLACK_USER_TOKEN environment variable for this to work.
         """
@@ -578,7 +577,7 @@ class _SlackClient:
         view: dict[str, Any],
     ) -> dict[str, Any]:
         """Open a modal dialog.
-        
+
         Args:
             trigger_id: From slash command or button interaction
             view: Modal view definition (type: "modal", title, blocks, etc.)
@@ -634,7 +633,7 @@ class _SlackClient:
         view: dict[str, Any],
     ) -> dict[str, Any]:
         """Publish/update a user's home tab.
-        
+
         Args:
             user_id: User whose home tab to update
             view: Home tab view (type: "home", blocks)
@@ -661,7 +660,7 @@ class _SlackClient:
         expiration: int | None = None,
     ) -> dict[str, Any]:
         """Set the user's status (requires user token with users.profile:write scope).
-        
+
         Args:
             status_text: Status message text
             status_emoji: Status emoji (e.g., ':palm_tree:')
@@ -683,7 +682,7 @@ class _SlackClient:
 
     def set_presence(self, presence: str) -> dict[str, Any]:
         """Set user presence (auto or away).
-        
+
         Args:
             presence: 'auto' or 'away'
         """
@@ -716,7 +715,7 @@ class _SlackClient:
         user: str | None = None,
     ) -> dict[str, Any]:
         """Create a reminder.
-        
+
         Args:
             text: Reminder text
             time: When to remind (Unix timestamp, or natural language like 'in 5 minutes')
@@ -765,7 +764,7 @@ class _SlackClient:
         channels: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a user group (for @mentions).
-        
+
         Args:
             name: Display name for the group
             handle: Short name for @mentioning (defaults to slugified name)
@@ -794,7 +793,7 @@ class _SlackClient:
         users: list[str],
     ) -> dict[str, Any]:
         """Update the members of a user group.
-        
+
         Args:
             usergroup_id: The ID of the user group
             users: List of user IDs to set as members
@@ -843,7 +842,7 @@ class _SlackClient:
         document_content: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a new canvas document.
-        
+
         Args:
             title: Canvas title
             document_content: Optional initial content (markdown structure)
@@ -866,7 +865,7 @@ class _SlackClient:
         changes: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Apply edits to a canvas.
-        
+
         Args:
             canvas_id: The canvas document ID
             changes: List of change operations (insert_at_start, insert_at_end, etc.)
@@ -885,7 +884,7 @@ class _SlackClient:
     # ============================================================
     # Phase 2: Analytics (AI-Driven - Pure Data for Agent Intelligence)
     # ============================================================
-    # 
+    #
     # DESIGN: These methods return RAW DATA. The AI agent uses its
     # intelligence to analyze, summarize, find patterns, identify
     # unanswered questions, etc. No rule-based logic here.
@@ -898,8 +897,8 @@ class _SlackClient:
         include_threads: bool = True,
     ) -> dict[str, Any]:
         """Fetch messages with full context for AI analysis.
-        
-        Returns raw message data including text, user, reactions, 
+
+        Returns raw message data including text, user, reactions,
         thread info, and timestamps. The AI agent should use its
         intelligence to analyze this data for:
         - Activity patterns
@@ -907,7 +906,7 @@ class _SlackClient:
         - Engagement levels
         - Sentiment
         - Key topics
-        
+
         Args:
             channel: Channel ID to fetch from
             limit: Number of messages (max 100)
@@ -916,11 +915,11 @@ class _SlackClient:
         history = self.get_history(channel, limit=min(limit, 100))
         if "error" in history:
             return history
-        
+
         messages = history.get("messages", [])
         if not messages:
             return {"channel": channel, "messages": [], "count": 0}
-        
+
         # Enrich messages with structured data for AI analysis
         enriched = []
         for msg in messages:
@@ -937,7 +936,7 @@ class _SlackClient:
                 "is_thread_parent": bool(msg.get("thread_ts") and msg.get("reply_count", 0) > 0),
                 "is_thread_reply": bool(msg.get("parent_user_id")),
             }
-            
+
             # Optionally fetch thread replies for deeper analysis
             if include_threads and enriched_msg["reply_count"] > 0:
                 thread_data = self.get_thread_replies(channel, msg["ts"])
@@ -946,16 +945,19 @@ class _SlackClient:
                         {"text": r.get("text", ""), "user": r.get("user")}
                         for r in thread_data["messages"][1:]  # Skip parent
                     ]
-            
+
             enriched.append(enriched_msg)
-        
+
         return {
             "channel": channel,
             "count": len(enriched),
             "messages": enriched,
-            "note": "Use your intelligence to analyze this data. Look for patterns, unanswered questions, engagement levels, sentiment and anything user asks for.",
+            "note": (
+                "Use your intelligence to analyze this data. "
+                "Look for patterns, unanswered questions, "
+                "engagement levels, sentiment and anything user asks for."
+            ),
         }
-
 
     # ============================================================
     # Phase 2: Workflow Automation
@@ -967,22 +969,22 @@ class _SlackClient:
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Trigger a Slack Workflow via webhook.
-        
+
         Args:
             webhook_url: The workflow's webhook URL
             payload: Optional JSON payload to send
         """
         body = payload or {}
-        
+
         response = httpx.post(
             webhook_url,
             json=body,
             timeout=30.0,
         )
-        
+
         if response.status_code != 200:
             return {"error": f"Workflow trigger failed: {response.status_code}"}
-        
+
         return {"success": True, "status_code": response.status_code}
 
     # ============================================================
@@ -996,10 +998,10 @@ class _SlackClient:
         include_user_info: bool = True,
     ) -> dict[str, Any]:
         """Get rich conversation context for AI understanding.
-        
+
         Fetches recent messages with user details, making it easy for
         the agent to understand who said what and respond appropriately.
-        
+
         Args:
             channel: Channel ID
             limit: Number of messages to fetch
@@ -1008,16 +1010,16 @@ class _SlackClient:
         history = self.get_history(channel, limit=limit)
         if "error" in history:
             return history
-        
+
         messages = history.get("messages", [])
-        
+
         # Build user cache to avoid repeated lookups
         user_cache: dict[str, str] = {}
-        
+
         context_messages = []
         for msg in messages:
             user_id = msg.get("user", "unknown")
-            
+
             # Resolve user name if requested
             user_name = user_id
             if include_user_info and user_id != "unknown":
@@ -1028,15 +1030,17 @@ class _SlackClient:
                     else:
                         user_cache[user_id] = user_id
                 user_name = user_cache[user_id]
-            
-            context_messages.append({
-                "user_id": user_id,
-                "user_name": user_name,
-                "text": msg.get("text", ""),
-                "ts": msg.get("ts"),
-                "has_replies": msg.get("reply_count", 0) > 0,
-            })
-        
+
+            context_messages.append(
+                {
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "text": msg.get("text", ""),
+                    "ts": msg.get("ts"),
+                    "has_replies": msg.get("reply_count", 0) > 0,
+                }
+            )
+
         return {
             "channel": channel,
             "message_count": len(context_messages),
@@ -1049,10 +1053,10 @@ class _SlackClient:
         email: str,
     ) -> dict[str, Any]:
         """Find a Slack user by their email address.
-        
+
         CRITICAL for CRM integrations - bridges email addresses
         to Slack user IDs for DMs and mentions.
-        
+
         Args:
             email: User's email address
         """
@@ -1070,7 +1074,7 @@ class _SlackClient:
         user: str,
     ) -> dict[str, Any]:
         """Remove a user from a channel.
-        
+
         Args:
             channel: Channel ID
             user: User ID to remove
@@ -1088,7 +1092,7 @@ class _SlackClient:
         file_id: str,
     ) -> dict[str, Any]:
         """Delete a file from Slack.
-        
+
         Args:
             file_id: The file ID to delete
         """
@@ -1102,7 +1106,7 @@ class _SlackClient:
 
     def get_team_stats(self) -> dict[str, Any]:
         """Get high-level workspace statistics.
-        
+
         Provides an overview of the team including user count
         and basic team info.
         """
@@ -1113,7 +1117,7 @@ class _SlackClient:
             timeout=30.0,
         )
         team_data = self._handle_response(team_response)
-        
+
         # Get user count
         users_response = httpx.get(
             f"{SLACK_API_BASE}/users.list",
@@ -1122,13 +1126,13 @@ class _SlackClient:
             timeout=30.0,
         )
         users_data = self._handle_response(users_response)
-        
+
         if "error" in team_data:
             return team_data
-        
+
         team = team_data.get("team", {})
         members = users_data.get("members", [])
-        
+
         return {
             "team_name": team.get("name"),
             "team_domain": team.get("domain"),
@@ -1140,7 +1144,7 @@ class _SlackClient:
 
 def register_tools(
     mcp: FastMCP,
-    credentials: "CredentialStoreAdapter | None" = None,
+    credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register Slack tools with the MCP server."""
 
@@ -1168,13 +1172,11 @@ def register_tools(
             return {
                 "error": "Slack credentials not configured",
                 "help": (
-                    "Set SLACK_BOT_TOKEN environment variable "
-                    "or configure via credential store"
+                    "Set SLACK_BOT_TOKEN environment variable or configure via credential store"
                 ),
             }
         user_token = _get_user_token()
         return _SlackClient(token, user_token=user_token)
-
 
     # --- Messages ---
 
@@ -2119,6 +2121,7 @@ def register_tools(
             '[{"type": "section", "text": {"type": "mrkdwn", "text": "*Hello* world"}}]'
         """
         import json as json_module
+
         client = _get_client()
         if isinstance(client, dict):
             return client
@@ -2166,6 +2169,7 @@ def register_tools(
             Dict with view ID or error
         """
         import json as json_module
+
         client = _get_client()
         if isinstance(client, dict):
             return client
@@ -2213,6 +2217,7 @@ def register_tools(
             Dict with success status or error
         """
         import json as json_module
+
         client = _get_client()
         if isinstance(client, dict):
             return client
@@ -2265,10 +2270,11 @@ def register_tools(
             return client
         try:
             import time
+
             expiration = None
             if expiration_minutes is not None and expiration_minutes > 0:
                 expiration = int(time.time()) + (expiration_minutes * 60)
-            
+
             result = client.set_user_status(status_text, status_emoji, expiration)
             if "error" in result:
                 return result
@@ -2563,7 +2569,7 @@ def register_tools(
             return {
                 "count": len(emoji),
                 "emoji": list(emoji.keys())[:100],  # Limit to first 100
-                "sample": {k: v for k, v in list(emoji.items())[:10]},
+                "sample": dict(list(emoji.items())[:10]),
             }
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -2599,7 +2605,7 @@ def register_tools(
                     "type": "markdown",
                     "markdown": markdown_content,
                 }
-            
+
             result = client.create_canvas(title, doc_content)
             if "error" in result:
                 return result
@@ -2634,14 +2640,16 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            changes = [{
-                "operation": operation,
-                "document_content": {
-                    "type": "markdown",
-                    "markdown": markdown_content,
+            changes = [
+                {
+                    "operation": operation,
+                    "document_content": {
+                        "type": "markdown",
+                        "markdown": markdown_content,
+                    },
                 }
-            }]
-            
+            ]
+
             result = client.edit_canvas(canvas_id, changes)
             if "error" in result:
                 return result
@@ -2658,8 +2666,8 @@ def register_tools(
     # =========================================================================
     # Phase 2 Tools: Analytics (AI-Driven Data Fetcher)
     # =========================================================================
-    # 
-    # DESIGN: This tool returns RAW message data. The AI agent uses its 
+    #
+    # DESIGN: This tool returns RAW message data. The AI agent uses its
     # intelligence to analyze, find patterns, identify unanswered questions,
     # compute engagement, detect sentiment, etc. No rule-based logic.
     # =========================================================================
@@ -2700,7 +2708,6 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-
     # =========================================================================
     # Phase 2 Tools: Workflow Automation
     # =========================================================================
@@ -2721,6 +2728,7 @@ def register_tools(
             Dict with success status or error
         """
         import json as json_module
+
         client = _get_client()
         if isinstance(client, dict):
             return client
@@ -2731,7 +2739,7 @@ def register_tools(
                     payload_dict = json_module.loads(payload)
                 except json_module.JSONDecodeError as e:
                     return {"error": f"Invalid payload JSON: {e}"}
-            
+
             return client.trigger_workflow(webhook_url, payload_dict)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -2869,4 +2877,3 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
-
