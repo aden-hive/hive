@@ -121,7 +121,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # Run your agent
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
@@ -207,7 +207,7 @@ flowchart LR
 Aden Hive provides a list of featured agents that you can use and build on top of.
 
 ### Run an agent shared by others
-Put the agent in `exports/` and run `PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'`
+Put the agent in `exports/` and run `PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'`
 
 
 For building and running goal-driven agents with the framework:
@@ -228,7 +228,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # Run agents
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.

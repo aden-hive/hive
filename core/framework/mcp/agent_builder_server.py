@@ -4,7 +4,7 @@ MCP Server for Agent Building Tools
 Exposes tools for building goal-driven agents via the Model Context Protocol.
 
 Usage:
-    python -m framework.mcp.agent_builder_server
+    uv run python -m framework.mcp.agent_builder_server
 """
 
 import json

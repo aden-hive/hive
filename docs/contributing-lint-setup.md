@@ -8,7 +8,7 @@ Hive uses [Ruff](https://docs.astral.sh/ruff/) for all Python linting and format
 
 ```bash
 # 1. Install dev dependencies
-cd core && pip install -e ".[dev]"
+cd core && uv pip install -e ".[dev]"
 
 # 2. Install pre-commit hooks (runs ruff automatically before each commit)
 make install-hooks
@@ -142,7 +142,7 @@ The single source of truth for lint rules is the `[tool.ruff]` section in each p
 
 ## FAQ
 
-**Q: Do I need to install anything beyond `pip install -e ".[dev]"`?**
+**Q: Do I need to install anything beyond `uv pip install -e ".[dev]"`?**
 Only if you want pre-commit hooks: `make install-hooks`. Everything else (VS Code settings, editorconfig) works automatically.
 
 **Q: Can I use a different formatter (black, autopep8)?**
