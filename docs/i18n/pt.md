@@ -80,6 +80,7 @@ cd hive
 ```
 
 Isto instala:
+
 - **framework** - Runtime do agente principal e executor de grafos
 - **aden_tools** - 19 ferramentas MCP para capacidades de agentes
 - Todas as dependências necessárias
@@ -91,7 +92,7 @@ Isto instala:
 ./quickstart.sh
 
 # Construir um agente usando Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Testar seu agente
 claude> /testing-agent
@@ -164,14 +165,14 @@ flowchart LR
 
 ### A Vantagem Aden
 
-| Frameworks Tradicionais | Aden |
-|-------------------------|------|
-| Codificar fluxos de trabalho de agentes | Descrever objetivos em linguagem natural |
-| Definição manual de grafos | Grafos de agentes auto-gerados |
-| Tratamento reativo de erros | Auto-evolução proativa |
-| Configurações de ferramentas estáticas | Nós dinâmicos envolvidos em SDK |
-| Configuração de monitoramento separada | Observabilidade em tempo real integrada |
-| Gerenciamento de orçamento DIY | Controles de custo e degradação integrados |
+| Frameworks Tradicionais                 | Aden                                       |
+| --------------------------------------- | ------------------------------------------ |
+| Codificar fluxos de trabalho de agentes | Descrever objetivos em linguagem natural   |
+| Definição manual de grafos              | Grafos de agentes auto-gerados             |
+| Tratamento reativo de erros             | Auto-evolução proativa                     |
+| Configurações de ferramentas estáticas  | Nós dinâmicos envolvidos em SDK            |
+| Configuração de monitoramento separada  | Observabilidade em tempo real integrada    |
+| Gerenciamento de orçamento DIY          | Controles de custo e degradação integrados |
 
 ### Como Funciona
 
@@ -237,7 +238,7 @@ Para construir e executar agentes orientados a objetivos com o framework:
 # - Todas as dependências
 
 # Construir novos agentes usando habilidades Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Testar agentes
 claude> /testing-agent
