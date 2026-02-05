@@ -570,7 +570,7 @@ web_search
 google_search
 
 $ jq -r '.graph.nodes[]?.node_type' exports/research-agent/agent.json | sort -u
-llm_tool_use
+event_loop
 
 [Maps tools/nodes to credentials using lookup table]
 Needed: anthropic, brave_search, google_search, google_cse

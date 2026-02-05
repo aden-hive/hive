@@ -39,7 +39,15 @@ class TestHealthCheckerRegistry:
 
     def test_all_expected_checkers_registered(self):
         """All expected health checkers are in the registry."""
-        expected = {"hubspot", "brave_search", "google_search", "anthropic", "github", "resend"}
+        expected = {
+            "hubspot",
+            "brave_search",
+            "google_search",
+            "anthropic",
+            "github",
+            "resend",
+            "slack",
+        }
         assert set(HEALTH_CHECKERS.keys()) == expected
 
 

@@ -296,6 +296,25 @@ class AgentRuntime:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
 
+    async def inject_input(self, node_id: str, content: str) -> bool:
+        """Inject user input into a running client-facing node.
+
+        Routes input to the EventLoopNode identified by ``node_id``
+        across all active streams. Used by the TUI ChatRepl to deliver
+        user responses during client-facing node execution.
+
+        Args:
+            node_id: The node currently waiting for input
+            content: The user's input text
+
+        Returns:
+            True if input was delivered, False if no matching node found
+        """
+        for stream in self._streams.values():
+            if await stream.inject_input(node_id, content):
+                return True
+        return False
+
     async def get_goal_progress(self) -> dict[str, Any]:
         """
         Evaluate goal progress across all streams.

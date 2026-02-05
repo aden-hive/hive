@@ -4,7 +4,7 @@ Calls live LLM APIs and dumps stream events to JSON files for review.
 Results are saved to core/tests/stream_event_dumps/{provider}_{model}_{scenario}.json
 
 Run with:
-    cd core && python -m pytest tests/test_litellm_streaming.py -v -s -k "RealAPI"
+    cd core && uv run python -m pytest tests/test_litellm_streaming.py -v -s -k "RealAPI"
 
 Requires API keys set in environment:
     ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY (or via credential store)

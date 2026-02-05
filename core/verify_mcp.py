@@ -76,7 +76,7 @@ def main():
         success(f"installed at {framework_path}")
     except subprocess.CalledProcessError:
         error("framework package not found")
-        logger.info(f"  Run: pip install -e {script_dir}")
+        logger.info(f"  Run: uv pip install -e {script_dir}")
         all_checks_passed = False
 
     # Check 2: MCP dependencies
@@ -90,7 +90,7 @@ def main():
 
     if missing_deps:
         error(f"missing: {', '.join(missing_deps)}")
-        logger.info(f"  Run: pip install {' '.join(missing_deps)}")
+        logger.info(f"  Run: uv pip install {' '.join(missing_deps)}")
         all_checks_passed = False
     else:
         success("all installed")
@@ -194,7 +194,7 @@ def main():
         logger.info("Your MCP server is ready to use.")
         logger.info("")
         logger.info(f"{Colors.BLUE}To start the server:{Colors.NC}")
-        logger.info("  python -m framework.mcp.agent_builder_server")
+        logger.info("  uv run python -m framework.mcp.agent_builder_server")
         logger.info("")
         logger.info(f"{Colors.BLUE}To use with Claude Desktop:{Colors.NC}")
         logger.info("  Add the configuration from .mcp.json to your")
@@ -203,7 +203,7 @@ def main():
         logger.info(f"{Colors.RED}✗ Some checks failed{Colors.NC}")
         logger.info("")
         logger.info("To fix issues, run:")
-        logger.info(f"  python {script_dir / 'setup_mcp.py'}")
+        logger.info(f"  uv run python {script_dir / 'setup_mcp.py'}")
     logger.info("")
 
 

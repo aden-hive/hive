@@ -33,6 +33,11 @@ class ToolRegistry:
     4. Manually registered tools
     """
 
+    # Framework-internal context keys injected into tool calls.
+    # Stripped from LLM-facing schemas (the LLM doesn't know these values)
+    # and auto-injected at call time for tools that accept them.
+    CONTEXT_PARAMS = frozenset({"workspace_id", "agent_id", "session_id"})
+
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
@@ -275,7 +280,16 @@ class ToolRegistry:
             return
 
         base_dir = config_path.parent
-        for server_config in config.get("servers", []):
+
+        # Support both formats:
+        #   {"servers": [{"name": "x", ...}]}        (list format)
+        #   {"server-name": {"transport": ...}, ...}  (dict format)
+        server_list = config.get("servers", [])
+        if not server_list and "servers" not in config:
+            # Treat top-level keys as server names
+            server_list = [{"name": name, **cfg} for name, cfg in config.items()]
+
+        for server_config in server_list:
             cwd = server_config.get("cwd")
             if cwd and not Path(cwd).is_absolute():
                 server_config["cwd"] = str((base_dir / cwd).resolve())
@@ -333,7 +347,7 @@ class ToolRegistry:
             # Register each tool
             count = 0
             for mcp_tool in client.list_tools():
-                # Convert MCP tool to framework Tool
+                # Convert MCP tool to framework Tool (strips context params from LLM schema)
                 tool = self._convert_mcp_tool_to_framework_tool(mcp_tool)
 
                 # Create executor that calls the MCP server
@@ -394,6 +408,11 @@ class ToolRegistry:
         input_schema = mcp_tool.input_schema
         properties = input_schema.get("properties", {})
         required = input_schema.get("required", [])
+
+        # Strip framework-internal context params from LLM-facing schema.
+        # The LLM can't know these values; they're auto-injected at call time.
+        properties = {k: v for k, v in properties.items() if k not in self.CONTEXT_PARAMS}
+        required = [r for r in required if r not in self.CONTEXT_PARAMS]
 
         # Convert to framework Tool format
         tool = Tool(
