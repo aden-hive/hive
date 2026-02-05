@@ -196,7 +196,7 @@ If not set, guide user to get one from Aden (this is where they do OAuth):
 from aden_tools.credentials import open_browser, get_aden_setup_url
 
 # Open browser to Aden - user will sign up and connect integrations there
-url = get_aden_setup_url()  # https://hive.adenhq.com/setup
+url = get_aden_setup_url()  # https://hive.adenhq.com
 success, msg = open_browser(url)
 
 print("Please sign in to Aden and connect your integrations (HubSpot, etc.).")
