@@ -534,7 +534,7 @@ class NodeResult:
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-3-haiku-20240307",
                 max_tokens=200,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -1321,7 +1321,8 @@ Output ONLY the JSON object, nothing else."""
         import json
 
         # Smart truncation: truncate values rather than corrupting JSON
-        def truncate_value(v, max_len=500):
+        # Increased from 500 to 8000 to handle longer content like blog posts
+        def truncate_value(v, max_len=8000):
             s = str(v)
             return s[:max_len] + "..." if len(s) > max_len else v
 
@@ -1344,7 +1345,7 @@ Output ONLY the JSON object, nothing else."""
 
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-3-haiku-20240307",
                 max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}],
             )

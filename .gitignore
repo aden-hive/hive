@@ -65,8 +65,8 @@ core/data/
 tmp/
 temp/
 
-exports/*
 
 .agent-builder-sessions/*
 
-.venv
+.venv.agent_runs/
+agent_demo.mov

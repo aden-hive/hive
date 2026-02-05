@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Content Marketing Agent - Output Report</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+        }
+        .header h1 { margin: 0 0 10px 0; font-size: 28px; }
+        .header p { margin: 0; opacity: 0.9; }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .card h2 {
+            margin-top: 0;
+            color: #667eea;
+            font-size: 18px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .metric {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .path {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .node {
+            background: #e8f4f8;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #0066cc;
+        }
+        .node.hitl { background: #fff3cd; color: #856404; }
+        .arrow { color: #999; }
+        .blog-post {
+            background: #fafafa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 15px 0;
+        }
+        .blog-post h1, .blog-post h2, .blog-post h3 {
+            color: #444;
+        }
+        .blog-post h1 { font-size: 24px; margin-top: 0; }
+        .blog-post h2 { font-size: 20px; margin-top: 25px; }
+        .blog-post h3 { font-size: 17px; margin-top: 20px; }
+        .tags {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        .tag {
+            background: #667eea;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .quality-badge {
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        .approval {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        .rejection {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        .approval-title { color: #155724; font-weight: bold; margin-bottom: 8px; }
+        .rejection-title { color: #721c24; font-weight: bold; margin-bottom: 8px; }
+        .input-section {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        hr { border: none; border-top: 1px solid #eee; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 Content Marketing Agent</h1>
+        <p>Automated blog content generation with human-in-the-loop approval</p>
+    </div>
+
+    <div class="card">
+        <h2>📊 Execution Metrics</h2>
+        <div class="metrics">
+            <div class="metric">
+                <div class="metric-value">5</div>
+                <div class="metric-label">Nodes Executed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">11,759</div>
+                <div class="metric-label">Tokens Used</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">55s</div>
+                <div class="metric-label">Total Time</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">✅</div>
+                <div class="metric-label">Status</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🔄 Execution Path</h2>
+        <div class="path"><span class="node">news_monitor</span><span class="arrow">→</span><span class="node">content_writer</span><span class="arrow">→</span><span class="node">quality_review</span><span class="arrow">→</span><span class="node">quality_router</span><span class="arrow">→</span><span class="node hitl">🙋 human_approval</span></div>
+    </div>
+
+    <div class="card">
+        <h2>📰 Input: News Article</h2>
+        <div class="input-section">
+            <strong>Title:</strong> ElevenLabs CEO: Voice is the next interface for AI<br><br>
+            <strong>Summary:</strong> ElevenLabs co-founder and CEO Mati Staniszewski says voice is becoming the next major interface for AI – the way people will increasingly interact with machines as models move beyond text and screens.
+Speaking at Web Summit in Doha, Staniszewski told TechCrunch voice models like those developed by ElevenLabs have recently moved beyond simply mimicking human speech — including emotion and intonation – to working in tandem with the reasoning capabilities of large language models. The result, he argued, is a shift in how people interact with technology. 
+In the years ahead, he said, “hopefully all our phones will go back in our pockets, and we can immerse ourselves in the real world around us, with voice as the mechanism that controls technology.”
+That vision fueled ElevenLabs’s $500 million raise this week at an $11 billion valuation, and it is increasingly shared across the AI industry. OpenAI and Google have both made voice a central focus of their next-generation models, while Apple appears to be quietly building voice-adjacent, always-on technologies through acquisitions like Q.ai. As AI spreads into wearables, cars, and other new hardware, control is becoming less about tapping screens and more about speaking, making voice a key battleground for the next phase of AI development. 
+Iconiq Capital general partner Seth Pierrepont echoed that view onstage at Web Summit, arguing that while screens will continue to matter for gaming and entertainment, traditional input methods like keyboards are starting to feel “outdated.”
+And as AI systems become more agentic, Pierrepont said, the interaction itself will also change, with models gaining guardrails, integrations, and context needed to respond with less explicit prompting from users. 
+Staniszewski pointed to that agentic shift as one of the biggest changes underway. Rather than spelling out every instruction, he said future voice systems will increasingly rely on persistent memory and context built up over time, making interactions feel more natural and requiring less effort from users. That evolution, he added, will influence how voice models are deployed. While high-quality audio models have largely lived in the cloud, Staniszewski said ElevenLabs is working toward a hybrid approach that blends cloud and on-device processing — a move aimed at supporting new hardware, including headphones and other wearables, where voice becomes a constant companion rather than a feature you decide when to engage with. 
+ElevenLabs is already partnering with Meta to bring its voice technology to products including Instagram and Horizon Worlds, the company’s virtual reality platform. Staniszewski said he would also be open to working with Meta on its Ray-Ban smart glasses as voice-driven interfaces expand into new form factors. 
+But as voice becomes more persistent and embedded in everyday hardware, it opens the door to serious concerns around privacy, surveillance, and how much personal data voice-based systems will store as they move closer to users’ daily lives — something companies like Google have already been accused of abusing.
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>✅ Quality Review</h2>
+        <p>
+            <span class="quality-badge">Score: 1.00 / 1.0</span>
+            &nbsp;&nbsp;✓ Passes Review
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>📝 Generated Blog Post</h2>
+        <div class="blog-post">
+            <h1>Why Voice is the Future of AI Interaction for Businesses</h1>
+
+<p>In the evolving landscape of artificial intelligence, a new frontier is emerging—voice. According to Mati Staniszewski, co-founder and CEO of ElevenLabs, voice is quickly becoming the dominant interface through which users will engage with AI technology. This shift promises to revolutionize how businesses operate and interact with consumers. </p>
+
+<h2>The Evolution of Voice Technology</h2>
+
+<p>Voice technology has come a long way from the rudimentary systems of the past. With advancements in natural language processing (NLP) and machine learning, voice recognition systems have gained unprecedented accuracy and versatility. From smart assistants like Siri and Alexa to enterprise solutions, voice is reshaping communication across sectors.  </p>
+
+<h3>Voice vs. Traditional Interfaces</h3>
+
+<p>Traditionally, human-computer interaction relied heavily on text and visual interfaces such as screens and keyboards. However, these methods present limitations. Text-based interfaces can be cumbersome, especially for tasks requiring quick access to information or communication. </p>
+
+<p>Conversely, voice interfaces offer a hands-free, more intuitive method of interaction. Imagine a business meeting where participants can pull up data, draft emails, or schedule tasks, all through voice commands. This capability significantly enhances productivity and streamlines workflows, enabling business professionals to focus on strategic decision-making rather than administrative tasks. </p>
+
+<h2>Implications for Business Professionals</h2>
+
+<h3>Enhanced Efficiency</h3>
+
+<p>For tech-savvy business professionals, the shift towards voice interfaces means increased efficiency. Voice commands can reduce the time spent on mundane tasks, allowing for a more strategic focus on core business objectives. This is particularly beneficial in fast-paced environments where decision-making speed is critical.  </p>
+
+<h3>Improved Customer Interaction</h3>
+
+<p>Voice technology also presents businesses with the opportunity to enhance customer interaction. With the rise of voice search and voice commerce, companies can engage customers more effectively. Customers can place orders, seek assistance, or receive information simply by speaking—a natural interaction that resonates well with today’s consumer behaviors.  </p>
+
+<h3>Accessibility and Inclusion</h3>
+
+<p>Moreover, voice technology holds the potential to make business tools more accessible. Individuals with disabilities often face challenges with traditional interfaces, but voice recognition can create more inclusive work environments. This accessibility not only reflects a company’s commitment to diversity but also broadens the talent pool from which businesses can draw.  </p>
+
+<h2>Preparing for the Voice-Driven Future</h2>
+
+<p>As the voice interface becomes more prevalent, businesses must adapt to this transformation. Here are a few steps organizations can take to integrate voice technology into their operations:</p>
+
+<p>- **Educate Employees:** Provide training for employees to leverage voice technology effectively.</p>
+<p>- **Invest in Voice Solutions:** Explore voice-activated software and devices that can enhance productivity.</p>
+<p>- **Solicit Feedback:** Continuously gather feedback from users to refine voice interface implementations.</p>
+
+<h2>Conclusion: Embrace the Voice Revolution</h2>
+
+<p>Mati Staniszewski’s vision for a voice-driven AI future is not just a trend but a fundamental shift in how we engage with technology. As voice becomes the next major interface for AI, businesses have a unique opportunity to capitalize on this innovation. For tech-savvy professionals, embracing voice technology today means being at the forefront of the business landscape tomorrow.</p>
+
+<p>What steps will your company take to adapt to this transformative change? Join the conversation and share your thoughts on the future of voice interaction in the workplace!</p>
+            <hr>
+            <p><strong>Excerpt:</strong> <em>Explore how voice technology is transforming AI interaction for businesses.</em></p>
+            <div class="tags"><span class="tag">AI</span><span class="tag">Voice Technology</span><span class="tag">Business</span><span class="tag">Innovation</span></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🙋 Human Approval Decision</h2>
+        <div class="approval">
+            <div class="approval-title">✅ APPROVED</div>
+            <p style="margin-bottom: 0;">**Decision: APPROVE**
+
+**Feedback:**
+
+This blog post on "Why Voice is the Future of AI Interaction for Businesses" is well-written, engaging, and informative. It effectively covers the topic with clear sections that highlight the evolution of voice technology, its implications for business professionals, and actionable steps for organizations to adopt voice solutions. The content aligns with the brand voice and is factually accurate.
+
+There are no quality issues or suggestions for improvement, making this post ready for publication. Great work!</p>
+        </div>
+    </div>
+
+    <div style="text-align: center; color: #999; font-size: 13px; margin-top: 40px;">
+        Generated by Content Marketing Agent • Aden Framework • February 05, 2026 13:33
+    </div>
+</body>
+</html>

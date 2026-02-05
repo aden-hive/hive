@@ -1,0 +1,55 @@
+{
+  "success": true,
+  "mode": "live",
+  "output": {
+    "news_title": "ElevenLabs CEO: Voice is the next interface for AI",
+    "news_summary": "ElevenLabs co-founder and CEO Mati Staniszewski says voice is becoming the next major interface for AI \u2013 the way people will increasingly interact with machines as models move beyond text and screens.\nSpeaking at Web Summit in Doha, Staniszewski told TechCrunch voice models like those developed by ElevenLabs have recently moved beyond simply mimicking human speech \u2014 including emotion and intonation \u2013 to working in tandem with the reasoning capabilities of large language models. The result, he argued, is a shift in how people interact with technology. \nIn the years ahead, he said, \u201chopefully all our phones will go back in our pockets, and we can immerse ourselves in the real world around us, with voice as the mechanism that controls technology.\u201d\nThat vision fueled ElevenLabs\u2019s $500 million raise this week at an $11 billion valuation, and it is increasingly shared across the AI industry. OpenAI and Google have both made voice a central focus of their next-generation models, while Apple appears to be quietly building voice-adjacent, always-on technologies through acquisitions like Q.ai. As AI spreads into wearables, cars, and other new hardware, control is becoming less about tapping screens and more about speaking, making voice a key battleground for the next phase of AI development. \nIconiq Capital general partner Seth Pierrepont echoed that view onstage at Web Summit, arguing that while screens will continue to matter for gaming and entertainment, traditional input methods like keyboards are starting to feel \u201coutdated.\u201d\nAnd as AI systems become more agentic, Pierrepont said, the interaction itself will also change, with models gaining guardrails, integrations, and context needed to respond with less explicit prompting from users. \nStaniszewski pointed to that agentic shift as one of the biggest changes underway. Rather than spelling out every instruction, he said future voice systems will increasingly rely on persistent memory and context built up over time, making interactions feel more natural and requiring less effort from users. That evolution, he added, will influence how voice models are deployed. While high-quality audio models have largely lived in the cloud, Staniszewski said ElevenLabs is working toward a hybrid approach that blends cloud and on-device processing \u2014 a move aimed at supporting new hardware, including headphones and other wearables, where voice becomes a constant companion rather than a feature you decide when to engage with. \nElevenLabs is already partnering with Meta to bring its voice technology to products including Instagram and Horizon Worlds, the company\u2019s virtual reality platform. Staniszewski said he would also be open to working with Meta on its Ray-Ban smart glasses as voice-driven interfaces expand into new form factors. \nBut as voice becomes more persistent and embedded in everyday hardware, it opens the door to serious concerns around privacy, surveillance, and how much personal data voice-based systems will store as they move closer to users\u2019 daily lives \u2014 something companies like Google have already been accused of abusing.",
+    "brand_name": "Acme Corp",
+    "brand_voice": "professional, innovative, approachable",
+    "target_audience": "tech-savvy business professionals",
+    "previous_feedback": "No previous feedback.",
+    "revision_count": 0,
+    "news_analysis": {
+      "is_relevant": true,
+      "relevance_score": 0.5,
+      "suggested_angle": "Exploring the evolution of voice as a primary interface for AI and its implications for business professionals.",
+      "key_topics": [
+        "voice technology",
+        "AI interface",
+        "business applications"
+      ]
+    },
+    "result": "{\n    \"quality_review\": {\n        \"quality_score\": 1.0,\n        \"passes_review\": true,\n        \"issues\": [],\n        \"suggestions\": []\n    },\n    \"route_on\": \"passes_review\"\n}",
+    "draft_content": {
+      "title": "Why Voice is the Future of AI Interaction for Businesses",
+      "body": "# Why Voice is the Future of AI Interaction for Businesses\n\nIn the evolving landscape of artificial intelligence, a new frontier is emerging\u2014voice. According to Mati Staniszewski, co-founder and CEO of ElevenLabs, voice is quickly becoming the dominant interface through which users will engage with AI technology. This shift promises to revolutionize how businesses operate and interact with consumers. \n\n## The Evolution of Voice Technology\n\nVoice technology has come a long way from the rudimentary systems of the past. With advancements in natural language processing (NLP) and machine learning, voice recognition systems have gained unprecedented accuracy and versatility. From smart assistants like Siri and Alexa to enterprise solutions, voice is reshaping communication across sectors.  \n\n### Voice vs. Traditional Interfaces\n\nTraditionally, human-computer interaction relied heavily on text and visual interfaces such as screens and keyboards. However, these methods present limitations. Text-based interfaces can be cumbersome, especially for tasks requiring quick access to information or communication. \n\nConversely, voice interfaces offer a hands-free, more intuitive method of interaction. Imagine a business meeting where participants can pull up data, draft emails, or schedule tasks, all through voice commands. This capability significantly enhances productivity and streamlines workflows, enabling business professionals to focus on strategic decision-making rather than administrative tasks. \n\n## Implications for Business Professionals\n\n### Enhanced Efficiency\n\nFor tech-savvy business professionals, the shift towards voice interfaces means increased efficiency. Voice commands can reduce the time spent on mundane tasks, allowing for a more strategic focus on core business objectives. This is particularly beneficial in fast-paced environments where decision-making speed is critical.  \n\n### Improved Customer Interaction\n\nVoice technology also presents businesses with the opportunity to enhance customer interaction. With the rise of voice search and voice commerce, companies can engage customers more effectively. Customers can place orders, seek assistance, or receive information simply by speaking\u2014a natural interaction that resonates well with today\u2019s consumer behaviors.  \n\n### Accessibility and Inclusion\n\nMoreover, voice technology holds the potential to make business tools more accessible. Individuals with disabilities often face challenges with traditional interfaces, but voice recognition can create more inclusive work environments. This accessibility not only reflects a company\u2019s commitment to diversity but also broadens the talent pool from which businesses can draw.  \n\n## Preparing for the Voice-Driven Future\n\nAs the voice interface becomes more prevalent, businesses must adapt to this transformation. Here are a few steps organizations can take to integrate voice technology into their operations:\n\n- **Educate Employees:** Provide training for employees to leverage voice technology effectively.\n- **Invest in Voice Solutions:** Explore voice-activated software and devices that can enhance productivity.\n- **Solicit Feedback:** Continuously gather feedback from users to refine voice interface implementations.\n\n## Conclusion: Embrace the Voice Revolution\n\nMati Staniszewski\u2019s vision for a voice-driven AI future is not just a trend but a fundamental shift in how we engage with technology. As voice becomes the next major interface for AI, businesses have a unique opportunity to capitalize on this innovation. For tech-savvy professionals, embracing voice technology today means being at the forefront of the business landscape tomorrow.\n\nWhat steps will your company take to adapt to this transformative change? Join the conversation and share your thoughts on the future of voice interaction in the workplace!",
+      "excerpt": "Explore how voice technology is transforming AI interaction for businesses.",
+      "tags": [
+        "AI",
+        "Voice Technology",
+        "Business",
+        "Innovation"
+      ]
+    },
+    "quality_review": {
+      "quality_score": 1.0,
+      "passes_review": true,
+      "issues": [],
+      "suggestions": []
+    },
+    "route_on": "passes_review",
+    "human_decision": "**Decision: APPROVE**\n\n**Feedback:**\n\nThis blog post on \"Why Voice is the Future of AI Interaction for Businesses\" is well-written, engaging, and informative. It effectively covers the topic with clear sections that highlight the evolution of voice technology, its implications for business professionals, and actionable steps for organizations to adopt voice solutions. The content aligns with the brand voice and is factually accurate.\n\nThere are no quality issues or suggestions for improvement, making this post ready for publication. Great work!"
+  },
+  "error": null,
+  "steps_executed": 5,
+  "total_tokens": 11759,
+  "total_latency_ms": 55774,
+  "path": [
+    "news_monitor",
+    "content_writer",
+    "quality_review",
+    "quality_router",
+    "human_approval"
+  ],
+  "paused_at": "human_approval"
+}
