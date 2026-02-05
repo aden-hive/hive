@@ -375,6 +375,39 @@ class AgentRunner:
         return module
 
     @classmethod
+    def from_file(
+        cls,
+        path: str | Path,
+        mock_mode: bool = False,
+        storage_path: Path | None = None,
+        model: str | None = None,
+        enable_tui: bool = False,
+    ) -> "AgentRunner":
+        """
+        Creates an AgentRunner instance directly from an agent.json file.
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Agent file not found at: {path}")
+
+        # Read the file as a raw string (handle BOM with utf-8-sig)
+        with open(path, encoding="utf-8-sig") as f:
+            raw_json_data = f.read()
+
+        # load_agent_export is designed to take a string and do the parsing
+        graph, goal = load_agent_export(raw_json_data)
+
+        return cls(
+            agent_path=path.parent,
+            graph=graph,
+            goal=goal,
+            mock_mode=mock_mode,
+            storage_path=storage_path,
+            model=model,
+            enable_tui=enable_tui,
+        )
+
+    @classmethod
     def load(
         cls,
         agent_path: str | Path,
