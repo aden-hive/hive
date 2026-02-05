@@ -1,11 +1,11 @@
 ---
-name: testing-agent
+name: hive-test
 description: Run goal-based evaluation tests for agents. Use when you need to verify an agent meets its goals, debug failing tests, or iterate on agent improvements based on test results.
 ---
 
 # Testing Workflow
 
-This skill provides tools for testing agents built with the building-agents skill.
+This skill provides tools for testing agents built with the hive-create skill.
 
 ## Workflow Overview
 
@@ -61,7 +61,7 @@ mcp__agent-builder__debug_test(
 
 # Testing Agents with MCP Tools
 
-Run goal-based evaluation tests for agents built with the building-agents skill.
+Run goal-based evaluation tests for agents built with the hive-create skill.
 
 **Key Principle: MCP tools provide guidelines, Claude writes tests directly**
 - ✅ Get guidelines: `generate_constraint_tests`, `generate_success_tests` → returns templates and guidelines
@@ -279,7 +279,7 @@ if missing_creds:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           GOAL STAGE                                     │
-│  (building-agents skill)                                                 │
+│  (hive-create skill)                                                 │
 │                                                                          │
 │  1. User defines goal with success_criteria and constraints             │
 │  2. Goal written to agent.py immediately                                │
@@ -289,7 +289,7 @@ if missing_creds:
                                    ↓
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          AGENT STAGE                                     │
-│  (building-agents skill)                                                 │
+│  (hive-create skill)                                                 │
 │                                                                          │
 │  Build nodes + edges, written immediately to files                      │
 │  Constraint tests can run during development:                           │
@@ -608,7 +608,7 @@ Edit(
 )
 
 # 4. May need to regenerate agent nodes if goal changed significantly
-# This requires going back to building-agents skill
+# This requires going back to hive-create skill
 ```
 
 #### EDGE_CASE → Add Test and Fix
@@ -1027,17 +1027,17 @@ async def test_client_facing_node(mock_mode):
     assert result.success or result.paused_at is not None
 ```
 
-## Integration with building-agents
+## Integration with hive-create
 
 ### Handoff Points
 
 | Scenario | From | To | Action |
 |----------|------|-----|--------|
-| Agent built, ready to test | building-agents | testing-agent | Generate success tests |
-| LOGIC_ERROR found | testing-agent | building-agents | Update goal, rebuild |
-| IMPLEMENTATION_ERROR found | testing-agent | Direct fix | Edit agent files, re-run tests |
-| EDGE_CASE found | testing-agent | testing-agent | Add edge case test |
-| All tests pass | testing-agent | Done | Agent validated ✅ |
+| Agent built, ready to test | hive-create | hive-test | Generate success tests |
+| LOGIC_ERROR found | hive-test | hive-create | Update goal, rebuild |
+| IMPLEMENTATION_ERROR found | hive-test | Direct fix | Edit agent files, re-run tests |
+| EDGE_CASE found | hive-test | hive-test | Add edge case test |
+| All tests pass | hive-test | Done | Agent validated ✅ |
 
 ### Iteration Speed Comparison
 

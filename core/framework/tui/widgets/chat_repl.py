@@ -15,6 +15,7 @@ Client-facing input:
 """
 
 import asyncio
+import re
 import threading
 from typing import Any
 
@@ -91,11 +92,18 @@ class ChatRepl(Vertical):
         yield Label("Agent is processing...", id="processing-indicator")
         yield Input(placeholder="Enter input for agent...", id="chat-input")
 
+    # Regex for file:// URIs that are NOT already inside Rich [link=...] markup
+    _FILE_URI_RE = re.compile(r"(?<!\[link=)(file://\S+)")
+
+    def _linkify(self, text: str) -> str:
+        """Convert bare file:// URIs to clickable Rich [link=...] markup."""
+        return self._FILE_URI_RE.sub(r"[link=\1]\1[/link]", text)
+
     def _write_history(self, content: str) -> None:
         """Write to chat history, only auto-scrolling if user is at the bottom."""
         history = self.query_one("#chat-history", RichLog)
         was_at_bottom = history.is_vertical_scroll_end
-        history.write(content)
+        history.write(self._linkify(content))
         if was_at_bottom:
             history.scroll_end(animate=False)
 

@@ -132,6 +132,7 @@ class GraphExecutor:
         event_bus: Any | None = None,
         stream_id: str = "",
         storage_path: str | Path | None = None,
+        loop_config: dict[str, Any] | None = None,
     ):
         """
         Initialize the executor.
@@ -149,6 +150,7 @@ class GraphExecutor:
             event_bus: Optional event bus for emitting node lifecycle events
             stream_id: Stream ID for event correlation
             storage_path: Optional base path for conversation persistence
+            loop_config: Optional EventLoopNode configuration (max_iterations, etc.)
         """
         self.runtime = runtime
         self.llm = llm
@@ -161,6 +163,7 @@ class GraphExecutor:
         self._event_bus = event_bus
         self._stream_id = stream_id
         self._storage_path = Path(storage_path) if storage_path else None
+        self._loop_config = loop_config or {}
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -284,6 +287,16 @@ class GraphExecutor:
         self.logger.info(f"🚀 Starting execution: {goal.name}")
         self.logger.info(f"   Goal: {goal.description}")
         self.logger.info(f"   Entry node: {graph.entry_node}")
+
+        # Set per-execution data_dir so data tools (save_data, load_data, etc.)
+        # and spillover files share the same session-scoped directory.
+        _ctx_token = None
+        if self._storage_path:
+            from framework.runner.tool_registry import ToolRegistry
+
+            _ctx_token = ToolRegistry.set_execution_context(
+                data_dir=str(self._storage_path / "data"),
+            )
 
         try:
             while steps < graph.max_steps:
@@ -720,6 +733,12 @@ class GraphExecutor:
                 node_visit_counts=dict(node_visit_counts),
             )
 
+        finally:
+            if _ctx_token is not None:
+                from framework.runner.tool_registry import ToolRegistry
+
+                ToolRegistry.reset_execution_context(_ctx_token)
+
     def _build_context(
         self,
         node_spec: NodeSpec,
@@ -845,19 +864,24 @@ class GraphExecutor:
             # When a tool result exceeds max_tool_result_chars, the full
             # content is written to spillover_dir and the agent gets a
             # truncated preview with instructions to use load_data().
+            # Uses storage_path/data which is session-scoped, matching the
+            # data_dir set via execution context for data tools.
             spillover = None
             if self._storage_path:
                 spillover = str(self._storage_path / "data")
 
+            lc = self._loop_config
+            default_max_iter = 100 if node_spec.client_facing else 50
             node = EventLoopNode(
                 event_bus=self._event_bus,
                 judge=None,  # implicit judge: accept when output_keys are filled
                 config=LoopConfig(
-                    max_iterations=100 if node_spec.client_facing else 50,
-                    max_tool_calls_per_turn=10,
-                    stall_detection_threshold=3,
-                    max_history_tokens=32000,
-                    max_tool_result_chars=3_000,
+                    max_iterations=lc.get("max_iterations", default_max_iter),
+                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 10),
+                    tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
+                    stall_detection_threshold=lc.get("stall_detection_threshold", 3),
+                    max_history_tokens=lc.get("max_history_tokens", 32000),
+                    max_tool_result_chars=lc.get("max_tool_result_chars", 3_000),
                     spillover_dir=spillover,
                 ),
                 tool_executor=self.tool_executor,
