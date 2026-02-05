@@ -92,8 +92,9 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 - Python 3.11+ for agent development
 - Claude Code or Cursor for utilizing agent skills
-
+- uv (Python package manager) is required (used in commands like `uv run`). Install: https://docs.astral.sh/uv/
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
+
 
 ### Installation
 
