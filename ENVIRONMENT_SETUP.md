@@ -10,8 +10,8 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ```
 
 > **Note for Windows Users:**  
-> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.  
-> It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for a smoother setup experience.
+> It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for the best experience.  
+> See our **[Windows Setup Guide](docs/windows-setup-guide.md)** for complete installation instructions and troubleshooting.
 
 This will:
 
@@ -25,14 +25,15 @@ This will:
 
 Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run agents.
 
-1. [Install WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install) if you haven't already:
-   ```powershell
-   wsl --install
-   ```
-2. Open your WSL terminal, clone the repo, and run the quickstart script:
-   ```bash
-   ./quickstart.sh
-   ```
+**[📖 Complete Windows Setup Guide](docs/windows-setup-guide.md)** - Detailed WSL installation, troubleshooting, and alternative options
+
+**Quick Start (if WSL already installed):**
+```bash
+# In WSL terminal
+git clone https://github.com/adenhq/hive.git
+cd hive
+./quickstart.sh
+```
 
 ## Alpine Linux Setup
 
@@ -88,7 +89,8 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 ```
 
 > **Windows Tip:**  
-> On Windows, if the verification commands fail, ensure you are running them in **WSL** or after **disabling Python App Execution Aliases** in Windows Settings → Apps → App Execution Aliases.
+> On Windows, if the verification commands fail, ensure you are running them in **WSL** or after **disabling Python App Execution Aliases** in Windows Settings → Apps → App Execution Aliases.  
+> See the **[Windows Setup Guide](docs/windows-setup-guide.md#troubleshooting)** for detailed troubleshooting.
 
 ## Requirements
 
