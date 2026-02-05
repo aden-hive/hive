@@ -26,9 +26,9 @@ Testing tools are integrated into the main agent_builder_server.py:
 ## CLI Commands
 
 ```bash
-python -m framework test-run <agent_path> --goal <goal_id>
-python -m framework test-debug <goal_id> <test_id>
-python -m framework test-list <agent_path> --goal <goal_id>
+uv run python -m framework test-run <agent_path> --goal <goal_id>
+uv run python -m framework test-debug <goal_id> <test_id>
+uv run python -m framework test-list <agent_path> --goal <goal_id>
 ```
 """
 

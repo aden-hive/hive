@@ -97,7 +97,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # 运行您的智能体
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
 **[📖 完整设置指南](ENVIRONMENT_SETUP.md)** - 智能体开发的详细说明
@@ -243,7 +243,7 @@ claude> /building-agents-construction
 claude> /testing-agent
 
 # 运行智能体
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
 完整设置说明请参阅 [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)。

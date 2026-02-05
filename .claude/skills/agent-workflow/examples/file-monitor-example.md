@@ -75,10 +75,10 @@ initialize → list → identify → check
 ### Step 5: Finalize
 
 ```bash
-$ PYTHONPATH=core:exports python -m file_monitor_agent validate
+$ PYTHONPATH=exports uv run python -m file_monitor_agent validate
 ✓ Agent is valid
 
-$ PYTHONPATH=core:exports python -m file_monitor_agent info
+$ PYTHONPATH=exports uv run python -m file_monitor_agent info
 Agent: File Monitor & Copy Agent
 Nodes: 7
 Edges: 8
@@ -131,7 +131,7 @@ Tests approved incrementally by user.
 ### Step 3: Run Tests
 
 ```bash
-$ PYTHONPATH=core:exports pytest exports/file_monitor_agent/tests/
+$ PYTHONPATH=exports uv run pytest exports/file_monitor_agent/tests/
 
 test_constraints.py::test_preserves_originals     PASSED
 test_constraints.py::test_handles_errors          PASSED
@@ -162,7 +162,7 @@ test_edge_cases.py::test_large_files              PASSED
 ./RUN_AGENT.sh
 
 # Or manually
-PYTHONPATH=core:exports:tools/src python -m file_monitor_agent run
+PYTHONPATH=exports uv run python -m file_monitor_agent run
 ```
 
 **Capabilities:**

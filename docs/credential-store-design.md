@@ -1202,7 +1202,7 @@ class HashiCorpVaultStorage(CredentialStorage):
     """
     HashiCorp Vault storage adapter.
 
-    Requires: pip install hvac
+    Requires: uv pip install hvac
 
     Features:
     - KV v2 secrets engine support
@@ -1243,7 +1243,7 @@ class HashiCorpVaultStorage(CredentialStorage):
         except ImportError:
             raise ImportError(
                 "HashiCorp Vault support requires 'hvac'. "
-                "Install with: pip install hvac"
+                "Install with: uv pip install hvac"
             )
 
         import os
