@@ -6,6 +6,12 @@ Streaming display approach:
   (Label.update() replaces text in-place, unlike RichLog which is append-only).
 - On EXECUTION_COMPLETED, the final output is written to RichLog as permanent history.
 - Tool events are written directly to RichLog as discrete status lines.
+
+Client-facing input:
+- When a client_facing=True EventLoopNode emits CLIENT_INPUT_REQUESTED, the
+  ChatRepl transitions to "waiting for input" state: input is re-enabled and
+  subsequent submissions are routed to runtime.inject_input() instead of
+  starting a new execution.
 """
 
 import asyncio
@@ -66,6 +72,8 @@ class ChatRepl(Vertical):
         self.runtime = runtime
         self._current_exec_id: str | None = None
         self._streaming_snapshot: str = ""
+        self._waiting_for_input: bool = False
+        self._input_node_id: str | None = None
 
         # Dedicated event loop for agent execution.
         # Keeps blocking runtime code (LLM calls, MCP tools) off
@@ -97,9 +105,36 @@ class ChatRepl(Vertical):
         history.write("[bold cyan]Chat REPL Ready[/bold cyan] — Type your input below\n")
 
     async def on_input_submitted(self, message: Input.Submitted) -> None:
-        """Handle input submission — fire-and-forget via trigger()."""
+        """Handle input submission — either start new execution or inject input."""
         user_input = message.value.strip()
         if not user_input:
+            return
+
+        # Client-facing input: route to the waiting node
+        if self._waiting_for_input and self._input_node_id:
+            self._write_history(f"[bold green]You:[/bold green] {user_input}")
+            message.input.value = ""
+
+            # Disable input while agent processes the response
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.disabled = True
+            chat_input.placeholder = "Enter input for agent..."
+            self._waiting_for_input = False
+
+            indicator = self.query_one("#processing-indicator", Label)
+            indicator.update("Thinking...")
+
+            node_id = self._input_node_id
+            self._input_node_id = None
+
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.runtime.inject_input(node_id, user_input),
+                    self._agent_loop,
+                )
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self._write_history(f"[bold red]Error delivering input:[/bold red] {e}")
             return
 
         # Double-submit guard: reject input while an execution is in-flight
@@ -206,17 +241,23 @@ class ChatRepl(Vertical):
         indicator = self.query_one("#processing-indicator", Label)
         indicator.display = False
 
-        # Write the final output to permanent history
-        output_str = str(output.get("output_string", output))
-        self._write_history(f"[bold blue]Agent:[/bold blue] {output_str}")
+        # Write the final streaming snapshot to permanent history (if any)
+        if self._streaming_snapshot:
+            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
+        else:
+            output_str = str(output.get("output_string", output))
+            self._write_history(f"[bold blue]Agent:[/bold blue] {output_str}")
         self._write_history("")  # separator
 
         self._current_exec_id = None
         self._streaming_snapshot = ""
+        self._waiting_for_input = False
+        self._input_node_id = None
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", Input)
         chat_input.disabled = False
+        chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
 
     def handle_execution_failed(self, error: str) -> None:
@@ -229,17 +270,34 @@ class ChatRepl(Vertical):
 
         self._current_exec_id = None
         self._streaming_snapshot = ""
+        self._waiting_for_input = False
+        self._input_node_id = None
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", Input)
         chat_input.disabled = False
+        chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
 
-    def handle_input_requested(self, prompt: str) -> None:
-        """Handle the agent requesting input from the user."""
+    def handle_input_requested(self, node_id: str) -> None:
+        """Handle a client-facing node requesting user input.
+
+        Transitions to 'waiting for input' state: flushes the current
+        streaming snapshot to history, re-enables the input widget,
+        and sets a flag so the next submission routes to inject_input().
+        """
+        # Flush accumulated streaming text as agent output
+        if self._streaming_snapshot:
+            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
+            self._streaming_snapshot = ""
+
+        self._waiting_for_input = True
+        self._input_node_id = node_id or None
+
         indicator = self.query_one("#processing-indicator", Label)
-        indicator.update(f"Input requested: {prompt}")
+        indicator.update("Waiting for your input...")
 
         chat_input = self.query_one("#chat-input", Input)
-        chat_input.placeholder = prompt or "Agent is waiting for input..."
+        chat_input.disabled = False
+        chat_input.placeholder = "Type your response..."
         chat_input.focus()

@@ -14,6 +14,7 @@ import logging
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
@@ -131,6 +132,7 @@ class GraphExecutor:
         event_bus: Any | None = None,
         stream_id: str = "",
         runtime_logger: Any = None,
+        storage_path: str | Path | None = None,
     ):
         """
         Initialize the executor.
@@ -148,6 +150,7 @@ class GraphExecutor:
             event_bus: Optional event bus for emitting node lifecycle events
             stream_id: Stream ID for event correlation
             runtime_logger: Optional RuntimeLogger for per-graph-run logging
+            storage_path: Optional base path for conversation persistence
         """
         self.runtime = runtime
         self.llm = llm
@@ -160,6 +163,7 @@ class GraphExecutor:
         self._event_bus = event_bus
         self._stream_id = stream_id
         self.runtime_logger = runtime_logger
+        self._storage_path = Path(storage_path) if storage_path else None
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -398,8 +402,16 @@ class GraphExecutor:
                     )
 
                 if result.success:
-                    # Validate output before accepting it
-                    if result.output and node_spec.output_keys:
+                    # Validate output before accepting it.
+                    # Skip for event_loop nodes — their judge system is
+                    # the sole acceptance mechanism (see WP-8).  Empty
+                    # strings and other flexible outputs are legitimate
+                    # for LLM-driven nodes that already passed the judge.
+                    if (
+                        result.output
+                        and node_spec.output_keys
+                        and node_spec.node_type != "event_loop"
+                    ):
                         validation = self.validator.validate_all(
                             output=result.output,
                             expected_keys=node_spec.output_keys,
@@ -477,56 +489,74 @@ class GraphExecutor:
                         _is_retry = True
                         continue
                     else:
-                        # Max retries exceeded - fail the execution
+                        # Max retries exceeded - check for failure handlers
                         self.logger.error(
                             f"   ✗ Max retries ({max_retries}) exceeded for node {current_node_id}"
                         )
-                        self.runtime.report_problem(
-                            severity="critical",
-                            description=(
-                                f"Node {current_node_id} failed after "
-                                f"{max_retries} attempts: {result.error}"
-                            ),
-                        )
-                        self.runtime.end_run(
-                            success=False,
-                            output_data=memory.read_all(),
-                            narrative=(
-                                f"Failed at {node_spec.name} after "
-                                f"{max_retries} retries: {result.error}"
-                            ),
+
+                        # Check if there's an ON_FAILURE edge to follow
+                        next_node = self._follow_edges(
+                            graph=graph,
+                            goal=goal,
+                            current_node_id=current_node_id,
+                            current_node_spec=node_spec,
+                            result=result,  # result.success=False triggers ON_FAILURE
+                            memory=memory,
                         )
 
-                        # Calculate quality metrics
-                        total_retries_count = sum(node_retry_counts.values())
-                        nodes_failed = list(node_retry_counts.keys())
-
-                        if self.runtime_logger:
-                            await self.runtime_logger.end_run(
-                                status="failure",
-                                duration_ms=total_latency,
-                                node_path=path,
-                                execution_quality="failed",
+                        if next_node:
+                            # Found a failure handler - route to it
+                            self.logger.info(f"   → Routing to failure handler: {next_node}")
+                            current_node_id = next_node
+                            continue  # Continue execution with handler
+                        else:
+                            # No failure handler - terminate execution
+                            self.runtime.report_problem(
+                                severity="critical",
+                                description=(
+                                    f"Node {current_node_id} failed after "
+                                    f"{max_retries} attempts: {result.error}"
+                                ),
+                            )
+                            self.runtime.end_run(
+                                success=False,
+                                output_data=memory.read_all(),
+                                narrative=(
+                                    f"Failed at {node_spec.name} after "
+                                    f"{max_retries} retries: {result.error}"
+                                ),
                             )
 
-                        return ExecutionResult(
-                            success=False,
-                            error=(
-                                f"Node '{node_spec.name}' failed after "
-                                f"{max_retries} attempts: {result.error}"
-                            ),
-                            output=memory.read_all(),
-                            steps_executed=steps,
-                            total_tokens=total_tokens,
-                            total_latency_ms=total_latency,
-                            path=path,
-                            total_retries=total_retries_count,
-                            nodes_with_failures=nodes_failed,
-                            retry_details=dict(node_retry_counts),
-                            had_partial_failures=len(nodes_failed) > 0,
-                            execution_quality="failed",
-                            node_visit_counts=dict(node_visit_counts),
-                        )
+                            # Calculate quality metrics
+                            total_retries_count = sum(node_retry_counts.values())
+                            nodes_failed = list(node_retry_counts.keys())
+
+                            if self.runtime_logger:
+                                await self.runtime_logger.end_run(
+                                    status="failure",
+                                    duration_ms=total_latency,
+                                    node_path=path,
+                                    execution_quality="failed",
+                                )
+
+                            return ExecutionResult(
+                                success=False,
+                                error=(
+                                    f"Node '{node_spec.name}' failed after "
+                                    f"{max_retries} attempts: {result.error}"
+                                ),
+                                output=memory.read_all(),
+                                steps_executed=steps,
+                                total_tokens=total_tokens,
+                                total_latency_ms=total_latency,
+                                path=path,
+                                total_retries=total_retries_count,
+                                nodes_with_failures=nodes_failed,
+                                retry_details=dict(node_retry_counts),
+                                had_partial_failures=len(nodes_failed) > 0,
+                                execution_quality="failed",
+                                node_visit_counts=dict(node_visit_counts),
+                            )
 
                 # Check if we just executed a pause node - if so, save state and return
                 # This must happen BEFORE determining next node, since pause nodes may have no edges
@@ -850,11 +880,43 @@ class GraphExecutor:
             )
 
         if node_spec.node_type == "event_loop":
-            # Event loop nodes must be pre-registered (like function nodes)
-            raise RuntimeError(
-                f"EventLoopNode '{node_spec.id}' not found in registry. "
-                "Register it with executor.register_node() before execution."
+            # Auto-create EventLoopNode with sensible defaults.
+            # Custom configs can still be pre-registered via node_registry.
+            from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+
+            # Create a FileConversationStore if a storage path is available
+            conv_store = None
+            if self._storage_path:
+                from framework.storage.conversation_store import FileConversationStore
+
+                store_path = self._storage_path / "conversations" / node_spec.id
+                conv_store = FileConversationStore(base_path=store_path)
+
+            # Auto-configure spillover directory for large tool results.
+            # When a tool result exceeds max_tool_result_chars, the full
+            # content is written to spillover_dir and the agent gets a
+            # truncated preview with instructions to use load_data().
+            spillover = None
+            if self._storage_path:
+                spillover = str(self._storage_path / "data")
+
+            node = EventLoopNode(
+                event_bus=self._event_bus,
+                judge=None,  # implicit judge: accept when output_keys are filled
+                config=LoopConfig(
+                    max_iterations=100 if node_spec.client_facing else 50,
+                    max_tool_calls_per_turn=10,
+                    stall_detection_threshold=3,
+                    max_history_tokens=32000,
+                    max_tool_result_chars=3_000,
+                    spillover_dir=spillover,
+                ),
+                tool_executor=self.tool_executor,
+                conversation_store=conv_store,
             )
+            # Cache so inject_event() is reachable for client-facing input
+            self.node_registry[node_spec.id] = node
+            return node
 
         # Should never reach here due to validation above
         raise RuntimeError(f"Unhandled node type: {node_spec.node_type}")
@@ -883,9 +945,12 @@ class GraphExecutor:
                 source_node_name=current_node_spec.name if current_node_spec else current_node_id,
                 target_node_name=target_node_spec.name if target_node_spec else edge.target,
             ):
-                # Validate and clean output before mapping inputs
+                # Validate and clean output before mapping inputs.
+                # Use full memory state (not just result.output) because
+                # target input_keys may come from earlier nodes in the
+                # graph, not only from the immediate source node.
                 if self.cleansing_config.enabled and target_node_spec:
-                    output_to_validate = result.output
+                    output_to_validate = memory.read_all()
 
                     validation = self.output_cleaner.validate_output(
                         output=output_to_validate,
@@ -1081,10 +1146,13 @@ class GraphExecutor:
             branch.status = "running"
 
             try:
-                # Validate and clean output before mapping inputs (same as _follow_edges)
+                # Validate and clean output before mapping inputs (same as _follow_edges).
+                # Use full memory state since target input_keys may come
+                # from earlier nodes, not just the immediate source.
                 if self.cleansing_config.enabled and node_spec:
+                    mem_snapshot = memory.read_all()
                     validation = self.output_cleaner.validate_output(
-                        output=source_result.output,
+                        output=mem_snapshot,
                         source_node_id=source_node_spec.id if source_node_spec else "unknown",
                         target_node_spec=node_spec,
                     )
@@ -1095,7 +1163,7 @@ class GraphExecutor:
                             f"{branch.node_id}: {validation.errors}"
                         )
                         cleaned_output = self.output_cleaner.clean_output(
-                            output=source_result.output,
+                            output=mem_snapshot,
                             source_node_id=source_node_spec.id if source_node_spec else "unknown",
                             target_node_spec=node_spec,
                             validation_errors=validation.errors,

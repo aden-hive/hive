@@ -112,6 +112,7 @@ class ExecutionStream:
         tool_executor: Callable | None = None,
         result_retention_max: int | None = 1000,
         result_retention_ttl_seconds: float | None = None,
+        runtime_log_store: Any = None,
     ):
         """
         Initialize execution stream.
@@ -128,6 +129,7 @@ class ExecutionStream:
             llm: LLM provider for nodes
             tools: Available tools
             tool_executor: Function to execute tools
+            runtime_log_store: Optional RuntimeLogStore for per-execution logging
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -142,6 +144,7 @@ class ExecutionStream:
         self._tool_executor = tool_executor
         self._result_retention_max = result_retention_max
         self._result_retention_ttl_seconds = result_retention_ttl_seconds
+        self._runtime_log_store = runtime_log_store
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -153,6 +156,7 @@ class ExecutionStream:
         # Execution tracking
         self._active_executions: dict[str, ExecutionContext] = {}
         self._execution_tasks: dict[str, asyncio.Task] = {}
+        self._active_executors: dict[str, GraphExecutor] = {}
         self._execution_results: OrderedDict[str, ExecutionResult] = OrderedDict()
         self._execution_result_times: dict[str, float] = {}
         self._completion_events: dict[str, asyncio.Event] = {}
@@ -237,6 +241,21 @@ class ExecutionStream:
                 )
             )
 
+    async def inject_input(self, node_id: str, content: str) -> bool:
+        """Inject user input into a running client-facing EventLoopNode.
+
+        Searches active executors for a node matching ``node_id`` and calls
+        its ``inject_event()`` method to unblock ``_await_user_input()``.
+
+        Returns True if input was delivered, False otherwise.
+        """
+        for executor in self._active_executors.values():
+            node = executor.node_registry.get(node_id)
+            if node is not None and hasattr(node, "inject_event"):
+                await node.inject_event(content)
+                return True
+        return False
+
     async def execute(
         self,
         input_data: dict[str, Any],
@@ -314,7 +333,19 @@ class ExecutionStream:
                 # Create runtime adapter for this execution
                 runtime_adapter = StreamRuntimeAdapter(self._runtime, execution_id)
 
-                # Create executor for this execution
+                # Create per-execution runtime logger
+                runtime_logger = None
+                if self._runtime_log_store:
+                    from framework.runtime.runtime_logger import RuntimeLogger
+
+                    runtime_logger = RuntimeLogger(
+                        store=self._runtime_log_store, agent_id=self.graph.id
+                    )
+
+                # Create executor for this execution.
+                # Scope storage by execution_id so each execution gets
+                # fresh conversations and spillover directories.
+                exec_storage = self._storage.base_path / "sessions" / execution_id
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
                     llm=self._llm,
@@ -322,7 +353,11 @@ class ExecutionStream:
                     tool_executor=self._tool_executor,
                     event_bus=self._event_bus,
                     stream_id=self.stream_id,
+                    storage_path=exec_storage,
+                    runtime_logger=runtime_logger,
                 )
+                # Track executor so inject_input() can reach EventLoopNode instances
+                self._active_executors[execution_id] = executor
 
                 # Create modified graph with entry point
                 # We need to override the entry_node to use our entry point
@@ -335,6 +370,9 @@ class ExecutionStream:
                     input_data=ctx.input_data,
                     session_state=ctx.session_state,
                 )
+
+                # Clean up executor reference
+                self._active_executors.pop(execution_id, None)
 
                 # Store result with retention
                 self._record_execution_result(execution_id, result)
