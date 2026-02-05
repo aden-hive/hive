@@ -39,17 +39,22 @@ Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run
 If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
 
 1. Install System Dependencies:
+
 ```bash
 apk update
 apk add bash git python3 py3-pip nodejs npm curl build-base python3-dev linux-headers libffi-dev
 ```
+
 2. Set up Virtual Environment (Required for Python 3.12+):
+
 ```
 uv venv
 source .venv/bin/activate
 # uv handles pip/setuptools/wheel automatically
 ```
+
 3. Run the Quickstart Script:
+
 ```
 ./quickstart.sh
 ```
@@ -105,19 +110,40 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 - Internet connection (for LLM API calls)
 - For Windows users: WSL 2 is recommended for full compatibility.
 
-### API Keys (Optional)
+## Environment Variables
 
-For running agents with real LLMs:
+(See `.env.example` for a quick start template)
+
+### Required for LLM Operations
+
+At least one of the following is required to power the agents:
 
 ```bash
-export ANTHROPIC_API_KEY="your-key-here"
+# Anthropic (Recommended for standard Hive agents)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Google Gemini
+export GEMINI_API_KEY="AIza..."
 ```
 
-Windows (PowerShell):
+### Optional Configuration
 
-```powershell
-$env:ANTHROPIC_API_KEY="your-key-here"
+```bash
+# Custom Credentials Path (Default: ~/.hive/credentials)
+export ADEN_CREDENTIALS_PATH="/custom/path"
+
+# Agent Storage Path (Default: /tmp)
+export AGENT_STORAGE_PATH="/custom/storage"
+
+# Vault Integration (Enterprise)
+export VAULT_ADDR="http://127.0.0.1:8200"
+export VAULT_TOKEN="hvs..."
 ```
+
+> **Windows Users:** Use `$env:VARIABLE_NAME="value"` in PowerShell.
 
 ## Running Agents
 
@@ -221,6 +247,7 @@ This step helps optimize agent design before final testing.
 ```
 claude> /testing-agent
 ```
+
 Follow the prompts to:
 
 1. Generate test guidelines for constraints and success criteria
