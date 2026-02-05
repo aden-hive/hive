@@ -1,5 +1,6 @@
 import ast
 import operator
+import math
 from typing import Any
 
 # Safe operators whitelist
@@ -50,6 +51,35 @@ SAFE_FUNCTIONS = {
     "round": round,
     "all": all,
     "any": any,
+    "range": range,
+    "enumerate": enumerate,
+    "zip": zip,
+    "reversed": reversed,
+    "sorted": sorted,
+    # Math functions
+    "math": math,
+    "sqrt": math.sqrt,
+    "ceil": math.ceil,
+    "floor": math.floor,
+}
+
+# Allowed methods whitelist
+ALLOWED_METHODS = {
+    # String methods
+    "lower", "upper", "strip", "lstrip", "rstrip", "split", "rsplit",
+    "replace", "join", "startswith", "endswith", "find", "rfind",
+    "count", "index", "isdigit", "isalpha", "isalnum", "isspace",
+    "title", "capitalize", "zfill", "center",
+
+    # List/Tuple methods
+    "append", "extend", "insert", "remove", "pop", "clear",
+    "sort", "reverse", "copy",
+
+    # Dict methods
+    "get", "keys", "values", "items",
+
+    # Set methods
+    "union", "intersection", "difference", "symmetric_difference", "issubset", "issuperset",
 }
 
 
@@ -88,6 +118,133 @@ class SafeEvalVisitor(ast.NodeVisitor):
             for k, v in zip(node.keys, node.values, strict=False)
             if k is not None
         }
+
+    def visit_Set(self, node: ast.Set) -> set:
+        return {self.visit(elt) for elt in node.elts}
+
+    # --- Comprehensions ---
+    def visit_ListComp(self, node: ast.ListComp) -> list:
+        return self._execute_comprehension(node.elt, node.generators, list)
+
+    def visit_SetComp(self, node: ast.SetComp) -> set:
+        return self._execute_comprehension(node.elt, node.generators, set)
+
+    def visit_DictComp(self, node: ast.DictComp) -> dict:
+        return self._execute_dict_comprehension(node.key, node.value, node.generators)
+
+    def _execute_comprehension(self, elt, generators, container_type):
+        results = []
+
+        def recurse(gens, current_context):
+            if not gens:
+                old_context = self.context
+                self.context = current_context
+                try:
+                    val = self.visit(elt)
+                    results.append(val)
+                finally:
+                    self.context = old_context
+                return
+
+            gen = gens[0]
+            remaining = gens[1:]
+
+            old_context = self.context
+            self.context = current_context
+            try:
+                iter_val = self.visit(gen.iter)
+            finally:
+                self.context = old_context
+
+            if not hasattr(iter_val, '__iter__'):
+                 raise ValueError(f"Object {type(iter_val)} is not iterable")
+
+            for item in iter_val:
+                new_context = current_context.copy()
+                self._assign(gen.target, item, new_context)
+
+                include = True
+                self.context = new_context
+                try:
+                    for if_expr in gen.ifs:
+                        if not self.visit(if_expr):
+                            include = False
+                            break
+                finally:
+                     pass
+
+                if include:
+                    recurse(remaining, new_context)
+
+        recurse(generators, self.context)
+
+        if container_type is list:
+            return results
+        elif container_type is set:
+            return set(results)
+        return results
+
+    def _execute_dict_comprehension(self, key_node, value_node, generators):
+        results = {}
+
+        def recurse(gens, current_context):
+            if not gens:
+                old_context = self.context
+                self.context = current_context
+                try:
+                    k = self.visit(key_node)
+                    v = self.visit(value_node)
+                    results[k] = v
+                finally:
+                    self.context = old_context
+                return
+
+            gen = gens[0]
+            remaining = gens[1:]
+
+            old_context = self.context
+            self.context = current_context
+            try:
+                iter_val = self.visit(gen.iter)
+            finally:
+                self.context = old_context
+
+            for item in iter_val:
+                new_context = current_context.copy()
+                self._assign(gen.target, item, new_context)
+
+                include = True
+                self.context = new_context
+                try:
+                    for if_expr in gen.ifs:
+                        if not self.visit(if_expr):
+                            include = False
+                            break
+                finally:
+                    pass
+
+                if include:
+                    recurse(remaining, new_context)
+
+        recurse(generators, self.context)
+        return results
+
+    def _assign(self, target, value, context):
+        if isinstance(target, ast.Name):
+            context[target.id] = value
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            try:
+                items = list(value)
+            except TypeError:
+                raise ValueError(f"Cannot unpack non-iterable {type(value)}")
+
+            if len(target.elts) != len(items):
+                raise ValueError(f"not enough values to unpack (expected {len(target.elts)}, got {len(items)})")
+
+            for t, v in zip(target.elts, items):
+                self._assign(t, v, context)
+        else:
+             raise ValueError("Unsupported assignment target in comprehension")
 
     # --- Operations ---
     def visit_BinOp(self, node: ast.BinOp) -> Any:
@@ -143,6 +300,12 @@ class SafeEvalVisitor(ast.NodeVisitor):
         idx = self.visit(node.slice)
         return val[idx]
 
+    def visit_Slice(self, node: ast.Slice) -> slice:
+        lower = self.visit(node.lower) if node.lower else None
+        upper = self.visit(node.upper) if node.upper else None
+        step = self.visit(node.step) if node.step else None
+        return slice(lower, upper, step)
+
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         # value.attr
         # STIRCT CHECK: No access to private attributes (starting with _)
@@ -151,21 +314,9 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
         val = self.visit(node.value)
 
-        # Safe attribute access: only allow if it's in the dict (if val is dict)
-        # or it's a safe property of a basic type?
-        # Actually, for flexibility, people often use dot access for dicts in these expressions.
-        # But standard Python dict doesn't support dot access.
-        # If val is a dict, Attribute access usually fails in Python unless wrapped.
-        # If the user context provides objects, we might want to allow attribute access.
-        # BUT we must be careful not to allow access to dangerous things like __class__ etc.
-        # The check starts_with("_") covers __class__, __init__, etc.
-
         try:
             return getattr(val, node.attr)
         except AttributeError:
-            # Fallback: maybe it's a dict and they want dot access?
-            # (Only if we want to support that sugar, usually not standard python)
-            # Let's stick to standard python behavior + strict private check.
             pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")
@@ -174,41 +325,25 @@ class SafeEvalVisitor(ast.NodeVisitor):
         # Only allow calling whitelisted functions
         func = self.visit(node.func)
 
-        # Check if the function object itself is in our whitelist values
-        # This is tricky because `func` is the actual function object,
-        # but we also want to verify it came from a safe place.
-        # Easier: Check if node.func is a Name and that name is in SAFE_FUNCTIONS.
-
         is_safe = False
         if isinstance(node.func, ast.Name):
             if node.func.id in SAFE_FUNCTIONS:
                 is_safe = True
 
-        # Also allow methods on objects if they are safe?
-        # E.g. "somestring".lower() or list.append() (if we allowed mutation, but we don't for now)
-        # For now, restrict to SAFE_FUNCTIONS whitelist for global calls and deny method calls
-        # unless we explicitly add safe methods.
-        # Allowing method calls on strings/lists (split, join, get) is commonly needed.
-
         if isinstance(node.func, ast.Attribute):
-            # Method call.
-            # Allow basic safe methods?
-            # For security, start strict. Only helper functions.
-            # Re-visiting: User might want 'output.get("key")'.
             method_name = node.func.attr
-            if method_name in [
-                "get",
-                "keys",
-                "values",
-                "items",
-                "lower",
-                "upper",
-                "strip",
-                "split",
-            ]:
+            if method_name in ALLOWED_METHODS:
                 is_safe = True
 
         if not is_safe and func not in SAFE_FUNCTIONS.values():
+             pass
+        elif is_safe:
+             pass
+        else:
+             if func in SAFE_FUNCTIONS.values():
+                 is_safe = True
+
+        if not is_safe:
             raise ValueError("Call to function/method is not allowed")
 
         args = [self.visit(arg) for arg in node.args]
