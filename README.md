@@ -87,6 +87,18 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## Quick Start
 
+## Minimal first agent (conceptual overview)
+
+For new users, a typical Hive flow looks like:
+
+1. Define an agent and its goal
+2. Configure memory and tools
+3. Execute the agent against an input or event
+4. Observe outputs and agent decisions
+5. Allow controlled evolution based on feedback or outcomes
+
+This section is intended as a conceptual overview. A minimal runnable example would further reduce onboarding friction for first-time users.
+
 ## Prerequisites
 
 - Python 3.11+ for agent development
