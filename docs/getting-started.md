@@ -9,6 +9,27 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 - **git** - Version control
 - **Claude Code** ([Install](https://docs.anthropic.com/claude/docs/claude-code)) - Optional, for using building skills
 
+---
+
+## Windows Setup (Native, without WSL)
+
+### Step 1: Install Python
+- Download Python 3.12+ from [python.org](https://www.python.org/downloads/windows/)
+- During installation, check "Add Python to PATH"
+
+### Step 2: Install Git
+- Download Git for Windows from [git-scm.com](https://git-scm.com/download/win)
+- During installation, select "Use Git from the command line and 3rd-party software"
+
+### Step 3: Install Project Dependencies
+- Open **PowerShell** (recommended) or **CMD**
+- Navigate to project folder:
+
+cd path\to\hive
+python -m pip install --upgrade pip
+pip install -e .[dev]
+
+
 ## Quick Start
 
 The fastest way to get started:
