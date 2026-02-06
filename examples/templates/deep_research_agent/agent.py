@@ -166,6 +166,11 @@ class DeepResearchAgent:
             edges=self.edges,
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
+            loop_config={
+                "max_iterations": 100,
+                "max_tool_calls_per_turn": 20,
+                "max_history_tokens": 32000,
+            },
         )
 
     def _setup(self, mock_mode=False) -> GraphExecutor:
@@ -203,6 +208,7 @@ class DeepResearchAgent:
             tool_executor=tool_executor,
             event_bus=self._event_bus,
             storage_path=storage_path,
+            loop_config=self._graph.loop_config,
         )
 
         return self._executor

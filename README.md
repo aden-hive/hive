@@ -63,7 +63,6 @@ Use Hive when you need:
 - Strong monitoring, safety, and budget controls
 - A framework that evolves with your goals
 
-
 ## What is Aden
 
 <p align="center">
@@ -107,6 +106,7 @@ cd hive
 ```
 
 This sets up:
+
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
 - All required Python dependencies
@@ -115,7 +115,7 @@ This sets up:
 
 ```bash
 # Build an agent using Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Test your agent
 claude> /testing-agent
@@ -133,7 +133,7 @@ Skills are also available in Cursor. To enable:
 1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
 2. Run `MCP: Enable` to enable MCP servers
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Type `/` in Agent chat and search for skills (e.g., `/building-agents-construction`)
+4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
 ## Features
 
@@ -188,7 +188,7 @@ flowchart LR
 | -------------------------- | -------------------------------------- |
 | Hardcode agent workflows   | Describe goals in natural language     |
 | Manual graph definition    | Auto-generated agent graphs            |
-| Reactive error handling    | Outcome-evaluation and adaptiveness               |
+| Reactive error handling    | Outcome-evaluation and adaptiveness    |
 | Static tool configurations | Dynamic SDK-wrapped nodes              |
 | Separate monitoring setup  | Built-in real-time observability       |
 | DIY budget management      | Integrated cost controls & degradation |
@@ -204,11 +204,12 @@ flowchart LR
 ## Run pre-built Agents (Coming Soon)
 
 ### Run a sample agent
+
 Aden Hive provides a list of featured agents that you can use and build on top of.
 
 ### Run an agent shared by others
-Put the agent in `exports/` and run `PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'`
 
+Put the agent in `exports/` and run `PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'`
 
 For building and running goal-driven agents with the framework:
 
@@ -221,11 +222,8 @@ For building and running goal-driven agents with the framework:
 # - aden_tools package (MCP tools)
 # - All Python dependencies
 
-# Build new agents using Claude Code skills
-claude> /building-agents-construction
-
-# Test agents
-claude> /testing-agent
+# Build new agents using Agent Skills
+claude> /hive
 
 # Run agents
 PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
@@ -332,11 +330,12 @@ end
 
 classDef done fill:#9e9e9e,color:#fff,stroke:#757575
 ```
+
 ## Contributing
 
 We welcome contributions from the community! We’re especially looking for help building tools, integrations, and example agents for the framework ([check #2805](https://github.com/adenhq/hive/issues/2805)). If you’re interested in extending its functionality, this is the perfect place to start. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-**Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you. Issues with reproducible steps and proposals are prioritized. This helps prevent duplicate work. 
+**Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you. Issues with reproducible steps and proposals are prioritized. This helps prevent duplicate work.
 
 1. Find or create an issue and get assigned
 2. Fork the repository

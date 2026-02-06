@@ -1,7 +1,7 @@
 """
-CLI entry point for Deep Research Agent.
+CLI entry point for Twitter Outreach Agent.
 
-Uses AgentRuntime for multi-entrypoint support with HITL pause/resume.
+Uses AgentRuntime for TUI support with client-facing interaction.
 """
 
 import asyncio
@@ -10,7 +10,7 @@ import logging
 import sys
 import click
 
-from .agent import default_agent, DeepResearchAgent
+from .agent import default_agent, TwitterOutreachAgent
 
 
 def setup_logging(verbose=False, debug=False):
@@ -28,24 +28,21 @@ def setup_logging(verbose=False, debug=False):
 @click.group()
 @click.version_option(version="1.0.0")
 def cli():
-    """Deep Research Agent - Interactive, rigorous research with TUI conversation."""
+    """Twitter Outreach Agent - Personalized email outreach powered by Twitter/X research."""
     pass
 
 
 @cli.command()
-@click.option("--topic", "-t", type=str, required=True, help="Research topic")
 @click.option("--mock", is_flag=True, help="Run in mock mode")
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def run(topic, mock, quiet, verbose, debug):
-    """Execute research on a topic."""
+def run(mock, quiet, verbose, debug):
+    """Execute the outreach workflow."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 
-    context = {"topic": topic}
-
-    result = asyncio.run(default_agent.run(context, mock_mode=mock))
+    result = asyncio.run(default_agent.run({}, mock_mode=mock))
 
     output_data = {
         "success": result.success,
@@ -64,7 +61,7 @@ def run(topic, mock, quiet, verbose, debug):
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
 def tui(mock, verbose, debug):
-    """Launch the TUI dashboard for interactive research."""
+    """Launch the TUI dashboard for interactive outreach."""
     setup_logging(verbose=verbose, debug=debug)
 
     try:
@@ -82,11 +79,13 @@ def tui(mock, verbose, debug):
     from framework.runtime.execution_stream import EntryPointSpec
 
     async def run_with_tui():
-        agent = DeepResearchAgent()
+        agent = TwitterOutreachAgent()
 
-        # Build graph and tools
         agent._event_bus = EventBus()
         agent._tool_registry = ToolRegistry()
+
+        storage_path = Path.home() / ".hive" / "twitter_outreach"
+        storage_path.mkdir(parents=True, exist_ok=True)
 
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
         if mcp_config_path.exists():
@@ -104,9 +103,6 @@ def tui(mock, verbose, debug):
         tool_executor = agent._tool_registry.get_executor()
         graph = agent._build_graph()
 
-        storage_path = Path.home() / ".hive" / "deep_research_agent"
-        storage_path.mkdir(parents=True, exist_ok=True)
-
         runtime = create_agent_runtime(
             graph=graph,
             goal=agent.goal,
@@ -114,7 +110,7 @@ def tui(mock, verbose, debug):
             entry_points=[
                 EntryPointSpec(
                     id="start",
-                    name="Start Research",
+                    name="Start Outreach",
                     entry_node="intake",
                     trigger_type="manual",
                     isolation_level="isolated",
@@ -172,7 +168,7 @@ def validate():
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True)
 def shell(verbose):
-    """Interactive research session (CLI, no TUI)."""
+    """Interactive outreach session (CLI, no TUI)."""
     asyncio.run(_interactive_shell(verbose))
 
 
@@ -180,54 +176,29 @@ async def _interactive_shell(verbose=False):
     """Async interactive shell."""
     setup_logging(verbose=verbose)
 
-    click.echo("=== Deep Research Agent ===")
-    click.echo("Enter a topic to research (or 'quit' to exit):\n")
+    click.echo("=== Twitter Outreach Agent ===")
+    click.echo("Starting outreach workflow...\n")
 
-    agent = DeepResearchAgent()
+    agent = TwitterOutreachAgent()
     await agent.start()
 
     try:
-        while True:
-            try:
-                topic = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Topic> "
-                )
-                if topic.lower() in ["quit", "exit", "q"]:
-                    click.echo("Goodbye!")
-                    break
+        result = await agent.trigger_and_wait("start", {})
 
-                if not topic.strip():
-                    continue
-
-                click.echo("\nResearching...\n")
-
-                result = await agent.trigger_and_wait("start", {"topic": topic})
-
-                if result is None:
-                    click.echo("\n[Execution timed out]\n")
-                    continue
-
-                if result.success:
-                    output = result.output
-                    if "report_content" in output:
-                        click.echo("\n--- Report ---\n")
-                        click.echo(output["report_content"])
-                        click.echo("\n")
-                    if "references" in output:
-                        click.echo("--- References ---\n")
-                        for ref in output.get("references", []):
-                            click.echo(f"  [{ref.get('number', '?')}] {ref.get('title', '')} - {ref.get('url', '')}")
-                        click.echo("\n")
-                else:
-                    click.echo(f"\nResearch failed: {result.error}\n")
-
-            except KeyboardInterrupt:
-                click.echo("\nGoodbye!")
-                break
-            except Exception as e:
-                click.echo(f"Error: {e}", err=True)
-                import traceback
-                traceback.print_exc()
+        if result is None:
+            click.echo("\n[Execution timed out]\n")
+        elif result.success:
+            output = result.output
+            status = output.get("delivery_status", "unknown")
+            click.echo(f"\nOutreach complete! Delivery status: {status}")
+        else:
+            click.echo(f"\nOutreach failed: {result.error}")
+    except KeyboardInterrupt:
+        click.echo("\nGoodbye!")
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        import traceback
+        traceback.print_exc()
     finally:
         await agent.stop()
 

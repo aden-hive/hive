@@ -1,19 +1,19 @@
 ---
-name: building-agents-patterns
+name: hive-patterns
 description: Best practices, patterns, and examples for building goal-driven agents. Includes client-facing interaction, feedback edges, judge patterns, fan-out/fan-in, context management, and anti-patterns.
 license: Apache-2.0
 metadata:
   author: hive
   version: "2.0"
   type: reference
-  part_of: building-agents
+  part_of: hive
 ---
 
 # Building Agents - Patterns & Best Practices
 
 Design patterns, examples, and best practices for building robust goal-driven agents.
 
-**Prerequisites:** Complete agent structure using `building-agents-construction`.
+**Prerequisites:** Complete agent structure using `hive-create`.
 
 ## Practical Example: Hybrid Workflow
 
@@ -97,6 +97,7 @@ research_node = NodeSpec(
 ```
 
 **How it works:**
+
 - Client-facing nodes stream LLM text to the user and block for input after each response
 - User input is injected via `node.inject_event(text)`
 - When the LLM calls `set_output` to produce structured outputs, the judge evaluates and ACCEPTs
@@ -107,13 +108,13 @@ research_node = NodeSpec(
 
 ### When to Use client_facing
 
-| Scenario | client_facing | Why |
-|----------|:---:|-----|
-| Gathering user requirements | Yes | Need user input |
-| Human review/approval checkpoint | Yes | Need human decision |
-| Data processing (scanning, scoring) | No | Runs autonomously |
-| Report generation | No | No user input needed |
-| Final confirmation before action | Yes | Need explicit approval |
+| Scenario                            | client_facing | Why                    |
+| ----------------------------------- | :-----------: | ---------------------- |
+| Gathering user requirements         |      Yes      | Need user input        |
+| Human review/approval checkpoint    |      Yes      | Need human decision    |
+| Data processing (scanning, scoring) |      No       | Runs autonomously      |
+| Report generation                   |      No       | No user input needed   |
+| Final confirmation before action    |      Yes      | Need explicit approval |
 
 > **Legacy Note:** The `pause_nodes` / `entry_points` pattern still works for backward compatibility but `client_facing=True` is preferred for new agents.
 
@@ -158,22 +159,24 @@ EdgeSpec(
 ```
 
 **Key concepts:**
+
 - `nullable_output_keys`: Lists output keys that may remain unset. The node sets exactly one of the mutually exclusive keys per execution.
 - `max_node_visits`: Must be >1 on the feedback target (extractor) so it can re-execute. Default is 1.
 - `priority`: Positive = forward edge (evaluated first). Negative = feedback edge. The executor tries forward edges first; if none match, falls back to feedback edges.
 
 ### Routing Decision Table
 
-| Pattern | Old Approach | New Approach |
-|---------|-------------|--------------|
-| Conditional branching | `router` node | Conditional edges with `condition_expr` |
-| Binary approve/reject | `pause_nodes` + resume | `client_facing=True` + `nullable_output_keys` |
-| Loop-back on rejection | Manual entry_points | Feedback edge with `priority=-1` |
-| Multi-way routing | Router with routes dict | Multiple conditional edges with priorities |
+| Pattern                | Old Approach            | New Approach                                  |
+| ---------------------- | ----------------------- | --------------------------------------------- |
+| Conditional branching  | `router` node           | Conditional edges with `condition_expr`       |
+| Binary approve/reject  | `pause_nodes` + resume  | `client_facing=True` + `nullable_output_keys` |
+| Loop-back on rejection | Manual entry_points     | Feedback edge with `priority=-1`              |
+| Multi-way routing      | Router with routes dict | Multiple conditional edges with priorities    |
 
 ## Judge Patterns
 
 **Core Principle: The judge is the SOLE mechanism for acceptance decisions.** Never add ad-hoc framework gating to compensate for LLM behavior. If the LLM calls `set_output` prematurely, fix the system prompt or use a custom judge. Anti-patterns to avoid:
+
 - Output rollback logic
 - `_user_has_responded` flags
 - Premature set_output rejection
@@ -184,6 +187,7 @@ Judges control when an event_loop node's loop exits. Choose based on validation 
 ### Implicit Judge (Default)
 
 When no judge is configured, the implicit judge ACCEPTs when:
+
 - The LLM finishes its response with no tool calls
 - All required output keys have been set via `set_output`
 
@@ -219,11 +223,11 @@ class SchemaJudge:
 
 ### When to Use Which Judge
 
-| Judge | Use When | Example |
-|-------|----------|---------|
+| Judge           | Use When                              | Example                |
+| --------------- | ------------------------------------- | ---------------------- |
 | Implicit (None) | Output keys are sufficient validation | Simple data extraction |
-| SchemaJudge | Need structural validation of outputs | API response parsing |
-| Custom | Domain-specific validation logic | Score must be 0.0-1.0 |
+| SchemaJudge     | Need structural validation of outputs | API response parsing   |
+| Custom          | Domain-specific validation logic      | Score must be 0.0-1.0  |
 
 ## Fan-Out / Fan-In (Parallel Execution)
 
@@ -244,6 +248,7 @@ EdgeSpec(id="scorer-to-extractor", source="scorer", target="extractor",
 ```
 
 **Requirements:**
+
 - Parallel event_loop nodes must have **disjoint output_keys** (no key written by both)
 - Only one parallel branch may contain a `client_facing` node
 - Fan-in node receives outputs from all completed branches in shared memory
@@ -253,6 +258,7 @@ EdgeSpec(id="scorer-to-extractor", source="scorer", target="extractor",
 ### Tiered Compaction
 
 EventLoopNode automatically manages context window usage with tiered compaction:
+
 1. **Pruning** — Old tool results replaced with compact placeholders (zero-cost, no LLM call)
 2. **Normal compaction** — LLM summarizes older messages
 3. **Aggressive compaction** — Keeps only recent messages + summary
@@ -265,17 +271,20 @@ The framework automatically truncates large tool results and saves full content 
 For explicit data management, use the data tools (real MCP tools, not synthetic):
 
 ```python
-# save_data, load_data, list_data_files are real MCP tools
-# Each takes a data_dir parameter since the MCP server is shared
+# save_data, load_data, list_data_files, serve_file_to_user are real MCP tools
+# data_dir is auto-injected by the framework — the LLM never sees it
 
 # Saving large results
-save_data(filename="sources.json", data=large_json_string, data_dir="/path/to/spillover")
+save_data(filename="sources.json", data=large_json_string)
 
 # Reading with pagination (line-based offset/limit)
-load_data(filename="sources.json", data_dir="/path/to/spillover", offset=0, limit=50)
+load_data(filename="sources.json", offset=0, limit=50)
 
 # Listing available files
-list_data_files(data_dir="/path/to/spillover")
+list_data_files()
+
+# Serving a file to the user as a clickable link
+serve_file_to_user(filename="report.html", label="Research Report")
 ```
 
 Add data tools to nodes that handle large tool results:
@@ -287,7 +296,7 @@ research_node = NodeSpec(
 )
 ```
 
-The `data_dir` is passed by the framework (from the node's spillover directory). The LLM sees `data_dir` in truncation messages and uses it when calling `load_data`.
+`data_dir` is a framework context parameter — auto-injected at call time. `GraphExecutor.execute()` sets it per-execution via `ToolRegistry.set_execution_context(data_dir=...)` (using `contextvars` for concurrency safety), ensuring it matches the session-scoped spillover directory.
 
 ## Anti-Patterns
 
@@ -304,18 +313,19 @@ The `data_dir` is passed by the framework (from the node's spillover directory).
 
 A common mistake is splitting work into too many small single-purpose nodes. Each node boundary requires serializing outputs, losing in-context information, and adding edge complexity.
 
-| Bad (8 thin nodes) | Good (4 rich nodes) |
-|---------------------|---------------------|
-| parse-query | intake (client-facing) |
-| search-sources | research (search + fetch + analyze) |
-| fetch-content | review (client-facing) |
-| evaluate-sources | report (write + deliver) |
-| synthesize-findings | |
-| write-report | |
-| quality-check | |
-| save-report | |
+| Bad (8 thin nodes)  | Good (4 rich nodes)                 |
+| ------------------- | ----------------------------------- |
+| parse-query         | intake (client-facing)              |
+| search-sources      | research (search + fetch + analyze) |
+| fetch-content       | review (client-facing)              |
+| evaluate-sources    | report (write + deliver)            |
+| synthesize-findings |                                     |
+| write-report        |                                     |
+| quality-check       |                                     |
+| save-report         |                                     |
 
 **Why fewer nodes are better:**
+
 - The LLM retains full context of its work within a single node
 - A research node that searches, fetches, and analyzes keeps all source material in its conversation history
 - Fewer edges means simpler graph and fewer failure points
@@ -324,6 +334,7 @@ A common mistake is splitting work into too many small single-purpose nodes. Eac
 ### MCP Tools - Correct Usage
 
 **MCP tools OK for:**
+
 - `test_node` — Validate node configuration with mock inputs
 - `validate_graph` — Check graph structure
 - `configure_loop` — Set event loop parameters
@@ -356,7 +367,7 @@ When agent is complete, transition to testing phase:
 ### Pre-Testing Checklist
 
 - [ ] Agent structure validates: `uv run python -m agent_name validate`
-- [ ] All nodes defined in nodes/__init__.py
+- [ ] All nodes defined in nodes/**init**.py
 - [ ] All edges connect valid nodes with correct priorities
 - [ ] Feedback edge targets have `max_node_visits > 1`
 - [ ] Client-facing nodes have meaningful system prompts
@@ -364,10 +375,10 @@ When agent is complete, transition to testing phase:
 
 ## Related Skills
 
-- **building-agents-core** — Fundamental concepts (node types, edges, event loop architecture)
-- **building-agents-construction** — Step-by-step building process
-- **testing-agent** — Test and validate agents
-- **agent-workflow** — Complete workflow orchestrator
+- **hive-concepts** — Fundamental concepts (node types, edges, event loop architecture)
+- **hive-create** — Step-by-step building process
+- **hive-test** — Test and validate agents
+- **hive** — Complete workflow orchestrator
 
 ---
 

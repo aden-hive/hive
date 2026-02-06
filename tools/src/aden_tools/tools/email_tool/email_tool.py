@@ -2,9 +2,10 @@
 Email Tool - Send emails using multiple providers.
 
 Supports:
+- Gmail (GOOGLE_ACCESS_TOKEN, via Aden OAuth2)
 - Resend (RESEND_API_KEY)
 
-Auto-detection: If provider="auto", tries Resend first.
+Auto-detection: If provider="auto", tries Gmail first, then Resend.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Literal
 
+import httpx
 import resend
 from fastmcp import FastMCP
 
@@ -58,14 +60,72 @@ def register_tools(
         except resend.exceptions.ResendError as e:
             return {"error": f"Resend API error: {e}"}
 
+    def _send_via_gmail(
+        access_token: str,
+        to: list[str],
+        subject: str,
+        html: str,
+        from_email: str | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+    ) -> dict:
+        """Send email using Gmail API (Bearer token pattern, same as HubSpot)."""
+        import base64
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        msg = MIMEMultipart("alternative")
+        msg["To"] = ", ".join(to)
+        msg["Subject"] = subject
+        if from_email:
+            msg["From"] = from_email
+        if cc:
+            msg["Cc"] = ", ".join(cc)
+        if bcc:
+            msg["Bcc"] = ", ".join(bcc)
+        msg.attach(MIMEText(html, "html"))
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+
+        response = httpx.post(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json={"raw": raw},
+            timeout=30.0,
+        )
+
+        if response.status_code == 401:
+            return {
+                "error": "Gmail token expired or invalid",
+                "help": "Re-authorize via hive.adenhq.com",
+            }
+        if response.status_code != 200:
+            return {
+                "error": f"Gmail API error (HTTP {response.status_code}): {response.text}",
+            }
+
+        data = response.json()
+        return {
+            "success": True,
+            "provider": "gmail",
+            "id": data.get("id", ""),
+            "to": to,
+            "subject": subject,
+        }
+
     def _get_credentials() -> dict:
         """Get available email credentials."""
         if credentials is not None:
             return {
                 "resend_api_key": credentials.get("resend"),
+                "gmail_access_token": credentials.get("google"),  # Google OAuth for Gmail
             }
         return {
             "resend_api_key": os.getenv("RESEND_API_KEY"),
+            "gmail_access_token": os.getenv("GOOGLE_ACCESS_TOKEN"),
         }
 
     def _resolve_from_email(from_email: str | None) -> str | None:
@@ -90,17 +150,12 @@ def register_tools(
         subject: str,
         html: str,
         from_email: str | None = None,
-        provider: Literal["auto", "resend"] = "auto",
+        provider: Literal["auto", "resend", "gmail"] = "auto",
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
     ) -> dict:
         """Core email sending logic, callable by other tools."""
         from_email = _resolve_from_email(from_email)
-        if not from_email:
-            return {
-                "error": "Sender email is required",
-                "help": "Pass from_email or set EMAIL_FROM environment variable",
-            }
 
         to_list = _normalize_recipients(to)
         if not to_list:
@@ -124,9 +179,37 @@ def register_tools(
             subject = f"[TEST -> {', '.join(original_to)}] {subject}"
 
         creds = _get_credentials()
+        gmail_available = bool(creds["gmail_access_token"])
         resend_available = bool(creds["resend_api_key"])
 
+        # Gmail doesn't require from_email (defaults to authenticated user).
+        # Resend always requires it.
+        needs_from_email = provider == "resend" or (
+            provider == "auto" and not gmail_available and resend_available
+        )
+        if not from_email and needs_from_email:
+            return {
+                "error": "Sender email is required",
+                "help": "Pass from_email or set EMAIL_FROM environment variable",
+            }
+
         try:
+            if provider == "gmail":
+                if not gmail_available:
+                    return {
+                        "error": "Gmail credentials not configured",
+                        "help": "Connect Gmail via hive.adenhq.com",
+                    }
+                return _send_via_gmail(
+                    creds["gmail_access_token"],
+                    to_list,
+                    subject,
+                    html,
+                    from_email,
+                    cc_list,
+                    bcc_list,
+                )
+
             if provider == "resend":
                 if not resend_available:
                     return {
@@ -138,7 +221,17 @@ def register_tools(
                     creds["resend_api_key"], to_list, subject, html, from_email, cc_list, bcc_list
                 )
 
-            # auto
+            # auto: Gmail first (user's own identity), then Resend
+            if gmail_available:
+                return _send_via_gmail(
+                    creds["gmail_access_token"],
+                    to_list,
+                    subject,
+                    html,
+                    from_email,
+                    cc_list,
+                    bcc_list,
+                )
             if resend_available:
                 return _send_via_resend(
                     creds["resend_api_key"], to_list, subject, html, from_email, cc_list, bcc_list
@@ -146,7 +239,7 @@ def register_tools(
 
             return {
                 "error": "No email credentials configured",
-                "help": "Set RESEND_API_KEY environment variable",
+                "help": "Connect Gmail via hive.adenhq.com or set RESEND_API_KEY",
             }
 
         except Exception as e:
@@ -158,7 +251,7 @@ def register_tools(
         subject: str,
         html: str,
         from_email: str | None = None,
-        provider: Literal["auto", "resend"] = "auto",
+        provider: Literal["auto", "resend", "gmail"] = "auto",
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
     ) -> dict:
@@ -166,7 +259,8 @@ def register_tools(
         Send an email.
 
         Supports multiple email providers:
-        - "auto": Tries Resend first (default)
+        - "auto": Tries Gmail first, then Resend (default)
+        - "gmail": Use Gmail API (requires Gmail OAuth2 via Aden)
         - "resend": Use Resend API (requires RESEND_API_KEY)
 
         Args:
@@ -174,7 +268,8 @@ def register_tools(
             subject: Email subject line (1-998 chars per RFC 2822).
             html: Email body as HTML string.
             from_email: Sender email address. Falls back to EMAIL_FROM env var if not provided.
-            provider: Email provider to use ("auto" or "resend").
+                        Optional for Gmail (defaults to authenticated user's address).
+            provider: Email provider to use ("auto", "gmail", or "resend").
             cc: CC recipient(s). Single string or list of strings. Optional.
             bcc: BCC recipient(s). Single string or list of strings. Optional.
 
@@ -192,7 +287,7 @@ def register_tools(
         budget_limit: float,
         currency: str = "USD",
         from_email: str | None = None,
-        provider: Literal["auto", "resend"] = "auto",
+        provider: Literal["auto", "resend", "gmail"] = "auto",
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
     ) -> dict:
@@ -209,7 +304,8 @@ def register_tools(
             budget_limit: Budget limit amount.
             currency: Currency code (default: "USD").
             from_email: Sender email address. Falls back to EMAIL_FROM env var if not provided.
-            provider: Email provider to use ("auto" or "resend").
+                        Optional for Gmail (defaults to authenticated user's address).
+            provider: Email provider to use ("auto", "gmail", or "resend").
             cc: CC recipient(s). Single string or list of strings. Optional.
             bcc: BCC recipient(s). Single string or list of strings. Optional.
 

@@ -1,12 +1,12 @@
 ---
-name: building-agents-core
+name: hive-concepts
 description: Core concepts for goal-driven agents - architecture, node types (event_loop, function), tool discovery, and workflow overview. Use when starting agent development or need to understand agent fundamentals.
 license: Apache-2.0
 metadata:
   author: hive
   version: "2.0"
   type: foundational
-  part_of: building-agents
+  part_of: hive
 ---
 
 # Building Agents - Core Concepts
@@ -251,6 +251,7 @@ The judge controls when a node's loop exits:
 Controls loop behavior:
 - `max_iterations` (default 50) — prevents infinite loops
 - `max_tool_calls_per_turn` (default 10) — limits tool calls per LLM response
+- `tool_call_overflow_margin` (default 0.5) — wiggle room before discarding extra tool calls (50% means hard cutoff at 150% of limit)
 - `stall_detection_threshold` (default 3) — detects repeated identical responses
 - `max_history_tokens` (default 32000) — triggers conversation compaction
 
@@ -258,9 +259,12 @@ Controls loop behavior:
 
 When tool results exceed the context window, the framework automatically saves them to a spillover directory and truncates with a hint. Nodes that produce or consume large data should include the data tools:
 
-- `save_data(filename, data, data_dir)` — Write data to a file in the data directory
-- `load_data(filename, data_dir, offset=0, limit=50)` — Read data with line-based pagination
-- `list_data_files(data_dir)` — List available data files
+- `save_data(filename, data)` — Write data to a file in the data directory
+- `load_data(filename, offset=0, limit=50)` — Read data with line-based pagination
+- `list_data_files()` — List available data files
+- `serve_file_to_user(filename, label="")` — Get a clickable file:// URI for the user
+
+Note: `data_dir` is a framework-injected context parameter — the LLM never sees or passes it. `GraphExecutor.execute()` sets it per-execution via `contextvars`, so data tools and spillover always share the same session-scoped directory.
 
 These are real MCP tools (not synthetic). Add them to nodes that handle large tool results:
 
@@ -346,15 +350,15 @@ Before writing a node with `tools=[...]`:
 
 ## When to Use This Skill
 
-Use building-agents-core when:
+Use hive-concepts when:
 - Starting a new agent project and need to understand fundamentals
 - Need to understand agent architecture before building
 - Want to validate tool availability before proceeding
 - Learning about node types, edges, and graph execution
 
 **Next Steps:**
-- Ready to build? → Use `building-agents-construction` skill
-- Need patterns and examples? → Use `building-agents-patterns` skill
+- Ready to build? → Use `hive-create` skill
+- Need patterns and examples? → Use `hive-patterns` skill
 
 ## MCP Tools for Validation
 
@@ -389,7 +393,7 @@ mcp__agent-builder__configure_loop(
 
 ## Related Skills
 
-- **building-agents-construction** - Step-by-step building process
-- **building-agents-patterns** - Best practices: judges, feedback edges, fan-out, context management
-- **agent-workflow** - Complete workflow orchestrator
-- **testing-agent** - Test and validate completed agents
+- **hive-create** - Step-by-step building process
+- **hive-patterns** - Best practices: judges, feedback edges, fan-out, context management
+- **hive** - Complete workflow orchestrator
+- **hive-test** - Test and validate completed agents

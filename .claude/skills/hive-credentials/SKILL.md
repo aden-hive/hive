@@ -1,5 +1,5 @@
 ---
-name: setup-credentials
+name: hive-credentials
 description: Set up and install credentials for an agent. Detects missing credentials from agent config, collects them from the user, and stores them securely in the local encrypted store at ~/.hive/credentials.
 license: Apache-2.0
 metadata:
@@ -86,7 +86,7 @@ grep -q '^BRAVE_SEARCH_API_KEY=' .env 2>/dev/null && echo "BRAVE_SEARCH_API_KEY:
 
 #### Step 2c: HIVE_CREDENTIAL_KEY Check
 
-If any credentials were found in the encrypted store metadata index, verify the encryption key is available. The key is typically persisted to shell config by a previous setup-credentials run.
+If any credentials were found in the encrypted store metadata index, verify the encryption key is available. The key is typically persisted to shell config by a previous hive-credentials run.
 
 Check both the current session AND shell config files:
 
@@ -94,12 +94,13 @@ Check both the current session AND shell config files:
 # Check 1: Current session
 printenv HIVE_CREDENTIAL_KEY > /dev/null 2>&1 && echo "session: set" || echo "session: not set"
 
-# Check 2: Shell config files (where setup-credentials persists it)
+# Check 2: Shell config files (where hive-credentials persists it)
 # Note: check each file individually to avoid non-zero exit when one doesn't exist
 for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTIAL_KEY' "$f" && echo "$f"; done
 ```
 
 Decision logic:
+
 - **In current session** — no action needed, credentials in the store are usable
 - **In shell config but NOT in current session** — the key is persisted but this shell hasn't sourced it. Run `source ~/.zshrc` (or `~/.bashrc`), then re-check. Credentials in the store are usable after sourcing.
 - **Not in session AND not in shell config** — the key was never persisted. Warn the user that credentials in the store cannot be decrypted. Help fix the key situation (recover/re-persist), do NOT re-collect credential values that are already stored.
@@ -153,7 +154,7 @@ Present the available options using AskUserQuestion:
 Choose how to configure HUBSPOT_ACCESS_TOKEN:
 
   1) Aden Platform (OAuth) (Recommended)
-     Secure OAuth2 flow via integration.adenhq.com
+     Secure OAuth2 flow via hive.adenhq.com
      - Quick setup with automatic token refresh
      - No need to manage API keys manually
 
@@ -195,7 +196,7 @@ If not set, guide user to get one from Aden (this is where they do OAuth):
 from aden_tools.credentials import open_browser, get_aden_setup_url
 
 # Open browser to Aden - user will sign up and connect integrations there
-url = get_aden_setup_url()  # https://integration.adenhq.com/setup
+url = get_aden_setup_url()  # https://hive.adenhq.com
 success, msg = open_browser(url)
 
 print("Please sign in to Aden and connect your integrations (HubSpot, etc.).")
@@ -272,7 +273,7 @@ print(f"Synced credentials: {synced}")
 # If the required credential wasn't synced, the user hasn't authorized it on Aden yet
 if "hubspot" not in synced:
     print("HubSpot not found in your Aden account.")
-    print("Please visit https://integration.adenhq.com to connect HubSpot, then try again.")
+    print("Please visit https://hive.adenhq.com to connect HubSpot, then try again.")
 ```
 
 For more control over the sync process:
@@ -456,14 +457,14 @@ Report the result to the user.
 
 Health checks validate credentials by making lightweight API calls:
 
-| Credential      | Endpoint                                | What It Checks                     |
-| --------------- | --------------------------------------- | ---------------------------------- |
-| `anthropic`     | `POST /v1/messages`                     | API key validity                   |
-| `brave_search`  | `GET /res/v1/web/search?q=test&count=1` | API key validity                   |
-| `google_search` | `GET /customsearch/v1?q=test&num=1`     | API key + CSE ID validity          |
-| `github`        | `GET /user`                             | Token validity, user identity      |
-| `hubspot`       | `GET /crm/v3/objects/contacts?limit=1`  | Bearer token validity, CRM scopes  |
-| `resend`        | `GET /domains`                          | API key validity                   |
+| Credential      | Endpoint                                | What It Checks                    |
+| --------------- | --------------------------------------- | --------------------------------- |
+| `anthropic`     | `POST /v1/messages`                     | API key validity                  |
+| `brave_search`  | `GET /res/v1/web/search?q=test&count=1` | API key validity                  |
+| `google_search` | `GET /customsearch/v1?q=test&num=1`     | API key + CSE ID validity         |
+| `github`        | `GET /user`                             | Token validity, user identity     |
+| `hubspot`       | `GET /crm/v3/objects/contacts?limit=1`  | Bearer token validity, CRM scopes |
+| `resend`        | `GET /domains`                          | API key validity                  |
 
 ```python
 from aden_tools.credentials import check_credential_health, HealthCheckResult
@@ -560,7 +561,7 @@ token = store.get_key("hubspot", "access_token")
 ## Example Session
 
 ```
-User: /setup-credentials for my research-agent
+User: /hive-credentials for my research-agent
 
 Agent: Let me check what credentials your research-agent needs.
 

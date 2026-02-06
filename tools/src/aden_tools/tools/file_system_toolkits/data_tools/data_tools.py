@@ -142,6 +142,52 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Failed to load data: {str(e)}"}
 
     @mcp.tool()
+    def serve_file_to_user(filename: str, data_dir: str, label: str = "") -> dict:
+        """
+        Purpose
+            Resolve a sandboxed file path to a fully qualified file URI
+            that the user can click to open in their system viewer.
+
+        When to use
+            After saving a file (HTML report, CSV export, etc.) with save_data,
+            call this to give the user a clickable link to open it.
+            The TUI will render the file:// URI as a clickable link.
+
+        Rules & Constraints
+            filename must be a simple name — no paths or '..'
+            The file must already exist in data_dir
+            Returns a file:// URI the agent should include in its response
+
+        Args:
+            filename: The filename to serve (must exist in data_dir).
+            data_dir: Absolute path to the data directory.
+            label: Optional display label (defaults to filename).
+
+        Returns:
+            Dict with file_uri, file_path, and label
+        """
+        if not filename or ".." in filename or "/" in filename or "\\" in filename:
+            return {"error": "Invalid filename. Use simple names like 'report.html'"}
+        if not data_dir:
+            return {"error": "data_dir is required"}
+
+        try:
+            path = Path(data_dir) / filename
+            if not path.exists():
+                return {"error": f"File not found: {filename}"}
+
+            full_path = str(path.resolve())
+            file_uri = f"file://{full_path}"
+            return {
+                "success": True,
+                "file_uri": file_uri,
+                "file_path": full_path,
+                "label": label or filename,
+            }
+        except Exception as e:
+            return {"error": f"Failed to serve file: {str(e)}"}
+
+    @mcp.tool()
     def list_data_files(data_dir: str) -> dict:
         """
         Purpose
