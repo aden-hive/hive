@@ -12,6 +12,7 @@ metadata:
     - hive-patterns
     - hive-test
     - hive-credentials
+    - hive-debugger
 ---
 
 # Agent Development Workflow
@@ -24,6 +25,7 @@ When this skill is loaded, determine what the user needs and invoke the appropri
 - **User wants to learn concepts** → Invoke `/hive-concepts` immediately
 - **User wants patterns/optimization** → Invoke `/hive-patterns` immediately
 - **User wants to set up credentials** → Invoke `/hive-credentials` immediately
+- **User has a failing/broken agent** → Invoke `/hive-debugger` immediately
 - **Unclear what user needs** → Ask the user (do NOT explore the codebase to figure it out)
 
 **DO NOT:** Read source files, explore the codebase, search for code, or do any investigation before routing. The sub-skills handle all of that.
@@ -41,6 +43,7 @@ This workflow orchestrates specialized skills to take you from initial concept t
 3. **Optimize Design** → `/hive-patterns` (optional)
 4. **Setup Credentials** → `/hive-credentials` (if agent uses tools requiring API keys)
 5. **Test & Validate** → `/hive-test`
+6. **Debug Issues** → `/hive-debugger` (if agent fails at runtime)
 
 ## When to Use This Workflow
 
@@ -63,6 +66,7 @@ Use this meta-skill when:
 "Need client-facing nodes or feedback loops" → hive-patterns
 "Set up API keys for my agent" → hive-credentials
 "Test my agent" → hive-test
+"My agent is failing/stuck/has errors" → hive-debugger
 "Not sure what I need" → Read phases below, then decide
 "Agent has structure but needs implementation" → See agent directory STATUS.md
 ```
@@ -345,11 +349,23 @@ hive (meta-skill)
     │   ├── Fan-out/fan-in parallel execution
     │   └── Context management and anti-patterns
     │
-    └── hive-test
-        ├── Reads agent goal
-        ├── Generates tests
-        ├── Runs evaluation
-        └── Reports results
+    ├── hive-credentials (utility)
+    │   ├── Detects missing credentials
+    │   ├── Offers auth method choices (Aden OAuth, direct API key)
+    │   ├── Stores securely in ~/.hive/credentials
+    │   └── Validates with health checks
+    │
+    ├── hive-test (validation)
+    │   ├── Reads agent goal
+    │   ├── Generates tests
+    │   ├── Runs evaluation
+    │   └── Reports results
+    │
+    └── hive-debugger (troubleshooting)
+        ├── Monitors runtime logs (L1/L2/L3)
+        ├── Identifies retry loops, tool failures
+        ├── Categorizes issues (10 categories)
+        └── Provides fix recommendations
 ```
 
 ## Troubleshooting
@@ -375,6 +391,13 @@ hive (meta-skill)
 - Verify constraints are met
 - Use `/hive-test` to debug and iterate
 - Fix agent code and re-run tests
+
+### "Agent is failing at runtime"
+
+- Use `/hive-debugger` to analyze runtime logs
+- The debugger identifies retry loops, tool failures, and stalled execution
+- Get actionable fix recommendations with code changes
+- Monitor the agent in real-time during TUI sessions
 
 ### "Not sure which phase I'm in"
 
@@ -448,7 +471,9 @@ This workflow provides a proven path from concept to production-ready agent:
 1. **Learn** with `/hive-concepts` → Understand fundamentals (optional)
 2. **Build** with `/hive-create` → Get validated structure
 3. **Optimize** with `/hive-patterns` → Apply best practices (optional)
-4. **Test** with `/hive-test` → Get verified functionality
+4. **Configure** with `/hive-credentials` → Set up API keys (if needed)
+5. **Test** with `/hive-test` → Get verified functionality
+6. **Debug** with `/hive-debugger` → Fix runtime issues (if needed)
 
 The workflow is **flexible** - skip phases as needed, iterate freely, and adapt to your specific requirements. The goal is **production-ready agents** built with **consistent, repeatable processes**.
 
@@ -478,3 +503,10 @@ The workflow is **flexible** - skip phases as needed, iterate freely, and adapt 
 - Ready to validate functionality
 - Need comprehensive test coverage
 - Testing feedback loops, output keys, or fan-out
+
+**Choose hive-debugger when:**
+- Agent is failing or stuck at runtime
+- Seeing retry loops or escalations
+- Tool calls are failing
+- Need to understand why a node isn't completing
+- Want real-time monitoring of agent execution

@@ -210,9 +210,28 @@ class EventLoopNode(NodeProtocol):
         stream_id = ctx.node_id
         node_id = ctx.node_id
 
+        # Verdict counters for runtime logging
+        _accept_count = _retry_count = _escalate_count = _continue_count = 0
+
         # 1. Guard: LLM required
         if ctx.llm is None:
-            return NodeResult(success=False, error="LLM provider not available")
+            error_msg = "LLM provider not available"
+            # Log guard failure
+            if ctx.runtime_logger:
+                ctx.runtime_logger.log_node_complete(
+                    node_id=node_id,
+                    node_name=ctx.node_spec.name,
+                    node_type="event_loop",
+                    success=False,
+                    error=error_msg,
+                    exit_status="guard_failure",
+                    total_steps=0,
+                    tokens_used=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=0,
+                )
+            return NodeResult(success=False, error=error_msg)
 
         # 2. Restore or create new conversation + accumulator
         conversation, accumulator, start_iteration = await self._restore(ctx)
@@ -258,9 +277,28 @@ class EventLoopNode(NodeProtocol):
 
         # 6. Main loop
         for iteration in range(start_iteration, self._config.max_iterations):
-            # 6a. Check pause
+            iter_start = time.time()
+
+            # 6a. Check pause (no current-iteration data yet — only log_node_complete needed)
             if await self._check_pause(ctx, conversation, iteration):
                 latency_ms = int((time.time() - start_time) * 1000)
+                if ctx.runtime_logger:
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.node_spec.name,
+                        node_type="event_loop",
+                        success=True,
+                        total_steps=iteration,
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        latency_ms=latency_ms,
+                        exit_status="paused",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
+                    )
                 return NodeResult(
                     success=True,
                     output=accumulator.to_dict(),
@@ -285,26 +323,73 @@ class EventLoopNode(NodeProtocol):
                 iteration,
                 len(conversation.messages),
             )
-            (
-                assistant_text,
-                real_tool_results,
-                outputs_set,
-                turn_tokens,
-                user_input_requested,
-            ) = await self._run_single_turn(ctx, conversation, tools, iteration, accumulator)
-            logger.info(
-                "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
-                "outputs_set=%s, tokens=%s, accumulator=%s",
-                node_id,
-                iteration,
-                len(assistant_text),
-                len(real_tool_results),
-                outputs_set or "[]",
-                turn_tokens,
-                {k: ("set" if v is not None else "None") for k, v in accumulator.to_dict().items()},
-            )
-            total_input_tokens += turn_tokens.get("input", 0)
-            total_output_tokens += turn_tokens.get("output", 0)
+            try:
+                (
+                    assistant_text,
+                    real_tool_results,
+                    outputs_set,
+                    turn_tokens,
+                    logged_tool_calls,
+                    user_input_requested,
+                ) = await self._run_single_turn(ctx, conversation, tools, iteration, accumulator)
+                logger.info(
+                    "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
+                    "outputs_set=%s, tokens=%s, accumulator=%s",
+                    node_id,
+                    iteration,
+                    len(assistant_text),
+                    len(real_tool_results),
+                    outputs_set or "[]",
+                    turn_tokens,
+                    {
+                        k: ("set" if v is not None else "None")
+                        for k, v in accumulator.to_dict().items()
+                    },
+                )
+                total_input_tokens += turn_tokens.get("input", 0)
+                total_output_tokens += turn_tokens.get("output", 0)
+            except Exception as e:
+                # LLM call crashed - log partial step with error
+                import traceback
+
+                iter_latency_ms = int((time.time() - iter_start) * 1000)
+                latency_ms = int((time.time() - start_time) * 1000)
+                error_msg = f"LLM call failed: {e}"
+                stack_trace = traceback.format_exc()
+
+                if ctx.runtime_logger:
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        error=error_msg,
+                        stacktrace=stack_trace,
+                        is_partial=True,
+                        input_tokens=0,
+                        output_tokens=0,
+                        latency_ms=iter_latency_ms,
+                    )
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.node_spec.name,
+                        node_type="event_loop",
+                        success=False,
+                        error=error_msg,
+                        stacktrace=stack_trace,
+                        total_steps=iteration + 1,
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        latency_ms=latency_ms,
+                        exit_status="failure",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
+                    )
+
+                # Re-raise to maintain existing error handling
+                raise
 
             # 6e'. Feed actual API token count back for accurate estimation
             turn_input = turn_tokens.get("input", 0)
@@ -352,6 +437,38 @@ class EventLoopNode(NodeProtocol):
             if self._is_stalled(recent_responses):
                 await self._publish_stalled(stream_id, node_id)
                 latency_ms = int((time.time() - start_time) * 1000)
+                _continue_count += 1
+                if ctx.runtime_logger:
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        verdict="CONTINUE",
+                        verdict_feedback="Stall detected before judge evaluation",
+                        tool_calls=logged_tool_calls,
+                        llm_text=assistant_text,
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        latency_ms=iter_latency_ms,
+                    )
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.node_spec.name,
+                        node_type="event_loop",
+                        success=False,
+                        error="Node stalled",
+                        total_steps=iteration + 1,
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        latency_ms=latency_ms,
+                        exit_status="stalled",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
+                    )
                 return NodeResult(
                     success=False,
                     error=(
@@ -379,6 +496,37 @@ class EventLoopNode(NodeProtocol):
                 if self._shutdown:
                     await self._publish_loop_completed(stream_id, node_id, iteration + 1)
                     latency_ms = int((time.time() - start_time) * 1000)
+                    _continue_count += 1
+                    if ctx.runtime_logger:
+                        iter_latency_ms = int((time.time() - iter_start) * 1000)
+                        ctx.runtime_logger.log_step(
+                            node_id=node_id,
+                            node_type="event_loop",
+                            step_index=iteration,
+                            verdict="CONTINUE",
+                            verdict_feedback="Shutdown signaled (client-facing)",
+                            tool_calls=logged_tool_calls,
+                            llm_text=assistant_text,
+                            input_tokens=turn_tokens.get("input", 0),
+                            output_tokens=turn_tokens.get("output", 0),
+                            latency_ms=iter_latency_ms,
+                        )
+                        ctx.runtime_logger.log_node_complete(
+                            node_id=node_id,
+                            node_name=ctx.node_spec.name,
+                            node_type="event_loop",
+                            success=True,
+                            total_steps=iteration + 1,
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                            latency_ms=latency_ms,
+                            exit_status="success",
+                            accept_count=_accept_count,
+                            retry_count=_retry_count,
+                            escalate_count=_escalate_count,
+                            continue_count=_continue_count,
+                        )
                     return NodeResult(
                         success=True,
                         output=accumulator.to_dict(),
@@ -392,6 +540,37 @@ class EventLoopNode(NodeProtocol):
                 if not got_input:
                     await self._publish_loop_completed(stream_id, node_id, iteration + 1)
                     latency_ms = int((time.time() - start_time) * 1000)
+                    _continue_count += 1
+                    if ctx.runtime_logger:
+                        iter_latency_ms = int((time.time() - iter_start) * 1000)
+                        ctx.runtime_logger.log_step(
+                            node_id=node_id,
+                            node_type="event_loop",
+                            step_index=iteration,
+                            verdict="CONTINUE",
+                            verdict_feedback="No input received (shutdown during wait)",
+                            tool_calls=logged_tool_calls,
+                            llm_text=assistant_text,
+                            input_tokens=turn_tokens.get("input", 0),
+                            output_tokens=turn_tokens.get("output", 0),
+                            latency_ms=iter_latency_ms,
+                        )
+                        ctx.runtime_logger.log_node_complete(
+                            node_id=node_id,
+                            node_name=ctx.node_spec.name,
+                            node_type="event_loop",
+                            success=True,
+                            total_steps=iteration + 1,
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                            latency_ms=latency_ms,
+                            exit_status="success",
+                            accept_count=_accept_count,
+                            retry_count=_retry_count,
+                            escalate_count=_escalate_count,
+                            continue_count=_continue_count,
+                        )
                     return NodeResult(
                         success=True,
                         output=accumulator.to_dict(),
@@ -409,75 +588,207 @@ class EventLoopNode(NodeProtocol):
             )
 
             logger.info("[%s] iter=%d: 6i should_judge=%s", node_id, iteration, should_judge)
-            if should_judge:
-                verdict = await self._evaluate(
-                    ctx,
-                    conversation,
-                    accumulator,
-                    assistant_text,
-                    real_tool_results,
-                    iteration,
-                )
-                fb_preview = (verdict.feedback or "")[:200]
-                logger.info(
-                    "[%s] iter=%d: judge verdict=%s feedback=%r",
-                    node_id,
-                    iteration,
-                    verdict.action,
-                    fb_preview,
-                )
-
-                if verdict.action == "ACCEPT":
-                    # Check for missing output keys
-                    missing = self._get_missing_output_keys(
-                        accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+            if not should_judge:
+                # Gap C: unjudged iteration — log as CONTINUE
+                _continue_count += 1
+                if ctx.runtime_logger:
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        verdict="CONTINUE",
+                        verdict_feedback="Unjudged (judge_every_n_turns skip)",
+                        tool_calls=logged_tool_calls,
+                        llm_text=assistant_text,
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        latency_ms=iter_latency_ms,
                     )
-                    if missing and self._judge is not None:
-                        hint = (
-                            f"Missing required output keys: {missing}. "
-                            "Use set_output to provide them."
-                        )
-                        logger.info(
-                            "[%s] iter=%d: ACCEPT but missing keys %s",
-                            node_id,
-                            iteration,
-                            missing,
-                        )
-                        await conversation.add_user_message(hint)
-                        continue
+                continue
 
-                    # Write outputs to shared memory
-                    for key, value in accumulator.to_dict().items():
-                        ctx.memory.write(key, value, validate=False)
+            # Judge evaluation (should_judge is always True here)
+            verdict = await self._evaluate(
+                ctx,
+                conversation,
+                accumulator,
+                assistant_text,
+                real_tool_results,
+                iteration,
+            )
+            fb_preview = (verdict.feedback or "")[:200]
+            logger.info(
+                "[%s] iter=%d: judge verdict=%s feedback=%r",
+                node_id,
+                iteration,
+                verdict.action,
+                fb_preview,
+            )
 
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
-                    latency_ms = int((time.time() - start_time) * 1000)
-                    return NodeResult(
+            if verdict.action == "ACCEPT":
+                # Check for missing output keys
+                missing = self._get_missing_output_keys(
+                    accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+                )
+                if missing and self._judge is not None:
+                    hint = (
+                        f"Missing required output keys: {missing}. Use set_output to provide them."
+                    )
+                    logger.info(
+                        "[%s] iter=%d: ACCEPT but missing keys %s",
+                        node_id,
+                        iteration,
+                        missing,
+                    )
+                    await conversation.add_user_message(hint)
+                    # Gap D: log ACCEPT-with-missing-keys as RETRY
+                    _retry_count += 1
+                    if ctx.runtime_logger:
+                        iter_latency_ms = int((time.time() - iter_start) * 1000)
+                        ctx.runtime_logger.log_step(
+                            node_id=node_id,
+                            node_type="event_loop",
+                            step_index=iteration,
+                            verdict="RETRY",
+                            verdict_feedback=(f"Judge accepted but missing output keys: {missing}"),
+                            tool_calls=logged_tool_calls,
+                            llm_text=assistant_text,
+                            input_tokens=turn_tokens.get("input", 0),
+                            output_tokens=turn_tokens.get("output", 0),
+                            latency_ms=iter_latency_ms,
+                        )
+                    continue
+
+                # Exit point 5: Judge ACCEPT — log step + log_node_complete
+                # Write outputs to shared memory
+                for key, value in accumulator.to_dict().items():
+                    ctx.memory.write(key, value, validate=False)
+
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                latency_ms = int((time.time() - start_time) * 1000)
+                _accept_count += 1
+                if ctx.runtime_logger:
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        verdict="ACCEPT",
+                        verdict_feedback=verdict.feedback,
+                        tool_calls=logged_tool_calls,
+                        llm_text=assistant_text,
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        latency_ms=iter_latency_ms,
+                    )
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.node_spec.name,
+                        node_type="event_loop",
                         success=True,
-                        output=accumulator.to_dict(),
+                        total_steps=iteration + 1,
                         tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
                         latency_ms=latency_ms,
+                        exit_status="success",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
                     )
+                return NodeResult(
+                    success=True,
+                    output=accumulator.to_dict(),
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    latency_ms=latency_ms,
+                )
 
-                elif verdict.action == "ESCALATE":
-                    await self._publish_loop_completed(stream_id, node_id, iteration + 1)
-                    latency_ms = int((time.time() - start_time) * 1000)
-                    return NodeResult(
+            elif verdict.action == "ESCALATE":
+                # Exit point 6: Judge ESCALATE — log step + log_node_complete
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1)
+                latency_ms = int((time.time() - start_time) * 1000)
+                _escalate_count += 1
+                if ctx.runtime_logger:
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        verdict="ESCALATE",
+                        verdict_feedback=verdict.feedback,
+                        tool_calls=logged_tool_calls,
+                        llm_text=assistant_text,
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        latency_ms=iter_latency_ms,
+                    )
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.node_spec.name,
+                        node_type="event_loop",
                         success=False,
                         error=f"Judge escalated: {verdict.feedback}",
-                        output=accumulator.to_dict(),
+                        total_steps=iteration + 1,
                         tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
                         latency_ms=latency_ms,
+                        exit_status="escalated",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
                     )
+                return NodeResult(
+                    success=False,
+                    error=f"Judge escalated: {verdict.feedback}",
+                    output=accumulator.to_dict(),
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    latency_ms=latency_ms,
+                )
 
-                elif verdict.action == "RETRY":
-                    if verdict.feedback:
-                        await conversation.add_user_message(f"[Judge feedback]: {verdict.feedback}")
-                    continue
+            elif verdict.action == "RETRY":
+                _retry_count += 1
+                if ctx.runtime_logger:
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        verdict="RETRY",
+                        verdict_feedback=verdict.feedback,
+                        tool_calls=logged_tool_calls,
+                        llm_text=assistant_text,
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        latency_ms=iter_latency_ms,
+                    )
+                if verdict.feedback:
+                    await conversation.add_user_message(f"[Judge feedback]: {verdict.feedback}")
+                continue
 
         # 7. Max iterations exhausted
         await self._publish_loop_completed(stream_id, node_id, self._config.max_iterations)
         latency_ms = int((time.time() - start_time) * 1000)
+        if ctx.runtime_logger:
+            ctx.runtime_logger.log_node_complete(
+                node_id=node_id,
+                node_name=ctx.node_spec.name,
+                node_type="event_loop",
+                success=False,
+                error=f"Max iterations ({self._config.max_iterations}) reached without acceptance",
+                total_steps=self._config.max_iterations,
+                tokens_used=total_input_tokens + total_output_tokens,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                latency_ms=latency_ms,
+                exit_status="failure",
+                accept_count=_accept_count,
+                retry_count=_retry_count,
+                escalate_count=_escalate_count,
+                continue_count=_continue_count,
+            )
         return NodeResult(
             success=False,
             error=(f"Max iterations ({self._config.max_iterations}) reached without acceptance"),
@@ -535,10 +846,10 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int], bool]:
+    ) -> tuple[str, list[dict], list[str], dict[str, int], list[dict], bool]:
         """Run a single LLM turn with streaming and tool execution.
 
-        Returns (assistant_text, real_tool_results, outputs_set, token_counts,
+        Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
         user_input_requested).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
@@ -547,6 +858,11 @@ class EventLoopNode(NodeProtocol):
         this turn.  ``user_input_requested`` is True if the LLM called
         ``ask_user`` during this turn.  This separation lets the caller treat
         synthetic tools as framework concerns rather than tool-execution concerns.
+
+        ``logged_tool_calls`` accumulates ALL tool calls across inner iterations
+        (real tools, set_output, and discarded calls) for L3 logging.  Unlike
+        ``real_tool_results`` which resets each inner iteration, this list grows
+        across the entire turn.
         """
         stream_id = ctx.node_id
         node_id = ctx.node_id
@@ -556,6 +872,9 @@ class EventLoopNode(NodeProtocol):
         # Track output keys set via set_output across all inner iterations
         outputs_set_this_turn: list[str] = []
         user_input_requested = False
+        # Accumulate ALL tool calls across inner iterations for L3 logging.
+        # Unlike real_tool_results (reset each inner iteration), this persists.
+        logged_tool_calls: list[dict] = []
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
@@ -626,7 +945,14 @@ class EventLoopNode(NodeProtocol):
 
             # If no tool calls, turn is complete
             if not tool_calls:
-                return final_text, [], outputs_set_this_turn, token_counts, user_input_requested
+                return (
+                    final_text,
+                    [],
+                    outputs_set_this_turn,
+                    token_counts,
+                    logged_tool_calls,
+                    user_input_requested,
+                )
 
             # Execute tool calls — separate real tools from set_output
             real_tool_results: list[dict] = []
@@ -676,6 +1002,15 @@ class EventLoopNode(NodeProtocol):
                                 pass
                         await accumulator.set(tc.tool_input["key"], value)
                         outputs_set_this_turn.append(tc.tool_input["key"])
+                    logged_tool_calls.append(
+                        {
+                            "tool_use_id": tc.tool_use_id,
+                            "tool_name": "set_output",
+                            "tool_input": tc.tool_input,
+                            "content": result.content,
+                            "is_error": result.is_error,
+                        }
+                    )
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
@@ -688,14 +1023,15 @@ class EventLoopNode(NodeProtocol):
                     # --- Real tool execution ---
                     result = await self._execute_tool(tc)
                     result = self._truncate_tool_result(result, tc.tool_name)
-                    real_tool_results.append(
-                        {
-                            "tool_use_id": tc.tool_use_id,
-                            "tool_name": tc.tool_name,
-                            "content": result.content,
-                            "is_error": result.is_error,
-                        }
-                    )
+                    tool_entry = {
+                        "tool_use_id": tc.tool_use_id,
+                        "tool_name": tc.tool_name,
+                        "tool_input": tc.tool_input,
+                        "content": result.content,
+                        "is_error": result.is_error,
+                    }
+                    real_tool_results.append(tool_entry)
+                    logged_tool_calls.append(tool_entry)
 
                 # Record tool result in conversation (both real and set_output
                 # go into the conversation for LLM context continuity)
@@ -741,14 +1077,15 @@ class EventLoopNode(NodeProtocol):
                     )
                     # Discarded calls go into real_tool_results so the
                     # caller sees they were attempted (for judge context).
-                    real_tool_results.append(
-                        {
-                            "tool_use_id": tc.tool_use_id,
-                            "tool_name": tc.tool_name,
-                            "content": discard_msg,
-                            "is_error": True,
-                        }
-                    )
+                    discard_entry = {
+                        "tool_use_id": tc.tool_use_id,
+                        "tool_name": tc.tool_name,
+                        "tool_input": tc.tool_input,
+                        "content": discard_msg,
+                        "is_error": True,
+                    }
+                    real_tool_results.append(discard_entry)
+                    logged_tool_calls.append(discard_entry)
                 # Prune old tool results NOW to prevent context bloat on the
                 # next turn.  The char-based token estimator underestimates
                 # actual API tokens, so the standard compaction check in the
@@ -771,6 +1108,7 @@ class EventLoopNode(NodeProtocol):
                     real_tool_results,
                     outputs_set_this_turn,
                     token_counts,
+                    logged_tool_calls,
                     user_input_requested,
                 )
 
@@ -796,6 +1134,7 @@ class EventLoopNode(NodeProtocol):
                     real_tool_results,
                     outputs_set_this_turn,
                     token_counts,
+                    logged_tool_calls,
                     user_input_requested,
                 )
 
