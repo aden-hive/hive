@@ -453,11 +453,13 @@ def create_agent_runtime(
     tool_executor: Callable | None = None,
     config: AgentRuntimeConfig | None = None,
     runtime_log_store: Any = None,
+    enable_logging: bool = True,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
 
     Convenience factory that creates runtime and registers entry points.
+    Runtime logging is enabled by default for observability.
 
     Args:
         graph: Graph specification
@@ -468,11 +470,21 @@ def create_agent_runtime(
         tools: Available tools
         tool_executor: Tool executor function
         config: Runtime configuration
-        runtime_log_store: Optional RuntimeLogStore for per-execution logging
+        runtime_log_store: Optional RuntimeLogStore for per-execution logging.
+            If None and enable_logging=True, creates one automatically.
+        enable_logging: Whether to enable runtime logging (default: True).
+            Set to False to disable logging entirely.
 
     Returns:
         Configured AgentRuntime (not yet started)
     """
+    # Auto-create runtime log store if logging is enabled and not provided
+    if enable_logging and runtime_log_store is None:
+        from framework.runtime.runtime_log_store import RuntimeLogStore
+
+        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        runtime_log_store = RuntimeLogStore(storage_path_obj / "runtime_logs")
+
     runtime = AgentRuntime(
         graph=graph,
         goal=goal,

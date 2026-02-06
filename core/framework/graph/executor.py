@@ -749,6 +749,10 @@ class GraphExecutor:
             )
 
         except Exception as e:
+            import traceback
+
+            stack_trace = traceback.format_exc()
+
             self.runtime.report_problem(
                 severity="critical",
                 description=str(e),
@@ -758,7 +762,7 @@ class GraphExecutor:
                 narrative=f"Failed at step {steps}: {e}",
             )
 
-            # Log the crashing node to L2
+            # Log the crashing node to L2 with full stack trace
             if self.runtime_logger and node_spec is not None:
                 self.runtime_logger.ensure_node_logged(
                     node_id=node_spec.id,
@@ -766,6 +770,7 @@ class GraphExecutor:
                     node_type=node_spec.node_type,
                     success=False,
                     error=str(e),
+                    stacktrace=stack_trace,
                 )
 
             # Calculate quality metrics even for exceptions
@@ -1279,11 +1284,14 @@ class GraphExecutor:
                 return branch, last_result
 
             except Exception as e:
+                import traceback
+
+                stack_trace = traceback.format_exc()
                 branch.status = "failed"
                 branch.error = str(e)
                 self.logger.error(f"      ✗ Branch {branch.node_id}: exception - {e}")
 
-                # Log the crashing branch node to L2
+                # Log the crashing branch node to L2 with full stack trace
                 if self.runtime_logger and node_spec is not None:
                     self.runtime_logger.ensure_node_logged(
                         node_id=node_spec.id,
@@ -1291,6 +1299,7 @@ class GraphExecutor:
                         node_type=node_spec.node_type,
                         success=False,
                         error=str(e),
+                        stacktrace=stack_trace,
                     )
 
                 return branch, e

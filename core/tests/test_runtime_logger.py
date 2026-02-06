@@ -765,3 +765,178 @@ class TestRuntimeLogger:
         assert len(runs) == 1
         assert runs[0].run_id == run_id
         assert runs[0].status == "in_progress"
+
+    @pytest.mark.asyncio
+    async def test_log_step_with_error_and_stacktrace(self, tmp_path: Path):
+        """Test logging partial steps with errors and stack traces."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        # Log a partial step with error
+        rt_logger.log_step(
+            node_id="node-1",
+            node_type="event_loop",
+            step_index=0,
+            error="LLM call failed: Connection timeout",
+            stacktrace=(
+                "Traceback (most recent call last):\n"
+                "  File test.py line 10\n"
+                "    raise TimeoutError()"
+            ),
+            is_partial=True,
+        )
+
+        # Verify the step was logged
+        loaded = await store.load_tool_logs(run_id)
+        assert loaded is not None
+        assert len(loaded.steps) == 1
+        step = loaded.steps[0]
+        assert step.error == "LLM call failed: Connection timeout"
+        assert "TimeoutError" in step.stacktrace
+        assert step.is_partial is True
+
+    @pytest.mark.asyncio
+    async def test_log_node_complete_with_stacktrace(self, tmp_path: Path):
+        """Test logging node completion with stack traces."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        # Log node failure with stacktrace
+        rt_logger.log_node_complete(
+            node_id="node-1",
+            node_name="Test Node",
+            node_type="event_loop",
+            success=False,
+            error="Node crashed",
+            stacktrace=(
+                "Traceback (most recent call last):\n"
+                "  File node.py line 42\n"
+                "    raise RuntimeError('crash')"
+            ),
+        )
+
+        # Verify the detail was logged with stacktrace
+        loaded = await store.load_details(run_id)
+        assert loaded is not None
+        assert len(loaded.nodes) == 1
+        node = loaded.nodes[0]
+        assert node.error == "Node crashed"
+        assert "RuntimeError" in node.stacktrace
+
+    @pytest.mark.asyncio
+    async def test_attention_flags_excessive_retries(self, tmp_path: Path):
+        """Test that excessive retries trigger attention flags."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        # Log node with excessive retries
+        rt_logger.log_node_complete(
+            node_id="node-1",
+            node_name="Retry Node",
+            node_type="event_loop",
+            success=True,
+            retry_count=5,  # > 3 threshold
+        )
+
+        # Verify attention flag is set
+        loaded = await store.load_details(run_id)
+        assert loaded is not None
+        node = loaded.nodes[0]
+        assert node.needs_attention is True
+        assert any("Excessive retries" in reason for reason in node.attention_reasons)
+
+    @pytest.mark.asyncio
+    async def test_attention_flags_high_latency(self, tmp_path: Path):
+        """Test that high latency triggers attention flags."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        # Log node with high latency
+        rt_logger.log_node_complete(
+            node_id="node-1",
+            node_name="Slow Node",
+            node_type="event_loop",
+            success=True,
+            latency_ms=65000,  # > 60000 threshold
+        )
+
+        # Verify attention flag is set
+        loaded = await store.load_details(run_id)
+        assert loaded is not None
+        node = loaded.nodes[0]
+        assert node.needs_attention is True
+        assert any("High latency" in reason for reason in node.attention_reasons)
+
+    @pytest.mark.asyncio
+    async def test_attention_flags_high_token_usage(self, tmp_path: Path):
+        """Test that high token usage triggers attention flags."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        # Log node with high token usage
+        rt_logger.log_node_complete(
+            node_id="node-1",
+            node_name="Token Heavy Node",
+            node_type="event_loop",
+            success=True,
+            tokens_used=150000,  # > 100000 threshold
+        )
+
+        # Verify attention flag is set
+        loaded = await store.load_details(run_id)
+        assert loaded is not None
+        node = loaded.nodes[0]
+        assert node.needs_attention is True
+        assert any("High token usage" in reason for reason in node.attention_reasons)
+
+    @pytest.mark.asyncio
+    async def test_attention_flags_many_iterations(self, tmp_path: Path):
+        """Test that many iterations trigger attention flags."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        # Log node with many iterations
+        rt_logger.log_node_complete(
+            node_id="node-1",
+            node_name="Iterative Node",
+            node_type="event_loop",
+            success=True,
+            total_steps=25,  # > 20 threshold
+        )
+
+        # Verify attention flag is set
+        loaded = await store.load_details(run_id)
+        assert loaded is not None
+        node = loaded.nodes[0]
+        assert node.needs_attention is True
+        assert any("Many iterations" in reason for reason in node.attention_reasons)
+
+    @pytest.mark.asyncio
+    async def test_guard_failure_exit_status(self, tmp_path: Path):
+        """Test that guard failures use the correct exit status."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rt_logger = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rt_logger.start_run("goal-1")
+
+        # Log a guard failure
+        rt_logger.log_node_complete(
+            node_id="node-1",
+            node_name="Guard Node",
+            node_type="event_loop",
+            success=False,
+            error="LLM provider not available",
+            exit_status="guard_failure",
+        )
+
+        # Verify exit status
+        loaded = await store.load_details(run_id)
+        assert loaded is not None
+        node = loaded.nodes[0]
+        assert node.exit_status == "guard_failure"
+        assert node.success is False

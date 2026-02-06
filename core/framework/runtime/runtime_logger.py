@@ -75,10 +75,18 @@ class RuntimeLogger:
         latency_ms: int = 0,
         verdict: str = "",
         verdict_feedback: str = "",
+        error: str = "",
+        stacktrace: str = "",
+        is_partial: bool = False,
     ) -> None:
         """Record data for one step within a node.
 
         Called by any node during execution. Synchronous, appends to JSONL file.
+
+        Args:
+            error: Error message if step failed
+            stacktrace: Full stack trace if exception occurred
+            is_partial: True if step didn't complete normally (e.g., LLM call crashed)
         """
         if tool_calls is None:
             tool_calls = []
@@ -106,6 +114,9 @@ class RuntimeLogger:
             latency_ms=latency_ms,
             verdict=verdict,
             verdict_feedback=verdict_feedback,
+            error=error,
+            stacktrace=stacktrace,
+            is_partial=is_partial,
         )
 
         with self._lock:
@@ -118,6 +129,7 @@ class RuntimeLogger:
         node_type: str,
         success: bool,
         error: str | None = None,
+        stacktrace: str = "",
         total_steps: int = 0,
         tokens_used: int = 0,
         input_tokens: int = 0,
@@ -142,12 +154,34 @@ class RuntimeLogger:
         if not success and error:
             attention_reasons.append(f"Node {node_id} failed: {error}")
 
+        # Enhanced attention flags
+        if retry_count > 3:
+            needs_attention = True
+            attention_reasons.append(f"Excessive retries: {retry_count}")
+
+        if escalate_count > 2:
+            needs_attention = True
+            attention_reasons.append(f"Excessive escalations: {escalate_count}")
+
+        if latency_ms > 60000:  # > 1 minute
+            needs_attention = True
+            attention_reasons.append(f"High latency: {latency_ms}ms")
+
+        if tokens_used > 100000:  # High token usage
+            needs_attention = True
+            attention_reasons.append(f"High token usage: {tokens_used}")
+
+        if total_steps > 20:  # Many iterations
+            needs_attention = True
+            attention_reasons.append(f"Many iterations: {total_steps}")
+
         detail = NodeDetail(
             node_id=node_id,
             node_name=node_name,
             node_type=node_type,
             success=success,
             error=error,
+            stacktrace=stacktrace,
             total_steps=total_steps,
             tokens_used=tokens_used,
             input_tokens=input_tokens,
@@ -174,6 +208,7 @@ class RuntimeLogger:
         node_type: str,
         success: bool,
         error: str | None = None,
+        stacktrace: str = "",
         tokens_used: int = 0,
         latency_ms: int = 0,
     ) -> None:
@@ -194,6 +229,7 @@ class RuntimeLogger:
             node_type=node_type,
             success=success,
             error=error,
+            stacktrace=stacktrace,
             tokens_used=tokens_used,
             latency_ms=latency_ms,
         )

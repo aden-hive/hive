@@ -44,6 +44,10 @@ class NodeStepLog(BaseModel):
     # EventLoopNode only:
     verdict: str = ""  # "ACCEPT"|"RETRY"|"ESCALATE"|"CONTINUE"
     verdict_feedback: str = ""
+    # Error tracking:
+    error: str = ""  # Error message if step failed
+    stacktrace: str = ""  # Full stack trace if exception occurred
+    is_partial: bool = False  # True if step didn't complete normally
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +63,7 @@ class NodeDetail(BaseModel):
     node_type: str = ""
     success: bool = True
     error: str | None = None
+    stacktrace: str = ""  # Full stack trace if exception occurred
     total_steps: int = 0
     tokens_used: int = 0  # combined input+output from NodeResult
     input_tokens: int = 0
@@ -66,7 +71,7 @@ class NodeDetail(BaseModel):
     latency_ms: int = 0
     attempt: int = 1  # retry attempt number
     # EventLoopNode-specific:
-    exit_status: str = ""  # "success"|"failure"|"stalled"|"escalated"|"paused"
+    exit_status: str = ""  # "success"|"failure"|"stalled"|"escalated"|"paused"|"guard_failure"
     accept_count: int = 0
     retry_count: int = 0
     escalate_count: int = 0

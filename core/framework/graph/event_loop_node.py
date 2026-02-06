@@ -215,7 +215,23 @@ class EventLoopNode(NodeProtocol):
 
         # 1. Guard: LLM required
         if ctx.llm is None:
-            return NodeResult(success=False, error="LLM provider not available")
+            error_msg = "LLM provider not available"
+            # Log guard failure
+            if ctx.runtime_logger:
+                ctx.runtime_logger.log_node_complete(
+                    node_id=node_id,
+                    node_name=ctx.node_spec.name,
+                    node_type="event_loop",
+                    success=False,
+                    error=error_msg,
+                    exit_status="guard_failure",
+                    total_steps=0,
+                    tokens_used=0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    latency_ms=0,
+                )
+            return NodeResult(success=False, error=error_msg)
 
         # 2. Restore or create new conversation + accumulator
         conversation, accumulator, start_iteration = await self._restore(ctx)
@@ -305,26 +321,72 @@ class EventLoopNode(NodeProtocol):
                 iteration,
                 len(conversation.messages),
             )
-            (
-                assistant_text,
-                real_tool_results,
-                outputs_set,
-                turn_tokens,
-                logged_tool_calls,
-            ) = await self._run_single_turn(ctx, conversation, tools, iteration, accumulator)
-            logger.info(
-                "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
-                "outputs_set=%s, tokens=%s, accumulator=%s",
-                node_id,
-                iteration,
-                len(assistant_text),
-                len(real_tool_results),
-                outputs_set or "[]",
-                turn_tokens,
-                {k: ("set" if v is not None else "None") for k, v in accumulator.to_dict().items()},
-            )
-            total_input_tokens += turn_tokens.get("input", 0)
-            total_output_tokens += turn_tokens.get("output", 0)
+            try:
+                (
+                    assistant_text,
+                    real_tool_results,
+                    outputs_set,
+                    turn_tokens,
+                    logged_tool_calls,
+                ) = await self._run_single_turn(ctx, conversation, tools, iteration, accumulator)
+                logger.info(
+                    "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
+                    "outputs_set=%s, tokens=%s, accumulator=%s",
+                    node_id,
+                    iteration,
+                    len(assistant_text),
+                    len(real_tool_results),
+                    outputs_set or "[]",
+                    turn_tokens,
+                    {
+                        k: ("set" if v is not None else "None")
+                        for k, v in accumulator.to_dict().items()
+                    },
+                )
+                total_input_tokens += turn_tokens.get("input", 0)
+                total_output_tokens += turn_tokens.get("output", 0)
+            except Exception as e:
+                # LLM call crashed - log partial step with error
+                import traceback
+
+                iter_latency_ms = int((time.time() - iter_start) * 1000)
+                latency_ms = int((time.time() - start_time) * 1000)
+                error_msg = f"LLM call failed: {e}"
+                stack_trace = traceback.format_exc()
+
+                if ctx.runtime_logger:
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        error=error_msg,
+                        stacktrace=stack_trace,
+                        is_partial=True,
+                        input_tokens=0,
+                        output_tokens=0,
+                        latency_ms=iter_latency_ms,
+                    )
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.node_spec.name,
+                        node_type="event_loop",
+                        success=False,
+                        error=error_msg,
+                        stacktrace=stack_trace,
+                        total_steps=iteration + 1,
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        latency_ms=latency_ms,
+                        exit_status="failure",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
+                    )
+
+                # Re-raise to maintain existing error handling
+                raise
 
             # 6e'. Feed actual API token count back for accurate estimation
             turn_input = turn_tokens.get("input", 0)
