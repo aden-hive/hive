@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -47,6 +46,36 @@ def _read_jsonl(path: Path) -> list[dict]:
     return results
 
 
+def _get_run_dirs(agent_work_dir: Path) -> list[tuple[str, Path]]:
+    """Scan both old and new storage locations for run directories.
+
+    Returns list of (run_id, log_dir_path) tuples.
+
+    Scans:
+    - New: {agent_work_dir}/sessions/{session_id}/logs/
+    - Old: {agent_work_dir}/runtime_logs/runs/{run_id}/ (deprecated)
+    """
+    run_dirs = []
+
+    # Scan new location: sessions/{session_id}/logs/
+    sessions_dir = agent_work_dir / "sessions"
+    if sessions_dir.exists():
+        for session_dir in sessions_dir.iterdir():
+            if session_dir.is_dir() and session_dir.name.startswith("session_"):
+                logs_dir = session_dir / "logs"
+                if logs_dir.exists() and logs_dir.is_dir():
+                    run_dirs.append((session_dir.name, logs_dir))
+
+    # Scan old location: runtime_logs/runs/ (deprecated)
+    old_runs_dir = agent_work_dir / "runtime_logs" / "runs"
+    if old_runs_dir.exists():
+        for run_dir in old_runs_dir.iterdir():
+            if run_dir.is_dir():
+                run_dirs.append((run_dir.name, run_dir))
+
+    return run_dirs
+
+
 def register_tools(mcp: FastMCP) -> None:
     """Register runtime log query tools with the MCP server."""
 
@@ -58,6 +87,7 @@ def register_tools(mcp: FastMCP) -> None:
     ) -> dict:
         """Query runtime log summaries. Returns high-level pass/fail for recent graph runs.
 
+        Scans both old (runtime_logs/runs/) and new (sessions/*/logs/) locations.
         Use status='needs_attention' to find runs that need debugging.
         Other status values: 'success', 'failure', 'degraded', 'in_progress'.
         Leave status empty to see all runs.
@@ -70,21 +100,15 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with 'runs' list of summary objects and 'total' count
         """
-        runs_dir = Path(agent_work_dir) / "runtime_logs" / "runs"
-        if not runs_dir.exists():
+        work_dir = Path(agent_work_dir)
+        run_dirs = _get_run_dirs(work_dir)
+
+        if not run_dirs:
             return {"runs": [], "total": 0, "message": "No runtime logs found"}
 
         summaries = []
-        try:
-            entries = os.listdir(runs_dir)
-        except OSError:
-            return {"runs": [], "total": 0, "error": "Cannot read runs directory"}
-
-        for run_id in entries:
-            run_dir = runs_dir / run_id
-            if not run_dir.is_dir():
-                continue
-            summary_path = run_dir / "summary.json"
+        for run_id, log_dir in run_dirs:
+            summary_path = log_dir / "summary.json"
             if summary_path.exists():
                 try:
                     data = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -128,6 +152,8 @@ def register_tools(mcp: FastMCP) -> None:
         and attention flags. Use after query_runtime_logs identifies
         a run to investigate.
 
+        Supports both old (runtime_logs/runs/) and new (sessions/*/logs/) locations.
+
         Args:
             agent_work_dir: Path to the agent's working directory
             run_id: The run ID from query_runtime_logs results
@@ -137,7 +163,15 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with run_id and nodes list of per-node details
         """
-        details_path = Path(agent_work_dir) / "runtime_logs" / "runs" / run_id / "details.jsonl"
+        work_dir = Path(agent_work_dir)
+
+        # Try new location first: sessions/{session_id}/logs/
+        if run_id.startswith("session_"):
+            details_path = work_dir / "sessions" / run_id / "logs" / "details.jsonl"
+        else:
+            # Old location: runtime_logs/runs/{run_id}/
+            details_path = work_dir / "runtime_logs" / "runs" / run_id / "details.jsonl"
+
         if not details_path.exists():
             return {"error": f"No details found for run {run_id}"}
 
@@ -164,6 +198,8 @@ def register_tools(mcp: FastMCP) -> None:
         query_runtime_log_details. Returns tool inputs/outputs,
         LLM text, and token counts per step.
 
+        Supports both old (runtime_logs/runs/) and new (sessions/*/logs/) locations.
+
         Args:
             agent_work_dir: Path to the agent's working directory
             run_id: The run ID from query_runtime_logs results
@@ -173,7 +209,15 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with run_id and steps list of tool/LLM details
         """
-        tool_logs_path = Path(agent_work_dir) / "runtime_logs" / "runs" / run_id / "tool_logs.jsonl"
+        work_dir = Path(agent_work_dir)
+
+        # Try new location first: sessions/{session_id}/logs/
+        if run_id.startswith("session_"):
+            tool_logs_path = work_dir / "sessions" / run_id / "logs" / "tool_logs.jsonl"
+        else:
+            # Old location: runtime_logs/runs/{run_id}/
+            tool_logs_path = work_dir / "runtime_logs" / "runs" / run_id / "tool_logs.jsonl"
+
         if not tool_logs_path.exists():
             return {"error": f"No tool logs found for run {run_id}"}
 
