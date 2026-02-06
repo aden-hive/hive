@@ -109,6 +109,8 @@ This sets up:
 
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
+- **credential store** - Encrypted API key storage (`~/.hive/credentials`)
+- **LLM provider** - Interactive default model configuration
 - All required Python dependencies
 
 ### Build Your First Agent
@@ -120,8 +122,11 @@ claude> /hive
 # Test your agent
 claude> /hive-test
 
-# Run your agent
-PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
+# Launch the interactive dashboard
+hive tui
+
+# Or run directly
+hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
@@ -143,6 +148,7 @@ Skills are also available in Cursor. To enable:
 - **SDK-Wrapped Nodes** - Every node gets shared memory, local RLM memory, monitoring, tools, and LLM access out of the box
 - **Human-in-the-Loop** - Intervention nodes that pause execution for human input with configurable timeouts and escalation
 - **Real-time Observability** - WebSocket streaming for live monitoring of agent execution, decisions, and node-to-node communication
+- **Interactive TUI Dashboard** - Terminal-based dashboard with live graph view, event log, and chat interface for agent interaction
 - **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
 - **Production-Ready** - Self-hostable, built for scale and reliability
 
@@ -201,33 +207,27 @@ flowchart LR
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **Adaptiveness** → On failure, the system evolves the graph and redeploys automatically
 
-## Run pre-built Agents (Coming Soon)
+## Run Agents
 
-### Run a sample agent
-
-Aden Hive provides a list of featured agents that you can use and build on top of.
-
-### Run an agent shared by others
-
-Put the agent in `exports/` and run `PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'`
-
-For building and running goal-driven agents with the framework:
+The `hive` CLI is the primary interface for running agents.
 
 ```bash
-# One-time setup
-./quickstart.sh
+# Browse and run agents interactively (Recommended)
+hive tui
 
-# This sets up:
-# - framework package (core runtime)
-# - aden_tools package (MCP tools)
-# - All Python dependencies
+# Run a specific agent directly
+hive run exports/my_agent --input '{"task": "Your input here"}'
 
-# Build new agents using Agent Skills
-claude> /hive
+# Run a specific agent with the TUI dashboard
+hive run exports/my_agent --tui
 
-# Run agents
-PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
+# Interactive REPL
+hive shell
 ```
+
+The TUI scans both `exports/` and `examples/templates/` for available agents.
+
+> **Using Python directly (alternative):** You can also run agents with `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
 
 See [environment-setup.md](docs/environment-setup.md) for complete setup instructions.
 
@@ -235,6 +235,7 @@ See [environment-setup.md](docs/environment-setup.md) for complete setup instruc
 
 - **[Developer Guide](docs/developer-guide.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
+- [TUI Guide](docs/tui-selection-guide.md) - Interactive dashboard usage
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
@@ -435,6 +436,10 @@ Aden's adaptation loop begins working from the first execution. When an agent fa
 **Q: How does Hive compare to other agent frameworks?**
 
 Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
+
+**Q: What is `hive tui`?**
+
+`hive tui` launches an interactive terminal dashboard to browse, select, and run agents with a live graph view, log stream, and chat interface. You can also run a specific agent with `hive run <path> --tui`.
 
 **Q: Does Aden offer enterprise support?**
 

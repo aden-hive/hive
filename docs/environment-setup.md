@@ -18,6 +18,8 @@ This will:
 - Check Python version (requires 3.11+)
 - Install the core framework package (`framework`)
 - Install the tools package (`aden_tools`)
+- Initialize encrypted credential store (`~/.hive/credentials`)
+- Configure default LLM provider
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
@@ -126,7 +128,32 @@ $env:ANTHROPIC_API_KEY="your-key-here"
 
 ## Running Agents
 
-All agent commands must be run from the project root with `PYTHONPATH` set:
+The `hive` CLI is the primary interface for running agents:
+
+```bash
+# Browse and run agents interactively (Recommended)
+hive tui
+
+# Run a specific agent
+hive run exports/my_agent --input '{"task": "Your input here"}'
+
+# Run with TUI dashboard
+hive run exports/my_agent --tui
+```
+
+### CLI Command Reference
+
+| Command | Description |
+|---------|-------------|
+| `hive tui` | Browse agents and launch TUI dashboard |
+| `hive run <path>` | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
+| `hive shell [path]` | Interactive REPL (`--multi`, `--no-approve`) |
+| `hive info <path>` | Show agent details |
+| `hive validate <path>` | Validate agent structure |
+| `hive list [dir]` | List available agents |
+| `hive dispatch [dir]` | Multi-agent orchestration |
+
+### Using Python directly (alternative)
 
 ```bash
 # From /hive/ directory
@@ -138,24 +165,6 @@ Windows (PowerShell):
 ```powershell
 $env:PYTHONPATH="core;exports"
 python -m agent_name COMMAND
-```
-
-### Example: Support Ticket Agent
-
-```bash
-# Validate agent structure
-PYTHONPATH=exports uv run python -m your_agent_name validate
-
-# Show agent information
-PYTHONPATH=exports uv run python -m your_agent_name info
-
-# Run agent with input
-PYTHONPATH=exports uv run python -m your_agent_name run --input '{
-  "task": "Your input here"
-}'
-
-# Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m your_agent_name run --mock --input '{...}'
 ```
 
 ## Building New Agents and Run Flow
@@ -353,8 +362,11 @@ hive/
 │   ├── .venv/              # Created by quickstart.sh
 │   └── pyproject.toml
 │
-└── exports/                 # Agent packages (user-created, gitignored)
-    └── your_agent_name/     # Created via /hive-create
+├── exports/                 # Agent packages (user-created, gitignored)
+│   └── your_agent_name/     # Created via /hive-create
+│
+└── examples/
+    └── templates/           # Pre-built template agents
 ```
 
 ## Separate Virtual Environments
@@ -456,7 +468,11 @@ claude> /hive-test
 ### 5. Run Agent
 
 ```bash
-PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
+# Interactive dashboard
+hive tui
+
+# Or run directly
+hive run exports/your_agent_name --input '{"task": "..."}'
 ```
 
 ## IDE Setup

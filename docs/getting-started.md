@@ -88,7 +88,8 @@ hive/
 │   │   ├── runtime/        # Runtime environment
 │   │   ├── schemas/        # Data schemas
 │   │   ├── storage/        # File-based persistence
-│   │   └── testing/        # Testing utilities
+│   │   ├── testing/        # Testing utilities
+│   │   └── tui/            # Terminal UI dashboard
 │   └── pyproject.toml      # Package metadata
 │
 ├── tools/                  # MCP Tools Package
@@ -101,6 +102,9 @@ hive/
 │
 ├── exports/                # Agent Packages (user-generated, not in repo)
 │   └── your_agent/         # Your agents created via /hive
+│
+├── examples/
+│   └── templates/          # Pre-built template agents
 │
 ├── .claude/                # Claude Code Skills
 │   └── skills/
@@ -116,19 +120,23 @@ hive/
 ## Running an Agent
 
 ```bash
-# Validate agent structure
-PYTHONPATH=exports uv run python -m my_agent validate
+# Browse and run agents interactively (Recommended)
+hive tui
 
-# Show agent information
-PYTHONPATH=exports uv run python -m my_agent info
+# Run a specific agent
+hive run exports/my_agent --input '{"task": "Your input here"}'
 
-# Run agent with input
-PYTHONPATH=exports uv run python -m my_agent run --input '{
-  "task": "Your input here"
-}'
+# Run with TUI dashboard
+hive run exports/my_agent --tui
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m my_agent run --mock --input '{...}'
+hive run exports/my_agent --mock --input '{"task": "..."}'
+```
+
+### Using Python directly (alternative)
+
+```bash
+PYTHONPATH=exports uv run python -m my_agent run --input '{"task": "Your input here"}'
 ```
 
 ## API Keys Setup
@@ -164,11 +172,12 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 
 ## Next Steps
 
-1. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
-2. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
-3. **Build Agents**: Use `/hive` skill in Claude Code
-4. **Custom Tools**: Learn to integrate MCP servers
-5. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
+1. **TUI Dashboard**: Run `hive tui` to explore agents interactively
+2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
+3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
+4. **Build Agents**: Use `/hive` skill in Claude Code
+5. **Custom Tools**: Learn to integrate MCP servers
+6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
 ## Troubleshooting
 

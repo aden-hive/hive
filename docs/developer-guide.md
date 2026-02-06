@@ -158,6 +158,7 @@ hive/                                    # Repository root
 │   │   ├── schemas/                     # Data schemas
 │   │   ├── storage/                     # File-based persistence
 │   │   ├── testing/                     # Testing utilities
+│   │   ├── tui/                         # Terminal UI dashboard
 │   │   └── __init__.py
 │   ├── pyproject.toml                   # Package metadata and dependencies
 │   ├── README.md                        # Framework documentation
@@ -179,6 +180,9 @@ hive/                                    # Repository root
 │
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
 │   └── your_agent_name/                 # Created via /hive-create
+│
+├── examples/                            # Example agents
+│   └── templates/                       # Pre-built template agents
 │
 ├── docs/                                # Documentation
 │   ├── getting-started.md               # Quick start guide
@@ -287,21 +291,20 @@ If you prefer to build agents manually:
 ### Running Agents
 
 ```bash
-# Validate agent structure
-PYTHONPATH=exports uv run python -m agent_name validate
+# Browse and run agents interactively (Recommended)
+hive tui
 
-# Show agent information
-PYTHONPATH=exports uv run python -m agent_name info
+# Run a specific agent
+hive run exports/my_agent --input '{"ticket_content": "My login is broken", "customer_id": "CUST-123"}'
 
-# Run agent with input
-PYTHONPATH=exports uv run python -m agent_name run --input '{
-  "ticket_content": "My login is broken",
-  "customer_id": "CUST-123"
-}'
+# Run with TUI dashboard
+hive run exports/my_agent --tui
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
+hive run exports/my_agent --mock --input '{"task": "..."}'
 ```
+
+> **Using Python directly:** `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
 
 ---
 
@@ -615,16 +618,22 @@ echo 'ANTHROPIC_API_KEY=your-key-here' >> .env
 
 ### Debugging Agent Execution
 
-```python
-# Add debug logging to your agent
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
+```bash
 # Run with verbose output
-PYTHONPATH=exports uv run python -m agent_name run --input '{...}' --verbose
+hive run exports/my_agent --verbose --input '{"task": "..."}'
 
 # Use mock mode to test without LLM calls
-PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
+hive run exports/my_agent --mock --input '{"task": "..."}'
+
+# Combine TUI with verbose for visual debugging
+hive run exports/my_agent --tui --verbose
+```
+
+For programmatic debugging, add logging to your agent code:
+
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
 ```
 
 ---
