@@ -740,7 +740,12 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
-echo -e "${BOLD}Quick Start:${NC}"
+echo -e "${BOLD}Run an Agent:${NC}"
+echo ""
+echo -e "  Launch the interactive dashboard to browse and run agents:"
+echo -e "     ${CYAN}hive tui${NC}"
+echo ""
+echo -e "${BOLD}Build a New Agent:${NC}"
 echo ""
 echo -e "  1. Open Claude Code in this directory:"
 echo -e "     ${CYAN}claude${NC}"
