@@ -52,11 +52,26 @@ class RuntimeLogger:
         self._logged_node_ids: set[str] = set()
         self._lock = threading.Lock()
 
-    def start_run(self, goal_id: str = "") -> str:
-        """Start a new run. Called by GraphExecutor at graph start. Returns run_id."""
-        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-        short_uuid = uuid.uuid4().hex[:8]
-        self._run_id = f"{ts}_{short_uuid}"
+    def start_run(self, goal_id: str = "", session_id: str = "") -> str:
+        """Start a new run. Called by GraphExecutor at graph start. Returns run_id.
+
+        Args:
+            goal_id: Goal ID for this run
+            session_id: Optional session ID. If provided, uses it as run_id (for unified sessions).
+                       Otherwise generates a new run_id in old format.
+
+        Returns:
+            The run_id (same as session_id if provided)
+        """
+        if session_id:
+            # Use provided session_id as run_id (unified sessions)
+            self._run_id = session_id
+        else:
+            # Generate run_id in old format (backward compatibility)
+            ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+            short_uuid = uuid.uuid4().hex[:8]
+            self._run_id = f"{ts}_{short_uuid}"
+
         self._goal_id = goal_id
         self._started_at = datetime.now(UTC).isoformat()
         self._logged_node_ids = set()

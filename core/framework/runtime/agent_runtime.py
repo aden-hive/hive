@@ -18,6 +18,7 @@ from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
+from framework.storage.session_store import SessionStore
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -121,11 +122,15 @@ class AgentRuntime:
         self._runtime_log_store = runtime_log_store
 
         # Initialize storage
+        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
         self._storage = ConcurrentStorage(
-            base_path=storage_path,
+            base_path=storage_path_obj,
             cache_ttl=self._config.cache_ttl,
             batch_interval=self._config.batch_interval,
         )
+
+        # Initialize SessionStore for unified sessions (always enabled)
+        self._session_store = SessionStore(storage_path_obj)
 
         # Initialize shared components
         self._state_manager = SharedStateManager()
@@ -216,6 +221,7 @@ class AgentRuntime:
                     result_retention_max=self._config.execution_result_max,
                     result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
                     runtime_log_store=self._runtime_log_store,
+                    session_store=self._session_store,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream

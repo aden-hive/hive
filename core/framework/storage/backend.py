@@ -36,16 +36,16 @@ class FileStorage:
         self._ensure_dirs()
 
     def _ensure_dirs(self) -> None:
-        """Create directory structure if it doesn't exist."""
-        dirs = [
-            self.base_path / "runs",
-            self.base_path / "indexes" / "by_goal",
-            self.base_path / "indexes" / "by_status",
-            self.base_path / "indexes" / "by_node",
-            self.base_path / "summaries",
-        ]
-        for d in dirs:
-            d.mkdir(parents=True, exist_ok=True)
+        """Create directory structure if it doesn't exist.
+
+        NOTE: Only creates indexes directory now. The runs/ and summaries/
+        directories are deprecated and no longer used for new sessions.
+        """
+        # Only create indexes directory (still used for backward compatibility)
+        indexes_dir = self.base_path / "indexes"
+        indexes_dir.mkdir(parents=True, exist_ok=True)
+
+        # Do NOT create runs/ and summaries/ - these are deprecated
 
     def _validate_key(self, key: str) -> None:
         """
@@ -84,23 +84,22 @@ class FileStorage:
     # === RUN OPERATIONS ===
 
     def save_run(self, run: Run) -> None:
-        """Save a run to storage."""
-        # Save full run using Pydantic's model_dump_json
-        run_path = self.base_path / "runs" / f"{run.id}.json"
-        with atomic_write(run_path) as f:
-            f.write(run.model_dump_json(indent=2))
+        """Save a run to storage.
 
-        # Save summary
-        summary = RunSummary.from_run(run)
-        summary_path = self.base_path / "summaries" / f"{run.id}.json"
-        with atomic_write(summary_path) as f:
-            f.write(summary.model_dump_json(indent=2))
+        DEPRECATED: This method writes to the old runs/ and summaries/ structure.
+        New sessions use unified storage at sessions/{session_id}/state.json.
+        This method is now a no-op to prevent creating deprecated directories.
+        """
+        import warnings
 
-        # Update indexes
-        self._add_to_index("by_goal", run.goal_id, run.id)
-        self._add_to_index("by_status", run.status.value, run.id)
-        for node_id in run.metrics.nodes_executed:
-            self._add_to_index("by_node", node_id, run.id)
+        warnings.warn(
+            "FileStorage.save_run() is deprecated. "
+            "New sessions use unified storage at sessions/{session_id}/state.json. "
+            "This write has been skipped.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        # No-op: do not write to deprecated locations
 
     def load_run(self, run_id: str) -> Run | None:
         """Load a run from storage."""

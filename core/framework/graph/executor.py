@@ -288,7 +288,12 @@ class GraphExecutor:
         )
 
         if self.runtime_logger:
-            self.runtime_logger.start_run(goal_id=goal.id)
+            # Extract session_id from storage_path if available (for unified sessions)
+            # storage_path format: base_path/sessions/{session_id}/
+            session_id = ""
+            if self._storage_path and self._storage_path.name.startswith("session_"):
+                session_id = self._storage_path.name
+            self.runtime_logger.start_run(goal_id=goal.id, session_id=session_id)
 
         self.logger.info(f"🚀 Starting execution: {goal.name}")
         self.logger.info(f"   Goal: {goal.description}")
