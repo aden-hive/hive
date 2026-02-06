@@ -61,12 +61,19 @@ def register_tools(mcp: FastMCP) -> None:
                         continue
                     if limit is not None and len(rows) >= limit:
                         break
+                    if not row or not any(v not in (None, "", " ") for v in row.values()):
+                        continue
                     rows.append(row)
 
             # Get total row count (re-read for accurate count)
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
-                total_rows = sum(1 for row in reader if any(row)) - 1
+                next(reader, None)  # Skip header row
+                total_rows = sum(
+                    1 for row in reader
+                    if row and any(cell.strip() for cell in row)
+                ) 
+
 
             return {
                 "success": True,
@@ -123,6 +130,17 @@ def register_tools(mcp: FastMCP) -> None:
             parent_dir = os.path.dirname(secure_path)
             if parent_dir:
                 os.makedirs(parent_dir, exist_ok=True)
+            
+            # Validate columns in rows
+            column_set = set(columns)
+            for i, row in enumerate(rows):
+                row_keys = set(row.keys())
+                extra_cols = row_keys - column_set
+                if extra_cols:
+                    return {
+                        "error": f"Row {i} contains columns not in header: {sorted(extra_cols)}. "
+                                f"Expected columns: {columns}"
+                    }
 
             # Write CSV
             with open(secure_path, "w", encoding="utf-8", newline="") as f:
@@ -184,10 +202,23 @@ def register_tools(mcp: FastMCP) -> None:
                     return {"error": "CSV file is empty or has no headers"}
                 columns = list(reader.fieldnames)
 
+            # Validate columns in rows
+            column_set = set(columns)
+            for i, row in enumerate(rows):
+                row_keys = set(row.keys())
+                extra_cols = row_keys - column_set
+                if extra_cols:
+                    return {
+                        "error": f"Row {i} contains columns not in CSV: {sorted(extra_cols)}. "
+                                f"Existing columns: {columns}. Use csv_write to create a new file with different columns."
+                    }
+
             # Append rows
             with open(secure_path, "a", encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=columns)
                 for row in rows:
+                    if not any(v not in (None, "", " ") for v in row.values()):
+                        continue  # skip empty rows
                     # Only write columns that exist in fieldnames
                     filtered_row = {k: v for k, v in row.items() if k in columns}
                     writer.writerow(filtered_row)
@@ -195,7 +226,11 @@ def register_tools(mcp: FastMCP) -> None:
             # Get new total row count
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
-                total_rows = sum(1 for row in reader if any(row)) - 1  # Subtract header
+                next(reader, None)  # Skip header row
+                total_rows = sum(
+                    1 for row in reader
+                    if row and any(cell.strip() for cell in row)
+                )
 
             return {
                 "success": True,
