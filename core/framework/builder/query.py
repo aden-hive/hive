@@ -149,21 +149,13 @@ class BuilderQuery:
     def list_runs_for_goal(self, goal_id: str) -> list[RunSummary]:
         """Get summaries of all runs for a goal."""
         run_ids = self.storage.get_runs_by_goal(goal_id)
-        summaries = []
-        for run_id in run_ids:
-            summary = self.storage.load_summary(run_id)
-            if summary:
-                summaries.append(summary)
+        summaries = [s for s in (self.storage.load_summary(rid) for rid in run_ids) if s]
         return summaries
 
     def get_recent_failures(self, limit: int = 10) -> list[RunSummary]:
         """Get recent failed runs."""
         run_ids = self.storage.get_runs_by_status(RunStatus.FAILED)
-        summaries = []
-        for run_id in run_ids[:limit]:
-            summary = self.storage.load_summary(run_id)
-            if summary:
-                summaries.append(summary)
+        summaries = [s for s in (self.storage.load_summary(rid) for rid in run_ids[:limit]) if s]
         return summaries
 
     # === WHY DID IT FAIL? ===
@@ -229,47 +221,41 @@ class BuilderQuery:
         if not run_ids:
             return None
 
-        runs = []
-        for run_id in run_ids:
-            run = self.storage.load_run(run_id)
-            if run:
-                runs.append(run)
-
+        runs = [self.storage.load_run(run_id) for run_id in run_ids]
+        runs = [r for r in runs if r is not None]
         if not runs:
             return None
 
-        # Calculate success rate
-        completed = [r for r in runs if r.status == RunStatus.COMPLETED]
-        success_rate = len(completed) / len(runs) if runs else 0.0
-
-        # Find common failures
+        # Single pass: collect failures, node stats, and success info
         failure_counts: dict[str, int] = defaultdict(int)
-        for run in runs:
-            for decision in run.decisions:
-                if not decision.was_successful and decision.outcome:
-                    error = decision.outcome.error or "Unknown error"
-                    failure_counts[error] += 1
-
-        common_failures = sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-
-        # Find problematic nodes
         node_stats: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "failed": 0})
+        completed_count = 0
+
         for run in runs:
+            if run.status == RunStatus.COMPLETED:
+                completed_count += 1
+
             for decision in run.decisions:
                 node_stats[decision.node_id]["total"] += 1
                 if not decision.was_successful:
                     node_stats[decision.node_id]["failed"] += 1
+                    if decision.outcome:
+                        error = decision.outcome.error or "Unknown error"
+                        failure_counts[error] += 1
 
-        problematic_nodes = []
-        for node_id, stats in node_stats.items():
-            if stats["total"] > 0:
-                failure_rate = stats["failed"] / stats["total"]
-                if failure_rate > 0.1:  # More than 10% failure rate
-                    problematic_nodes.append((node_id, failure_rate))
+        success_rate = completed_count / len(runs) if runs else 0.0
 
-        problematic_nodes.sort(key=lambda x: x[1], reverse=True)
+        common_failures = sorted(failure_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        problematic_nodes = sorted(
+            [
+                (node_id, stats["failed"] / stats["total"])
+                for node_id, stats in node_stats.items()
+                if stats["total"] > 0 and stats["failed"] / stats["total"] > 0.1
+            ],
+            key=lambda x: x[1],
+            reverse=True,
+        )
 
-        # Decision patterns
         decision_patterns = self._analyze_decision_patterns(runs)
 
         return PatternAnalysis(
@@ -375,16 +361,22 @@ class BuilderQuery:
 
         for run_id in run_ids:
             run = self.storage.load_run(run_id)
-            if run:
-                for decision in run.decisions:
-                    if decision.node_id == node_id:
-                        total_decisions += 1
-                        if decision.was_successful:
-                            successful_decisions += 1
-                        if decision.outcome:
-                            total_latency += decision.outcome.latency_ms
-                            total_tokens += decision.outcome.tokens_used
-                        decision_types[decision.decision_type.value] += 1
+            if not run:
+                continue
+
+            for decision in run.decisions:
+                if decision.node_id != node_id:
+                    continue
+
+                total_decisions += 1
+                if decision.was_successful:
+                    successful_decisions += 1
+
+                if decision.outcome:
+                    total_latency += decision.outcome.latency_ms
+                    total_tokens += decision.outcome.tokens_used
+
+                decision_types[decision.decision_type.value] += 1
 
         return {
             "node_id": node_id,
