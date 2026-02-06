@@ -22,7 +22,7 @@ cd hive
 ./quickstart.sh
 
 # 3. Verify installation (optional, quickstart.sh already verifies)
-python -c "import framework; import aden_tools; print('✓ Setup complete')"
+uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
 ## Building Your First Agent
@@ -33,10 +33,11 @@ python -c "import framework; import aden_tools; print('✓ Setup complete')"
 # Setup already done via quickstart.sh above
 
 # Start Claude Code and build an agent
-claude> /building-agents-construction
+claude> /hive
 ```
 
 Follow the interactive prompts to:
+
 1. Define your agent's goal
 2. Design the workflow (nodes and edges)
 3. Generate the agent package
@@ -52,10 +53,10 @@ mkdir -p exports/my_agent
 
 # Create your agent structure
 cd exports/my_agent
-# Create agent.json, tools.py, README.md (see DEVELOPER.md for structure)
+# Create agent.json, tools.py, README.md (see developer-guide.md for structure)
 
 # Validate the agent
-PYTHONPATH=core:exports python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
 ### Option 3: Manual Code-First (Minimal Example)
@@ -67,7 +68,7 @@ If you prefer to start with code rather than CLI wizards, check out the manual a
 cat core/examples/manual_agent.py
 
 # Run it (no API keys required)
-PYTHONPATH=core python core/examples/manual_agent.py
+uv run python core/examples/manual_agent.py
 ```
 
 This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
@@ -99,15 +100,15 @@ hive/
 │       └── mcp_server.py   # HTTP MCP server
 │
 ├── exports/                # Agent Packages (user-generated, not in repo)
-│   └── your_agent/         # Your agents created via /building-agents
+│   └── your_agent/         # Your agents created via /hive
 │
 ├── .claude/                # Claude Code Skills
 │   └── skills/
-│       ├── agent-workflow/
-│       ├── building-agents-construction/
-│       ├── building-agents-core/
-│       ├── building-agents-patterns/
-│       └── testing-agent/
+│       ├── hive/
+│       ├── hive-create/
+│       ├── hive-concepts/
+│       ├── hive-patterns/
+│       └── hive-test/
 │
 └── docs/                   # Documentation
 ```
@@ -116,18 +117,18 @@ hive/
 
 ```bash
 # Validate agent structure
-PYTHONPATH=core:exports python -m my_agent validate
+PYTHONPATH=exports uv run python -m my_agent validate
 
 # Show agent information
-PYTHONPATH=core:exports python -m my_agent info
+PYTHONPATH=exports uv run python -m my_agent info
 
 # Run agent with input
-PYTHONPATH=core:exports python -m my_agent run --input '{
+PYTHONPATH=exports uv run python -m my_agent run --input '{
   "task": "Your input here"
 }'
 
 # Run in mock mode (no LLM calls)
-PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
+PYTHONPATH=exports uv run python -m my_agent run --mock --input '{...}'
 ```
 
 ## API Keys Setup
@@ -142,6 +143,7 @@ export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search
 ```
 
 Get your API keys:
+
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
@@ -150,21 +152,21 @@ Get your API keys:
 
 ```bash
 # Using Claude Code
-claude> /testing-agent
+claude> /hive-test
 
 # Or manually
-PYTHONPATH=core:exports python -m my_agent test
+PYTHONPATH=exports uv run python -m my_agent test
 
 # Run with specific test type
-PYTHONPATH=core:exports python -m my_agent test --type constraint
-PYTHONPATH=core:exports python -m my_agent test --type success
+PYTHONPATH=exports uv run python -m my_agent test --type constraint
+PYTHONPATH=exports uv run python -m my_agent test --type success
 ```
 
 ## Next Steps
 
-1. **Detailed Setup**: See [ENVIRONMENT_SETUP.md](../ENVIRONMENT_SETUP.md)
-2. **Developer Guide**: See [DEVELOPER.md](../DEVELOPER.md)
-3. **Build Agents**: Use `/building-agents` skill in Claude Code
+1. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
+2. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
+3. **Build Agents**: Use `/hive` skill in Claude Code
 4. **Custom Tools**: Learn to integrate MCP servers
 5. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
@@ -175,7 +177,7 @@ PYTHONPATH=core:exports python -m my_agent test --type success
 ```bash
 # Reinstall framework package
 cd core
-pip install -e .
+uv pip install -e .
 ```
 
 ### ModuleNotFoundError: No module named 'aden_tools'
@@ -183,7 +185,7 @@ pip install -e .
 ```bash
 # Reinstall tools package
 cd tools
-pip install -e .
+uv pip install -e .
 ```
 
 ### LLM API Errors
@@ -193,7 +195,7 @@ pip install -e .
 echo $ANTHROPIC_API_KEY
 
 # Run in mock mode to test without API
-PYTHONPATH=core:exports python -m my_agent run --mock --input '{...}'
+PYTHONPATH=exports uv run python -m my_agent run --mock --input '{...}'
 ```
 
 ### Package Installation Issues
@@ -209,4 +211,4 @@ pip uninstall -y framework tools
 - **Documentation**: Check the `/docs` folder
 - **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
-- **Build Agents**: Use `/building-agents` skill to create agents
+- **Build Agents**: Use `/hive` skill to create agents

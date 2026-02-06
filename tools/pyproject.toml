@@ -30,6 +30,7 @@ dependencies = [
     "playwright-stealth>=1.0.5",
     "litellm>=1.81.0",
     "resend>=2.0.0",
+    "framework",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +54,9 @@ all = [
     "pillow>=10.0.0",
     "duckdb>=1.0.0",
 ]
+
+[tool.uv.sources]
+framework = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

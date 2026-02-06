@@ -28,7 +28,7 @@ cp -r examples/templates/marketing_agent exports/my_marketing_agent
 # 3. Customize goal, nodes, edges, and prompts
 
 # 4. Run it
-PYTHONPATH=core python -m exports.my_marketing_agent --input '{"product_description": "..."}'
+uv run python -m exports.my_marketing_agent --input '{"product_description": "..."}'
 ```
 
 ## Available templates
