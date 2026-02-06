@@ -186,6 +186,26 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     shell_parser.set_defaults(func=cmd_shell)
 
+    # tui command (interactive agent dashboard)
+    tui_parser = subparsers.add_parser(
+        "tui",
+        help="Launch interactive TUI dashboard",
+        description="Browse available agents and launch the terminal dashboard.",
+    )
+    tui_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Run in mock mode (no real LLM calls)",
+    )
+    tui_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model to use (any LiteLLM-compatible name)",
+    )
+    tui_parser.set_defaults(func=cmd_tui)
+
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
@@ -985,8 +1005,216 @@ def cmd_shell(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tui(args: argparse.Namespace) -> int:
+    """Browse agents and launch the interactive TUI dashboard."""
+    import logging
+
+    from framework.runner import AgentRunner
+    from framework.tui.app import AdenTUI
+
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    exports_dir = Path("exports")
+    examples_dir = Path("examples/templates")
+
+    has_exports = _has_agents(exports_dir)
+    has_examples = _has_agents(examples_dir)
+
+    if not has_exports and not has_examples:
+        print("No agents found in exports/ or examples/templates/", file=sys.stderr)
+        return 1
+
+    # Determine which directory to browse
+    if has_exports and has_examples:
+        print("\nAgent sources:\n")
+        print("  1. Your Agents (exports/)")
+        print("  2. Sample Agents (examples/templates/)")
+        print()
+        try:
+            choice = input("Select source (number): ").strip()
+            if choice == "1":
+                agents_dir = exports_dir
+            elif choice == "2":
+                agents_dir = examples_dir
+            else:
+                print("Invalid selection")
+                return 1
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 1
+    elif has_exports:
+        agents_dir = exports_dir
+    else:
+        agents_dir = examples_dir
+
+    # Let user pick an agent
+    agent_path = _select_agent(agents_dir)
+    if not agent_path:
+        return 1
+
+    # Launch TUI (same pattern as cmd_run --tui)
+    async def run_with_tui():
+        try:
+            runner = AgentRunner.load(
+                agent_path,
+                mock_mode=args.mock,
+                model=args.model,
+                enable_tui=True,
+            )
+        except Exception as e:
+            print(f"Error loading agent: {e}")
+            return
+
+        if runner._agent_runtime is None:
+            runner._setup()
+
+        if runner._agent_runtime and not runner._agent_runtime.is_running:
+            await runner._agent_runtime.start()
+
+        app = AdenTUI(runner._agent_runtime)
+        try:
+            await app.run_async()
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            print(f"TUI error: {e}")
+
+        await runner.cleanup_async()
+
+    asyncio.run(run_with_tui())
+    print("TUI session ended.")
+    return 0
+
+
+def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
+    """Extract name and description from a Python-based agent's config.py.
+
+    Uses AST parsing to safely extract values without executing code.
+    Returns (name, description) tuple, with fallbacks if parsing fails.
+    """
+    import ast
+
+    config_path = agent_path / "config.py"
+    fallback_name = agent_path.name.replace("_", " ").title()
+    fallback_desc = "(Python-based agent)"
+
+    if not config_path.exists():
+        return fallback_name, fallback_desc
+
+    try:
+        with open(config_path) as f:
+            tree = ast.parse(f.read())
+
+        # Find AgentMetadata class definition
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "AgentMetadata":
+                name = fallback_name
+                desc = fallback_desc
+
+                # Extract default values from class body
+                for item in node.body:
+                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                        field_name = item.target.id
+                        if item.value:
+                            # Handle simple string constants
+                            if isinstance(item.value, ast.Constant):
+                                if field_name == "name":
+                                    name = item.value.value
+                                elif field_name == "description":
+                                    desc = item.value.value
+                            # Handle parenthesized multi-line strings (concatenated)
+                            elif isinstance(item.value, ast.JoinedStr):
+                                # f-strings - skip, use fallback
+                                pass
+                            elif isinstance(item.value, ast.BinOp):
+                                # String concatenation with + - try to evaluate
+                                try:
+                                    result = _eval_string_binop(item.value)
+                                    if result and field_name == "name":
+                                        name = result
+                                    elif result and field_name == "description":
+                                        desc = result
+                                except Exception:
+                                    pass
+
+                return name, desc
+
+        return fallback_name, fallback_desc
+    except Exception:
+        return fallback_name, fallback_desc
+
+
+def _eval_string_binop(node) -> str | None:
+    """Recursively evaluate a BinOp of string constants."""
+    import ast
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _eval_string_binop(node.left)
+        right = _eval_string_binop(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
+def _is_valid_agent_dir(path: Path) -> bool:
+    """Check if a directory contains a valid agent (agent.json or agent.py)."""
+    if not path.is_dir():
+        return False
+    return (path / "agent.json").exists() or (path / "agent.py").exists()
+
+
+def _has_agents(directory: Path) -> bool:
+    """Check if a directory contains any valid agents (folders with agent.json or agent.py)."""
+    if not directory.exists():
+        return False
+    return any(_is_valid_agent_dir(p) for p in directory.iterdir())
+
+
+def _getch() -> str:
+    """Read a single character from stdin without waiting for Enter."""
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            ch = msvcrt.getch()
+            return ch.decode("utf-8", errors="ignore")
+        else:
+            import termios
+            import tty
+
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                ch = sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            return ch
+    except Exception:
+        return ""
+
+
+def _read_key() -> str:
+    """Read a key, handling arrow key escape sequences."""
+    ch = _getch()
+    if ch == "\x1b":  # Escape sequence start
+        ch2 = _getch()
+        if ch2 == "[":
+            ch3 = _getch()
+            if ch3 == "C":  # Right arrow
+                return "RIGHT"
+            elif ch3 == "D":  # Left arrow
+                return "LEFT"
+    return ch
+
+
 def _select_agent(agents_dir: Path) -> str | None:
-    """Let user select an agent from available agents."""
+    """Let user select an agent from available agents with pagination."""
+    AGENTS_PER_PAGE = 10
+
     if not agents_dir.exists():
         print(f"Directory not found: {agents_dir}", file=sys.stderr)
         # fixes issue #696, creates an exports folder if it does not exist
@@ -996,37 +1224,126 @@ def _select_agent(agents_dir: Path) -> str | None:
 
     agents = []
     for path in agents_dir.iterdir():
-        if path.is_dir() and (path / "agent.json").exists():
+        if _is_valid_agent_dir(path):
             agents.append(path)
 
     if not agents:
         print(f"No agents found in {agents_dir}", file=sys.stderr)
         return None
 
-    print(f"\nAvailable agents in {agents_dir}:\n")
-    for i, agent_path in enumerate(agents, 1):
+    # Pagination setup
+    page = 0
+    total_pages = (len(agents) + AGENTS_PER_PAGE - 1) // AGENTS_PER_PAGE
+
+    while True:
+        start_idx = page * AGENTS_PER_PAGE
+        end_idx = min(start_idx + AGENTS_PER_PAGE, len(agents))
+        page_agents = agents[start_idx:end_idx]
+
+        # Show page header with indicator
+        if total_pages > 1:
+            print(f"\nAvailable agents in {agents_dir} (Page {page + 1}/{total_pages}):\n")
+        else:
+            print(f"\nAvailable agents in {agents_dir}:\n")
+
+        # Display agents for current page (with global numbering)
+        for i, agent_path in enumerate(page_agents, start_idx + 1):
+            try:
+                agent_json = agent_path / "agent.json"
+                if agent_json.exists():
+                    with open(agent_json) as f:
+                        data = json.load(f)
+                    agent_meta = data.get("agent", {})
+                    name = agent_meta.get("name", agent_path.name)
+                    desc = agent_meta.get("description", "")
+                else:
+                    # Python-based agent - extract from config.py
+                    name, desc = _extract_python_agent_metadata(agent_path)
+                desc = desc[:50] + "..." if len(desc) > 50 else desc
+                print(f"  {i}. {name}")
+                print(f"     {desc}")
+            except Exception as e:
+                print(f"  {i}. {agent_path.name} (error: {e})")
+
+        # Build navigation options
+        nav_options = []
+        if total_pages > 1:
+            nav_options.append("←/→ or p/n=navigate")
+        nav_options.append("q=quit")
+
+        print()
+        if total_pages > 1:
+            print(f"  [{', '.join(nav_options)}]")
+            print()
+
+        # Show prompt
+        print("Select agent (number), use arrows to navigate, or q to quit: ", end="", flush=True)
+
         try:
-            from framework.runner import AgentRunner
+            key = _read_key()
 
-            runner = AgentRunner.load(agent_path)
-            info = runner.info()
-            desc = info.description[:50] + "..." if len(info.description) > 50 else info.description
-            print(f"  {i}. {info.name}")
-            print(f"     {desc}")
-            runner.cleanup()
-        except Exception as e:
-            print(f"  {i}. {agent_path.name} (error: {e})")
+            if key == "RIGHT" and page < total_pages - 1:
+                page += 1
+                print()  # Newline before redrawing
+            elif key == "LEFT" and page > 0:
+                page -= 1
+                print()
+            elif key == "q":
+                print()
+                return None
+            elif key in ("n", ">") and page < total_pages - 1:
+                page += 1
+                print()
+            elif key in ("p", "<") and page > 0:
+                page -= 1
+                print()
+            elif key.isdigit():
+                # Build number with support for backspace
+                buffer = key
+                print(key, end="", flush=True)
 
-    print()
-    try:
-        choice = input("Select agent (number): ").strip()
-        idx = int(choice) - 1
-        if 0 <= idx < len(agents):
-            return str(agents[idx])
-        print("Invalid selection")
-        return None
-    except (ValueError, EOFError, KeyboardInterrupt):
-        return None
+                while True:
+                    ch = _getch()
+                    if ch in ("\r", "\n"):
+                        # Enter pressed - submit
+                        print()
+                        break
+                    elif ch in ("\x7f", "\x08"):
+                        # Backspace (DEL or BS)
+                        if buffer:
+                            buffer = buffer[:-1]
+                            # Erase character: move back, print space, move back
+                            print("\b \b", end="", flush=True)
+                    elif ch.isdigit():
+                        buffer += ch
+                        print(ch, end="", flush=True)
+                    elif ch == "\x1b":
+                        # Escape - cancel input
+                        print()
+                        buffer = ""
+                        break
+                    elif ch == "\x03":
+                        # Ctrl+C
+                        print()
+                        return None
+                    # Ignore other characters
+
+                if buffer:
+                    try:
+                        idx = int(buffer) - 1
+                        if 0 <= idx < len(agents):
+                            return str(agents[idx])
+                        print("Invalid selection")
+                    except ValueError:
+                        print("Invalid input")
+            elif key == "\r" or key == "\n":
+                print()  # Just pressed enter, redraw
+            else:
+                print()
+                print("Invalid input")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
 
 
 def _interactive_multi(agents_dir: Path) -> int:
@@ -1042,7 +1359,7 @@ def _interactive_multi(agents_dir: Path) -> int:
 
     # Register all agents
     for path in agents_dir.iterdir():
-        if path.is_dir() and (path / "agent.json").exists():
+        if _is_valid_agent_dir(path):
             try:
                 orchestrator.register(path.name, path)
                 agent_count += 1

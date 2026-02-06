@@ -149,7 +149,7 @@ class EventLoopNode(NodeProtocol):
     1. Try to restore from durable state (crash recovery)
     2. If no prior state, init from NodeSpec.system_prompt + input_keys
     3. Loop: drain injection queue -> stream LLM -> execute tools
-       -> if client_facing + no real tools: block for user input
+       -> if client_facing + ask_user called: block for user input
        -> judge evaluates (acceptance criteria)
        (each add_* and set_output writes through to store immediately)
     4. Publish events to EventBus at each stage
@@ -157,11 +157,11 @@ class EventLoopNode(NodeProtocol):
     6. Terminate when judge returns ACCEPT, shutdown signaled, or max iterations
     7. Build output dict from OutputAccumulator
 
-    Client-facing blocking: When ``client_facing=True`` and the LLM finishes
-    without real tool calls (stop_reason != tool_call), the node blocks via
-    ``_await_user_input()`` until ``inject_event()`` or ``signal_shutdown()``
-    is called.  After user input, the judge evaluates — the judge is the
-    sole mechanism for acceptance decisions.
+    Client-facing blocking: When ``client_facing=True``, a synthetic
+    ``ask_user`` tool is injected.  The node blocks for user input ONLY
+    when the LLM explicitly calls ``ask_user()``.  Text-only turns
+    without ``ask_user`` flow through without blocking, allowing the LLM
+    to stream progress updates and summaries freely.
 
     Always returns NodeResult with retryable=False semantics. The executor
     must NOT retry event loop nodes -- retry is handled internally by the
@@ -233,11 +233,13 @@ class EventLoopNode(NodeProtocol):
             if initial_message:
                 await conversation.add_user_message(initial_message)
 
-        # 3. Build tool list: node tools + synthetic set_output tool
+        # 3. Build tool list: node tools + synthetic set_output + ask_user tools
         tools = list(ctx.available_tools)
         set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
         if set_output_tool:
             tools.append(set_output_tool)
+        if ctx.node_spec.client_facing:
+            tools.append(self._build_ask_user_tool())
 
         logger.info(
             "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
@@ -288,6 +290,7 @@ class EventLoopNode(NodeProtocol):
                 real_tool_results,
                 outputs_set,
                 turn_tokens,
+                user_input_requested,
             ) = await self._run_single_turn(ctx, conversation, tools, iteration, accumulator)
             logger.info(
                 "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
@@ -317,7 +320,12 @@ class EventLoopNode(NodeProtocol):
             # outputs are already set, accept immediately.  This prevents
             # wasted iterations when the LLM has genuinely finished its
             # work (e.g. after calling set_output in a previous turn).
-            truly_empty = not assistant_text and not real_tool_results and not outputs_set
+            truly_empty = (
+                not assistant_text
+                and not real_tool_results
+                and not outputs_set
+                and not user_input_requested
+            )
             if truly_empty and accumulator is not None:
                 missing = self._get_missing_output_keys(
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
@@ -360,15 +368,14 @@ class EventLoopNode(NodeProtocol):
 
             # 6h. Client-facing input blocking
             #
-            # For client_facing nodes, block for user input whenever the
-            # LLM finishes without making real tool calls (i.e. the LLM's
-            # stop_reason is not tool_call).  set_output is separated from
-            # real tools by _run_single_turn, so this correctly treats
-            # set_output-only turns as conversational boundaries.
+            # For client_facing nodes, block for user input only when the
+            # LLM explicitly called ask_user().  Text-only turns without
+            # ask_user flow through without blocking, allowing progress
+            # updates and summaries to stream freely.
             #
             # After user input, always fall through to judge evaluation
             # (6i).  The judge handles all acceptance decisions.
-            if ctx.node_spec.client_facing and not real_tool_results:
+            if ctx.node_spec.client_facing and user_input_requested:
                 if self._shutdown:
                     await self._publish_loop_completed(stream_id, node_id, iteration + 1)
                     latency_ms = int((time.time() - start_time) * 1000)
@@ -501,8 +508,8 @@ class EventLoopNode(NodeProtocol):
     async def _await_user_input(self, ctx: NodeContext) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
-        Called when a client_facing node produces text without tool calls —
-        a natural conversational turn boundary.
+        Called when a client_facing node explicitly calls ask_user() —
+        an intentional conversational turn boundary.
 
         Returns True if input arrived, False if shutdown was signaled.
         """
@@ -528,16 +535,18 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
-    ) -> tuple[str, list[dict], list[str], dict[str, int]]:
+    ) -> tuple[str, list[dict], list[str], dict[str, int], bool]:
         """Run a single LLM turn with streaming and tool execution.
 
-        Returns (assistant_text, real_tool_results, outputs_set, token_counts).
+        Returns (assistant_text, real_tool_results, outputs_set, token_counts,
+        user_input_requested).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
-        etc.), NOT from the synthetic ``set_output`` tool.  ``outputs_set`` lists
-        the output keys written via ``set_output`` during this turn.  This
-        separation lets the caller treat set_output as a framework concern
-        rather than a tool-execution concern.
+        etc.), NOT from the synthetic ``set_output`` or ``ask_user`` tools.
+        ``outputs_set`` lists the output keys written via ``set_output`` during
+        this turn.  ``user_input_requested`` is True if the LLM called
+        ``ask_user`` during this turn.  This separation lets the caller treat
+        synthetic tools as framework concerns rather than tool-execution concerns.
         """
         stream_id = ctx.node_id
         node_id = ctx.node_id
@@ -546,6 +555,7 @@ class EventLoopNode(NodeProtocol):
         final_text = ""
         # Track output keys set via set_output across all inner iterations
         outputs_set_this_turn: list[str] = []
+        user_input_requested = False
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
@@ -616,7 +626,7 @@ class EventLoopNode(NodeProtocol):
 
             # If no tool calls, turn is complete
             if not tool_calls:
-                return final_text, [], outputs_set_this_turn, token_counts
+                return final_text, [], outputs_set_this_turn, token_counts, user_input_requested
 
             # Execute tool calls — separate real tools from set_output
             real_tool_results: list[dict] = []
@@ -666,6 +676,14 @@ class EventLoopNode(NodeProtocol):
                                 pass
                         await accumulator.set(tc.tool_input["key"], value)
                         outputs_set_this_turn.append(tc.tool_input["key"])
+                elif tc.tool_name == "ask_user":
+                    # --- Framework-level ask_user handling ---
+                    user_input_requested = True
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content="Waiting for user input...",
+                        is_error=False,
+                    )
                 else:
                     # --- Real tool execution ---
                     result = await self._execute_tool(tc)
@@ -748,7 +766,13 @@ class EventLoopNode(NodeProtocol):
                     )
                 # Limit hit — return from this turn so the judge can
                 # evaluate instead of looping back for another stream.
-                return final_text, real_tool_results, outputs_set_this_turn, token_counts
+                return (
+                    final_text,
+                    real_tool_results,
+                    outputs_set_this_turn,
+                    token_counts,
+                    user_input_requested,
+                )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
             if conversation.usage_ratio() >= 0.6:
@@ -764,11 +788,49 @@ class EventLoopNode(NodeProtocol):
                         conversation.usage_ratio() * 100,
                     )
 
+            # If ask_user was called, return immediately so the outer loop
+            # can block for user input instead of re-invoking the LLM.
+            if user_input_requested:
+                return (
+                    final_text,
+                    real_tool_results,
+                    outputs_set_this_turn,
+                    token_counts,
+                    user_input_requested,
+                )
+
             # Tool calls processed -- loop back to stream with updated conversation
 
     # -------------------------------------------------------------------
-    # set_output synthetic tool
+    # Synthetic tools: set_output, ask_user
     # -------------------------------------------------------------------
+
+    def _build_ask_user_tool(self) -> Tool:
+        """Build the synthetic ask_user tool for explicit user-input requests.
+
+        Client-facing nodes call ask_user() when they need to pause and wait
+        for user input.  Text-only turns WITHOUT ask_user flow through without
+        blocking, allowing progress updates and summaries to stream freely.
+        """
+        return Tool(
+            name="ask_user",
+            description=(
+                "Call this tool when you need to wait for the user's response. "
+                "Use it after greeting the user, asking a question, or requesting "
+                "approval. Do NOT call it when you are just providing a status "
+                "update or summary that doesn't require a response."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "Optional: the question or prompt shown to the user.",
+                    },
+                },
+                "required": [],
+            },
+        )
 
     def _build_set_output_tool(self, output_keys: list[str] | None) -> Tool | None:
         """Build the synthetic set_output tool for explicit output declaration."""
