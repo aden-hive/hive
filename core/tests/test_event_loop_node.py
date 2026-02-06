@@ -316,7 +316,7 @@ class TestSetOutput:
         result = await node.execute(ctx)
 
         assert result.success is True
-        assert result.output["result"] == "42"
+        assert result.output["result"] == 42
 
     @pytest.mark.asyncio
     async def test_set_output_rejects_invalid_key(self, runtime, node_spec, memory):

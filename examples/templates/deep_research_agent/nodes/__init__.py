@@ -102,41 +102,56 @@ Should we proceed to writing the final report?
 )
 
 # Node 4: Report (client-facing)
-# Writes the final report and presents it to the user.
+# Writes an HTML report, serves the link to the user, and answers follow-ups.
 report_node = NodeSpec(
     id="report",
     name="Write & Deliver Report",
-    description="Write a cited report from the findings and present it to the user",
+    description="Write a cited HTML report from the findings and present it to the user",
     node_type="event_loop",
     client_facing=True,
     input_keys=["findings", "sources", "research_brief"],
     output_keys=["delivery_status"],
     system_prompt="""\
-Write a comprehensive research report and present it to the user.
+Write a comprehensive research report as an HTML file and present it to the user.
 
-**STEP 1 — Write and present the report (text only, NO tool calls):**
+**STEP 1 — Write the HTML report (tool calls, NO text to user yet):**
 
-Report structure:
-1. **Executive Summary** (2-3 paragraphs)
-2. **Findings** (organized by theme, with [n] citations)
-3. **Analysis** (synthesis, implications, areas of debate)
-4. **Conclusion** (key takeaways, confidence assessment)
-5. **References** (numbered list of sources cited)
+1. Compose a complete, self-contained HTML document with embedded CSS styling.
+   Use a clean, readable design: max-width container, pleasant typography,
+   numbered citation links, a table of contents, and a references section.
 
-Requirements:
-- Every factual claim must cite its source with [n] notation
-- Be objective — present multiple viewpoints where sources disagree
-- Distinguish well-supported conclusions from speculation
-- Answer the original research questions from the brief
+   Report structure inside the HTML:
+   - Title & date
+   - Executive Summary (2-3 paragraphs)
+   - Table of Contents
+   - Findings (organized by theme, with [n] citation links)
+   - Analysis (synthesis, implications, areas of debate)
+   - Conclusion (key takeaways, confidence assessment)
+   - References (numbered list with clickable URLs)
 
-End by asking the user if they have questions or want to save the report.
+   Requirements:
+   - Every factual claim must cite its source with [n] notation
+   - Be objective — present multiple viewpoints where sources disagree
+   - Distinguish well-supported conclusions from speculation
+   - Answer the original research questions from the brief
 
-**STEP 2 — After the user responds:**
+2. Save the HTML file:
+   save_data(filename="report.html", data=<your_html>)
+
+3. Get the clickable link:
+   serve_file_to_user(filename="report.html", label="Research Report")
+
+**STEP 2 — Present the link to the user (text only, NO tool calls):**
+
+Tell the user the report is ready and include the file:// URI from
+serve_file_to_user so they can click it to open. Give a brief summary
+of what the report covers. Ask if they have questions.
+
+**STEP 3 — After the user responds:**
 - Answer follow-up questions from the research material
-- If they want to save, use write_to_file tool
 - When the user is satisfied: set_output("delivery_status", "completed")
 """,
-    tools=["write_to_file"],
+    tools=["save_data", "serve_file_to_user", "load_data", "list_data_files"],
 )
 
 __all__ = [

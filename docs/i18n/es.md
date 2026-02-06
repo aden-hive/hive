@@ -78,6 +78,7 @@ cd hive
 ```
 
 Esto instala:
+
 - **framework** - Runtime del agente principal y ejecutor de grafos
 - **aden_tools** - 19 herramientas MCP para capacidades de agentes
 - Todas las dependencias requeridas
@@ -89,7 +90,7 @@ Esto instala:
 ./quickstart.sh
 
 # Construir un agente usando Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Probar tu agente
 claude> /testing-agent
@@ -162,14 +163,14 @@ flowchart LR
 
 ### La Ventaja de Aden
 
-| Frameworks Tradicionales | Aden |
-|--------------------------|------|
-| Codificar flujos de trabajo de agentes | Describir objetivos en lenguaje natural |
-| Definición manual de grafos | Grafos de agentes auto-generados |
-| Manejo reactivo de errores | Auto-evolución proactiva |
-| Configuraciones de herramientas estáticas | Nodos dinámicos envueltos en SDK |
-| Configuración de monitoreo separada | Observabilidad en tiempo real integrada |
-| Gestión de presupuesto DIY | Controles de costos y degradación integrados |
+| Frameworks Tradicionales                  | Aden                                         |
+| ----------------------------------------- | -------------------------------------------- |
+| Codificar flujos de trabajo de agentes    | Describir objetivos en lenguaje natural      |
+| Definición manual de grafos               | Grafos de agentes auto-generados             |
+| Manejo reactivo de errores                | Auto-evolución proactiva                     |
+| Configuraciones de herramientas estáticas | Nodos dinámicos envueltos en SDK             |
+| Configuración de monitoreo separada       | Observabilidad en tiempo real integrada      |
+| Gestión de presupuesto DIY                | Controles de costos y degradación integrados |
 
 ### Cómo Funciona
 
@@ -235,7 +236,7 @@ Para construir y ejecutar agentes orientados a objetivos con el framework:
 # - Todas las dependencias
 
 # Construir nuevos agentes usando habilidades de Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Probar agentes
 claude> /testing-agent

@@ -1,20 +1,34 @@
 ---
-name: agent-workflow
-description: Complete workflow for building, implementing, and testing goal-driven agents. Orchestrates building-agents-* and testing-agent skills. Use when starting a new agent project, unsure which skill to use, or need end-to-end guidance.
+name: hive
+description: Complete workflow for building, implementing, and testing goal-driven agents. Orchestrates hive-* skills. Use when starting a new agent project, unsure which skill to use, or need end-to-end guidance.
 license: Apache-2.0
 metadata:
   author: hive
   version: "2.0"
   type: workflow-orchestrator
   orchestrates:
-    - building-agents-core
-    - building-agents-construction
-    - building-agents-patterns
-    - testing-agent
-    - setup-credentials
+    - hive-concepts
+    - hive-create
+    - hive-patterns
+    - hive-test
+    - hive-credentials
 ---
 
 # Agent Development Workflow
+
+**THIS IS AN EXECUTABLE WORKFLOW. DO NOT explore the codebase or read source files. ROUTE to the correct skill IMMEDIATELY.**
+
+When this skill is loaded, determine what the user needs and invoke the appropriate skill NOW:
+- **User wants to build an agent** → Invoke `/hive-create` immediately
+- **User wants to test an agent** → Invoke `/hive-test` immediately
+- **User wants to learn concepts** → Invoke `/hive-concepts` immediately
+- **User wants patterns/optimization** → Invoke `/hive-patterns` immediately
+- **User wants to set up credentials** → Invoke `/hive-credentials` immediately
+- **Unclear what user needs** → Ask the user (do NOT explore the codebase to figure it out)
+
+**DO NOT:** Read source files, explore the codebase, search for code, or do any investigation before routing. The sub-skills handle all of that.
+
+---
 
 Complete Standard Operating Procedure (SOP) for building production-ready goal-driven agents.
 
@@ -22,11 +36,11 @@ Complete Standard Operating Procedure (SOP) for building production-ready goal-d
 
 This workflow orchestrates specialized skills to take you from initial concept to production-ready agent:
 
-1. **Understand Concepts** → `/building-agents-core` (optional)
-2. **Build Structure** → `/building-agents-construction`
-3. **Optimize Design** → `/building-agents-patterns` (optional)
-4. **Setup Credentials** → `/setup-credentials` (if agent uses tools requiring API keys)
-5. **Test & Validate** → `/testing-agent`
+1. **Understand Concepts** → `/hive-concepts` (optional)
+2. **Build Structure** → `/hive-create`
+3. **Optimize Design** → `/hive-patterns` (optional)
+4. **Setup Credentials** → `/hive-credentials` (if agent uses tools requiring API keys)
+5. **Test & Validate** → `/hive-test`
 
 ## When to Use This Workflow
 
@@ -37,18 +51,18 @@ Use this meta-skill when:
 - Want consistent, repeatable agent builds
 
 **Skip this workflow** if:
-- You only need to test an existing agent → use `/testing-agent` directly
+- You only need to test an existing agent → use `/hive-test` directly
 - You know exactly which phase you're in → use specific skill directly
 
 ## Quick Decision Tree
 
 ```
-"Need to understand agent concepts" → building-agents-core
-"Build a new agent" → building-agents-construction
-"Optimize my agent design" → building-agents-patterns
-"Need client-facing nodes or feedback loops" → building-agents-patterns
-"Set up API keys for my agent" → setup-credentials
-"Test my agent" → testing-agent
+"Need to understand agent concepts" → hive-concepts
+"Build a new agent" → hive-create
+"Optimize my agent design" → hive-patterns
+"Need client-facing nodes or feedback loops" → hive-patterns
+"Set up API keys for my agent" → hive-credentials
+"Test my agent" → hive-test
 "Not sure what I need" → Read phases below, then decide
 "Agent has structure but needs implementation" → See agent directory STATUS.md
 ```
@@ -56,7 +70,7 @@ Use this meta-skill when:
 ## Phase 0: Understand Concepts (Optional)
 
 **Duration**: 5-10 minutes
-**Skill**: `/building-agents-core`
+**Skill**: `/hive-concepts`
 **Input**: Questions about agent architecture
 
 ### When to Use
@@ -78,7 +92,7 @@ Use this meta-skill when:
 ## Phase 1: Build Agent Structure
 
 **Duration**: 15-30 minutes
-**Skill**: `/building-agents-construction`
+**Skill**: `/hive-create`
 **Input**: User requirements ("Build an agent that...")
 
 ### What This Phase Does
@@ -121,7 +135,7 @@ You're ready for Phase 2 when:
 
 ### Common Outputs
 
-The building-agents-construction skill produces:
+The hive-create skill produces:
 ```
 exports/agent_name/
 ├── __init__.py          (package exports)
@@ -141,7 +155,7 @@ exports/agent_name/
 → You may need to add Python functions or MCP tools (not covered by current skills)
 
 **If want to optimize design:**
-→ Proceed to Phase 1.5 (building-agents-patterns)
+→ Proceed to Phase 1.5 (hive-patterns)
 
 **If ready to test:**
 → Proceed to Phase 2
@@ -149,7 +163,7 @@ exports/agent_name/
 ## Phase 1.5: Optimize Design (Optional)
 
 **Duration**: 10-15 minutes
-**Skill**: `/building-agents-patterns`
+**Skill**: `/hive-patterns`
 **Input**: Completed agent structure
 
 ### When to Use
@@ -174,7 +188,7 @@ exports/agent_name/
 ## Phase 2: Test & Validate
 
 **Duration**: 20-40 minutes
-**Skill**: `/testing-agent`
+**Skill**: `/hive-test`
 **Input**: Working agent from Phase 1
 
 ### What This Phase Does
@@ -251,9 +265,9 @@ You're done when:
 
 ```
 User: "Build an agent that monitors files"
-→ Use /building-agents-construction
+→ Use /hive-create
 → Agent structure created
-→ Use /testing-agent
+→ Use /hive-test
 → Tests created and passing
 → Done: Production-ready agent
 ```
@@ -262,10 +276,10 @@ User: "Build an agent that monitors files"
 
 ```
 User: "Build an agent (first time)"
-→ Use /building-agents-core (understand concepts)
-→ Use /building-agents-construction (build structure)
-→ Use /building-agents-patterns (optimize design)
-→ Use /testing-agent (validate)
+→ Use /hive-concepts (understand concepts)
+→ Use /hive-create (build structure)
+→ Use /hive-patterns (optimize design)
+→ Use /hive-test (validate)
 → Done: Production-ready agent
 ```
 
@@ -274,7 +288,7 @@ User: "Build an agent (first time)"
 ```
 User: "Test my agent at exports/my_agent"
 → Skip Phase 1
-→ Use /testing-agent directly
+→ Use /hive-test directly
 → Tests created
 → Done: Validated agent
 ```
@@ -283,10 +297,10 @@ User: "Test my agent at exports/my_agent"
 
 ```
 User: "Build an agent"
-→ Use /building-agents-construction (Phase 1)
+→ Use /hive-create (Phase 1)
 → Implementation needed (see STATUS.md)
 → [User implements functions]
-→ Use /testing-agent (Phase 2)
+→ Use /hive-test (Phase 2)
 → Tests reveal bugs
 → [Fix bugs manually]
 → Re-run tests
@@ -297,41 +311,41 @@ User: "Build an agent"
 
 ```
 User: "Build an agent with human review and feedback loops"
-→ Use /building-agents-core (learn event loop, client-facing nodes)
-→ Use /building-agents-construction (build structure with feedback edges)
-→ Use /building-agents-patterns (implement client-facing + feedback patterns)
-→ Use /testing-agent (validate review flows and edge routing)
+→ Use /hive-concepts (learn event loop, client-facing nodes)
+→ Use /hive-create (build structure with feedback edges)
+→ Use /hive-patterns (implement client-facing + feedback patterns)
+→ Use /hive-test (validate review flows and edge routing)
 → Done: Agent with HITL checkpoints and review loops
 ```
 
 ## Skill Dependencies
 
 ```
-agent-workflow (meta-skill)
+hive (meta-skill)
     │
-    ├── building-agents-core (foundational)
+    ├── hive-concepts (foundational)
     │   ├── Architecture concepts (event loop, judges)
     │   ├── Node types (event_loop, function)
     │   ├── Edge routing and priority
     │   ├── Tool discovery procedures
     │   └── Workflow overview
     │
-    ├── building-agents-construction (procedural)
+    ├── hive-create (procedural)
     │   ├── Creates package structure
     │   ├── Defines goal
     │   ├── Adds nodes (event_loop, function)
     │   ├── Connects edges with priority routing
     │   ├── Finalizes agent class
-    │   └── Requires: building-agents-core
+    │   └── Requires: hive-concepts
     │
-    ├── building-agents-patterns (reference)
+    ├── hive-patterns (reference)
     │   ├── Client-facing interaction patterns
     │   ├── Feedback edges and review loops
     │   ├── Judge patterns (implicit, SchemaJudge)
     │   ├── Fan-out/fan-in parallel execution
     │   └── Context management and anti-patterns
     │
-    └── testing-agent
+    └── hive-test
         ├── Reads agent goal
         ├── Generates tests
         ├── Runs evaluation
@@ -351,7 +365,7 @@ agent-workflow (meta-skill)
 
 - Check for STATUS.md or IMPLEMENTATION_GUIDE.md in agent directory
 - Implementation may be needed (Python functions or MCP tools)
-- This is expected - building-agents-construction creates structure, not implementation
+- This is expected - hive-create creates structure, not implementation
 - See implementation guide for completion options
 
 ### "Tests are failing"
@@ -359,7 +373,7 @@ agent-workflow (meta-skill)
 - Review test output for specific failures
 - Check agent goal and success criteria
 - Verify constraints are met
-- Use `/testing-agent` to debug and iterate
+- Use `/hive-test` to debug and iterate
 - Fix agent code and re-run tests
 
 ### "Not sure which phase I'm in"
@@ -420,10 +434,10 @@ You're done with the workflow when:
 
 ## Additional Resources
 
-- **building-agents-core**: See `.claude/skills/building-agents-core/SKILL.md`
-- **building-agents-construction**: See `.claude/skills/building-agents-construction/SKILL.md`
-- **building-agents-patterns**: See `.claude/skills/building-agents-patterns/SKILL.md`
-- **testing-agent**: See `.claude/skills/testing-agent/SKILL.md`
+- **hive-concepts**: See `.claude/skills/hive-concepts/SKILL.md`
+- **hive-create**: See `.claude/skills/hive-create/SKILL.md`
+- **hive-patterns**: See `.claude/skills/hive-patterns/SKILL.md`
+- **hive-test**: See `.claude/skills/hive-test/SKILL.md`
 - **Agent framework docs**: See `core/README.md`
 - **Example agents**: See `exports/` directory
 
@@ -431,35 +445,35 @@ You're done with the workflow when:
 
 This workflow provides a proven path from concept to production-ready agent:
 
-1. **Learn** with `/building-agents-core` → Understand fundamentals (optional)
-2. **Build** with `/building-agents-construction` → Get validated structure
-3. **Optimize** with `/building-agents-patterns` → Apply best practices (optional)
-4. **Test** with `/testing-agent` → Get verified functionality
+1. **Learn** with `/hive-concepts` → Understand fundamentals (optional)
+2. **Build** with `/hive-create` → Get validated structure
+3. **Optimize** with `/hive-patterns` → Apply best practices (optional)
+4. **Test** with `/hive-test` → Get verified functionality
 
 The workflow is **flexible** - skip phases as needed, iterate freely, and adapt to your specific requirements. The goal is **production-ready agents** built with **consistent, repeatable processes**.
 
 ## Skill Selection Guide
 
-**Choose building-agents-core when:**
+**Choose hive-concepts when:**
 - First time building agents
 - Need to understand event loop architecture
 - Validating tool availability
 - Learning about node types, edges, and judges
 
-**Choose building-agents-construction when:**
+**Choose hive-create when:**
 - Actually building an agent
 - Have clear requirements
 - Ready to write code
 - Want step-by-step guidance
 
-**Choose building-agents-patterns when:**
+**Choose hive-patterns when:**
 - Agent structure complete
 - Need client-facing nodes or feedback edges
 - Implementing review loops or fan-out/fan-in
 - Want judge patterns or context management
 - Want best practices
 
-**Choose testing-agent when:**
+**Choose hive-test when:**
 - Agent structure complete
 - Ready to validate functionality
 - Need comprehensive test coverage

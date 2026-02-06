@@ -74,6 +74,11 @@ class LoopConfig:
     max_history_tokens: int = 32_000
     store_prefix: str = ""
 
+    # Overflow margin for max_tool_calls_per_turn.  Tool calls are only
+    # discarded when the count exceeds max_tool_calls_per_turn * (1 + margin).
+    # Default 0.5 means 50% wiggle room (e.g. limit=10 → hard cutoff at 15).
+    tool_call_overflow_margin: float = 0.5
+
     # --- Tool result context management ---
     # When a tool result exceeds this character count, it is truncated in the
     # conversation context.  If *spillover_dir* is set the full result is
@@ -877,9 +882,12 @@ class EventLoopNode(NodeProtocol):
             real_tool_results: list[dict] = []
             limit_hit = False
             executed_in_batch = 0
+            hard_limit = int(
+                self._config.max_tool_calls_per_turn * (1 + self._config.tool_call_overflow_margin)
+            )
             for tc in tool_calls:
                 tool_call_count += 1
-                if tool_call_count > self._config.max_tool_calls_per_turn:
+                if tool_call_count > hard_limit:
                     limit_hit = True
                     break
                 executed_in_batch += 1
@@ -912,7 +920,7 @@ class EventLoopNode(NodeProtocol):
                         if isinstance(value, str):
                             try:
                                 parsed = json.loads(value)
-                                if isinstance(parsed, (list, dict)):
+                                if isinstance(parsed, (list, dict, bool, int, float)):
                                     value = parsed
                             except (json.JSONDecodeError, TypeError):
                                 pass
@@ -965,17 +973,16 @@ class EventLoopNode(NodeProtocol):
             # corresponding tool results, causing the LLM to repeat them
             # in the next turn (infinite loop).
             if limit_hit:
-                max_tc = self._config.max_tool_calls_per_turn
                 skipped = tool_calls[executed_in_batch:]
                 logger.warning(
-                    "Max tool calls per turn (%d) exceeded — discarding %d remaining call(s): %s",
-                    max_tc,
+                    "Hard tool call limit (%d) exceeded — discarding %d remaining call(s): %s",
+                    hard_limit,
                     len(skipped),
                     ", ".join(tc.tool_name for tc in skipped),
                 )
                 discard_msg = (
-                    f"Tool call discarded: max tool calls per turn "
-                    f"({max_tc}) exceeded. Consolidate your work and "
+                    f"Tool call discarded: hard limit of {hard_limit} tool calls "
+                    f"per turn exceeded. Consolidate your work and "
                     f"use fewer tool calls."
                 )
                 for tc in skipped:
@@ -1325,7 +1332,7 @@ class EventLoopNode(NodeProtocol):
             truncated = (
                 f"[Result from {tool_name}: {len(result.content)} chars — "
                 f"too large for context, saved to '{filename}'. "
-                f"Use load_data(filename='{filename}', data_dir='{spill_dir}') "
+                f"Use load_data(filename='{filename}') "
                 f"to read the full result.]\n\n"
                 f"Preview:\n{preview}…"
             )
@@ -1545,11 +1552,9 @@ class EventLoopNode(NodeProtocol):
 
         # 5. Spillover files hint
         if self._config.spillover_dir:
-            spill = self._config.spillover_dir
             parts.append(
                 "NOTE: Large tool results were saved to files. "
-                f"Use load_data(filename='<filename>', data_dir='{spill}') "
-                "to read them."
+                "Use load_data(filename='<filename>') to read them."
             )
 
         # 6. Tool call history (prevent re-calling tools)

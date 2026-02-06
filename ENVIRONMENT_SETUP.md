@@ -9,8 +9,8 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ./quickstart.sh
 ```
 
-> **Note for Windows Users:**  
-> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.  
+> **Note for Windows Users:**
+> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.
 > It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for a smoother setup experience.
 
 This will:
@@ -39,17 +39,22 @@ Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run
 If you are using Alpine Linux (e.g., inside a Docker container), you must install system dependencies and use a virtual environment before running the setup script:
 
 1. Install System Dependencies:
+
 ```bash
 apk update
 apk add bash git python3 py3-pip nodejs npm curl build-base python3-dev linux-headers libffi-dev
 ```
+
 2. Set up Virtual Environment (Required for Python 3.12+):
+
 ```
 uv venv
 source .venv/bin/activate
 # uv handles pip/setuptools/wheel automatically
 ```
+
 3. Run the Quickstart Script:
+
 ```
 ./quickstart.sh
 ```
@@ -87,7 +92,7 @@ uv run python -c "import aden_tools; print('✓ aden_tools OK')"
 uv run python -c "import litellm; print('✓ litellm OK')"
 ```
 
-> **Windows Tip:**  
+> **Windows Tip:**
 > On Windows, if the verification commands fail, ensure you are running them in **WSL** or after **disabling Python App Execution Aliases** in Windows Settings → Apps → App Execution Aliases.
 
 ## Requirements
@@ -165,7 +170,7 @@ Build and run an agent using Claude Code CLI with the agent building skills:
 
 This verifies agent-related Claude Code skills are available:
 
-- `/building-agents-construction` - Step-by-step build guide
+- `/hive-create` - Step-by-step build guide
 - `/building-agents-core` - Fundamental concepts
 - `/building-agents-patterns` - Best practices
 - `/testing-agent` - Test and validate agents
@@ -174,7 +179,7 @@ This verifies agent-related Claude Code skills are available:
 ### 2. Build an Agent
 
 ```
-claude> /building-agents-construction
+claude> /hive
 ```
 
 Follow the prompts to:
@@ -221,6 +226,7 @@ This step helps optimize agent design before final testing.
 ```
 claude> /testing-agent
 ```
+
 Follow the prompts to:
 
 1. Generate test guidelines for constraints and success criteria
@@ -363,7 +369,7 @@ hive/
 │   └── pyproject.toml
 │
 └── exports/                 # Agent packages (user-created, gitignored)
-    └── your_agent_name/     # Created via /building-agents-construction
+    └── your_agent_name/     # Created via /hive-create
 ```
 
 ## Separate Virtual Environments
@@ -446,7 +452,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-claude> /building-agents-construction
+claude> /hive
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 
@@ -516,7 +522,7 @@ export AGENT_STORAGE_PATH="/custom/storage"
 - **Framework Documentation:** [core/README.md](core/README.md)
 - **Tools Documentation:** [tools/README.md](tools/README.md)
 - **Example Agents:** [exports/](exports/)
-- **Agent Building Guide:** [.claude/skills/building-agents-construction/SKILL.md](.claude/skills/building-agents-construction/SKILL.md)
+- **Agent Building Guide:** [.claude/skills/hive-create/SKILL.md](.claude/skills/hive-create/SKILL.md)
 - **Testing Guide:** [.claude/skills/testing-agent/SKILL.md](.claude/skills/testing-agent/SKILL.md)
 
 ## Contributing

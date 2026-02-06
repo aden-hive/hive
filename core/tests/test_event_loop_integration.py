@@ -508,7 +508,7 @@ async def test_event_loop_set_output():
 
     assert result.success
     if USE_MOCK_LLM:
-        assert result.output == {"lead_score": "87", "company": "TechCorp"}
+        assert result.output == {"lead_score": 87, "company": "TechCorp"}
     else:
         assert "lead_score" in result.output
         assert "company" in result.output
@@ -549,7 +549,7 @@ async def test_event_loop_missing_output_keys_retried():
     assert "score" in result.output
     assert "reason" in result.output
     if USE_MOCK_LLM:
-        assert result.output["score"] == "87"
+        assert result.output["score"] == 87
         assert result.output["reason"] == "good fit"
 
 
@@ -920,7 +920,7 @@ async def test_context_handoff_between_nodes(runtime):
     assert "lead_score" in result.output
     assert "strategy" in result.output
     if USE_MOCK_LLM:
-        assert result.output["lead_score"] == "92"
+        assert result.output["lead_score"] == 92
         assert result.output["strategy"] == "premium"
 
 

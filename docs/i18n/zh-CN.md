@@ -80,6 +80,7 @@ cd hive
 ```
 
 这将安装：
+
 - **framework** - 核心智能体运行时和图执行器
 - **aden_tools** - 19 个 MCP 工具提供智能体能力
 - 所有必需的依赖项
@@ -91,7 +92,7 @@ cd hive
 ./quickstart.sh
 
 # 使用 Claude Code 构建智能体
-claude> /building-agents-construction
+claude> /hive
 
 # 测试您的智能体
 claude> /testing-agent
@@ -164,14 +165,14 @@ flowchart LR
 
 ### Aden 的优势
 
-| 传统框架 | Aden |
-|----------|------|
+| 传统框架           | Aden               |
+| ------------------ | ------------------ |
 | 硬编码智能体工作流 | 用自然语言描述目标 |
-| 手动图定义 | 自动生成智能体图 |
-| 被动错误处理 | 主动自我进化 |
-| 静态工具配置 | 动态 SDK 封装节点 |
-| 单独设置监控 | 内置实时可观测性 |
-| DIY 预算管理 | 集成成本控制和降级 |
+| 手动图定义         | 自动生成智能体图   |
+| 被动错误处理       | 主动自我进化       |
+| 静态工具配置       | 动态 SDK 封装节点  |
+| 单独设置监控       | 内置实时可观测性   |
+| DIY 预算管理       | 集成成本控制和降级 |
 
 ### 工作原理
 
@@ -237,7 +238,7 @@ hive/
 # - 所有依赖项
 
 # 使用 Claude Code 技能构建新智能体
-claude> /building-agents-construction
+claude> /hive
 
 # 测试智能体
 claude> /testing-agent
