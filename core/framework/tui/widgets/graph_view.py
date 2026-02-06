@@ -4,10 +4,10 @@ Graph/Tree Overview Widget - Displays real agent graph structure.
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import RichLog
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import EventType
+from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichLog
 
 
 class GraphOverview(Vertical):

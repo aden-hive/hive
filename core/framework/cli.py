@@ -44,6 +44,13 @@ def _configure_paths():
         if exports_str not in sys.path:
             sys.path.insert(0, exports_str)
 
+    # Add examples/templates/ to sys.path so template agents are importable
+    templates_dir = project_root / "examples" / "templates"
+    if templates_dir.is_dir():
+        templates_str = str(templates_dir)
+        if templates_str not in sys.path:
+            sys.path.insert(0, templates_str)
+
     # Ensure core/ is also in sys.path (for non-editable-install scenarios)
     core_str = str(project_root / "core")
     if (project_root / "core").is_dir() and core_str not in sys.path:
