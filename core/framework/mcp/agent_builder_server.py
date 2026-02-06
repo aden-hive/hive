@@ -9,20 +9,36 @@ Usage:
 
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from mcp.server import FastMCP
+# Ensure exports/ is on sys.path so AgentRunner can import agent modules.
+_framework_dir = Path(__file__).resolve().parent.parent  # core/framework/ -> core/
+_project_root = _framework_dir.parent  # core/ -> project root
+_exports_dir = _project_root / "exports"
+if _exports_dir.is_dir() and str(_exports_dir) not in sys.path:
+    sys.path.insert(0, str(_exports_dir))
+del _framework_dir, _project_root, _exports_dir
 
-from framework.graph import Constraint, EdgeCondition, EdgeSpec, Goal, NodeSpec, SuccessCriterion
-from framework.graph.plan import Plan
+from mcp.server import FastMCP  # noqa: E402
+
+from framework.graph import (  # noqa: E402
+    Constraint,
+    EdgeCondition,
+    EdgeSpec,
+    Goal,
+    NodeSpec,
+    SuccessCriterion,
+)
+from framework.graph.plan import Plan  # noqa: E402
 
 # Testing framework imports
-from framework.testing.prompts import (
+from framework.testing.prompts import (  # noqa: E402
     PYTEST_TEST_FILE_HEADER,
 )
-from framework.utils.io import atomic_write
+from framework.utils.io import atomic_write  # noqa: E402
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")

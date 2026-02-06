@@ -53,7 +53,7 @@ mkdir -p exports/my_agent
 
 # Create your agent structure
 cd exports/my_agent
-# Create agent.json, tools.py, README.md (see DEVELOPER.md for structure)
+# Create agent.json, tools.py, README.md (see developer-guide.md for structure)
 
 # Validate the agent
 PYTHONPATH=exports uv run python -m my_agent validate
@@ -100,15 +100,15 @@ hive/
 │       └── mcp_server.py   # HTTP MCP server
 │
 ├── exports/                # Agent Packages (user-generated, not in repo)
-│   └── your_agent/         # Your agents created via /building-agents
+│   └── your_agent/         # Your agents created via /hive
 │
 ├── .claude/                # Claude Code Skills
 │   └── skills/
-│       ├── agent-workflow/
-│       ├── building-agents-construction/
-│       ├── building-agents-core/
-│       ├── building-agents-patterns/
-│       └── testing-agent/
+│       ├── hive/
+│       ├── hive-create/
+│       ├── hive-concepts/
+│       ├── hive-patterns/
+│       └── hive-test/
 │
 └── docs/                   # Documentation
 ```
@@ -152,7 +152,7 @@ Get your API keys:
 
 ```bash
 # Using Claude Code
-claude> /testing-agent
+claude> /hive-test
 
 # Or manually
 PYTHONPATH=exports uv run python -m my_agent test
@@ -164,9 +164,9 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 
 ## Next Steps
 
-1. **Detailed Setup**: See [ENVIRONMENT_SETUP.md](../ENVIRONMENT_SETUP.md)
-2. **Developer Guide**: See [DEVELOPER.md](../DEVELOPER.md)
-3. **Build Agents**: Use `/building-agents` skill in Claude Code
+1. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
+2. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
+3. **Build Agents**: Use `/hive` skill in Claude Code
 4. **Custom Tools**: Learn to integrate MCP servers
 5. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
@@ -211,4 +211,4 @@ pip uninstall -y framework tools
 - **Documentation**: Check the `/docs` folder
 - **Issues**: [github.com/adenhq/hive/issues](https://github.com/adenhq/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
-- **Build Agents**: Use `/building-agents` skill to create agents
+- **Build Agents**: Use `/hive` skill to create agents

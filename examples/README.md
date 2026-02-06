@@ -37,5 +37,5 @@ uv run python -m exports.my_agent --help
 ## How to use a recipe
 
 1. Read the recipe markdown file
-2. Use the patterns described to build your own agent — either manually or with the builder agent (`/agent-workflow`)
+2. Use the patterns described to build your own agent — either manually or with the builder agent (`/hive`)
 3. Refer to the [core README](../core/README.md) for framework API details

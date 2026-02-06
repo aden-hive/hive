@@ -67,7 +67,9 @@ def tui(mock, verbose, debug):
     try:
         from framework.tui.app import AdenTUI
     except ImportError:
-        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
+        click.echo(
+            "TUI requires the 'textual' package. Install with: pip install textual"
+        )
         sys.exit(1)
 
     from pathlib import Path
@@ -198,6 +200,7 @@ async def _interactive_shell(verbose=False):
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         import traceback
+
         traceback.print_exc()
     finally:
         await agent.stop()
