@@ -596,5 +596,23 @@ All credentials are now configured:
   ✓ brave_search (BRAVE_SEARCH_API_KEY) — already in encrypted store
   ✓ google_search (GOOGLE_API_KEY) — stored in encrypted store
   ✓ google_cse (GOOGLE_CSE_ID) — stored in encrypted store
-Your agent is ready to run!
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      ✅ CREDENTIALS CONFIGURED                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  NEXT STEPS:                                                                │
+│                                                                             │
+│  1. RUN YOUR AGENT:                                                         │
+│                                                                             │
+│     PYTHONPATH=core:exports python -m research-agent tui                    │
+│                                                                             │
+│  2. IF YOU ENCOUNTER ISSUES, USE THE DEBUGGER:                              │
+│                                                                             │
+│     /hive-debugger                                                          │
+│                                                                             │
+│     The debugger analyzes runtime logs, identifies retry loops, tool        │
+│     failures, stalled execution, and provides actionable fix suggestions.  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
