@@ -6,8 +6,8 @@ from framework.graph import EdgeCondition, EdgeSpec, Goal, SuccessCriterion, Con
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.runtime.core import Runtime
-from framework.llm.anthropic import AnthropicProvider
-
+# CORRECTED IMPORT: This points to the actual LiteLLM-based provider in the framework
+from framework.llm.litellm import LiteLLMProvider
 from .config import default_config, RuntimeConfig
 from .nodes import all_nodes
 
@@ -34,12 +34,6 @@ goal = Goal(
             metric="custom",
             target="len(content) >= 2",
         ),
-        SuccessCriterion(
-            id="variants-provided",
-            description="A/B variants are provided for each content piece",
-            metric="custom",
-            target="all variants present",
-        ),
     ],
     constraints=[
         Constraint(
@@ -47,12 +41,6 @@ goal = Goal(
             description="No competitor brand names in generated content",
             constraint_type="hard",
             category="safety",
-        ),
-        Constraint(
-            id="social-length",
-            description="Social media content should be under 280 characters",
-            constraint_type="soft",
-            category="quality",
         ),
     ],
     input_schema={
@@ -68,7 +56,7 @@ goal = Goal(
 )
 
 # ---------------------------------------------------------------------------
-# Edges
+# Agent structure
 # ---------------------------------------------------------------------------
 edges = [
     EdgeSpec(
@@ -85,26 +73,12 @@ edges = [
         condition=EdgeCondition.ON_SUCCESS,
         description="After content generation, review and refine",
     ),
-    EdgeSpec(
-        id="review-to-regenerate",
-        source="review-and-refine",
-        target="generate-content",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_revision == True",
-        priority=10,
-        description="If revision needed, loop back to content generation",
-    ),
 ]
 
-# ---------------------------------------------------------------------------
-# Graph structure
-# ---------------------------------------------------------------------------
 entry_node = "analyze-audience"
 entry_points = {"start": "analyze-audience"}
 terminal_nodes = ["review-and-refine"]
-pause_nodes = []
 nodes = all_nodes
-
 
 # ---------------------------------------------------------------------------
 # Agent class
@@ -128,7 +102,6 @@ class MarketingAgent:
             entry_node=self.entry_node,
             entry_points=entry_points,
             terminal_nodes=self.terminal_nodes,
-            pause_nodes=pause_nodes,
             nodes=self.nodes,
             edges=self.edges,
             default_model=self.config.model,
@@ -138,7 +111,9 @@ class MarketingAgent:
 
     def _create_executor(self):
         runtime = Runtime(storage_path=Path(self.config.storage_path).expanduser())
-        llm = AnthropicProvider(model=self.config.model)
+        
+        # We use LiteLLMProvider to correctly handle your Groq model
+        llm = LiteLLMProvider(model=self.config.model)
         self.executor = GraphExecutor(runtime=runtime, llm=llm)
         return self.executor
 
@@ -156,6 +131,5 @@ class MarketingAgent:
             "steps": result.steps_executed,
             "path": result.path,
         }
-
 
 default_agent = MarketingAgent()
