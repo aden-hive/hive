@@ -118,12 +118,10 @@ class TestMissingCredentialsError:
             f"Tool '{tool_name}' should return a dict, got {type(result)}"
         )
         assert "error" in result, (
-            f"Tool '{tool_name}' missing credentials should return {{'error': ...}}, "
-            f"got {result}"
+            f"Tool '{tool_name}' missing credentials should return {{'error': ...}}, got {result}"
         )
         assert "help" in result, (
-            f"Tool '{tool_name}' missing credentials should return {{'help': ...}}, "
-            f"got {result}"
+            f"Tool '{tool_name}' missing credentials should return {{'help': ...}}, got {result}"
         )
 
 
