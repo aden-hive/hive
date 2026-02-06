@@ -7,6 +7,66 @@ from fastmcp import FastMCP
 
 from ..file_system_toolkits.security import get_secure_path
 
+# Actionable encoding error message (replaces dead-end "unable to decode as UTF-8")
+_ENCODING_ERROR_HINT = (
+    "File encoding error: unable to decode file. "
+    "Try specifying encoding='auto' for auto-detection, "
+    "or use a specific encoding like 'latin-1', 'windows-1252', 'shift-jis'."
+)
+
+
+def _detect_encoding(filepath: str) -> str:
+    """Detect file encoding from its raw bytes.
+
+    Strategy:
+      1. BOM detection (UTF-16 LE/BE, UTF-8-sig)
+      2. Try UTF-8 decode (fast path for the common case)
+      3. charset_normalizer if available (already a transitive dep via httpx)
+      4. Fallback: latin-1 (never fails — all byte values are valid)
+
+    Only reads the first 32 KB for performance.
+    """
+    with open(filepath, "rb") as f:
+        raw = f.read(32768)
+
+    if not raw:
+        return "utf-8"
+
+    # 1. Check BOM (Byte Order Mark)
+    if raw.startswith(b"\xff\xfe"):
+        return "utf-16-le"
+    if raw.startswith(b"\xfe\xff"):
+        return "utf-16-be"
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+
+    # 2. Try UTF-8 first (most common)
+    try:
+        raw.decode("utf-8")
+        return "utf-8"
+    except UnicodeDecodeError:
+        pass
+
+    # 3. Use charset_normalizer if available (already in uv.lock via httpx)
+    try:
+        from charset_normalizer import from_bytes
+
+        result = from_bytes(raw).best()
+        if result:
+            return result.encoding
+    except ImportError:
+        pass
+
+    # 4. Final fallback: latin-1 (never fails, covers Western European)
+    return "latin-1"
+
+
+def _resolve_encoding(encoding: str, secure_path: str) -> str:
+    """Resolve the encoding string, handling 'auto' detection."""
+    if encoding == "auto":
+        return _detect_encoding(secure_path)
+    return encoding
+
 
 def register_tools(mcp: FastMCP) -> None:
     """Register CSV tools with the MCP server."""
@@ -19,6 +79,7 @@ def register_tools(mcp: FastMCP) -> None:
         session_id: str,
         limit: int | None = None,
         offset: int = 0,
+        encoding: str = "utf-8",
     ) -> dict:
         """
         Read a CSV file and return its contents.
@@ -30,6 +91,8 @@ def register_tools(mcp: FastMCP) -> None:
             session_id: Session identifier
             limit: Maximum number of rows to return (None = all rows)
             offset: Number of rows to skip from the beginning
+            encoding: File encoding (default: "utf-8"). Use "auto" for auto-detection,
+                      or specify explicitly: "latin-1", "windows-1252", "shift-jis", etc.
 
         Returns:
             dict with success status, data, and metadata
@@ -45,8 +108,11 @@ def register_tools(mcp: FastMCP) -> None:
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
 
+            # Resolve encoding (handles "auto" detection)
+            resolved_encoding = _resolve_encoding(encoding, secure_path)
+
             # Read CSV
-            with open(secure_path, encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding=resolved_encoding, newline="") as f:
                 reader = csv.DictReader(f)
 
                 if reader.fieldnames is None:
@@ -64,13 +130,14 @@ def register_tools(mcp: FastMCP) -> None:
                     rows.append(row)
 
             # Get total row count (re-read for accurate count)
-            with open(secure_path, encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding=resolved_encoding, newline="") as f:
                 reader = csv.reader(f)
                 total_rows = sum(1 for row in reader if any(row)) - 1
 
             return {
                 "success": True,
                 "path": path,
+                "encoding": resolved_encoding,
                 "columns": columns,
                 "column_count": len(columns),
                 "rows": rows,
@@ -83,7 +150,7 @@ def register_tools(mcp: FastMCP) -> None:
         except csv.Error as e:
             return {"error": f"CSV parsing error: {str(e)}"}
         except UnicodeDecodeError:
-            return {"error": "File encoding error: unable to decode as UTF-8"}
+            return {"error": _ENCODING_ERROR_HINT}
         except Exception as e:
             return {"error": f"Failed to read CSV: {str(e)}"}
 
@@ -151,6 +218,7 @@ def register_tools(mcp: FastMCP) -> None:
         agent_id: str,
         session_id: str,
         rows: list[dict],
+        encoding: str = "utf-8",
     ) -> dict:
         """
         Append rows to an existing CSV file.
@@ -161,6 +229,8 @@ def register_tools(mcp: FastMCP) -> None:
             agent_id: Agent identifier
             session_id: Session identifier
             rows: List of dictionaries to append, keys should match existing columns
+            encoding: File encoding (default: "utf-8"). Use "auto" for auto-detection,
+                      or specify explicitly: "latin-1", "windows-1252", "shift-jis", etc.
 
         Returns:
             dict with success status and metadata
@@ -177,15 +247,18 @@ def register_tools(mcp: FastMCP) -> None:
             if not rows:
                 return {"error": "rows cannot be empty"}
 
+            # Resolve encoding (handles "auto" detection)
+            resolved_encoding = _resolve_encoding(encoding, secure_path)
+
             # Read existing columns
-            with open(secure_path, encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding=resolved_encoding, newline="") as f:
                 reader = csv.DictReader(f)
                 if reader.fieldnames is None:
                     return {"error": "CSV file is empty or has no headers"}
                 columns = list(reader.fieldnames)
 
             # Append rows
-            with open(secure_path, "a", encoding="utf-8", newline="") as f:
+            with open(secure_path, "a", encoding=resolved_encoding, newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=columns)
                 for row in rows:
                     # Only write columns that exist in fieldnames
@@ -193,13 +266,14 @@ def register_tools(mcp: FastMCP) -> None:
                     writer.writerow(filtered_row)
 
             # Get new total row count
-            with open(secure_path, encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding=resolved_encoding, newline="") as f:
                 reader = csv.reader(f)
                 total_rows = sum(1 for row in reader if any(row)) - 1  # Subtract header
 
             return {
                 "success": True,
                 "path": path,
+                "encoding": resolved_encoding,
                 "rows_appended": len(rows),
                 "total_rows": total_rows,
             }
@@ -207,7 +281,7 @@ def register_tools(mcp: FastMCP) -> None:
         except csv.Error as e:
             return {"error": f"CSV parsing error: {str(e)}"}
         except UnicodeDecodeError:
-            return {"error": "File encoding error: unable to decode as UTF-8"}
+            return {"error": _ENCODING_ERROR_HINT}
         except Exception as e:
             return {"error": f"Failed to append to CSV: {str(e)}"}
 
@@ -217,6 +291,7 @@ def register_tools(mcp: FastMCP) -> None:
         workspace_id: str,
         agent_id: str,
         session_id: str,
+        encoding: str = "utf-8",
     ) -> dict:
         """
         Get metadata about a CSV file without reading all data.
@@ -226,6 +301,8 @@ def register_tools(mcp: FastMCP) -> None:
             workspace_id: Workspace identifier
             agent_id: Agent identifier
             session_id: Session identifier
+            encoding: File encoding (default: "utf-8"). Use "auto" for auto-detection,
+                      or specify explicitly: "latin-1", "windows-1252", "shift-jis", etc.
 
         Returns:
             dict with file metadata (columns, row count, file size)
@@ -239,11 +316,14 @@ def register_tools(mcp: FastMCP) -> None:
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
 
+            # Resolve encoding (handles "auto" detection)
+            resolved_encoding = _resolve_encoding(encoding, secure_path)
+
             # Get file size
             file_size = os.path.getsize(secure_path)
 
             # Read headers and count rows
-            with open(secure_path, encoding="utf-8", newline="") as f:
+            with open(secure_path, encoding=resolved_encoding, newline="") as f:
                 reader = csv.DictReader(f)
 
                 if reader.fieldnames is None:
@@ -257,6 +337,7 @@ def register_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "path": path,
+                "encoding": resolved_encoding,
                 "columns": columns,
                 "column_count": len(columns),
                 "total_rows": total_rows,
@@ -266,7 +347,7 @@ def register_tools(mcp: FastMCP) -> None:
         except csv.Error as e:
             return {"error": f"CSV parsing error: {str(e)}"}
         except UnicodeDecodeError:
-            return {"error": "File encoding error: unable to decode as UTF-8"}
+            return {"error": _ENCODING_ERROR_HINT}
         except Exception as e:
             return {"error": f"Failed to get CSV info: {str(e)}"}
 
@@ -277,6 +358,7 @@ def register_tools(mcp: FastMCP) -> None:
         agent_id: str,
         session_id: str,
         query: str,
+        encoding: str = "utf-8",
     ) -> dict:
         """
         Query a CSV file using SQL (powered by DuckDB).
@@ -290,6 +372,8 @@ def register_tools(mcp: FastMCP) -> None:
             session_id: Session identifier
             query: SQL query to execute. The CSV is available as table 'data'.
                    Example: "SELECT * FROM data WHERE price > 100 ORDER BY name LIMIT 10"
+            encoding: File encoding (default: "utf-8"). Use "auto" to let DuckDB
+                      auto-detect, or specify explicitly: "latin-1", "windows-1252", etc.
 
         Returns:
             dict with query results, columns, and row count
@@ -355,7 +439,18 @@ def register_tools(mcp: FastMCP) -> None:
             con = duckdb.connect(":memory:")
             try:
                 # Load CSV as 'data' table
-                con.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')")
+                # Pass explicit encoding to DuckDB when specified (not auto/utf-8)
+                if encoding and encoding not in ("auto", "utf-8"):
+                    con.execute(
+                        f"CREATE TABLE data AS SELECT * FROM "
+                        f"read_csv_auto('{secure_path}', encoding='{encoding}')"
+                    )
+                else:
+                    # Let DuckDB handle its own auto-detection
+                    con.execute(
+                        f"CREATE TABLE data AS SELECT * FROM "
+                        f"read_csv_auto('{secure_path}')"
+                    )
 
                 # Execute user query
                 result = con.execute(query)
@@ -368,6 +463,7 @@ def register_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "path": path,
+                    "encoding": encoding,
                     "query": query,
                     "columns": columns,
                     "column_count": len(columns),

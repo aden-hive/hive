@@ -890,3 +890,159 @@ class TestCsvSql:
         assert result["success"] is True
         assert result["row_count"] == 1
         assert result["rows"][0]["名前"] == "商品B"
+
+
+class TestCsvEncoding:
+    """Tests for encoding support (auto-detection and explicit encoding parameter)."""
+
+    def test_read_latin1_explicit(self, csv_tools, session_dir, tmp_path):
+        """Read a Latin-1 encoded CSV with explicit encoding parameter."""
+        csv_file = session_dir / "latin1.csv"
+        csv_file.write_bytes("name,city\nHans,München\nKlaus,Düsseldorf\n".encode("latin-1"))
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_read"](
+                path="latin1.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                encoding="latin-1",
+            )
+
+        assert result["success"] is True
+        assert result["encoding"] == "latin-1"
+        assert result["rows"][0]["city"] == "München"
+        assert result["rows"][1]["city"] == "Düsseldorf"
+
+    def test_read_latin1_auto_detection(self, csv_tools, session_dir, tmp_path):
+        """Read a Latin-1 encoded CSV with auto-detection."""
+        csv_file = session_dir / "latin1_auto.csv"
+        csv_file.write_bytes("name,city\nHans,München\nKlaus,Düsseldorf\n".encode("latin-1"))
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_read"](
+                path="latin1_auto.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                encoding="auto",
+            )
+
+        assert result["success"] is True
+        assert result["encoding"] != "utf-8"  # Should detect non-UTF-8
+        assert result["row_count"] == 2
+        # Data should be readable (not garbled)
+        assert "M" in result["rows"][0]["city"]  # München starts with M
+
+    def test_read_utf8_bom_auto(self, csv_tools, session_dir, tmp_path):
+        """Read a UTF-8 BOM encoded CSV with auto-detection."""
+        csv_file = session_dir / "utf8bom.csv"
+        content = "name,age\nAlice,30\nBob,25\n"
+        csv_file.write_bytes(b"\xef\xbb\xbf" + content.encode("utf-8"))
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_read"](
+                path="utf8bom.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                encoding="auto",
+            )
+
+        assert result["success"] is True
+        assert result["encoding"] == "utf-8-sig"
+        assert result["row_count"] == 2
+        assert "name" in result["columns"]
+
+    def test_read_default_encoding_unchanged(self, csv_tools, session_dir, tmp_path):
+        """Default encoding is still utf-8 (backward compatibility)."""
+        csv_file = session_dir / "default.csv"
+        csv_file.write_text("name,age\nAlice,30\n", encoding="utf-8")
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_read"](
+                path="default.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+            )
+
+        assert result["success"] is True
+        assert result["encoding"] == "utf-8"
+
+    def test_info_with_encoding(self, csv_tools, session_dir, tmp_path):
+        """csv_info works with explicit encoding parameter."""
+        csv_file = session_dir / "latin1_info.csv"
+        csv_file.write_bytes("name,city\nHans,München\nKlaus,Düsseldorf\n".encode("latin-1"))
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_info"](
+                path="latin1_info.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                encoding="latin-1",
+            )
+
+        assert result["success"] is True
+        assert result["encoding"] == "latin-1"
+        assert result["columns"] == ["name", "city"]
+        assert result["total_rows"] == 2
+
+    def test_append_with_encoding(self, csv_tools, session_dir, tmp_path):
+        """csv_append works with explicit encoding parameter."""
+        csv_file = session_dir / "latin1_append.csv"
+        csv_file.write_bytes("name,city\nHans,München\n".encode("latin-1"))
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_append"](
+                path="latin1_append.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                rows=[{"name": "Klaus", "city": "Düsseldorf"}],
+                encoding="latin-1",
+            )
+
+        assert result["success"] is True
+        assert result["encoding"] == "latin-1"
+        assert result["rows_appended"] == 1
+        assert result["total_rows"] == 2
+
+    @pytest.mark.skipif(not duckdb_available, reason="duckdb not installed")
+    def test_sql_with_encoding(self, csv_tools, session_dir, tmp_path):
+        """csv_sql passes encoding to DuckDB."""
+        csv_file = session_dir / "sql_enc.csv"
+        csv_file.write_text("name,price\nAlice,100\nBob,200\n", encoding="utf-8")
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path="sql_enc.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data",
+                encoding="utf-8",
+            )
+
+        assert result["success"] is True
+        assert result["encoding"] == "utf-8"
+        assert result["row_count"] == 2
+
+    def test_encoding_error_message_improved(self, csv_tools, session_dir, tmp_path):
+        """Error message suggests encoding='auto' when UTF-8 decoding fails."""
+        csv_file = session_dir / "bad_enc.csv"
+        # Write bytes that are invalid UTF-8
+        csv_file.write_bytes(b"name,city\nHans,M\xfcnchen\n")
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_read"](
+                path="bad_enc.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+            )
+
+        assert "error" in result
+        assert "auto" in result["error"].lower()
+        assert "latin-1" in result["error"].lower() or "windows-1252" in result["error"].lower()
