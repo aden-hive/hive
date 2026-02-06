@@ -95,13 +95,13 @@ cd hive
 claude> /hive
 
 # エージェントをテスト
-claude> /testing-agent
+claude> /hive-test
 
 # エージェントを実行
 PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
-**[📖 完全セットアップガイド](ENVIRONMENT_SETUP.md)** - エージェント開発の詳細な手順
+**[📖 完全セットアップガイド](../environment-setup.md)** - エージェント開発の詳細な手順
 
 ## 機能
 
@@ -216,10 +216,7 @@ hive/
 ├── docs/                   # ドキュメントとガイド
 ├── scripts/                # ビルドとユーティリティスクリプト
 ├── .claude/                # エージェント構築用のClaude Codeスキル
-├── ENVIRONMENT_SETUP.md    # エージェント開発用のPythonセットアップガイド
-├── DEVELOPER.md            # 開発者ガイド
 ├── CONTRIBUTING.md         # 貢献ガイドライン
-└── ROADMAP.md              # プロダクトロードマップ
 ```
 
 ## 開発
@@ -241,17 +238,17 @@ hive/
 claude> /hive
 
 # エージェントをテスト
-claude> /testing-agent
+claude> /hive-test
 
 # エージェントを実行
 PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
-完全なセットアップ手順については、[ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)を参照してください。
+完全なセットアップ手順については、[environment-setup.md](../environment-setup.md)を参照してください。
 
 ## ドキュメント
 
-- **[開発者ガイド](DEVELOPER.md)** - 開発者向け総合ガイド
+- **[開発者ガイド](../developer-guide.md)** - 開発者向け総合ガイド
 - [はじめに](docs/getting-started.md) - クイックセットアップ手順
 - [設定ガイド](docs/configuration.md) - すべての設定オプション
 - [アーキテクチャ概要](docs/architecture/README.md) - システム設計と構造
@@ -260,7 +257,7 @@ PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 
 Aden エージェントフレームワークは、開発者が結果志向で自己適応するエージェントを構築できるよう支援することを目指しています。ロードマップはこちらをご覧ください
 
-[ROADMAP.md](ROADMAP.md)
+[roadmap.md](../roadmap.md)
 
 ```mermaid
 timeline
