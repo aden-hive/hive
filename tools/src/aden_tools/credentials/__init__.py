@@ -39,6 +39,7 @@ Credential categories:
 - github.py: GitHub API credentials
 - hubspot.py: HubSpot CRM credentials
 - slack.py: Slack workspace credentials
+- x.py: X (Twitter) API credentials
 
 Note: Tools that don't need credentials simply omit the 'credentials' parameter
 from their register_tools() function. This convention is enforced by CI tests.
@@ -65,6 +66,7 @@ from .shell_config import (
 )
 from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
+from .x import X_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -74,6 +76,7 @@ CREDENTIAL_SPECS = {
     **GITHUB_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
     **SLACK_CREDENTIALS,
+    **X_CREDENTIALS,
 }
 
 __all__ = [
@@ -104,4 +107,5 @@ __all__ = [
     "GITHUB_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
     "SLACK_CREDENTIALS",
+    "X_CREDENTIALS",
 ]
