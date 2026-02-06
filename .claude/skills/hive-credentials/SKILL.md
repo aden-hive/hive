@@ -4,7 +4,7 @@ description: Set up and install credentials for an agent. Detects missing creden
 license: Apache-2.0
 metadata:
   author: hive
-  version: "2.2"
+  version: "2.3"
   type: utility
 ---
 
@@ -31,96 +31,50 @@ Determine which agent needs credentials. The user will either:
 
 Locate the agent's directory under `exports/{agent_name}/`.
 
-### Step 2: Detect Required Credentials (Bash-First)
+### Step 2: Detect Missing Credentials
 
-Use bash commands to determine what the agent needs and what's already configured. This avoids Python import issues and works even when `HIVE_CREDENTIAL_KEY` is not set.
+Use the `check_missing_credentials` MCP tool to detect what the agent needs and what's already configured. This tool loads the agent, inspects its required tools and node types, maps them to credentials via `CREDENTIAL_SPECS`, and checks both the encrypted store and environment variables.
 
-#### Step 2a: Read Agent Requirements
-
-Extract `required_tools` and node types from the agent config:
-
-```bash
-# Get required tools
-jq -r '.required_tools[]?' exports/{agent_name}/agent.json 2>/dev/null
-
-# Get node types from graph nodes
-jq -r '.graph.nodes[]?.node_type' exports/{agent_name}/agent.json 2>/dev/null | sort -u
+```
+check_missing_credentials(agent_path="exports/{agent_name}")
 ```
 
-Map the extracted tools and node types to credentials by reading the spec files directly:
+The tool returns a JSON response:
 
-```bash
-# Read all credential specs — each file defines tools, node_types, env_var, and credential_id
-cat tools/src/aden_tools/credentials/llm.py tools/src/aden_tools/credentials/search.py tools/src/aden_tools/credentials/email.py tools/src/aden_tools/credentials/integrations.py
+```json
+{
+  "agent": "exports/{agent_name}",
+  "missing": [
+    {
+      "credential_name": "brave_search",
+      "env_var": "BRAVE_SEARCH_API_KEY",
+      "description": "Brave Search API key for web search",
+      "help_url": "https://brave.com/search/api/",
+      "tools": ["web_search"]
+    }
+  ],
+  "available": [
+    {
+      "credential_name": "anthropic",
+      "env_var": "ANTHROPIC_API_KEY",
+      "source": "encrypted_store"
+    }
+  ],
+  "total_missing": 1,
+  "ready": false
+}
 ```
 
-For each `CredentialSpec`, match its `tools` and `node_types` lists against the agent's required tools and node types. Extract the `env_var`, `credential_id`, and `credential_group` for every match. This is the list of needed credentials.
-
-#### Step 2b: Check Existing Credential Sources
-
-For each needed credential, check three sources. A credential is "found" if it exists in ANY of them:
-
-**1. Encrypted store metadata index** (unencrypted JSON — no decryption key needed):
-
-```bash
-cat ~/.hive/credentials/metadata/index.json 2>/dev/null | jq -r '.credentials | keys[]'
-```
-
-If a credential ID appears in this list, it is stored in the encrypted store.
-
-**2. Environment variables:**
-
-```bash
-# Check each needed env var, e.g.:
-printenv ANTHROPIC_API_KEY > /dev/null 2>&1 && echo "ANTHROPIC_API_KEY: set" || echo "ANTHROPIC_API_KEY: not set"
-printenv BRAVE_SEARCH_API_KEY > /dev/null 2>&1 && echo "BRAVE_SEARCH_API_KEY: set" || echo "BRAVE_SEARCH_API_KEY: not set"
-```
-
-**3. Project `.env` file:**
-
-```bash
-# Check each needed env var, e.g.:
-grep -q '^ANTHROPIC_API_KEY=' .env 2>/dev/null && echo "ANTHROPIC_API_KEY: in .env" || echo "ANTHROPIC_API_KEY: not in .env"
-grep -q '^BRAVE_SEARCH_API_KEY=' .env 2>/dev/null && echo "BRAVE_SEARCH_API_KEY: in .env" || echo "BRAVE_SEARCH_API_KEY: not in .env"
-```
-
-#### Step 2c: HIVE_CREDENTIAL_KEY Check
-
-If any credentials were found in the encrypted store metadata index, verify the encryption key is available. The key is typically persisted to shell config by a previous hive-credentials run.
-
-Check both the current session AND shell config files:
-
-```bash
-# Check 1: Current session
-printenv HIVE_CREDENTIAL_KEY > /dev/null 2>&1 && echo "session: set" || echo "session: not set"
-
-# Check 2: Shell config files (where hive-credentials persists it)
-# Note: check each file individually to avoid non-zero exit when one doesn't exist
-for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTIAL_KEY' "$f" && echo "$f"; done
-```
-
-Decision logic:
-
-- **In current session** — no action needed, credentials in the store are usable
-- **In shell config but NOT in current session** — the key is persisted but this shell hasn't sourced it. Run `source ~/.zshrc` (or `~/.bashrc`), then re-check. Credentials in the store are usable after sourcing.
-- **Not in session AND not in shell config** — the key was never persisted. Warn the user that credentials in the store cannot be decrypted. Help fix the key situation (recover/re-persist), do NOT re-collect credential values that are already stored.
-
-#### Step 2d: Compute Missing & Group
-
-Diff the "needed" credentials against the "found" credentials to get the truly missing list.
-
-Group related credentials by their `credential_group` field from the spec files. Credentials that share the same non-empty `credential_group` value should be presented as a single setup step rather than asking for each one individually.
-
-**If nothing is missing and there's no HIVE_CREDENTIAL_KEY issue:** Report all credentials as configured and skip Steps 3-5. Example:
+**If `ready` is true (nothing missing):** Report all credentials as configured and skip Steps 3-5. Example:
 
 ```
 All required credentials are already configured:
-  ✓ anthropic (ANTHROPIC_API_KEY) — found in encrypted store
-  ✓ brave_search (BRAVE_SEARCH_API_KEY) — found in environment
+  ✓ anthropic (ANTHROPIC_API_KEY)
+  ✓ brave_search (BRAVE_SEARCH_API_KEY)
 Your agent is ready to run!
 ```
 
-**If credentials are missing:** Continue to Step 3 with only the missing ones.
+**If credentials are missing:** Continue to Step 3 with the `missing` list.
 
 ### Step 3: Present Auth Options for Each Missing Credential
 
@@ -170,6 +124,22 @@ Choose how to configure HUBSPOT_ACCESS_TOKEN:
 ```
 
 ### Step 4: Execute Auth Flow Based on User Choice
+
+#### Prerequisite: Ensure HIVE_CREDENTIAL_KEY Is Available
+
+Before storing any credentials, verify `HIVE_CREDENTIAL_KEY` is set (needed to encrypt/decrypt the local store). Check both the current session and shell config:
+
+```bash
+# Check current session
+printenv HIVE_CREDENTIAL_KEY > /dev/null 2>&1 && echo "session: set" || echo "session: not set"
+
+# Check shell config files
+for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTIAL_KEY' "$f" && echo "$f"; done
+```
+
+- **In current session** — proceed to store credentials
+- **In shell config but NOT in current session** — run `source ~/.zshrc` (or `~/.bashrc`) first, then proceed
+- **Not set anywhere** — `EncryptedFileStorage` will auto-generate one. After storing, tell the user to persist it: `export HIVE_CREDENTIAL_KEY="{generated_key}"` in their shell profile
 
 #### Option 1: Aden Platform (OAuth)
 
@@ -443,15 +413,25 @@ config_path.write_text(json.dumps(config, indent=2))
 
 ### Step 6: Verify All Credentials
 
-Run validation again to confirm everything is set:
+Use the `verify_credentials` MCP tool to confirm everything is properly configured:
 
-```python
-runner = AgentRunner.load("exports/{agent_name}")
-validation = runner.validate()
-assert not validation.missing_credentials, "Still missing credentials!"
+```
+verify_credentials(agent_path="exports/{agent_name}")
 ```
 
-Report the result to the user.
+The tool returns:
+
+```json
+{
+  "agent": "exports/{agent_name}",
+  "ready": true,
+  "missing_credentials": [],
+  "warnings": [],
+  "errors": []
+}
+```
+
+If `ready` is true, report success. If `missing_credentials` is non-empty, identify what failed and loop back to Step 3 for the remaining credentials.
 
 ## Health Check Reference
 
@@ -565,55 +545,22 @@ User: /hive-credentials for my research-agent
 
 Agent: Let me check what credentials your research-agent needs.
 
-[Reads agent config]
-$ jq -r '.required_tools[]?' exports/research-agent/agent.json
-web_search
-google_search
-
-$ jq -r '.graph.nodes[]?.node_type' exports/research-agent/agent.json | sort -u
-event_loop
-
-[Maps tools/nodes to credentials using lookup table]
-Needed: anthropic, brave_search, google_search, google_cse
-
-[Checks encrypted store metadata index]
-$ cat ~/.hive/credentials/metadata/index.json | jq -r '.credentials | keys[]'
-anthropic
-brave_search
-
-[Checks environment variables]
-$ printenv ANTHROPIC_API_KEY > /dev/null 2>&1 && echo "set" || echo "not set"
-not set
-$ printenv BRAVE_SEARCH_API_KEY > /dev/null 2>&1 && echo "set" || echo "not set"
-not set
-$ printenv GOOGLE_API_KEY > /dev/null 2>&1 && echo "set" || echo "not set"
-not set
-$ printenv GOOGLE_CSE_ID > /dev/null 2>&1 && echo "set" || echo "not set"
-not set
-
-[Checks HIVE_CREDENTIAL_KEY since credentials found in store]
-$ printenv HIVE_CREDENTIAL_KEY > /dev/null 2>&1 && echo "session: set" || echo "session: not set"
-session: not set
-$ for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTIAL_KEY' "$f" && echo "$f"; done
-/Users/user/.zshrc
-
-[Key is in shell config but not current session — sourcing it]
-$ source ~/.zshrc
-
-[Computes missing credentials]
-Found:
-  ✓ anthropic (ANTHROPIC_API_KEY) — in encrypted store
-  ✓ brave_search (BRAVE_SEARCH_API_KEY) — in encrypted store
-Missing:
-  ✗ google_search (GOOGLE_API_KEY)
-  ✗ google_cse (GOOGLE_CSE_ID)
+[Calls check_missing_credentials(agent_path="exports/research-agent")]
+→ Returns:
+  available: anthropic (encrypted_store), brave_search (encrypted_store)
+  missing: google_search (GOOGLE_API_KEY), google_cse (GOOGLE_CSE_ID)
+  ready: false
 
 Agent: 2 of 4 required credentials are already configured. Only Google Custom
-Search needs setup (2 values as a single group).
+Search needs setup (2 values).
 
 --- Setting up Google Custom Search (google_search + google_cse) ---
 
 This requires two values that work together.
+
+[Checks HIVE_CREDENTIAL_KEY before storing]
+$ printenv HIVE_CREDENTIAL_KEY > /dev/null 2>&1 && echo "set" || echo "not set"
+set
 
 First, the Google API Key:
 1. Go to https://console.cloud.google.com/apis/credentials
@@ -641,10 +588,13 @@ Now, the Custom Search Engine ID:
 
 ✓ Google Custom Search credentials valid
 
+[Calls verify_credentials(agent_path="exports/research-agent")]
+→ Returns: ready: true, missing_credentials: []
+
 All credentials are now configured:
   ✓ anthropic (ANTHROPIC_API_KEY) — already in encrypted store
   ✓ brave_search (BRAVE_SEARCH_API_KEY) — already in encrypted store
   ✓ google_search (GOOGLE_API_KEY) — stored in encrypted store
   ✓ google_cse (GOOGLE_CSE_ID) — stored in encrypted store
-  Your agent is ready to run!
+Your agent is ready to run!
 ```
