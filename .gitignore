@@ -54,7 +54,6 @@ __pycache__/
 *.egg-info/
 .eggs/
 *.egg
-uv.lock
 
 # Generated runtime data
 core/data/
@@ -69,4 +68,9 @@ exports/*
 
 .agent-builder-sessions/*
 
+.claude/settings.local.json
+
 .venv
+
+docs/github-issues/*
+core/tests/*dumps/*

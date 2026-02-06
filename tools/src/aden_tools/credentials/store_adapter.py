@@ -349,6 +349,41 @@ class CredentialStoreAdapter:
     # --- Factory Methods ---
 
     @classmethod
+    def default(
+        cls,
+        specs: dict[str, CredentialSpec] | None = None,
+    ) -> CredentialStoreAdapter:
+        """Create adapter with encrypted storage primary and env var fallback."""
+        from framework.credentials import CredentialStore
+        from framework.credentials.storage import (
+            CompositeStorage,
+            EncryptedFileStorage,
+            EnvVarStorage,
+        )
+
+        if specs is None:
+            from . import CREDENTIAL_SPECS
+
+            specs = CREDENTIAL_SPECS
+
+        env_mapping = {name: spec.env_var for name, spec in specs.items()}
+
+        try:
+            encrypted = EncryptedFileStorage()
+            env = EnvVarStorage(env_mapping)
+            composite = CompositeStorage(primary=encrypted, fallbacks=[env])
+            store = CredentialStore(storage=composite)
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Encrypted credential storage unavailable, falling back to env vars: %s", e
+            )
+            store = CredentialStore.with_env_storage(env_mapping)
+
+        return cls(store=store, specs=specs)
+
+    @classmethod
     def for_testing(
         cls,
         overrides: dict[str, str],

@@ -7,7 +7,7 @@ Usage:
     from aden_tools.credentials import CredentialStoreAdapter
 
     mcp = FastMCP("my-server")
-    credentials = CredentialStoreAdapter.with_env_storage()
+    credentials = CredentialStoreAdapter.default()
     register_all_tools(mcp, credentials=credentials)
 """
 
@@ -26,6 +26,7 @@ from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
+from .file_system_toolkits.data_tools import register_tools as register_data_tools
 from .file_system_toolkits.execute_command_tool import (
     register_tools as register_execute_command,
 )
@@ -41,6 +42,7 @@ from .file_system_toolkits.write_to_file import register_tools as register_write
 from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
+from .slack_tool import register_tools as register_slack
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 from .x_tool import register_tools as register_x
@@ -73,6 +75,8 @@ def register_all_tools(
     # email supports multiple providers (Resend) with auto-detection
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    register_slack(mcp, credentials=credentials)
+    register_x(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -83,8 +87,8 @@ def register_all_tools(
     register_apply_patch(mcp)
     register_grep_search(mcp)
     register_execute_command(mcp)
+    register_data_tools(mcp)
     register_csv(mcp)
-    register_x(mcp, credentials=credentials)
 
     return [
         "example_tool",
@@ -99,6 +103,10 @@ def register_all_tools(
         "apply_patch",
         "grep_search",
         "execute_command_tool",
+        "load_data",
+        "save_data",
+        "list_data_files",
+        "serve_file_to_user",
         "csv_read",
         "csv_write",
         "csv_append",
@@ -117,6 +125,9 @@ def register_all_tools(
         "github_search_code",
         "github_list_branches",
         "github_get_branch",
+        "github_list_stargazers",
+        "github_get_user_profile",
+        "github_get_user_emails",
         "send_email",
         "send_budget_alert_email",
         "hubspot_search_contacts",
@@ -131,11 +142,71 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        "slack_send_message",
+        "slack_list_channels",
+        "slack_get_channel_history",
+        "slack_add_reaction",
+        "slack_get_user_info",
+        "slack_update_message",
+        "slack_delete_message",
+        "slack_schedule_message",
+        "slack_create_channel",
+        "slack_archive_channel",
+        "slack_invite_to_channel",
+        "slack_set_channel_topic",
+        "slack_remove_reaction",
+        "slack_list_users",
+        "slack_upload_file",
+        # Advanced Slack tools
+        "slack_search_messages",
+        "slack_get_thread_replies",
+        "slack_pin_message",
+        "slack_unpin_message",
+        "slack_list_pins",
+        "slack_add_bookmark",
+        "slack_list_scheduled_messages",
+        "slack_delete_scheduled_message",
+        "slack_send_dm",
+        "slack_get_permalink",
+        "slack_send_ephemeral",
+        # Block Kit & Views
+        "slack_post_blocks",
+        "slack_open_modal",
+        "slack_update_home_tab",
+        # Phase 2: User Status & Presence
+        "slack_set_status",
+        "slack_set_presence",
+        "slack_get_presence",
+        # Phase 2: Reminders
+        "slack_create_reminder",
+        "slack_list_reminders",
+        "slack_delete_reminder",
+        # Phase 2: User Groups
+        "slack_create_usergroup",
+        "slack_update_usergroup_members",
+        "slack_list_usergroups",
+        # Phase 2: Emoji
+        "slack_list_emoji",
+        # Phase 2: Canvas
+        "slack_create_canvas",
+        "slack_edit_canvas",
+        # Phase 2: Analytics (AI-Driven)
+        "slack_get_messages_for_analysis",
+        # Phase 2: Workflow
+        "slack_trigger_workflow",
+        # Phase 3: Critical Power Tools
+        "slack_get_conversation_context",
+        "slack_find_user_by_email",
+        "slack_kick_user_from_channel",
+        "slack_delete_file",
+        "slack_get_team_stats",
+        # X (Twitter) tools
+        "x_search_tweets",
+        "x_get_mentions",
         "x_post_tweet",
         "x_reply_tweet",
         "x_delete_tweet",
-        "x_search_tweets",
-        "x_get_mentions",
+        "x_send_dm",
     ]
 
 

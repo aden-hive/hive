@@ -153,6 +153,7 @@ class ExecutionStream:
         # Execution tracking
         self._active_executions: dict[str, ExecutionContext] = {}
         self._execution_tasks: dict[str, asyncio.Task] = {}
+        self._active_executors: dict[str, GraphExecutor] = {}
         self._execution_results: OrderedDict[str, ExecutionResult] = OrderedDict()
         self._execution_result_times: dict[str, float] = {}
         self._completion_events: dict[str, asyncio.Event] = {}
@@ -237,6 +238,21 @@ class ExecutionStream:
                 )
             )
 
+    async def inject_input(self, node_id: str, content: str) -> bool:
+        """Inject user input into a running client-facing EventLoopNode.
+
+        Searches active executors for a node matching ``node_id`` and calls
+        its ``inject_event()`` method to unblock ``_await_user_input()``.
+
+        Returns True if input was delivered, False otherwise.
+        """
+        for executor in self._active_executors.values():
+            node = executor.node_registry.get(node_id)
+            if node is not None and hasattr(node, "inject_event"):
+                await node.inject_event(content)
+                return True
+        return False
+
     async def execute(
         self,
         input_data: dict[str, Any],
@@ -314,13 +330,25 @@ class ExecutionStream:
                 # Create runtime adapter for this execution
                 runtime_adapter = StreamRuntimeAdapter(self._runtime, execution_id)
 
-                # Create executor for this execution
+                # Create executor for this execution.
+                # Each execution gets its own storage under sessions/{exec_id}/
+                # so conversations, spillover, and data files are all scoped
+                # to this execution.  The executor sets data_dir via execution
+                # context (contextvars) so data tools and spillover share the
+                # same session-scoped directory.
+                exec_storage = self._storage.base_path / "sessions" / execution_id
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
+                    event_bus=self._event_bus,
+                    stream_id=self.stream_id,
+                    storage_path=exec_storage,
+                    loop_config=self.graph.loop_config,
                 )
+                # Track executor so inject_input() can reach EventLoopNode instances
+                self._active_executors[execution_id] = executor
 
                 # Create modified graph with entry point
                 # We need to override the entry_node to use our entry point
@@ -333,6 +361,9 @@ class ExecutionStream:
                     input_data=ctx.input_data,
                     session_state=ctx.session_state,
                 )
+
+                # Clean up executor reference
+                self._active_executors.pop(execution_id, None)
 
                 # Store result with retention
                 self._record_execution_result(execution_id, result)

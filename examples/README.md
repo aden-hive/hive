@@ -31,11 +31,11 @@ cp -r examples/templates/marketing_agent exports/my_agent
 # 2. Edit the goal, nodes, and edges in agent.py and nodes/__init__.py
 
 # 3. Run it
-PYTHONPATH=core python -m exports.my_agent --help
+uv run python -m exports.my_agent --help
 ```
 
 ## How to use a recipe
 
 1. Read the recipe markdown file
-2. Use the patterns described to build your own agent — either manually or with the builder agent (`/agent-workflow`)
+2. Use the patterns described to build your own agent — either manually or with the builder agent (`/hive`)
 3. Refer to the [core README](../core/README.md) for framework API details
