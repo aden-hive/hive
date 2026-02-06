@@ -95,13 +95,13 @@ cd hive
 claude> /hive
 
 # 测试您的智能体
-claude> /testing-agent
+claude> /hive-test
 
 # 运行您的智能体
 PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
-**[📖 完整设置指南](ENVIRONMENT_SETUP.md)** - 智能体开发的详细说明
+**[📖 完整设置指南](../environment-setup.md)** - 智能体开发的详细说明
 
 ## 功能特性
 
@@ -216,10 +216,7 @@ hive/
 ├── docs/                   # 文档和指南
 ├── scripts/                # 构建和实用脚本
 ├── .claude/                # Claude Code 技能用于构建智能体
-├── ENVIRONMENT_SETUP.md    # 智能体开发的 Python 设置指南
-├── DEVELOPER.md            # 开发者指南
 ├── CONTRIBUTING.md         # 贡献指南
-└── ROADMAP.md              # 产品路线图
 ```
 
 ## 开发
@@ -241,17 +238,17 @@ hive/
 claude> /hive
 
 # 测试智能体
-claude> /testing-agent
+claude> /hive-test
 
 # 运行智能体
 PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
-完整设置说明请参阅 [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)。
+完整设置说明请参阅 [environment-setup.md](../environment-setup.md)。
 
 ## 文档
 
-- **[开发者指南](DEVELOPER.md)** - 开发者综合指南
+- **[开发者指南](../developer-guide.md)** - 开发者综合指南
 - [入门指南](docs/getting-started.md) - 快速设置说明
 - [配置指南](docs/configuration.md) - 所有配置选项
 - [架构概述](docs/architecture/README.md) - 系统设计和结构
@@ -260,7 +257,7 @@ PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 
 Aden 智能体框架旨在帮助开发者构建面向结果的、自适应的智能体。请在此查看我们的路线图
 
-[ROADMAP.md](ROADMAP.md)
+[roadmap.md](../roadmap.md)
 
 ```mermaid
 timeline

@@ -91,16 +91,16 @@ cd hive
 ./quickstart.sh
 
 # Claude Code를 사용해 에이전트 빌드
-claude> /building-agents
+claude> /hive
 
 # 에이전트 테스트
-claude> /testing-agent
+claude> /hive-test
 
 # 에이전트 실행
 PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
-**[📖 전체 설정 가이드](ENVIRONMENT_SETUP.md)** - 에이전트 개발을 위한 상세한 설명
+**[📖 전체 설정 가이드](../environment-setup.md)** - 에이전트 개발을 위한 상세한 설명
 
 ## 주요 기능
 
@@ -226,10 +226,7 @@ hive/
 ├── docs/                   # 문서 및 가이드
 ├── scripts/                # 빌드 및 유틸리티 스크립트
 ├── .claude/                # 에이전트 생성을 위한 Claude Code 스킬
-├── ENVIRONMENT_SETUP.md    # 에이전트 개발을 위한 Python 환경 설정 가이드
-├── DEVELOPER.md            # 개발자 가이드
 ├── CONTRIBUTING.md         # 기여 가이드라인
-└── ROADMAP.md              # 제품 로드맵
 ```
 
 ## 개발
@@ -248,20 +245,20 @@ hive/
 # - 모든 의존성
 
 # Claude Code 스킬을 사용해 새 에이전트 생성
-claude> /building-agents
+claude> /hive
 
 # 에이전트 테스트
-claude> /testing-agent
+claude> /hive-test
 
 # 에이전트 실행
 PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
-전체 설정 방법은 [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) 를 참고하세요.
+전체 설정 방법은 [environment-setup.md](../environment-setup.md) 를 참고하세요.
 
 ## 문서
 
-- **[개발자 가이드](DEVELOPER.md)** - 개발자를 위한 종합 가이드
+- **[개발자 가이드](../developer-guide.md)** - 개발자를 위한 종합 가이드
 - [시작하기](docs/getting-started.md) - 빠른 설정 방법
 - [설정 가이드](docs/configuration.md) - 모든 설정 옵션 안내
 - [아키텍처 개요](docs/architecture/README.md) - 시스템 설계 및 구조
@@ -271,7 +268,7 @@ PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 Aden Agent Framework는 개발자가 결과 중심(outcome-oriented) 이며 자기 적응형(self-adaptive) 에이전트를 구축할 수 있도록 돕는 것을 목표로 합니다.
 자세한 로드맵은 아래 문서에서 확인할 수 있습니다.
 
-[ROADMAP.md](ROADMAP.md)
+[roadmap.md](../roadmap.md)
 
 ```mermaid
 timeline
@@ -352,7 +349,7 @@ Aden은 모니터링과 관측성을 위해 토큰 사용량, 지연 시간 메�
 
 **Q: Aden은 어떤 배포 방식을 지원하나요?**
 
-Aden은 Python 패키지를 통한 셀프 호스팅 배포를 지원합니다. 설치 방법은 [환경 설정 가이드](ENVIRONMENT_SETUP.md)를 참조하세요. 클라우드 배포 옵션과 Kubernetes 대응 설정은 로드맵에 포함되어 있습니다.
+Aden은 Python 패키지를 통한 셀프 호스팅 배포를 지원합니다. 설치 방법은 [환경 설정 가이드](../environment-setup.md)를 참조하세요. 클라우드 배포 옵션과 Kubernetes 대응 설정은 로드맵에 포함되어 있습니다.
 
 **Q: Aden은 복잡한 프로덕션 규모의 사용 사례도 처리할 수 있나요?**
 
@@ -380,7 +377,7 @@ Aden은 지출 한도, 호출 제한, 자동 모델 다운그레이드 정책 �
 
 **Q: 예제와 문서는 어디에서 확인할 수 있나요?**
 
-전체 가이드, API 레퍼런스, 시작 튜토리얼은 [docs.adenhq.com](https://docs.adenhq.com/) 에서 확인하실 수 있습니다. 또한 저장소의 `docs/` 디렉터리와 종합적인 [DEVELOPER.md](DEVELOPER.md) 가이드도 함께 제공됩니다.
+전체 가이드, API 레퍼런스, 시작 튜토리얼은 [docs.adenhq.com](https://docs.adenhq.com/) 에서 확인하실 수 있습니다. 또한 저장소의 `docs/` 디렉터리와 종합적인 [developer-guide.md](../developer-guide.md) 가이드도 함께 제공됩니다.
 
 **Q: Aden에 기여하려면 어떻게 해야 하나요?**
 

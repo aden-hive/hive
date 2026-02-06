@@ -181,6 +181,7 @@ def register_all_tools(
         "slack_delete_reminder",
         # Phase 2: User Groups
         "slack_create_usergroup",
+        "slack_update_usergroup_members",
         "slack_list_usergroups",
         # Phase 2: Emoji
         "slack_list_emoji",

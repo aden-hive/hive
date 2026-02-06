@@ -187,4 +187,4 @@ Run from the project root with PYTHONPATH:
 PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
-See [Environment Setup](../ENVIRONMENT_SETUP.md) for detailed installation instructions.
+See [Environment Setup](./environment-setup.md) for detailed installation instructions.

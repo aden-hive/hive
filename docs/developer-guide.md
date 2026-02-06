@@ -101,11 +101,11 @@ Get API keys:
 
 This installs agent-related Claude Code skills:
 
-- `/building-agents-core` - Fundamental agent concepts
+- `/hive` - Complete workflow for building agents
 - `/hive-create` - Step-by-step agent building
-- `/building-agents-patterns` - Best practices and design patterns
-- `/testing-agent` - Test and validate agents
-- `/agent-workflow` - End-to-end guided workflow
+- `/hive-concepts` - Fundamental agent concepts
+- `/hive-patterns` - Best practices and design patterns
+- `/hive-test` - Test and validate agents
 
 ### Verify Setup
 
@@ -140,21 +140,11 @@ hive/                                    # Repository root
 │
 ├── .claude/                             # Claude Code Skills
 │   └── skills/                          # Skills for building
-│       ├── building-agents-core/
-|       |   ├── SKILL.md                 # Main skill definition
-│       |   └── examples
-│       ├── building-agents-patterns/
-|       |   ├── SKILL.md
-│       |   └── examples
-│       ├── building-agents-construction/
-|       |   ├── SKILL.md
-│       |   └── examples
-│       ├── testing-agent/               # Skills for testing agents
-│       │   ├── SKILL.md
-│       |   └── examples
-│       └── agent-workflow/              # Complete workflow
-|           ├── SKILL.md
-│           └── examples
+│       ├── hive/                        # Complete workflow
+│       ├── hive-create/                 # Step-by-step build guide
+│       ├── hive-concepts/               # Fundamental concepts
+│       ├── hive-patterns/               # Best practices
+│       └── hive-test/                   # Test and validate agents
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
@@ -202,12 +192,9 @@ hive/                                    # Repository root
 │   └── auto-close-duplicates.ts         # GitHub duplicate issue closer
 │
 ├── quickstart.sh                        # Interactive setup wizard
-├── ENVIRONMENT_SETUP.md                 # Complete Python setup guide
 ├── README.md                            # Project overview
-├── DEVELOPER.md                         # This file
 ├── CONTRIBUTING.md                      # Contribution guidelines
 ├── CHANGELOG.md                         # Version history
-├── ROADMAP.md                           # Product roadmap
 ├── LICENSE                              # Apache 2.0 License
 ├── CODE_OF_CONDUCT.md                   # Community guidelines
 └── SECURITY.md                          # Security policy
@@ -229,7 +216,7 @@ The fastest way to build agents is using the Claude Code skills:
 claude> /hive
 
 # Test the agent
-claude> /testing-agent
+claude> /hive-test
 ```
 
 ### Agent Development Workflow
@@ -260,7 +247,7 @@ claude> /testing-agent
 
 5. **Test the Agent**
    ```
-   claude> /testing-agent
+   claude> /hive-test
    ```
 
 ### Manual Agent Development
@@ -324,7 +311,7 @@ PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
 
 ```bash
 # Run tests for an agent
-claude> /testing-agent
+claude> /hive-test
 ```
 
 This generates and runs:

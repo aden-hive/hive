@@ -70,7 +70,9 @@ def tui(mock, verbose, debug):
     try:
         from framework.tui.app import AdenTUI
     except ImportError:
-        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
+        click.echo(
+            "TUI requires the 'textual' package. Install with: pip install textual"
+        )
         sys.exit(1)
 
     from pathlib import Path
@@ -216,7 +218,9 @@ async def _interactive_shell(verbose=False):
                     if "references" in output:
                         click.echo("--- References ---\n")
                         for ref in output.get("references", []):
-                            click.echo(f"  [{ref.get('number', '?')}] {ref.get('title', '')} - {ref.get('url', '')}")
+                            click.echo(
+                                f"  [{ref.get('number', '?')}] {ref.get('title', '')} - {ref.get('url', '')}"
+                            )
                         click.echo("\n")
                 else:
                     click.echo(f"\nResearch failed: {result.error}\n")
@@ -227,6 +231,7 @@ async def _interactive_shell(verbose=False):
             except Exception as e:
                 click.echo(f"Error: {e}", err=True)
                 import traceback
+
                 traceback.print_exc()
     finally:
         await agent.stop()
