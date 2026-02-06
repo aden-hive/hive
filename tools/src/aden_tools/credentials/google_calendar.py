@@ -8,7 +8,7 @@ from .base import CredentialSpec
 
 GOOGLE_CALENDAR_CREDENTIALS = {
     "google_calendar_oauth": CredentialSpec(
-        env_var="GOOGLE_CALENDAR_OAUTH_TOKEN",
+        env_var="GOOGLE_CALENDAR_ACCESS_TOKEN",
         tools=[
             "calendar_list_events",
             "calendar_get_event",
@@ -19,22 +19,19 @@ GOOGLE_CALENDAR_CREDENTIALS = {
             "calendar_get_calendar",
             "calendar_check_availability",
         ],
-        required=True,
+        node_types=[],
+        required=False,
         startup_required=False,
-        help_url="https://console.cloud.google.com/apis/credentials",
-        description="Google Calendar OAuth2 credentials (via Aden or direct setup)",
+        help_url="https://hive.adenhq.com",
+        description="Google Calendar OAuth2 access token (via Aden) - used for Google Calendar",
         # Auth method support
         aden_supported=True,
         aden_provider_name="google-calendar",
         direct_api_key_supported=False,
-        api_key_instructions=(
-            "To set up Google Calendar credentials directly:\n"
-            "1. Go to https://developers.google.com/oauthplayground/\n"
-            "2. Select 'Google Calendar API v3' scopes\n"
-            "3. Authorize and get an access token\n"
-            "4. Set GOOGLE_CALENDAR_OAUTH_TOKEN environment variable\n"
-            "Note: Tokens expire after ~1 hour. Use Aden OAuth for auto-refresh."
-        ),
+        api_key_instructions="Google Calendar OAuth requires OAuth2. Connect via hive.adenhq.com",
+        # Health check configuration
+        health_check_endpoint="https://www.googleapis.com/calendar/v3/users/me/calendarList",
+        health_check_method="GET",
         # Credential store mapping
         credential_id="google_calendar_oauth",
         credential_key="access_token",
