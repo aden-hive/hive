@@ -170,11 +170,11 @@ Build and run an agent using Claude Code CLI with the agent building skills:
 
 This verifies agent-related Claude Code skills are available:
 
+- `/hive` - Complete workflow for building agents
 - `/hive-create` - Step-by-step build guide
-- `/building-agents-core` - Fundamental concepts
-- `/building-agents-patterns` - Best practices
-- `/testing-agent` - Test and validate agents
-- `/agent-workflow` - Complete workflow
+- `/hive-concepts` - Fundamental concepts
+- `/hive-patterns` - Best practices
+- `/hive-test` - Test and validate agents
 
 ### 2. Build an Agent
 
@@ -194,7 +194,7 @@ This step creates the initial agent structure required for further development.
 ### 3. Define Agent Logic
 
 ```
-claude> /building-agents-core
+claude> /hive-concepts
 ```
 
 Follow the prompts to:
@@ -209,7 +209,7 @@ This step establishes the core concepts and rules needed before building an agen
 ### 4. Apply Agent Patterns
 
 ```
-claude> /building-agents-patterns
+claude> /hive-patterns
 ```
 
 Follow the prompts to:
@@ -224,7 +224,7 @@ This step helps optimize agent design before final testing.
 ### 5. Test Your Agent
 
 ```
-claude> /testing-agent
+claude> /hive-test
 ```
 
 Follow the prompts to:
@@ -235,21 +235,6 @@ Follow the prompts to:
 4. Debug failing tests and iterate on agent improvements
 
 This step verifies that the agent meets its goals before production use.
-
-### 6. Agent Development Workflow (End-to-End)
-
-```
-claude> /agent-workflow
-```
-
-Follow the guided flow to:
-
-1. Understand core agent concepts (optional)
-2. Build the agent structure step by step
-3. Apply best-practice design patterns (optional)
-4. Test and validate the agent against its goals
-
-This workflow orchestrates all agent-building skills to take you from idea → production-ready agent.
 
 ## Troubleshooting
 
@@ -465,7 +450,7 @@ PYTHONPATH=exports uv run python -m your_agent_name validate
 ### 4. Test Agent
 
 ```
-claude> /testing-agent
+claude> /hive-test
 ```
 
 ### 5. Run Agent
@@ -519,11 +504,11 @@ export AGENT_STORAGE_PATH="/custom/storage"
 
 ## Additional Resources
 
-- **Framework Documentation:** [core/README.md](core/README.md)
-- **Tools Documentation:** [tools/README.md](tools/README.md)
-- **Example Agents:** [exports/](exports/)
-- **Agent Building Guide:** [.claude/skills/hive-create/SKILL.md](.claude/skills/hive-create/SKILL.md)
-- **Testing Guide:** [.claude/skills/testing-agent/SKILL.md](.claude/skills/testing-agent/SKILL.md)
+- **Framework Documentation:** [core/README.md](../core/README.md)
+- **Tools Documentation:** [tools/README.md](../tools/README.md)
+- **Example Agents:** [exports/](../exports/)
+- **Agent Building Guide:** [.claude/skills/hive-create/SKILL.md](../.claude/skills/hive-create/SKILL.md)
+- **Testing Guide:** [.claude/skills/hive-test/SKILL.md](../.claude/skills/hive-test/SKILL.md)
 
 ## Contributing
 
@@ -532,7 +517,7 @@ When contributing agent packages:
 1. Place agents in `exports/agent_name/`
 2. Follow the standard agent structure (see existing agents)
 3. Include README.md with usage instructions
-4. Add tests if using `/testing-agent`
+4. Add tests if using `/hive-test`
 5. Document required environment variables
 
 ## Support

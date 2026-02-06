@@ -118,13 +118,13 @@ This sets up:
 claude> /hive
 
 # Test your agent
-claude> /testing-agent
+claude> /hive-test
 
 # Run your agent
 PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
-**[📖 Complete Setup Guide](ENVIRONMENT_SETUP.md)** - Detailed instructions for agent development
+**[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
 
 ### Cursor IDE Support
 
@@ -229,18 +229,18 @@ claude> /hive
 PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
-See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete setup instructions.
+See [environment-setup.md](docs/environment-setup.md) for complete setup instructions.
 
 ## Documentation
 
-- **[Developer Guide](DEVELOPER.md)** - Comprehensive guide for developers
+- **[Developer Guide](docs/developer-guide.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
 ## Roadmap
 
-Aden Hive Agent Framework aims to help developers build outcome-oriented, self-adaptive agents. See [ROADMAP.md](ROADMAP.md) for details.
+Aden Hive Agent Framework aims to help developers build outcome-oriented, self-adaptive agents. See [roadmap.md](docs/roadmap.md) for details.
 
 ```mermaid
 flowchart TD
@@ -394,7 +394,7 @@ Hive collects telemetry data for monitoring and observability purposes, includin
 
 **Q: What deployment options does Hive support?**
 
-Hive supports self-hosted deployments via Python packages. See the [Environment Setup Guide](ENVIRONMENT_SETUP.md) for installation instructions. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
+Hive supports self-hosted deployments via Python packages. See the [Environment Setup Guide](docs/environment-setup.md) for installation instructions. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
 
 **Q: Can Hive handle complex, production-scale use cases?**
 
@@ -422,7 +422,7 @@ Hive provides granular budget controls including spending limits, throttles, and
 
 **Q: Where can I find examples and documentation?**
 
-Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API reference, and getting started tutorials. The repository also includes documentation in the `docs/` folder and a comprehensive [DEVELOPER.md](DEVELOPER.md) guide.
+Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API reference, and getting started tutorials. The repository also includes documentation in the `docs/` folder and a comprehensive [developer guide](docs/developer-guide.md).
 
 **Q: How can I contribute to Aden?**
 

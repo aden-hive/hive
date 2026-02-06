@@ -93,13 +93,13 @@ Esto instala:
 claude> /hive
 
 # Probar tu agente
-claude> /testing-agent
+claude> /hive-test
 
 # Ejecutar tu agente
 PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
-**[📖 Guía de Configuración Completa](ENVIRONMENT_SETUP.md)** - Instrucciones detalladas para desarrollo de agentes
+**[📖 Guía de Configuración Completa](../environment-setup.md)** - Instrucciones detalladas para desarrollo de agentes
 
 ## Características
 
@@ -214,10 +214,7 @@ hive/
 ├── docs/                   # Documentación y guías
 ├── scripts/                # Scripts de construcción y utilidades
 ├── .claude/                # Habilidades de Claude Code para construir agentes
-├── ENVIRONMENT_SETUP.md    # Guía de configuración de Python para desarrollo de agentes
-├── DEVELOPER.md            # Guía del desarrollador
 ├── CONTRIBUTING.md         # Directrices de contribución
-└── ROADMAP.md              # Hoja de ruta del producto
 ```
 
 ## Desarrollo
@@ -239,17 +236,17 @@ Para construir y ejecutar agentes orientados a objetivos con el framework:
 claude> /hive
 
 # Probar agentes
-claude> /testing-agent
+claude> /hive-test
 
 # Ejecutar agentes
 PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
-Consulta [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instrucciones de configuración completas.
+Consulta [environment-setup.md](../environment-setup.md) para instrucciones de configuración completas.
 
 ## Documentación
 
-- **[Guía del Desarrollador](DEVELOPER.md)** - Guía completa para desarrolladores
+- **[Guía del Desarrollador](../developer-guide.md)** - Guía completa para desarrolladores
 - [Primeros Pasos](docs/getting-started.md) - Instrucciones de configuración rápida
 - [Guía de Configuración](docs/configuration.md) - Todas las opciones de configuración
 - [Visión General de Arquitectura](docs/architecture/README.md) - Diseño y estructura del sistema
@@ -258,7 +255,7 @@ Consulta [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instrucciones de conf
 
 El Framework de Agentes Aden tiene como objetivo ayudar a los desarrolladores a construir agentes auto-adaptativos orientados a resultados. Encuentra nuestra hoja de ruta aquí
 
-[ROADMAP.md](ROADMAP.md)
+[roadmap.md](../roadmap.md)
 
 ```mermaid
 timeline
