@@ -363,6 +363,23 @@ mcp__agent-builder__export_graph()
 - NOT: `{"first-node-id": ["input_keys"]}` (WRONG)
 - NOT: `{"first-node-id"}` (WRONG - this is a set)
 
+**IMPORTANT mcp_servers.json format:**
+
+```json
+{
+  "hive-tools": {
+    "transport": "stdio",
+    "command": "python",
+    "args": ["mcp_server.py", "--stdio"],
+    "cwd": "../../tools",
+    "description": "Hive tools MCP server"
+  }
+}
+```
+
+- NO `"mcpServers"` wrapper (that's Claude Desktop format, NOT hive format)
+- `cwd` MUST be `"../../tools"` (relative from `exports/AGENT_NAME/` to `tools/`)
+
 **Use the example agent** at `.claude/skills/hive-create/examples/deep_research_agent/` as a template for file structure and patterns. It demonstrates: STEP 1/STEP 2 prompts, client-facing nodes, feedback loops, nullable_output_keys, and data tools.
 
 **AFTER writing all files, tell the user:**
@@ -496,3 +513,4 @@ result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
 8. **Forgetting nullable_output_keys** - Mark input_keys that only arrive on certain edges (e.g., feedback) as nullable on the receiving node
 9. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code
 10. **Writing code before user approves the graph** - Always get approval on goal, nodes, and graph BEFORE writing any agent code
+11. **Wrong mcp_servers.json format** - Use flat format (no `"mcpServers"` wrapper), and `cwd` must be `"../../tools"` not `"tools"`
