@@ -2,10 +2,14 @@
 
 from aden_tools.credentials.base import CredentialSpec
 
-
 discord_credential_spec = CredentialSpec(
     env_var="DISCORD_BOT_TOKEN",
-    tools=["discord_send_message", "discord_read_messages", "discord_list_channels", "discord_add_reaction"],
+    tools=[
+        "discord_send_message",
+        "discord_read_messages",
+        "discord_list_channels",
+        "discord_add_reaction",
+    ],
     node_types=[],
     required=True,
     startup_required=False,
