@@ -277,6 +277,27 @@ class CredentialStoreAdapter:
         """Access the underlying credential store for advanced operations."""
         return self._store
 
+    def rotate_encryption_key(self, new_key: bytes) -> None:
+        """
+        Rotate the encryption key used by the underlying storage backend.
+
+        This delegates to the storage implementation if it exposes `rotate_key`.
+        If the backend does not support rotation, a NotImplementedError is raised.
+
+        Args:
+            new_key: Fernet-compatible key bytes to re-encrypt credentials with.
+        """
+        storage = getattr(self._store, "_storage", None)
+        if storage is None:
+            raise NotImplementedError("No storage backend available to rotate key")
+
+        if not hasattr(storage, "rotate_key"):
+            raise NotImplementedError(
+                "Underlying storage does not support key rotation"
+            )
+
+        storage.rotate_key(new_key)
+
     # --- Error Formatting (copied from base.py for consistency) ---
 
     def _format_missing_error(

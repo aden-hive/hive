@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import SecretStr
+import tempfile
 
 from .models import CredentialDecryptionError, CredentialKey, CredentialObject, CredentialType
 
@@ -285,6 +286,60 @@ class EncryptedFileStorage(CredentialStorage):
 
         with open(index_path, "w") as f:
             json.dump(index, f, indent=2)
+
+    def rotate_key(self, new_key: bytes) -> None:
+        """
+        Rotate the encryption key used by this storage backend.
+
+        This will re-encrypt all credential files in-place using the provided
+        `new_key` (expected to be a Fernet-compatible key). The operation is
+        performed atomically for each file to avoid partial writes.
+
+        Args:
+            new_key: 32-byte Fernet key as bytes
+
+        Raises:
+            ImportError: If `cryptography` is not available.
+            Exception: If any file fails to decrypt with the current key.
+        """
+        try:
+            from cryptography.fernet import Fernet
+        except ImportError as e:
+            raise ImportError(
+                "Encrypted storage requires 'cryptography'. "
+                "Install with: pip install cryptography"
+            ) from e
+
+        new_fernet = Fernet(new_key)
+        creds_dir = self.base_path / "credentials"
+
+        # Iterate credential files and re-encrypt
+        for cred_file in creds_dir.glob("*.enc"):
+            with open(cred_file, "rb") as f:
+                encrypted = f.read()
+
+            # Decrypt using current key - will raise if wrong
+            json_bytes = self._fernet.decrypt(encrypted)
+
+            # Encrypt with new key
+            new_encrypted = new_fernet.encrypt(json_bytes)
+
+            # Atomic write to same directory
+            tmp = tempfile.NamedTemporaryFile(delete=False, dir=str(creds_dir))
+            try:
+                tmp.write(new_encrypted)
+                tmp.flush()
+                tmp_name = tmp.name
+            finally:
+                tmp.close()
+
+            # Replace original file atomically
+            os.replace(tmp_name, str(cred_file))
+
+        # Update in-memory key/fernet so future operations use new key
+        self._key = new_key
+        self._fernet = new_fernet
+        logger.info("Rotated encryption key for EncryptedFileStorage")
 
 
 class EnvVarStorage(CredentialStorage):
