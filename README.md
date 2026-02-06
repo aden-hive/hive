@@ -87,6 +87,18 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## Quick Start
 
+## Beginner Tip: What Happens After quickstart.sh?
+
+After running `./quickstart.sh`, no GitHub changes are created.
+This step only sets up your local environment.
+
+Next recommended steps:
+1. Review the generated environments
+2. Build your first agent using Claude Code or Cursor
+3. Run a sample agent to verify execution
+4. Modify documentation or examples before opening a PR
+
+
 ## Prerequisites
 
 - Python 3.11+ for agent development
