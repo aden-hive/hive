@@ -44,13 +44,12 @@ class FileStorage:
     def _ensure_dirs(self) -> None:
         """Create directory structure if it doesn't exist.
 
-        NOTE: All directories (runs/, summaries/, indexes/) are deprecated.
+        DEPRECATED: All directories (runs/, summaries/, indexes/) are deprecated.
         New sessions use unified storage at sessions/{session_id}/state.json.
-        This method is kept for backward compatibility but creates no directories.
+        This method is now a no-op. Tests should not rely on this.
         """
-        # Do NOT create any directories - all are deprecated
-        # - runs/ and summaries/ deprecated in Phase 3
-        # - indexes/ deprecated - scan sessions/*/state.json instead
+        # No-op: do not create deprecated directories
+        pass
 
     def _validate_key(self, key: str) -> None:
         """
@@ -91,9 +90,9 @@ class FileStorage:
     def save_run(self, run: Run) -> None:
         """Save a run to storage.
 
-        DEPRECATED: This method writes to the old runs/ and summaries/ structure.
+        DEPRECATED: This method is now a no-op.
         New sessions use unified storage at sessions/{session_id}/state.json.
-        This method is now a no-op to prevent creating deprecated directories.
+        Tests should not rely on FileStorage - use unified session storage instead.
         """
         import warnings
 
