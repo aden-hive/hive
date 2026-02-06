@@ -45,6 +45,7 @@ from .pdf_read_tool import register_tools as register_pdf_read
 from .slack_tool import register_tools as register_slack
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
+from .youtube_transcript_tool.tool import register as register_youtube
 
 
 def register_all_tools(
@@ -66,6 +67,7 @@ def register_all_tools(
     register_example(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
+    register_youtube(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -93,6 +95,7 @@ def register_all_tools(
         "web_search",
         "web_scrape",
         "pdf_read",
+        "get_youtube_transcript",
         "view_file",
         "write_to_file",
         "list_dir",
