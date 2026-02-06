@@ -20,9 +20,11 @@ from fastmcp import FastMCP
 from aden_tools.credentials import (
     CREDENTIAL_SPECS,
     EMAIL_CREDENTIALS,
-    INTEGRATION_CREDENTIALS,
+    GITHUB_CREDENTIALS,
+    HUBSPOT_CREDENTIALS,
     LLM_CREDENTIALS,
     SEARCH_CREDENTIALS,
+    SLACK_CREDENTIALS,
 )
 from aden_tools.tools import register_all_tools
 
@@ -30,6 +32,7 @@ from .conftest import (
     CREDENTIAL_TOOL_MODULE_IDS,
     CREDENTIAL_TOOL_MODULES,
     KNOWN_PHANTOM_TOOLS,
+    MODULE_TO_TOOLS,
     TOOL_MODULE_IDS,
     TOOL_MODULES,
 )
@@ -210,7 +213,9 @@ class TestSpecsMergedIntoCredentialSpecs:
         "LLM_CREDENTIALS": LLM_CREDENTIALS,
         "SEARCH_CREDENTIALS": SEARCH_CREDENTIALS,
         "EMAIL_CREDENTIALS": EMAIL_CREDENTIALS,
-        "INTEGRATION_CREDENTIALS": INTEGRATION_CREDENTIALS,
+        "GITHUB_CREDENTIALS": GITHUB_CREDENTIALS,
+        "HUBSPOT_CREDENTIALS": HUBSPOT_CREDENTIALS,
+        "SLACK_CREDENTIALS": SLACK_CREDENTIALS,
     }
 
     @pytest.mark.parametrize("category_name", list(CATEGORY_DICTS.keys()))
@@ -254,4 +259,55 @@ class TestToolNamesInReturnList:
             assert tool_name in all_tools_return, (
                 f"Tool '{tool_name}' (from spec '{spec_name}') "
                 f"not in register_all_tools() return list"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 1a-7: Credential coverage - tools accepting credentials must have specs
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialCoverage:
+    """Every tool that accepts credentials must have a corresponding CredentialSpec.
+
+    This enforces the convention:
+    - register_tools(mcp) -> no credentials needed
+    - register_tools(mcp, credentials=None) -> must have CredentialSpec entries
+
+    This eliminates the need for a separate "no_credentials" list.
+    """
+
+    @pytest.fixture(scope="class")
+    def all_spec_tools(self) -> set[str]:
+        """Collect all tool names referenced in CREDENTIAL_SPECS."""
+        tools: set[str] = set()
+        for spec in CREDENTIAL_SPECS.values():
+            tools.update(spec.tools)
+        tools.update(KNOWN_PHANTOM_TOOLS)
+        return tools
+
+    @pytest.mark.parametrize(
+        "import_path,short_name",
+        CREDENTIAL_TOOL_MODULES,
+        ids=CREDENTIAL_TOOL_MODULE_IDS,
+    )
+    def test_credential_tools_have_specs(
+        self, import_path: str, short_name: str, all_spec_tools: set[str]
+    ):
+        """Every tool from a module with credentials param must have a spec.
+
+        If this test fails, you have two options:
+        1. Add a CredentialSpec in credentials/<category>.py for your tool
+        2. Remove the 'credentials' param from register_tools() if no credentials needed
+        """
+        tools_in_module = MODULE_TO_TOOLS.get(short_name, [])
+        for tool_name in tools_in_module:
+            assert tool_name in all_spec_tools, (
+                f"Tool '{tool_name}' from module '{short_name}' accepts credentials "
+                f"but has no CredentialSpec.\n\n"
+                f"Fix by either:\n"
+                f"  1. Adding a CredentialSpec in credentials/<category>.py with "
+                f"tools=['{tool_name}'], or\n"
+                f"  2. Removing 'credentials' param from register_tools() if this "
+                f"tool doesn't need credentials"
             )
