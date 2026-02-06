@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import importlib
 import inspect
-from unittest.mock import patch
 
 import pytest
 from fastmcp import FastMCP
@@ -19,7 +18,6 @@ from aden_tools.credentials import CREDENTIAL_SPECS
 from .conftest import (
     CREDENTIAL_TOOL_MODULES,
     MODULE_TO_TOOLS,
-    get_all_credential_tool_names,
     get_minimal_args,
 )
 

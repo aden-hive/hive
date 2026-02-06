@@ -57,13 +57,13 @@ from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
-from .slack import SLACK_CREDENTIALS
 from .shell_config import (
     add_env_var_to_shell_config,
     detect_shell,
     get_shell_config_path,
     get_shell_source_command,
 )
+from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials

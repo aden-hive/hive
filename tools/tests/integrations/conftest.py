@@ -11,10 +11,9 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastmcp import FastMCP
 
-from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter
+from aden_tools.credentials import CREDENTIAL_SPECS
 
 # --- Known Issues ---
 # google_search and google_cse specs use tools=["google_search"] but
