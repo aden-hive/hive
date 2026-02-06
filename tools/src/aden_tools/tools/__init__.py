@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
+from .excel_tool import register_tools as register_excel
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
@@ -87,6 +88,7 @@ def register_all_tools(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
+    register_excel(mcp)
 
     return [
         "example_tool",
@@ -109,6 +111,9 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "excel_read",
+        "excel_info",
+        "excel_sql",
         "github_list_repos",
         "github_get_repo",
         "github_search_repos",
