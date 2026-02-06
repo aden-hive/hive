@@ -73,15 +73,32 @@ class OpenRouterProvider(LLMProvider):
         print(f"[OpenRouter Debug] API Key present: {bool(self.api_key)}")
 
         # Make request via OpenAI client (with automatic retry logic)
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=full_messages,
-            max_tokens=max_tokens,
-            temperature=0.2,
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=full_messages,
+                max_tokens=max_tokens,
+                temperature=0.2,
+            )
+        except Exception as e:
+            print("[OpenRouter Debug] Request failed before completion.")
+            print(f"[OpenRouter Debug] Error type: {type(e).__name__}")
+            print(f"[OpenRouter Debug] Error: {e}")
+            raise
 
         # Extract response data
-        content = response.choices[0].message.content or ""
+        try:
+            content = response.choices[0].message.content or ""
+        except Exception as e:
+            print("[OpenRouter Debug] Malformed response (no choices).")
+            try:
+                print(f"[OpenRouter Debug] Raw response: {response}")
+            except Exception:
+                print("[OpenRouter Debug] Raw response could not be printed.")
+            print(f"[OpenRouter Debug] Error type: {type(e).__name__}")
+            print(f"[OpenRouter Debug] Error: {e}")
+            raise
+
         input_tokens = response.usage.prompt_tokens if response.usage else 0
         output_tokens = response.usage.completion_tokens if response.usage else 0
 
