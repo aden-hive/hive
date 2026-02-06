@@ -21,6 +21,19 @@ This will:
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
+- > **Note:** If `uv` is not found after installation, you may need to add `~/.local/bin` to your PATH:
+> 
+> ```bash
+> # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+> export PATH="$HOME/.local/bin:$PATH"
+> ```
+> 
+> Or reload your shell:
+> 
+> ```bash
+> source ~/.local/bin/env
+> ```
+
 ## Windows Setup
 
 Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run agents.
@@ -368,6 +381,8 @@ The project uses **separate virtual environments** for `core` and `tools` packag
 ### How It Works
 
 When you run `./quickstart.sh` or `uv sync` in each directory:
+
+> **Note:** When running `./quickstart.sh`, a single root `.venv/` directory is created in the project root, not separate `core/.venv/` and `tools/.venv/` directories. The separate virtual environments mentioned below apply when manually setting up each package.
 
 1. **core/.venv/** - Contains the `framework` package and its dependencies (anthropic, litellm, mcp, etc.)
 2. **tools/.venv/** - Contains the `aden_tools` package and its dependencies (beautifulsoup4, pandas, etc.)
