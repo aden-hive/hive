@@ -79,7 +79,7 @@ class ToolRegistry:
         Args:
             func: Function to register
             name: Tool name (defaults to function name)
-            description: Tool description (defaults to docstring)
+            description: Tool description (defaults to function docstring)
         """
         tool_name = name or func.__name__
         tool_desc = description or func.__doc__ or f"Execute {tool_name}"
