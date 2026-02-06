@@ -477,10 +477,23 @@ class TestSpecCompleteness:
         assert google_cse.credential_group == "google_custom_search"
         assert google_search.credential_group == google_cse.credential_group
 
+    def test_x_credentials_share_credential_group(self):
+        """All X credentials share the same credential_group 'x'."""
+        x_cred_names = [n for n in CREDENTIAL_SPECS if n.startswith("x_")]
+        assert len(x_cred_names) >= 1, "Expected at least one X credential"
+        for name in x_cred_names:
+            assert CREDENTIAL_SPECS[name].credential_group == "x", (
+                f"X credential '{name}' has unexpected credential_group="
+                f"'{CREDENTIAL_SPECS[name].credential_group}'"
+            )
+
     def test_credential_group_default_empty(self):
         """Specs without a group have empty credential_group."""
+        grouped = {"google_search", "google_cse"} | {
+            n for n, s in CREDENTIAL_SPECS.items() if s.credential_group == "x"
+        }
         for name, spec in CREDENTIAL_SPECS.items():
-            if name not in ("google_search", "google_cse"):
+            if name not in grouped:
                 assert spec.credential_group == "", (
                     f"Credential '{name}' has unexpected credential_group='{spec.credential_group}'"
                 )
