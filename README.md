@@ -89,10 +89,32 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## Prerequisites
 
-- Python 3.11+ for agent development
-- Claude Code or Cursor for utilizing agent skills
+- **Python 3.11+** ([Download](https://www.python.org/downloads/))
+- **Git** ([Download](https://git-scm.com/downloads))
+- **Claude Code** or **Cursor** (optional, recommended for agent builder skills)
+  - [Install Claude Code](https://docs.anthropic.com/claude/docs/claude-code)
+  - [Install Cursor](https://cursor.sh/)
 
-> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
+### Platform-Specific Requirements
+
+**Windows Users - Choose One Option:**
+
+- **Option 1 (Recommended): WSL 2**
+  - [Install WSL](https://learn.microsoft.com/en-us/windows/wsl/install)
+  - Provides full Linux compatibility, all bash scripts work
+  - Then follow Linux installation steps below
+
+- **Option 2: Native Windows**
+  - Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first:
+    ```powershell
+    # In PowerShell (as Administrator)
+    irm https://astral.sh/uv/install.ps1 | iex
+    ```
+  - Then follow [Windows Native Setup](#windows-native-setup-using-uv) below
+  - **Note:** Python packages work natively on Windows; WSL is recommended only for bash setup scripts
+
+**Linux/macOS Users:**
+- No additional requirements (setup script installs `uv` automatically)
 
 ### Installation
 
@@ -107,18 +129,49 @@ cd hive
 
 This sets up:
 
-- **framework** - Core agent runtime and graph executor (in `core/.venv`)
-- **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
+- **framework** - Core agent runtime and graph executor
+- **aden_tools** - MCP tools for agent capabilities
+- **Virtual environment** - Created at workspace root (`.venv/`)
 - All required Python dependencies
+
+### Windows (Native) Setup (Using uv)
+
+If you are running Hive on native Windows (without WSL), you may encounter packaging issues with `pip install -e .`.
+
+**Prerequisites:** Ensure you have installed `uv` using the PowerShell command from the [Prerequisites](#prerequisites) section above.
+
+Recommended setup using `uv`:
+
+```powershell
+# Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install uv (if not already installed)
+pip install uv
+
+# Install dependencies
+uv sync
+
+# Verify installation
+uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
+```
+
+Continue with [Build Your First Agent](#build-your-first-agent).
 
 ### Build Your First Agent
 
+After completing the setup, you can create and run your first agent using Claude Code.
+
 ```bash
-# Build an agent using Claude Code
-claude> /hive
+# Open Claude Code in the project directory
+claude
+
+# Create an agent
+/hive
 
 # Test your agent
-claude> /hive-test
+/hive-test
 
 # Run your agent
 PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
@@ -201,33 +254,35 @@ flowchart LR
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **[Adaptiveness](docs/key_concepts/evolution.md)** → On failure, the system evolves the graph and redeploys automatically
 
-## Run pre-built Agents (Coming Soon)
+## Running Agents
 
-### Run a sample agent
+### Run your own agent
 
-Aden Hive provides a list of featured agents that you can use and build on top of.
-
-### Run an agent shared by others
-
-Put the agent in `exports/` and run `PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'`
-
-For building and running goal-driven agents with the framework:
+After building an agent with `/hive`, run it from the project root:
 
 ```bash
-# One-time setup
-./quickstart.sh
+# Linux/macOS
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 
-# This sets up:
-# - framework package (core runtime)
-# - aden_tools package (MCP tools)
-# - All Python dependencies
-
-# Build new agents using Agent Skills
-claude> /hive
-
-# Run agents
-PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
+# Windows (PowerShell)
+$env:PYTHONPATH="exports"
+uv run python -m your_agent_name run --input '{...}'
 ```
+
+### Run agents shared by others
+
+Download or clone agent packages into `exports/` and run the same way:
+
+```bash
+# Example: Run a downloaded agent
+cd hive
+git clone https://github.com/example/some-agent.git exports/some_agent
+PYTHONPATH=exports uv run python -m some_agent run --input '{...}'
+```
+
+### Featured Agent Library (Coming Soon)
+
+We're building a curated library of production-ready agents. Stay tuned!
 
 See [environment-setup.md](docs/environment-setup.md) for complete setup instructions.
 
