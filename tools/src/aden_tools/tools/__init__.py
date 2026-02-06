@@ -43,6 +43,7 @@ from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
+from .image_tools.image_tool import register_tools as register_image
 
 def register_all_tools(
     mcp: FastMCP,
@@ -82,6 +83,9 @@ def register_all_tools(
     register_execute_command(mcp)
     register_csv(mcp)
 
+    # Register image tools
+    register_image(mcp)
+
     return [
         "example_tool",
         "web_search",
@@ -114,6 +118,11 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        
+        "image_resize",
+        "image_compress",
+        "image_convert",
+        "image_metadata",
     ]
 
 
