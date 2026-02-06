@@ -56,9 +56,7 @@ class TestModuleStructure:
         assert hasattr(mod, "register_tools"), (
             f"Module {import_path} does not export 'register_tools'"
         )
-        assert callable(mod.register_tools), (
-            f"{import_path}.register_tools is not callable"
-        )
+        assert callable(mod.register_tools), f"{import_path}.register_tools is not callable"
 
     @pytest.mark.parametrize(
         "import_path,short_name",
@@ -93,9 +91,7 @@ class TestRegisterToolsSignature:
         mod = importlib.import_module(import_path)
         sig = inspect.signature(mod.register_tools)
         params = list(sig.parameters.keys())
-        assert len(params) >= 1, (
-            f"{import_path}.register_tools has no parameters"
-        )
+        assert len(params) >= 1, f"{import_path}.register_tools has no parameters"
         assert params[0] == "mcp", (
             f"{import_path}.register_tools first param should be 'mcp', got '{params[0]}'"
         )
@@ -105,9 +101,7 @@ class TestRegisterToolsSignature:
         CREDENTIAL_TOOL_MODULES,
         ids=CREDENTIAL_TOOL_MODULE_IDS,
     )
-    def test_credential_tools_accept_credentials_param(
-        self, import_path: str, short_name: str
-    ):
+    def test_credential_tools_accept_credentials_param(self, import_path: str, short_name: str):
         """Tools with CredentialSpecs must accept a 'credentials' parameter."""
         mod = importlib.import_module(import_path)
         sig = inspect.signature(mod.register_tools)
@@ -226,8 +220,7 @@ class TestSpecsMergedIntoCredentialSpecs:
                 f"'{spec_name}' from {category_name} is not in CREDENTIAL_SPECS"
             )
             assert CREDENTIAL_SPECS[spec_name] is spec, (
-                f"'{spec_name}' in CREDENTIAL_SPECS is not the same object "
-                f"as in {category_name}"
+                f"'{spec_name}' in CREDENTIAL_SPECS is not the same object as in {category_name}"
             )
 
 
