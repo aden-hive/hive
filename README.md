@@ -92,18 +92,27 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 - Python 3.11+ for agent development
 - Claude Code or Cursor for utilizing agent skills
 
-> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
-### Installation
+> **Note for Windows Users:**  
+It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash**.
 
-```bash
-# Clone the repository
-git clone https://github.com/adenhq/hive.git
-cd hive
+### Recommended setup using WSL
 
-# Run quickstart setup
-./quickstart.sh
-```
+1. Open PowerShell as Administrator.
+2. Install WSL:
+   wsl --install
+3. Restart your system if prompted.
+4. Open the Ubuntu terminal.
+5. Install Git and Python:
+   sudo apt update
+   sudo apt install git python3 python3-pip
+6. Clone the repository and run:
+   git clone https://github.com/adenhq/hive.git
+   cd hive
+   ./quickstart.sh
+
+This setup provides the best compatibility with the framework scripts.
+
 
 This sets up:
 
