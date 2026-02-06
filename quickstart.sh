@@ -139,7 +139,7 @@ PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{s
 PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)')
 PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
 
-if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
+if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]; }; then
     echo -e "${RED}Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
     echo ""
     echo "Please upgrade your Python installation and run this script again."
@@ -408,12 +408,14 @@ print(json.dumps(config, indent=2))
 set +e
 if [ -f "$SCRIPT_DIR/.env" ]; then
     set -a
+    # shellcheck disable=SC1091
     source "$SCRIPT_DIR/.env" 2>/dev/null
     set +a
 fi
 
 if [ -f "$HOME/.env" ]; then
     set -a
+    # shellcheck disable=SC1091
     source "$HOME/.env" 2>/dev/null
     set +a
 fi
@@ -610,9 +612,12 @@ else
         if [ ! -f "$SCRIPT_DIR/.env" ]; then
             touch "$SCRIPT_DIR/.env"
         fi
-        echo "" >> "$SCRIPT_DIR/.env"
-        echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SCRIPT_DIR/.env"
-        echo "HIVE_CREDENTIAL_KEY=$GENERATED_KEY" >> "$SCRIPT_DIR/.env"
+        {
+            echo ""
+            echo "# Encryption key for Hive credential store (~/.hive/credentials)"
+            echo "HIVE_CREDENTIAL_KEY=$GENERATED_KEY"
+        } >> "$SCRIPT_DIR/.env"
+
         export HIVE_CREDENTIAL_KEY="$GENERATED_KEY"
 
         echo -e "${GREEN}  ✓ Encryption key saved to .env${NC}"
@@ -688,7 +693,7 @@ fi
 
 echo -n "  ⬡ skills... "
 if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
+    SKILL_COUNT=$(find "$SCRIPT_DIR/.claude/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
     echo -e "${GREEN}${SKILL_COUNT} found${NC}"
 else
     echo -e "${YELLOW}--${NC}"
