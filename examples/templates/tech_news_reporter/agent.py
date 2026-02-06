@@ -171,13 +171,11 @@ class TechNewsReporterAgent:
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
 
-        llm = None
-        if not mock_mode:
-            llm = LiteLLMProvider(
-                model=self.config.model,
-                api_key=self.config.api_key,
-                api_base=self.config.api_base,
-            )
+        llm = LiteLLMProvider(
+            model=self.config.model,
+            api_key=self.config.api_key,
+            api_base=self.config.api_base,
+        )
 
         tool_executor = self._tool_registry.get_executor()
         tools = list(self._tool_registry.get_tools().values())
