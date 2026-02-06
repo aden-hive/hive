@@ -63,6 +63,20 @@ Use Hive when you need:
 - Strong monitoring, safety, and budget controls
 - A framework that evolves with your goals
 
+## Agent Lifecycle (High-Level)
+
+Hive agents are designed to evolve over time rather than operate as
+static rule-based systems.
+
+At a high level:
+1. An agent is initialized with goals, tools, and constraints
+2. The agent executes tasks against a business process
+3. Outcomes and feedback are evaluated
+4. The agent updates its strategy or behavior for future runs
+
+This lifecycle enables long-running, autonomous workflows that improve
+over time with usage.
+
 ## What is Aden
 
 <p align="center">
