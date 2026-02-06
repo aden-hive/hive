@@ -522,12 +522,10 @@ max_node_visits=3  # Prevent getting stuck
 
    **For quick manual tests:**
    ```bash
-   # Run the agent with test input
-   PYTHONPATH=core:exports python -m {agent_name}
-
-   # Or use TUI mode for interactive testing
-   PYTHONPATH=core:exports python -m {agent_name} tui
+   # Launch the interactive TUI dashboard
+   hive tui
    ```
+   Then use arrow keys to select the agent from the list and press Enter to run it.
 
 2. **Provide MCP tool queries to validate the fix:**
 
@@ -574,8 +572,9 @@ Developer: "I applied the fix to intake-collector. How do I verify it works?"
 
 You: "Great! Let's verify the fix with these steps:
 
-1. Run the agent:
-   PYTHONPATH=core:exports python -m twitter_outreach
+1. Launch the TUI dashboard:
+   hive tui
+   Then select your agent from the list and press Enter to run it.
 
 2. After it completes, check the logs:
    [Use query_runtime_logs to check for attention flags]
@@ -781,8 +780,9 @@ Developer: "I updated the prompt. How do I test it?"
 
 You: "Let's verify the fix:
 
-1. Run the agent with your test input:
-   PYTHONPATH=core:exports python -m twitter_outreach
+1. Launch the TUI dashboard:
+   hive tui
+   Then select your agent and press Enter to run it.
 
 2. I'll check the logs after it runs..."
 
