@@ -88,5 +88,5 @@ Implement **Option A**. The MCP server should be a thin utility layer for test e
 ## Related Files
 
 - `core/framework/mcp/agent_builder_server.py` - Main file to modify
-- `.claude/skills/testing-agent/SKILL.md` - Update documentation if tools change
+- `.claude/skills/hive-test/SKILL.md` - Update documentation if tools change
 - `core/framework/testing/` - Test generation utilities that could be removed
