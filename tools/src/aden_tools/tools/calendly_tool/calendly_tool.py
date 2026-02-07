@@ -12,7 +12,7 @@ API Reference: https://developer.calendly.com/api-docs
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -132,7 +132,7 @@ class _CalendlyClient:
     ) -> dict[str, Any]:
         """Get available times for an event type. Max 7-day range."""
         if not start_time or not end_time:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             end = start + timedelta(days=7)
             start_time = start.isoformat().replace("+00:00", "Z")
@@ -212,7 +212,7 @@ def register_tools(
             return {
                 "error": "Calendly credentials not configured",
                 "help": (
-                    "Set CALENDLY_API_TOKEN environment variable or configure via credential store. "
+                    "Set CALENDLY_API_TOKEN env var or configure via credential store. "
                     "Get token from https://calendly.com/integrations/api_webhooks"
                 ),
             }
@@ -276,7 +276,8 @@ def register_tools(
         from calendly_list_event_types, you can use it directly.
 
         Args:
-            event_type_uri: Full URI of the event type (e.g. https://api.calendly.com/event_types/XXXXX)
+            event_type_uri: Full URI of the event type
+                (e.g. https://api.calendly.com/event_types/XXXXX)
 
         Returns:
             Dict with scheduling_url or error
