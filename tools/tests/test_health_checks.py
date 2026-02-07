@@ -6,8 +6,8 @@ import httpx
 
 from aden_tools.credentials.health_check import (
     HEALTH_CHECKERS,
-    AnthropicHealthChecker,
     AirtableHealthChecker,
+    AnthropicHealthChecker,
     GitHubHealthChecker,
     GoogleSearchHealthChecker,
     ResendHealthChecker,
