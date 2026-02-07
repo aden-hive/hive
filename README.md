@@ -73,7 +73,7 @@ Use Hive when you need:
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
-- **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans
+- **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
 ## Quick Start
@@ -136,7 +136,7 @@ hive run exports/your_agent_name --input '{"key": "value"}'
 
 ## Integration
 
-<img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" />
+<a href="https://github.com/adenhq/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
 
 Hive is built to be model-agnostic and system-agnostic.
 
