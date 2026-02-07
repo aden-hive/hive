@@ -41,6 +41,7 @@ from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
+from .notion_tool import register_tools as register_notion
 from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .slack_tool import register_tools as register_slack
@@ -77,6 +78,7 @@ def register_all_tools(
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_notion(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -202,6 +204,11 @@ def register_all_tools(
         "slack_find_user_by_email",
         "slack_kick_user_from_channel",
         "slack_delete_file",
+        # Notion tools
+        "notion_search",
+        "notion_get_page",
+        "notion_create_page",
+        "notion_append_text",
         "slack_get_team_stats",
     ]
 
