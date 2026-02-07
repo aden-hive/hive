@@ -107,6 +107,15 @@ This installs agent-related Claude Code skills:
 - `/hive-patterns` - Best practices and design patterns
 - `/hive-test` - Test and validate agents
 
+### Cursor IDE Support
+
+Skills are also available in Cursor. To enable:
+
+1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
+2. Run `MCP: Enable` to enable MCP servers
+3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
+4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
+
 ### Verify Setup
 
 ```bash
