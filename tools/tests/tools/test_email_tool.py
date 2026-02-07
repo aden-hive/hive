@@ -122,13 +122,67 @@ class TestSendEmail:
         assert "error" in result
 
     def test_empty_html_returns_error(self, send_email_fn, monkeypatch):
-        """Empty HTML body returns error."""
+        """Empty HTML body with no text returns error."""
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_email_fn(to="test@example.com", subject="Test", html="")
 
         assert "error" in result
+        assert "html or text" in result["error"]
+
+    def test_text_only_body_allowed(self, send_email_fn, monkeypatch):
+        """Text-only body is accepted and passed to provider."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_text_only"}
+            result = send_email_fn(to="test@example.com", subject="Test", text="Hello")
+
+        assert result["success"] is True
+        call_args = mock_send.call_args[0][0]
+        assert call_args["text"] == "Hello"
+        assert "html" not in call_args
+
+    def test_html_and_text_both_sent(self, send_email_fn, monkeypatch):
+        """HTML and text bodies are both passed to provider."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_both"}
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                text="Hi",
+            )
+
+        assert result["success"] is True
+        call_args = mock_send.call_args[0][0]
+        assert call_args["html"] == "<p>Hi</p>"
+        assert call_args["text"] == "Hi"
+
+    def test_reply_to_and_headers_passed(self, send_email_fn, monkeypatch):
+        """Reply-to and headers are passed to provider."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "email_headers"}
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                reply_to="reply@example.com",
+                headers={"X-Trace-Id": "trace-123"},
+            )
+
+        assert result["success"] is True
+        call_args = mock_send.call_args[0][0]
+        assert call_args["reply_to"] == ["reply@example.com"]
+        assert call_args["headers"] == {"X-Trace-Id": "trace-123"}
 
     def test_to_string_normalized_to_list(self, send_email_fn, monkeypatch):
         """Single string 'to' is accepted and normalized."""

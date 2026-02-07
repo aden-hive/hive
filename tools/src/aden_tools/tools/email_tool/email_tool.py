@@ -31,10 +31,13 @@ def register_tools(
         api_key: str,
         to: list[str],
         subject: str,
-        html: str,
+        html: str | None,
+        text: str | None,
         from_email: str,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
+        reply_to: list[str] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict:
         """Send email using Resend API."""
         resend.api_key = api_key
@@ -43,12 +46,19 @@ def register_tools(
                 "from": from_email,
                 "to": to,
                 "subject": subject,
-                "html": html,
             }
+            if html:
+                payload["html"] = html
+            if text:
+                payload["text"] = text
             if cc:
                 payload["cc"] = cc
             if bcc:
                 payload["bcc"] = bcc
+            if reply_to:
+                payload["reply_to"] = reply_to
+            if headers:
+                payload["headers"] = headers
             email = resend.Emails.send(payload)
             return {
                 "success": True,
@@ -64,17 +74,20 @@ def register_tools(
         access_token: str,
         to: list[str],
         subject: str,
-        html: str,
+        html: str | None,
+        text: str | None,
         from_email: str | None = None,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
+        reply_to: list[str] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict:
         """Send email using Gmail API (Bearer token pattern, same as HubSpot)."""
         import base64
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
 
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("alternative") if html and text else MIMEMultipart()
         msg["To"] = ", ".join(to)
         msg["Subject"] = subject
         if from_email:
@@ -83,7 +96,17 @@ def register_tools(
             msg["Cc"] = ", ".join(cc)
         if bcc:
             msg["Bcc"] = ", ".join(bcc)
-        msg.attach(MIMEText(html, "html"))
+        if reply_to:
+            msg["Reply-To"] = ", ".join(reply_to)
+        if headers:
+            for key, value in headers.items():
+                if key in {"To", "Subject", "From", "Cc", "Bcc", "Reply-To"}:
+                    continue
+                msg[key] = value
+        if text:
+            msg.attach(MIMEText(text, "plain"))
+        if html:
+            msg.attach(MIMEText(html, "html"))
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 
@@ -145,14 +168,36 @@ def register_tools(
         filtered = [v for v in value if isinstance(v, str) and v.strip()]
         return filtered if filtered else None
 
+    def _normalize_body(value: str | None) -> str | None:
+        """Normalize a body value to a non-empty string or None."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return None
+        return value if value.strip() else None
+
+    def _normalize_headers(value: dict[str, str] | None) -> dict[str, str] | None:
+        """Normalize headers to a non-empty dict of string pairs."""
+        if not value:
+            return None
+        filtered = {
+            key: header_value
+            for key, header_value in value.items()
+            if isinstance(key, str) and key and isinstance(header_value, str)
+        }
+        return filtered if filtered else None
+
     def _send_email_impl(
         to: str | list[str],
         subject: str,
-        html: str,
+        html: str | None = None,
+        text: str | None = None,
         from_email: str | None = None,
         provider: Literal["auto", "resend", "gmail"] = "auto",
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
+        reply_to: str | list[str] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict:
         """Core email sending logic, callable by other tools."""
         from_email = _resolve_from_email(from_email)
@@ -162,11 +207,15 @@ def register_tools(
             return {"error": "At least one recipient email is required"}
         if not subject or len(subject) > 998:
             return {"error": "Subject must be 1-998 characters"}
-        if not html:
-            return {"error": "Email body (html) is required"}
+        html = _normalize_body(html)
+        text = _normalize_body(text)
+        if not html and not text:
+            return {"error": "Email body (html or text) is required"}
 
         cc_list = _normalize_recipients(cc)
         bcc_list = _normalize_recipients(bcc)
+        reply_to_list = _normalize_recipients(reply_to)
+        headers_dict = _normalize_headers(headers)
 
         # Testing override: redirect all recipients to a single address.
         # Set EMAIL_OVERRIDE_TO=you@example.com to intercept all outbound mail.
@@ -205,9 +254,12 @@ def register_tools(
                     to_list,
                     subject,
                     html,
+                    text,
                     from_email,
                     cc_list,
                     bcc_list,
+                    reply_to_list,
+                    headers_dict,
                 )
 
             if provider == "resend":
@@ -218,7 +270,16 @@ def register_tools(
                         "Get a key at https://resend.com/api-keys",
                     }
                 return _send_via_resend(
-                    creds["resend_api_key"], to_list, subject, html, from_email, cc_list, bcc_list
+                    creds["resend_api_key"],
+                    to_list,
+                    subject,
+                    html,
+                    text,
+                    from_email,
+                    cc_list,
+                    bcc_list,
+                    reply_to_list,
+                    headers_dict,
                 )
 
             # auto: Gmail first (user's own identity), then Resend
@@ -228,13 +289,25 @@ def register_tools(
                     to_list,
                     subject,
                     html,
+                    text,
                     from_email,
                     cc_list,
                     bcc_list,
+                    reply_to_list,
+                    headers_dict,
                 )
             if resend_available:
                 return _send_via_resend(
-                    creds["resend_api_key"], to_list, subject, html, from_email, cc_list, bcc_list
+                    creds["resend_api_key"],
+                    to_list,
+                    subject,
+                    html,
+                    text,
+                    from_email,
+                    cc_list,
+                    bcc_list,
+                    reply_to_list,
+                    headers_dict,
                 )
 
             return {
@@ -249,11 +322,14 @@ def register_tools(
     def send_email(
         to: str | list[str],
         subject: str,
-        html: str,
+        html: str | None = None,
+        text: str | None = None,
         from_email: str | None = None,
         provider: Literal["auto", "resend", "gmail"] = "auto",
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
+        reply_to: str | list[str] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> dict:
         """
         Send an email.
@@ -266,18 +342,32 @@ def register_tools(
         Args:
             to: Recipient email address(es). Single string or list of strings.
             subject: Email subject line (1-998 chars per RFC 2822).
-            html: Email body as HTML string.
+            html: Email body as HTML string. Optional if text is provided.
+            text: Email body as plain text string. Optional if html is provided.
             from_email: Sender email address. Falls back to EMAIL_FROM env var if not provided.
                         Optional for Gmail (defaults to authenticated user's address).
             provider: Email provider to use ("auto", "gmail", or "resend").
             cc: CC recipient(s). Single string or list of strings. Optional.
             bcc: BCC recipient(s). Single string or list of strings. Optional.
+            reply_to: Reply-to address(es). Single string or list of strings. Optional.
+            headers: Custom email headers as a dict. Optional.
 
         Returns:
             Dict with send result including provider used and message ID,
             or error dict with "error" and optional "help" keys.
         """
-        return _send_email_impl(to, subject, html, from_email, provider, cc, bcc)
+        return _send_email_impl(
+            to=to,
+            subject=subject,
+            html=html,
+            text=text,
+            from_email=from_email,
+            provider=provider,
+            cc=cc,
+            bcc=bcc,
+            reply_to=reply_to,
+            headers=headers,
+        )
 
     @mcp.tool()
     def send_budget_alert_email(

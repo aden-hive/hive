@@ -10,9 +10,14 @@ Send a general-purpose email.
 **Parameters:**
 - `to` (str | list[str]) - Recipient email address(es)
 - `subject` (str) - Email subject line
-- `html` (str) - Email body as HTML
+- `html` (str, optional) - Email body as HTML (optional if `text` is provided)
+- `text` (str, optional) - Email body as plain text (optional if `html` is provided)
 - `from_email` (str, optional) - Sender address. Falls back to `EMAIL_FROM` env var
-- `provider` ("auto" | "resend", optional) - Provider to use (default: "auto")
+- `provider` ("auto" | "resend" | "gmail", optional) - Provider to use (default: "auto")
+- `cc` (str | list[str], optional) - CC recipient(s)
+- `bcc` (str | list[str], optional) - BCC recipient(s)
+- `reply_to` (str | list[str], optional) - Reply-to address(es)
+- `headers` (dict[str, str], optional) - Custom email headers
 
 ### `send_budget_alert_email`
 Send a formatted budget alert notification.
