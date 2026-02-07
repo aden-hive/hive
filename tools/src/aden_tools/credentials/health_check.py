@@ -289,6 +289,66 @@ class SlackHealthChecker:
             )
 
 
+class AirtableHealthChecker:
+    """Health checker for Airtable Personal Access Tokens."""
+
+    ENDPOINT = "https://api.airtable.com/v0/meta/bases"
+    TIMEOUT = 10.0
+
+    def check(self, api_token: str) -> HealthCheckResult:
+        """
+        Validate Airtable token by calling /meta/bases.
+
+        Makes a GET request to verify the token works.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {api_token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Airtable token valid",
+                        details={},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Airtable token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Airtable token access forbidden",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Airtable API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Airtable API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Airtable API: {e}",
+                details={"error": str(e)},
+            )
+
+
 class AnthropicHealthChecker:
     """Health checker for Anthropic API credentials."""
 
@@ -497,6 +557,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
     "resend": ResendHealthChecker(),
+    "airtable": AirtableHealthChecker(),
 }
 
 

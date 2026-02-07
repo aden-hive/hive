@@ -50,6 +50,7 @@ To add a new credential:
 """
 
 from .base import CredentialError, CredentialSpec
+from .airtable import AIRTABLE_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .email import EMAIL_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
@@ -74,6 +75,7 @@ CREDENTIAL_SPECS = {
     **GITHUB_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
     **SLACK_CREDENTIALS,
+    **AIRTABLE_CREDENTIALS,
 }
 
 __all__ = [
@@ -104,4 +106,5 @@ __all__ = [
     "GITHUB_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
     "SLACK_CREDENTIALS",
+    "AIRTABLE_CREDENTIALS",
 ]
