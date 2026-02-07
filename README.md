@@ -22,7 +22,6 @@
   <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
-
 <p align="center">
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
@@ -134,6 +133,60 @@ hive run exports/your_agent_name --input '{"key": "value"}'
 - **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
 - **Production-Ready** - Self-hostable, built for scale and reliability
 
+### Enterprise Infrastructure
+
+Hive includes production-grade infrastructure modules:
+
+- **Telemetry & Tracing** - OpenTelemetry integration with distributed tracing and Prometheus-compatible metrics
+- **Caching** - Multi-tier LRU cache with TTL support for LLM responses
+- **Rate Limiting** - Token bucket algorithm with configurable limits
+- **Connection Pooling** - Async connection pool with health checks
+- **Health Checks** - Multi-component health monitoring system
+- **Structured Logging** - JSON-formatted logs with correlation IDs
+
+```python
+from framework import get_tracer, get_cache, get_health
+
+# Distributed tracing
+tracer = get_tracer("my.service")
+with tracer.start_as_current_span("operation"):
+    # Your code here
+
+# Health checks
+health = get_health()
+report = await health.check_all()
+```
+
+### Enterprise Security
+
+Hive provides comprehensive security protection:
+
+| Feature                | Description                                                     |
+| ---------------------- | --------------------------------------------------------------- |
+| **Input Validation**   | Detects SQL injection, XSS, command injection, prompt injection |
+| **Encryption**         | AES-256-GCM encryption with PBKDF2 key derivation               |
+| **Secrets Management** | Auto-masking of API keys in logs, pattern detection             |
+| **Audit Logging**      | Tamper-evident logs with chain hashing                          |
+| **RBAC**               | Role-based access control with permissions                      |
+| **Sanitization**       | Deep sanitization for HTML, control characters, Unicode         |
+
+```python
+from framework.security import validate_input, encrypt_value, AuthContext, Role
+
+# Validate inputs
+result = validate_input(user_input)
+if not result.is_valid:
+    print(f"Blocked: {result.threats_detected}")
+
+# Encrypt sensitive data
+encrypted = encrypt_value("secret", key="master_key")
+
+# Role-based authorization
+ctx = AuthContext.for_role("user1", Role.DEVELOPER)
+if ctx.has_permission(Permission.EXECUTE_GRAPH):
+    # Execute
+```
+
 ## Integration
 
 <a href="https://github.com/adenhq/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
@@ -142,7 +195,6 @@ Hive is built to be model-agnostic and system-agnostic.
 
 - **LLM flexibility** - Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
 - **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
-
 
 ## Why Aden
 

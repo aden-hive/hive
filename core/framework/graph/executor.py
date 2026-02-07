@@ -34,6 +34,12 @@ from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
 
+# Infrastructure integration
+from framework.telemetry import get_tracer, get_meter
+from framework.logging import get_logger as get_structured_logger
+from framework.security.validation import validate_input, ValidationResult
+from framework.security.sanitizer import sanitize_input
+
 
 @dataclass
 class ExecutionResult:
@@ -178,6 +184,21 @@ class GraphExecutor:
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
         self._parallel_config = parallel_config or ParallelExecutionConfig()
+
+        # Infrastructure integration
+        self._tracer = get_tracer("hive.executor")
+        self._meter = get_meter("hive.executor")
+        self._structured_logger = get_structured_logger("hive.executor")
+
+        # Metrics
+        self._node_execution_counter = self._meter.create_counter(
+            "hive.node.executions",
+            description="Number of node executions",
+        )
+        self._node_latency_histogram = self._meter.create_histogram(
+            "hive.node.latency_ms",
+            description="Node execution latency in milliseconds",
+        )
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
@@ -391,15 +412,63 @@ class GraphExecutor:
                         description=f"Validation errors for {current_node_id}: {validation_errors}",
                     )
 
+                # Security validation: check input for injection attacks
+                if input_data:
+                    for key, value in input_data.items():
+                        if isinstance(value, str) and len(value) > 0:
+                            sec_result = validate_input(value)
+                            if not sec_result.is_valid:
+                                self._structured_logger.warning(
+                                    "Security validation failed for input",
+                                    node_id=current_node_id,
+                                    input_key=key,
+                                    threats=sec_result.threats_detected,
+                                )
+                                # Sanitize the input
+                                sanitized = sanitize_input(value)
+                                input_data[key] = sanitized
+                                memory.write(key, sanitized, validate=False)
+
                 # Emit node-started event (skip event_loop nodes — they emit their own)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_started(
                         stream_id=self._stream_id, node_id=current_node_id
                     )
 
-                # Execute node
+                # Execute node with telemetry tracing
                 self.logger.info("   Executing...")
-                result = await node_impl.execute(ctx)
+
+                # Create tracing span for node execution
+                import time
+                _node_start = time.perf_counter()
+
+                with self._tracer.start_as_current_span(
+                    f"node.execute.{current_node_id}",
+                    attributes={
+                        "node.id": current_node_id,
+                        "node.type": node_spec.node_type,
+                        "goal.id": goal.id,
+                    }
+                ) as span:
+                    result = await node_impl.execute(ctx)
+
+                    # Record span attributes
+                    span.set_attribute("node.success", result.success)
+                    span.set_attribute("node.tokens_used", result.tokens_used)
+                    if result.error:
+                        span.set_attribute("node.error", result.error)
+
+                _node_duration_ms = (time.perf_counter() - _node_start) * 1000
+
+                # Record metrics
+                self._node_execution_counter.add(
+                    1,
+                    {"node_id": current_node_id, "node_type": node_spec.node_type, "success": str(result.success)}
+                )
+                self._node_latency_histogram.record(
+                    _node_duration_ms,
+                    {"node_id": current_node_id, "node_type": node_spec.node_type}
+                )
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":

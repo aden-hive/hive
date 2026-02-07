@@ -26,7 +26,41 @@ except ImportError:
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import StreamEvent
 
+# Infrastructure integration
+from framework.cache import LRUCache, Cache
+from framework.ratelimit import TokenBucket, RateLimiter, get_limiter
+from framework.telemetry import get_tracer, get_meter
+
 logger = logging.getLogger(__name__)
+
+# Infrastructure instances
+_llm_cache: LRUCache | None = None
+_llm_tracer = None
+_llm_meter = None
+
+
+def _get_llm_cache() -> LRUCache:
+    """Get or create the LLM response cache."""
+    global _llm_cache
+    if _llm_cache is None:
+        _llm_cache = LRUCache(max_size=1000)  # Cache up to 1000 responses
+    return _llm_cache
+
+
+def _get_llm_tracer():
+    """Get the LLM tracer."""
+    global _llm_tracer
+    if _llm_tracer is None:
+        _llm_tracer = get_tracer("hive.llm")
+    return _llm_tracer
+
+
+def _get_llm_meter():
+    """Get the LLM meter."""
+    global _llm_meter
+    if _llm_meter is None:
+        _llm_meter = get_meter("hive.llm")
+    return _llm_meter
 
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
@@ -255,6 +289,27 @@ class LiteLLMProvider(LLMProvider):
         json_mode: bool = False,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
+        import hashlib
+        import asyncio
+
+        # Generate cache key from request parameters
+        cache_key = hashlib.sha256(
+            f"{self.model}:{system}:{json.dumps(messages, sort_keys=True)}:{max_tokens}".encode()
+        ).hexdigest()[:32]
+
+        # Check cache first (only for non-tool calls)
+        if not tools:
+            cache = _get_llm_cache()
+            try:
+                loop = asyncio.get_event_loop()
+                cached = loop.run_until_complete(cache.get(cache_key))
+                if cached is not None:
+                    logger.debug(f"[cache] Hit for {cache_key[:8]}...")
+                    return cached.value
+            except RuntimeError:
+                # No event loop running, skip cache
+                pass
+
         # Prepare messages with system prompt
         full_messages = []
         if system:
@@ -292,8 +347,13 @@ class LiteLLMProvider(LLMProvider):
         if response_format:
             kwargs["response_format"] = response_format
 
-        # Make the call
-        response = self._completion_with_rate_limit_retry(**kwargs)
+        # Make the call with telemetry
+        tracer = _get_llm_tracer()
+        with tracer.start_as_current_span(
+            "llm.complete",
+            attributes={"model": self.model, "max_tokens": max_tokens}
+        ):
+            response = self._completion_with_rate_limit_retry(**kwargs)
 
         # Extract content
         content = response.choices[0].message.content or ""
@@ -303,7 +363,7 @@ class LiteLLMProvider(LLMProvider):
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
 
-        return LLMResponse(
+        result = LLMResponse(
             content=content,
             model=response.model or self.model,
             input_tokens=input_tokens,
@@ -311,6 +371,16 @@ class LiteLLMProvider(LLMProvider):
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
         )
+
+        # Store in cache (only for non-tool calls)
+        if not tools:
+            try:
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(cache.set(cache_key, result, ttl=3600))  # 1 hour TTL
+            except RuntimeError:
+                pass
+
+        return result
 
     def complete_with_tools(
         self,

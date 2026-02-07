@@ -19,6 +19,11 @@ from framework.runner.protocol import (
 )
 from framework.runner.runner import AgentRunner
 
+# Infrastructure integration
+from framework.health import HealthChecker, HealthStatus, CheckResult, get_health
+from framework.telemetry import get_tracer
+from framework.logging import get_logger
+
 
 @dataclass
 class RoutingDecision:
