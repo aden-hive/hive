@@ -772,11 +772,6 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
-echo -e "${BOLD}Run an Agent:${NC}"
-echo ""
-echo -e "  Launch the interactive dashboard to browse and run agents:"
-echo -e "     ${CYAN}hive tui${NC}"
-echo ""
 echo -e "${BOLD}Build a New Agent:${NC}"
 echo ""
 echo -e "  1. Open Claude Code in this directory:"
@@ -788,15 +783,11 @@ echo ""
 echo -e "  3. Test an existing agent:"
 echo -e "     ${CYAN}/hive-test${NC}"
 echo ""
-echo -e "${BOLD}Skills:${NC}"
-if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    for skill_dir in "$SCRIPT_DIR/.claude/skills"/*/; do
-        skill_name=$(basename "$skill_dir")
-        echo -e "  ⬡ ${CYAN}/$skill_name${NC}"
-    done
-fi
+echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
-echo -e "${BOLD}Examples:${NC} ${CYAN}exports/${NC}"
+echo -e "  Launch the interactive dashboard to browse and run agents:"
+echo -e "  You can start a example agent or an agent built by yourself:"
+echo -e "     ${CYAN}hive tui${NC}"
 echo ""
 echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
 echo ""
