@@ -41,6 +41,7 @@ from .file_system_toolkits.replace_file_content import (
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
+from .google_maps_tool import register_tools as register_google_maps
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
@@ -87,6 +88,7 @@ def register_all_tools(
     register_slack(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
+    register_google_maps(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -241,6 +243,13 @@ def register_all_tools(
         "vision_safe_search",
         "telegram_send_message",
         "telegram_send_document",
+        # Google Maps tools
+        "maps_geocode",
+        "maps_reverse_geocode",
+        "maps_directions",
+        "maps_distance_matrix",
+        "maps_place_details",
+        "maps_place_search",
     ]
 
 

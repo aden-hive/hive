@@ -488,12 +488,84 @@ class ResendHealthChecker:
             )
 
 
+class GoogleMapsHealthChecker:
+    """Health checker for Google Maps Platform API key."""
+
+    ENDPOINT = "https://maps.googleapis.com/maps/api/geocode/json"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """
+        Validate Google Maps API key with a lightweight geocode request.
+
+        Makes a minimal geocode request for a well-known address to verify
+        the key is valid and the Geocoding API is enabled.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    params={
+                        "address": "1600 Amphitheatre Parkway",
+                        "key": api_key,
+                    },
+                )
+
+                if response.status_code != 200:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Google Maps API returned HTTP {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+
+                data = response.json()
+                status = data.get("status", "UNKNOWN_ERROR")
+
+                if status == "OK":
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Google Maps API key valid",
+                    )
+                elif status == "REQUEST_DENIED":
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Google Maps API key is invalid or Geocoding API not enabled",
+                        details={"status": status},
+                    )
+                elif status in ("OVER_DAILY_LIMIT", "OVER_QUERY_LIMIT"):
+                    # Quota exceeded but key itself is valid
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Google Maps API key valid (quota exceeded)",
+                        details={"status": status, "rate_limited": True},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Google Maps API returned status: {status}",
+                        details={"status": status},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Google Maps API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Google Maps API: {e}",
+                details={"error": str(e)},
+            )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
     "slack": SlackHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
+    "google_maps": GoogleMapsHealthChecker(),
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
     "resend": ResendHealthChecker(),
