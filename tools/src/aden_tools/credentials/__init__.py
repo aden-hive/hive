@@ -40,6 +40,7 @@ Credential categories:
 - llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
 - stripe.py: Payment and billing credentials
+- zoom.py: Meeting and video conferencing credentials
 
 To add a new credential:
 1. Find the appropriate category file (or create a new one)
@@ -50,14 +51,16 @@ To add a new credential:
 from .base import CredentialError, CredentialManager, CredentialSpec
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
-from .stripe import STRIPE_CREDENTIALS  # <--- Added this import
+from .stripe import STRIPE_CREDENTIALS
+from .zoom import ZOOM_CREDENTIALS  # <--- Added Zoom
 from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
-    **STRIPE_CREDENTIALS,  # <--- Added this to registry
+    **STRIPE_CREDENTIALS,
+    **ZOOM_CREDENTIALS,  # <--- Added Zoom to registry
 }
 
 __all__ = [
@@ -72,5 +75,6 @@ __all__ = [
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
-    "STRIPE_CREDENTIALS",  # <--- Added this to exports
+    "STRIPE_CREDENTIALS",
+    "ZOOM_CREDENTIALS",
 ]

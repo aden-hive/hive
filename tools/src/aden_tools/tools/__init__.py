@@ -43,7 +43,7 @@ from .web_search_tool import register_tools as register_web_search
 from .stripe_tool import register_tools as register_stripe
 
 # [NEW] Import Zoom tool
-from .zoom_tool import register_tools as register_zoom
+from .meeting_tool import register_tools as register_meeting_tools
 
 
 def register_all_tools(
@@ -56,7 +56,7 @@ def register_all_tools(
     Args:
         mcp: FastMCP server instance
         credentials: Optional CredentialManager for centralized credential access.
-                      If not provided, tools fall back to direct os.getenv() calls.
+                       If not provided, tools fall back to direct os.getenv() calls.
 
     Returns:
         List of registered tool names
@@ -74,7 +74,7 @@ def register_all_tools(
     register_stripe(mcp, credentials=credentials)
 
     # [NEW] Register Zoom tool
-    register_zoom(mcp, credentials=credentials)
+    register_meeting_tools(mcp)
     
     # Register file system toolkits
     register_view_file(mcp)
@@ -123,7 +123,13 @@ def register_all_tools(
         "create_checkout_session",
         "create_payment_link",
         "verify_webhook_signature",
-    
+        # [NEW] Meeting Functions
+        "create_meeting",
+        "list_upcoming_meetings",
+        "get_meeting_details",
+        "update_meeting",
+        "delete_meeting",
+        "get_meeting_transcript",
     ]
 
 
