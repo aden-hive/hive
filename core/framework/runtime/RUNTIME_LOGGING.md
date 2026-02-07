@@ -19,7 +19,7 @@ This layered approach enables efficient debugging: start with L1 to identify pro
 **Default since 2026-02-06**
 
 ```
-~/.hive/{agent_name}/
+~/.hive/agents/{agent_name}/
 └── sessions/
     └── session_YYYYMMDD_HHMMSS_{uuid}/
         ├── state.json           # Session state and metadata
@@ -42,7 +42,7 @@ This layered approach enables efficient debugging: start with L1 to identify pro
 **Read-only for backward compatibility**
 
 ```
-~/.hive/{agent_name}/
+~/.hive/agents/{agent_name}/
 ├── runtime_logs/
 │   └── runs/
 │       └── {run_id}/
@@ -215,7 +215,7 @@ Three MCP tools provide access to the logging system:
 
 ```python
 query_runtime_logs(
-    agent_work_dir: str,        # e.g., "~/.hive/twitter_outreach"
+    agent_work_dir: str,        # e.g., "~/.hive/agents/twitter_outreach"
     status: str = "",           # "needs_attention", "success", "failure", "degraded"
     limit: int = 20
 ) -> dict  # {"runs": [...], "total": int}
@@ -362,14 +362,14 @@ query_runtime_log_raw(agent_work_dir, run_id)
 ```python
 # 1. Find problematic runs (L1)
 result = query_runtime_logs(
-    agent_work_dir="~/.hive/twitter_outreach",
+    agent_work_dir="~/.hive/agents/twitter_outreach",
     status="needs_attention"
 )
 run_id = result["runs"][0]["run_id"]
 
 # 2. Identify failing nodes (L2)
 details = query_runtime_log_details(
-    agent_work_dir="~/.hive/twitter_outreach",
+    agent_work_dir="~/.hive/agents/twitter_outreach",
     run_id=run_id,
     needs_attention_only=True
 )
@@ -377,7 +377,7 @@ problem_node = details["nodes"][0]["node_id"]
 
 # 3. Analyze root cause (L3)
 raw = query_runtime_log_raw(
-    agent_work_dir="~/.hive/twitter_outreach",
+    agent_work_dir="~/.hive/agents/twitter_outreach",
     run_id=run_id,
     node_id=problem_node
 )
@@ -390,12 +390,12 @@ raw = query_runtime_log_raw(
 
 ```python
 # Get recent runs
-runs = query_runtime_logs("~/.hive/my_agent", limit=10)
+runs = query_runtime_logs("~/.hive/agents/my_agent", limit=10)
 
 # For each run, check specific node
 for run in runs["runs"]:
     node_details = query_runtime_log_details(
-        "~/.hive/my_agent",
+        "~/.hive/agents/my_agent",
         run["run_id"],
         node_id="problematic-node"
     )
@@ -411,7 +411,7 @@ import time
 
 while True:
     result = query_runtime_logs(
-        agent_work_dir="~/.hive/my_agent",
+        agent_work_dir="~/.hive/agents/my_agent",
         status="needs_attention",
         limit=1
     )
@@ -574,10 +574,10 @@ The system automatically handles both old and new formats:
 
 ```python
 # MCP tools check both locations automatically
-result = query_runtime_logs("~/.hive/old_agent")
+result = query_runtime_logs("~/.hive/agents/old_agent")
 # Returns logs from both:
-# - ~/.hive/old_agent/runtime_logs/runs/*/
-# - ~/.hive/old_agent/sessions/session_*/logs/
+# - ~/.hive/agents/old_agent/runtime_logs/runs/*/
+# - ~/.hive/agents/old_agent/sessions/session_*/logs/
 ```
 
 ### Deprecation Warnings
@@ -636,9 +636,9 @@ Typical session with 5 nodes, 20 steps:
 **Symptom:** MCP tools return empty results
 
 **Check:**
-1. Verify storage path exists: `~/.hive/{agent_name}/`
-2. Check session directories: `ls ~/.hive/{agent_name}/sessions/`
-3. Verify logs directory exists: `ls ~/.hive/{agent_name}/sessions/session_*/logs/`
+1. Verify storage path exists: `~/.hive/agents/{agent_name}/`
+2. Check session directories: `ls ~/.hive/agents/{agent_name}/sessions/`
+3. Verify logs directory exists: `ls ~/.hive/agents/{agent_name}/sessions/session_*/logs/`
 4. Check file permissions
 
 ### Issue: Corrupt JSONL files
@@ -661,7 +661,7 @@ query_runtime_log_details(agent_work_dir, run_id)
 **Solution:**
 ```bash
 # Archive old sessions
-cd ~/.hive/{agent_name}/sessions/
+cd ~/.hive/agents/{agent_name}/sessions/
 find . -name "session_2025*" -type d -exec tar -czf archive.tar.gz {} +
 rm -rf session_2025*
 
