@@ -28,6 +28,8 @@ uv run python -c "import framework; import aden_tools; print('✓ Setup complete
 ## Building Your First Agent
 
 ### Option 1: Using Claude Code Skills (Recommended)
+Claude Code provides an interactive development experience for building agents faster. 
+If you prefer manual setup or scripting workflows, you can use the alternative setup options below.
 
 ```bash
 # Setup already done via quickstart.sh above
