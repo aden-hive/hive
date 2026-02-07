@@ -44,6 +44,19 @@ Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and
 
 https://github.com/user-attachments/assets/846c0cc7-ffd6-47fa-b4b7-495494857a55
 
+## How Hive is Different
+
+Hive is **not** a task-chaining library, a workflow engine, or a low-level LLM toolkit. If you're comparing it to LangChain, n8n, CrewAI, or similar tools, the mental model is different:
+
+| **Typical frameworks** (LangChain, n8n, etc.) | **Hive** |
+|-----------------------------------------------|----------|
+| You design and wire workflows, chains, or steps yourself | You describe the **outcome**; a coding agent generates the agent graph and connection code |
+| Success = steps ran without errors | Success = **goal met** (evaluated by criteria and constraints) |
+| Failures are handled manually or with retries | Failures are **captured and fed into evolution** — the agent graph can be updated and redeployed automatically |
+| Observability and cost control are add-ons or DIY | **Built-in** real-time monitoring, budgets, and human-in-the-loop nodes |
+
+So: use Hive when you want **goal-driven, self-improving agents** that run real business processes and get better over time. Use workflow/chain libraries when you need fine-grained control over every step or are building one-off scripts. For detailed comparisons, see [Aden vs LangChain](docs/articles/aden-vs-langchain.md), [Aden vs CrewAI](docs/articles/aden-vs-crewai.md), and [Aden vs AutoGen](docs/articles/aden-vs-autogen.md). For positioning, GTM outlines, and migration guidance, see [Why Hive?](docs/why-hive.md).
+
 ## Who Is Hive For?
 
 Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
@@ -225,6 +238,7 @@ See [environment-setup.md](docs/environment-setup.md) for complete setup instruc
 
 ## Documentation
 
+- **[Why Hive?](docs/why-hive.md)** - How Hive is different, framework comparisons, and GTM outlines
 - **[Developer Guide](docs/developer-guide.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
 - [TUI Guide](docs/tui-selection-guide.md) - Interactive dashboard usage
