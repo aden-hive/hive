@@ -195,6 +195,29 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="LLM model to use (any LiteLLM-compatible name)",
     )
     tui_parser.set_defaults(func=cmd_tui)
+    # mcp-inspect command
+    inspect_parser = subparsers.add_parser(
+        "mcp-inspect",
+        help="Launch MCP Inspector",
+        description="Launch the MCP Inspector web UI for debugging MCP servers.",
+    )
+    inspect_parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to .mcp.json config file (default: core/.mcp.json)",
+    )
+    inspect_parser.add_argument(
+        "--port",
+        type=int,
+        default=6274,
+        help="Port for inspector UI (default: 6274)",
+    )
+    inspect_parser.add_argument(
+        "--server",
+        type=str,
+        help="Specific server to inspect (required if multiple servers configured)",
+    )
+    inspect_parser.set_defaults(func=cmd_mcp_inspect)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -1432,3 +1455,12 @@ def _interactive_multi(agents_dir: Path) -> int:
 
     orchestrator.cleanup()
     return 0
+
+
+def cmd_mcp_inspect(args: argparse.Namespace) -> int:
+    """Launch MCP Inspector."""
+    from framework.runner.mcp_inspector import launch_inspector
+
+    return launch_inspector(
+        config_path=args.config, port=args.port, server=getattr(args, "server", None)
+    )
