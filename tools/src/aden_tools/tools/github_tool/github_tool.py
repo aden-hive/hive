@@ -270,6 +270,58 @@ class _GitHubClient:
         )
         return self._handle_response(response)
 
+    def get_issue_timeline(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+    ) -> dict[str, Any]:
+        """Get timeline events for an issue."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/timeline",
+            headers={**self._headers, "Accept": "application/vnd.github.mockingbird-preview+json"},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def get_issue_comments(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+    ) -> dict[str, Any]:
+        """Get comments for an issue."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def list_repo_labels(
+        self,
+        owner: str,
+        repo: str,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """List all labels for a repository."""
+        owner = _sanitize_path_param(owner, "owner")
+        repo = _sanitize_path_param(repo, "repo")
+        params = {
+            "per_page": min(limit, 100),
+        }
+        response = httpx.get(
+            f"{GITHUB_API_BASE}/repos/{owner}/{repo}/labels",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
     # --- Pull Requests ---
 
     def list_pull_requests(
@@ -725,6 +777,87 @@ def register_tools(
             return client
         try:
             return client.update_issue(owner, repo, issue_number, title, body, state, labels)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    @mcp.tool()
+    def github_get_issue_timeline(
+        owner: str,
+        repo: str,
+        issue_number: int,
+    ) -> dict:
+        """
+        Get timeline events for an issue.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            issue_number: Issue number
+
+        Returns:
+            Dict with timeline events or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_issue_timeline(owner, repo, issue_number)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    @mcp.tool()
+    def github_get_issue_comments(
+        owner: str,
+        repo: str,
+        issue_number: int,
+    ) -> dict:
+        """
+        Get comments for an issue.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            issue_number: Issue number
+
+        Returns:
+            Dict with list of comments or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_issue_comments(owner, repo, issue_number)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": _sanitize_error_message(e)}
+
+    @mcp.tool()
+    def github_list_repo_labels(
+        owner: str,
+        repo: str,
+        limit: int = 100,
+    ) -> dict:
+        """
+        List all labels for a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            limit: Maximum number of labels to return (1-100, default 100)
+
+        Returns:
+            Dict with list of labels or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_repo_labels(owner, repo, limit)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

@@ -1,7 +1,14 @@
 """
 Aden Tools - Tool implementations for FastMCP.
 
+Key Tools:
+----------
+- **GitHub Tool**: Comprehensive GitHub API wrapper (issues, PRs, repos, search)
+- **Email Tool**: Multi-provider email sender (Gmail, Resend, SMTP with auto-detection)
+- **Vector DB Tool**: ChromaDB integration for semantic search and embeddings
+
 Usage:
+------
     from fastmcp import FastMCP
     from aden_tools.tools import register_all_tools
     from aden_tools.credentials import CredentialStoreAdapter
@@ -9,6 +16,19 @@ Usage:
     mcp = FastMCP("my-server")
     credentials = CredentialStoreAdapter.default()
     register_all_tools(mcp, credentials=credentials)
+
+Available Tools:
+----------------
+- GitHub: github_list_repos, github_get_issue, github_create_pr, etc.
+- Email: send_email, send_budget_alert_email
+- Vector DB: vector_db_search, vector_db_upsert, vector_db_chunk_text
+- Web: web_search, web_scrape
+- File System: view_file, write_to_file, grep_search, apply_diff
+- CSV: csv_read, csv_write, csv_sql
+- Slack: slack_send_message, slack_list_channels (60+ tools)
+- HubSpot: hubspot_search_contacts, hubspot_create_deal
+- PDF: pdf_read
+- Runtime Logs: query_runtime_logs
 """
 
 from __future__ import annotations
@@ -45,6 +65,7 @@ from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .slack_tool import register_tools as register_slack
+from .vector_db_tool import register_tools as register_vector_db
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
@@ -73,9 +94,18 @@ def register_all_tools(
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
+    
+    # GitHub Tool - Comprehensive GitHub API wrapper
+    # Supports: repos, issues, PRs, search, branches, users
+    # Credentials: GITHUB_TOKEN env var or CredentialStoreAdapter
     register_github(mcp, credentials=credentials)
-    # email supports multiple providers (Resend) with auto-detection
+    
+    # Email Tool - Multi-provider email sender
+    # Supports: Gmail (OAuth), Resend (API key), SMTP (app passwords)
+    # Auto-detection: Gmail → Resend → SMTP
+    # Credentials: GOOGLE_ACCESS_TOKEN, RESEND_API_KEY, or SMTP_* env vars
     register_email(mcp, credentials=credentials)
+    
     register_hubspot(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
@@ -91,6 +121,11 @@ def register_all_tools(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
+
+    # Vector Database Tool - ChromaDB integration for semantic search
+    # Supports: upsert, search, delete, count, chunk_text
+    # Credentials: CHROMA_PERSIST_DIR, CHROMA_COLLECTION_NAME env vars (optional)
+    register_vector_db(mcp, credentials=credentials)
 
     return [
         "example_tool",
@@ -125,6 +160,9 @@ def register_all_tools(
         "github_get_issue",
         "github_create_issue",
         "github_update_issue",
+        "github_get_issue_timeline",  # NEW: Get issue timeline events
+        "github_get_issue_comments",  # NEW: Get issue comments
+        "github_list_repo_labels",    # NEW: List repository labels
         "github_list_pull_requests",
         "github_get_pull_request",
         "github_create_pull_request",
@@ -209,6 +247,12 @@ def register_all_tools(
         "slack_kick_user_from_channel",
         "slack_delete_file",
         "slack_get_team_stats",
+        # Vector DB tools
+        "vector_db_upsert",
+        "vector_db_search",
+        "vector_db_delete",
+        "vector_db_count",
+        "vector_db_chunk_text",
     ]
 
 
