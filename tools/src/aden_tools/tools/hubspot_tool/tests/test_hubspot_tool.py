@@ -193,7 +193,7 @@ class TestToolRegistration:
         mcp = MagicMock()
         mcp.tool.return_value = lambda fn: fn
         register_tools(mcp)
-        assert mcp.tool.call_count == 12
+        assert mcp.tool.call_count == 14
 
     def test_no_credentials_returns_error(self):
         mcp = MagicMock()
@@ -288,6 +288,45 @@ class TestContactTools:
         assert result["id"] == "1"
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
+    def test_get_contact_by_email(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(
+                return_value={
+                    "results":[
+                        {
+                            "id":"123",
+                            "properties":{
+                                "email":"test@example.com",
+                                "firstname":"Test",
+                            },
+                        }
+                    ]
+                }
+            ),
+        )
+
+        result=self._fn("hubspot_get_contact_by_email")(
+            email="test@example.com"
+        )
+        assert result["id"]=="123"
+
+    @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
+    def test_search_contacts_with_pagination(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={
+                "results":[{"id":"1"}],
+                "paging":{"next":{"after":"abc"}}
+            })
+        )
+        result=self._fn("hubspot_search_contacts")(
+            query="john",
+            after="abc",
+        )
+        assert "paging" in result
+
+    @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
     def test_create_contact(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=201, json=MagicMock(return_value={"id": "2"})
@@ -354,6 +393,20 @@ class TestCompanyTools:
         result = self._fn("hubspot_create_company")(properties={"name": "Acme"})
         assert result["id"] == "11"
 
+    @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
+    def test_search_companies_with_pagination(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(
+                return_value={
+                    "results": [{"id": "1"}],
+                    "paging": {"next": {"after": "abc"}},
+                }
+            ),
+       )
+        result = self._fn("hubspot_search_companies")(query="acme", after="abc")
+        assert "paging" in result
+
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.patch")
     def test_update_company(self, mock_patch):
         mock_patch.return_value = MagicMock(
@@ -384,6 +437,36 @@ class TestDealTools:
         )
         result = self._fn("hubspot_search_deals")(query="big deal")
         assert result["total"] == 3
+
+    @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.patch")
+    def test_update_deal_stage(self,mock_patch):
+        mock_patch.return_value=MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={"id":"20","properties":{"dealstage":"closedwon"}}),
+        )
+
+        result=self._fn("hubspot_update_deal_stage")(
+            deal_id="20",stage="closedwon",
+        )
+        assert result["id"]=="20"
+        assert result["properties"]["dealstage"]=="closedwon"
+
+    @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.post")
+    def test_search_deals_with_pagination(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=MagicMock(return_value={
+            "results": [{"id": "20"}],
+            "paging": {"next": {"after": "next_page_token"}}})
+        )
+
+        result = self._fn("hubspot_search_deals")(
+        query="big deal",
+        after="next_page_token",
+        )
+
+        assert "paging" in result
+        assert result["paging"]["next"]["after"] == "next_page_token"
 
     @patch("aden_tools.tools.hubspot_tool.hubspot_tool.httpx.get")
     def test_get_deal(self, mock_get):
@@ -487,4 +570,5 @@ class TestCredentialSpec:
         spec = CREDENTIAL_SPECS["hubspot"]
         assert "hubspot_search_contacts" in spec.tools
         assert "hubspot_create_deal" in spec.tools
-        assert len(spec.tools) == 12
+        assert "hubspot_get_contact_by_email" in spec.tools
+        assert len(spec.tools) == 13

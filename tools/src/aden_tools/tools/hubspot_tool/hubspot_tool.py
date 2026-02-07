@@ -2,8 +2,8 @@
 HubSpot CRM Tool - Manage contacts, companies, and deals via HubSpot API v3.
 
 Supports:
-- Private App access tokens (HUBSPOT_ACCESS_TOKEN)
-- OAuth2 tokens via the credential store
+- OAuth2 authentication via Hive credential store (recommended)
+- Private App access tokens via HUBSPOT_ACCESS_TOKEN (fallback)
 
 API Reference: https://developers.hubspot.com/docs/api/crm
 """
@@ -37,21 +37,41 @@ class _HubSpotClient:
         }
 
     def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
-        """Handle common HTTP error codes."""
-        if response.status_code == 401:
-            return {"error": "Invalid or expired HubSpot access token"}
-        if response.status_code == 403:
-            return {"error": "Insufficient permissions. Check your HubSpot app scopes."}
-        if response.status_code == 404:
-            return {"error": "Resource not found"}
-        if response.status_code == 429:
-            return {"error": "HubSpot rate limit exceeded. Try again later."}
-        if response.status_code >= 400:
+        """Handle HubSpot API responses with consistent error structure."""
+        if response.status_code==401:
+            return{
+                "error":"Invalid or expired HubSpot access token",
+                "status_code":401,
+                "type":"auth_error",
+            }
+        if response.status_code==403:
+            return {
+                "error":"Insufficient permissions. Check your HubSpot app scopes.",
+                "status_code":403,
+                "type":"permission_error",
+            }
+        if response.status_code==404:
+            return {
+                "error": "Resource not found",
+                "status_code": 404,
+                "type":"not_found",
+            }
+        if response.status_code==429:
+            return {
+                "error": "HubSpot rate limit exceeded. Try again later.",
+                "status_code": 429,
+                "type": "rate_limit",
+            }
+        if response.status_code>=400:
             try:
-                detail = response.json().get("message", response.text)
+                detail=response.json().get("message",response.text)
             except Exception:
-                detail = response.text
-            return {"error": f"HubSpot API error (HTTP {response.status_code}): {detail}"}
+                detail=response.text
+            return {
+                "error": f"HubSpot API error (HTTP {response.status_code}): {detail}",
+                "status_code": response.status_code,
+                "type": "api_error",
+            }
         return response.json()
 
     def search_objects(
@@ -60,9 +80,12 @@ class _HubSpotClient:
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        after: str | None = None,
     ) -> dict[str, Any]:
         """Search CRM objects."""
         body: dict[str, Any] = {"limit": min(limit, 100)}
+        if after:
+            body["after"] = after
         if query:
             body["query"] = query
         if properties:
@@ -94,6 +117,42 @@ class _HubSpotClient:
             timeout=30.0,
         )
         return self._handle_response(response)
+
+
+
+    def get_contact_by_email(self,email:str)->dict[str,Any]:
+        "Get a single HubSpot contact by email."
+        body={
+            "filterGroups":[
+                {
+                    "filters":[
+                        {
+                            "propertyName":"email",
+                            "operator":"EQ",
+                            "value":email,
+                        }
+                    ]
+                }
+            ],
+            "limit":1,
+        }
+        response=httpx.post(
+            f"{HUBSPOT_API_BASE}/crm/v3/objects/contacts/search",
+            headers=self._headers,
+            json=body,
+            timeout=30.0,
+        )
+        result=self._handle_response(response)
+        if "error" in result:
+            return result
+        if not result.get("results"):
+            return {
+                "error":f"No HubSpot contact found with email {email}",
+                "type":"not_found",
+                "status_code":404,
+            }
+        return result["results"][0]
+
 
     def create_object(
         self,
@@ -150,8 +209,9 @@ def register_tools(
             return {
                 "error": "HubSpot credentials not configured",
                 "help": (
-                    "Set HUBSPOT_ACCESS_TOKEN environment variable "
-                    "or configure via credential store"
+                     "Configure HubSpot authentication using one of the following:\n"
+                     "• OAuth2 connection via Hive credentials (recommended)\n"
+                     "• OAuth2 connection via Hive credentials (recommended)\n"
                 ),
             }
         return _HubSpotClient(token)
@@ -163,6 +223,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        after:str|None=None,
     ) -> dict:
         """
         Search HubSpot contacts.
@@ -181,7 +242,7 @@ def register_tools(
             return client
         try:
             return client.search_objects(
-                "contacts", query, properties or ["email", "firstname", "lastname"], limit
+                "contacts", query, properties or ["email", "firstname", "lastname"], limit, after
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -213,6 +274,29 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def hubspot_get_contact_by_email(
+        email:str,
+    )->dict:
+       """
+        Get a HubSpot contact by email.
+
+        Args:
+            email: Contact email address (e.g., "user@example.com")
+
+        Returns:
+            Dict with contact data or error
+       """
+       client=_get_client()
+       if isinstance(client,dict):
+           return client
+       try:
+           return client.get_contact_by_email(email)
+       except httpx.TimeoutException:
+           return {"error":"Request timed out"}
+       except httpx.RequestError as e:
+           return {"error":f"Network error: {e}"}
 
     @mcp.tool()
     def hubspot_create_contact(
@@ -270,6 +354,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        after:str|None=None,
     ) -> dict:
         """
         Search HubSpot companies.
@@ -287,7 +372,7 @@ def register_tools(
             return client
         try:
             return client.search_objects(
-                "companies", query, properties or ["name", "domain", "industry"], limit
+                "companies", query, properties or ["name", "domain", "industry"], limit,after
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -375,6 +460,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        after:str|None=None,
     ) -> dict:
         """
         Search HubSpot deals.
@@ -393,7 +479,7 @@ def register_tools(
             return client
         try:
             return client.search_objects(
-                "deals", query, properties or ["dealname", "amount", "dealstage"], limit
+                "deals", query, properties or ["dealname", "amount", "dealstage"], limit, after
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -448,6 +534,34 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def hubspot_update_deal_stage(
+        deal_id:str,
+        stage:str,
+    )->dict:
+       """
+       Update the stage of an existing HubSpot deal.
+
+       Args:
+           deal_id: The HubSpot deal ID
+           stage: New deal stage (e.g., "qualifiedtobuy", "closedwon")
+        Returns:
+            Dict with updated deal data or error
+       """
+       client=_get_client()
+       if isinstance(client,dict):
+           return client
+       try:
+           return client.update_object(
+               "deals",
+                deal_id,
+                {"dealstage":stage},
+            )
+       except httpx.TimeoutException:
+            return {"error":"Request timed out"}
+       except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
