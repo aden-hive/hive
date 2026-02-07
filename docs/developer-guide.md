@@ -200,7 +200,7 @@ hive/                                    # Repository root
 ├── CONTRIBUTING.md                      # Contribution guidelines
 ├── CHANGELOG.md                         # Version history
 ├── LICENSE                              # Apache 2.0 License
-├── CODE_OF_CONDUCT.md                   # Community guidelines
+├── docs/CODE_OF_CONDUCT.md              # Community guidelines
 └── SECURITY.md                          # Security policy
 ```
 
