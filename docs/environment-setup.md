@@ -442,6 +442,46 @@ This design allows agents in `exports/` to be:
 - Version controlled separately
 - Deployed as standalone packages
 
+
+### When is PYTHONPATH Required?
+
+PYTHONPATH is only required when running agents or scripts that import modules from the `exports/` directory.
+
+This is because:
+- `framework` and `aden_tools` are installed in editable mode and are automatically available in the environment.
+- The `exports/` directory contains user-created agents that are not installed as packages, so Python needs an explicit path to locate them.
+
+#### PYTHONPATH is NOT required when:
+- Importing `framework`
+- Importing `aden_tools`
+- Running commands using the `hive` CLI
+- Verifying installations using `uv run`
+
+Example:
+```bash
+uv run python -c "import framework"
+```
+
+#### PYTHONPATH is required when:
+- Running an agent directly with `python -m`
+- Importing modules located inside the `exports/` directory
+
+Example (Linux/macOS):
+```bash
+PYTHONPATH=exports uv run python -m your_agent_name validate
+```
+
+Example (Windows PowerShell):
+```powershell
+$env:PYTHONPATH="core;exports"
+python -m your_agent_name validate
+```
+
+#### Does `uv run` set PYTHONPATH automatically?
+
+No. `uv run` manages the virtual environment and dependencies, but it does not automatically include the `exports/` directory in the Python module search path. PYTHONPATH must be set manually when running agents directly.
+
+
 ## Development Workflow
 
 ### 1. Setup (Once)
