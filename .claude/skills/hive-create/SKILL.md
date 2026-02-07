@@ -28,8 +28,8 @@ metadata:
 mcp__agent-builder__add_mcp_server(
     name="hive-tools",
     transport="stdio",
-    command="python",
-    args='["mcp_server.py", "--stdio"]',
+    command="uv",
+    args='["run", "python", "mcp_server.py", "--stdio"]',
     cwd="tools",
     description="Hive tools MCP server"
 )
@@ -369,8 +369,8 @@ mcp__agent-builder__export_graph()
 {
   "hive-tools": {
     "transport": "stdio",
-    "command": "python",
-    "args": ["mcp_server.py", "--stdio"],
+    "command": "uv",
+    "args": ["run", "python", "mcp_server.py", "--stdio"],
     "cwd": "../../tools",
     "description": "Hive tools MCP server"
   }
@@ -379,6 +379,7 @@ mcp__agent-builder__export_graph()
 
 - NO `"mcpServers"` wrapper (that's Claude Desktop format, NOT hive format)
 - `cwd` MUST be `"../../tools"` (relative from `exports/AGENT_NAME/` to `tools/`)
+- `command` MUST be `"uv"` with `"args": ["run", "python", ...]` (NOT bare `"python"` which fails on Mac)
 
 **Use the example agent** at `.claude/skills/hive-create/examples/deep_research_agent/` as a template for file structure and patterns. It demonstrates: STEP 1/STEP 2 prompts, client-facing nodes, feedback loops, nullable_output_keys, and data tools.
 
@@ -424,7 +425,9 @@ cd /home/timothy/oss/hive && PYTHONPATH=exports uv run python -m AGENT_NAME vali
 │                                                                             │
 │  2. RUN YOUR AGENT:                                                         │
 │                                                                             │
-│     PYTHONPATH=core:exports python -m AGENT_NAME tui                        │
+│     hive tui                                                                │
+│                                                                             │
+│     Then select your agent from the list and press Enter.                   │
 │                                                                             │
 │  3. DEBUG ANY ISSUES:                                                       │
 │                                                                             │
@@ -534,4 +537,4 @@ result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
 8. **Forgetting nullable_output_keys** - Mark input_keys that only arrive on certain edges (e.g., feedback) as nullable on the receiving node
 9. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code
 10. **Writing code before user approves the graph** - Always get approval on goal, nodes, and graph BEFORE writing any agent code
-11. **Wrong mcp_servers.json format** - Use flat format (no `"mcpServers"` wrapper), and `cwd` must be `"../../tools"` not `"tools"`
+11. **Wrong mcp_servers.json format** - Use flat format (no `"mcpServers"` wrapper), `cwd` must be `"../../tools"`, and `command` must be `"uv"` with args `["run", "python", ...]`
