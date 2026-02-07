@@ -206,9 +206,8 @@ result = math.sqrt(16)
 """,
             inputs={},
         )
-        # Note: imports are blocked by default in validation
-        # This test documents current behavior
-        assert result.success is False  # imports blocked by validator
+        assert result.success is True
+        assert result.result == 4
 
 
 class TestHybridJudge:

@@ -86,8 +86,6 @@ ALLOWED_MODULES = {
 
 # Dangerous AST nodes to block
 BLOCKED_AST_NODES = {
-    ast.Import,
-    ast.ImportFrom,
     ast.Global,
     ast.Nonlocal,
 }
@@ -145,8 +143,13 @@ class RestrictedImporter:
 class CodeValidator:
     """Validates code for safety before execution."""
 
-    def __init__(self, blocked_nodes: set[type] | None = None):
+    def __init__(
+        self,
+        blocked_nodes: set[type] | None = None,
+        allowed_modules: set[str] | None = None,
+    ):
         self.blocked_nodes = blocked_nodes or BLOCKED_AST_NODES
+        self.allowed_modules = allowed_modules or ALLOWED_MODULES
 
     def validate(self, code: str) -> list[str]:
         """
@@ -166,6 +169,31 @@ class CodeValidator:
             if type(node) in self.blocked_nodes:
                 lineno = getattr(node, "lineno", "?")
                 issues.append(f"Blocked operation: {type(node).__name__} at line {lineno}")
+
+            # Check for imports against allowlist
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    module_name = alias.name.split(".")[0]
+                    if module_name not in self.allowed_modules:
+                        issues.append(
+                            f"Import of module '{alias.name}' is not allowed at line {node.lineno}"
+                        )
+
+            if isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    issues.append(
+                        f"Relative import is not allowed at line {node.lineno}"
+                    )
+                elif not node.module:
+                    issues.append(
+                        f"Import without module is not allowed at line {node.lineno}"
+                    )
+                else:
+                    module_name = node.module.split(".")[0]
+                    if module_name not in self.allowed_modules:
+                        issues.append(
+                            f"Import of module '{node.module}' is not allowed at line {node.lineno}"
+                        )
 
             # Check for dangerous attribute access
             if isinstance(node, ast.Attribute):
@@ -208,7 +236,7 @@ class CodeSandbox:
         self.timeout_seconds = timeout_seconds
         self.allowed_modules = allowed_modules or ALLOWED_MODULES
         self.safe_builtins = safe_builtins or SAFE_BUILTINS
-        self.validator = CodeValidator()
+        self.validator = CodeValidator(allowed_modules=self.allowed_modules)
         self.importer = RestrictedImporter(self.allowed_modules)
 
     @contextmanager
@@ -233,8 +261,11 @@ class CodeSandbox:
 
     def _create_namespace(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Create isolated namespace for code execution."""
+        builtins = dict(self.safe_builtins)
+        builtins["__import__"] = self.importer
+
         namespace = {
-            "__builtins__": dict(self.safe_builtins),
+            "__builtins__": builtins,
             "__import__": self.importer,
         }
 
