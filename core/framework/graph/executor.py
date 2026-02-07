@@ -397,9 +397,18 @@ class GraphExecutor:
                         stream_id=self._stream_id, node_id=current_node_id
                     )
 
-                # Execute node
+                # Execute node with transactional memory guards
                 self.logger.info("   Executing...")
-                result = await node_impl.execute(ctx)
+                txn_id = memory.begin_transaction()
+                try:
+                    result = await node_impl.execute(ctx)
+                    if result.success:
+                        memory.commit_transaction(txn_id)
+                    else:
+                        memory.rollback_transaction(txn_id)
+                except Exception:
+                    memory.rollback_transaction(txn_id)
+                    raise
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
@@ -1239,7 +1248,17 @@ class GraphExecutor:
                     self.logger.info(
                         f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
                     )
-                    result = await node_impl.execute(ctx)
+                    # Transactional guards for parallel branch (async for thread safety)
+                    txn_id = await memory.begin_transaction_async()
+                    try:
+                        result = await node_impl.execute(ctx)
+                        if result.success:
+                            await memory.commit_transaction_async(txn_id)
+                        else:
+                            await memory.rollback_transaction_async(txn_id)
+                    except Exception:
+                        await memory.rollback_transaction_async(txn_id)
+                        raise
                     last_result = result
 
                     # Ensure L2 entry for this branch node

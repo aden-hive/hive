@@ -660,9 +660,15 @@ class EventLoopNode(NodeProtocol):
                     continue
 
                 # Exit point 5: Judge ACCEPT — log step + log_node_complete
-                # Write outputs to shared memory
-                for key, value in accumulator.to_dict().items():
-                    ctx.memory.write(key, value, validate=False)
+                # Write outputs to shared memory with transactional guard
+                txn_id = ctx.memory.begin_transaction()
+                try:
+                    for key, value in accumulator.to_dict().items():
+                        ctx.memory.write(key, value, validate=False)
+                    ctx.memory.commit_transaction(txn_id)
+                except Exception:
+                    ctx.memory.rollback_transaction(txn_id)
+                    raise
 
                 await self._publish_loop_completed(stream_id, node_id, iteration + 1)
                 latency_ms = int((time.time() - start_time) * 1000)

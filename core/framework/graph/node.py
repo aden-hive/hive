@@ -18,6 +18,7 @@ Protocol:
 import asyncio
 import inspect
 import logging
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -265,16 +266,44 @@ class SharedMemory:
     # Locks for thread-safe parallel execution
     _lock: asyncio.Lock | None = field(default=None, repr=False)
     _key_locks: dict[str, asyncio.Lock] = field(default_factory=dict, repr=False)
+    # Transaction support
+    _staged_data: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
+    _transaction_stack: list[str] = field(default_factory=list, repr=False)
+    # Use list wrapper for mutable counter that shares across views
+    _transaction_counter: list[int] = field(default_factory=lambda: [0], repr=False)
+    _txn_lock: asyncio.Lock | None = field(default=None, repr=False)
+    # Thread lock for sync transaction methods (matches RuntimeLogger pattern)
+    _sync_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    # Transaction metrics (for observability integration)
+    _txn_metrics: dict[str, Any] = field(
+        default_factory=lambda: {
+            "total_commits": 0,
+            "total_rollbacks": 0,
+            "active_count": 0,
+        },
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         """Initialize the main lock if not provided."""
         if self._lock is None:
             self._lock = asyncio.Lock()
+        if self._txn_lock is None:
+            self._txn_lock = asyncio.Lock()
 
     def read(self, key: str) -> Any:
-        """Read a value from shared memory."""
+        """Read a value from shared memory.
+
+        If a transaction is active, reads staged data first (read-your-own-writes),
+        then falls back to committed data.
+        """
         if self._allowed_read and key not in self._allowed_read:
             raise PermissionError(f"Node not allowed to read key: {key}")
+        # Check staged data first if transaction is active
+        if self._transaction_stack:
+            txn_id = self._transaction_stack[-1]
+            if txn_id in self._staged_data and key in self._staged_data[txn_id]:
+                return self._staged_data[txn_id][key]
         return self._data.get(key)
 
     def write(self, key: str, value: Any, validate: bool = True) -> None:
@@ -308,7 +337,14 @@ class SharedMemory:
                         "If this is intentional, use validate=False."
                     )
 
-        self._data[key] = value
+        # Write to staged data if transaction is active
+        if self._transaction_stack:
+            txn_id = self._transaction_stack[-1]
+            if txn_id not in self._staged_data:
+                self._staged_data[txn_id] = {}
+            self._staged_data[txn_id][key] = value
+        else:
+            self._data[key] = value
 
     async def write_async(self, key: str, value: Any, validate: bool = True) -> None:
         """
@@ -350,7 +386,14 @@ class SharedMemory:
                             f"appears to be hallucinated code ({len(value)} chars). "
                             "If this is intentional, use validate=False."
                         )
-            self._data[key] = value
+            # Write to staged data if transaction is active
+            if self._transaction_stack:
+                txn_id = self._transaction_stack[-1]
+                if txn_id not in self._staged_data:
+                    self._staged_data[txn_id] = {}
+                self._staged_data[txn_id][key] = value
+            else:
+                self._data[key] = value
 
     def _contains_code_indicators(self, value: str) -> bool:
         """
@@ -414,10 +457,21 @@ class SharedMemory:
         return False
 
     def read_all(self) -> dict[str, Any]:
-        """Read all accessible data."""
+        """Read all accessible data.
+
+        If a transaction is active, merges staged data with committed data.
+        """
+        # Start with committed data
+        result = dict(self._data)
+        # Merge staged data if transaction is active
+        if self._transaction_stack:
+            txn_id = self._transaction_stack[-1]
+            if txn_id in self._staged_data:
+                result.update(self._staged_data[txn_id])
+        # Apply read permissions filter
         if self._allowed_read:
-            return {k: v for k, v in self._data.items() if k in self._allowed_read}
-        return dict(self._data)
+            return {k: v for k, v in result.items() if k in self._allowed_read}
+        return result
 
     def with_permissions(
         self,
@@ -426,7 +480,7 @@ class SharedMemory:
     ) -> "SharedMemory":
         """Create a view with restricted permissions for a specific node.
 
-        The scoped view shares the same underlying data and locks,
+        The scoped view shares the same underlying data, locks, and transaction state,
         enabling thread-safe parallel execution across scoped views.
         """
         return SharedMemory(
@@ -435,7 +489,236 @@ class SharedMemory:
             _allowed_write=set(write_keys) if write_keys else set(),
             _lock=self._lock,  # Share lock for thread safety
             _key_locks=self._key_locks,  # Share key locks
+            _staged_data=self._staged_data,  # Share staged data
+            _transaction_stack=self._transaction_stack,  # Share transaction stack
+            _transaction_counter=self._transaction_counter,  # Share counter (mutable list)
+            _txn_lock=self._txn_lock,  # Share transaction lock
+            _sync_lock=self._sync_lock,  # Share sync lock
+            _txn_metrics=self._txn_metrics,  # Share metrics
         )
+
+    def begin_transaction(self) -> str:
+        """Start a new transaction.
+
+        Returns:
+            Transaction ID that must be passed to commit or rollback.
+
+        Note:
+            For async code, prefer begin_transaction_async() for thread safety.
+        """
+        with self._sync_lock:
+            txn_id = f"txn_{self._transaction_counter[0]}"
+            self._transaction_counter[0] += 1
+            self._transaction_stack.append(txn_id)
+            self._staged_data[txn_id] = {}
+            self._txn_metrics["active_count"] += 1
+        logger.debug(f"Transaction started: {txn_id}")
+        return txn_id
+
+    async def begin_transaction_async(self) -> str:
+        """Start a new transaction with async lock protection.
+
+        Use this method in async contexts for thread-safe transaction creation.
+
+        Returns:
+            Transaction ID that must be passed to commit or rollback.
+        """
+        async with self._txn_lock:
+            txn_id = f"txn_{self._transaction_counter[0]}"
+            self._transaction_counter[0] += 1
+            self._transaction_stack.append(txn_id)
+            self._staged_data[txn_id] = {}
+        logger.debug(f"Transaction started (async): {txn_id}")
+        return txn_id
+
+    def commit_transaction(self, txn_id: str) -> None:
+        """Commit a transaction, merging staged writes to committed data.
+
+        Args:
+            txn_id: The transaction ID returned by begin_transaction.
+
+        Raises:
+            ValueError: If the transaction ID is not active.
+        """
+        with self._sync_lock:
+            if txn_id not in self._transaction_stack:
+                raise ValueError(f"Transaction {txn_id} not active")
+
+            # Remove from stack
+            self._transaction_stack.remove(txn_id)
+            staged = self._staged_data.pop(txn_id, {})
+            self._txn_metrics["active_count"] -= 1
+            self._txn_metrics["total_commits"] += 1
+
+            if self._transaction_stack:
+                # Nested transaction: merge into parent
+                parent_txn = self._transaction_stack[-1]
+                if parent_txn not in self._staged_data:
+                    self._staged_data[parent_txn] = {}
+                self._staged_data[parent_txn].update(staged)
+                logger.debug(f"Transaction {txn_id} merged into parent {parent_txn}")
+            else:
+                # Top-level transaction: commit to main data
+                self._data.update(staged)
+                logger.debug(f"Transaction {txn_id} committed to main data")
+
+    def rollback_transaction(self, txn_id: str) -> None:
+        """Rollback a transaction, discarding all staged writes.
+
+        Args:
+            txn_id: The transaction ID returned by begin_transaction.
+
+        Raises:
+            ValueError: If the transaction ID is not active.
+        """
+        with self._sync_lock:
+            if txn_id not in self._transaction_stack:
+                raise ValueError(f"Transaction {txn_id} not active")
+
+            self._transaction_stack.remove(txn_id)
+            self._staged_data.pop(txn_id, None)
+            self._txn_metrics["active_count"] -= 1
+            self._txn_metrics["total_rollbacks"] += 1
+        logger.debug(f"Transaction {txn_id} rolled back")
+
+    def has_active_transaction(self) -> bool:
+        """Check if there is an active transaction."""
+        return len(self._transaction_stack) > 0
+
+    def get_current_transaction(self) -> str | None:
+        """Get the current (innermost) transaction ID, or None."""
+        return self._transaction_stack[-1] if self._transaction_stack else None
+
+    async def commit_transaction_async(self, txn_id: str) -> None:
+        """Commit a transaction with async lock protection.
+
+        Args:
+            txn_id: The transaction ID returned by begin_transaction.
+
+        Raises:
+            ValueError: If the transaction ID is not active.
+        """
+        async with self._txn_lock:
+            if txn_id not in self._transaction_stack:
+                raise ValueError(f"Transaction {txn_id} not active")
+
+            self._transaction_stack.remove(txn_id)
+            staged = self._staged_data.pop(txn_id, {})
+
+            if self._transaction_stack:
+                parent_txn = self._transaction_stack[-1]
+                if parent_txn not in self._staged_data:
+                    self._staged_data[parent_txn] = {}
+                self._staged_data[parent_txn].update(staged)
+                logger.debug(f"Transaction {txn_id} merged into parent {parent_txn}")
+            else:
+                self._data.update(staged)
+                logger.debug(f"Transaction {txn_id} committed to main data (async)")
+
+    async def rollback_transaction_async(self, txn_id: str) -> None:
+        """Rollback a transaction with async lock protection.
+
+        Args:
+            txn_id: The transaction ID returned by begin_transaction.
+
+        Raises:
+            ValueError: If the transaction ID is not active.
+        """
+        async with self._txn_lock:
+            if txn_id not in self._transaction_stack:
+                raise ValueError(f"Transaction {txn_id} not active")
+
+            self._transaction_stack.remove(txn_id)
+            self._staged_data.pop(txn_id, None)
+        logger.debug(f"Transaction {txn_id} rolled back (async)")
+
+    def cleanup_orphaned_transactions(self) -> int:
+        """Clean up any orphaned transactions (e.g., from crashed nodes).
+
+        This method discards all staged data and clears the transaction stack.
+        Use with caution - only call when you're certain no transactions are
+        legitimately in progress.
+
+        Returns:
+            Number of orphaned transactions that were cleaned up.
+        """
+        with self._sync_lock:
+            count = len(self._transaction_stack)
+            if count > 0:
+                logger.warning(
+                    f"Cleaning up {count} orphaned transactions: {self._transaction_stack}"
+                )
+                self._txn_metrics["total_rollbacks"] += count
+                self._txn_metrics["active_count"] = 0
+                self._transaction_stack.clear()
+                self._staged_data.clear()
+        return count
+
+    def get_transaction_metrics(self) -> dict[str, Any]:
+        """Get transaction metrics for observability integration.
+
+        Returns a copy of metrics dict containing:
+        - total_commits: Number of successful commits
+        - total_rollbacks: Number of rollbacks (including cleanups)
+        - active_count: Currently active transactions
+
+        Can be passed to RuntimeLogger or other observability systems.
+        """
+        with self._sync_lock:
+            return dict(self._txn_metrics)
+
+    def transaction(self) -> "TransactionContext":
+        """Context manager for automatic transaction handling.
+
+        Usage::
+
+            with memory.transaction() as txn:
+                memory.write("key", "value")
+                if some_error:
+                    txn.mark_rollback()
+            # Auto-commits if not marked for rollback
+
+        Returns:
+            TransactionContext for use in 'with' statement.
+        """
+        return TransactionContext(self)
+
+
+class TransactionContext:
+    """Context manager for SharedMemory transactions.
+
+    Provides automatic commit on success, rollback on exception or when
+    explicitly marked for rollback.
+    """
+
+    def __init__(self, memory: SharedMemory) -> None:
+        self._memory = memory
+        self._txn_id: str | None = None
+        self._should_rollback = False
+
+    def __enter__(self) -> "TransactionContext":
+        self._txn_id = self._memory.begin_transaction()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+        if self._txn_id is None:
+            return False
+
+        if exc_type is not None or self._should_rollback:
+            self._memory.rollback_transaction(self._txn_id)
+        else:
+            self._memory.commit_transaction(self._txn_id)
+
+        return False  # Don't suppress exceptions
+
+    def mark_rollback(self) -> None:
+        """Mark this transaction for rollback on exit."""
+        self._should_rollback = True
+
+    @property
+    def txn_id(self) -> str | None:
+        """Get the transaction ID."""
+        return self._txn_id
 
 
 @dataclass
