@@ -4,8 +4,8 @@
       "name": "tools",
       "description": "Aden tools including web search, file operations, and PDF reading",
       "transport": "stdio",
-      "command": "python",
-      "args": ["mcp_server.py", "--stdio"],
+      "command": "uv",
+      "args": ["run", "python", "mcp_server.py", "--stdio"],
       "cwd": "../tools",
       "env": {
         "BRAVE_SEARCH_API_KEY": "${BRAVE_SEARCH_API_KEY}"

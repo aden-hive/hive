@@ -86,7 +86,7 @@ def tui(verbose, debug):
         agent._event_bus = EventBus()
         agent._tool_registry = ToolRegistry()
 
-        storage_path = Path.home() / ".hive" / "tech_news_reporter"
+        storage_path = Path.home() / ".hive" / "agents" / "tech_news_reporter"
         storage_path.mkdir(parents=True, exist_ok=True)
 
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
