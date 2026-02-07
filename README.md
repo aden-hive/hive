@@ -96,13 +96,15 @@ cd hive
 ./quickstart.sh
 ```
 
-This sets up:
+### About `uv`
 
-- **framework** - Core agent runtime and graph executor (in `core/.venv`)
-- **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
-- **credential store** - Encrypted API key storage (`~/.hive/credentials`)
-- **LLM provider** - Interactive default model configuration
-- All required Python dependencies with `uv`
+Hive uses **uv** as the Python package and environment manager.
+It is a fast, modern alternative to `pip` and `virtualenv`.
+
+You do not need to install dependencies manually.
+Running `./quickstart.sh` automatically sets up all required
+virtual environments and dependencies using `uv`.
+
 
 ### Build Your First Agent
 
