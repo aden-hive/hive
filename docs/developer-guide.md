@@ -299,8 +299,6 @@ PYTHONPATH=exports uv run python -m agent_name run --input '{
   "customer_id": "CUST-123"
 }'
 
-# Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
 ```
 
 ---
@@ -623,8 +621,6 @@ logging.basicConfig(level=logging.DEBUG)
 # Run with verbose output
 PYTHONPATH=exports uv run python -m agent_name run --input '{...}' --verbose
 
-# Use mock mode to test without LLM calls
-PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
 ```
 
 ---

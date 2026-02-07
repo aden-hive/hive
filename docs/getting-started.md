@@ -127,8 +127,6 @@ PYTHONPATH=exports uv run python -m my_agent run --input '{
   "task": "Your input here"
 }'
 
-# Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m my_agent run --mock --input '{...}'
 ```
 
 ## API Keys Setup
@@ -194,8 +192,6 @@ uv pip install -e .
 # Verify API key is set
 echo $ANTHROPIC_API_KEY
 
-# Run in mock mode to test without API
-PYTHONPATH=exports uv run python -m my_agent run --mock --input '{...}'
 ```
 
 ### Package Installation Issues

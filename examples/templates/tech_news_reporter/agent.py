@@ -1,4 +1,4 @@
-"""Agent graph construction for Deep Research Agent."""
+"""Agent graph construction for Tech & AI News Reporter."""
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
@@ -12,66 +12,73 @@ from .config import default_config, metadata
 from .nodes import (
     intake_node,
     research_node,
-    review_node,
-    report_node,
+    compile_report_node,
 )
 
 # Goal definition
 goal = Goal(
-    id="rigorous-interactive-research",
-    name="Rigorous Interactive Research",
+    id="tech-news-report",
+    name="Tech & AI News Reporter",
     description=(
-        "Research any topic by searching diverse sources, analyzing findings, "
-        "and producing a cited report — with user checkpoints to guide direction."
+        "Research the latest technology and AI news from the web, "
+        "summarize key stories, and produce a well-organized report "
+        "for the user to read."
     ),
     success_criteria=[
         SuccessCriterion(
-            id="source-diversity",
-            description="Use multiple diverse, authoritative sources",
-            metric="source_count",
+            id="sc-find-articles",
+            description="Finds recent, relevant tech/AI news articles",
+            metric="articles_sourced",
             target=">=5",
             weight=0.25,
         ),
         SuccessCriterion(
-            id="citation-coverage",
-            description="Every factual claim in the report cites its source",
-            metric="citation_coverage",
-            target="100%",
-            weight=0.25,
+            id="sc-diverse-topics",
+            description="Covers diverse topics, not just one story",
+            metric="topics_covered",
+            target=">=3",
+            weight=0.2,
         ),
         SuccessCriterion(
-            id="user-satisfaction",
-            description="User reviews findings before report generation",
-            metric="user_approval",
+            id="sc-structured-report",
+            description="Produces a structured, readable report with sections, summaries, and links",
+            metric="report_structured",
             target="true",
             weight=0.25,
         ),
         SuccessCriterion(
-            id="report-completeness",
-            description="Final report answers the original research questions",
-            metric="question_coverage",
-            target="90%",
-            weight=0.25,
+            id="sc-source-attribution",
+            description="Includes source attribution with URLs for every story",
+            metric="source_attribution",
+            target="100%",
+            weight=0.15,
+        ),
+        SuccessCriterion(
+            id="sc-deliver-report",
+            description="Delivers the report to the user in a viewable format",
+            metric="report_delivered",
+            target="true",
+            weight=0.15,
         ),
     ],
     constraints=[
         Constraint(
-            id="no-hallucination",
-            description="Only include information found in fetched sources",
-            constraint_type="quality",
-            category="accuracy",
+            id="c-no-fabrication",
+            description="Never fabricate news stories or URLs",
+            constraint_type="hard",
+            category="quality",
         ),
         Constraint(
-            id="source-attribution",
-            description="Every claim must cite its source with a numbered reference",
-            constraint_type="quality",
-            category="accuracy",
+            id="c-source-attribution",
+            description="Always attribute sources with links",
+            constraint_type="hard",
+            category="quality",
         ),
         Constraint(
-            id="user-checkpoint",
-            description="Present findings to the user before writing the final report",
-            constraint_type="functional",
-            category="interaction",
+            id="c-recent-news",
+            description="Only include news from the past week",
+            constraint_type="hard",
+            category="quality",
         ),
     ],
 )
@@ -80,13 +87,11 @@ goal = Goal(
 nodes = [
     intake_node,
     research_node,
-    review_node,
-    report_node,
+    compile_report_node,
 ]
 
 # Edge definitions
 edges = [
-    # intake -> research
     EdgeSpec(
         id="intake-to-research",
         source="intake",
@@ -94,31 +99,12 @@ edges = [
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # research -> review
     EdgeSpec(
-        id="research-to-review",
+        id="research-to-compile-report",
         source="research",
-        target="review",
+        target="compile-report",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
-    ),
-    # review -> research (feedback loop)
-    EdgeSpec(
-        id="review-to-research-feedback",
-        source="review",
-        target="research",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == True",
-        priority=1,
-    ),
-    # review -> report (user satisfied)
-    EdgeSpec(
-        id="review-to-report",
-        source="review",
-        target="report",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == False",
-        priority=2,
     ),
 ]
 
@@ -126,16 +112,14 @@ edges = [
 entry_node = "intake"
 entry_points = {"start": "intake"}
 pause_nodes = []
-terminal_nodes = ["report"]
+terminal_nodes = ["compile-report"]
 
 
-class DeepResearchAgent:
+class TechNewsReporterAgent:
     """
-    Deep Research Agent — 4-node pipeline with user checkpoints.
+    Tech & AI News Reporter — 3-node pipeline.
 
-    Flow: intake -> research -> review -> report
-                      ^           |
-                      +-- feedback loop (if user wants more)
+    Flow: intake -> research -> compile-report
     """
 
     def __init__(self, config=None):
@@ -155,7 +139,7 @@ class DeepResearchAgent:
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
         return GraphSpec(
-            id="deep-research-agent-graph",
+            id="tech-news-reporter-graph",
             goal_id=self.goal.id,
             version="1.0.0",
             entry_node=self.entry_node,
@@ -167,8 +151,8 @@ class DeepResearchAgent:
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
             loop_config={
-                "max_iterations": 100,
-                "max_tool_calls_per_turn": 20,
+                "max_iterations": 50,
+                "max_tool_calls_per_turn": 10,
                 "max_history_tokens": 32000,
             },
         )
@@ -177,7 +161,7 @@ class DeepResearchAgent:
         """Set up the executor with all components."""
         from pathlib import Path
 
-        storage_path = Path.home() / ".hive" / "deep_research_agent"
+        storage_path = Path.home() / ".hive" / "tech_news_reporter"
         storage_path.mkdir(parents=True, exist_ok=True)
 
         self._event_bus = EventBus()
@@ -306,4 +290,4 @@ class DeepResearchAgent:
 
 
 # Create default instance
-default_agent = DeepResearchAgent()
+default_agent = TechNewsReporterAgent()

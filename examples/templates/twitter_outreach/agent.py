@@ -172,7 +172,7 @@ class TwitterOutreachAgent:
             },
         )
 
-    def _setup(self, mock_mode=False) -> GraphExecutor:
+    def _setup(self) -> GraphExecutor:
         """Set up the executor with all components."""
         from pathlib import Path
 
@@ -186,13 +186,11 @@ class TwitterOutreachAgent:
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
 
-        llm = None
-        if not mock_mode:
-            llm = LiteLLMProvider(
-                model=self.config.model,
-                api_key=self.config.api_key,
-                api_base=self.config.api_base,
-            )
+        llm = LiteLLMProvider(
+            model=self.config.model,
+            api_key=self.config.api_key,
+            api_base=self.config.api_base,
+        )
 
         tool_executor = self._tool_registry.get_executor()
         tools = list(self._tool_registry.get_tools().values())
@@ -212,10 +210,10 @@ class TwitterOutreachAgent:
 
         return self._executor
 
-    async def start(self, mock_mode=False) -> None:
+    async def start(self) -> None:
         """Set up the agent (initialize executor and tools)."""
         if self._executor is None:
-            self._setup(mock_mode=mock_mode)
+            self._setup()
 
     async def stop(self) -> None:
         """Clean up resources."""
@@ -243,10 +241,10 @@ class TwitterOutreachAgent:
         )
 
     async def run(
-        self, context: dict, mock_mode=False, session_state=None
+        self, context: dict, session_state=None
     ) -> ExecutionResult:
         """Run the agent (convenience method for single execution)."""
-        await self.start(mock_mode=mock_mode)
+        await self.start()
         try:
             result = await self.trigger_and_wait(
                 "start", context, session_state=session_state
