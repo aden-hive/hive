@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="100%" alt="Hive Banner" src="https://storage.googleapis.com/aden-prod-assets/website/aden-title-card.png" />
+  <img width="100%" alt="Hive Banner" src="https://github.com/user-attachments/assets/a027429b-5d3c-4d34-88e4-0feaeaabbab3" />
 </p>
 
 <p align="center">
@@ -154,6 +154,16 @@ Skills are also available in Cursor. To enable:
 - **Interactive TUI Dashboard** - Terminal-based dashboard with live graph view, event log, and chat interface for agent interaction
 - **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
 - **Production-Ready** - Self-hostable, built for scale and reliability
+
+## Integration
+
+<img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" />
+
+Hive is built to be model-agnostic and system-agnostic.
+
+- **LLM flexibility** - Aden Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
+- **Business system connectivity** - Aden Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
+
 
 ## Why Aden
 
