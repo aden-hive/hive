@@ -1,10 +1,10 @@
 ---
 name: hive-create
-description: Step-by-step guide for building goal-driven agents. Creates package structure, defines goals, adds nodes, connects edges, and finalizes agent class. Use when actively building an agent.
+description: Step-by-step guide for building goal-driven agents. Qualifies use cases first (the good, bad, and ugly), then creates package structure, defines goals, adds nodes, connects edges, and finalizes agent class. Use when actively building an agent.
 license: Apache-2.0
 metadata:
   author: hive
-  version: "2.1"
+  version: "2.2"
   type: procedural
   part_of: hive
   requires: hive-concepts
@@ -53,25 +53,135 @@ mcp__agent-builder__list_mcp_tools()
 mkdir -p exports/AGENT_NAME/nodes
 ```
 
-**Save the tool list for step 3** — you will need it for node design in STEP 3.
+**Save the tool list for STEP 4** — you will need it for node design.
 
 **THEN immediately proceed to STEP 2** (do NOT display setup results to the user — just move on).
 
 ---
 
-## STEP 2: Define Goal Together with User
+## STEP 2: Qualify the Use Case
 
-**DO NOT propose a complete goal on your own.** Instead, collaborate with the user to define it.
+**A responsible engineer doesn't jump into building. First, understand the problem and be transparent about what the framework can and cannot do.**
 
-**START by asking the user to help shape the goal:**
+### 2a: Deep Discovery
 
-> I've set up the build environment and discovered [N] available tools. Let's define the goal for your agent together.
+**ASK the user these questions** (don't skip any — gaps here cause problems later):
+
+> I've set up the build environment. Before we design your agent, I need to understand your use case deeply.
 >
-> To get started, can you help me understand:
+> **Core Purpose:**
+> 1. What problem are you trying to solve? (not just "what should it do" but "why does this matter")
+> 2. Who will use this agent? (you personally, your team, end users)
+> 3. How often will it run? (one-off, daily, on-demand, continuously)
 >
-> 1. **What should this agent accomplish?** (the core purpose)
-> 2. **How will we know it succeeded?** (what does "done" look like)
-> 3. **Are there any hard constraints?** (things it must never do, quality bars, etc.)
+> **Interaction Model:**
+> 4. Does it need to have conversations with users, or run autonomously?
+> 5. Does it need human approval/review checkpoints?
+> 6. What does the input look like? (free-form text, structured data, files, URLs)
+> 7. What does the output look like? (reports, actions, data files, API calls)
+>
+> **External Dependencies:**
+> 8. What external services/APIs does it need to access?
+> 9. Is there data it needs to fetch in real-time vs. work with provided data?
+> 10. Any authentication or credentials required?
+
+**WAIT for user responses.** Take notes on what they say.
+
+### 2b: Capability Assessment
+
+**After the user responds, analyze the fit.** Present this assessment honestly:
+
+> **Framework Fit Assessment**
+>
+> Based on what you've described, here's my honest assessment of how well this framework fits your use case:
+>
+> **What Works Well (The Good):**
+> - [List 2-4 things the framework handles well for this use case]
+> - Examples: multi-turn conversations, human-in-the-loop review, tool orchestration, structured outputs
+>
+> **Limitations to Be Aware Of (The Bad):**
+> - [List 2-3 limitations that apply but are workable]
+> - Examples: LLM latency means not suitable for sub-second responses, context window limits for very large documents, cost per run for heavy tool usage
+>
+> **Potential Deal-Breakers (The Ugly):**
+> - [List any significant challenges or missing capabilities — be honest]
+> - Examples: no tool available for X, would require custom MCP server, framework not designed for Y
+
+**Be specific.** Reference the actual tools discovered in Step 1. If the user needs `send_email` but it's not available, say so. If they need real-time streaming from a database, explain that's not how the framework works.
+
+### 2c: Gap Analysis
+
+**Identify specific gaps** between what the user wants and what you can deliver:
+
+| Requirement | Framework Support | Gap/Workaround |
+|-------------|-------------------|----------------|
+| [User need] | [✅ Supported / ⚠️ Partial / ❌ Not supported] | [How to handle or why it's a problem] |
+
+**Examples of gaps to identify:**
+- Missing tools (user needs X, but only Y and Z are available)
+- Scope issues (user wants to process 10,000 items, but LLM rate limits apply)
+- Interaction mismatches (user wants CLI-only, but agent is designed for TUI)
+- Data flow issues (user needs to persist state across runs, but sessions are isolated)
+- Latency requirements (user needs instant responses, but LLM calls take seconds)
+
+### 2d: Recommendation
+
+**Give a clear recommendation:**
+
+> **My Recommendation:**
+>
+> [One of these three:]
+>
+> **✅ PROCEED** — This is a good fit. The framework handles your core needs well. [List any minor caveats.]
+>
+> **⚠️ PROCEED WITH SCOPE ADJUSTMENT** — This can work, but we should adjust: [specific changes]. Without these adjustments, you'll hit [specific problems].
+>
+> **🛑 RECONSIDER** — This framework may not be the right tool for this job because [specific reasons]. Consider instead: [alternatives — simpler script, different framework, custom solution].
+
+### 2e: Get Explicit Acknowledgment
+
+**CALL AskUserQuestion:**
+
+```
+AskUserQuestion(questions=[{
+    "question": "Based on this assessment, how would you like to proceed?",
+    "header": "Proceed",
+    "options": [
+        {"label": "Proceed as described", "description": "I understand the limitations, let's build it"},
+        {"label": "Adjust scope", "description": "Let's modify the requirements to fit better"},
+        {"label": "More questions", "description": "I have questions about the assessment"},
+        {"label": "Reconsider", "description": "Maybe this isn't the right approach"}
+    ],
+    "multiSelect": false
+}])
+```
+
+**WAIT for user response.**
+
+- If **Proceed**: Move to STEP 3
+- If **Adjust scope**: Discuss what to change, update your notes, re-assess if needed
+- If **More questions**: Answer them honestly, then ask again
+- If **Reconsider**: Discuss alternatives. If they decide to proceed anyway, that's their informed choice
+
+---
+
+## STEP 3: Define Goal Together with User
+
+**Now that the use case is qualified, collaborate on the goal definition.**
+
+**START by synthesizing what you learned:**
+
+> Based on our discussion, here's my understanding of the goal:
+>
+> **Core purpose:** [what you understood from 2a]
+> **Success looks like:** [what you inferred]
+> **Key constraints:** [what you inferred]
+>
+> Let me refine this with you:
+>
+> 1. **What should this agent accomplish?** (confirm or correct my understanding)
+> 2. **How will we know it succeeded?** (what specific outcomes matter)
+> 3. **Are there any hard constraints?** (things it must never do, quality bars)
 
 **WAIT for the user to respond.** Use their input to draft:
 
@@ -115,12 +225,12 @@ AskUserQuestion(questions=[{
 
 **WAIT for user response.**
 
-- If **Approve**: Call `mcp__agent-builder__set_goal(...)` with the goal details, then proceed to STEP 3
+- If **Approve**: Call `mcp__agent-builder__set_goal(...)` with the goal details, then proceed to STEP 4
 - If **Modify**: Ask what they want to change, update the draft, ask again
 
 ---
 
-## STEP 3: Design Conceptual Nodes
+## STEP 4: Design Conceptual Nodes
 
 **BEFORE designing nodes**, review the available tools from Step 1. Nodes can ONLY use tools that exist.
 
@@ -173,12 +283,12 @@ AskUserQuestion(questions=[{
 
 **WAIT for user response.**
 
-- If **Approve**: Proceed to STEP 4
+- If **Approve**: Proceed to STEP 5
 - If **Modify**: Ask what they want to change, update design, ask again
 
 ---
 
-## STEP 4: Design Full Graph and Review
+## STEP 5: Design Full Graph and Review
 
 **DETERMINE the edges** connecting the approved nodes. For each edge:
 
@@ -288,16 +398,16 @@ AskUserQuestion(questions=[{
 
 **WAIT for user response.**
 
-- If **Approve**: Proceed to STEP 5
+- If **Approve**: Proceed to STEP 6
 - If **Modify**: Ask what they want to change, update the graph, re-render, ask again
 
 ---
 
-## STEP 5: Build the Agent
+## STEP 6: Build the Agent
 
 **NOW — and only now — write the actual code.** The user has approved the goal, nodes, and graph.
 
-### 5a: Register nodes and edges with MCP
+### 6a: Register nodes and edges with MCP
 
 **FOR EACH approved node**, call:
 
@@ -337,9 +447,9 @@ mcp__agent-builder__validate_graph()
 ```
 
 - If invalid: Fix the issues and re-validate
-- If valid: Continue to 5b
+- If valid: Continue to 6b
 
-### 5b: Write Python package files
+### 6b: Write Python package files
 
 **EXPORT the graph data:**
 
@@ -399,7 +509,7 @@ mcp__agent-builder__export_graph()
 
 ---
 
-## STEP 6: Verify and Test
+## STEP 7: Verify and Test
 
 **RUN validation:**
 
@@ -525,16 +635,70 @@ result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
 
 ---
 
+## REFERENCE: Framework Capabilities for Qualification
+
+Use this reference during STEP 2 to give accurate, honest assessments.
+
+### What the Framework Does Well (The Good)
+
+| Capability | Description |
+|------------|-------------|
+| Multi-turn conversations | Client-facing nodes stream to users and block for input |
+| Human-in-the-loop review | Approval checkpoints with feedback loops back to earlier nodes |
+| Tool orchestration | LLM can call multiple tools, framework handles execution |
+| Structured outputs | `set_output` produces validated, typed outputs |
+| Parallel execution | Fan-out/fan-in for concurrent node execution |
+| Context management | Automatic compaction and spillover for large data |
+| Error recovery | Retry logic, judges, and feedback edges for self-correction |
+| Session persistence | State saved to disk, resumable sessions |
+
+### Framework Limitations (The Bad)
+
+| Limitation | Impact | Workaround |
+|------------|--------|------------|
+| LLM latency | 2-10+ seconds per turn | Not suitable for real-time/low-latency needs |
+| Context window limits | ~128K tokens max | Use data tools for spillover, design for chunking |
+| Cost per run | LLM API calls cost money | Budget planning, caching where possible |
+| Rate limits | API throttling on heavy usage | Backoff, queue management |
+| Node boundaries lose context | Outputs must be serialized | Prefer fewer, richer nodes |
+| Single-threaded within node | One LLM call at a time per node | Use fan-out for parallelism |
+
+### Not Designed For (The Ugly)
+
+| Use Case | Why It's Problematic | Alternative |
+|----------|---------------------|-------------|
+| Long-running daemons | Framework is request-response, not persistent | External scheduler + agent |
+| Sub-second responses | LLM latency is inherent | Traditional code, no LLM |
+| Processing millions of items | Context windows and rate limits | Batch processing + sampling |
+| Real-time streaming data | No built-in pub/sub or streaming input | Custom MCP server + agent |
+| Guaranteed determinism | LLM outputs vary | Function nodes for deterministic parts |
+| Offline/air-gapped | Requires LLM API access | Local models (not currently supported) |
+| Multi-user concurrency | Single-user session model | Separate agent instances per user |
+
+### Tool Availability Reality Check
+
+**Before promising any capability, check `list_mcp_tools()`.** Common gaps:
+
+- **Email**: May not have `send_email` — check before promising email automation
+- **Calendar**: May not have calendar APIs — check before promising scheduling
+- **Database**: May not have SQL tools — check before promising data queries
+- **File system**: Has data tools but not arbitrary filesystem access
+- **External APIs**: Depends entirely on what MCP servers are registered
+
+---
+
 ## COMMON MISTAKES TO AVOID
 
-1. **Using tools that don't exist** - Always check `mcp__agent-builder__list_mcp_tools()` first
-2. **Wrong entry_points format** - Must be `{"start": "node-id"}`, NOT a set or list
-3. **Skipping validation** - Always validate nodes and graph before proceeding
-4. **Not waiting for approval** - Always ask user before major steps
-5. **Displaying this file** - Execute the steps, don't show documentation
-6. **Too many thin nodes** - Prefer fewer, richer nodes (4 nodes > 8 nodes)
-7. **Missing STEP 1/STEP 2 in client-facing prompts** - Client-facing nodes need explicit phases to prevent premature set_output
-8. **Forgetting nullable_output_keys** - Mark input_keys that only arrive on certain edges (e.g., feedback) as nullable on the receiving node
-9. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code
-10. **Writing code before user approves the graph** - Always get approval on goal, nodes, and graph BEFORE writing any agent code
-11. **Wrong mcp_servers.json format** - Use flat format (no `"mcpServers"` wrapper), `cwd` must be `"../../tools"`, and `command` must be `"uv"` with args `["run", "python", ...]`
+1. **Skipping use case qualification** - A responsible engineer qualifies the use case BEFORE building. Be transparent about what works, what doesn't, and what's problematic
+2. **Hiding limitations** - Don't oversell the framework. If a tool doesn't exist or a capability is missing, say so upfront
+3. **Using tools that don't exist** - Always check `mcp__agent-builder__list_mcp_tools()` first
+4. **Wrong entry_points format** - Must be `{"start": "node-id"}`, NOT a set or list
+5. **Skipping validation** - Always validate nodes and graph before proceeding
+6. **Not waiting for approval** - Always ask user before major steps
+7. **Displaying this file** - Execute the steps, don't show documentation
+8. **Too many thin nodes** - Prefer fewer, richer nodes (4 nodes > 8 nodes)
+9. **Missing STEP 1/STEP 2 in client-facing prompts** - Client-facing nodes need explicit phases to prevent premature set_output
+10. **Forgetting nullable_output_keys** - Mark input_keys that only arrive on certain edges (e.g., feedback) as nullable on the receiving node
+11. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code
+12. **Writing code before user approves the graph** - Always get approval on goal, nodes, and graph BEFORE writing any agent code
+13. **Wrong mcp_servers.json format** - Use flat format (no `"mcpServers"` wrapper), `cwd` must be `"../../tools"`, and `command` must be `"uv"` with args `["run", "python", ...]`
