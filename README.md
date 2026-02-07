@@ -157,7 +157,7 @@ Skills are also available in Cursor. To enable:
 
 ## Why Aden
 
-Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe [outcomes](docs/key_concepts/goals_outcome.md), and the system builds itself**—delivering an outcome-driven, [adaptive](docs/key_concepts/evolution.md) experience with an easy-to-use set of tools and integrations.
+Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe outcomes, and the system builds itself**—delivering an outcome-driven, adaptive experience with an easy-to-use set of tools and integrations.
 
 ```mermaid
 flowchart LR
@@ -241,13 +241,6 @@ See [environment-setup.md](docs/environment-setup.md) for complete setup instruc
 - [TUI Guide](docs/tui-selection-guide.md) - Interactive dashboard usage
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
-
-### Key Concepts
-
-- [Goals & Outcome-Driven Development](docs/key_concepts/goals_outcome.md) - Why Hive is outcome-driven and how goals define success
-- [The Agent Graph](docs/key_concepts/graph.md) - Nodes, edges, shared memory, and how agents execute
-- [The Worker Agent](docs/key_concepts/worker_agent.md) - Sessions, iterations, headless execution, and the runtime
-- [Evolution](docs/key_concepts/evolution.md) - How agents improve across generations through failure data
 
 ## Roadmap
 
@@ -393,7 +386,7 @@ Yes! Hive supports local models through LiteLLM. Simply use the model name forma
 
 **Q: What makes Hive different from other agent frameworks?**
 
-Hive generates your entire agent system from natural language [goals](docs/key_concepts/goals_outcome.md) using a coding agent—you don't hardcode workflows or manually define graphs. When agents fail, the framework automatically captures failure data, [evolves the agent graph](docs/key_concepts/evolution.md), and redeploys. This self-improving loop is unique to Aden.
+Hive generates your entire agent system from natural language goals using a coding agent—you don't hardcode workflows or manually define graphs. When agents fail, the framework automatically captures failure data, [evolves the agent graph](docs/key_concepts/evolution.md), and redeploys. This self-improving loop is unique to Aden.
 
 **Q: Is Hive open-source?**
 
@@ -441,7 +434,7 @@ Contributions are welcome! Fork the repository, create your feature branch, impl
 
 **Q: When will my team start seeing results from Aden's adaptive agents?**
 
-Aden's [adaptation loop](docs/key_concepts/evolution.md) begins working from the first execution. When an agent fails, the framework captures the failure data, helping developers evolve the agent graph through the coding agent. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your [goal definitions](docs/key_concepts/goals_outcome.md), and the volume of executions generating feedback.
+Aden's adaptation loop begins working from the first execution. When an agent fails, the framework captures the failure data, helping developers evolve the agent graph through the coding agent. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your goal definitions, and the volume of executions generating feedback.
 
 **Q: How does Hive compare to other agent frameworks?**
 
