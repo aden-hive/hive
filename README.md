@@ -39,6 +39,31 @@ Build reliable, self-improving AI agents without hardcoding workflows. Define yo
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+## Why Hive?
+
+Most agent frameworks ask you to manually define workflows, wire graphs, and handle failures reactively. Hive flips this: **describe your goals, and the system builds itself**. Unlike LangChain or CrewAI, Hive generates your agent architecture from natural language goals — no manual graph wiring required.
+
+| | What makes Hive different |
+|---|---|
+| **Goal-driven, not workflow-driven** | Describe what you want to achieve. Hive's coding agent generates the agent graph, connection code, and test cases automatically. No manual node wiring. |
+| **Self-improving** | When agents fail, the framework captures failure data, evolves the agent graph through the coding agent, and redeploys — automatically. Agents get better with every run. |
+| **Production-ready from day one** | Cost controls, human-in-the-loop intervention, real-time observability, and budget enforcement are built in — not bolted on after deployment. |
+
+> **Comparing frameworks?** See our detailed comparison guides: [Hive vs LangChain](docs/articles/aden-vs-langchain.md) | [Hive vs CrewAI](docs/articles/aden-vs-crewai.md) | [Hive vs AutoGen](docs/articles/aden-vs-autogen.md)
+
+## What Can I Build?
+
+| If you need to... | Start here |
+|---|---|
+| Automate deep research across the web | [Deep Research Agent](examples/templates/deep_research_agent/) |
+| Monitor and report on tech/AI news | [Tech News Reporter](examples/templates/tech_news_reporter/) |
+| Run personalized outreach campaigns | [Twitter Outreach Agent](examples/templates/twitter_outreach/) |
+| Build sales development workflows | SDR Agent *(coming soon — [#3829](https://github.com/adenhq/hive/issues/3829))* |
+| Triage customer support tickets | Support Triage Agent *(coming soon — [#3882](https://github.com/adenhq/hive/issues/3882))* |
+| Generate weekly business reports | Report Generator *(coming soon — [#3882](https://github.com/adenhq/hive/issues/3882))* |
+
+Or build your own: `claude> /hive` walks you through creating a custom agent from a goal description.
+
 ## Who Is Hive For?
 
 Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
@@ -51,7 +76,7 @@ Hive is a good fit if you:
 - Require **human-in-the-loop control**, observability, and cost limits
 - Plan to run agents in **production environments**
 
-Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
+Hive may not be the best fit if you're only experimenting with simple agent chains or one-off scripts.
 
 ## When Should You Use Hive?
 
@@ -152,9 +177,9 @@ Skills are also available in Cursor. To enable:
 - **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
 - **Production-Ready** - Self-hostable, built for scale and reliability
 
-## Why Aden
+## How Hive Works
 
-Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe [outcomes](docs/key_concepts/goals_outcome.md), and the system builds itself**—delivering an outcome-driven, [adaptive](docs/key_concepts/evolution.md) experience with an easy-to-use set of tools and integrations.
+Hive's [outcome-driven](docs/key_concepts/goals_outcome.md), [adaptive](docs/key_concepts/evolution.md) loop: define a goal, auto-generate the agent graph, execute, monitor, and evolve on failure — no manual rewiring needed.
 
 ```mermaid
 flowchart LR
