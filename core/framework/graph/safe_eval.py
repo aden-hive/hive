@@ -50,6 +50,18 @@ SAFE_FUNCTIONS = {
     "round": round,
     "all": all,
     "any": any,
+    # Type checking (commonly used in edge conditions)
+    "isinstance": isinstance,
+    "issubclass": issubclass,
+    "type": type,
+    # Iteration utilities
+    "enumerate": enumerate,
+    "filter": filter,
+    "map": map,
+    "range": range,
+    "sorted": sorted,
+    "reversed": reversed,
+    "zip": zip,
 }
 
 class SafeEvalVisitor(ast.NodeVisitor):
