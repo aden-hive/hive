@@ -42,6 +42,8 @@ Build autonomous, reliable, self-improving AI agents without hardcoding workflow
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+https://github.com/user-attachments/assets/846c0cc7-ffd6-47fa-b4b7-495494857a55
+
 ## Who Is Hive For?
 
 Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
@@ -66,21 +68,6 @@ Use Hive when you need:
 - Multi-agent coordination
 - A framework that evolves with your goals
 
-## What is Aden
-
-<p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
-</p>
-
-Aden is a platform for building, deploying, operating, and adapting AI agents:
-
-- **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
-- **Deploy** - Headless deployment (self-hosted, cloud native deployment coming soon)
-- **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
-- **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
-- **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
-- **Integration** - Integrate to your business systems to automate processes
-
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
@@ -91,7 +78,7 @@ Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 ## Quick Start
 
-## Prerequisites
+### Prerequisites
 
 - Python 3.11+ for agent development
 - Claude Code or Cursor for utilizing agent skills
@@ -115,7 +102,7 @@ This sets up:
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
 - **LLM provider** - Interactive default model configuration
-- All required Python dependencies
+- All required Python dependencies with `uv`
 
 ### Build Your First Agent
 
@@ -153,8 +140,8 @@ hive run exports/your_agent_name --input '{"key": "value"}'
 
 Hive is built to be model-agnostic and system-agnostic.
 
-- **LLM flexibility** - Aden Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
-- **Business system connectivity** - Aden Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
+- **LLM flexibility** - Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
+- **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
 
 
 ## Why Aden
@@ -193,9 +180,9 @@ flowchart LR
     style V6 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
 ```
 
-### The Aden Advantage
+### The Hive Advantage
 
-| Traditional Frameworks     | Aden                                   |
+| Traditional Frameworks     | Hive                                   |
 | -------------------------- | -------------------------------------- |
 | Hardcode agent workflows   | Describe goals in natural language     |
 | Manual graph definition    | Auto-generated agent graphs            |
@@ -402,7 +389,7 @@ Yes, Hive fully supports [human-in-the-loop](docs/key_concepts/graph.md#human-in
 
 The Hive framework is built in Python. A JavaScript/TypeScript SDK is on the roadmap.
 
-**Q: Can Aden agents interact with external tools and APIs?**
+**Q: Can Hive agents interact with external tools and APIs?**
 
 Yes. Aden's SDK-wrapped nodes provide built-in tool access, and the framework supports flexible tool ecosystems. Agents can integrate with external APIs, databases, and services through the node architecture.
 
