@@ -288,7 +288,9 @@ class TestCalendlyHealthChecker:
         mock_client = MagicMock()
         mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
         mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
-        mock_client.get.return_value = self._mock_response(200, {"resource": {"uri": "https://api.calendly.com/users/me123"}})
+        mock_client.get.return_value = self._mock_response(
+            200, {"resource": {"uri": "https://api.calendly.com/users/me123"}}
+        )
 
         checker = CalendlyHealthChecker()
         result = checker.check("test-calendly-token")

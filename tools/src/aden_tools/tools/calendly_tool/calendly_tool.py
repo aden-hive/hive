@@ -87,15 +87,17 @@ class _CalendlyClient:
         events = []
         for item in collection:
             resource = item.get("resource", {})
-            events.append({
-                "uri": resource.get("uri"),
-                "name": resource.get("name"),
-                "slug": resource.get("slug"),
-                "active": resource.get("active", True),
-                "scheduling_url": resource.get("scheduling_url"),
-                "duration": resource.get("duration"),
-                "kind": resource.get("kind"),
-            })
+            events.append(
+                {
+                    "uri": resource.get("uri"),
+                    "name": resource.get("name"),
+                    "slug": resource.get("slug"),
+                    "active": resource.get("active", True),
+                    "scheduling_url": resource.get("scheduling_url"),
+                    "duration": resource.get("duration"),
+                    "kind": resource.get("kind"),
+                }
+            )
 
         return {
             "success": True,
@@ -156,10 +158,12 @@ class _CalendlyClient:
         slots = []
         for item in collection:
             resource = item.get("resource", {})
-            slots.append({
-                "start_time": resource.get("start_time"),
-                "invitees_remaining": resource.get("invitees_remaining", 1),
-            })
+            slots.append(
+                {
+                    "start_time": resource.get("start_time"),
+                    "invitees_remaining": resource.get("invitees_remaining", 1),
+                }
+            )
 
         return {
             "success": True,
