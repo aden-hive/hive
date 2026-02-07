@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from framework.runtime.event_bus import EventBus
     from framework.runtime.outcome_aggregator import OutcomeAggregator
     from framework.storage.concurrent import ConcurrentStorage
+    from framework.storage.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,8 @@ class ExecutionStream:
         tool_executor: Callable | None = None,
         result_retention_max: int | None = 1000,
         result_retention_ttl_seconds: float | None = None,
+        runtime_log_store: Any = None,
+        session_store: "SessionStore | None" = None,
     ):
         """
         Initialize execution stream.
@@ -128,6 +131,8 @@ class ExecutionStream:
             llm: LLM provider for nodes
             tools: Available tools
             tool_executor: Function to execute tools
+            runtime_log_store: Optional RuntimeLogStore for per-execution logging
+            session_store: Optional SessionStore for unified session storage
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -142,6 +147,8 @@ class ExecutionStream:
         self._tool_executor = tool_executor
         self._result_retention_max = result_retention_max
         self._result_retention_ttl_seconds = result_retention_ttl_seconds
+        self._runtime_log_store = runtime_log_store
+        self._session_store = session_store
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -221,6 +228,13 @@ class ExecutionStream:
                     await task
                 except asyncio.CancelledError:
                     pass
+                except RuntimeError as e:
+                    # Task may be attached to a different event loop (e.g., when TUI
+                    # uses a separate loop). Log and continue cleanup.
+                    if "attached to a different loop" in str(e):
+                        logger.warning(f"Task cleanup skipped (different event loop): {e}")
+                    else:
+                        raise
 
         self._execution_tasks.clear()
         self._active_executions.clear()
@@ -275,8 +289,21 @@ class ExecutionStream:
         if not self._running:
             raise RuntimeError(f"ExecutionStream '{self.stream_id}' is not running")
 
-        # Generate execution ID
-        execution_id = f"exec_{self.stream_id}_{uuid.uuid4().hex[:8]}"
+        # Generate execution ID using unified session format
+        if self._session_store:
+            execution_id = self._session_store.generate_session_id()
+        else:
+            # Fallback to old format if SessionStore not available (shouldn't happen)
+            import warnings
+
+            warnings.warn(
+                "SessionStore not available, using deprecated exec_* ID format. "
+                "Please ensure AgentRuntime is properly initialized.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            execution_id = f"exec_{self.stream_id}_{uuid.uuid4().hex[:8]}"
+
         if correlation_id is None:
             correlation_id = execution_id
 
@@ -330,6 +357,15 @@ class ExecutionStream:
                 # Create runtime adapter for this execution
                 runtime_adapter = StreamRuntimeAdapter(self._runtime, execution_id)
 
+                # Create per-execution runtime logger
+                runtime_logger = None
+                if self._runtime_log_store:
+                    from framework.runtime.runtime_logger import RuntimeLogger
+
+                    runtime_logger = RuntimeLogger(
+                        store=self._runtime_log_store, agent_id=self.graph.id
+                    )
+
                 # Create executor for this execution.
                 # Each execution gets its own storage under sessions/{exec_id}/
                 # so conversations, spillover, and data files are all scoped
@@ -345,10 +381,14 @@ class ExecutionStream:
                     event_bus=self._event_bus,
                     stream_id=self.stream_id,
                     storage_path=exec_storage,
+                    runtime_logger=runtime_logger,
                     loop_config=self.graph.loop_config,
                 )
                 # Track executor so inject_input() can reach EventLoopNode instances
                 self._active_executors[execution_id] = executor
+
+                # Write initial session state
+                await self._write_session_state(execution_id, ctx)
 
                 # Create modified graph with entry point
                 # We need to override the entry_node to use our entry point
@@ -373,6 +413,9 @@ class ExecutionStream:
                 ctx.status = "completed" if result.success else "failed"
                 if result.paused_at:
                     ctx.status = "paused"
+
+                # Write final session state
+                await self._write_session_state(execution_id, ctx, result=result)
 
                 # Emit completion/failure event
                 if self._event_bus:
@@ -410,6 +453,9 @@ class ExecutionStream:
                     ),
                 )
 
+                # Write error session state
+                await self._write_session_state(execution_id, ctx, error=str(e))
+
                 # Emit failure event
                 if self._event_bus:
                     await self._event_bus.emit_execution_failed(
@@ -432,6 +478,88 @@ class ExecutionStream:
                     self._active_executions.pop(execution_id, None)
                     self._completion_events.pop(execution_id, None)
                     self._execution_tasks.pop(execution_id, None)
+
+    async def _write_session_state(
+        self,
+        execution_id: str,
+        ctx: ExecutionContext,
+        result: ExecutionResult | None = None,
+        error: str | None = None,
+    ) -> None:
+        """
+        Write state.json for a session.
+
+        Args:
+            execution_id: Session/execution ID
+            ctx: Execution context
+            result: Optional execution result (if completed)
+            error: Optional error message (if failed)
+        """
+        # Only write if session_store is available
+        if not self._session_store:
+            return
+
+        from framework.schemas.session_state import SessionState, SessionStatus
+
+        try:
+            # Determine status
+            if result:
+                if result.paused_at:
+                    status = SessionStatus.PAUSED
+                elif result.success:
+                    status = SessionStatus.COMPLETED
+                else:
+                    status = SessionStatus.FAILED
+            elif error:
+                status = SessionStatus.FAILED
+            else:
+                status = SessionStatus.ACTIVE
+
+            # Create SessionState
+            if result:
+                # Create from execution result
+                state = SessionState.from_execution_result(
+                    session_id=execution_id,
+                    goal_id=self.goal.id,
+                    result=result,
+                    stream_id=self.stream_id,
+                    correlation_id=ctx.correlation_id,
+                    started_at=ctx.started_at.isoformat(),
+                    input_data=ctx.input_data,
+                    agent_id=self.graph.id,
+                    entry_point=self.entry_spec.id,
+                )
+            else:
+                # Create initial state
+                from framework.schemas.session_state import SessionTimestamps
+
+                now = datetime.now().isoformat()
+                state = SessionState(
+                    session_id=execution_id,
+                    stream_id=self.stream_id,
+                    correlation_id=ctx.correlation_id,
+                    goal_id=self.goal.id,
+                    agent_id=self.graph.id,
+                    entry_point=self.entry_spec.id,
+                    status=status,
+                    timestamps=SessionTimestamps(
+                        started_at=ctx.started_at.isoformat(),
+                        updated_at=now,
+                    ),
+                    input_data=ctx.input_data,
+                )
+
+            # Handle error case
+            if error:
+                state.result.error = error
+
+            # Write state.json
+            await self._session_store.write_state(execution_id, state)
+            logger.debug(f"Wrote state.json for session {execution_id} (status={status})")
+
+        except Exception as e:
+            # Log but don't fail the execution
+            logger.error(f"Failed to write state.json for {execution_id}: {e}")
 
     def _create_modified_graph(self) -> "GraphSpec":
         """Create a graph with the entry point overridden."""

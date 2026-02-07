@@ -585,7 +585,11 @@ def add_node(
         str, "JSON object mapping conditions to target node IDs for router nodes"
     ] = "{}",
     client_facing: Annotated[
-        bool, "If True, node streams output to user and blocks for input between turns"
+        bool,
+        "If True, an ask_user() tool is injected so the LLM can explicitly request user input. "
+        "The node blocks ONLY when ask_user() is called — text-only turns stream freely. "
+        "Set True for nodes that interact with users (intake, review, approval). "
+        "Nodes that do autonomous work (research, data processing, API calls) MUST be False.",
     ] = False,
     nullable_output_keys: Annotated[
         str, "JSON array of output keys that may remain unset (for mutually exclusive outputs)"
@@ -664,6 +668,14 @@ def add_node(
         warnings.append(
             f"Node type '{node_type}' is deprecated. Use 'event_loop' instead. "
             "EventLoopNode supports tool use, streaming, and judge-based evaluation."
+        )
+
+    # Warn about client_facing on nodes with tools (likely autonomous work)
+    if node_type == "event_loop" and client_facing and tools_list:
+        warnings.append(
+            f"Node '{node_id}' is client_facing=True but has tools {tools_list}. "
+            "Nodes with tools typically do autonomous work and should be "
+            "client_facing=False. Only set True if this node needs user approval."
         )
 
     # nullable_output_keys must be a subset of output_keys
@@ -1374,6 +1386,17 @@ def validate_graph() -> str:
     for dn in deprecated_nodes:
         warnings.append(
             f"Node '{dn['node_id']}' uses deprecated type '{dn['type']}'. Use 'event_loop' instead."
+        )
+
+    # Warn if all event_loop nodes are client_facing (common misconfiguration)
+    el_nodes = [n for n in session.nodes if n.node_type == "event_loop"]
+    cf_el_nodes = [n for n in el_nodes if n.client_facing]
+    if len(el_nodes) > 1 and len(cf_el_nodes) == len(el_nodes):
+        warnings.append(
+            f"ALL {len(el_nodes)} event_loop nodes are client_facing=True. "
+            "This injects ask_user() on every node. Only nodes that need user "
+            "interaction (intake, review, approval) should be client_facing. Set "
+            "client_facing=False on autonomous processing nodes."
         )
 
     # Collect summary info
@@ -2213,7 +2236,7 @@ def test_node(
             )
         else:
             cf_note = (
-                "Node is client-facing: will block for user input between turns. "
+                "Node is client-facing: has ask_user() tool, blocks when LLM calls it. "
                 if node_spec.client_facing
                 else ""
             )

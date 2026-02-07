@@ -18,8 +18,8 @@ PYTHONPATH=core:exports uv run python -m twitter_outreach validate
 # Show agent info
 PYTHONPATH=core:exports uv run python -m twitter_outreach info
 
-# Run in mock mode (no API calls)
-PYTHONPATH=core:exports uv run python -m twitter_outreach run --mock
+# Run the workflow
+PYTHONPATH=core:exports uv run python -m twitter_outreach run
 
 # Launch the TUI
 PYTHONPATH=core:exports uv run python -m twitter_outreach tui

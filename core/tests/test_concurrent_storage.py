@@ -26,6 +26,11 @@ def create_test_run(
     )
 
 
+@pytest.mark.skip(
+    reason="FileStorage.save_run() is deprecated and now a no-op. "
+    "ConcurrentStorage wraps FileStorage, so these tests no longer work. "
+    "New sessions use unified storage at sessions/{session_id}/state.json"
+)
 @pytest.mark.asyncio
 async def test_cache_invalidation_on_save(tmp_path: Path):
     """Test that summary cache is invalidated when a run is saved.
@@ -62,6 +67,11 @@ async def test_cache_invalidation_on_save(tmp_path: Path):
         await storage.stop()
 
 
+@pytest.mark.skip(
+    reason="FileStorage.save_run() is deprecated and now a no-op. "
+    "ConcurrentStorage wraps FileStorage, so these tests no longer work. "
+    "New sessions use unified storage at sessions/{session_id}/state.json"
+)
 @pytest.mark.asyncio
 async def test_batched_write_cache_consistency(tmp_path: Path):
     """Test that cache is only updated after successful batched write.
@@ -104,6 +114,11 @@ async def test_batched_write_cache_consistency(tmp_path: Path):
         await storage.stop()
 
 
+@pytest.mark.skip(
+    reason="FileStorage.save_run() is deprecated and now a no-op. "
+    "ConcurrentStorage wraps FileStorage, so these tests no longer work. "
+    "New sessions use unified storage at sessions/{session_id}/state.json"
+)
 @pytest.mark.asyncio
 async def test_immediate_write_updates_cache(tmp_path: Path):
     """Test that immediate writes still update cache correctly."""
@@ -129,6 +144,11 @@ async def test_immediate_write_updates_cache(tmp_path: Path):
         await storage.stop()
 
 
+@pytest.mark.skip(
+    reason="FileStorage.save_run() is deprecated and now a no-op. "
+    "ConcurrentStorage wraps FileStorage, so these tests no longer work. "
+    "New sessions use unified storage at sessions/{session_id}/state.json"
+)
 @pytest.mark.asyncio
 async def test_summary_cache_invalidated_on_multiple_saves(tmp_path: Path):
     """Test that summary cache is invalidated on each save, not just the first."""

@@ -28,8 +28,8 @@ metadata:
 mcp__agent-builder__add_mcp_server(
     name="hive-tools",
     transport="stdio",
-    command="python",
-    args='["mcp_server.py", "--stdio"]',
+    command="uv",
+    args='["run", "python", "mcp_server.py", "--stdio"]',
     cwd="tools",
     description="Hive tools MCP server"
 )
@@ -363,6 +363,24 @@ mcp__agent-builder__export_graph()
 - NOT: `{"first-node-id": ["input_keys"]}` (WRONG)
 - NOT: `{"first-node-id"}` (WRONG - this is a set)
 
+**IMPORTANT mcp_servers.json format:**
+
+```json
+{
+  "hive-tools": {
+    "transport": "stdio",
+    "command": "uv",
+    "args": ["run", "python", "mcp_server.py", "--stdio"],
+    "cwd": "../../tools",
+    "description": "Hive tools MCP server"
+  }
+}
+```
+
+- NO `"mcpServers"` wrapper (that's Claude Desktop format, NOT hive format)
+- `cwd` MUST be `"../../tools"` (relative from `exports/AGENT_NAME/` to `tools/`)
+- `command` MUST be `"uv"` with `"args": ["run", "python", ...]` (NOT bare `"python"` which fails on Mac)
+
 **Use the example agent** at `.claude/skills/hive-create/examples/deep_research_agent/` as a template for file structure and patterns. It demonstrates: STEP 1/STEP 2 prompts, client-facing nodes, feedback loops, nullable_output_keys, and data tools.
 
 **AFTER writing all files, tell the user:**
@@ -392,11 +410,34 @@ cd /home/timothy/oss/hive && PYTHONPATH=exports uv run python -m AGENT_NAME vali
 - If valid: Agent is complete!
 - If errors: Fix the issues and re-run
 
-**TELL the user the agent is ready** and suggest next steps:
+**TELL the user the agent is ready** and display the next steps box:
 
-- Run with mock mode to test without API calls
-- Use `/hive-test` skill for comprehensive testing
-- Use `/hive-credentials` if the agent needs API keys
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         ✅ AGENT BUILD COMPLETE                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  NEXT STEPS:                                                                │
+│                                                                             │
+│  1. SET UP CREDENTIALS (if agent uses tools like web_search, send_email):  │
+│                                                                             │
+│     /hive-credentials --agent AGENT_NAME                                    │
+│                                                                             │
+│  2. RUN YOUR AGENT:                                                         │
+│                                                                             │
+│     hive tui                                                                │
+│                                                                             │
+│     Then select your agent from the list and press Enter.                   │
+│                                                                             │
+│  3. DEBUG ANY ISSUES:                                                       │
+│                                                                             │
+│     /hive-debugger                                                          │
+│                                                                             │
+│     The debugger monitors runtime logs, identifies retry loops,             │
+│     tool failures, and missing outputs, and provides fix recommendations.  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -466,7 +507,7 @@ EventLoopNodes are **auto-created** by `GraphExecutor` at runtime. Both direct `
 from framework.graph.executor import GraphExecutor
 from framework.runtime.core import Runtime
 
-storage_path = Path.home() / ".hive" / "my_agent"
+storage_path = Path.home() / ".hive" / "agents" / "my_agent"
 storage_path.mkdir(parents=True, exist_ok=True)
 runtime = Runtime(storage_path)
 
@@ -496,3 +537,4 @@ result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
 8. **Forgetting nullable_output_keys** - Mark input_keys that only arrive on certain edges (e.g., feedback) as nullable on the receiving node
 9. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code
 10. **Writing code before user approves the graph** - Always get approval on goal, nodes, and graph BEFORE writing any agent code
+11. **Wrong mcp_servers.json format** - Use flat format (no `"mcpServers"` wrapper), `cwd` must be `"../../tools"`, and `command` must be `"uv"` with args `["run", "python", ...]`

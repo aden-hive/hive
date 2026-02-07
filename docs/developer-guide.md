@@ -107,6 +107,15 @@ This installs agent-related Claude Code skills:
 - `/hive-patterns` - Best practices and design patterns
 - `/hive-test` - Test and validate agents
 
+### Cursor IDE Support
+
+Skills are also available in Cursor. To enable:
+
+1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
+2. Run `MCP: Enable` to enable MCP servers
+3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
+4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
+
 ### Verify Setup
 
 ```bash
@@ -158,6 +167,7 @@ hive/                                    # Repository root
 │   │   ├── schemas/                     # Data schemas
 │   │   ├── storage/                     # File-based persistence
 │   │   ├── testing/                     # Testing utilities
+│   │   ├── tui/                         # Terminal UI dashboard
 │   │   └── __init__.py
 │   ├── pyproject.toml                   # Package metadata and dependencies
 │   ├── README.md                        # Framework documentation
@@ -180,6 +190,9 @@ hive/                                    # Repository root
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
 │   └── your_agent_name/                 # Created via /hive-create
 │
+├── examples/                            # Example agents
+│   └── templates/                       # Pre-built template agents
+│
 ├── docs/                                # Documentation
 │   ├── getting-started.md               # Quick start guide
 │   ├── configuration.md                 # Configuration reference
@@ -196,7 +209,7 @@ hive/                                    # Repository root
 ├── CONTRIBUTING.md                      # Contribution guidelines
 ├── CHANGELOG.md                         # Version history
 ├── LICENSE                              # Apache 2.0 License
-├── CODE_OF_CONDUCT.md                   # Community guidelines
+├── docs/CODE_OF_CONDUCT.md              # Community guidelines
 └── SECURITY.md                          # Security policy
 ```
 
@@ -287,21 +300,18 @@ If you prefer to build agents manually:
 ### Running Agents
 
 ```bash
-# Validate agent structure
-PYTHONPATH=exports uv run python -m agent_name validate
+# Browse and run agents interactively (Recommended)
+hive tui
 
-# Show agent information
-PYTHONPATH=exports uv run python -m agent_name info
+# Run a specific agent
+hive run exports/my_agent --input '{"ticket_content": "My login is broken", "customer_id": "CUST-123"}'
 
-# Run agent with input
-PYTHONPATH=exports uv run python -m agent_name run --input '{
-  "ticket_content": "My login is broken",
-  "customer_id": "CUST-123"
-}'
+# Run with TUI dashboard
+hive run exports/my_agent --tui
 
-# Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
 ```
+
+> **Using Python directly:** `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
 
 ---
 
@@ -615,16 +625,10 @@ echo 'ANTHROPIC_API_KEY=your-key-here' >> .env
 
 ### Debugging Agent Execution
 
-```python
-# Add debug logging to your agent
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
+```bash
 # Run with verbose output
-PYTHONPATH=exports uv run python -m agent_name run --input '{...}' --verbose
+hive run exports/my_agent --verbose --input '{"task": "..."}'
 
-# Use mock mode to test without LLM calls
-PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
 ```
 
 ---
