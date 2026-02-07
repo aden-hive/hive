@@ -100,11 +100,11 @@ configure_logging(level="INFO", format="auto")
 ### JSON Format (Machine-parseable)
 
 ```json
-{"timestamp": "2026-01-28T15:01:02.671126+00:00", "level": "info", "logger": "framework.runtime", "message": "Starting agent execution", "trace_id": "tr_1234567890abcdef...", "execution_id": "exec_start_a1b2c3d4e5f6...", "agent_id": "sales-agent", "goal_id": "qualify-leads"}
+{"timestamp": "2026-01-28T15:01:02.671126+00:00", "level": "info", "logger": "framework.runtime", "message": "Starting agent execution", "trace_id": "54e80d7b5bd6409dbc3217e5cd16a4fd", "execution_id": "b4c348ec54e80d7b5bd6409dbc3217e50", "agent_id": "sales-agent", "goal_id": "qualify-leads"}
 ```
 
 **Features:**
-- Full UUIDs for `execution_id` and `trace_id` (for machine correlation)
+- `trace_id` and `execution_id` are 32 hex chars (W3C/OTel-aligned, no prefixes)
 - Compact single-line format (easy to stream/parse)
 - All trace context fields included automatically
 
@@ -125,8 +125,8 @@ configure_logging(level="INFO", format="auto")
 
 The following fields are automatically included in all logs:
 
-- **trace_id**: Full UUID for tracing entire request flow
-- **execution_id**: Full UUID for specific execution (format: `exec_{stream_id}_{uuid}`)
+- **trace_id**: 32 hex chars (W3C Trace Context compliant)
+- **execution_id**: 32 hex chars (run/session correlation)
 - **agent_id**: Agent/graph identifier
 - **goal_id**: Goal being pursued
 - **node_id**: Current node (when set)
@@ -192,10 +192,10 @@ If you need to set trace context manually (rare):
 ```python
 from framework.observability import set_trace_context, get_trace_context
 
-# Set context
+# Set context (32-hex, no prefixes)
 set_trace_context(
-    trace_id="tr_abc123",
-    execution_id="exec_xyz789",
+    trace_id="54e80d7b5bd6409dbc3217e5cd16a4fd",
+    execution_id="b4c348ec54e80d7b5bd6409dbc3217e50",
     agent_id="my-agent"
 )
 

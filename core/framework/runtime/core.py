@@ -79,16 +79,13 @@ class Runtime:
         Returns:
             The run ID
         """
-        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex}"
+        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        trace_id = uuid.uuid4().hex
+        execution_id = uuid.uuid4().hex  # 32 hex, OTel/W3C-aligned for logs
 
-        # Generate trace_id for correlation across entire execution
-        # Full UUID (128 bits) for uniqueness, displayed shortened in human mode
-        trace_id = f"tr_{uuid.uuid4().hex}"
-
-        # Set trace context - automatically propagates to all logs in this execution
         set_trace_context(
             trace_id=trace_id,
-            execution_id=run_id,
+            execution_id=execution_id,
             goal_id=goal_id,
         )
 

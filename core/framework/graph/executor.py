@@ -293,7 +293,6 @@ class GraphExecutor:
 
         if self.runtime_logger:
             # Extract session_id from storage_path if available (for unified sessions)
-            # storage_path format: base_path/sessions/{session_id}/
             session_id = ""
             if self._storage_path and self._storage_path.name.startswith("session_"):
                 session_id = self._storage_path.name

@@ -264,10 +264,11 @@ def set_trace_context(**kwargs: Any) -> None:
 
     Example (framework code):
         # In Runtime.start_run()
-        trace_id = f"tr_{uuid.uuid4().hex}"  # Full UUID for uniqueness
+        trace_id = uuid.uuid4().hex  # 32 hex, W3C Trace Context compliant
+        execution_id = uuid.uuid4().hex  # 32 hex, OTel-aligned for correlation
         set_trace_context(
             trace_id=trace_id,
-            execution_id=run_id,
+            execution_id=execution_id,
             goal_id=goal_id
         )
         # All subsequent logs in this execution get these fields automatically!
