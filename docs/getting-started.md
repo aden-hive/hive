@@ -129,14 +129,6 @@ hive run exports/my_agent --input '{"task": "Your input here"}'
 # Run with TUI dashboard
 hive run exports/my_agent --tui
 
-# Run in mock mode (no LLM calls)
-hive run exports/my_agent --mock --input '{"task": "..."}'
-```
-
-### Using Python directly (alternative)
-
-```bash
-PYTHONPATH=exports uv run python -m my_agent run --input '{"task": "Your input here"}'
 ```
 
 ## API Keys Setup
@@ -203,8 +195,6 @@ uv pip install -e .
 # Verify API key is set
 echo $ANTHROPIC_API_KEY
 
-# Run in mock mode to test without API
-PYTHONPATH=exports uv run python -m my_agent run --mock --input '{...}'
 ```
 
 ### Package Installation Issues

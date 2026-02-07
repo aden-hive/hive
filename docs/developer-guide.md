@@ -300,8 +300,6 @@ hive run exports/my_agent --input '{"ticket_content": "My login is broken", "cus
 # Run with TUI dashboard
 hive run exports/my_agent --tui
 
-# Run in mock mode (no LLM calls)
-hive run exports/my_agent --mock --input '{"task": "..."}'
 ```
 
 > **Using Python directly:** `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
@@ -622,18 +620,6 @@ echo 'ANTHROPIC_API_KEY=your-key-here' >> .env
 # Run with verbose output
 hive run exports/my_agent --verbose --input '{"task": "..."}'
 
-# Use mock mode to test without LLM calls
-hive run exports/my_agent --mock --input '{"task": "..."}'
-
-# Combine TUI with verbose for visual debugging
-hive run exports/my_agent --tui --verbose
-```
-
-For programmatic debugging, add logging to your agent code:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
 ```
 
 ---
