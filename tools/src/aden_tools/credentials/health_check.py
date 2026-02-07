@@ -289,6 +289,66 @@ class SlackHealthChecker:
             )
 
 
+class CalendlyHealthChecker:
+    """Health checker for Calendly API tokens."""
+
+    ENDPOINT = "https://api.calendly.com/users/me"
+    TIMEOUT = 10.0
+
+    def check(self, api_token: str) -> HealthCheckResult:
+        """
+        Validate Calendly token by calling /users/me.
+
+        Makes a GET request to verify the token works.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {api_token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Calendly token valid",
+                        details={},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Calendly token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Calendly token access forbidden",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Calendly API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Calendly API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Calendly API: {e}",
+                details={"error": str(e)},
+            )
+
+
 class AnthropicHealthChecker:
     """Health checker for Anthropic API credentials."""
 
@@ -493,6 +553,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
     "slack": SlackHealthChecker(),
+    "calendly": CalendlyHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),

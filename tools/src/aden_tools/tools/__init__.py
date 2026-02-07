@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .calendly_tool import register_tools as register_calendly
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
@@ -77,6 +78,7 @@ def register_all_tools(
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_calendly(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -203,6 +205,10 @@ def register_all_tools(
         "slack_kick_user_from_channel",
         "slack_delete_file",
         "slack_get_team_stats",
+        "calendly_list_event_types",
+        "calendly_get_availability",
+        "calendly_get_booking_link",
+        "calendly_cancel_event",
     ]
 
 

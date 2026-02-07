@@ -7,6 +7,7 @@ import httpx
 from aden_tools.credentials.health_check import (
     HEALTH_CHECKERS,
     AnthropicHealthChecker,
+    CalendlyHealthChecker,
     GitHubHealthChecker,
     GoogleSearchHealthChecker,
     ResendHealthChecker,
@@ -37,6 +38,11 @@ class TestHealthCheckerRegistry:
         assert "resend" in HEALTH_CHECKERS
         assert isinstance(HEALTH_CHECKERS["resend"], ResendHealthChecker)
 
+    def test_calendly_registered(self):
+        """CalendlyHealthChecker is registered in HEALTH_CHECKERS."""
+        assert "calendly" in HEALTH_CHECKERS
+        assert isinstance(HEALTH_CHECKERS["calendly"], CalendlyHealthChecker)
+
     def test_all_expected_checkers_registered(self):
         """All expected health checkers are in the registry."""
         expected = {
@@ -47,6 +53,7 @@ class TestHealthCheckerRegistry:
             "github",
             "resend",
             "slack",
+            "calendly",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected
 
@@ -261,6 +268,69 @@ class TestResendHealthChecker:
 
         checker = ResendHealthChecker()
         result = checker.check("re_test-key")
+
+        assert result.valid is False
+        assert result.details["error"] == "timeout"
+
+
+class TestCalendlyHealthChecker:
+    """Tests for CalendlyHealthChecker."""
+
+    def _mock_response(self, status_code, json_data=None):
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = status_code
+        if json_data:
+            response.json.return_value = json_data
+        return response
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_valid_token_200(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(200, {"resource": {"uri": "https://api.calendly.com/users/me123"}})
+
+        checker = CalendlyHealthChecker()
+        result = checker.check("test-calendly-token")
+
+        assert result.valid is True
+        assert "valid" in result.message.lower()
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_invalid_token_401(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(401)
+
+        checker = CalendlyHealthChecker()
+        result = checker.check("invalid-token")
+
+        assert result.valid is False
+        assert result.details["status_code"] == 401
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_forbidden_403(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(403)
+
+        checker = CalendlyHealthChecker()
+        result = checker.check("test-token")
+
+        assert result.valid is False
+        assert result.details["status_code"] == 403
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_timeout(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.side_effect = httpx.TimeoutException("timed out")
+
+        checker = CalendlyHealthChecker()
+        result = checker.check("test-token")
 
         assert result.valid is False
         assert result.details["error"] == "timeout"
