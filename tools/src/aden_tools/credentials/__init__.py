@@ -35,7 +35,14 @@ Usage:
 Credential categories:
 - llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
-- integrations.py: Third-party integrations (hubspot, etc.)
+- email.py: Email provider credentials (resend, google/gmail)
+- apollo.py: Apollo.io API credentials
+- github.py: GitHub API credentials
+- hubspot.py: HubSpot CRM credentials
+- slack.py: Slack workspace credentials
+
+Note: Tools that don't need credentials simply omit the 'credentials' parameter
+from their register_tools() function. This convention is enforced by CI tests.
 
 To add a new credential:
 1. Find the appropriate category file (or create a new one)
@@ -43,11 +50,13 @@ To add a new credential:
 3. If new category, import and merge it in this __init__.py
 """
 
+from .apollo import APOLLO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .email import EMAIL_CREDENTIALS
+from .github import GITHUB_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
-from .integrations import INTEGRATION_CREDENTIALS
+from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .shell_config import (
@@ -56,6 +65,7 @@ from .shell_config import (
     get_shell_config_path,
     get_shell_source_command,
 )
+from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials
@@ -63,7 +73,10 @@ CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
     **EMAIL_CREDENTIALS,
-    **INTEGRATION_CREDENTIALS,
+    **APOLLO_CREDENTIALS,
+    **GITHUB_CREDENTIALS,
+    **HUBSPOT_CREDENTIALS,
+    **SLACK_CREDENTIALS,
 }
 
 __all__ = [
@@ -91,5 +104,8 @@ __all__ = [
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
     "EMAIL_CREDENTIALS",
-    "INTEGRATION_CREDENTIALS",
+    "GITHUB_CREDENTIALS",
+    "HUBSPOT_CREDENTIALS",
+    "SLACK_CREDENTIALS",
+    "APOLLO_CREDENTIALS",
 ]

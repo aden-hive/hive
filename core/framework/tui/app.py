@@ -1,4 +1,6 @@
 import logging
+import platform
+import subprocess
 import time
 
 from textual.app import App, ComposeResult
@@ -11,6 +13,7 @@ from framework.runtime.event_bus import AgentEvent, EventType
 from framework.tui.widgets.chat_repl import ChatRepl
 from framework.tui.widgets.graph_view import GraphOverview
 from framework.tui.widgets.log_pane import LogPane
+from framework.tui.widgets.selectable_rich_log import SelectableRichLog
 
 
 class StatusBar(Container):
@@ -202,6 +205,8 @@ class AdenTUI(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("ctrl+c", "ctrl_c", "Interrupt", show=False, priority=True),
+        Binding("super+c", "ctrl_c", "Copy", show=False, priority=True),
         Binding("ctrl+s", "screenshot", "Screenshot (SVG)", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
@@ -216,6 +221,26 @@ class AdenTUI(App):
         self.chat_repl = ChatRepl(runtime)
         self.status_bar = StatusBar(graph_id=runtime.graph.id)
         self.is_ready = False
+
+    def open_url(self, url: str, *, new_tab: bool = True) -> None:
+        """Override to use native `open` for file:// URLs on macOS."""
+        if url.startswith("file://") and platform.system() == "Darwin":
+            path = url.removeprefix("file://")
+            subprocess.Popen(["open", path])
+        else:
+            super().open_url(url, new_tab=new_tab)
+
+    def action_ctrl_c(self) -> None:
+        # Check if any SelectableRichLog has an active selection to copy
+        for widget in self.query(SelectableRichLog):
+            if widget.selection is not None:
+                text = widget.copy_selection()
+                if text:
+                    widget.clear_selection()
+                    self.notify("Copied to clipboard", severity="information", timeout=2)
+                    return
+
+        self.notify("Press [b]q[/b] to quit", severity="warning", timeout=3)
 
     def compose(self) -> ComposeResult:
         yield self.status_bar

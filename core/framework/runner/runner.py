@@ -19,6 +19,8 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.core import Runtime
 from framework.runtime.execution_stream import EntryPointSpec
+from framework.runtime.runtime_log_store import RuntimeLogStore
+from framework.runtime.runtime_logger import RuntimeLogger
 
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
@@ -306,9 +308,9 @@ class AgentRunner:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            # Use persistent storage in ~/.hive by default
+            # Use persistent storage in ~/.hive/agents/{agent_name}/ per RUNTIME_LOGGING.md spec
             home = Path.home()
-            default_storage = home / ".hive" / "storage" / agent_path.name
+            default_storage = home / ".hive" / "agents" / agent_path.name
             default_storage.mkdir(parents=True, exist_ok=True)
             self._storage_path = default_storage
             self._temp_dir = None
@@ -393,7 +395,7 @@ class AgentRunner:
         Args:
             agent_path: Path to agent folder
             mock_mode: If True, use mock LLM responses
-            storage_path: Path for runtime storage (defaults to ~/.hive/storage/{name})
+            storage_path: Path for runtime storage (defaults to ~/.hive/agents/{name})
             model: LLM model to use (reads from agent's default_config if None)
             enable_tui: If True, forces use of AgentRuntime with EventBus
 
@@ -696,6 +698,10 @@ class AgentRunner:
         # Create runtime
         self._runtime = Runtime(storage_path=self._storage_path)
 
+        # Create runtime logger
+        log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
+        runtime_logger = RuntimeLogger(store=log_store, agent_id=self.graph.id)
+
         # Create executor
         self._executor = GraphExecutor(
             runtime=self._runtime,
@@ -703,6 +709,8 @@ class AgentRunner:
             tools=tools,
             tool_executor=tool_executor,
             approval_callback=self._approval_callback,
+            runtime_logger=runtime_logger,
+            loop_config=self.graph.loop_config,
         )
 
     def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
@@ -736,6 +744,8 @@ class AgentRunner:
             )
 
         # Create AgentRuntime with all entry points
+        log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -744,6 +754,7 @@ class AgentRunner:
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
+            runtime_log_store=log_store,
         )
 
     async def run(

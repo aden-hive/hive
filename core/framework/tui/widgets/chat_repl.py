@@ -15,14 +15,16 @@ Client-facing input:
 """
 
 import asyncio
+import re
 import threading
 from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, Label, RichLog
+from textual.widgets import Input, Label
 
 from framework.runtime.agent_runtime import AgentRuntime
+from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichLog
 
 
 class ChatRepl(Vertical):
@@ -87,15 +89,35 @@ class ChatRepl(Vertical):
         self._agent_thread.start()
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="chat-history", highlight=True, markup=True, auto_scroll=False, wrap=True)
+        yield RichLog(
+            id="chat-history",
+            highlight=True,
+            markup=True,
+            auto_scroll=False,
+            wrap=True,
+            min_width=0,
+        )
         yield Label("Agent is processing...", id="processing-indicator")
         yield Input(placeholder="Enter input for agent...", id="chat-input")
+
+    # Regex for file:// URIs that are NOT already inside Rich [link=...] markup
+    _FILE_URI_RE = re.compile(r"(?<!\[link=)(file://[^\s)\]>*]+)")
+
+    def _linkify(self, text: str) -> str:
+        """Convert bare file:// URIs to clickable Rich [link=...] markup with short display text."""
+
+        def _shorten(match: re.Match) -> str:
+            uri = match.group(1)
+            filename = uri.rsplit("/", 1)[-1] if "/" in uri else uri
+            return f"[link={uri}]{filename}[/link]"
+
+        return self._FILE_URI_RE.sub(_shorten, text)
 
     def _write_history(self, content: str) -> None:
         """Write to chat history, only auto-scrolling if user is at the bottom."""
         history = self.query_one("#chat-history", RichLog)
         was_at_bottom = history.is_vertical_scroll_end
-        history.write(content)
+        history.write(self._linkify(content))
         if was_at_bottom:
             history.scroll_end(animate=False)
 
