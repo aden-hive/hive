@@ -38,7 +38,7 @@
 
 ## Overview
 
-Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
+Build autonomous, reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
@@ -61,9 +61,9 @@ Hive may not be the best fit if you’re only experimenting with simple agent ch
 Use Hive when you need:
 
 - Long-running, autonomous agents
-- Multi-agent coordination
+- Strong guardrails, process, and controls
 - Continuous improvement based on failures
-- Strong monitoring, safety, and budget controls
+- Multi-agent coordination
 - A framework that evolves with your goals
 
 ## What is Aden
@@ -75,17 +75,18 @@ Use Hive when you need:
 Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 - **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
-- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
+- **Deploy** - Headless deployment (self-hosted, cloud native deployment coming soon)
 - **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
 - **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
 - **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
+- **Integration** - Integrate to your business systems to automate processes
 
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
-<!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
+- **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
 ## Quick Start
@@ -133,15 +134,6 @@ hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
-
-### Cursor IDE Support
-
-Skills are also available in Cursor. To enable:
-
-1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Run `MCP: Enable` to enable MCP servers
-3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
 ## Features
 
