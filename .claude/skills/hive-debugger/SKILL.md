@@ -34,7 +34,7 @@ Before using this skill, ensure:
 1. You have an exported agent in `exports/{agent_name}/`
 2. The agent has been run at least once (logs exist)
 3. Runtime logging is enabled (default in Hive framework)
-4. You have access to the agent's working directory at `~/.hive/{agent_name}/`
+4. You have access to the agent's working directory at `~/.hive/agents/{agent_name}/`
 
 ---
 
@@ -51,7 +51,7 @@ Before using this skill, ensure:
    - Confirm the agent exists in `exports/{agent_name}/`
 
 2. **Determine agent working directory:**
-   - Calculate: `~/.hive/{agent_name}/`
+   - Calculate: `~/.hive/agents/{agent_name}/`
    - Verify this directory exists and contains session logs
 
 3. **Read agent configuration:**
@@ -532,7 +532,7 @@ max_node_visits=3  # Prevent getting stuck
    **Check if issue is resolved:**
    ```
    query_runtime_logs(
-       agent_work_dir="~/.hive/{agent_name}",
+       agent_work_dir="~/.hive/agents/{agent_name}",
        status="needs_attention",
        limit=5
    )
@@ -542,7 +542,7 @@ max_node_visits=3  # Prevent getting stuck
    **Verify specific node behavior:**
    ```
    query_runtime_log_details(
-       agent_work_dir="~/.hive/{agent_name}",
+       agent_work_dir="~/.hive/agents/{agent_name}",
        run_id="{new_run_id}",
        node_id="{fixed_node_id}"
    )
@@ -671,7 +671,7 @@ You: "I'll help debug the twitter_outreach agent. Let me gather context..."
 Context:
 - Agent: twitter_outreach
 - Goal: twitter-outreach-multi-loop
-- Working Dir: ~/.hive/twitter_outreach
+- Working Dir: ~/.hive/agents/twitter_outreach
 - Success Criteria: ["Successfully send 5 personalized outreach messages"]
 - Constraints: ["Must verify handle exists", "Must personalize message"]
 - Nodes: intake-collector, profile-analyzer, message-composer, outreach-sender
@@ -834,12 +834,12 @@ Your agent should now work correctly!"
 ## Storage Locations Reference
 
 **New unified storage (default):**
-- Logs: `~/.hive/{agent_name}/sessions/session_YYYYMMDD_HHMMSS_{uuid}/logs/`
-- State: `~/.hive/{agent_name}/sessions/{session_id}/state.json`
-- Conversations: `~/.hive/{agent_name}/sessions/{session_id}/conversations/`
+- Logs: `~/.hive/agents/{agent_name}/sessions/session_YYYYMMDD_HHMMSS_{uuid}/logs/`
+- State: `~/.hive/agents/{agent_name}/sessions/{session_id}/state.json`
+- Conversations: `~/.hive/agents/{agent_name}/sessions/{session_id}/conversations/`
 
 **Old storage (deprecated, still supported):**
-- Logs: `~/.hive/{agent_name}/runtime_logs/runs/{run_id}/`
+- Logs: `~/.hive/agents/{agent_name}/runtime_logs/runs/{run_id}/`
 
 The MCP tools automatically check both locations.
 
