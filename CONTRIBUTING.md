@@ -4,7 +4,7 @@ Thank you for your interest in contributing to the Aden Agent Framework! This do
 
 ## Code of Conduct
 
-By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
+By participating in this project, you agree to abide by our [Code of Conduct](docs/CODE_OF_CONDUCT.md).
 
 ## Issue Assignment Policy
 
@@ -35,9 +35,16 @@ You may submit PRs without prior assignment for:
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/hive.git`
-3. Create a feature branch: `git checkout -b feature/your-feature-name`
-4. Make your changes
-5. Run checks and tests:
+3. Add the upstream repository: `git remote add upstream https://github.com/adenhq/hive.git`
+4. Sync with upstream to ensure you're starting from the latest code:
+   ```bash
+   git fetch upstream
+   git checkout main
+   git merge upstream/main
+   ```
+5. Create a feature branch: `git checkout -b feature/your-feature-name`
+6. Make your changes
+7. Run checks and tests:
    ```bash
    make check    # Lint and format checks (ruff check + ruff format --check on core/ and tools/)
    make test     # Core tests (cd core && pytest tests/ -v)
@@ -125,7 +132,7 @@ feat(component): add new feature description
 > **Note:** When testing agents in `exports/`, always set PYTHONPATH:
 >
 > ```bash
-> PYTHONPATH=core:exports python -m agent_name test
+> PYTHONPATH=exports uv run python -m agent_name test
 > ```
 
 ```bash
@@ -139,7 +146,7 @@ make test
 cd core && pytest tests/ -v
 
 # Run tests for a specific agent
-PYTHONPATH=core:exports python -m agent_name test
+PYTHONPATH=exports uv run python -m agent_name test
 ```
 
 > **CI also validates** that all exported agent JSON files (`exports/*/agent.json`) are well-formed JSON. Ensure your agent exports are valid before submitting.

@@ -362,6 +362,15 @@ class MCPClient:
         # Call tool using persistent session
         result = await self._session.call_tool(tool_name, arguments=arguments)
 
+        # Check for server-side errors (validation failures, tool exceptions, etc.)
+        if getattr(result, "isError", False):
+            error_text = ""
+            if result.content:
+                content_item = result.content[0]
+                if hasattr(content_item, "text"):
+                    error_text = content_item.text
+            raise RuntimeError(f"MCP tool '{tool_name}' failed: {error_text}")
+
         # Extract content
         if result.content:
             # MCP returns content as a list of content items

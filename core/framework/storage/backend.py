@@ -1,7 +1,10 @@
 """
 File-based storage backend for runtime data.
 
-Stores runs as JSON files with indexes for efficient querying.
+DEPRECATED: This storage backend is deprecated for new sessions.
+New sessions use unified storage at sessions/{session_id}/state.json.
+This module is kept for backward compatibility with old run data only.
+
 Uses Pydantic's built-in serialization.
 """
 
@@ -14,21 +17,24 @@ from framework.utils.io import atomic_write
 
 class FileStorage:
     """
-    Simple file-based storage for runs.
+    DEPRECATED: File-based storage for old runs only.
 
-    Directory structure:
+    New sessions use unified storage at sessions/{session_id}/state.json.
+    This class is kept for backward compatibility with old run data.
+
+    Old directory structure (deprecated):
     {base_path}/
-      runs/
-        {run_id}.json           # Full run data
-      indexes/
+      runs/            # DEPRECATED - no longer written
+        {run_id}.json
+      summaries/       # DEPRECATED - no longer written
+        {run_id}.json
+      indexes/         # DEPRECATED - no longer written or read
         by_goal/
-          {goal_id}.json        # List of run IDs for this goal
+          {goal_id}.json
         by_status/
-          {status}.json         # List of run IDs with this status
+          {status}.json
         by_node/
-          {node_id}.json        # List of run IDs that used this node
-      summaries/
-        {run_id}.json           # Run summary (for quick loading)
+          {node_id}.json
     """
 
     def __init__(self, base_path: str | Path):
@@ -36,16 +42,14 @@ class FileStorage:
         self._ensure_dirs()
 
     def _ensure_dirs(self) -> None:
-        """Create directory structure if it doesn't exist."""
-        dirs = [
-            self.base_path / "runs",
-            self.base_path / "indexes" / "by_goal",
-            self.base_path / "indexes" / "by_status",
-            self.base_path / "indexes" / "by_node",
-            self.base_path / "summaries",
-        ]
-        for d in dirs:
-            d.mkdir(parents=True, exist_ok=True)
+        """Create directory structure if it doesn't exist.
+
+        DEPRECATED: All directories (runs/, summaries/, indexes/) are deprecated.
+        New sessions use unified storage at sessions/{session_id}/state.json.
+        This method is now a no-op. Tests should not rely on this.
+        """
+        # No-op: do not create deprecated directories
+        pass
 
     def _validate_key(self, key: str) -> None:
         """
@@ -84,23 +88,22 @@ class FileStorage:
     # === RUN OPERATIONS ===
 
     def save_run(self, run: Run) -> None:
-        """Save a run to storage."""
-        # Save full run using Pydantic's model_dump_json
-        run_path = self.base_path / "runs" / f"{run.id}.json"
-        with atomic_write(run_path) as f:
-            f.write(run.model_dump_json(indent=2))
+        """Save a run to storage.
 
-        # Save summary
-        summary = RunSummary.from_run(run)
-        summary_path = self.base_path / "summaries" / f"{run.id}.json"
-        with atomic_write(summary_path) as f:
-            f.write(summary.model_dump_json(indent=2))
+        DEPRECATED: This method is now a no-op.
+        New sessions use unified storage at sessions/{session_id}/state.json.
+        Tests should not rely on FileStorage - use unified session storage instead.
+        """
+        import warnings
 
-        # Update indexes
-        self._add_to_index("by_goal", run.goal_id, run.id)
-        self._add_to_index("by_status", run.status.value, run.id)
-        for node_id in run.metrics.nodes_executed:
-            self._add_to_index("by_node", node_id, run.id)
+        warnings.warn(
+            "FileStorage.save_run() is deprecated. "
+            "New sessions use unified storage at sessions/{session_id}/state.json. "
+            "This write has been skipped.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        # No-op: do not write to deprecated locations
 
     def load_run(self, run_id: str) -> Run | None:
         """Load a run from storage."""
@@ -148,17 +151,53 @@ class FileStorage:
     # === QUERY OPERATIONS ===
 
     def get_runs_by_goal(self, goal_id: str) -> list[str]:
-        """Get all run IDs for a goal."""
+        """Get all run IDs for a goal.
+
+        DEPRECATED: Indexes are deprecated. For new sessions, scan sessions/*/state.json instead.
+        This method only returns old run IDs from deprecated indexes.
+        """
+        import warnings
+
+        warnings.warn(
+            "FileStorage.get_runs_by_goal() is deprecated. "
+            "For new sessions, scan sessions/*/state.json instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._get_index("by_goal", goal_id)
 
     def get_runs_by_status(self, status: str | RunStatus) -> list[str]:
-        """Get all run IDs with a status."""
+        """Get all run IDs with a status.
+
+        DEPRECATED: Indexes are deprecated. For new sessions, scan sessions/*/state.json instead.
+        This method only returns old run IDs from deprecated indexes.
+        """
+        import warnings
+
+        warnings.warn(
+            "FileStorage.get_runs_by_status() is deprecated. "
+            "For new sessions, scan sessions/*/state.json instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if isinstance(status, RunStatus):
             status = status.value
         return self._get_index("by_status", status)
 
     def get_runs_by_node(self, node_id: str) -> list[str]:
-        """Get all run IDs that executed a node."""
+        """Get all run IDs that executed a node.
+
+        DEPRECATED: Indexes are deprecated. For new sessions, scan sessions/*/state.json instead.
+        This method only returns old run IDs from deprecated indexes.
+        """
+        import warnings
+
+        warnings.warn(
+            "FileStorage.get_runs_by_node() is deprecated. "
+            "For new sessions, scan sessions/*/state.json instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self._get_index("by_node", node_id)
 
     def list_all_runs(self) -> list[str]:
@@ -167,8 +206,22 @@ class FileStorage:
         return [f.stem for f in runs_dir.glob("*.json")]
 
     def list_all_goals(self) -> list[str]:
-        """List all goal IDs that have runs."""
+        """List all goal IDs that have runs.
+
+        DEPRECATED: Indexes are deprecated. For new sessions, scan sessions/*/state.json instead.
+        This method only returns goals from old run IDs in deprecated indexes.
+        """
+        import warnings
+
+        warnings.warn(
+            "FileStorage.list_all_goals() is deprecated. "
+            "For new sessions, scan sessions/*/state.json instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         goals_dir = self.base_path / "indexes" / "by_goal"
+        if not goals_dir.exists():
+            return []
         return [f.stem for f in goals_dir.glob("*.json")]
 
     # === INDEX OPERATIONS ===
