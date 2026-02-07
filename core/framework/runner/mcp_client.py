@@ -15,6 +15,26 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+class MCPToolTimeoutError(TimeoutError):
+    """Raised when an MCP tool call exceeds its timeout.
+
+    Attributes:
+        tool_name: Name of the tool that timed out.
+        timeout: Timeout duration in seconds.
+        error_type: Always "timeout" for structured error handling.
+    """
+
+    def __init__(self, tool_name: str, timeout: float):
+        self.tool_name = tool_name
+        self.timeout = timeout
+        self.error_type = "timeout"
+        super().__init__(f"MCP tool '{tool_name}' timed out after {timeout}s")
+
+
+# Default timeout for tool calls in seconds
+DEFAULT_TOOL_TIMEOUT = 30.0
+
+
 @dataclass
 class MCPServerConfig:
     """Configuration for an MCP server connection."""
@@ -34,6 +54,9 @@ class MCPServerConfig:
 
     # Optional metadata
     description: str = ""
+
+    # Timeout for tool calls in seconds (None = no timeout)
+    tool_timeout: float | None = DEFAULT_TOOL_TIMEOUT
 
 
 @dataclass
@@ -74,22 +97,26 @@ class MCPClient:
         self._loop = None
         self._loop_thread = None
 
-    def _run_async(self, coro):
+    def _run_async(self, coro, timeout: float | None = None):
         """
         Run an async coroutine, handling both sync and async contexts.
 
         Args:
             coro: Coroutine to run
+            timeout: Optional timeout in seconds for the operation
 
         Returns:
             Result of the coroutine
+
+        Raises:
+            TimeoutError: If the operation exceeds the timeout
         """
         # If we have a persistent loop (for STDIO), use it
         if self._loop is not None:
             # Check if loop is running AND not closed
             if self._loop.is_running() and not self._loop.is_closed():
                 future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-                return future.result()
+                return future.result(timeout=timeout)
             # else: fall through to the standard approach below
             # This handles the case when STDIO loop exists but is stopped/closed
 
@@ -342,6 +369,10 @@ class MCPClient:
 
         Returns:
             Tool result
+
+        Raises:
+            MCPToolTimeoutError: If the tool call exceeds the configured timeout
+            ValueError: If the tool name is unknown
         """
         if not self._connected:
             self.connect()
@@ -349,8 +380,23 @@ class MCPClient:
         if tool_name not in self._tools:
             raise ValueError(f"Unknown tool: {tool_name}")
 
+        timeout = self.config.tool_timeout
         if self.config.transport == "stdio":
-            return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
+            try:
+                return self._run_async(
+                    self._call_tool_stdio_async(tool_name, arguments),
+                    timeout=timeout,
+                )
+            except TimeoutError as e:
+                # Re-raise MCPToolTimeoutError as-is; wrap bare TimeoutError
+                # from future.result() for consistent error handling
+                if isinstance(e, MCPToolTimeoutError):
+                    raise
+                logger.error(
+                    f"MCP tool '{tool_name}' on server '{self.config.name}' timed out "
+                    f"after {timeout}s | arguments={arguments}"
+                )
+                raise MCPToolTimeoutError(tool_name, timeout) from e
         else:
             return self._call_tool_http(tool_name, arguments)
 
@@ -359,8 +405,22 @@ class MCPClient:
         if not self._session:
             raise RuntimeError("STDIO session not initialized")
 
-        # Call tool using persistent session
-        result = await self._session.call_tool(tool_name, arguments=arguments)
+        # Call tool using persistent session, with timeout protection
+        timeout = self.config.tool_timeout
+        try:
+            if timeout is not None:
+                result = await asyncio.wait_for(
+                    self._session.call_tool(tool_name, arguments=arguments),
+                    timeout=timeout,
+                )
+            else:
+                result = await self._session.call_tool(tool_name, arguments=arguments)
+        except TimeoutError:
+            logger.error(
+                f"MCP tool '{tool_name}' on server '{self.config.name}' timed out "
+                f"after {timeout}s | arguments={arguments}"
+            )
+            raise MCPToolTimeoutError(tool_name, timeout) from None
 
         # Check for server-side errors (validation failures, tool exceptions, etc.)
         if getattr(result, "isError", False):
@@ -390,6 +450,7 @@ class MCPClient:
         if not self._http_client:
             raise RuntimeError("HTTP client not initialized")
 
+        timeout = self.config.tool_timeout
         try:
             response = self._http_client.post(
                 "/mcp/v1",
@@ -402,6 +463,7 @@ class MCPClient:
                         "arguments": arguments,
                     },
                 },
+                timeout=timeout,
             )
             response.raise_for_status()
             data = response.json()
@@ -410,6 +472,14 @@ class MCPClient:
                 raise RuntimeError(f"Tool execution error: {data['error']}")
 
             return data.get("result", {}).get("content", [])
+        except httpx.TimeoutException:
+            logger.error(
+                f"MCP tool '{tool_name}' on server '{self.config.name}' timed out "
+                f"after {timeout}s (HTTP) | arguments={arguments}"
+            )
+            raise MCPToolTimeoutError(tool_name, timeout) from None
+        except MCPToolTimeoutError:
+            raise
         except Exception as e:
             raise RuntimeError(f"Failed to call tool via HTTP: {e}") from e
 
