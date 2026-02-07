@@ -187,7 +187,7 @@ class HybridJudge:
 
         try:
             return template.format(**context)
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, TypeError, IndexError):
             return template
 
     async def _evaluate_llm(

@@ -824,6 +824,13 @@ class EventLoopNode(NodeProtocol):
 
         Returns True if input arrived, False if shutdown was signaled.
         """
+        # Clear _before_ emitting so that an inject_event() triggered
+        # during the emit await is not lost.  Previously, clear() came
+        # after the emit, creating a race window where inject_event()
+        # could set the flag only for clear() to immediately wipe it,
+        # causing wait() to block forever.
+        self._input_ready.clear()
+
         if self._event_bus:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.node_id,
@@ -831,7 +838,6 @@ class EventLoopNode(NodeProtocol):
                 prompt="",
             )
 
-        self._input_ready.clear()
         await self._input_ready.wait()
         return not self._shutdown
 
