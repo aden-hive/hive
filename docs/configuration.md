@@ -152,7 +152,7 @@ Add to `.vscode/settings.json`:
 
 1. **Never commit API keys** - Use environment variables or `.env` files
 2. **`.env` is git-ignored** - Copy `.env.example` to `.env` at the project root and fill in your values
-3. **Mock mode for testing** - Set `MOCK_MODE=1` to avoid LLM calls during development
+3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 
 ## Troubleshooting

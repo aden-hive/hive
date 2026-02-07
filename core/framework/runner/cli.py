@@ -34,11 +34,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Input context from JSON file",
     )
     run_parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="Run in mock mode (no real LLM calls)",
-    )
-    run_parser.add_argument(
         "--output",
         "-o",
         type=str,
@@ -193,11 +188,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         description="Browse available agents and launch the terminal dashboard.",
     )
     tui_parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="Run in mock mode (no real LLM calls)",
-    )
-    tui_parser.add_argument(
         "--model",
         "-m",
         type=str,
@@ -248,7 +238,6 @@ def cmd_run(args: argparse.Namespace) -> int:
                 try:
                     runner = AgentRunner.load(
                         args.agent_path,
-                        mock_mode=args.mock,
                         model=args.model,
                         enable_tui=True,
                     )
@@ -286,7 +275,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         try:
             runner = AgentRunner.load(
                 args.agent_path,
-                mock_mode=args.mock,
                 model=args.model,
                 enable_tui=False,
             )
@@ -1057,7 +1045,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
         try:
             runner = AgentRunner.load(
                 agent_path,
-                mock_mode=args.mock,
                 model=args.model,
                 enable_tui=True,
             )

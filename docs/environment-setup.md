@@ -154,8 +154,6 @@ PYTHONPATH=exports uv run python -m your_agent_name run --input '{
   "task": "Your input here"
 }'
 
-# Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m your_agent_name run --mock --input '{...}'
 ```
 
 ## Building New Agents and Run Flow
