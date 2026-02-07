@@ -1,7 +1,10 @@
 """
 File-based storage backend for runtime data.
 
-Stores runs as JSON files with indexes for efficient querying.
+DEPRECATED: This storage backend is deprecated for new sessions.
+New sessions use unified storage at sessions/{session_id}/state.json.
+This module is kept for backward compatibility with old run data only.
+
 Uses Pydantic's built-in serialization.
 """
 
@@ -15,21 +18,24 @@ from framework.utils.io import atomic_write
 
 class FileStorage:
     """
-    Simple file-based storage for runs.
+    DEPRECATED: File-based storage for old runs only.
 
-    Directory structure:
+    New sessions use unified storage at sessions/{session_id}/state.json.
+    This class is kept for backward compatibility with old run data.
+
+    Old directory structure (deprecated):
     {base_path}/
-      runs/
-        {run_id}.json           # Full run data
-      indexes/
+      runs/            # DEPRECATED - no longer written
+        {run_id}.json
+      summaries/       # DEPRECATED - no longer written
+        {run_id}.json
+      indexes/         # DEPRECATED - no longer written or read
         by_goal/
-          {goal_id}.json        # List of run IDs for this goal
+          {goal_id}.json
         by_status/
-          {status}.json         # List of run IDs with this status
+          {status}.json
         by_node/
-          {node_id}.json        # List of run IDs that used this node
-      summaries/
-        {run_id}.json           # Run summary (for quick loading)
+          {node_id}.json
     """
 
     def __init__(self, base_path: str | Path):
@@ -37,16 +43,14 @@ class FileStorage:
         self._ensure_dirs()
 
     def _ensure_dirs(self) -> None:
-        """Create directory structure if it doesn't exist."""
-        dirs = [
-            self.base_path / "runs",
-            self.base_path / "indexes" / "by_goal",
-            self.base_path / "indexes" / "by_status",
-            self.base_path / "indexes" / "by_node",
-            self.base_path / "summaries",
-        ]
-        for d in dirs:
-            d.mkdir(parents=True, exist_ok=True)
+        """Create directory structure if it doesn't exist.
+
+        DEPRECATED: All directories (runs/, summaries/, indexes/) are deprecated.
+        New sessions use unified storage at sessions/{session_id}/state.json.
+        This method is now a no-op. Tests should not rely on this.
+        """
+        # No-op: do not create deprecated directories
+        pass
 
     def _validate_key(self, key: str) -> None:
         """
@@ -172,6 +176,8 @@ class FileStorage:
 
     def list_all_goals(self) -> list[str]:
         goals_dir = self.base_path / "indexes" / "by_goal"
+        if not goals_dir.exists():
+            return []
         return [f.stem for f in goals_dir.glob("*.json")]
 
     # === INDEX OPERATIONS ===
