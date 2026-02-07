@@ -112,19 +112,9 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 - Internet connection (for LLM API calls)
 - For Windows users: WSL 2 is recommended for full compatibility.
 
-### API Keys (Optional)
+### API Keys
 
-For running agents with real LLMs:
-
-```bash
-export ANTHROPIC_API_KEY="your-key-here"
-```
-
-Windows (PowerShell):
-
-```powershell
-$env:ANTHROPIC_API_KEY="your-key-here"
-```
+We recommend using quickstart.sh for LLM API credential setup and /hive-credentials for the tools credentials
 
 ## Running Agents
 
