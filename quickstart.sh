@@ -710,6 +710,38 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 # ============================================================
+# Step 7: Install hive CLI globally
+# ============================================================
+
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Installing hive CLI...${NC}"
+echo ""
+
+# Ensure ~/.local/bin exists and is in PATH
+mkdir -p "$HOME/.local/bin"
+
+# Create/update symlink
+HIVE_SCRIPT="$SCRIPT_DIR/hive"
+HIVE_LINK="$HOME/.local/bin/hive"
+
+if [ -L "$HIVE_LINK" ] || [ -e "$HIVE_LINK" ]; then
+    rm -f "$HIVE_LINK"
+fi
+
+ln -s "$HIVE_SCRIPT" "$HIVE_LINK"
+echo -e "${GREEN}  ✓ hive CLI installed to ~/.local/bin/hive${NC}"
+
+# Check if ~/.local/bin is in PATH
+if echo "$PATH" | grep -q "$HOME/.local/bin"; then
+    echo -e "${GREEN}  ✓ ~/.local/bin is in PATH${NC}"
+else
+    echo -e "${YELLOW}  ⚠ Add ~/.local/bin to your PATH:${NC}"
+    echo -e "     ${DIM}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"
+    echo -e "     ${DIM}source ~/.bashrc${NC}"
+fi
+
+echo ""
+
+# ============================================================
 # Success!
 # ============================================================
 
