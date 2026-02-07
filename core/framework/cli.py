@@ -82,6 +82,11 @@ def main():
 
     register_testing_commands(subparsers)
 
+    # Register scorecard commands (scorecard)
+    from framework.builder.scorecard_cli import register_scorecard_commands
+
+    register_scorecard_commands(subparsers)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
