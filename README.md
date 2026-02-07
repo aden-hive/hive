@@ -120,9 +120,9 @@ This sets up:
 claude> /hive
 
 # Test your agent
-claude> /hive-test
+claude> /hive-debugger
 
-# Launch the interactive dashboard
+# (at separate terminal) Launch the interactive dashboard
 hive tui
 
 # Or run directly
@@ -436,10 +436,6 @@ Aden's adaptation loop begins working from the first execution. When an agent fa
 **Q: How does Hive compare to other agent frameworks?**
 
 Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
-
-**Q: What is `hive tui`?**
-
-`hive tui` launches an interactive terminal dashboard to browse, select, and run agents with a live graph view, log stream, and chat interface. You can also run a specific agent with `hive run <path> --tui`.
 
 **Q: Does Aden offer enterprise support?**
 
