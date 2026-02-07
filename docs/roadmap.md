@@ -175,7 +175,7 @@ classDef done fill:#9e9e9e,color:#fff,stroke:#757575
     - [x] PDF tools
     - [ ] Excel tools
     - [ ] Email Tools
-    - [ ] Recipe for "Add your own tools"
+    - [x] Recipe for "Add your own tools"
 
 ### Memory & File System
 - [x] DB for long-term persistent memory (Filesystem as durable scratchpad pattern)
