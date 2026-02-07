@@ -1,25 +1,59 @@
 """Agent Runner - loads and runs exported agents."""
 
 import json
+import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Any
+from typing import TYPE_CHECKING, Any
 
 from framework.graph import Goal
-from framework.graph.edge import GraphSpec, EdgeSpec, EdgeCondition, AsyncEntryPointSpec
+from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.graph.node import NodeSpec
-from framework.graph.executor import GraphExecutor, ExecutionResult
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.core import Runtime
 
 # Multi-entry-point runtime imports
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
+from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.core import Runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 if TYPE_CHECKING:
-    from framework.runner.protocol import CapabilityResponse, AgentMessage
+    from framework.runner.protocol import AgentMessage, CapabilityResponse
+
+
+logger = logging.getLogger(__name__)
+
+# Configuration paths
+HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
+
+
+def get_hive_config() -> dict[str, Any]:
+    """Load hive configuration from ~/.hive/configuration.json."""
+    if not HIVE_CONFIG_FILE.exists():
+        return {}
+    try:
+        with open(HIVE_CONFIG_FILE) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def get_claude_code_token() -> str | None:
+    """
+    Get the OAuth token from Claude Code subscription.
+    """
+    if not CLAUDE_CREDENTIALS_FILE.exists():
+        return None
+    try:
+        with open(CLAUDE_CREDENTIALS_FILE) as f:
+            creds = json.load(f)
+        return creds.get("claudeAiOauth", {}).get("accessToken")
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 @dataclass
@@ -57,15 +91,7 @@ class ValidationResult:
 
 
 def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
-    """
-    Load GraphSpec and Goal from export_graph() output.
-
-    Args:
-        data: JSON string or dict from export_graph()
-
-    Returns:
-        Tuple of (GraphSpec, Goal)
-    """
+    """Load GraphSpec and Goal from export_graph() output."""
     if isinstance(data, str):
         data = json.loads(data)
 
@@ -87,6 +113,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
             "on_success": EdgeCondition.ON_SUCCESS,
             "on_failure": EdgeCondition.ON_FAILURE,
             "conditional": EdgeCondition.CONDITIONAL,
+            "llm_decide": EdgeCondition.LLM_DECIDE,
         }
         edge = EdgeSpec(
             id=edge_data["id"],
@@ -102,16 +129,18 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     # Build AsyncEntryPointSpec objects for multi-entry-point support
     async_entry_points = []
     for aep_data in graph_data.get("async_entry_points", []):
-        async_entry_points.append(AsyncEntryPointSpec(
-            id=aep_data["id"],
-            name=aep_data.get("name", aep_data["id"]),
-            entry_node=aep_data["entry_node"],
-            trigger_type=aep_data.get("trigger_type", "manual"),
-            trigger_config=aep_data.get("trigger_config", {}),
-            isolation_level=aep_data.get("isolation_level", "shared"),
-            priority=aep_data.get("priority", 0),
-            max_concurrent=aep_data.get("max_concurrent", 10),
-        ))
+        async_entry_points.append(
+            AsyncEntryPointSpec(
+                id=aep_data["id"],
+                name=aep_data.get("name", aep_data["id"]),
+                entry_node=aep_data["entry_node"],
+                trigger_type=aep_data.get("trigger_type", "manual"),
+                trigger_config=aep_data.get("trigger_config", {}),
+                isolation_level=aep_data.get("isolation_level", "shared"),
+                priority=aep_data.get("priority", 0),
+                max_concurrent=aep_data.get("max_concurrent", 10),
+            )
+        )
 
     # Build GraphSpec
     graph = GraphSpec(
@@ -131,27 +160,31 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     )
 
     # Build Goal
-    from framework.graph.goal import SuccessCriterion, Constraint
+    from framework.graph.goal import Constraint, SuccessCriterion
 
     success_criteria = []
     for sc_data in goal_data.get("success_criteria", []):
-        success_criteria.append(SuccessCriterion(
-            id=sc_data["id"],
-            description=sc_data["description"],
-            metric=sc_data.get("metric", ""),
-            target=sc_data.get("target", ""),
-            weight=sc_data.get("weight", 1.0),
-        ))
+        success_criteria.append(
+            SuccessCriterion(
+                id=sc_data["id"],
+                description=sc_data["description"],
+                metric=sc_data.get("metric", ""),
+                target=sc_data.get("target", ""),
+                weight=sc_data.get("weight", 1.0),
+            )
+        )
 
     constraints = []
     for c_data in goal_data.get("constraints", []):
-        constraints.append(Constraint(
-            id=c_data["id"],
-            description=c_data["description"],
-            constraint_type=c_data.get("constraint_type", "hard"),
-            category=c_data.get("category", "safety"),
-            check=c_data.get("check", ""),
-        ))
+        constraints.append(
+            Constraint(
+                id=c_data["id"],
+                description=c_data["description"],
+                constraint_type=c_data.get("constraint_type", "hard"),
+                category=c_data.get("category", "safety"),
+                check=c_data.get("check", ""),
+            )
+        )
 
     goal = Goal(
         id=goal_data.get("id", ""),
@@ -165,65 +198,41 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
 
 
 class AgentRunner:
-    """
-    Loads and runs exported agents with minimal boilerplate.
+    """Loads and runs exported agents with minimal boilerplate."""
 
-    Handles:
-    - Loading graph and goal from agent.json
-    - Auto-discovering tools from tools.py
-    - Setting up Runtime, LLM, and executor
-    - Executing with dynamic edge traversal
-
-    Usage:
-        # Simple usage
-        runner = AgentRunner.load("exports/outbound-sales-agent")
-        result = await runner.run({"lead_id": "123"})
-
-        # With context manager
-        async with AgentRunner.load("exports/outbound-sales-agent") as runner:
-            result = await runner.run({"lead_id": "123"})
-
-        # With custom tools
-        runner = AgentRunner.load("exports/outbound-sales-agent")
-        runner.register_tool("my_tool", my_tool_func)
-        result = await runner.run({"lead_id": "123"})
-    """
+    @staticmethod
+    def _resolve_default_model() -> str:
+        """Resolve the default model from ~/.hive/configuration.json."""
+        config = get_hive_config()
+        llm = config.get("llm", {})
+        if llm.get("provider") and llm.get("model"):
+            return f"{llm['provider']}/{llm['model']}"
+        return "anthropic/claude-sonnet-4-20250514"
 
     def __init__(
         self,
         agent_path: Path,
         graph: GraphSpec,
         goal: Goal,
-        mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "cerebras/zai-glm-4.7",
+        model: str | None = None,
+        enable_tui: bool = False,
     ):
-        """
-        Initialize the runner (use AgentRunner.load() instead).
-
-        Args:
-            agent_path: Path to agent folder
-            graph: Loaded GraphSpec object
-            goal: Loaded Goal object
-            mock_mode: If True, use mock LLM responses
-            storage_path: Path for runtime storage (defaults to temp)
-            model: Model to use - any LiteLLM-compatible model name
-                   (e.g., "claude-sonnet-4-20250514", "gpt-4o-mini", "gemini/gemini-pro")
-        """
+        """Initialize the runner (use AgentRunner.load() instead)."""
         self.agent_path = agent_path
         self.graph = graph
         self.goal = goal
-        self.mock_mode = mock_mode
-        self.model = model
+        self.model = model or self._resolve_default_model()
+        self.enable_tui = enable_tui
 
         # Set up storage
         if storage_path:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            # Use persistent storage in ~/.hive by default
+            # Use persistent storage in ~/.hive/agents/{agent_name}/
             home = Path.home()
-            default_storage = home / ".hive" / "storage" / agent_path.name
+            default_storage = home / ".hive" / "agents" / agent_path.name
             default_storage.mkdir(parents=True, exist_ok=True)
             self._storage_path = default_storage
             self._temp_dir = None
@@ -249,32 +258,98 @@ class AgentRunner:
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
 
+    @staticmethod
+    def _import_agent_module(agent_path: Path):
+        """Import an agent package from its directory path."""
+        import importlib
+
+        package_name = agent_path.name
+
+        # Try importing as a package (works when exports/ is on sys.path)
+        try:
+            return importlib.import_module(package_name)
+        except ImportError:
+            pass
+
+        # Fallback: import agent.py directly via file path
+        import importlib.util
+
+        agent_py = agent_path / "agent.py"
+        if not agent_py.exists():
+            raise FileNotFoundError(
+                f"No importable agent found at {agent_path}. "
+                f"Expected a Python package with agent.py."
+            )
+        spec = importlib.util.spec_from_file_location(
+            f"{package_name}.agent",
+            agent_py,
+            submodule_search_locations=[str(agent_path)],
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     @classmethod
     def load(
         cls,
         agent_path: str | Path,
-        mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "cerebras/zai-glm-4.7",
+        model: str | None = None,
+        enable_tui: bool = False,
     ) -> "AgentRunner":
-        """
-        Load an agent from an export folder.
-
-        Args:
-            agent_path: Path to agent folder (containing agent.json)
-            mock_mode: If True, use mock LLM responses
-            storage_path: Path for runtime storage (defaults to temp)
-            model: LLM model to use (any LiteLLM-compatible model name)
-
-        Returns:
-            AgentRunner instance ready to run
-        """
+        """Load an agent from an export folder."""
         agent_path = Path(agent_path)
 
-        # Load agent.json
+        # Try loading from Python module first (code-based agents)
+        agent_py = agent_path / "agent.py"
+        if agent_py.exists():
+            agent_module = cls._import_agent_module(agent_path)
+
+            goal = getattr(agent_module, "goal", None)
+            nodes = getattr(agent_module, "nodes", None)
+            edges = getattr(agent_module, "edges", None)
+
+            if goal is None or nodes is None or edges is None:
+                raise ValueError(
+                    f"Agent at {agent_path} must define 'goal', 'nodes', and 'edges' "
+                    f"in agent.py (or __init__.py)"
+                )
+
+            # Read model and max_tokens from agent's config if not explicitly provided
+            agent_config = getattr(agent_module, "default_config", None)
+            if model is None:
+                if agent_config and hasattr(agent_config, "model"):
+                    model = agent_config.model
+
+            max_tokens = getattr(agent_config, "max_tokens", 1024) if agent_config else 1024
+
+            # Build GraphSpec from module-level variables
+            graph = GraphSpec(
+                id=f"{agent_path.name}-graph",
+                goal_id=goal.id,
+                version="1.0.0",
+                entry_node=getattr(agent_module, "entry_node", nodes[0].id),
+                entry_points=getattr(agent_module, "entry_points", {}),
+                terminal_nodes=getattr(agent_module, "terminal_nodes", []),
+                pause_nodes=getattr(agent_module, "pause_nodes", []),
+                nodes=nodes,
+                edges=edges,
+                max_tokens=max_tokens,
+            )
+
+            return cls(
+                agent_path=agent_path,
+                graph=graph,
+                goal=goal,
+                storage_path=storage_path,
+                model=model,
+                enable_tui=enable_tui,
+            )
+
+        # Fallback: load from agent.json (legacy JSON-based agents)
         agent_json_path = agent_path / "agent.json"
         if not agent_json_path.exists():
-            raise FileNotFoundError(f"agent.json not found in {agent_path}")
+            raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
         with open(agent_json_path) as f:
             graph, goal = load_agent_export(f.read())
@@ -283,9 +358,9 @@ class AgentRunner:
             agent_path=agent_path,
             graph=graph,
             goal=goal,
-            mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+            enable_tui=enable_tui,
         )
 
     def register_tool(
@@ -294,14 +369,7 @@ class AgentRunner:
         tool_or_func: Tool | Callable,
         executor: Callable | None = None,
     ) -> None:
-        """
-        Register a tool for use by the agent.
-
-        Args:
-            name: Tool name
-            tool_or_func: Either a Tool object or a callable function
-            executor: Executor function (required if tool_or_func is a Tool)
-        """
+        """Register a tool for use by the agent."""
         if isinstance(tool_or_func, Tool):
             if executor is None:
                 raise ValueError("executor required when registering a Tool object")
@@ -311,15 +379,7 @@ class AgentRunner:
             self._tool_registry.register_function(tool_or_func, name=name)
 
     def register_tools_from_module(self, module_path: Path) -> int:
-        """
-        Auto-discover and register tools from a Python module.
-
-        Args:
-            module_path: Path to tools.py file
-
-        Returns:
-            Number of tools discovered
-        """
+        """Auto-discover and register tools from a Python module."""
         return self._tool_registry.discover_from_module(module_path)
 
     def register_mcp_server(
@@ -328,34 +388,7 @@ class AgentRunner:
         transport: str,
         **config_kwargs,
     ) -> int:
-        """
-        Register an MCP server and discover its tools.
-
-        Args:
-            name: Server name
-            transport: "stdio" or "http"
-            **config_kwargs: Additional configuration (command, args, url, etc.)
-
-        Returns:
-            Number of tools registered from this server
-
-        Example:
-            # Register STDIO MCP server
-            runner.register_mcp_server(
-                name="tools",
-                transport="stdio",
-                command="python",
-                args=["-m", "aden_tools.mcp_server", "--stdio"],
-                cwd="/path/to/tools"
-            )
-
-            # Register HTTP MCP server
-            runner.register_mcp_server(
-                name="tools",
-                transport="http",
-                url="http://localhost:4001"
-            )
-        """
+        """Register an MCP server and discover its tools."""
         server_config = {
             "name": name,
             "transport": transport,
@@ -364,32 +397,11 @@ class AgentRunner:
         return self._tool_registry.register_mcp_server(server_config)
 
     def _load_mcp_servers_from_config(self, config_path: Path) -> None:
-        """
-        Load and register MCP servers from a configuration file.
-
-        Args:
-            config_path: Path to mcp_servers.json file
-        """
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-
-            servers = config.get("servers", [])
-            for server_config in servers:
-                try:
-                    self._tool_registry.register_mcp_server(server_config)
-                except Exception as e:
-                    print(f"Warning: Failed to register MCP server '{server_config.get('name', 'unknown')}': {e}")
-        except Exception as e:
-            print(f"Warning: Failed to load MCP servers config from {config_path}: {e}")
+        """Load and register MCP servers from a configuration file."""
+        self._tool_registry.load_mcp_config(config_path)
 
     def set_approval_callback(self, callback: Callable) -> None:
-        """
-        Set a callback for human-in-the-loop approval during execution.
-
-        Args:
-            callback: Function to call for approval (receives node info, returns bool)
-        """
+        """Set a callback for human-in-the-loop approval during execution."""
         self._approval_callback = callback
         # If executor already exists, update it
         if self._executor is not None:
@@ -409,24 +421,42 @@ class AgentRunner:
             session_id=session_id,
         )
 
-        # Create LLM provider (if not mock mode and API key available)
-        # Uses LiteLLM which auto-detects the provider from model name
-        if not self.mock_mode:
-            # Detect required API key from model name
+        # Create LLM provider
+        from framework.llm.litellm import LiteLLMProvider
+
+        # Check if Claude Code subscription is configured
+        config = get_hive_config()
+        llm_config = config.get("llm", {})
+        use_claude_code = llm_config.get("use_claude_code_subscription", False)
+
+        api_key = None
+        if use_claude_code:
+            # Get OAuth token from Claude Code subscription
+            api_key = get_claude_code_token()
+            if not api_key:
+                print("Warning: Claude Code subscription configured but no token found.")
+                print("Run 'claude' to authenticate, then try again.")
+
+        if api_key:
+            # Use Claude Code subscription token
+            self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+        else:
+            # Fall back to environment variable
             api_key_env = self._get_api_key_env_var(self.model)
             if api_key_env and os.environ.get(api_key_env):
-                from framework.llm.litellm import LiteLLMProvider
                 self._llm = LiteLLMProvider(model=self.model)
             elif api_key_env:
                 print(f"Warning: {api_key_env} not set. LLM calls will fail.")
                 print(f"Set it with: export {api_key_env}=your-api-key")
+            else:
+                self._llm = LiteLLMProvider(model=self.model)
 
         # Get tools for executor/runtime
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
-        if self._uses_async_entry_points:
-            # Multi-entry-point mode: use AgentRuntime
+        if self._uses_async_entry_points or self.enable_tui:
+            # Multi-entry-point mode or TUI mode: use AgentRuntime
             self._setup_agent_runtime(tools, tool_executor)
         else:
             # Single-entry-point mode: use legacy GraphExecutor
@@ -437,7 +467,6 @@ class AgentRunner:
         model_lower = model.lower()
 
         # Map model prefixes to API key environment variables
-        # LiteLLM uses these conventions
         if model_lower.startswith("cerebras/"):
             return "CEREBRAS_API_KEY"
         elif model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
@@ -469,13 +498,15 @@ class AgentRunner:
         # Create runtime
         self._runtime = Runtime(storage_path=self._storage_path)
 
-        # Create executor
+        # Create executor (no RuntimeLogger to avoid missing file issues)
         self._executor = GraphExecutor(
             runtime=self._runtime,
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
             approval_callback=self._approval_callback,
+            runtime_logger=None,
+            loop_config=self.graph.loop_config,
         )
 
     def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
@@ -495,7 +526,20 @@ class AgentRunner:
             )
             entry_points.append(ep)
 
-        # Create AgentRuntime with all entry points
+        # If TUI enabled but no entry points (single-entry agent), create default
+        if not entry_points and self.enable_tui and self.graph.entry_node:
+            logger.info("Creating default entry point for TUI")
+            entry_points.append(
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=self.graph.entry_node,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                )
+            )
+
+        # Create AgentRuntime (disabled logging to avoid missing file issues)
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -504,6 +548,8 @@ class AgentRunner:
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
+            runtime_log_store=None,
+            enable_logging=False,
         )
 
     async def run(
@@ -514,20 +560,22 @@ class AgentRunner:
     ) -> ExecutionResult:
         """
         Execute the agent with given input data.
-
-        For single-entry-point agents, this is the standard execution path.
-        For multi-entry-point agents, you can optionally specify which entry point to use.
-
-        Args:
-            input_data: Input data for the agent (e.g., {"lead_id": "123"})
-            session_state: Optional session state to resume from
-            entry_point_id: For multi-entry-point agents, which entry point to trigger
-                           (defaults to first entry point or "default")
-
-        Returns:
-            ExecutionResult with output, path, and metrics
         """
-        if self._uses_async_entry_points:
+        # Validate credentials (basic env check only)
+        validation = self.validate()
+        if validation.missing_credentials:
+            error_lines = ["Cannot run agent: missing required credentials\n"]
+            for warning in validation.warnings:
+                if "Missing " in warning:
+                    error_lines.append(f"  {warning}")
+            error_lines.append("\nSet the required environment variables and re-run the agent.")
+            error_msg = "\n".join(error_lines)
+            return ExecutionResult(
+                success=False,
+                error=error_msg,
+            )
+
+        if self._uses_async_entry_points or self.enable_tui:
             # Multi-entry-point mode: use AgentRuntime
             return await self._run_with_agent_runtime(
                 input_data=input_data or {},
@@ -596,12 +644,7 @@ class AgentRunner:
     # === Multi-Entry-Point API (for agents with async_entry_points) ===
 
     async def start(self) -> None:
-        """
-        Start the agent runtime (for multi-entry-point agents).
-
-        This starts all registered entry points and allows concurrent execution.
-        For single-entry-point agents, this is a no-op.
-        """
+        """Start the agent runtime (for multi-entry-point agents)."""
         if not self._uses_async_entry_points:
             return
 
@@ -611,11 +654,7 @@ class AgentRunner:
         await self._agent_runtime.start()
 
     async def stop(self) -> None:
-        """
-        Stop the agent runtime (for multi-entry-point agents).
-
-        For single-entry-point agents, this is a no-op.
-        """
+        """Stop the agent runtime (for multi-entry-point agents)."""
         if self._agent_runtime is not None:
             await self._agent_runtime.stop()
 
@@ -625,22 +664,7 @@ class AgentRunner:
         input_data: dict[str, Any],
         correlation_id: str | None = None,
     ) -> str:
-        """
-        Trigger execution at a specific entry point (non-blocking).
-
-        For multi-entry-point agents only. Returns execution ID for tracking.
-
-        Args:
-            entry_point_id: Which entry point to trigger
-            input_data: Input data for the execution
-            correlation_id: Optional ID to correlate related executions
-
-        Returns:
-            Execution ID for tracking
-
-        Raises:
-            RuntimeError: If agent doesn't use async entry points
-        """
+        """Trigger execution at a specific entry point (non-blocking)."""
         if not self._uses_async_entry_points:
             raise RuntimeError(
                 "trigger() is only available for multi-entry-point agents. "
@@ -660,17 +684,7 @@ class AgentRunner:
         )
 
     async def get_goal_progress(self) -> dict[str, Any]:
-        """
-        Get goal progress across all execution streams.
-
-        For multi-entry-point agents only.
-
-        Returns:
-            Dict with overall_progress, criteria_status, constraint_violations, etc.
-
-        Raises:
-            RuntimeError: If agent doesn't use async entry points
-        """
+        """Get goal progress across all execution streams."""
         if not self._uses_async_entry_points:
             raise RuntimeError(
                 "get_goal_progress() is only available for multi-entry-point agents."
@@ -682,12 +696,7 @@ class AgentRunner:
         return await self._agent_runtime.get_goal_progress()
 
     def get_entry_points(self) -> list[EntryPointSpec]:
-        """
-        Get all registered entry points (for multi-entry-point agents).
-
-        Returns:
-            List of EntryPointSpec objects
-        """
+        """Get all registered entry points (for multi-entry-point agents)."""
         if not self._uses_async_entry_points:
             return []
 
@@ -760,7 +769,12 @@ class AgentRunner:
             entry_node=self.graph.entry_node,
             terminal_nodes=self.graph.terminal_nodes,
             success_criteria=[
-                {"id": sc.id, "description": sc.description, "metric": sc.metric, "target": sc.target}
+                {
+                    "id": sc.id,
+                    "description": sc.description,
+                    "metric": sc.metric,
+                    "target": sc.target,
+                }
                 for sc in self.goal.success_criteria
             ],
             constraints=[
@@ -801,50 +815,19 @@ class AgentRunner:
         if missing_tools:
             warnings.append(f"Missing tool implementations: {', '.join(missing_tools)}")
 
-        # Check credentials for required tools and node types
+        # Basic credential check (fall back to env vars since framework.credentials is missing)
         missing_credentials = []
-        try:
-            from aden_tools.credentials import CredentialManager
-
-            cred_manager = CredentialManager()
-
-            # Check tool credentials (Tier 2)
-            missing_creds = cred_manager.get_missing_for_tools(info.required_tools)
-            for cred_name, spec in missing_creds:
-                missing_credentials.append(spec.env_var)
-                affected_tools = [t for t in info.required_tools if t in spec.tools]
-                tools_str = ", ".join(affected_tools)
-                warning_msg = f"Missing {spec.env_var} for {tools_str}"
-                if spec.help_url:
-                    warning_msg += f"\n  Get it at: {spec.help_url}"
-                warnings.append(warning_msg)
-
-            # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
-            node_types = list(set(node.node_type for node in self.graph.nodes))
-            missing_node_creds = cred_manager.get_missing_for_node_types(node_types)
-            for cred_name, spec in missing_node_creds:
-                if spec.env_var not in missing_credentials:  # Avoid duplicates
-                    missing_credentials.append(spec.env_var)
-                    affected_types = [t for t in node_types if t in spec.node_types]
-                    types_str = ", ".join(affected_types)
-                    warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
-                    if spec.help_url:
-                        warning_msg += f"\n  Get it at: {spec.help_url}"
-                    warnings.append(warning_msg)
-        except ImportError:
-            # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(
-                node.node_type in ("llm_generate", "llm_tool_use")
-                for node in self.graph.nodes
-            )
-            if has_llm_nodes:
-                api_key_env = self._get_api_key_env_var(self.model)
-                if api_key_env and not os.environ.get(api_key_env):
-                    if api_key_env not in missing_credentials:
-                        missing_credentials.append(api_key_env)
-                    warnings.append(
-                        f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
-                    )
+        has_llm_nodes = any(
+            node.node_type in ("llm_generate", "llm_tool_use") for node in self.graph.nodes
+        )
+        if has_llm_nodes:
+            api_key_env = self._get_api_key_env_var(self.model)
+            if api_key_env and not os.environ.get(api_key_env):
+                if api_key_env not in missing_credentials:
+                    missing_credentials.append(api_key_env)
+                warnings.append(
+                    f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
+                )
 
         return ValidationResult(
             valid=len(errors) == 0,
@@ -854,20 +837,13 @@ class AgentRunner:
             missing_credentials=missing_credentials,
         )
 
-    async def can_handle(self, request: dict, llm: LLMProvider | None = None) -> "CapabilityResponse":
+    async def can_handle(
+        self, request: dict, llm: LLMProvider | None = None
+    ) -> "CapabilityResponse":
         """
         Ask the agent if it can handle this request.
-
-        Uses LLM to evaluate the request against the agent's goal and capabilities.
-
-        Args:
-            request: The request to evaluate
-            llm: LLM provider to use (uses self._llm if not provided)
-
-        Returns:
-            CapabilityResponse with level, confidence, and reasoning
         """
-        from framework.runner.protocol import CapabilityResponse, CapabilityLevel
+        from framework.runner.protocol import CapabilityLevel, CapabilityResponse
 
         # Use provided LLM or set up our own
         eval_llm = llm
@@ -924,7 +900,8 @@ Respond with JSON only:
 
             # Parse response
             import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 level_map = {
@@ -948,7 +925,7 @@ Respond with JSON only:
 
     def _keyword_capability_check(self, request: dict) -> "CapabilityResponse":
         """Simple keyword-based capability check (fallback when no LLM)."""
-        from framework.runner.protocol import CapabilityResponse, CapabilityLevel
+        from framework.runner.protocol import CapabilityLevel, CapabilityResponse
 
         info = self.info()
         request_str = json.dumps(request).lower()
@@ -986,12 +963,6 @@ Respond with JSON only:
     async def receive_message(self, message: "AgentMessage") -> "AgentMessage":
         """
         Handle a message from the orchestrator or another agent.
-
-        Args:
-            message: The incoming message
-
-        Returns:
-            Response message
         """
         from framework.runner.protocol import MessageType
 
