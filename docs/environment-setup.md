@@ -112,19 +112,9 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 - Internet connection (for LLM API calls)
 - For Windows users: WSL 2 is recommended for full compatibility.
 
-### API Keys (Optional)
+### API Keys
 
-For running agents with real LLMs:
-
-```bash
-export ANTHROPIC_API_KEY="your-key-here"
-```
-
-Windows (PowerShell):
-
-```powershell
-$env:ANTHROPIC_API_KEY="your-key-here"
-```
+We recommend using quickstart.sh for LLM API credential setup and /hive-credentials for the tools credentials
 
 ## Running Agents
 
@@ -184,6 +174,15 @@ This verifies agent-related Claude Code skills are available:
 - `/hive-concepts` - Fundamental concepts
 - `/hive-patterns` - Best practices
 - `/hive-test` - Test and validate agents
+
+### Cursor IDE Support
+
+Skills are also available in Cursor. To enable:
+
+1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
+2. Run `MCP: Enable` to enable MCP servers
+3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
+4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
 ### 2. Build an Agent
 
@@ -371,7 +370,9 @@ hive/
 
 ## Separate Virtual Environments
 
-The project uses **separate virtual environments** for `core` and `tools` packages to:
+Hive primarily uses **uv** to create and manage separate virtual environments for `core` and `tools`.
+
+The project uses separate virtual environments to:
 
 - Isolate dependencies and avoid conflicts
 - Allow independent development and testing of each package
@@ -379,10 +380,17 @@ The project uses **separate virtual environments** for `core` and `tools` packag
 
 ### How It Works
 
-When you run `./quickstart.sh` or `uv sync` in each directory:
+When you run `./quickstart.sh`, `uv` sets up:
 
 1. **core/.venv/** - Contains the `framework` package and its dependencies (anthropic, litellm, mcp, etc.)
 2. **tools/.venv/** - Contains the `aden_tools` package and its dependencies (beautifulsoup4, pandas, etc.)
+
+If you need to refresh environments manually, use `uv`:
+
+```bash
+cd core && uv sync
+cd ../tools && uv sync
+```
 
 ### Cross-Package Imports
 
@@ -392,38 +400,34 @@ The `core` and `tools` packages are **intentionally independent**:
 - **Communication via MCP**: Tools are exposed to agents through MCP servers, not direct Python imports
 - **Runtime integration**: The agent runner loads tools via the MCP protocol at runtime
 
-If you need to use both packages in a single script (e.g., for testing), you have two options:
+If you need to use both packages in a single script (e.g., for testing), prefer `uv run` with `PYTHONPATH`:
 
 ```bash
-# Option 1: Install both in a shared environment
-uv venv
-source .venv/bin/activate
-uv pip install -e core/ -e tools/
-
-# Option 2: Use PYTHONPATH (for quick testing)
 PYTHONPATH=tools/src uv run python your_script.py
 ```
 
 ### MCP Server Configuration
 
-The `.mcp.json` at project root configures MCP servers to use their respective virtual environments:
+The `.mcp.json` at project root configures MCP servers to run through `uv run` in each package directory:
 
 ```json
 {
   "mcpServers": {
     "agent-builder": {
-      "command": "core/.venv/bin/python",
-      "args": ["-m", "framework.mcp.agent_builder_server"]
+      "command": "uv",
+      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
+      "cwd": "core"
     },
     "tools": {
-      "command": "tools/.venv/bin/python",
-      "args": ["-m", "aden_tools.mcp_server", "--stdio"]
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools"
     }
   }
 }
 ```
 
-This ensures each MCP server runs with its correct dependencies.
+This ensures each MCP server runs with the correct project environment managed by `uv`.
 
 ### Why PYTHONPATH is Required
 

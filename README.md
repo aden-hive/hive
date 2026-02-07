@@ -38,7 +38,7 @@
 
 ## Overview
 
-Build reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
+Build autonomous, reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
@@ -61,9 +61,9 @@ Hive may not be the best fit if you’re only experimenting with simple agent ch
 Use Hive when you need:
 
 - Long-running, autonomous agents
-- Multi-agent coordination
+- Strong guardrails, process, and controls
 - Continuous improvement based on failures
-- Strong monitoring, safety, and budget controls
+- Multi-agent coordination
 - A framework that evolves with your goals
 
 ## What is Aden
@@ -75,17 +75,18 @@ Use Hive when you need:
 Aden is a platform for building, deploying, operating, and adapting AI agents:
 
 - **Build** - A Coding Agent generates specialized Worker Agents (Sales, Marketing, Ops) from natural language goals
-- **Deploy** - Headless deployment with CI/CD integration and full API lifecycle management
+- **Deploy** - Headless deployment (self-hosted, cloud native deployment coming soon)
 - **Operate** - Real-time monitoring, observability, and runtime guardrails keep agents reliable
 - **Adapt** - Continuous evaluation, supervision, and adaptation ensure agents improve over time
 - **Infra** - Shared memory, LLM integrations, tools, and skills power every agent
+- **Integration** - Integrate to your business systems to automate processes
 
 ## Quick Links
 
 - **[Documentation](https://docs.adenhq.com/)** - Complete guides and API reference
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
-<!-- - **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans -->
+- **[Roadmap](https://adenhq.com/roadmap)** - Upcoming features and plans
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
 
 ## Quick Start
@@ -133,15 +134,6 @@ hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
-
-### Cursor IDE Support
-
-Skills are also available in Cursor. To enable:
-
-1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Run `MCP: Enable` to enable MCP servers
-3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
 ## Features
 
@@ -382,10 +374,6 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Frequently Asked Questions (FAQ)
 
-**Q: Does Hive depend on LangChain or other agent frameworks?**
-
-No. Hive is built from the ground up with no dependencies on LangChain, CrewAI, or other agent frameworks. The framework is designed to be lean and flexible, generating agent graphs dynamically rather than relying on predefined components.
-
 **Q: What LLM providers does Hive support?**
 
 Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
@@ -402,14 +390,6 @@ Hive generates your entire agent system from natural language goals using a codi
 
 Yes, Hive is fully open-source under the Apache License 2.0. We actively encourage community contributions and collaboration.
 
-**Q: Does Hive collect data from users?**
-
-Hive collects telemetry data for monitoring and observability purposes, including token usage, latency metrics, and cost tracking. Content capture (prompts and responses) is configurable and stored with team-scoped data isolation. All data stays within your infrastructure when self-hosted.
-
-**Q: What deployment options does Hive support?**
-
-Hive supports self-hosted deployments via Python packages. See the [Environment Setup Guide](docs/environment-setup.md) for installation instructions. Cloud deployment options and Kubernetes-ready configurations are on the roadmap.
-
 **Q: Can Hive handle complex, production-scale use cases?**
 
 Yes. Hive is explicitly designed for production environments with features like automatic failure recovery, real-time observability, cost controls, and horizontal scaling support. The framework handles both simple automations and complex multi-agent workflows.
@@ -417,10 +397,6 @@ Yes. Hive is explicitly designed for production environments with features like 
 **Q: Does Hive support human-in-the-loop workflows?**
 
 Yes, Hive fully supports [human-in-the-loop](docs/key_concepts/graph.md#human-in-the-loop) workflows through intervention nodes that pause execution for human input. These include configurable timeouts and escalation policies, allowing seamless collaboration between human experts and AI agents.
-
-**Q: What monitoring and debugging tools does Hive provide?**
-
-Hive includes comprehensive observability features: real-time WebSocket streaming for live agent execution monitoring, TimescaleDB-powered analytics for cost and performance metrics, health check endpoints for Kubernetes integration, and MCP tools for agent execution, including file operations, web search, data processing, and more.
 
 **Q: What programming languages does Hive support?**
 
@@ -449,10 +425,6 @@ Aden's adaptation loop begins working from the first execution. When an agent fa
 **Q: How does Hive compare to other agent frameworks?**
 
 Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
-
-**Q: Does Aden offer enterprise support?**
-
-For enterprise inquiries, contact the Aden team through [adenhq.com](https://adenhq.com) or join our [Discord community](https://discord.com/invite/MXE49hrKDk) for support and discussions.
 
 ---
 
