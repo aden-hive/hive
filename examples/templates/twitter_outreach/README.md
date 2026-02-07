@@ -55,3 +55,18 @@ intake → research → draft-review → send
 - **Approval Required** — Never sends without explicit user approval
 - **Tone** — Professional, authentic, conversational
 - **Privacy** — Only uses publicly available information
+
+## Business Value
+
+- **Personalized outreach** — Each email references the recipient's actual interests, recent posts, and bio, moving beyond generic templates that get ignored
+- **Time savings** — Automates the research-draft-review cycle that typically takes 20-30 minutes per recipient down to a single guided session
+- **Higher response rates** — Personalization based on real social signals consistently outperforms batch email approaches, driving meaningful engagement
+- **Approval workflow** — Human-in-the-loop review at the draft stage ensures every message meets your standards before sending, preventing embarrassing mistakes
+- **Reusable pattern** — The research-to-personalized-action pipeline adapts to LinkedIn outreach, partnership proposals, investor emails, or any scenario where context-aware communication matters
+
+## Customization Guide
+
+- **Change data source** — Swap Twitter/X research for LinkedIn, GitHub, or company websites by editing the `research` node system prompt and tools in `nodes/__init__.py`
+- **Email provider** — Replace the `send_email` tool with your preferred email service (SendGrid, Mailgun, SMTP) by updating the tool implementation in your MCP server
+- **Tone adjustment** — Edit the `draft-review` node system prompt to match your communication style (formal, casual, technical) or add brand voice guidelines
+- **Multi-recipient** — Extend the intake node to accept a list of handles and loop the research-draft-send pipeline, creating a batch outreach workflow with per-recipient personalization

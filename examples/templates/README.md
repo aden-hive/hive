@@ -21,18 +21,20 @@ template_name/
 
 ```bash
 # 1. Copy to your exports directory
-cp -r examples/templates/marketing_agent exports/my_marketing_agent
+cp -r examples/templates/deep_research_agent exports/my_research_agent
 
 # 2. Update the module references in __main__.py and __init__.py
 
 # 3. Customize goal, nodes, edges, and prompts
 
 # 4. Run it
-uv run python -m exports.my_marketing_agent --input '{"product_description": "..."}'
+uv run python -m exports.my_research_agent run --topic "your research topic"
 ```
 
 ## Available templates
 
-| Template | Description |
-|----------|-------------|
-| [marketing_agent](marketing_agent/) | Multi-channel marketing content generator with audience analysis, content generation, and editorial review nodes |
+| Template | Nodes | Description |
+|----------|:-----:|-------------|
+| [deep_research_agent](deep_research_agent/) | 4 | Research any topic through multi-source search with user review checkpoints and a feedback loop for iterative deepening. Produces a cited HTML report. |
+| [tech_news_reporter](tech_news_reporter/) | 3 | Scan the web for recent tech/AI news, summarize key stories, and deliver a structured HTML report. |
+| [twitter_outreach](twitter_outreach/) | 4 | Research a target's Twitter/X profile and craft a personalized outreach email with human approval before sending. |

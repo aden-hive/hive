@@ -114,3 +114,18 @@ Terminal nodes: `compile-report`
 - **1.0.0** (2026-02-06): Initial release
   - 3 nodes, 2 edges
   - Goal: Tech & AI News Reporter
+
+## Business Value
+
+- **Stay current** — Automates the daily ritual of scanning dozens of tech news sites, delivering a curated briefing in minutes instead of hours
+- **Team awareness** — Produces shareable HTML reports that keep entire teams aligned on industry developments without everyone doing independent research
+- **Focus filtering** — The intake conversation lets users narrow scope to specific topics (e.g., "AI regulation" or "semiconductor supply chain"), avoiding information overload
+- **Source quality** — Prioritizes authoritative sources and enforces URL attribution, so readers can verify claims and explore further
+- **Reusable pattern** — The linear intake-research-report pipeline serves as a starting point for any web-to-report workflow (market research, competitor analysis, trend monitoring)
+
+## Customization Guide
+
+- **Change news sources** — Edit the `research` node system prompt in `nodes/__init__.py` to prioritize specific publications, RSS feeds, or domains (e.g., restrict to `.gov` sites for policy news)
+- **Adjust article count** — Modify the success criteria target in `agent.py` to require more or fewer articles per report (default is 5+)
+- **Modify report format** — Edit the `compile-report` node system prompt to change the HTML layout, add sections like "Editor's Pick" or "Trending Topics", or switch to Markdown output
+- **Add an analysis node** — Insert a new `NodeSpec` between `research` and `compile-report` that summarizes trends, identifies themes across articles, or scores stories by relevance to the user's interests

@@ -16,6 +16,7 @@ Educational content comparing AI agent frameworks and exploring the agent develo
 | [Building Production AI Agents](./building-production-ai-agents.md) | Guide | production, deployment, reliability |
 | [Multi-Agent vs Single-Agent](./multi-agent-vs-single-agent-systems.md) | Concept | architecture, design patterns |
 | [AI Agent Observability](./ai-agent-observability-monitoring.md) | Guide | monitoring, observability, debugging |
+| [Aden vs OpenAI Agents SDK](./aden-vs-openai-agents.md) | Comparison | openai, agents sdk, handoffs, guardrails |
 
 ## Purpose
 
