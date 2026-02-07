@@ -42,6 +42,7 @@ from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
+from .json_read_tool import register_tools as register_json_read
 from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .slack_tool import register_tools as register_slack
@@ -68,6 +69,7 @@ def register_all_tools(
     register_example(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
+    register_json_read(mcp)
     register_runtime_logs(mcp)
 
     # Tools that need credentials (pass credentials if provided)
@@ -97,6 +99,7 @@ def register_all_tools(
         "web_search",
         "web_scrape",
         "pdf_read",
+        "json_read",
         "view_file",
         "write_to_file",
         "list_dir",
