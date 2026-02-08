@@ -45,6 +45,7 @@ from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .slack_tool import register_tools as register_slack
+from .time_tool import register_tools as register_time
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
@@ -69,6 +70,7 @@ def register_all_tools(
     register_web_scrape(mcp)
     register_pdf_read(mcp)
     register_runtime_logs(mcp)
+        register_time(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -97,6 +99,12 @@ def register_all_tools(
         "web_search",
         "web_scrape",
         "pdf_read",
+                # Time tools
+        "time_difference_tool",
+        "format_datetime_tool",
+        "parse_datetime_tool",
+        "add_time_tool",
+        "list_timezones_tool",
         "view_file",
         "write_to_file",
         "list_dir",
