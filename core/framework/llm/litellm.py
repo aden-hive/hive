@@ -293,7 +293,21 @@ class LiteLLMProvider(LLMProvider):
             kwargs["response_format"] = response_format
 
         # Make the call
-        response = self._completion_with_rate_limit_retry(**kwargs)
+        # response = self._completion_with_rate_limit_retry(**kwargs)
+        # Make the call
+        try:
+            response = self._completion_with_rate_limit_retry(**kwargs)
+        except Exception as e:
+            # Estimate tokens spent before failure
+            estimated_tokens, method = _estimate_tokens(self.model, full_messages)
+
+            # Attach metadata for observability (no behavior change)
+            setattr(e, "failure_reason", type(e).__name__)
+            setattr(e, "wasted_input_tokens", estimated_tokens)
+            setattr(e, "wasted_output_tokens", 0)
+            setattr(e, "token_estimation_method", method)
+
+        raise
 
         # Extract content
         content = response.choices[0].message.content or ""
