@@ -1,4 +1,9 @@
 # The Worker Agent
+> **TL;DR:**  
+> A Worker Agent is a purpose-built AI agent designed to execute a single business process end-to-end.  
+> In Hive, worker agents are generated from natural language goals and run continuously as part of your system, with built-in iteration, observability, and human oversight.
+
+
 
 ## What a Worker Agent Is
 
