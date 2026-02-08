@@ -49,12 +49,14 @@ To add a new credential:
 from .base import CredentialError, CredentialManager, CredentialSpec
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
+from .crm import CRM_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
+    **CRM_CREDENTIALS,
 }
 
 __all__ = [
@@ -69,4 +71,5 @@ __all__ = [
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
+    "CRM_CREDENTIALS",
 ]

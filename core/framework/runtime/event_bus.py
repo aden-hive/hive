@@ -41,6 +41,9 @@ class EventType(str, Enum):
     STREAM_STARTED = "stream_started"
     STREAM_STOPPED = "stream_stopped"
 
+    # External events
+    WEBHOOK_RECEIVED = "webhook_received"
+
     # Custom events
     CUSTOM = "custom"
 

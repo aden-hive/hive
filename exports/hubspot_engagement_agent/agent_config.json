@@ -1,0 +1,44 @@
+{
+  "name": "HubSpot Engagement Agent",
+  "description": "Automatically reacts to new HubSpot deals by drafting research summaries.",
+  "version": "1.0.0",
+  "author": "Hive CRM Integrator",
+  "entry_node": "process_event",
+  "nodes": [
+    {
+      "id": "process_event",
+      "type": "logic",
+      "description": "Parse incoming HubSpot webhook event",
+      "output_keys": ["deal_id", "portal_id"],
+      "next": "research_company"
+    },
+    {
+      "id": "research_company",
+      "type": "tool_use",
+      "tool": "web_search",
+      "description": "Research the company associated with the deal",
+      "next": "format_summary"
+    },
+    {
+      "id": "format_summary",
+      "type": "llm_generate",
+      "prompt": "Based on the HubSpot deal {{deal_id}} and the following research: {{research_company.output}}, draft a sales discovery brief.",
+      "next": "end"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "event_bus",
+      "event_type": "webhook_received",
+      "filter": {
+        "event_type": "deal.creation"
+      }
+    }
+  ],
+  "simulation_config": {
+    "mock_inputs": {
+      "deal_id": "12345",
+      "portal_id": "999"
+    }
+  }
+}
