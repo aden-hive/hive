@@ -59,6 +59,7 @@ from .http_headers_scanner import register_tools as register_http_headers_scanne
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
+from .postgres_tool import register_tools as register_postgres
 from .port_scanner import register_tools as register_port_scanner
 from .razorpay_tool import register_tools as register_razorpay
 from .risk_scorer import register_tools as register_risk_scorer
@@ -135,6 +136,134 @@ def register_all_tools(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
+
+    # Register database toolkits
+    register_postgres(mcp)
+
+    return [
+        "example_tool",
+        "web_search",
+        "web_scrape",
+        "pdf_read",
+        "view_file",
+        "write_to_file",
+        "list_dir",
+        "replace_file_content",
+        "apply_diff",
+        "apply_patch",
+        "grep_search",
+        "execute_command_tool",
+        "load_data",
+        "save_data",
+        "list_data_files",
+        "serve_file_to_user",
+        "csv_read",
+        "csv_write",
+        "csv_append",
+        "csv_info",
+        "csv_sql",
+        "apollo_enrich_person",
+        "apollo_enrich_company",
+        "apollo_search_people",
+        "apollo_search_companies",
+        "github_list_repos",
+        "github_get_repo",
+        "github_search_repos",
+        "github_list_issues",
+        "github_get_issue",
+        "github_create_issue",
+        "github_update_issue",
+        "github_list_pull_requests",
+        "github_get_pull_request",
+        "github_create_pull_request",
+        "github_search_code",
+        "github_list_branches",
+        "github_get_branch",
+        "github_list_stargazers",
+        "github_get_user_profile",
+        "github_get_user_emails",
+        "send_email",
+        "send_budget_alert_email",
+        "hubspot_search_contacts",
+        "hubspot_get_contact",
+        "hubspot_create_contact",
+        "hubspot_update_contact",
+        "hubspot_search_companies",
+        "hubspot_get_company",
+        "hubspot_create_company",
+        "hubspot_update_company",
+        "hubspot_search_deals",
+        "hubspot_get_deal",
+        "hubspot_create_deal",
+        "hubspot_update_deal",
+        "query_runtime_logs",
+        "query_runtime_log_details",
+        "query_runtime_log_raw",
+        "slack_send_message",
+        "slack_list_channels",
+        "slack_get_channel_history",
+        "slack_add_reaction",
+        "slack_get_user_info",
+        "slack_update_message",
+        "slack_delete_message",
+        "slack_schedule_message",
+        "slack_create_channel",
+        "slack_archive_channel",
+        "slack_invite_to_channel",
+        "slack_set_channel_topic",
+        "slack_remove_reaction",
+        "slack_list_users",
+        "slack_upload_file",
+        # Advanced Slack tools
+        "slack_search_messages",
+        "slack_get_thread_replies",
+        "slack_pin_message",
+        "slack_unpin_message",
+        "slack_list_pins",
+        "slack_add_bookmark",
+        "slack_list_scheduled_messages",
+        "slack_delete_scheduled_message",
+        "slack_send_dm",
+        "slack_get_permalink",
+        "slack_send_ephemeral",
+        # Block Kit & Views
+        "slack_post_blocks",
+        "slack_open_modal",
+        "slack_update_home_tab",
+        # Phase 2: User Status & Presence
+        "slack_set_status",
+        "slack_set_presence",
+        "slack_get_presence",
+        # Phase 2: Reminders
+        "slack_create_reminder",
+        "slack_list_reminders",
+        "slack_delete_reminder",
+        # Phase 2: User Groups
+        "slack_create_usergroup",
+        "slack_update_usergroup_members",
+        "slack_list_usergroups",
+        # Phase 2: Emoji
+        "slack_list_emoji",
+        # Phase 2: Canvas
+        "slack_create_canvas",
+        "slack_edit_canvas",
+        # Phase 2: Analytics (AI-Driven)
+        "slack_get_messages_for_analysis",
+        # Phase 2: Workflow
+        "slack_trigger_workflow",
+        # Phase 3: Critical Power Tools
+        "slack_get_conversation_context",
+        "slack_find_user_by_email",
+        "slack_kick_user_from_channel",
+        "slack_delete_file",
+        "slack_get_team_stats",
+
+        "pg_query",
+        "pg_list_schemas",
+        "pg_list_tables",
+        "pg_describe_table",
+        "pg_explain"
+    ]
     register_excel(mcp)
 
     # Security scanning tools (no credentials needed)
