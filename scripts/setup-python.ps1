@@ -29,6 +29,9 @@ $pythonCmd = $null
 if (Get-Command python -ErrorAction SilentlyContinue) {
     $pythonCmd = "python"
 }
+elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    $pythonCmd = "py"
+}
 
 if (-not $pythonCmd) {
     Write-Host "Error: Python is not installed." -ForegroundColor $RED
@@ -102,7 +105,7 @@ Write-Host ""
 
 # Upgrade pip, setuptools, and wheel
 Write-Host "Upgrading pip, setuptools, and wheel..."
-& $pythonCmd -m pip install --upgrade pip setuptools wheel 
+& $pythonCmd -m pip install --upgrade pip setuptools wheel
 Write-Host "[OK] Core packages upgraded" -ForegroundColor $GREEN
 Write-Host ""
 
