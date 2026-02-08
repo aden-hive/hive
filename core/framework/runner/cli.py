@@ -22,12 +22,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Path to agent folder (containing agent.json)",
     )
     run_parser.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        help="Override model (e.g., gemini/gemini-flash-latest). If omitted, use agent.json graph.default_model.",
-    )
-    run_parser.add_argument(
         "--input",
         "-i",
         type=str,
@@ -38,11 +32,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "-f",
         type=str,
         help="Input context from JSON file",
-    )
-    run_parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="Run in mock mode (no real LLM calls)",
     )
     run_parser.add_argument(
         "--output",
@@ -238,23 +227,23 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"Error reading input file: {e}", file=sys.stderr)
             return 1
 
-    # Load and run agent
-    try:
-        load_kwargs = {"mock_mode": args.mock}
-        if args.model:
-            load_kwargs["model"] = args.model
-        runner = AgentRunner.load(args.agent_path, **load_kwargs)
+    # Run the agent (with TUI or standard)
+    if getattr(args, "tui", False):
+        from framework.tui.app import AdenTUI
 
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
-
-    # Auto-inject user_id if the agent expects it but it's not provided
-    entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
-    if "user_id" in entry_input_keys and context.get("user_id") is None:
-        import os
-
-        context["user_id"] = os.environ.get("USER", "default_user")
+        async def run_with_tui():
+            try:
+                # Load runner inside the async loop to ensure strict loop affinity
+                # (only one load — avoids spawning duplicate MCP subprocesses)
+                try:
+                    runner = AgentRunner.load(
+                        args.agent_path,
+                        model=args.model,
+                        enable_tui=True,
+                    )
+                except Exception as e:
+                    print(f"Error loading agent: {e}")
+                    return
 
                 # Force setup inside the loop
                 if runner._agent_runtime is None:
@@ -727,7 +716,12 @@ def _format_natural_language_to_json(
         main_field = input_keys[0] if input_keys else "objective"
         existing_value = session_context.get(main_field, "")
 
-        session_info = f'\n\nExisting {main_field}: "{existing_value}"\n\nThe user is providing ADDITIONAL information. Append this new information to the existing {main_field} to create an enriched, more detailed version.'
+        session_info = (
+            f'\n\nExisting {main_field}: "{existing_value}"\n\n'
+            f"The user is providing ADDITIONAL information. Append this new "
+            f"information to the existing {main_field} to create an enriched, "
+            "more detailed version."
+        )
 
     prompt = f"""You are formatting user input for an agent that requires specific input fields.
 
@@ -1224,19 +1218,9 @@ def _select_agent(agents_dir: Path) -> str | None:
         print(f"No agents found in {agents_dir}", file=sys.stderr)
         return None
 
-    print(f"\nAvailable agents in {agents_dir}:\n")
-    for i, agent_path in enumerate(agents, 1):
-        try:
-            from framework.runner import AgentRunner
-
-            runner = AgentRunner.load(agent_path)
-            info = runner.info()
-            desc = info.description[:50] + "..." if len(info.description) > 50 else info.description
-            print(f"  {i}. {info.name}")
-            print(f"     {desc}")
-            runner.cleanup()
-        except Exception as e:
-            print(f"  {i}. {agent_path.name} (error: {e})")
+    # Pagination setup
+    page = 0
+    total_pages = (len(agents) + AGENTS_PER_PAGE - 1) // AGENTS_PER_PAGE
 
     while True:
         start_idx = page * AGENTS_PER_PAGE
