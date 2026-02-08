@@ -5,10 +5,10 @@ Supports:
 - OAuth 2.0 authentication via REDDIT_CREDENTIALS
 - Search & Monitoring (5 functions)
 - Content Creation (5 functions)
-- User Engagement (3 functions)
+- User Engagement (4 functions)
 - Moderation (3 functions)
 
-Total: 18 tools
+Total: 17 tools
 
 API Reference: https://www.reddit.com/dev/api/
 PRAW Documentation: https://praw.readthedocs.io/
@@ -200,50 +200,6 @@ def register_tools(
             }
         except PrawcoreException as e:
             return {"error": f"Reddit API error: {str(e)}"}
-        except Exception as e:
-            return {"error": f"Search failed: {str(e)}"}
-
-    @mcp.tool()
-    def reddit_search_comments(
-        query: str,
-        subreddit: str = "all",
-        time_filter: str = "all",
-        sort: str = "relevance",
-        limit: int = 10,
-    ) -> dict:
-        """
-        Search for Reddit comments matching a query.
-
-        Use this to monitor brand mentions or discussions in comments.
-
-        Args:
-            query: Search query (1-512 characters)
-            subreddit: Subreddit name or "all" for site-wide search
-            time_filter: Time period - "hour", "day", "week", "month", "year", "all"
-            sort: Sort method - "relevance", "new", "top"
-            limit: Maximum number of comments to return (1-100)
-
-        Returns:
-            Dict with search results or error dict
-        """
-        if not query or len(query) > 512:
-            return {"error": "Query must be 1-512 characters"}
-
-        limit = max(1, min(100, limit))
-
-        reddit = _get_reddit_client(credentials)
-        if isinstance(reddit, dict):
-            return reddit
-
-        try:
-            # PRAW's search returns submissions, not comments directly
-            # To get comments, use reddit_search_posts and then reddit_get_comments
-            return {
-                "error": "Comment search not directly supported by PRAW",
-                "help": (
-                    "Use reddit_search_posts and then reddit_get_comments for specific posts"
-                ),
-            }
         except Exception as e:
             return {"error": f"Search failed: {str(e)}"}
 
