@@ -1,0 +1,4 @@
+{
+  "subject": "Pytest tests not showing on BrowserStack dashboard",
+  "description": "We are running 19 Pytest tests using the BrowserStack SDK. The tests execute locally but when run via `browserstack-sdk pytest`, the BrowserStack dashboard shows 0 tests reported. The WebDriver session appears to start but immediately fails during setup. We are using Python 3.11, Selenium 4.15, and our browserstack.yml has projectName and buildName configured. The error in logs shows: 'ValueError: Missing required key in config'. We need help identifying why our tests are not being reported to the dashboard."
+}
