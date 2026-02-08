@@ -59,6 +59,8 @@ You may submit PRs without prior assignment for:
 ./quickstart.sh
 ```
 
+> **Tip:** planning to build a new tool? Check out our [Building Tools Guide](tools/BUILDING_TOOLS.md) for a step-by-step walkthrough.
+
 > **Windows Users:**  
 > If you are on native Windows, it is recommended to use **WSL (Windows Subsystem for Linux)**.  
 > Alternatively, make sure to run PowerShell or Git Bash with Python 3.11+ installed, and disable "App Execution Aliases" in Windows settings.

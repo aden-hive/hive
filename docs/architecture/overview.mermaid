@@ -1,0 +1,24 @@
+graph TD
+    User([User]) -->|Run Agent| Runner[Agent Runner]
+
+    subgraph "Agent Runtime"
+        Runner -->|Load| Graph[Agent Graph]
+        Graph -->|Start| Node1[Node: Plan]
+        Node1 -->|Next| Node2[Node: Execute]
+
+        Node2 -->|Use Tool| Tools[Tool Registry]
+        Tools -->|Call| Tool1[Excel Tool]
+        Tools -->|Call| Tool2[Image Gen Tool]
+        Tool1 -->|Result| Memory[(Shared Memory)]
+        Tool2 -->|Result| Memory
+
+        Memory -->|Read Context| Node2
+    end
+
+    Node2 -->|Output| Runner
+    Runner -->|Display| User
+
+    style User fill:#f9f,stroke:#333
+    style Runner fill:#bbf,stroke:#333
+    style Graph fill:#bfb,stroke:#333
+    style Memory fill:#fbb,stroke:#333
