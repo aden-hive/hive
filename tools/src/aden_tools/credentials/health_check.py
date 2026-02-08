@@ -8,6 +8,7 @@ to verify the credential works.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -488,6 +489,97 @@ class ResendHealthChecker:
             )
 
 
+class RedditHealthChecker:
+    """Health checker for Reddit OAuth credentials."""
+
+    TIMEOUT = 10.0
+
+    def check(self, credentials_json: str) -> HealthCheckResult:
+        """
+        Validate Reddit OAuth credentials using PRAW.
+
+        Expects credentials_json to be a JSON string with:
+        - client_id
+        - client_secret
+        - refresh_token
+        - user_agent
+        """
+        try:
+            # Parse credentials
+            try:
+                creds = json.loads(credentials_json)
+            except json.JSONDecodeError:
+                return HealthCheckResult(
+                    valid=False,
+                    message="Reddit credentials must be valid JSON",
+                    details={"error": "invalid_json"},
+                )
+
+            required_fields = ["client_id", "client_secret", "refresh_token", "user_agent"]
+            missing = [f for f in required_fields if f not in creds]
+            if missing:
+                return HealthCheckResult(
+                    valid=False,
+                    message=f"Missing required fields: {', '.join(missing)}",
+                    details={"missing_fields": missing},
+                )
+
+            # Import praw here to avoid dependency in health_check.py if not needed
+            try:
+                import praw
+            except ImportError:
+                return HealthCheckResult(
+                    valid=False,
+                    message="PRAW library not installed (pip install praw)",
+                    details={"error": "missing_dependency"},
+                )
+
+            # Create Reddit instance and validate
+            try:
+                reddit = praw.Reddit(
+                    client_id=creds["client_id"],
+                    client_secret=creds["client_secret"],
+                    refresh_token=creds["refresh_token"],
+                    user_agent=creds["user_agent"],
+                )
+
+                # Make a lightweight API call to validate credentials
+                user = reddit.user.me()
+                username = str(user)
+
+                return HealthCheckResult(
+                    valid=True,
+                    message=f"Reddit credentials valid (authenticated as u/{username})",
+                    details={"username": username},
+                )
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "401" in error_msg or "unauthorized" in error_msg:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Reddit credentials are invalid or expired",
+                        details={"error": "unauthorized"},
+                    )
+                elif "403" in error_msg or "forbidden" in error_msg:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Reddit credentials lack required scopes",
+                        details={"error": "insufficient_scope"},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Reddit API error: {str(e)}",
+                        details={"error": str(e)},
+                    )
+        except Exception as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to validate Reddit credentials: {str(e)}",
+                details={"error": str(e)},
+            )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "hubspot": HubSpotHealthChecker(),
@@ -497,6 +589,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
     "resend": ResendHealthChecker(),
+    "reddit": RedditHealthChecker(),
 }
 
 

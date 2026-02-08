@@ -4,13 +4,12 @@ Community management and content monitoring tool for Reddit. Monitor brand menti
 
 ## Features
 
-### Search & Monitoring (6 functions)
+### Search & Monitoring (5 functions)
 - **reddit_search_posts**: Search for posts matching keywords
-- **reddit_search_comments**: Search for comments (via post search + comment retrieval)
-- **reddit_get_subreddit_posts**: Get hot/new/top posts from a subreddit
+- **reddit_get_subreddit_new**: Get new posts from a subreddit
+- **reddit_get_subreddit_hot**: Get hot posts from a subreddit
 - **reddit_get_post**: Retrieve specific post details
-- **reddit_get_post_comments**: Get all comments from a post
-- **reddit_get_user_posts**: Monitor user posting activity
+- **reddit_get_comments**: Get all comments from a post
 
 ### Content Creation (5 functions)
 - **reddit_submit_post**: Create text or link posts
@@ -21,9 +20,9 @@ Community management and content monitoring tool for Reddit. Monitor brand menti
 
 ### User Engagement (4 functions)
 - **reddit_get_user_profile**: View user profiles and karma
-- **reddit_vote**: Upvote/downvote posts and comments
+- **reddit_upvote**: Upvote posts and comments
+- **reddit_downvote**: Downvote posts and comments
 - **reddit_save_post**: Bookmark posts
-- **reddit_unsave_post**: Remove bookmarks
 
 ### Moderation (3 functions - requires moderator permissions)
 - **reddit_remove_post**: Remove posts as a moderator
@@ -96,9 +95,8 @@ for post in result["posts"]:
 
 ```python
 # Get hot posts from a specific subreddit
-result = reddit_get_subreddit_posts(
+result = reddit_get_subreddit_hot(
     subreddit="python",
-    feed_type="hot",
     limit=25
 )
 
@@ -116,7 +114,7 @@ result = reddit_reply_to_post(
 )
 
 # Upvote the post
-reddit_vote(item_id="abc123", direction="up")
+reddit_upvote(item_id="abc123")
 ```
 
 ### Create Content
@@ -136,7 +134,7 @@ print(f"Post created: {result['permalink']}")
 
 ```python
 # Get all comments from a post
-result = reddit_get_post_comments(
+result = reddit_get_comments(
     post_id="abc123",
     sort="best",
     limit=100
@@ -163,19 +161,29 @@ Search for Reddit posts matching a query.
 
 **Returns:** Dict with `query`, `subreddit`, `count`, and `posts` array
 
-### reddit_get_subreddit_posts
+### reddit_get_subreddit_new
 
-Get posts from a subreddit feed.
+Get new posts from a subreddit.
 
 **Arguments:**
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | subreddit | str | Required | Subreddit name (e.g., "python") |
-| feed_type | str | "hot" | "hot", "new", "top", "rising", "controversial" |
-| time_filter | str | "all" | Time period for "top"/"controversial" |
 | limit | int | 25 | Maximum posts to return (1-100) |
 
-**Returns:** Dict with `subreddit`, `feed_type`, `count`, and `posts` array
+**Returns:** Dict with `subreddit`, `count`, and `posts` array
+
+### reddit_get_subreddit_hot
+
+Get hot posts from a subreddit.
+
+**Arguments:**
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| subreddit | str | Required | Subreddit name (e.g., "python") |
+| limit | int | 25 | Maximum posts to return (1-100) |
+
+**Returns:** Dict with `subreddit`, `count`, and `posts` array
 
 ### reddit_get_post
 
@@ -188,7 +196,7 @@ Get a specific Reddit post by ID.
 
 **Returns:** Dict with `success` and `post` object
 
-### reddit_get_post_comments
+### reddit_get_comments
 
 Get comments from a Reddit post.
 
@@ -228,17 +236,27 @@ Reply to a Reddit post.
 
 **Returns:** Dict with `success`, `comment_id`, and `permalink`
 
-### reddit_vote
+### reddit_upvote
 
-Vote on a post or comment.
+Upvote a post or comment.
 
 **Arguments:**
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | item_id | str | Required | Reddit post or comment ID |
-| direction | str | Required | "up" (upvote), "down" (downvote), "clear" |
 
-**Returns:** Dict with `success`, `item_id`, `direction`, and `message`
+**Returns:** Dict with `success`, `item_id`, and `message`
+
+### reddit_downvote
+
+Downvote a post or comment.
+
+**Arguments:**
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| item_id | str | Required | Reddit post or comment ID |
+
+**Returns:** Dict with `success`, `item_id`, and `message`
 
 ### reddit_get_user_profile
 

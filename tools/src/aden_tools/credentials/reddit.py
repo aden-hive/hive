@@ -12,7 +12,6 @@ REDDIT_CREDENTIALS = {
         tools=[
             # Search & Monitoring
             "reddit_search_posts",
-            "reddit_search_comments",
             "reddit_get_subreddit_new",
             "reddit_get_subreddit_hot",
             "reddit_get_post",
