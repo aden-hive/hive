@@ -1,8 +1,10 @@
 """LLM Provider abstraction for pluggable LLM backends."""
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 
@@ -84,6 +86,36 @@ class LLMProvider(ABC):
             LLMResponse with content and metadata
         """
         pass
+
+    async def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+    ) -> "LLMResponse":
+        """Async version of complete() that avoids blocking the event loop.
+
+        The default implementation offloads the synchronous complete() call
+        to a thread executor.  Subclasses that have a native async API
+        (e.g. LiteLLMProvider) should override this for true non-blocking
+        behaviour.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(
+                self.complete,
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            ),
+        )
 
     @abstractmethod
     def complete_with_tools(

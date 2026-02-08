@@ -81,6 +81,25 @@ class AnthropicProvider(LLMProvider):
             json_mode=json_mode,
         )
 
+    async def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+    ) -> LLMResponse:
+        """Async completion from Claude (via LiteLLM) — does not block the event loop."""
+        return await self._provider.acomplete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+        )
+
     def complete_with_tools(
         self,
         messages: list[dict[str, Any]],
