@@ -22,7 +22,6 @@
   <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
-
 <p align="center">
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
@@ -75,6 +74,7 @@ Use Hive when you need:
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
 - **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
 
@@ -142,7 +142,6 @@ Hive is built to be model-agnostic and system-agnostic.
 
 - **LLM flexibility** - Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
 - **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
-
 
 ## Why Aden
 
@@ -230,6 +229,7 @@ See [environment-setup.md](docs/environment-setup.md) for complete setup instruc
 - [TUI Guide](docs/tui-selection-guide.md) - Interactive dashboard usage
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
+- [Contributing Guide](CONTRIBUTING.md) - Guidelines for contributing to the project
 
 ## Roadmap
 
