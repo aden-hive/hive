@@ -464,6 +464,13 @@ class GraphExecutor:
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
                             self.logger.info(f"      {key}: {value_str}")
+
+                    # Write node outputs to memory BEFORE edge evaluation
+                    # This enables direct key access in conditional expressions (e.g., "score > 80")
+                    # Without this, conditional edges can only use output['key'] syntax
+                    if result.output:
+                        for key, value in result.output.items():
+                            memory.write(key, value, validate=False)
                 else:
                     self.logger.error(f"   ✗ Failed: {result.error}")
 
