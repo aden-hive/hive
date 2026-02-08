@@ -11,13 +11,13 @@ The Plan is the contract between the external planner and the executor:
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ActionType(str, Enum):
+class ActionType(StrEnum):
     """Types of actions a PlanStep can perform."""
 
     LLM_CALL = "llm_call"  # Call LLM for generation
@@ -27,7 +27,7 @@ class ActionType(str, Enum):
     CODE_EXECUTION = "code_execution"  # Execute dynamic code (sandboxed)
 
 
-class StepStatus(str, Enum):
+class StepStatus(StrEnum):
     """Status of a plan step."""
 
     PENDING = "pending"
@@ -38,8 +38,25 @@ class StepStatus(str, Enum):
     SKIPPED = "skipped"
     REJECTED = "rejected"  # Human rejected execution
 
+    def is_terminal(self) -> bool:
+        """Check if this status represents a terminal (finished) state.
 
-class ApprovalDecision(str, Enum):
+        Terminal states are states where the step will not execute further,
+        either because it completed successfully or failed/was skipped.
+        """
+        return self in (
+            StepStatus.COMPLETED,
+            StepStatus.FAILED,
+            StepStatus.SKIPPED,
+            StepStatus.REJECTED,
+        )
+
+    def is_successful(self) -> bool:
+        """Check if this status represents successful completion."""
+        return self == StepStatus.COMPLETED
+
+
+class ApprovalDecision(StrEnum):
     """Human decision on a step requiring approval."""
 
     APPROVE = "approve"  # Execute as planned
@@ -74,7 +91,7 @@ class ApprovalResult(BaseModel):
     model_config = {"extra": "allow"}
 
 
-class JudgmentAction(str, Enum):
+class JudgmentAction(StrEnum):
     """Actions the judge can take after evaluating a step."""
 
     ACCEPT = "accept"  # Step completed successfully, continue
@@ -161,11 +178,23 @@ class PlanStep(BaseModel):
 
     model_config = {"extra": "allow"}
 
-    def is_ready(self, completed_step_ids: set[str]) -> bool:
-        """Check if this step is ready to execute (all dependencies met)."""
+    def is_ready(self, terminal_step_ids: set[str]) -> bool:
+        """Check if this step is ready to execute (all dependencies finished).
+
+        A step is ready when:
+        1. Its status is PENDING (not yet started)
+        2. All its dependencies are in a terminal state (completed, failed, skipped, or rejected)
+
+        Note: This allows dependent steps to become "ready" even if their dependencies
+        failed. The executor should check if any dependencies failed and handle
+        accordingly (e.g., skip the step or mark it as blocked).
+
+        Args:
+            terminal_step_ids: Set of step IDs that are in a terminal state
+        """
         if self.status != StepStatus.PENDING:
             return False
-        return all(dep in completed_step_ids for dep in self.dependencies)
+        return all(dep in terminal_step_ids for dep in self.dependencies)
 
 
 class Judgment(BaseModel):
@@ -327,17 +356,45 @@ class Plan(BaseModel):
         return None
 
     def get_ready_steps(self) -> list[PlanStep]:
-        """Get all steps that are ready to execute."""
-        completed_ids = {s.id for s in self.steps if s.status == StepStatus.COMPLETED}
-        return [s for s in self.steps if s.is_ready(completed_ids)]
+        """Get all steps that are ready to execute.
+
+        A step is ready when all its dependencies are in terminal states
+        (completed, failed, skipped, or rejected).
+        """
+        terminal_ids = {s.id for s in self.steps if s.status.is_terminal()}
+        return [s for s in self.steps if s.is_ready(terminal_ids)]
 
     def get_completed_steps(self) -> list[PlanStep]:
         """Get all completed steps."""
         return [s for s in self.steps if s.status == StepStatus.COMPLETED]
 
     def is_complete(self) -> bool:
-        """Check if all steps are completed."""
+        """Check if all steps are in terminal states (finished executing).
+
+        Returns True when all steps have reached a terminal state, regardless
+        of whether they succeeded or failed. Use has_failed_steps() to check
+        if any steps failed.
+        """
+        return all(s.status.is_terminal() for s in self.steps)
+
+    def is_successful(self) -> bool:
+        """Check if all steps completed successfully."""
         return all(s.status == StepStatus.COMPLETED for s in self.steps)
+
+    def has_failed_steps(self) -> bool:
+        """Check if any steps failed, were skipped, or were rejected."""
+        return any(
+            s.status in (StepStatus.FAILED, StepStatus.SKIPPED, StepStatus.REJECTED)
+            for s in self.steps
+        )
+
+    def get_failed_steps(self) -> list[PlanStep]:
+        """Get all steps that failed, were skipped, or were rejected."""
+        return [
+            s
+            for s in self.steps
+            if s.status in (StepStatus.FAILED, StepStatus.SKIPPED, StepStatus.REJECTED)
+        ]
 
     def to_feedback_context(self) -> dict[str, Any]:
         """Create context for replanning."""
@@ -366,7 +423,7 @@ class Plan(BaseModel):
         }
 
 
-class ExecutionStatus(str, Enum):
+class ExecutionStatus(StrEnum):
     """Status of plan execution."""
 
     COMPLETED = "completed"

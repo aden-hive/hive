@@ -7,16 +7,81 @@ Groq, and local models.
 See: https://docs.litellm.ai/docs/providers
 """
 
+import asyncio
 import json
-from collections.abc import Callable
+import logging
+import time
+from collections.abc import AsyncIterator, Callable
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 try:
     import litellm
+    from litellm.exceptions import RateLimitError
 except ImportError:
     litellm = None  # type: ignore[assignment]
+    RateLimitError = Exception  # type: ignore[assignment, misc]
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.stream_events import StreamEvent
+
+logger = logging.getLogger(__name__)
+
+RATE_LIMIT_MAX_RETRIES = 10
+RATE_LIMIT_BACKOFF_BASE = 2  # seconds
+
+# Directory for dumping failed requests
+FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
+
+
+def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
+    """Estimate token count for messages. Returns (token_count, method)."""
+    # Try litellm's token counter first
+    if litellm is not None:
+        try:
+            count = litellm.token_counter(model=model, messages=messages)
+            return count, "litellm"
+        except Exception:
+            pass
+
+    # Fallback: rough estimate based on character count (~4 chars per token)
+    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    return total_chars // 4, "estimate"
+
+
+def _dump_failed_request(
+    model: str,
+    kwargs: dict[str, Any],
+    error_type: str,
+    attempt: int,
+) -> str:
+    """Dump failed request to a file for debugging. Returns the file path."""
+    FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    filename = f"{error_type}_{model.replace('/', '_')}_{timestamp}.json"
+    filepath = FAILED_REQUESTS_DIR / filename
+
+    # Build dump data
+    messages = kwargs.get("messages", [])
+    dump_data = {
+        "timestamp": datetime.now().isoformat(),
+        "model": model,
+        "error_type": error_type,
+        "attempt": attempt,
+        "estimated_tokens": _estimate_tokens(model, messages),
+        "num_messages": len(messages),
+        "messages": messages,
+        "tools": kwargs.get("tools"),
+        "max_tokens": kwargs.get("max_tokens"),
+        "temperature": kwargs.get("temperature"),
+    }
+
+    with open(filepath, "w") as f:
+        json.dump(dump_data, f, indent=2, default=str)
+
+    return str(filepath)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -82,8 +147,103 @@ class LiteLLMProvider(LLMProvider):
 
         if litellm is None:
             raise ImportError(
-                "LiteLLM is not installed. Please install it with: pip install litellm"
+                "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
+
+    def _completion_with_rate_limit_retry(self, **kwargs: Any) -> Any:
+        """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
+        model = kwargs.get("model", self.model)
+        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+            try:
+                response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+
+                # Some providers (e.g. Gemini) return 200 with empty content on
+                # rate limit / quota exhaustion instead of a proper 429.  Treat
+                # empty responses the same as a rate-limit error and retry.
+                content = response.choices[0].message.content if response.choices else None
+                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                if not content and not has_tool_calls:
+                    # If the conversation ends with an assistant message,
+                    # an empty response is expected — don't retry.
+                    messages = kwargs.get("messages", [])
+                    last_role = next(
+                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
+                        None,
+                    )
+                    if last_role == "assistant":
+                        logger.debug(
+                            "[retry] Empty response after assistant message — "
+                            "expected, not retrying."
+                        )
+                        return response
+
+                    finish_reason = (
+                        response.choices[0].finish_reason if response.choices else "unknown"
+                    )
+                    # Dump full request to file for debugging
+                    token_count, token_method = _estimate_tokens(model, messages)
+                    dump_path = _dump_failed_request(
+                        model=model,
+                        kwargs=kwargs,
+                        error_type="empty_response",
+                        attempt=attempt,
+                    )
+                    logger.warning(
+                        f"[retry] Empty response - {len(messages)} messages, "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+
+                    if attempt == RATE_LIMIT_MAX_RETRIES:
+                        logger.error(
+                            f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                            f"attempts — empty response "
+                            f"(finish_reason={finish_reason}, "
+                            f"choices={len(response.choices) if response.choices else 0})"
+                        )
+                        return response
+                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    logger.warning(
+                        f"[retry] {model} returned empty response "
+                        f"(finish_reason={finish_reason}, "
+                        f"choices={len(response.choices) if response.choices else 0}) — "
+                        f"likely rate limited or quota exceeded. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    time.sleep(wait)
+                    continue
+
+                return response
+            except RateLimitError as e:
+                # Dump full request to file for debugging
+                messages = kwargs.get("messages", [])
+                token_count, token_method = _estimate_tokens(model, messages)
+                dump_path = _dump_failed_request(
+                    model=model,
+                    kwargs=kwargs,
+                    error_type="rate_limit",
+                    attempt=attempt,
+                )
+                if attempt == RATE_LIMIT_MAX_RETRIES:
+                    logger.error(
+                        f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                        f"attempts — rate limit error: {e!s}. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+                    raise
+                wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                logger.warning(
+                    f"[retry] {model} rate limited (429): {e!s}. "
+                    f"~{token_count} tokens ({token_method}). "
+                    f"Full request dumped to: {dump_path}. "
+                    f"Retrying in {wait}s "
+                    f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                )
+                time.sleep(wait)
+        # unreachable, but satisfies type checker
+        raise RuntimeError("Exhausted rate limit retries")
 
     def complete(
         self,
@@ -133,7 +293,7 @@ class LiteLLMProvider(LLMProvider):
             kwargs["response_format"] = response_format
 
         # Make the call
-        response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+        response = self._completion_with_rate_limit_retry(**kwargs)
 
         # Extract content
         content = response.choices[0].message.content or ""
@@ -189,7 +349,7 @@ class LiteLLMProvider(LLMProvider):
             if self.api_base:
                 kwargs["api_base"] = self.api_base
 
-            response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+            response = self._completion_with_rate_limit_retry(**kwargs)
 
             # Track tokens
             usage = response.usage
@@ -233,11 +393,18 @@ class LiteLLMProvider(LLMProvider):
 
             # Execute tools and add results.
             for tool_call in message.tool_calls:
-                # Parse arguments
                 try:
                     args = json.loads(tool_call.function.arguments)
                 except json.JSONDecodeError:
-                    args = {}
+                    # Surface error to LLM and skip tool execution
+                    current_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": "Invalid JSON arguments provided to tool.",
+                        }
+                    )
+                    continue
 
                 tool_use = ToolUse(
                     id=tool_call.id,
@@ -280,3 +447,189 @@ class LiteLLMProvider(LLMProvider):
                 },
             },
         }
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream a completion via litellm.acompletion(stream=True).
+
+        Yields StreamEvent objects as chunks arrive from the provider.
+        Tool call arguments are accumulated across chunks and yielded as
+        a single ToolCallEvent with fully parsed JSON when complete.
+
+        Empty responses (e.g. Gemini stealth rate-limits that return 200
+        with no content) are retried with exponential backoff, mirroring
+        the retry behaviour of ``_completion_with_rate_limit_retry``.
+        """
+        from framework.llm.stream_events import (
+            FinishEvent,
+            StreamErrorEvent,
+            TextDeltaEvent,
+            TextEndEvent,
+            ToolCallEvent,
+        )
+
+        full_messages: list[dict[str, Any]] = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": full_messages,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            **self.extra_kwargs,
+        }
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if tools:
+            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+
+        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+            # Post-stream events (ToolCall, TextEnd, Finish) are buffered
+            # because they depend on the full stream.  TextDeltaEvents are
+            # yielded immediately so callers see tokens in real time.
+            tail_events: list[StreamEvent] = []
+            accumulated_text = ""
+            tool_calls_acc: dict[int, dict[str, str]] = {}
+            input_tokens = 0
+            output_tokens = 0
+
+            try:
+                response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
+
+                async for chunk in response:
+                    choice = chunk.choices[0] if chunk.choices else None
+                    if not choice:
+                        continue
+
+                    delta = choice.delta
+
+                    # --- Text content — yield immediately for real-time streaming ---
+                    if delta and delta.content:
+                        accumulated_text += delta.content
+                        yield TextDeltaEvent(
+                            content=delta.content,
+                            snapshot=accumulated_text,
+                        )
+
+                    # --- Tool calls (accumulate across chunks) ---
+                    if delta and delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index if hasattr(tc, "index") and tc.index is not None else 0
+                            if idx not in tool_calls_acc:
+                                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc.id:
+                                tool_calls_acc[idx]["id"] = tc.id
+                            if tc.function:
+                                if tc.function.name:
+                                    tool_calls_acc[idx]["name"] = tc.function.name
+                                if tc.function.arguments:
+                                    tool_calls_acc[idx]["arguments"] += tc.function.arguments
+
+                    # --- Finish ---
+                    if choice.finish_reason:
+                        for _idx, tc_data in sorted(tool_calls_acc.items()):
+                            try:
+                                parsed_args = json.loads(tc_data["arguments"])
+                            except (json.JSONDecodeError, KeyError):
+                                parsed_args = {"_raw": tc_data.get("arguments", "")}
+                            tail_events.append(
+                                ToolCallEvent(
+                                    tool_use_id=tc_data["id"],
+                                    tool_name=tc_data["name"],
+                                    tool_input=parsed_args,
+                                )
+                            )
+
+                        if accumulated_text:
+                            tail_events.append(TextEndEvent(full_text=accumulated_text))
+
+                        usage = getattr(chunk, "usage", None)
+                        if usage:
+                            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+                        tail_events.append(
+                            FinishEvent(
+                                stop_reason=choice.finish_reason,
+                                input_tokens=input_tokens,
+                                output_tokens=output_tokens,
+                                model=self.model,
+                            )
+                        )
+
+                # Check whether the stream produced any real content.
+                # (If text deltas were yielded above, has_content is True
+                # and we skip the retry path — nothing was yielded in vain.)
+                has_content = accumulated_text or tool_calls_acc
+                if not has_content and attempt < RATE_LIMIT_MAX_RETRIES:
+                    # If the conversation ends with an assistant or tool
+                    # message, an empty stream is expected — the LLM has
+                    # nothing new to say.  Don't burn retries on this;
+                    # let the caller (EventLoopNode) decide what to do.
+                    # Typical case: client_facing node where the LLM set
+                    # all outputs via set_output tool calls, and the tool
+                    # results are the last messages.
+                    last_role = next(
+                        (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
+                        None,
+                    )
+                    if last_role in ("assistant", "tool"):
+                        logger.debug(
+                            "[stream] Empty response after %s message — expected, not retrying.",
+                            last_role,
+                        )
+                        for event in tail_events:
+                            yield event
+                        return
+                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    token_count, token_method = _estimate_tokens(
+                        self.model,
+                        full_messages,
+                    )
+                    dump_path = _dump_failed_request(
+                        model=self.model,
+                        kwargs=kwargs,
+                        error_type="empty_stream",
+                        attempt=attempt,
+                    )
+                    logger.warning(
+                        f"[stream-retry] {self.model} returned empty stream — "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Request dumped to: {dump_path}. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                # Success (or final attempt) — flush remaining events.
+                for event in tail_events:
+                    yield event
+                return
+
+            except RateLimitError as e:
+                if attempt < RATE_LIMIT_MAX_RETRIES:
+                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    logger.warning(
+                        f"[stream-retry] {self.model} rate limited (429): {e!s}. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                yield StreamErrorEvent(error=str(e), recoverable=False)
+                return
+
+            except Exception as e:
+                yield StreamErrorEvent(error=str(e), recoverable=False)
+                return

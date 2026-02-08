@@ -19,7 +19,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
 echo -e "${YELLOW}Step 1: Installing framework package...${NC}"
-pip install -e . || {
+uv pip install -e . || {
     echo -e "${RED}Failed to install framework package${NC}"
     exit 1
 }
@@ -27,7 +27,7 @@ echo -e "${GREEN}✓ Framework package installed${NC}"
 echo ""
 
 echo -e "${YELLOW}Step 2: Installing MCP dependencies...${NC}"
-pip install mcp fastmcp || {
+uv pip install mcp fastmcp || {
     echo -e "${RED}Failed to install MCP dependencies${NC}"
     exit 1
 }
@@ -59,7 +59,7 @@ fi
 echo ""
 
 echo -e "${YELLOW}Step 4: Testing MCP server...${NC}"
-python -c "from framework.mcp import agent_builder_server; print('✓ MCP server module loads successfully')" || {
+uv run python -c "from framework.mcp import agent_builder_server; print('✓ MCP server module loads successfully')" || {
     echo -e "${RED}Failed to import MCP server module${NC}"
     exit 1
 }
@@ -71,7 +71,7 @@ echo ""
 echo "The MCP server is now ready to use!"
 echo ""
 echo "To start the MCP server manually:"
-echo "  python -m framework.mcp.agent_builder_server"
+echo "  uv run python -m framework.mcp.agent_builder_server"
 echo ""
 echo "MCP Configuration location:"
 echo "  $SCRIPT_DIR/.mcp.json"

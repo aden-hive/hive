@@ -11,7 +11,6 @@ our edges can be created dynamically by a Builder agent based on the goal.
 
 Edge Types:
 - always: Always traverse after source completes
-- always: Always traverse after source completes
 - on_success: Traverse only if source succeeds
 - on_failure: Traverse only if source fails
 - conditional: Traverse based on expression evaluation (SAFE SUBSET ONLY)
@@ -22,7 +21,7 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -30,7 +29,7 @@ from pydantic import BaseModel, Field
 from framework.graph.safe_eval import safe_eval
 
 
-class EdgeCondition(str, Enum):
+class EdgeCondition(StrEnum):
     """When an edge should be traversed."""
 
     ALWAYS = "always"  # Always after source completes
@@ -157,6 +156,10 @@ class EdgeSpec(BaseModel):
         memory: dict[str, Any],
     ) -> bool:
         """Evaluate a conditional expression."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         if not self.condition_expr:
             return True
 
@@ -173,12 +176,24 @@ class EdgeSpec(BaseModel):
 
         try:
             # Safe evaluation using AST-based whitelist
-            return bool(safe_eval(self.condition_expr, context))
+            result = bool(safe_eval(self.condition_expr, context))
+            # Log the evaluation for visibility
+            # Extract the variable names used in the expression for debugging
+            expr_vars = {
+                k: repr(context[k])
+                for k in context
+                if k not in ("output", "memory", "result", "true", "false")
+                and k in self.condition_expr
+            }
+            logger.info(
+                "  Edge %s: condition '%s' → %s  (vars: %s)",
+                self.id,
+                self.condition_expr,
+                result,
+                expr_vars or "none matched",
+            )
+            return result
         except Exception as e:
-            # Log the error for debugging
-            import logging
-
-            logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
             logger.warning(f"         Available context keys: {list(context.keys())}")
@@ -420,6 +435,12 @@ class GraphSpec(BaseModel):
     max_steps: int = Field(default=100, description="Maximum node executions before timeout")
     max_retries_per_node: int = 3
 
+    # EventLoopNode configuration (from configure_loop)
+    loop_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="EventLoopNode configuration (max_iterations, max_tool_calls_per_turn, etc.)",
+    )
+
     # Metadata
     description: str = ""
     created_by: str = ""  # "human" or "builder_agent"
@@ -608,5 +629,41 @@ class GraphSpec(BaseModel):
                 ):
                     continue
                 errors.append(f"Node '{node.id}' is unreachable from entry")
+
+        # Client-facing fan-out validation
+        fan_outs = self.detect_fan_out_nodes()
+        for source_id, targets in fan_outs.items():
+            client_facing_targets = [
+                t
+                for t in targets
+                if self.get_node(t) and getattr(self.get_node(t), "client_facing", False)
+            ]
+            if len(client_facing_targets) > 1:
+                errors.append(
+                    f"Fan-out from '{source_id}' has multiple client-facing nodes: "
+                    f"{client_facing_targets}. Only one branch may be client-facing."
+                )
+
+        # Output key overlap on parallel event_loop nodes
+        for source_id, targets in fan_outs.items():
+            event_loop_targets = [
+                t
+                for t in targets
+                if self.get_node(t) and getattr(self.get_node(t), "node_type", "") == "event_loop"
+            ]
+            if len(event_loop_targets) > 1:
+                seen_keys: dict[str, str] = {}
+                for node_id in event_loop_targets:
+                    node = self.get_node(node_id)
+                    for key in getattr(node, "output_keys", []):
+                        if key in seen_keys:
+                            errors.append(
+                                f"Fan-out from '{source_id}': event_loop nodes "
+                                f"'{seen_keys[key]}' and '{node_id}' both write to "
+                                f"output_key '{key}'. Parallel event_loop nodes must "
+                                f"have disjoint output_keys to prevent last-wins data loss."
+                            )
+                        else:
+                            seen_keys[key] = node_id
 
         return errors
