@@ -23,6 +23,7 @@ if _exports_dir.is_dir() and str(_exports_dir) not in sys.path:
 del _framework_dir, _project_root, _exports_dir
 
 from mcp.server import FastMCP  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 
 from framework.graph import (  # noqa: E402
     Constraint,
@@ -1883,39 +1884,42 @@ def import_from_export(
     except json.JSONDecodeError as e:
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
 
-    # Parse goal (same pattern as BuildSession.from_dict lines 88-99)
-    goal_data = data.get("goal")
-    if goal_data:
-        session.goal = Goal(
-            id=goal_data["id"],
-            name=goal_data["name"],
-            description=goal_data["description"],
-            success_criteria=[
-                SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
-            ],
-            constraints=[Constraint(**c) for c in goal_data.get("constraints", [])],
-        )
+    try:
+        # Parse goal (same pattern as BuildSession.from_dict lines 88-99)
+        goal_data = data.get("goal")
+        if goal_data:
+            session.goal = Goal(
+                id=goal_data["id"],
+                name=goal_data["name"],
+                description=goal_data["description"],
+                success_criteria=[
+                    SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
+                ],
+                constraints=[Constraint(**c) for c in goal_data.get("constraints", [])],
+            )
 
-    # Parse nodes (same pattern as BuildSession.from_dict line 102)
-    graph_data = data.get("graph", {})
-    nodes_data = graph_data.get("nodes", [])
-    session.nodes = [NodeSpec(**n) for n in nodes_data]
+        # Parse nodes (same pattern as BuildSession.from_dict line 102)
+        graph_data = data.get("graph", {})
+        nodes_data = graph_data.get("nodes", [])
+        session.nodes = [NodeSpec(**n) for n in nodes_data]
 
-    # Parse edges (same pattern as BuildSession.from_dict lines 105-118)
-    edges_data = graph_data.get("edges", [])
-    session.edges = []
-    for e in edges_data:
-        condition_str = e.get("condition")
-        if isinstance(condition_str, str):
-            condition_map = {
-                "always": EdgeCondition.ALWAYS,
-                "on_success": EdgeCondition.ON_SUCCESS,
-                "on_failure": EdgeCondition.ON_FAILURE,
-                "conditional": EdgeCondition.CONDITIONAL,
-                "llm_decide": EdgeCondition.LLM_DECIDE,
-            }
-            e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
-        session.edges.append(EdgeSpec(**e))
+        # Parse edges (same pattern as BuildSession.from_dict lines 105-118)
+        edges_data = graph_data.get("edges", [])
+        session.edges = []
+        for e in edges_data:
+            condition_str = e.get("condition")
+            if isinstance(condition_str, str):
+                condition_map = {
+                    "always": EdgeCondition.ALWAYS,
+                    "on_success": EdgeCondition.ON_SUCCESS,
+                    "on_failure": EdgeCondition.ON_FAILURE,
+                    "conditional": EdgeCondition.CONDITIONAL,
+                    "llm_decide": EdgeCondition.LLM_DECIDE,
+                }
+                e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
+            session.edges.append(EdgeSpec(**e))
+    except (KeyError, TypeError, ValueError, ValidationError) as e:
+        return json.dumps({"success": False, "error": f"Malformed agent.json: {e}"})
 
     # Persist updated session
     _save_session(session)

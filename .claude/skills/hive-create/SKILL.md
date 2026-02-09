@@ -45,7 +45,22 @@ AskUserQuestion(questions=[{
 
 **EXECUTE THESE TOOL CALLS NOW** (silent setup — no user interaction needed):
 
-1. Register the hive-tools MCP server:
+1. Check for existing sessions:
+
+```
+mcp__agent-builder__list_sessions()
+```
+
+- If a session with this agent name already exists, load it with `mcp__agent-builder__load_session_by_id(session_id="...")` and skip to step 3.
+- If no matching session exists, proceed to step 2.
+
+2. Create a build session (replace AGENT_NAME with the user's requested agent name in snake_case):
+
+```
+mcp__agent-builder__create_session(name="AGENT_NAME")
+```
+
+3. Register the hive-tools MCP server:
 
 ```
 mcp__agent-builder__add_mcp_server(
@@ -58,19 +73,13 @@ mcp__agent-builder__add_mcp_server(
 )
 ```
 
-2. Create a build session (replace AGENT_NAME with the user's requested agent name in snake_case):
-
-```
-mcp__agent-builder__create_session(name="AGENT_NAME")
-```
-
-3. Discover available tools:
+4. Discover available tools:
 
 ```
 mcp__agent-builder__list_mcp_tools()
 ```
 
-4. Create the package directory:
+5. Create the package directory:
 
 ```bash
 mkdir -p exports/AGENT_NAME/nodes
@@ -138,7 +147,22 @@ AskUserQuestion(questions=[{
 cp -r examples/templates/TEMPLATE_DIR exports/NEW_AGENT_NAME
 ```
 
-### 1B.4: Create session and register MCP (same as STEP 1A)
+### 1B.4: Create session and register MCP (same logic as STEP 1A)
+
+First, check for existing sessions:
+
+```
+mcp__agent-builder__list_sessions()
+```
+
+- If a session with this agent name already exists, load it with `mcp__agent-builder__load_session_by_id(session_id="...")` and skip to `list_mcp_tools`.
+- If no matching session exists, create one:
+
+```
+mcp__agent-builder__create_session(name="NEW_AGENT_NAME")
+```
+
+Then register MCP and discover tools:
 
 ```
 mcp__agent-builder__add_mcp_server(
@@ -149,10 +173,6 @@ mcp__agent-builder__add_mcp_server(
     cwd="tools",
     description="Hive tools MCP server"
 )
-```
-
-```
-mcp__agent-builder__create_session(name="NEW_AGENT_NAME")
 ```
 
 ```
@@ -177,6 +197,23 @@ This reads the agent.json and populates the builder session with the goal, all n
 
 **If starting from a template**, the goal is already loaded in the builder session. Present the existing goal to the user using the format below and ask for approval. Skip the collaborative drafting questions — go straight to presenting and asking "Do you approve this goal, or would you like to modify it?"
 
+**If the user has NOT already described what they want to build**, start by asking what kind of agent they have in mind:
+
+```
+AskUserQuestion(questions=[{
+    "question": "What kind of agent do you want to build?",
+    "header": "Agent type",
+    "options": [
+        {"label": "Data collection", "description": "Gathers information from the web, analyzes it, and produces a report or sends outreach (e.g. market research, news digest, email campaigns, competitive analysis)"},
+        {"label": "Workflow automation", "description": "Automates a multi-step business process end-to-end (e.g. lead qualification, content publishing pipeline, data entry)"},
+        {"label": "Personal assistant", "description": "Handles recurring tasks or monitors for events and acts on them (e.g. daily briefings, meeting prep, file organization)"}
+    ],
+    "multiSelect": false
+}])
+```
+
+Use the user's selection (or their custom description if they chose "Other") as context when shaping the goal below. If the user already described what they want before this step, skip the question and proceed directly.
+
 **DO NOT propose a complete goal on your own.** Instead, collaborate with the user to define it.
 
 **START by asking the user to help shape the goal:**
@@ -189,7 +226,7 @@ This reads the agent.json and populates the builder session with the goal, all n
 > 2. **How will we know it succeeded?** (what does "done" look like)
 > 3. **Are there any hard constraints?** (things it must never do, quality bars, etc.)
 
-**WAIT for the user to respond.** Use their input to draft:
+**WAIT for the user to respond.** Use their input (and the agent type they selected) to draft:
 
 - Goal ID (kebab-case)
 - Goal name
@@ -417,7 +454,25 @@ AskUserQuestion(questions=[{
 
 **NOW — and only now — write the actual code.** The user has approved the goal, nodes, and graph.
 
-**If starting from a template**, the copied files will be overwritten with the approved design. The Python files must use the NEW agent name (class name, module references, storage paths, metadata), not the original template name.
+**If starting from a template**, the copied files will be overwritten with the approved design. You MUST replace every occurrence of the old template name with the new agent name. Here is the complete checklist — miss NONE of these:
+
+| File | What to rename |
+|------|---------------|
+| `config.py` | `AgentMetadata.name` — the display name shown in TUI agent selection |
+| `config.py` | `AgentMetadata.description` — agent description |
+| `agent.py` | Module docstring (line 1) |
+| `agent.py` | `class OldNameAgent:` → `class NewNameAgent:` |
+| `agent.py` | `GraphSpec(id="old-name-graph")` → `GraphSpec(id="new-name-graph")` — shown in TUI status bar |
+| `agent.py` | Storage path: `Path.home() / ".hive" / "agents" / "old_name"` → `"new_name"` |
+| `__main__.py` | Module docstring (line 1) |
+| `__main__.py` | `from .agent import ... OldNameAgent` → `NewNameAgent` |
+| `__main__.py` | CLI help string in `def cli()` docstring |
+| `__main__.py` | All `OldNameAgent()` instantiations |
+| `__main__.py` | Storage path (duplicated from agent.py) |
+| `__main__.py` | Shell banner string (e.g. `"=== Old Name Agent ==="`) |
+| `__init__.py` | Package docstring |
+| `__init__.py` | `from .agent import OldNameAgent` import |
+| `__init__.py` | `__all__` list entry |
 
 ### 5a: Register nodes and edges with MCP
 
