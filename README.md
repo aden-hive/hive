@@ -122,6 +122,17 @@ hive run exports/your_agent_name --input '{"key": "value"}'
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
 
+## ⚡ Try it First
+Want to see Hive in action before building your own agent? You can run a pre-built template immediately.
+
+### Option 1: Run a Simple Test
+Use the `run` command to execute the default template agent. This demonstrates the core execution loop.
+
+**Windows (PowerShell):**
+```powershell
+.\hive run template/basic
+
+
 ## Features
 
 - **[Goal-Driven Development](docs/key_concepts/goals_outcome.md)** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
