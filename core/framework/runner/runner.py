@@ -603,7 +603,11 @@ class AgentRunner:
             else:
                 # Fall back to environment variable
                 api_key_env = self._get_api_key_env_var(self.model)
-                if api_key_env and os.environ.get(api_key_env):
+
+                if api_key_env is None:
+                    # No key required (e.g. Ollama)
+                    self._llm = LiteLLMProvider(model=self.model)
+                elif os.environ.get(api_key_env):
                     self._llm = LiteLLMProvider(model=self.model)
                 else:
                     # Fall back to credential store

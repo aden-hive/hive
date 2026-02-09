@@ -10,7 +10,9 @@ See: https://docs.litellm.ai/docs/providers
 import asyncio
 import json
 import logging
+import re
 import time
+import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from pathlib import Path
@@ -611,6 +613,78 @@ class LiteLLMProvider(LLMProvider):
                     )
                     await asyncio.sleep(wait)
                     continue
+
+                # Fallback: If no tool calls were detected but we have text,
+                # check if the text is actually a JSON tool call (common in
+                # smaller models like Llama 3).
+                if accumulated_text and not tool_calls_acc:
+                    try:
+                        # Try to find JSON block in markdown or raw text
+                        # 1. Look for ```json ... ``` blocks
+                        json_block = re.search(
+                            r"```(?:json)?\s*(\{.*?\})\s*```",
+                            accumulated_text,
+                            re.DOTALL,
+                        )
+
+                        json_str = ""
+                        if json_block:
+                            json_str = json_block.group(1)
+                        else:
+                            # 2. Look for the first outer-most JSON object
+                            # This regex finds a brace, then matches non-brace
+                            # chars or nested braces recursively (up to a depth)
+                            # For simplicity, we just find the first { and last }
+                            # and try to parse
+                            start = accumulated_text.find("{")
+                            end = accumulated_text.rfind("}")
+                            if start != -1 and end != -1 and end > start:
+                                json_str = accumulated_text[start : end + 1]
+
+                        if json_str:
+                            try:
+                                data = json.loads(json_str)
+
+                                # Check if it matches tool call structure
+                                # Also handle cases where name/arguments are missing
+                                # but inferred? No, stay strict.
+                                if (
+                                    isinstance(data, dict)
+                                    and "name" in data
+                                    and ("arguments" in data or "parameters" in data)
+                                ):
+                                    tool_name = data["name"]
+                                    tool_args = (
+                                        data.get("arguments")
+                                        or data.get("parameters")
+                                        or {}
+                                    )
+
+                                    # If arguments are a string (nested JSON), parse them
+                                    if isinstance(tool_args, str):
+                                        try:
+                                            tool_args = json.loads(tool_args)
+                                        except json.JSONDecodeError:
+                                            pass
+
+                                    # Generate synthetic tool ID
+                                    tool_id = f"call_{uuid.uuid4().hex[:8]}"
+
+                                    logger.info(
+                                        f"Detected JSON tool call in text: {tool_name}"
+                                    )
+
+                                    tail_events.append(
+                                        ToolCallEvent(
+                                            tool_use_id=tool_id,
+                                            tool_name=tool_name,
+                                            tool_input=tool_args,
+                                        )
+                                    )
+                            except json.JSONDecodeError:
+                                pass
+                    except Exception:
+                        pass
 
                 # Success (or final attempt) — flush remaining events.
                 for event in tail_events:
