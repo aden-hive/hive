@@ -26,6 +26,7 @@ class MockLLMProvider(LLMProvider):
     def __init__(self, response_content: str = '{"passes": true, "explanation": "Test passed"}'):
         self.response_content = response_content
         self.complete_calls = []
+        self.complete_with_tools_calls = []
 
     def complete(
         self,
@@ -52,7 +53,23 @@ class MockLLMProvider(LLMProvider):
         )
 
     def complete_with_tools(self, messages, system, tools, tool_executor, max_iterations=10):
-        raise NotImplementedError("Tool use not needed for judge tests")
+        self.complete_with_tools_calls.append(
+            {
+                "messages": messages,
+                "system": system,
+                "tools": tools,
+                "tool_executor": tool_executor,
+                "max_iterations": max_iterations,
+            }
+        )
+
+        return LLMResponse(
+            content='{"passes": true, "explanation": "Tool execution completed"}',
+            model="mock-model",
+            input_tokens=200,
+            output_tokens=150,
+        )
+
 
 
 # ============================================================================
