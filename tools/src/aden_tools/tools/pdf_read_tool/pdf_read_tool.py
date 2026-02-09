@@ -1,5 +1,5 @@
 """
-PDF Read Tool - Parse and extract text from PDF files.
+PDF Read Tool - Manage Accounting and Financial Operations.
 
 Uses pypdf to read PDF documents and extract text content
 along with metadata.
