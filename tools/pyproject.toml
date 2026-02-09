@@ -30,6 +30,10 @@ dependencies = [
     "playwright-stealth>=1.0.5",
     "litellm>=1.81.0",
     "resend>=2.0.0",
+    "chromadb>=0.4.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "apscheduler>=3.11.2",
     "framework",
 ]
 

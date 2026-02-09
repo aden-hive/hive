@@ -1,22 +1,15 @@
-"""GitHub API client for fetching issues and managing webhooks."""
+"""GitHub API client using MCP tools.
 
-import httpx
+This module provides a simplified interface to GitHub operations
+using the aden_tools github_tool via MCP.
+"""
 from datetime import datetime, timedelta
 
-from app.config import settings
+from app.mcp_client import mcp_client
 
 
 class GitHubClient:
-    """Client for interacting with GitHub API."""
-    
-    def __init__(self):
-        self.base_url = "https://api.github.com"
-        self.repo = f"{settings.github_repo_owner}/{settings.github_repo_name}"
-        self.headers = {
-            "Authorization": f"Bearer {settings.github_token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28"
-        }
+    """Client for interacting with GitHub API via MCP tools."""
     
     def get_recent_issues(self, minutes: int = 65) -> list[dict]:
         """
@@ -28,22 +21,34 @@ class GitHubClient:
         Returns:
             List of issue dictionaries
         """
-        since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat() + "Z"
+        since_dt = datetime.utcnow() - timedelta(minutes=minutes)
         
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(
-                f"{self.base_url}/repos/{self.repo}/issues",
-                headers=self.headers,
-                params={
-                    "state": "open",
-                    "since": since,
-                    "per_page": 100,
-                    "sort": "created",
-                    "direction": "desc"
-                }
-            )
-            response.raise_for_status()
-            return response.json()
+        # GitHub tool doesn't support 'since' parameter, so we fetch and filter client-side
+        # Fetch recent pages to capture new issues
+        all_issues = []
+        for page in range(1, 4):  # Fetch first 3 pages (up to 90 issues)
+            result = mcp_client.get_issues(state="open", page=page, limit=30)
+            
+            if isinstance(result, dict) and "error" in result:
+                if page == 1:
+                    raise Exception(f"GitHub API error: {result['error']}")
+                break  # Stop if we hit an error on subsequent pages
+            
+            if not result:
+                break
+                
+            all_issues.extend(result)
+        
+        # Filter by created_at
+        recent_issues = []
+        for issue in all_issues:
+            created_at_str = issue.get("created_at", "")
+            if created_at_str:
+                created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                if created_at.replace(tzinfo=None) >= since_dt:
+                    recent_issues.append(issue)
+        
+        return recent_issues
     
     def get_issue_with_comments(self, issue_number: int) -> dict:
         """
@@ -55,24 +60,16 @@ class GitHubClient:
         Returns:
             Dict with 'issue' and 'comments' keys
         """
-        with httpx.Client(timeout=30.0) as client:
-            # Get issue
-            issue_resp = client.get(
-                f"{self.base_url}/repos/{self.repo}/issues/{issue_number}",
-                headers=self.headers
-            )
-            issue_resp.raise_for_status()
-            issue = issue_resp.json()
-            
-            # Get comments
-            comments_resp = client.get(
-                f"{self.base_url}/repos/{self.repo}/issues/{issue_number}/comments",
-                headers=self.headers
-            )
-            comments_resp.raise_for_status()
-            comments = comments_resp.json()
-            
-            return {"issue": issue, "comments": comments}
+        issue = mcp_client.get_issue(issue_number=issue_number)
+        comments = mcp_client.get_issue_comments(issue_number=issue_number)
+        
+        if isinstance(issue, dict) and "error" in issue:
+            raise Exception(f"Failed to fetch issue: {issue['error']}")
+        
+        if isinstance(comments, dict) and "error" in comments:
+            raise Exception(f"Failed to fetch comments: {comments['error']}")
+        
+        return {"issue": issue, "comments": comments}
     
     def get_issue_timeline(self, issue_number: int) -> list[dict]:
         """
@@ -84,13 +81,12 @@ class GitHubClient:
         Returns:
             List of timeline events
         """
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(
-                f"{self.base_url}/repos/{self.repo}/issues/{issue_number}/timeline",
-                headers={**self.headers, "Accept": "application/vnd.github.mockingbird-preview+json"}
-            )
-            response.raise_for_status()
-            return response.json()
+        result = mcp_client.get_issue_timeline(issue_number=issue_number)
+        
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(f"Failed to fetch timeline: {result['error']}")
+        
+        return result
     
     def get_pr_details(self, pr_number: int) -> dict:
         """
@@ -102,14 +98,12 @@ class GitHubClient:
         Returns:
             PR details dict
         """
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(
-                f"{self.base_url}/repos/{self.repo}/pulls/{pr_number}",
-                headers=self.headers
-            )
-            response.raise_for_status()
-            return response.json()
-
+        result = mcp_client.get_pull_request(pr_number=pr_number)
+        
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(f"Failed to fetch PR: {result['error']}")
+        
+        return result
 
     def get_stale_assigned_issues(self, days: int = 14) -> list[dict]:
         """
@@ -121,39 +115,30 @@ class GitHubClient:
         Returns:
             List of stale assigned issues
         """
-        from datetime import datetime, timedelta
-        
         stale_threshold = datetime.utcnow() - timedelta(days=days)
         stale_threshold_str = stale_threshold.isoformat() + "Z"
         
-        with httpx.Client(timeout=30.0) as client:
-            # Fetch assigned issues
-            response = client.get(
-                f"{self.base_url}/repos/{self.repo}/issues",
-                headers=self.headers,
-                params={
-                    "state": "open",
-                    "assignee": "*",  # Any assignee
-                    "per_page": 100,
-                    "sort": "updated",
-                    "direction": "asc"  # Oldest first
-                }
-            )
-            response.raise_for_status()
-            all_issues = response.json()
+        # Fetch assigned issues
+        result = mcp_client.get_issues(state="open", assignee="*", limit=100)
+        
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(f"GitHub API error: {result['error']}")
+        
+        all_issues = result
+        
+        # Filter for stale issues
+        stale_issues = []
+        for issue in all_issues:
+            # Skip pull requests
+            if "pull_request" in issue:
+                continue
             
-            # Filter for stale issues
-            stale_issues = []
-            for issue in all_issues:
-                # Skip pull requests
-                if "pull_request" in issue:
-                    continue
-                
-                updated_at = datetime.fromisoformat(issue["updated_at"].replace("Z", "+00:00"))
-                if updated_at.replace(tzinfo=None) < stale_threshold:
-                    stale_issues.append(issue)
-            
-            return stale_issues
+            updated_at = datetime.fromisoformat(issue["updated_at"].replace("Z", "+00:00"))
+            if updated_at.replace(tzinfo=None) < stale_threshold:
+                stale_issues.append(issue)
+        
+        return stale_issues
 
 
+# Global instance
 github_client = GitHubClient()

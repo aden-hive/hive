@@ -22,6 +22,11 @@ class ProcessedIssue(Base):
     short_summary = Column(String, nullable=True)
 
 
+# Create directory if it doesn't exist
+from pathlib import Path
+db_path = Path(settings.sqlite_db_path)
+db_path.parent.mkdir(parents=True, exist_ok=True)
+
 # Create engine and session
 engine = create_engine(f"sqlite:///{settings.sqlite_db_path}")
 SessionLocal = sessionmaker(bind=engine)

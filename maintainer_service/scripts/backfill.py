@@ -29,74 +29,69 @@ def backfill_issues(days: int = 30):
     # Calculate the date threshold
     since = (datetime.utcnow() - timedelta(days=days)).isoformat() + "Z"
     
-    # Fetch all issues (including closed)
     print(f"Fetching issues since {since}...")
     
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    import httpx
+    from app.mcp_client import mcp_client
     
-    def fetch_page(page_num):
-        """Fetch a single page of issues."""
-        with httpx.Client(timeout=60.0) as client:
-            response = client.get(
-                f"{github_client.base_url}/repos/{github_client.repo}/issues",
-                headers=github_client.headers,
-                params={
-                    "state": "all",
-                    "since": since,
-                    "per_page": 100,
-                    "page": page_num,
-                    "sort": "updated",
-                    "direction": "desc"
-                }
-            )
-            response.raise_for_status()
-            return response.json()
+    all_issues = []
+    page = 1
     
-    # First, fetch page 1 to estimate total pages
-    page_1_issues = fetch_page(1)
-    all_issues = page_1_issues
-    print(f"Fetched page 1: {len(page_1_issues)} issues")
-    
-    # If we got 100 issues, there are likely more pages
-    if len(page_1_issues) == 100:
-        # Estimate max pages (GitHub typically has a cap, so we'll fetch up to 50 pages in parallel)
-        max_pages = 50
-        
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            # Submit fetch jobs for pages 2 onwards
-            futures = {
-                executor.submit(fetch_page, page): page 
-                for page in range(2, max_pages + 1)
-            }
+    while True:
+        try:
+            print(f"Fetching page {page}...")
             
-            # Collect results as they complete
-            for future in as_completed(futures):
-                page_num = futures[future]
-                try:
-                    issues = future.result()
-                    if issues:
-                        all_issues.extend(issues)
-                        print(f"Fetched page {page_num}: {len(issues)} issues")
-                    else:
-                        # Empty page means we've reached the end
-                        break
-                except Exception as e:
-                    print(f"Error fetching page {page_num}: {e}")
+            # Use the corrected mcp_client.get_issues method
+            batch = mcp_client.get_issues(state="all", page=page, limit=100)
+            
+            if isinstance(batch, dict) and "error" in batch:
+                print(f"Error fetching page {page}: {batch['error']}")
+                break
+                
+            if not batch:
+                break
+                
+            all_issues.extend(batch)
+            print(f"Fetched {len(batch)} issues (Total: {len(all_issues)})")
+            
+            if len(batch) < 100:
+                break
+                
+            page += 1
+            
+        except Exception as e:
+            print(f"Error fetching page {page}: {e}")
+            break
+    
+    # Filter by 'since' date client-side
+    since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+    filtered_issues = []
+    for issue in all_issues:
+        updated_at_str = issue.get("updated_at", "")
+        if updated_at_str:
+            updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+            if updated_at >= since_dt:
+                filtered_issues.append(issue)
+    
+    print(f"Filtered to {len(filtered_issues)} issues updated since {since}")
+    all_issues = filtered_issues
     
     print(f"Total issues to process: {len(all_issues)}")
     
-    # Process each issue in parallel
+    # Process each issue
+    # We can stick to serial processing or use ThreadPoolExecutor but call MCP tools
     from concurrent.futures import ThreadPoolExecutor, as_completed
     
     def process_single_issue(idx, issue):
         """Process a single issue and return success status."""
         issue_number = issue["number"]
-        print(f"[{idx}/{len(all_issues)}] Processing issue #{issue_number}...")
+        # print(f"[{idx}/{len(all_issues)}] Processing issue #{issue_number}...", end="\r")
         
         try:
-            # Fetch timeline
-            timeline = github_client.get_issue_timeline(issue_number)
+            # Fetch timeline via MCP
+            timeline = mcp_client.get_issue_timeline(issue_number)
+            if isinstance(timeline, dict) and "error" in timeline:
+                # Fallback or empty if error
+                timeline = []
             
             # Extract PR references
             pr_refs = extract_pr_info_from_timeline(timeline)
@@ -105,14 +100,15 @@ def backfill_issues(days: int = 30):
             pr_statuses = []
             for pr_ref in pr_refs[:5]:  # Limit to first 5 PRs
                 try:
-                    pr_details = github_client.get_pr_details(pr_ref["pr_number"])
-                    pr_statuses.append({
-                        "pr_number": pr_ref["pr_number"],
-                        "is_merged": pr_details.get("merged", False),
-                        "merged_at": pr_details.get("merged_at"),
-                        "state": pr_details.get("state")
-                    })
-                except Exception as e:
+                    pr_details = mcp_client.get_pull_request(pr_ref["pr_number"])
+                    if isinstance(pr_details, dict) and "error" not in pr_details:
+                        pr_statuses.append({
+                            "pr_number": pr_ref["pr_number"],
+                            "is_merged": pr_details.get("merged", False),
+                            "merged_at": pr_details.get("merged_at"),
+                            "state": pr_details.get("state")
+                        })
+                except Exception:
                     pass
             
             # Build rich text
@@ -128,11 +124,11 @@ def backfill_issues(days: int = 30):
             # Determine if has merged PR
             has_merged_pr = any(pr.get("is_merged") for pr in pr_statuses)
             
-            # Extract label names and convert to comma-separated string
+            # Extract label names
             labels = [label["name"] for label in issue.get("labels", [])]
             labels_str = ", ".join(labels) if labels else ""
             
-            # Upsert to ChromaDB
+            # Upsert to ChromaDB via memory module (which uses MCP)
             issue_memory.upsert_issue(
                 issue_id=str(issue_number),
                 full_text=full_text,
@@ -146,28 +142,30 @@ def backfill_issues(days: int = 30):
                 }
             )
             
-            print(f"  ✓ Processed (Merged PR: {has_merged_pr})")
-            return True
+            return True, idx
         
         except Exception as e:
-            print(f"  ✗ Error processing issue #{issue_number}: {e}")
-            return False
+            return False, e
     
     # Use ThreadPoolExecutor for parallel processing
-    max_workers = 500  # Adjust based on rate limits
+    max_workers = 10  # Reduced/Safe worker count for MCP calls
     success_count = 0
     
+    print("Processing issues...")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all tasks
         futures = {
             executor.submit(process_single_issue, idx, issue): idx 
             for idx, issue in enumerate(all_issues, 1)
         }
         
-        # Wait for completion
         for future in as_completed(futures):
-            if future.result():
+            success, result = future.result()
+            if success:
                 success_count += 1
+                if result % 10 == 0:
+                    print(f"Processed {result}/{len(all_issues)} issues...")
+            else:
+                print(f"Error: {result}")
     
     print(f"\n✅ Backfill complete! Successfully processed {success_count}/{len(all_issues)} issues.")
 

@@ -1,6 +1,8 @@
 """Configuration settings for the Maintainer Service."""
 
-from pydantic_settings import BaseSettings
+import os
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -17,8 +19,10 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4.1-nano"
     
     # Database
-    chroma_persist_directory: str = "./data/chroma"
-    sqlite_db_path: str = "./data/state.db"
+    # Resolve paths relative to the project root (maintainer_service/)
+    _project_root = Path(__file__).resolve().parent.parent
+    chroma_persist_directory: str = str(_project_root / "data" / "chroma")
+    sqlite_db_path: str = str(_project_root / "data" / "state.db")
     
     # Scheduler
     analysis_interval_minutes: int = 60
@@ -33,10 +37,12 @@ class Settings(BaseSettings):
     
     slack_webhook_url: str | None = None
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),  # Try current dir first, then parent
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False
+    )
 
 
 settings = Settings()

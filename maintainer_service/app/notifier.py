@@ -1,12 +1,10 @@
-"""Notification system for sending digests."""
+"""Notification system for sending digests using MCP tools."""
 
 import logging
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import httpx
 
 from app.config import settings
+from app.mcp_client import mcp_client
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +20,7 @@ def send_digest(issues: list[dict], stale_issues: list[dict] = None):
     if stale_issues is None:
         stale_issues = []
     
-    if settings.notification_email and settings.smtp_host:
+    if settings.notification_email:
         send_email_digest(issues, stale_issues)
     
     if settings.slack_webhook_url:
@@ -30,7 +28,7 @@ def send_digest(issues: list[dict], stale_issues: list[dict] = None):
 
 
 def send_email_digest(issues: list[dict], stale_issues: list[dict] = None):
-    """Send email digest via SMTP."""
+    """Send email digest via MCP email tool."""
     if stale_issues is None:
         stale_issues = []
     
@@ -99,7 +97,7 @@ def send_email_digest(issues: list[dict], stale_issues: list[dict] = None):
         </head>
         <body>
             <h2>Hourly Issue Digest: {total_count} Items Requiring Attention</h2>
-            <p>Issues are ranked by <strong>Impact Score (0-100)</strong>, combining Novelty and Severity.</p>
+            <p>Issues are ranked by <strong>Impact Score</strong></p>
         """
         
         # Add issues by category
@@ -162,21 +160,19 @@ def send_email_digest(issues: list[dict], stale_issues: list[dict] = None):
         </html>
         """
         
-        # Send email
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = f"Hourly Issue Digest: {total_count} Items Requiring Attention"
-        msg['From'] = settings.smtp_username
-        msg['To'] = settings.notification_email
+        # Send email via MCP tool
+        result = mcp_client.send_email(
+            to=settings.notification_email,
+            subject=f"Hourly Issue Digest: {total_count} Items Requiring Attention",
+            html=html,
+            from_email=settings.smtp_username,
+            provider="smtp"
+        )
         
-        msg.attach(MIMEText(html, 'html'))
-        
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
-            server.starttls()
-            if settings.smtp_username and settings.smtp_password:
-                server.login(settings.smtp_username, settings.smtp_password)
-            server.send_message(msg)
-        
-        logger.info(f"Email digest sent to {settings.notification_email}")
+        if isinstance(result, dict) and result.get("success"):
+            logger.info(f"Email digest sent to {settings.notification_email}")
+        else:
+            logger.error(f"Failed to send email: {result.get('error', 'Unknown error')}")
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
 

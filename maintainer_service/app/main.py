@@ -5,6 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 import uvicorn
+import argparse
+import sys
+import os
 
 from app.config import settings
 from app.database import init_db
@@ -51,6 +54,42 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Maintainer Service")
+    parser.add_argument("--check", type=str, help="Lookback window in hours (e.g., 24, 0.5, 1/60)")
+    parser.add_argument("--schedule", type=str, help="Analysis interval in hours (e.g., 1, 0.5, 1/60)")
+    
+    # Parse known args to avoid conflict with uvicorn or other potential args
+    args, unknown = parser.parse_known_args()
+    
+    def parse_hours(value: str) -> float:
+        try:
+            if "/" in value:
+                num, denom = value.split("/")
+                return float(num) / float(denom)
+            return float(value)
+        except ValueError:
+            print(f"Error: Invalid hour format '{value}'. Use decimal (0.5) or fraction (1/2).")
+            sys.exit(1)
+    
+    if args.check:
+        hours = parse_hours(args.check)
+        minutes = int(hours * 60)
+        # Ensure at least 1 minute
+        minutes = max(1, minutes)
+        os.environ["LOOKBACK_WINDOW_MINUTES"] = str(minutes)
+        print(f"Configured lookback window: {args.check} hours ({minutes} minutes)")
+        
+    if args.schedule:
+        hours = parse_hours(args.schedule)
+        minutes = int(hours * 60)
+        # Ensure at least 1 minute
+        minutes = max(1, minutes)
+        os.environ["ANALYSIS_INTERVAL_MINUTES"] = str(minutes)
+        print(f"Configured analysis interval: {args.schedule} hours ({minutes} minutes)")
+    
+    # Remove our custom args from sys.argv so uvicorn doesn't complain if we were to use sys.argv
+    # But here we are using uvicorn.run programmatically, so it's fine.
+    
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
