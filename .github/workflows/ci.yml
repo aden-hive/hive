@@ -58,8 +58,16 @@ jobs:
       - name: Install dependencies and run tests
         run: |
           cd core
-          uv sync
-          uv run pytest tests/ -v
+          uv sync --group dev
+          uv run pytest tests/ -v --cov=framework --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        if: github.repository == 'adenhq/hive'
+        uses: codecov/codecov-action@v5
+        with:
+          files: core/coverage.xml
+          flags: core
+          fail_ci_if_error: false
 
   test-tools:
     name: Test Tools

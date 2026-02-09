@@ -60,5 +60,13 @@ lint.isort.section-order = [
   "local-folder",
 ]
 
+[tool.coverage.run]
+branch = true
+source = ["framework"]
+relative_files = true
+
+[tool.coverage.report]
+skip_empty = true
+
 [dependency-groups]
-dev = ["ty>=0.0.13", "ruff>=0.14.14"]
+dev = ["ty>=0.0.13", "ruff>=0.14.14", "pytest-cov>=5.0.0"]
