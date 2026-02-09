@@ -521,6 +521,15 @@ export ADEN_CREDENTIALS_PATH="/custom/path"
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
+## Opencode Setup
+
+[Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
+
+### Automatic Setup
+Run the setup script in the root directory:
+```bash
+python setup_opencode.py
+```
 
 ## Additional Resources
 
@@ -529,6 +538,13 @@ export AGENT_STORAGE_PATH="/custom/storage"
 - **Example Agents:** [exports/](../exports/)
 - **Agent Building Guide:** [.claude/skills/hive-create/SKILL.md](../.claude/skills/hive-create/SKILL.md)
 - **Testing Guide:** [.claude/skills/hive-test/SKILL.md](../.claude/skills/hive-test/SKILL.md)
+## Opencode Setup
+
+[Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
+
+### Automatic Setup
+Run the setup script in the root directory:
+```bash
 
 ## Contributing
 

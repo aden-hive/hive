@@ -116,6 +116,16 @@ Skills are also available in Cursor. To enable:
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
 4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
+```markdown
+### Opencode Integration
+
+The Opencode integration leverages the same MCP servers used by Cursor and Claude Code.
+
+* **Configuration:** Located in `.opencode/mcp.json`.
+* **Agent Definition:** The Hive agent is defined in `.opencode/agents/hive.md`.
+* **Skills:** The integration reuses existing skills from `.claude/skills/`. The Hive agent is configured to access these patterns directly, ensuring consistency across all coding agents.
+* **Tools:** Accesses `agent-builder` and standard `tools` via standard MCP protocols over stdio.
+```
 ### Verify Setup
 
 ```bash
