@@ -78,7 +78,6 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
         if credentials is None:
             raise ValueError("Credentials provider not available for QuickBooks tools")
 
-        # Adjust according to your actual credentials interface
         credentials.validate_for_tools(["quickbooks"])
         access_token = credentials.get("quickbooks_access_token")
         realm_id = credentials.get("quickbooks_realm_id")
@@ -95,8 +94,7 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
         due_date: str,
         memo: Optional[str] = None,
         custom_fields: Optional[List[Dict[str, Any]]] = None,
-        discount: Optional[float] = None,
-        tax: Optional[Dict[str, Any]] = None,
+        discount_amount: Optional[float] = None,
     ) -> str:
         """
         Create an invoice for a customer in QuickBooks Online.
@@ -106,7 +104,7 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
             client = get_client()
 
             payload: Dict[str, Any] = {
-                "Line": line_items,
+                "Line": line_items[:],  # copy to avoid mutating input
                 "CustomerRef": {"value": customer_id},
                 "DueDate": due_date,
             }
@@ -117,8 +115,16 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
             if custom_fields:
                 payload["CustomField"] = custom_fields
 
-            # Note: discount and tax usually require special Line items in QBO
-            # Simple total discount line would need to be added to `Line` here
+            # Simple discount support (as a negative line item)
+            if discount_amount is not None and discount_amount > 0:
+                payload["Line"].append({
+                    "Amount": -discount_amount,
+                    "DetailType": "DiscountLineDetail",
+                    "Description": "Discount",
+                    "DiscountLineDetail": {
+                        "PercentBased": False
+                    }
+                })
 
             result = client._request("POST", "/invoice", json=payload)
             invoice = result["Invoice"]
@@ -155,7 +161,7 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
         limit: int = 10,
         active_only: bool = True,
     ) -> str:
-        """Search customers by name or email. Returns JSON list."""
+        """Search customers by name or email. Returns JSON."""
         try:
             client = get_client()
 
@@ -208,7 +214,7 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
             if company_name:
                 payload["CompanyName"] = company_name
             if notes:
-                payload["Note"] = notes
+                payload["Notes"] = notes                     # ← FIXED: was "Note"
             if billing_address:
                 payload["BillAddr"] = billing_address
 
@@ -234,7 +240,6 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
         invoice_id: str,
         amount: float,
         payment_date: str,
-        payment_method: Optional[str] = None,
         reference_number: Optional[str] = None,
     ) -> str:
         """Record a payment against an invoice. Returns JSON summary."""
@@ -259,12 +264,11 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
 
             if reference_number:
                 payload["PaymentRefNum"] = reference_number
-            # payment_method would require PaymentMethodRef (list entity)
 
             result = client._request("POST", "/payment", json=payload)
             payment = result["Payment"]
 
-            # Optional: refresh invoice to get updated balance
+            # Refresh invoice to get updated balance
             updated_inv = client._request("GET", f"/invoice/{invoice_id}")["Invoice"]
 
             return json.dumps(
@@ -283,17 +287,16 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
 
     @mcp.tool()
     def quickbooks_create_expense(
-        payee: str,               # vendor name (will try to match or create minimally)
+        payee: str,
         amount: float,
-        expense_account_id: str,  # expense category account ID
+        expense_account_id: str,
         bank_account_id: Optional[str] = None,
         date: Optional[str] = None,
         memo: Optional[str] = None,
-        payment_method: Optional[str] = None,
     ) -> str:
         """
         Create an expense (Purchase) in QuickBooks.
-        payee is treated as Vendor name (simple version).
+        payee is treated as Vendor name (QuickBooks will create if not exists).
         """
         try:
             client = get_client()
@@ -308,19 +311,17 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
 
             payload = {
                 "Line": [line_detail],
-                "PaymentType": "Cash",  # can be Cash, Check, CreditCard, etc.
+                "PaymentType": "Cash",  # can be overridden later if needed
                 "EntityRef": {"name": payee, "type": "Vendor"},
             }
 
             if bank_account_id:
-                payload["AccountRef"] = {"value": bank_account_id}  # account paid from
+                payload["AccountRef"] = {"value": bank_account_id}  # paid from
 
             if date:
                 payload["TxnDate"] = date
             if memo:
                 payload["PrivateNote"] = memo
-
-            # payment_method would require reference to PaymentMethod entity
 
             result = client._request("POST", "/purchase", json=payload)
             expense = result["Purchase"]
