@@ -55,6 +55,7 @@ from .base import CredentialError, CredentialSpec
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .email import EMAIL_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
+from .quickbooks import QUICKBOOK_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
@@ -75,6 +76,7 @@ CREDENTIAL_SPECS = {
     **EMAIL_CREDENTIALS,
     **APOLLO_CREDENTIALS,
     **GITHUB_CREDENTIALS,
+    **QUICKBOOK_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
     **SLACK_CREDENTIALS,
 }
@@ -103,6 +105,7 @@ __all__ = [
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
+    "QUICKBOOKS_CREDENTIALS"
     "EMAIL_CREDENTIALS",
     "GITHUB_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",

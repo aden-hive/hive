@@ -25,6 +25,7 @@ from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
+from .quickbooks_tool import register_tools as register_quickbooks
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -79,6 +80,7 @@ def register_all_tools(
     register_hubspot(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_quickbooks(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -148,6 +150,12 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        "quickbooks_create_invoice",
+        "quickbooks_get_invoice",
+        "quickbooks_search_customers",
+        "quickbooks_create_customer",
+        "quickbooks_record_payment",
+        "quickbooks_create_expense",
         "query_runtime_logs",
         "query_runtime_log_details",
         "query_runtime_log_raw",
