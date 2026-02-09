@@ -91,10 +91,11 @@ class SessionState(BaseModel):
 
     Version History:
     - v1.0: Initial schema (2026-02-06)
+    - v1.1: Added checkpoint support (2026-02-08)
     """
 
     # Schema version for forward/backward compatibility
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
 
     # Identity
     session_id: str  # Format: session_YYYYMMDD_HHMMSS_{uuid_8char}
@@ -136,6 +137,10 @@ class SessionState(BaseModel):
     # Isolation level (from ExecutionContext)
     isolation_level: str = "shared"
 
+    # Checkpointing (for crash recovery and resume-from-failure)
+    checkpoint_enabled: bool = False
+    latest_checkpoint_id: str | None = None
+
     model_config = {"extra": "allow"}
 
     @computed_field
@@ -153,6 +158,14 @@ class SessionState(BaseModel):
     def is_resumable(self) -> bool:
         """Can this session be resumed?"""
         return self.status == SessionStatus.PAUSED and self.progress.resume_from is not None
+
+    @computed_field
+    @property
+    def is_resumable_from_checkpoint(self) -> bool:
+        """Can this session be resumed from a checkpoint?"""
+        # ANY session with checkpoints can be resumed (not just failed ones)
+        # This enables: pause/resume, iterative execution, continuation after completion
+        return self.checkpoint_enabled and self.latest_checkpoint_id is not None
 
     @classmethod
     def from_execution_result(
