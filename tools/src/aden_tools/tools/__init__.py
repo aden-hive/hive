@@ -40,6 +40,7 @@ from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
+from .mssql_tool import register_tools as register_mssql
 from .pdf_read_tool import register_tools as register_pdf_read
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
@@ -72,6 +73,7 @@ def register_all_tools(
     # email supports multiple providers (Resend) with auto-detection
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    register_mssql(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -129,6 +131,10 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        "mssql_execute_query",
+        "mssql_execute_update",
+        "mssql_get_schema",
+        "mssql_execute_procedure",
     ]
 
 

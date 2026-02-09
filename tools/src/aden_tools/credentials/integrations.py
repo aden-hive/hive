@@ -91,4 +91,81 @@ INTEGRATION_CREDENTIALS = {
         credential_id="hubspot",
         credential_key="access_token",
     ),
+    "mssql_server": CredentialSpec(
+        env_var="MSSQL_SERVER",
+        tools=[
+            "mssql_execute_query",
+            "mssql_execute_update",
+            "mssql_get_schema",
+            "mssql_execute_procedure",
+        ],
+        required=True,
+        startup_required=False,
+        help_url="https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server",
+        description="MSSQL Server instance name (e.g., 'localhost' or 'SERVER\\INSTANCE')",
+        # Auth method support
+        aden_supported=False,
+        direct_api_key_supported=True,
+        api_key_instructions="""To connect to MSSQL Server:
+1. Ensure SQL Server is installed and running
+2. Note your server instance name (e.g., 'localhost\\SQLEXPRESS')
+3. Set the connection details as environment variables:
+   - MSSQL_SERVER: Server address (e.g., 'localhost\\SQLEXPRESS')
+   - MSSQL_DATABASE: Database name (e.g., 'AdenTestDB')
+   - MSSQL_USERNAME: SQL Server username (e.g., 'sa')
+   - MSSQL_PASSWORD: SQL Server password
+4. Ensure ODBC Driver 17 for SQL Server is installed""",
+        # Credential store mapping
+        credential_id="mssql",
+        credential_key="server",
+    ),
+    "mssql_database": CredentialSpec(
+        env_var="MSSQL_DATABASE",
+        tools=[
+            "mssql_execute_query",
+            "mssql_execute_update",
+            "mssql_get_schema",
+            "mssql_execute_procedure",
+        ],
+        required=True,
+        startup_required=False,
+        help_url="https://learn.microsoft.com/en-us/sql/t-sql/statements/create-database-transact-sql",
+        description="MSSQL Database name to connect to",
+        aden_supported=False,
+        direct_api_key_supported=True,
+        credential_id="mssql",
+        credential_key="database",
+    ),
+    "mssql_username": CredentialSpec(
+        env_var="MSSQL_USERNAME",
+        tools=[
+            "mssql_execute_query",
+            "mssql_execute_update",
+            "mssql_get_schema",
+            "mssql_execute_procedure",
+        ],
+        required=False,  # Optional - can use Windows Auth
+        startup_required=False,
+        description="MSSQL Server username (not required for Windows Authentication)",
+        aden_supported=False,
+        direct_api_key_supported=True,
+        credential_id="mssql",
+        credential_key="username",
+    ),
+    "mssql_password": CredentialSpec(
+        env_var="MSSQL_PASSWORD",
+        tools=[
+            "mssql_execute_query",
+            "mssql_execute_update",
+            "mssql_get_schema",
+            "mssql_execute_procedure",
+        ],
+        required=False,  # Optional - can use Windows Auth
+        startup_required=False,
+        description="MSSQL Server password (not required for Windows Authentication)",
+        aden_supported=False,
+        direct_api_key_supported=True,
+        credential_id="mssql",
+        credential_key="password",
+    ),
 }
