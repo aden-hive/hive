@@ -18,6 +18,11 @@ export AIRTABLE_API_TOKEN=your-airtable-personal-access-token
 
 Alternatively, configure via the credential store (`CredentialStoreAdapter`).
 
+## Rate Limits
+
+- Automatically retries up to 2 times on 429 using Airtable's `Retry-After` header
+- Returns clear error with `retry_after` when exhausted
+
 ## Tools (5)
 
 | Tool | Description |
