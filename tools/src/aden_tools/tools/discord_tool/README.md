@@ -12,7 +12,7 @@ Send messages and interact with Discord servers via the Discord API.
 ## Limits & Validation
 
 - **Message length**: Max 2000 characters (validated before sending)
-- **Rate limits**: Returns clear error with `retry_after` on 429
+- **Rate limits**: Automatically retries up to 2 times on 429 using Discord's `retry_after`; returns clear error when exhausted
 - **Channel filtering**: `discord_list_channels` defaults to text channels only; use `text_only=False` for all types
 
 ## Setup

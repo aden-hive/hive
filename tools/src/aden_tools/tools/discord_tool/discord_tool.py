@@ -10,6 +10,7 @@ API Reference: https://discord.com/developers/docs
 from __future__ import annotations
 
 import os
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -22,6 +23,8 @@ DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_MESSAGE_LENGTH = 2000  # Discord API limit
 # Channel types: 0 = GUILD_TEXT, 5 = GUILD_ANNOUNCEMENT (both support messages)
 TEXT_CHANNEL_TYPES = (0, 5)
+MAX_RETRIES = 2  # 3 total attempts on 429
+MAX_RETRY_WAIT = 60  # cap wait at 60s
 
 
 class _DiscordClient:
@@ -36,6 +39,27 @@ class _DiscordClient:
             "Authorization": f"Bot {self._token}",
             "Content-Type": "application/json",
         }
+
+    def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Make HTTP request with retry on 429 rate limit."""
+        request_kwargs = {"headers": self._headers, "timeout": 30.0, **kwargs}
+        for attempt in range(MAX_RETRIES + 1):
+            response = httpx.request(method, url, **request_kwargs)
+            if response.status_code == 429 and attempt < MAX_RETRIES:
+                try:
+                    data = response.json()
+                    wait = min(float(data.get("retry_after", 1)), MAX_RETRY_WAIT)
+                except Exception:
+                    wait = min(2**attempt, MAX_RETRY_WAIT)
+                time.sleep(wait)
+                continue
+            return self._handle_response(response)
+        return self._handle_response(response)
 
     def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
         """Handle Discord API response format."""
@@ -68,21 +92,11 @@ class _DiscordClient:
 
     def list_guilds(self) -> dict[str, Any]:
         """List guilds (servers) the bot is a member of."""
-        response = httpx.get(
-            f"{DISCORD_API_BASE}/users/@me/guilds",
-            headers=self._headers,
-            timeout=30.0,
-        )
-        return self._handle_response(response)
+        return self._request_with_retry("GET", f"{DISCORD_API_BASE}/users/@me/guilds")
 
     def list_channels(self, guild_id: str, text_only: bool = True) -> dict[str, Any]:
         """List channels for a guild. Optionally filter to text channels only."""
-        response = httpx.get(
-            f"{DISCORD_API_BASE}/guilds/{guild_id}/channels",
-            headers=self._headers,
-            timeout=30.0,
-        )
-        result = self._handle_response(response)
+        result = self._request_with_retry("GET", f"{DISCORD_API_BASE}/guilds/{guild_id}/channels")
         if isinstance(result, dict) and "error" in result:
             return result
         if text_only:
@@ -98,13 +112,11 @@ class _DiscordClient:
     ) -> dict[str, Any]:
         """Send a message to a channel."""
         body: dict[str, Any] = {"content": content, "tts": tts}
-        response = httpx.post(
+        return self._request_with_retry(
+            "POST",
             f"{DISCORD_API_BASE}/channels/{channel_id}/messages",
-            headers=self._headers,
             json=body,
-            timeout=30.0,
         )
-        return self._handle_response(response)
 
     def get_messages(
         self,
@@ -119,14 +131,11 @@ class _DiscordClient:
             params["before"] = before
         if after:
             params["after"] = after
-
-        response = httpx.get(
+        return self._request_with_retry(
+            "GET",
             f"{DISCORD_API_BASE}/channels/{channel_id}/messages",
-            headers=self._headers,
             params=params,
-            timeout=30.0,
         )
-        return self._handle_response(response)
 
 
 def register_tools(

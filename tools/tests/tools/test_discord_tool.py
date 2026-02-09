@@ -17,6 +17,7 @@ import pytest
 from aden_tools.tools.discord_tool.discord_tool import (
     DISCORD_API_BASE,
     MAX_MESSAGE_LENGTH,
+    MAX_RETRIES,
     _DiscordClient,
     register_tools,
 )
@@ -68,9 +69,9 @@ class TestDiscordClient:
         assert "error" in result
         assert str(status_code) in result["error"]
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_list_guilds(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_list_guilds(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value=[
@@ -80,17 +81,15 @@ class TestDiscordClient:
             ),
         )
         result = self.client.list_guilds()
-        mock_get.assert_called_once_with(
-            f"{DISCORD_API_BASE}/users/@me/guilds",
-            headers=self.client._headers,
-            timeout=30.0,
-        )
+        mock_request.assert_called_once()
+        assert mock_request.call_args[0][0] == "GET"
+        assert "users/@me/guilds" in mock_request.call_args[0][1]
         assert len(result) == 2
         assert result[0]["name"] == "Test Server"
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_list_channels_text_only_default(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_list_channels_text_only_default(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value=[
@@ -106,9 +105,9 @@ class TestDiscordClient:
         assert result[1]["name"] == "incidents"
         assert not any(c["type"] == 2 for c in result)
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_list_channels_all_types(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_list_channels_all_types(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value=[
@@ -122,9 +121,9 @@ class TestDiscordClient:
         assert result[0]["type"] == 0
         assert result[1]["type"] == 2
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.post")
-    def test_send_message(self, mock_post):
-        mock_post.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_send_message(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value={
@@ -135,18 +134,15 @@ class TestDiscordClient:
             ),
         )
         result = self.client.send_message("c1", "Hello world")
-        mock_post.assert_called_once_with(
-            f"{DISCORD_API_BASE}/channels/c1/messages",
-            headers=self.client._headers,
-            json={"content": "Hello world", "tts": False},
-            timeout=30.0,
-        )
+        mock_request.assert_called_once()
+        assert mock_request.call_args[0][0] == "POST"
+        assert "channels/c1/messages" in mock_request.call_args[0][1]
         assert result["content"] == "Hello world"
         assert result["channel_id"] == "c1"
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_get_messages(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_get_messages(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value=[
@@ -156,14 +152,43 @@ class TestDiscordClient:
             ),
         )
         result = self.client.get_messages("c1", limit=10)
-        mock_get.assert_called_once_with(
-            f"{DISCORD_API_BASE}/channels/c1/messages",
-            headers=self.client._headers,
-            params={"limit": 10},
-            timeout=30.0,
-        )
+        mock_request.assert_called_once()
+        assert mock_request.call_args[1]["params"] == {"limit": 10}
         assert len(result) == 2
         assert result[0]["content"] == "First"
+
+    @patch("aden_tools.tools.discord_tool.discord_tool.time.sleep")
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_retry_on_429_then_success(self, mock_request, mock_sleep):
+        mock_request.side_effect = [
+            MagicMock(
+                status_code=429,
+                json=MagicMock(return_value={"retry_after": 0.01}),
+                text="{}",
+            ),
+            MagicMock(
+                status_code=200,
+                json=MagicMock(return_value=[{"id": "g1", "name": "Server"}]),
+            ),
+        ]
+        result = self.client.list_guilds()
+        assert len(result) == 1
+        assert result[0]["name"] == "Server"
+        assert mock_request.call_count == 2
+        mock_sleep.assert_called_once_with(0.01)
+
+    @patch("aden_tools.tools.discord_tool.discord_tool.time.sleep")
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_retry_exhausted_returns_error(self, mock_request, mock_sleep):
+        mock_request.return_value = MagicMock(
+            status_code=429,
+            json=MagicMock(return_value={"retry_after": 0.01}),
+            text="{}",
+        )
+        result = self.client.list_guilds()
+        assert "error" in result
+        assert "rate limit" in result["error"].lower()
+        assert mock_request.call_count == MAX_RETRIES + 1
 
 
 # --- Tool registration tests ---
@@ -181,9 +206,9 @@ class TestDiscordListGuildsTool:
     def _fn(self, name):
         return next(f for f in self.fns if f.__name__ == name)
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_list_guilds_success(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_list_guilds_success(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(return_value=[{"id": "g1", "name": "Test Server"}]),
         )
@@ -215,9 +240,9 @@ class TestDiscordListChannelsTool:
     def _fn(self, name):
         return next(f for f in self.fns if f.__name__ == name)
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_list_channels_success(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_list_channels_success(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value=[
@@ -230,9 +255,9 @@ class TestDiscordListChannelsTool:
         assert len(result["channels"]) == 1
         assert result["channels"][0]["name"] == "general"
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_list_channels_text_only_filter(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_list_channels_text_only_filter(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value=[
@@ -246,9 +271,9 @@ class TestDiscordListChannelsTool:
         assert len(result["channels"]) == 1
         assert result["channels"][0]["name"] == "general"
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_list_channels_error(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_list_channels_error(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=404,
             json=MagicMock(return_value={"message": "Unknown Guild"}),
             text="Unknown Guild",
@@ -270,9 +295,9 @@ class TestDiscordSendMessageTool:
     def _fn(self, name):
         return next(f for f in self.fns if f.__name__ == name)
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.post")
-    def test_send_message_success(self, mock_post):
-        mock_post.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_send_message_success(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value={
@@ -296,17 +321,17 @@ class TestDiscordSendMessageTool:
 
     def test_send_message_exactly_at_limit(self):
         content = "x" * MAX_MESSAGE_LENGTH
-        with patch("aden_tools.tools.discord_tool.discord_tool.httpx.post") as mock_post:
-            mock_post.return_value = MagicMock(
+        with patch("aden_tools.tools.discord_tool.discord_tool.httpx.request") as mock_request:
+            mock_request.return_value = MagicMock(
                 status_code=200,
                 json=MagicMock(return_value={"id": "m1", "channel_id": "c1", "content": content}),
             )
             result = self._fn("discord_send_message")("c1", content)
         assert result["success"] is True
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.post")
-    def test_send_message_rate_limit_429(self, mock_post):
-        mock_post.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_send_message_rate_limit_429_exhausted(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=429,
             json=MagicMock(return_value={"message": "Rate limit", "retry_after": 5}),
             text='{"message": "Rate limit", "retry_after": 5}',
@@ -315,6 +340,25 @@ class TestDiscordSendMessageTool:
         assert "error" in result
         assert "rate limit" in result["error"].lower()
         assert result.get("retry_after") == 5
+        assert mock_request.call_count == MAX_RETRIES + 1
+
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_send_message_rate_limit_then_success(self, mock_request):
+        mock_request.side_effect = [
+            MagicMock(
+                status_code=429,
+                json=MagicMock(return_value={"retry_after": 0.01}),
+                text="{}",
+            ),
+            MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"id": "m1", "channel_id": "c1", "content": "Hi"}),
+            ),
+        ]
+        result = self._fn("discord_send_message")("c1", "Hi")
+        assert result["success"] is True
+        assert result["message"]["content"] == "Hi"
+        assert mock_request.call_count == 2
 
 
 class TestDiscordGetMessagesTool:
@@ -329,9 +373,9 @@ class TestDiscordGetMessagesTool:
     def _fn(self, name):
         return next(f for f in self.fns if f.__name__ == name)
 
-    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.get")
-    def test_get_messages_success(self, mock_get):
-        mock_get.return_value = MagicMock(
+    @patch("aden_tools.tools.discord_tool.discord_tool.httpx.request")
+    def test_get_messages_success(self, mock_request):
+        mock_request.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
                 return_value=[
