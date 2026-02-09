@@ -186,21 +186,30 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         )
 
     # Build GraphSpec
-    graph = GraphSpec(
-        id=graph_data.get("id", "agent-graph"),
-        goal_id=graph_data.get("goal_id", ""),
-        version=graph_data.get("version", "1.0.0"),
-        entry_node=graph_data.get("entry_node", ""),
-        entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
-        async_entry_points=async_entry_points,  # Support multi-entry-point agents
-        terminal_nodes=graph_data.get("terminal_nodes", []),
-        pause_nodes=graph_data.get("pause_nodes", []),  # Support pause/resume architecture
-        nodes=nodes,
-        edges=edges,
-        max_steps=graph_data.get("max_steps", 100),
-        max_retries_per_node=graph_data.get("max_retries_per_node", 3),
-        description=graph_data.get("description", ""),
-    )
+    graph_kwargs = {
+        "id": graph_data.get("id", "agent-graph"),
+        "goal_id": graph_data.get("goal_id", ""),
+        "version": graph_data.get("version", "1.0.0"),
+        "entry_node": graph_data.get("entry_node", ""),
+        "entry_points": graph_data.get("entry_points", {}),  # Support pause/resume architecture
+        "async_entry_points": async_entry_points,  # Support multi-entry-point agents
+        "terminal_nodes": graph_data.get("terminal_nodes", []),
+        "pause_nodes": graph_data.get("pause_nodes", []),  # Support pause/resume architecture
+        "nodes": nodes,
+        "edges": edges,
+        "max_steps": graph_data.get("max_steps", 100),
+        "max_retries_per_node": graph_data.get("max_retries_per_node", 3),
+        "description": graph_data.get("description", ""),
+    }
+
+# Backward/forward compatibility for exports
+if "default_model" in graph_data:
+    graph_kwargs["default_model"] = graph_data["default_model"]
+elif "defaultModel" in graph_data:
+    graph_kwargs["default_model"] = graph_data["defaultModel"]
+
+graph = GraphSpec(**graph_kwargs)
+
 
     # Build Goal
     from framework.graph.goal import Constraint, SuccessCriterion
@@ -603,6 +612,14 @@ class AgentRunner:
             else:
                 # Fall back to environment variable
                 api_key_env = self._get_api_key_env_var(self.model)
+                # Gemini: allow GOOGLE_API_KEY as fallback for users who set it
+                if (
+                    api_key_env == "GEMINI_API_KEY"
+                    and not os.environ.get("GEMINI_API_KEY")
+                    and os.environ.get("GOOGLE_API_KEY")
+                ):
+                    os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
+
                 if api_key_env and os.environ.get(api_key_env):
                     self._llm = LiteLLMProvider(model=self.model)
                 else:
@@ -641,8 +658,8 @@ class AgentRunner:
             return "OPENAI_API_KEY"
         elif model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
             return "ANTHROPIC_API_KEY"
-        elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
-            return "GOOGLE_API_KEY"
+        elif (model_lower.startswith("gemini/") or model_lower.startswith("google/") or "gemini" in model_lower):
+            return "GEMINI_API_KEY"
         elif model_lower.startswith("mistral/"):
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
@@ -741,6 +758,17 @@ class AgentRunner:
         # Create AgentRuntime with all entry points
         log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
 
+        # Enable checkpointing by default for resumable sessions
+        from framework.graph.checkpoint_config import CheckpointConfig
+
+        checkpoint_config = CheckpointConfig(
+            enabled=True,
+            checkpoint_on_node_start=False,  # Only checkpoint after nodes complete
+            checkpoint_on_node_complete=True,
+            checkpoint_max_age_days=7,
+            async_checkpoint=True,  # Non-blocking
+        )
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -750,6 +778,7 @@ class AgentRunner:
             tools=tools,
             tool_executor=tool_executor,
             runtime_log_store=log_store,
+            checkpoint_config=checkpoint_config,
         )
 
     async def run(
