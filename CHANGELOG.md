@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Agent evaluation framework (`core/framework/evaluation/`)
+  - Runtime evaluation of ExecutionResult against Goal success criteria and constraints
+  - 22-category failure taxonomy with pattern matching and structural analysis
+  - Metrics aggregation with trend detection across runs
+  - Structured reports with evolution recommendations for the Coding Agent
 - Initial project structure
 - React frontend (honeycomb) with Vite and TypeScript
 - Node.js backend (hive) with Express and TypeScript
