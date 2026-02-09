@@ -588,29 +588,27 @@ class ChatRepl(Vertical):
             self._write_history(f"[dim]{traceback.format_exc()}[/dim]")
 
     async def _cmd_pause(self) -> None:
-        """Request graceful pause at next node boundary."""
+        """Immediately pause execution by cancelling task (same as Ctrl+Z)."""
         # Check if there's a current execution
         if not self._current_exec_id:
             self._write_history("[bold yellow]No active execution to pause[/bold yellow]")
             self._write_history("  Start an execution first, then use /pause during execution")
             return
 
-        # Find the executor for the current execution
-        executor_found = False
+        # Find and cancel the execution task - executor will catch and save state
+        task_cancelled = False
         for stream in self.runtime._streams.values():
-            if self._current_exec_id in stream._active_executors:
-                executor = stream._active_executors[self._current_exec_id]
-                executor.request_pause()
-                executor_found = True
-                self._write_history("[bold green]✓ Pause requested[/bold green]")
-                self._write_history("  Execution will pause after current iteration completes")
-                self._write_history("  (Each iteration = 1 LLM stop + tool calls)")
+            exec_id = self._current_exec_id
+            task = stream._execution_tasks.get(exec_id)
+            if task and not task.done():
+                task.cancel()
+                task_cancelled = True
+                self._write_history("[bold green]⏸ Execution paused - state saved[/bold green]")
                 self._write_history("  Resume later with: [bold]/resume[/bold]")
                 break
 
-        if not executor_found:
-            self._write_history("[bold yellow]Could not find active executor[/bold yellow]")
-            self._write_history("  The execution may have already completed")
+        if not task_cancelled:
+            self._write_history("[bold yellow]Execution already completed[/bold yellow]")
 
     def on_mount(self) -> None:
         """Add welcome message and check for resumable sessions."""

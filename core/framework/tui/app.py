@@ -536,14 +536,44 @@ class AdenTUI(App):
             self.notify(f"Screenshot failed: {e}", severity="error", timeout=5)
 
     def action_pause_execution(self) -> None:
-        """Request pause at next node boundary (bound to F5)."""
-        self.notify(
-            "⏸ Pause requested - will pause at next node boundary",
-            severity="warning",
-            timeout=3,
-        )
-        # TODO: Implement actual pause via runtime
-        # For now, just show the notification
+        """Immediately pause execution by cancelling task (bound to Ctrl+Z)."""
+        try:
+            chat_repl = self.query_one(ChatRepl)
+            if not chat_repl._current_exec_id:
+                self.notify(
+                    "No active execution to pause",
+                    severity="information",
+                    timeout=3,
+                )
+                return
+
+            # Find and cancel the execution task - executor will catch and save state
+            task_cancelled = False
+            for stream in self.runtime._streams.values():
+                exec_id = chat_repl._current_exec_id
+                task = stream._execution_tasks.get(exec_id)
+                if task and not task.done():
+                    task.cancel()
+                    task_cancelled = True
+                    self.notify(
+                        "⏸ Execution paused - state saved",
+                        severity="information",
+                        timeout=3,
+                    )
+                    break
+
+            if not task_cancelled:
+                self.notify(
+                    "Execution already completed",
+                    severity="information",
+                    timeout=2,
+                )
+        except Exception as e:
+            self.notify(
+                f"Error pausing execution: {e}",
+                severity="error",
+                timeout=5,
+            )
 
     def action_show_sessions(self) -> None:
         """Show sessions list (bound to Ctrl+R)."""
@@ -584,13 +614,15 @@ class AdenTUI(App):
                         # Cancel the task - executor will catch and save state
                         task.cancel()
                         try:
-                            # Wait briefly for cancellation to propagate
-                            await asyncio.wait_for(task, timeout=0.5)
+                            # Wait for executor to save state (may take a few seconds)
+                            # Longer timeout for quit to ensure state is properly saved
+                            await asyncio.wait_for(task, timeout=5.0)
                         except (TimeoutError, asyncio.CancelledError):
                             # Expected - task was cancelled
+                            # If timeout, state may not be fully saved
                             pass
                         except Exception:
-                            # Ignore other exceptions
+                            # Ignore other exceptions during cleanup
                             pass
                         break
         except Exception:
