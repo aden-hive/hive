@@ -746,6 +746,17 @@ class AgentRunner:
         # Create AgentRuntime with all entry points
         log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
 
+        # Enable checkpointing by default for resumable sessions
+        from framework.graph.checkpoint_config import CheckpointConfig
+
+        checkpoint_config = CheckpointConfig(
+            enabled=True,
+            checkpoint_on_node_start=False,  # Only checkpoint after nodes complete
+            checkpoint_on_node_complete=True,
+            checkpoint_max_age_days=7,
+            async_checkpoint=True,  # Non-blocking
+        )
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -755,6 +766,7 @@ class AgentRunner:
             tools=tools,
             tool_executor=tool_executor,
             runtime_log_store=log_store,
+            checkpoint_config=checkpoint_config,
         )
 
     async def run(

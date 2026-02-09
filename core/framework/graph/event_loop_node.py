@@ -1763,7 +1763,19 @@ class EventLoopNode(NodeProtocol):
         conversation: NodeConversation,
         iteration: int,
     ) -> bool:
-        """Check if pause has been requested. Returns True if paused."""
+        """
+        Check if pause has been requested. Returns True if paused.
+
+        Note: This check happens BEFORE starting iteration N, after completing N-1.
+        If paused, the node exits having completed {iteration} iterations (0 to iteration-1).
+        """
+        # Check executor-level pause event (for /pause command, Ctrl+Z)
+        if ctx.pause_event and ctx.pause_event.is_set():
+            completed = iteration  # 0-indexed: iteration=3 means 3 iterations completed (0,1,2)
+            logger.info(f"⏸ Pausing after {completed} iteration(s) completed (executor-level)")
+            return True
+
+        # Check context-level pause flags (legacy/alternative methods)
         pause_requested = ctx.input_data.get("pause_requested", False)
         if not pause_requested:
             try:
@@ -1771,8 +1783,10 @@ class EventLoopNode(NodeProtocol):
             except (PermissionError, KeyError):
                 pause_requested = False
         if pause_requested:
-            logger.info(f"Pause requested at iteration {iteration}")
+            completed = iteration
+            logger.info(f"⏸ Pausing after {completed} iteration(s) completed (context-level)")
             return True
+
         return False
 
     # -------------------------------------------------------------------

@@ -495,11 +495,96 @@ max_node_visits=3  # Prevent getting stuck
 - Confirm it calls set_output eventually
 ```
 
+#### Template 6: Checkpoint Recovery (Post-Fix Resume)
+
+```markdown
+## Recovery Strategy: Resume from Last Clean Checkpoint
+
+**Situation:** You've fixed the issue, but the failed session is stuck mid-execution
+
+**Solution:** Resume execution from a checkpoint before the failure
+
+### Option A: Auto-Resume from Latest Checkpoint (Recommended)
+
+Use CLI arguments to auto-resume when launching TUI:
+
+```bash
+PYTHONPATH=core:exports python -m {agent_name} --tui \
+    --resume-session {session_id}
+```
+
+This will:
+- Load session state from `state.json`
+- Continue from where it paused/failed
+- Apply your fixes immediately
+
+### Option B: Resume from Specific Checkpoint (Time-Travel)
+
+If you need to go back to an earlier point:
+
+```bash
+PYTHONPATH=core:exports python -m {agent_name} --tui \
+    --resume-session {session_id} \
+    --checkpoint {checkpoint_id}
+```
+
+Example:
+```bash
+PYTHONPATH=core:exports python -m deep_research_agent --tui \
+    --resume-session session_20260208_143022_abc12345 \
+    --checkpoint cp_node_complete_intake_143030
+```
+
+### Option C: Use TUI Commands
+
+Alternatively, launch TUI normally and use commands:
+
+```bash
+# Launch TUI
+PYTHONPATH=core:exports python -m {agent_name} --tui
+
+# In TUI, use commands:
+/resume {session_id}                    # Resume from session state
+/recover {session_id} {checkpoint_id}   # Recover from specific checkpoint
+```
+
+### When to Use Each Option:
+
+**Use `/resume` (or --resume-session) when:**
+- You fixed credentials and want to retry
+- Agent paused and you want to continue
+- Agent failed and you want to retry from last state
+
+**Use `/recover` (or --resume-session + --checkpoint) when:**
+- You need to go back to an earlier checkpoint
+- You want to try a different path from a specific point
+- Debugging requires time-travel to earlier state
+
+### Find Available Checkpoints:
+
+```bash
+# In TUI:
+/sessions {session_id}
+
+# This shows all checkpoints with timestamps:
+Available Checkpoints: (3)
+  1. cp_node_complete_intake_143030
+  2. cp_node_complete_research_143115
+  3. cp_pause_research_143130
+```
+
+**Verification:**
+- Use `--resume-session` to test your fix immediately
+- No need to re-run from the beginning
+- Session continues with your code changes applied
+```
+
 **Selecting the right template:**
 - Match the issue category from Stage 4
 - Customize with specific details from Stage 5
 - Include actual error messages and code snippets
 - Provide file paths and line numbers when possible
+- **Always include recovery commands** (Template 6) after providing fix recommendations
 
 ---
 
