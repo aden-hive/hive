@@ -4,7 +4,7 @@ A goal-driven agent runtime with Builder-friendly observability.
 
 ## Overview
 
-Framework provides a runtime framework that captures **decisions**, not just actions. This enables a "Builder" LLM to analyze and improve agent behavior by understanding:
+The framework provides a runtime that captures **decisions**, not just actions. This enables a "Builder" LLM to analyze and improve agent behavior by understanding:
 
 - What the agent was trying to accomplish
 - What options it considered
