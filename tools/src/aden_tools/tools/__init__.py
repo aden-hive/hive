@@ -7,7 +7,7 @@ Usage:
     from aden_tools.credentials import CredentialStoreAdapter
 
     mcp = FastMCP("my-server")
-    credentials = CredentialStoreAdapter.with_env_storage()
+    credentials = CredentialStoreAdapter.default()
     register_all_tools(mcp, credentials=credentials)
 """
 
@@ -21,11 +21,13 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
+from .file_system_toolkits.data_tools import register_tools as register_data_tools
 from .file_system_toolkits.execute_command_tool import (
     register_tools as register_execute_command,
 )
@@ -42,6 +44,8 @@ from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
 from .mssql_tool import register_tools as register_mssql
 from .pdf_read_tool import register_tools as register_pdf_read
+from .runtime_logs_tool import register_tools as register_runtime_logs
+from .slack_tool import register_tools as register_slack
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
@@ -65,6 +69,7 @@ def register_all_tools(
     register_example(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
+    register_runtime_logs(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -73,7 +78,11 @@ def register_all_tools(
     # email supports multiple providers (Resend) with auto-detection
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+
+    # Combined Register Sections
     register_mssql(mcp, credentials=credentials)
+    register_apollo(mcp, credentials=credentials)
+    register_slack(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -84,6 +93,7 @@ def register_all_tools(
     register_apply_patch(mcp)
     register_grep_search(mcp)
     register_execute_command(mcp)
+    register_data_tools(mcp)
     register_csv(mcp)
 
     return [
@@ -99,11 +109,19 @@ def register_all_tools(
         "apply_patch",
         "grep_search",
         "execute_command_tool",
+        "load_data",
+        "save_data",
+        "list_data_files",
+        "serve_file_to_user",
         "csv_read",
         "csv_write",
         "csv_append",
         "csv_info",
         "csv_sql",
+        "apollo_enrich_person",
+        "apollo_enrich_company",
+        "apollo_search_people",
+        "apollo_search_companies",
         "github_list_repos",
         "github_get_repo",
         "github_search_repos",
@@ -117,6 +135,9 @@ def register_all_tools(
         "github_search_code",
         "github_list_branches",
         "github_get_branch",
+        "github_list_stargazers",
+        "github_get_user_profile",
+        "github_get_user_emails",
         "send_email",
         "send_budget_alert_email",
         "hubspot_search_contacts",
@@ -131,10 +152,63 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        # MSSQL Tools
         "mssql_execute_query",
         "mssql_execute_update",
         "mssql_get_schema",
         "mssql_execute_procedure",
+        # Upstream Updates
+        "query_runtime_logs",
+        "query_runtime_log_details",
+        "query_runtime_log_raw",
+        "slack_send_message",
+        "slack_list_channels",
+        "slack_get_channel_history",
+        "slack_add_reaction",
+        "slack_get_user_info",
+        "slack_update_message",
+        "slack_delete_message",
+        "slack_schedule_message",
+        "slack_create_channel",
+        "slack_archive_channel",
+        "slack_invite_to_channel",
+        "slack_set_channel_topic",
+        "slack_remove_reaction",
+        "slack_list_users",
+        "slack_upload_file",
+        "slack_search_messages",
+        "slack_get_thread_replies",
+        "slack_pin_message",
+        "slack_unpin_message",
+        "slack_list_pins",
+        "slack_add_bookmark",
+        "slack_list_scheduled_messages",
+        "slack_delete_scheduled_message",
+        "slack_send_dm",
+        "slack_get_permalink",
+        "slack_send_ephemeral",
+        "slack_post_blocks",
+        "slack_open_modal",
+        "slack_update_home_tab",
+        "slack_set_status",
+        "slack_set_presence",
+        "slack_get_presence",
+        "slack_create_reminder",
+        "slack_list_reminders",
+        "slack_delete_reminder",
+        "slack_create_usergroup",
+        "slack_update_usergroup_members",
+        "slack_list_usergroups",
+        "slack_list_emoji",
+        "slack_create_canvas",
+        "slack_edit_canvas",
+        "slack_get_messages_for_analysis",
+        "slack_trigger_workflow",
+        "slack_get_conversation_context",
+        "slack_find_user_by_email",
+        "slack_kick_user_from_channel",
+        "slack_delete_file",
+        "slack_get_team_stats",
     ]
 
 

@@ -2,10 +2,16 @@
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.stream_events import (
+    FinishEvent,
+    StreamEvent,
+    TextDeltaEvent,
+    TextEndEvent,
+)
 
 
 class MockLLMProvider(LLMProvider):
@@ -175,3 +181,28 @@ class MockLLMProvider(LLMProvider):
             output_tokens=0,
             stop_reason="mock_complete",
         )
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream a mock completion as word-level TextDeltaEvents.
+
+        Splits the mock response into words and yields each as a separate
+        TextDeltaEvent with an accumulating snapshot, exercising the full
+        streaming pipeline without any API calls.
+        """
+        content = self._generate_mock_response(system=system, json_mode=False)
+        words = content.split(" ")
+        accumulated = ""
+
+        for i, word in enumerate(words):
+            chunk = word if i == 0 else " " + word
+            accumulated += chunk
+            yield TextDeltaEvent(content=chunk, snapshot=accumulated)
+
+        yield TextEndEvent(full_text=accumulated)
+        yield FinishEvent(stop_reason="mock_complete", model=self.model)
