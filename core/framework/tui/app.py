@@ -6,7 +6,7 @@ import time
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Footer, Label
+from textual.widgets import Footer, Input, Label
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import AgentEvent, EventType
@@ -208,17 +208,24 @@ class AdenTUI(App):
         Binding("ctrl+c", "ctrl_c", "Interrupt", show=False, priority=True),
         Binding("super+c", "ctrl_c", "Copy", show=False, priority=True),
         Binding("ctrl+s", "screenshot", "Screenshot (SVG)", show=True, priority=True),
+        Binding("ctrl+z", "pause_execution", "Pause", show=True, priority=True),
+        Binding("ctrl+r", "show_sessions", "Sessions", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
     ]
 
-    def __init__(self, runtime: AgentRuntime):
+    def __init__(
+        self,
+        runtime: AgentRuntime,
+        resume_session: str | None = None,
+        resume_checkpoint: str | None = None,
+    ):
         super().__init__()
 
         self.runtime = runtime
         self.log_pane = LogPane()
         self.graph_view = GraphOverview(runtime)
-        self.chat_repl = ChatRepl(runtime)
+        self.chat_repl = ChatRepl(runtime, resume_session, resume_checkpoint)
         self.status_bar = StatusBar(graph_id=runtime.graph.id)
         self.is_ready = False
 
@@ -528,9 +535,99 @@ class AdenTUI(App):
         except Exception as e:
             self.notify(f"Screenshot failed: {e}", severity="error", timeout=5)
 
+    def action_pause_execution(self) -> None:
+        """Immediately pause execution by cancelling task (bound to Ctrl+Z)."""
+        try:
+            chat_repl = self.query_one(ChatRepl)
+            if not chat_repl._current_exec_id:
+                self.notify(
+                    "No active execution to pause",
+                    severity="information",
+                    timeout=3,
+                )
+                return
+
+            # Find and cancel the execution task - executor will catch and save state
+            task_cancelled = False
+            for stream in self.runtime._streams.values():
+                exec_id = chat_repl._current_exec_id
+                task = stream._execution_tasks.get(exec_id)
+                if task and not task.done():
+                    task.cancel()
+                    task_cancelled = True
+                    self.notify(
+                        "⏸ Execution paused - state saved",
+                        severity="information",
+                        timeout=3,
+                    )
+                    break
+
+            if not task_cancelled:
+                self.notify(
+                    "Execution already completed",
+                    severity="information",
+                    timeout=2,
+                )
+        except Exception as e:
+            self.notify(
+                f"Error pausing execution: {e}",
+                severity="error",
+                timeout=5,
+            )
+
+    def action_show_sessions(self) -> None:
+        """Show sessions list (bound to Ctrl+R)."""
+        # Send /sessions command to chat input
+        try:
+            chat_repl = self.query_one(ChatRepl)
+            chat_input = chat_repl.query_one("#chat-input", Input)
+            chat_input.value = "/sessions"
+            # Trigger submission
+            self.notify(
+                "💡 Type /sessions in the chat to see all sessions",
+                severity="information",
+                timeout=3,
+            )
+        except Exception:
+            self.notify(
+                "Use /sessions command to see all sessions",
+                severity="information",
+                timeout=3,
+            )
+
     async def on_unmount(self) -> None:
-        """Cleanup on app shutdown."""
+        """Cleanup on app shutdown - cancel execution which will save state."""
         self.is_ready = False
+
+        # Cancel any active execution - the executor will catch CancelledError
+        # and save current state as paused (no waiting needed!)
+        try:
+            import asyncio
+
+            chat_repl = self.query_one(ChatRepl)
+            if chat_repl._current_exec_id:
+                # Find the stream with this execution
+                for stream in self.runtime._streams.values():
+                    exec_id = chat_repl._current_exec_id
+                    task = stream._execution_tasks.get(exec_id)
+                    if task and not task.done():
+                        # Cancel the task - executor will catch and save state
+                        task.cancel()
+                        try:
+                            # Wait for executor to save state (may take a few seconds)
+                            # Longer timeout for quit to ensure state is properly saved
+                            await asyncio.wait_for(task, timeout=5.0)
+                        except (TimeoutError, asyncio.CancelledError):
+                            # Expected - task was cancelled
+                            # If timeout, state may not be fully saved
+                            pass
+                        except Exception:
+                            # Ignore other exceptions during cleanup
+                            pass
+                        break
+        except Exception:
+            pass
+
         try:
             if hasattr(self, "_subscription_id"):
                 self.runtime.unsubscribe_from_events(self._subscription_id)
