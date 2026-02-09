@@ -480,6 +480,9 @@ class NodeContext:
     # Runtime logging (optional)
     runtime_logger: Any = None  # RuntimeLogger | None — uses Any to avoid import
 
+    # Pause control (optional) - asyncio.Event for pause requests
+    pause_event: Any = None  # asyncio.Event | None
+
 
 @dataclass
 class NodeResult:
