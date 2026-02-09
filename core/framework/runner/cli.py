@@ -332,6 +332,60 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     resume_parser.set_defaults(func=cmd_resume)
 
 
+def _load_resume_state(
+    agent_path: str, session_id: str, checkpoint_id: str | None = None
+) -> dict | None:
+    """Load session or checkpoint state for headless resume.
+
+    Args:
+        agent_path: Path to the agent folder (e.g., exports/my_agent)
+        session_id: Session ID to resume from
+        checkpoint_id: Optional checkpoint ID within the session
+
+    Returns:
+        session_state dict for executor, or None if not found
+    """
+    agent_name = Path(agent_path).name
+    agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
+    session_dir = agent_work_dir / "sessions" / session_id
+
+    if not session_dir.exists():
+        return None
+
+    if checkpoint_id:
+        # Checkpoint-based resume: load checkpoint and extract state
+        cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
+        if not cp_path.exists():
+            return None
+        try:
+            cp_data = json.loads(cp_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+        return {
+            "memory": cp_data.get("shared_memory", {}),
+            "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
+            "execution_path": cp_data.get("execution_path", []),
+            "node_visit_counts": {},
+        }
+    else:
+        # Session state resume: load state.json
+        state_path = session_dir / "state.json"
+        if not state_path.exists():
+            return None
+        try:
+            state_data = json.loads(state_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+        progress = state_data.get("progress", {})
+        paused_at = progress.get("paused_at") or progress.get("resume_from")
+        return {
+            "memory": state_data.get("memory", {}),
+            "paused_at": paused_at,
+            "execution_path": progress.get("path", []),
+            "node_visit_counts": progress.get("node_visit_counts", {}),
+        }
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
@@ -421,6 +475,27 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"Error: {e}", file=sys.stderr)
             return 1
 
+        # Load session/checkpoint state for resume (headless mode)
+        session_state = None
+        resume_session = getattr(args, "resume_session", None)
+        checkpoint = getattr(args, "checkpoint", None)
+        if resume_session:
+            session_state = _load_resume_state(args.agent_path, resume_session, checkpoint)
+            if session_state is None:
+                print(
+                    f"Error: Could not load session state for {resume_session}",
+                    file=sys.stderr,
+                )
+                return 1
+            if not args.quiet:
+                resume_node = session_state.get("paused_at", "unknown")
+                if checkpoint:
+                    print(f"Resuming from checkpoint: {checkpoint}")
+                else:
+                    print(f"Resuming session: {resume_session}")
+                print(f"Resume point: {resume_node}")
+                print()
+
         # Auto-inject user_id if the agent expects it but it's not provided
         entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
         if "user_id" in entry_input_keys and context.get("user_id") is None:
@@ -440,7 +515,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             print("=" * 60)
             print()
 
-        result = asyncio.run(runner.run(context))
+        result = asyncio.run(runner.run(context, session_state=session_state))
 
     # Format output
     output = {

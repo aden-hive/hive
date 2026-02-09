@@ -259,7 +259,7 @@ The fix is to the `report` node (the last node). To demonstrate checkpoint recov
 
 ```bash
 # Run via CLI to get checkpoints
-PYTHONPATH=core:exports uv run python -m deep_research_agent --tui
+uv run hive run exports/deep_research_agent --input '{"topic": "climate change effects"}'
 
 # After it runs, find the clean checkpoint before report
 list_agent_checkpoints(
@@ -270,7 +270,7 @@ list_agent_checkpoints(
 # → cp_node_complete_review_152100 (after review, before report)
 
 # Resume — skips intake, research, review entirely
-PYTHONPATH=core:exports uv run python -m deep_research_agent --tui \
+uv run hive run exports/deep_research_agent \
   --resume-session session_20260209_152000_ghi34567 \
   --checkpoint cp_node_complete_review_152100
 ```

@@ -138,10 +138,10 @@ Two execution paths, use the right one for your situation.
 Run the agent via CLI. This creates sessions with checkpoints at `~/.hive/agents/{agent_name}/sessions/`:
 
 ```bash
-PYTHONPATH=core:exports uv run python -m {agent_name} --tui
+uv run hive run exports/{agent_name} --input '{"query": "test topic"}'
 ```
 
-The TUI lets you interact with client-facing nodes and see real-time execution. Sessions and checkpoints are saved automatically.
+Sessions and checkpoints are saved automatically. For agents with client-facing nodes that require user interaction, the user must launch the TUI manually in a separate terminal (Claude Code cannot interact with TUI apps).
 
 #### Automated regression (for CI or final verification)
 
@@ -334,7 +334,7 @@ Resume when ALL of these are true:
 
 ```bash
 # Resume from the last clean checkpoint before the failing node
-PYTHONPATH=core:exports uv run python -m {agent_name} --tui \
+uv run hive run exports/{agent_name} \
   --resume-session session_20260209_143022_abc12345 \
   --checkpoint cp_node_complete_research_143030
 ```
@@ -350,7 +350,7 @@ Re-run when ANY of these are true:
 - You changed the graph structure (added/removed nodes/edges)
 
 ```bash
-PYTHONPATH=core:exports uv run python -m {agent_name} --tui
+uv run hive run exports/{agent_name} --input '{"query": "test topic"}'
 ```
 
 #### Inspecting a checkpoint before resuming
@@ -696,7 +696,7 @@ run_tests(goal_id, agent_path, test_types='["success"]')
 
 ```bash
 # Iterative debugging with checkpoints (via CLI)
-PYTHONPATH=core:exports uv run python -m {agent_name} --tui
+uv run hive run exports/{agent_name} --input '{"query": "test"}'
 ```
 
 ### Phase 3: Analysis
@@ -739,8 +739,8 @@ get_agent_checkpoint(agent_work_dir, session_id, checkpoint_id)
 ```
 
 ```bash
-# Resume from checkpoint via CLI
-PYTHONPATH=core:exports uv run python -m {agent_name} --tui \
+# Resume from checkpoint via CLI (headless)
+uv run hive run exports/{agent_name} \
   --resume-session {session_id} --checkpoint {checkpoint_id}
 ```
 
@@ -757,8 +757,9 @@ PYTHONPATH=core:exports uv run python -m {agent_name} --tui \
 | Write 30+ tests | Write 8-15 focused tests |
 | Skip credential check | Use `/hive-credentials` before testing |
 | Confuse `exports/` with `~/.hive/agents/` | Code in `exports/`, runtime data in `~/.hive/` |
-| Use `run_tests` for iterative debugging | Use CLI with checkpoints for iterative debugging |
-| Use CLI for final regression | Use `run_tests` for automated regression |
+| Use `run_tests` for iterative debugging | Use headless CLI with checkpoints for iterative debugging |
+| Use headless CLI for final regression | Use `run_tests` for automated regression |
+| Use `--tui` from Claude Code | Use headless `run` command — TUI hangs in non-interactive shells |
 | Run tests without reading goal first | Always understand the goal before writing tests |
 | Skip Phase 3 analysis and guess | Use session + log tools to identify root cause |
 
@@ -866,7 +867,7 @@ list_agent_checkpoints(
 # → cp_node_complete_intake_150005
 
 # Resume from after intake, re-run research with fixed prompt
-PYTHONPATH=core:exports uv run python -m deep_research_agent --tui \
+uv run hive run exports/deep_research_agent \
   --resume-session session_20260209_150000_abc12345 \
   --checkpoint cp_node_complete_intake_150005
 ```
@@ -874,7 +875,7 @@ PYTHONPATH=core:exports uv run python -m deep_research_agent --tui \
 Or for this simple case (intake is fast), just re-run:
 
 ```bash
-PYTHONPATH=core:exports uv run python -m deep_research_agent --tui
+uv run hive run exports/deep_research_agent --input '{"topic": "test"}'
 ```
 
 ### Phase 6: Final verification
