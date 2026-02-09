@@ -96,14 +96,14 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 {
   "mcpServers": {
     "agent-builder": {
-      "command": "core/.venv/bin/python",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "."
+      "command": "uv",
+      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
+      "cwd": "core"
     },
     "tools": {
-      "command": "tools/.venv/bin/python",
-      "args": ["-m", "aden_tools.mcp_server", "--stdio"],
-      "cwd": "."
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools"
     }
   }
 }
@@ -152,7 +152,7 @@ Add to `.vscode/settings.json`:
 
 1. **Never commit API keys** - Use environment variables or `.env` files
 2. **`.env` is git-ignored** - Copy `.env.example` to `.env` at the project root and fill in your values
-3. **Mock mode for testing** - Set `MOCK_MODE=1` to avoid LLM calls during development
+3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 
 ## Troubleshooting
@@ -187,4 +187,4 @@ Run from the project root with PYTHONPATH:
 PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
-See [Environment Setup](../ENVIRONMENT_SETUP.md) for detailed installation instructions.
+See [Environment Setup](./environment-setup.md) for detailed installation instructions.

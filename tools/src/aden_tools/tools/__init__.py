@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
@@ -42,7 +43,11 @@ from .file_system_toolkits.write_to_file import register_tools as register_write
 from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
+<<<<<<< feat/redshift-integration
 from .redshift_tool import register_tools as register_redshift
+=======
+from .runtime_logs_tool import register_tools as register_runtime_logs
+>>>>>>> main
 from .slack_tool import register_tools as register_slack
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
@@ -67,6 +72,7 @@ def register_all_tools(
     register_example(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
+    register_runtime_logs(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -75,7 +81,11 @@ def register_all_tools(
     # email supports multiple providers (Resend) with auto-detection
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+<<<<<<< feat/redshift-integration
     register_redshift(mcp, credentials=credentials)
+=======
+    register_apollo(mcp, credentials=credentials)
+>>>>>>> main
     register_slack(mcp, credentials=credentials)
 
     # Register file system toolkits
@@ -106,11 +116,16 @@ def register_all_tools(
         "load_data",
         "save_data",
         "list_data_files",
+        "serve_file_to_user",
         "csv_read",
         "csv_write",
         "csv_append",
         "csv_info",
         "csv_sql",
+        "apollo_enrich_person",
+        "apollo_enrich_company",
+        "apollo_search_people",
+        "apollo_search_companies",
         "github_list_repos",
         "github_get_repo",
         "github_search_repos",
@@ -141,11 +156,17 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+<<<<<<< feat/redshift-integration
         "redshift_list_schemas",
         "redshift_list_tables",
         "redshift_get_table_schema",
         "redshift_execute_query",
         "redshift_export_query_results",
+=======
+        "query_runtime_logs",
+        "query_runtime_log_details",
+        "query_runtime_log_raw",
+>>>>>>> main
         "slack_send_message",
         "slack_list_channels",
         "slack_get_channel_history",
@@ -187,6 +208,7 @@ def register_all_tools(
         "slack_delete_reminder",
         # Phase 2: User Groups
         "slack_create_usergroup",
+        "slack_update_usergroup_members",
         "slack_list_usergroups",
         # Phase 2: Emoji
         "slack_list_emoji",

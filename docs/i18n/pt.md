@@ -80,6 +80,7 @@ cd hive
 ```
 
 Isto instala:
+
 - **framework** - Runtime do agente principal e executor de grafos
 - **aden_tools** - 19 ferramentas MCP para capacidades de agentes
 - Todas as dependências necessárias
@@ -91,16 +92,16 @@ Isto instala:
 ./quickstart.sh
 
 # Construir um agente usando Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Testar seu agente
-claude> /testing-agent
+claude> /hive-test
 
 # Executar seu agente
 PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
-**[📖 Guia Completo de Configuração](ENVIRONMENT_SETUP.md)** - Instruções detalhadas para desenvolvimento de agentes
+**[📖 Guia Completo de Configuração](../environment-setup.md)** - Instruções detalhadas para desenvolvimento de agentes
 
 ## Funcionalidades
 
@@ -164,14 +165,14 @@ flowchart LR
 
 ### A Vantagem Aden
 
-| Frameworks Tradicionais | Aden |
-|-------------------------|------|
-| Codificar fluxos de trabalho de agentes | Descrever objetivos em linguagem natural |
-| Definição manual de grafos | Grafos de agentes auto-gerados |
-| Tratamento reativo de erros | Auto-evolução proativa |
-| Configurações de ferramentas estáticas | Nós dinâmicos envolvidos em SDK |
-| Configuração de monitoramento separada | Observabilidade em tempo real integrada |
-| Gerenciamento de orçamento DIY | Controles de custo e degradação integrados |
+| Frameworks Tradicionais                 | Aden                                       |
+| --------------------------------------- | ------------------------------------------ |
+| Codificar fluxos de trabalho de agentes | Descrever objetivos em linguagem natural   |
+| Definição manual de grafos              | Grafos de agentes auto-gerados             |
+| Tratamento reativo de erros             | Auto-evolução proativa                     |
+| Configurações de ferramentas estáticas  | Nós dinâmicos envolvidos em SDK            |
+| Configuração de monitoramento separada  | Observabilidade em tempo real integrada    |
+| Gerenciamento de orçamento DIY          | Controles de custo e degradação integrados |
 
 ### Como Funciona
 
@@ -215,10 +216,7 @@ hive/
 ├── docs/                   # Documentação e guias
 ├── scripts/                # Scripts de build e utilitários
 ├── .claude/                # Habilidades Claude Code para construir agentes
-├── ENVIRONMENT_SETUP.md    # Guia de configuração Python para desenvolvimento de agentes
-├── DEVELOPER.md            # Guia do desenvolvedor
 ├── CONTRIBUTING.md         # Diretrizes de contribuição
-└── ROADMAP.md              # Roadmap do produto
 ```
 
 ## Desenvolvimento
@@ -237,20 +235,20 @@ Para construir e executar agentes orientados a objetivos com o framework:
 # - Todas as dependências
 
 # Construir novos agentes usando habilidades Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Testar agentes
-claude> /testing-agent
+claude> /hive-test
 
 # Executar agentes
 PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
-Consulte [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instruções completas de configuração.
+Consulte [environment-setup.md](../environment-setup.md) para instruções completas de configuração.
 
 ## Documentação
 
-- **[Guia do Desenvolvedor](DEVELOPER.md)** - Guia abrangente para desenvolvedores
+- **[Guia do Desenvolvedor](../developer-guide.md)** - Guia abrangente para desenvolvedores
 - [Começando](docs/getting-started.md) - Instruções de configuração rápida
 - [Guia de Configuração](docs/configuration.md) - Todas as opções de configuração
 - [Visão Geral da Arquitetura](docs/architecture/README.md) - Design e estrutura do sistema
@@ -259,7 +257,7 @@ Consulte [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instruções completa
 
 O Aden Agent Framework visa ajudar desenvolvedores a construir agentes auto-adaptativos orientados a resultados. Encontre nosso roadmap aqui
 
-[ROADMAP.md](ROADMAP.md)
+[roadmap.md](../roadmap.md)
 
 ```mermaid
 timeline

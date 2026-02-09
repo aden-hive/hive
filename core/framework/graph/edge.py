@@ -156,6 +156,10 @@ class EdgeSpec(BaseModel):
         memory: dict[str, Any],
     ) -> bool:
         """Evaluate a conditional expression."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         if not self.condition_expr:
             return True
 
@@ -172,12 +176,24 @@ class EdgeSpec(BaseModel):
 
         try:
             # Safe evaluation using AST-based whitelist
-            return bool(safe_eval(self.condition_expr, context))
+            result = bool(safe_eval(self.condition_expr, context))
+            # Log the evaluation for visibility
+            # Extract the variable names used in the expression for debugging
+            expr_vars = {
+                k: repr(context[k])
+                for k in context
+                if k not in ("output", "memory", "result", "true", "false")
+                and k in self.condition_expr
+            }
+            logger.info(
+                "  Edge %s: condition '%s' → %s  (vars: %s)",
+                self.id,
+                self.condition_expr,
+                result,
+                expr_vars or "none matched",
+            )
+            return result
         except Exception as e:
-            # Log the error for debugging
-            import logging
-
-            logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
             logger.warning(f"         Available context keys: {list(context.keys())}")
@@ -418,6 +434,12 @@ class GraphSpec(BaseModel):
     # Execution limits
     max_steps: int = Field(default=100, description="Maximum node executions before timeout")
     max_retries_per_node: int = 3
+
+    # EventLoopNode configuration (from configure_loop)
+    loop_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="EventLoopNode configuration (max_iterations, max_tool_calls_per_turn, etc.)",
+    )
 
     # Metadata
     description: str = ""
