@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 AIRTABLE_API_BASE = "https://api.airtable.com/v0"
+MAX_RETRIES = 2
+MAX_RETRY_WAIT = 60
 
 
 class _AirtableClient:
@@ -38,6 +41,26 @@ class _AirtableClient:
             "Content-Type": "application/json",
         }
 
+    def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Make HTTP request with retry on 429 rate limit."""
+        request_kwargs = {"headers": self._headers, "timeout": 30.0, **kwargs}
+        for attempt in range(MAX_RETRIES + 1):
+            response = httpx.request(method, url, **request_kwargs)
+            if response.status_code == 429 and attempt < MAX_RETRIES:
+                try:
+                    wait = min(float(response.headers.get("Retry-After", 1)), MAX_RETRY_WAIT)
+                except (ValueError, TypeError):
+                    wait = min(2**attempt, MAX_RETRY_WAIT)
+                time.sleep(wait)
+                continue
+            return self._handle_response(response)
+        return self._handle_response(response)
+
     def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
         """Handle Airtable API response."""
         if response.status_code == 401:
@@ -49,7 +72,11 @@ class _AirtableClient:
         if response.status_code == 422:
             return {"error": f"Airtable validation error: {response.text}"}
         if response.status_code == 429:
-            return {"error": "Airtable rate limit exceeded. Try again later."}
+            retry_after = response.headers.get("Retry-After", "60")
+            return {
+                "error": f"Airtable rate limit exceeded. Retry after {retry_after}s",
+                "retry_after": retry_after,
+            }
         if response.status_code >= 400:
             return {"error": f"Airtable API error (HTTP {response.status_code}): {response.text}"}
 
@@ -60,12 +87,7 @@ class _AirtableClient:
 
     def list_bases(self) -> dict[str, Any]:
         """List bases available to the authenticated user."""
-        response = httpx.get(
-            f"{AIRTABLE_API_BASE}/meta/bases",
-            headers=self._headers,
-            timeout=30.0,
-        )
-        result = self._handle_response(response)
+        result = self._request_with_retry("GET", f"{AIRTABLE_API_BASE}/meta/bases")
         if "error" in result:
             return result
 
@@ -85,12 +107,7 @@ class _AirtableClient:
 
     def list_tables(self, base_id: str) -> dict[str, Any]:
         """List tables in a base."""
-        response = httpx.get(
-            f"{AIRTABLE_API_BASE}/meta/bases/{base_id}/tables",
-            headers=self._headers,
-            timeout=30.0,
-        )
-        result = self._handle_response(response)
+        result = self._request_with_retry("GET", f"{AIRTABLE_API_BASE}/meta/bases/{base_id}/tables")
         if "error" in result:
             return result
 
@@ -126,13 +143,11 @@ class _AirtableClient:
         if fields:
             params["fields[]"] = fields
 
-        response = httpx.get(
+        result = self._request_with_retry(
+            "GET",
             f"{AIRTABLE_API_BASE}/{base_id}/{table_id_or_name}",
-            headers=self._headers,
             params=params,
-            timeout=30.0,
         )
-        result = self._handle_response(response)
         if "error" in result:
             return result
 
@@ -159,13 +174,11 @@ class _AirtableClient:
         fields: dict[str, Any],
     ) -> dict[str, Any]:
         """Create a single record."""
-        response = httpx.post(
+        result = self._request_with_retry(
+            "POST",
             f"{AIRTABLE_API_BASE}/{base_id}/{table_id_or_name}",
-            headers=self._headers,
             json={"fields": fields},
-            timeout=30.0,
         )
-        result = self._handle_response(response)
         if "error" in result:
             return result
 
@@ -185,13 +198,11 @@ class _AirtableClient:
         fields: dict[str, Any],
     ) -> dict[str, Any]:
         """Update a record by ID."""
-        response = httpx.patch(
+        result = self._request_with_retry(
+            "PATCH",
             f"{AIRTABLE_API_BASE}/{base_id}/{table_id_or_name}/{record_id}",
-            headers=self._headers,
             json={"fields": fields},
-            timeout=30.0,
         )
-        result = self._handle_response(response)
         if "error" in result:
             return result
 

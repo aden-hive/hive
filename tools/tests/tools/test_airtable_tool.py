@@ -66,8 +66,8 @@ class TestAirtableListBases:
 
         with (
             patch(
-                "aden_tools.tools.airtable_tool.airtable_tool.httpx.get",
-            ) as mock_get,
+                "aden_tools.tools.airtable_tool.airtable_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -76,7 +76,7 @@ class TestAirtableListBases:
                     {"id": "app123", "name": "Leads", "permissionLevel": "edit"},
                 ]
             }
-            mock_get.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = airtable_list_bases_fn()
 
@@ -91,12 +91,12 @@ class TestAirtableListBases:
 
         with (
             patch(
-                "aden_tools.tools.airtable_tool.airtable_tool.httpx.get",
-            ) as mock_get,
+                "aden_tools.tools.airtable_tool.airtable_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 401
-            mock_get.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = airtable_list_bases_fn()
 
@@ -113,8 +113,8 @@ class TestAirtableListRecords:
 
         with (
             patch(
-                "aden_tools.tools.airtable_tool.airtable_tool.httpx.get",
-            ) as mock_get,
+                "aden_tools.tools.airtable_tool.airtable_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -127,7 +127,7 @@ class TestAirtableListRecords:
                     }
                 ],
             }
-            mock_get.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = airtable_list_records_fn(
                 base_id="app123",
@@ -149,8 +149,8 @@ class TestAirtableCreateRecord:
 
         with (
             patch(
-                "aden_tools.tools.airtable_tool.airtable_tool.httpx.post",
-            ) as mock_post,
+                "aden_tools.tools.airtable_tool.airtable_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -159,7 +159,7 @@ class TestAirtableCreateRecord:
                 "createdTime": "2026-01-01T00:00:00.000Z",
                 "fields": {"Name": "Acme", "Status": "Contacted"},
             }
-            mock_post.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = airtable_create_record_fn(
                 base_id="app123",
@@ -181,8 +181,8 @@ class TestAirtableUpdateRecord:
 
         with (
             patch(
-                "aden_tools.tools.airtable_tool.airtable_tool.httpx.patch",
-            ) as mock_patch,
+                "aden_tools.tools.airtable_tool.airtable_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -191,7 +191,7 @@ class TestAirtableUpdateRecord:
                 "createdTime": "2026-01-01T00:00:00.000Z",
                 "fields": {"Name": "Acme", "Status": "Contacted"},
             }
-            mock_patch.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = airtable_update_record_fn(
                 base_id="app123",
