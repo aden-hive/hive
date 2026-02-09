@@ -40,6 +40,8 @@ from framework.testing.prompts import (  # noqa: E402
 )
 from framework.utils.io import atomic_write  # noqa: E402
 
+from framework.schemas.agent_builder import CreateSessionResponse
+
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
 
@@ -200,19 +202,21 @@ def get_session() -> BuildSession:
 
 
 @mcp.tool()
-def create_session(name: Annotated[str, "Name for the agent being built"]) -> str:
+def create_session(
+    name: Annotated[str, "Name for the agent being built"],
+) -> CreateSessionResponse:
     """Create a new agent building session. Call this first before building an agent."""
     global _session
     _session = BuildSession(name)
     _save_session(_session)  # Auto-save
-    return json.dumps(
-        {
-            "session_id": _session.id,
-            "name": name,
-            "status": "created",
-            "persisted": True,
-        }
+
+    return CreateSessionResponse(
+        session_id=_session.id,
+        name=name,
+        status="created",
+        persisted=True,
     )
+
 
 
 @mcp.tool()
