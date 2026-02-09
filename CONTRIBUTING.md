@@ -60,8 +60,8 @@ You may submit PRs without prior assignment for:
 ```
 
 > **Windows Users:**  
-> If you are on native Windows, it is recommended to use **WSL (Windows Subsystem for Linux)**.  
-> Alternatively, make sure to run PowerShell or Git Bash with Python 3.11+ installed, and disable "App Execution Aliases" in Windows settings.
+> For the best experience, run standard **PowerShell 7+** and use the native setup script: `./quickstart.ps1`.  
+> Alternatively, you can use **WSL (Windows Subsystem for Linux)** or **Git Bash**.
 
 > **Tip:** Installing Claude Code skills is optional for running existing agents, but required if you plan to **build new agents**.
 

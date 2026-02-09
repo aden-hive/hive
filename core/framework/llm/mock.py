@@ -21,15 +21,6 @@ class MockLLMProvider(LLMProvider):
     This provider generates placeholder responses based on the expected output structure,
     allowing structural validation and graph execution testing without incurring costs
     or requiring API keys.
-
-    Example:
-        llm = MockLLMProvider()
-        response = llm.complete(
-            messages=[{"role": "user", "content": "test"}],
-            system="Generate JSON with keys: name, age",
-            json_mode=True
-        )
-        # Returns: {"name": "mock_value", "age": "mock_value"}
     """
 
     def __init__(self, model: str = "mock-model"):
@@ -40,21 +31,11 @@ class MockLLMProvider(LLMProvider):
             model: Model name to report in responses (default: "mock-model")
         """
         self.model = model
+        self._call_count = 0
 
     def _extract_output_keys(self, system: str) -> list[str]:
         """
         Extract expected output keys from the system prompt.
-
-        Looks for patterns like:
-        - "output_keys: [key1, key2]"
-        - "keys: key1, key2"
-        - "Generate JSON with keys: key1, key2"
-
-        Args:
-            system: System prompt text
-
-        Returns:
-            List of extracted key names
         """
         keys = []
 
@@ -75,12 +56,18 @@ class MockLLMProvider(LLMProvider):
         # Pattern 3: Look for JSON schema in system prompt
         match = re.search(r'\{[^}]*"([a-zA-Z0-9_]+)":\s*', system)
         if match:
-            # Found at least one key in a JSON-like structure
             all_matches = re.findall(r'"([a-zA-Z0-9_]+)":\s*', system)
             if all_matches:
                 return list(set(all_matches))
 
         return keys
+
+    def _generate_mock_output(self, system: str) -> dict[str, str]:
+        """Generate mock output keys and values based on the system prompt."""
+        keys = self._extract_output_keys(system)
+        if not keys:
+            return {"result": f"mock_result_{self._call_count}"}
+        return {key: f"mock_{key}_value_{self._call_count}" for key in keys}
 
     def _generate_mock_response(
         self,
@@ -89,28 +76,12 @@ class MockLLMProvider(LLMProvider):
     ) -> str:
         """
         Generate a mock response based on the system prompt and mode.
-
-        Args:
-            system: System prompt (may contain output key hints)
-            json_mode: If True, generate JSON response
-
-        Returns:
-            Mock response string
         """
         if json_mode:
-            # Try to extract expected keys from system prompt
-            keys = self._extract_output_keys(system)
-
-            if keys:
-                # Generate JSON with the expected keys
-                mock_data = {key: f"mock_{key}_value" for key in keys}
-                return json.dumps(mock_data, indent=2)
-            else:
-                # Fallback: generic mock response
-                return json.dumps({"result": "mock_result_value"}, indent=2)
+            mock_data = self._generate_mock_output(system)
+            return json.dumps(mock_data, indent=2)
         else:
-            # Plain text mock response
-            return "This is a mock response for testing purposes."
+            return f"This is a mock response (call #{self._call_count}) for testing purposes."
 
     def complete(
         self,
@@ -121,20 +92,8 @@ class MockLLMProvider(LLMProvider):
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
     ) -> LLMResponse:
-        """
-        Generate a mock completion without calling a real LLM.
-
-        Args:
-            messages: Conversation history (ignored in mock mode)
-            system: System prompt (used to extract expected output keys)
-            tools: Available tools (ignored in mock mode)
-            max_tokens: Maximum tokens (ignored in mock mode)
-            response_format: Response format (ignored in mock mode)
-            json_mode: If True, generate JSON response
-
-        Returns:
-            LLMResponse with mock content
-        """
+        """Generate a mock completion without calling a real LLM."""
+        self._call_count += 1
         content = self._generate_mock_response(system=system, json_mode=json_mode)
 
         return LLMResponse(
@@ -153,25 +112,9 @@ class MockLLMProvider(LLMProvider):
         tool_executor: Callable[[ToolUse], ToolResult],
         max_iterations: int = 10,
     ) -> LLMResponse:
-        """
-        Generate a mock completion without tool use.
-
-        In mock mode, we skip tool execution and return a final response immediately.
-
-        Args:
-            messages: Initial conversation (ignored in mock mode)
-            system: System prompt (used to extract expected output keys)
-            tools: Available tools (ignored in mock mode)
-            tool_executor: Tool executor function (ignored in mock mode)
-            max_iterations: Max iterations (ignored in mock mode)
-
-        Returns:
-            LLMResponse with mock content
-        """
-        # In mock mode, we don't execute tools - just return a final response
-        # Try to generate JSON if the system prompt suggests structured output
+        """Generate a mock completion without tool use."""
+        self._call_count += 1
         json_mode = "json" in system.lower() or "output_keys" in system.lower()
-
         content = self._generate_mock_response(system=system, json_mode=json_mode)
 
         return LLMResponse(
@@ -189,20 +132,30 @@ class MockLLMProvider(LLMProvider):
         tools: list[Tool] | None = None,
         max_tokens: int = 4096,
     ) -> AsyncIterator[StreamEvent]:
-        """Stream a mock completion as word-level TextDeltaEvents.
-
-        Splits the mock response into words and yields each as a separate
-        TextDeltaEvent with an accumulating snapshot, exercising the full
-        streaming pipeline without any API calls.
-        """
+        """Stream a mock completion. If set_output is available, it will call it."""
+        self._call_count += 1
         content = self._generate_mock_response(system=system, json_mode=False)
-        words = content.split(" ")
         accumulated = ""
 
+        # Stream text deltas
+        words = content.split(" ")
         for i, word in enumerate(words):
             chunk = word if i == 0 else " " + word
             accumulated += chunk
             yield TextDeltaEvent(content=chunk, snapshot=accumulated)
+
+        # In EventLoopNode, we need tool calls to progress or complete.
+        # If the agent has a 'set_output' tool, simulate using it to fulfill requirements.
+        if tools:
+            set_output_tool = next((t for t in tools if t.name == "set_output"), None)
+            if set_output_tool:
+                mock_data = self._generate_mock_output(system)
+                for key, value in mock_data.items():
+                    yield ToolCallEvent(
+                        tool_use_id=f"mock_call_{self._call_count}_{key}",
+                        tool_name="set_output",
+                        tool_input={"key": key, "value": str(value)},
+                    )
 
         yield TextEndEvent(full_text=accumulated)
         yield FinishEvent(stop_reason="mock_complete", model=self.model)

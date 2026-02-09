@@ -75,6 +75,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Resume from a specific checkpoint (requires --resume-session)",
     )
+    run_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Use mock LLM responses (no API key required)",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -191,6 +196,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Disable human-in-the-loop approval (auto-approve all steps)",
     )
+    shell_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Use mock LLM responses (no API key required)",
+    )
     shell_parser.set_defaults(func=cmd_shell)
 
     # tui command (interactive agent dashboard)
@@ -205,6 +215,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
+    )
+    tui_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Use mock LLM responses (no API key required)",
     )
     tui_parser.set_defaults(func=cmd_tui)
 
@@ -373,6 +388,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 try:
                     runner = AgentRunner.load(
                         args.agent_path,
+                        mock_mode=getattr(args, "mock", False),
                         model=args.model,
                         enable_tui=True,
                     )
@@ -414,6 +430,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         try:
             runner = AgentRunner.load(
                 args.agent_path,
+                mock_mode=getattr(args, "mock", False),
                 model=args.model,
                 enable_tui=False,
             )
@@ -926,7 +943,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
             return 1
 
     try:
-        runner = AgentRunner.load(agent_path)
+        runner = AgentRunner.load(agent_path, mock_mode=getattr(args, "mock", False))
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -1184,6 +1201,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
         try:
             runner = AgentRunner.load(
                 agent_path,
+                mock_mode=getattr(args, "mock", False),
                 model=args.model,
                 enable_tui=True,
             )

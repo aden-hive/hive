@@ -84,7 +84,7 @@ Use Hive when you need:
 - Python 3.11+ for agent development
 - Claude Code or Cursor for utilizing agent skills
 
-> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
+> **Note for Windows Users:** You can run Hive natively using **PowerShell 7+**. Simply run `./quickstart.ps1` to automate your setup. Alternatively, you can use **WSL (Windows Subsystem for Linux)** or **Git Bash**.
 
 ### Installation
 
@@ -93,9 +93,16 @@ Use Hive when you need:
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# Run quickstart setup
+# Run quickstart setup (Linux/macOS)
 ./quickstart.sh
+
+# Run quickstart setup (Windows PowerShell)
+./quickstart.ps1
 ```
+
+> [!TIP]
+> **Windows "uv not found" fix:** If PowerShell says `uv` is not recognized after setup, run this to fix your Path permanently:
+> `[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$HOME\.local\bin", "User")`
 
 This sets up:
 
@@ -105,9 +112,9 @@ This sets up:
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
 
-### Build Your First Agent
+# Start exploring immediately (No API key needed!)
+uv run hive tui --mock
 
-```bash
 # Build an agent using Claude Code
 claude> /hive
 
@@ -213,6 +220,9 @@ hive run exports/my_agent --input '{"task": "Your input here"}'
 
 # Run a specific agent with the TUI dashboard
 hive run exports/my_agent --tui
+
+# Run in Mock Mode (Exploration mode, no API keys required)
+uv run hive tui --mock
 
 # Interactive REPL
 hive shell
@@ -361,6 +371,11 @@ For security concerns, please see [SECURITY.md](SECURITY.md).
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Frequently Asked Questions (FAQ)
+
+**Q: I get "uv: The term is not recognized" on Windows. How do I fix it?**
+
+This happens when Windows hasn't refreshed your Path. You can either restart your terminal or run this command once:
+`[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$HOME\.local\bin", "User")`
 
 **Q: What LLM providers does Hive support?**
 
