@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP
+from playwright.async_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeout
 
 from aden_tools.tools.web_scrape_tool import register_tools
 
@@ -135,6 +136,44 @@ class TestWebScrapeTool:
         result = await web_scrape_fn(url="https://example.com", selector=".content")
         assert isinstance(result, dict)
         assert "error" not in result
+
+    @pytest.mark.asyncio
+    @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.asyncio.sleep", new_callable=AsyncMock)
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    async def test_retry_on_timeout_then_success(self, mock_pw, mock_stealth, mock_sleep, web_scrape_fn):
+        """Transient timeout then success returns result; goto called twice."""
+        html = "<html><body>Hello</body></html>"
+        mock_cm, mock_response, mock_page = _make_playwright_mocks(html, final_url="https://example.com")
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        # First goto times out, second succeeds
+        mock_page.goto.side_effect = [PlaywrightTimeout("timed out"), mock_response]
+
+        result = await web_scrape_fn(url="https://example.com")
+
+        assert mock_page.goto.call_count == 2
+        mock_sleep.assert_called_once()
+        assert "error" not in result
+        assert result.get("content", "").strip() == "Hello"
+
+    @pytest.mark.asyncio
+    @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.asyncio.sleep", new_callable=AsyncMock)
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    async def test_retry_exhausted_returns_timeout_error(self, mock_pw, mock_stealth, mock_sleep, web_scrape_fn):
+        """After all retries exhausted, returns timeout error."""
+        mock_cm, _, mock_page = _make_playwright_mocks("<html></html>")
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+        mock_page.goto.side_effect = PlaywrightTimeout("timed out")
+
+        result = await web_scrape_fn(url="https://example.com")
+
+        assert result == {"error": "Request timed out"}
+        assert mock_page.goto.call_count == 3  # 1 initial + 2 retries
+        assert mock_sleep.call_count == 2
 
 
 class TestWebScrapeToolLinkConversion:

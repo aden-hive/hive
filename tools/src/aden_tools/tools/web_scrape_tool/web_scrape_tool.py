@@ -8,6 +8,7 @@ Uses BeautifulSoup for HTML parsing and content extraction.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from urllib.parse import urljoin
 
@@ -26,6 +27,10 @@ BROWSER_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
+
+# Retry config for transient failures (timeouts, connection errors)
+WEB_SCRAPE_MAX_RETRIES = 2
+WEB_SCRAPE_RETRY_BACKOFF_SEC = 1.0
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -62,54 +67,81 @@ def register_tools(mcp: FastMCP) -> None:
             # Validate max_length
             max_length = max(1000, min(max_length, 500000))
 
-            # Launch headless browser with stealth
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-setuid-sandbox",
-                        "--disable-dev-shm-usage",
-                        "--disable-blink-features=AutomationControlled",
-                    ],
-                )
+            response = None
+            html_content = None
+            last_transient_error: dict[str, Any] | None = None
+
+            for attempt in range(WEB_SCRAPE_MAX_RETRIES + 1):
                 try:
-                    context = await browser.new_context(
-                        viewport={"width": 1920, "height": 1080},
-                        user_agent=BROWSER_USER_AGENT,
-                        locale="en-US",
-                    )
-                    page = await context.new_page()
-                    await Stealth().apply_stealth_async(page)
+                    # Launch headless browser with stealth
+                    async with async_playwright() as p:
+                        browser = await p.chromium.launch(
+                            headless=True,
+                            args=[
+                                "--no-sandbox",
+                                "--disable-setuid-sandbox",
+                                "--disable-dev-shm-usage",
+                                "--disable-blink-features=AutomationControlled",
+                            ],
+                        )
+                        try:
+                            context = await browser.new_context(
+                                viewport={"width": 1920, "height": 1080},
+                                user_agent=BROWSER_USER_AGENT,
+                                locale="en-US",
+                            )
+                            page = await context.new_page()
+                            await Stealth().apply_stealth_async(page)
 
-                    response = await page.goto(
-                        url,
-                        wait_until="domcontentloaded",
-                        timeout=60000,
-                    )
+                            response = await page.goto(
+                                url,
+                                wait_until="domcontentloaded",
+                                timeout=60000,
+                            )
 
-                    # Give JS a moment to render dynamic content
-                    await page.wait_for_timeout(2000)
+                            # Give JS a moment to render dynamic content
+                            await page.wait_for_timeout(2000)
 
-                    if response is None:
-                        return {"error": "Navigation failed: no response received"}
+                            if response is None:
+                                return {"error": "Navigation failed: no response received"}
 
-                    if response.status != 200:
-                        return {"error": f"HTTP {response.status}: Failed to fetch URL"}
+                            if response.status != 200:
+                                return {"error": f"HTTP {response.status}: Failed to fetch URL"}
 
-                    # Validate Content-Type
-                    content_type = response.headers.get("content-type", "").lower()
-                    if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
-                        return {
-                            "error": (f"Skipping non-HTML content (Content-Type: {content_type})"),
-                            "url": url,
-                            "skipped": True,
-                        }
+                            # Validate Content-Type
+                            content_type = response.headers.get("content-type", "").lower()
+                            if not any(
+                                t in content_type for t in ["text/html", "application/xhtml+xml"]
+                            ):
+                                return {
+                                    "error": (
+                                        f"Skipping non-HTML content (Content-Type: {content_type})"
+                                    ),
+                                    "url": url,
+                                    "skipped": True,
+                                }
 
-                    # Get fully rendered HTML
-                    html_content = await page.content()
-                finally:
-                    await browser.close()
+                            # Get fully rendered HTML
+                            html_content = await page.content()
+                        finally:
+                            await browser.close()
+
+                    break  # success
+                except PlaywrightTimeout:
+                    last_transient_error = {"error": "Request timed out"}
+                    if attempt < WEB_SCRAPE_MAX_RETRIES:
+                        await asyncio.sleep(WEB_SCRAPE_RETRY_BACKOFF_SEC)
+                    else:
+                        return last_transient_error
+                except PlaywrightError as e:
+                    last_transient_error = {"error": f"Browser error: {e!s}"}
+                    if attempt < WEB_SCRAPE_MAX_RETRIES:
+                        await asyncio.sleep(WEB_SCRAPE_RETRY_BACKOFF_SEC)
+                    else:
+                        return last_transient_error
+
+            if html_content is None:
+                return last_transient_error or {"error": "Scraping failed"}
 
             # Parse rendered HTML with BeautifulSoup
             soup = BeautifulSoup(html_content, "html.parser")
@@ -175,9 +207,5 @@ def register_tools(mcp: FastMCP) -> None:
 
             return result
 
-        except PlaywrightTimeout:
-            return {"error": "Request timed out"}
-        except PlaywrightError as e:
-            return {"error": f"Browser error: {e!s}"}
         except Exception as e:
             return {"error": f"Scraping failed: {e!s}"}
