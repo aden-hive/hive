@@ -5,13 +5,13 @@ Tool library for the Aden agent framework. Provides a collection of tools that A
 ## Installation
 
 ```bash
-pip install -e tools
+uv pip install -e tools
 ```
 
 For development:
 
 ```bash
-pip install -e "tools[dev]"
+uv pip install -e "tools[dev]"
 ```
 
 ## Environment Setup

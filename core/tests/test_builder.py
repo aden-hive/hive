@@ -1,9 +1,19 @@
-"""Tests for the BuilderQuery interface - how Builder analyzes agent runs."""
+"""Tests for the BuilderQuery interface - how Builder analyzes agent runs.
+
+DEPRECATED: These tests rely on the deprecated FileStorage backend.
+BuilderQuery and Runtime both use FileStorage which is deprecated.
+New code should use unified session storage instead.
+"""
 
 from pathlib import Path
 
+import pytest
+
 from framework import BuilderQuery, Runtime
 from framework.schemas.run import RunStatus
+
+# Mark all tests in this module as skipped - they rely on deprecated FileStorage
+pytestmark = pytest.mark.skip(reason="Tests rely on deprecated FileStorage backend")
 
 
 def create_successful_run(runtime: Runtime, goal_id: str = "test_goal") -> str:

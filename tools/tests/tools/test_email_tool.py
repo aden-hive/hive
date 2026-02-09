@@ -1,6 +1,6 @@
 """Tests for email tool with multi-provider support (FastMCP)."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP
@@ -28,6 +28,7 @@ class TestSendEmail:
     def test_no_credentials_returns_error(self, send_email_fn, monkeypatch):
         """Send without credentials returns helpful error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
@@ -39,6 +40,7 @@ class TestSendEmail:
     def test_resend_explicit_missing_key(self, send_email_fn, monkeypatch):
         """Explicit resend provider without key returns error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_email_fn(
@@ -50,8 +52,9 @@ class TestSendEmail:
         assert "help" in result
 
     def test_missing_from_email_returns_error(self, send_email_fn, monkeypatch):
-        """No from_email and no EMAIL_FROM env var returns error."""
+        """No from_email and no EMAIL_FROM env var returns error when using Resend."""
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.delenv("EMAIL_FROM", raising=False)
 
         result = send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
@@ -333,6 +336,7 @@ class TestSendBudgetAlertEmail:
     def test_no_credentials_returns_error(self, send_budget_alert_fn, monkeypatch):
         """Budget alert without credentials returns error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_budget_alert_fn(
@@ -444,3 +448,161 @@ class TestSendBudgetAlertEmail:
             )
 
         assert result["success"] is True
+
+
+class TestGmailProvider:
+    """Tests for Gmail email provider."""
+
+    def test_gmail_success(self, send_email_fn, monkeypatch):
+        """Successful Gmail send returns success dict with message ID."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.setenv("EMAIL_FROM", "user@gmail.com")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "gmail_msg_123"}
+
+        patch_target = "aden_tools.tools.email_tool.email_tool.httpx.post"
+        with patch(patch_target, return_value=mock_response) as mock_post:
+            result = send_email_fn(
+                to="recipient@example.com",
+                subject="Test Gmail",
+                html="<p>Hello from Gmail</p>",
+                provider="gmail",
+            )
+
+        assert result["success"] is True
+        assert result["provider"] == "gmail"
+        assert result["id"] == "gmail_msg_123"
+        assert result["to"] == ["recipient@example.com"]
+        assert result["subject"] == "Test Gmail"
+
+        # Verify Bearer token and Gmail API endpoint
+        call_kwargs = mock_post.call_args
+        assert call_kwargs[1]["headers"]["Authorization"] == "Bearer test_gmail_token"
+        assert "gmail.googleapis.com" in call_kwargs[0][0]
+        # Verify raw message is base64 encoded
+        assert "raw" in call_kwargs[1]["json"]
+
+    def test_gmail_missing_credentials(self, send_email_fn, monkeypatch):
+        """Explicit Gmail provider without token returns error."""
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        result = send_email_fn(
+            to="test@example.com",
+            subject="Test",
+            html="<p>Hi</p>",
+            provider="gmail",
+        )
+
+        assert "error" in result
+        assert "Gmail credentials not configured" in result["error"]
+        assert "help" in result
+
+    def test_gmail_api_error(self, send_email_fn, monkeypatch):
+        """Gmail API non-200 response returns error dict."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.setenv("EMAIL_FROM", "user@gmail.com")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.text = "Insufficient permissions"
+
+        with patch("aden_tools.tools.email_tool.email_tool.httpx.post", return_value=mock_response):
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="gmail",
+            )
+
+        assert "error" in result
+        assert "403" in result["error"]
+
+    def test_gmail_token_expired(self, send_email_fn, monkeypatch):
+        """Gmail 401 response returns token expiry error with help."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "expired_token")
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.setenv("EMAIL_FROM", "user@gmail.com")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.text = "Invalid credentials"
+
+        with patch("aden_tools.tools.email_tool.email_tool.httpx.post", return_value=mock_response):
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="gmail",
+            )
+
+        assert "error" in result
+        assert "expired" in result["error"].lower() or "invalid" in result["error"].lower()
+        assert "help" in result
+
+    def test_auto_prefers_gmail_over_resend(self, send_email_fn, monkeypatch):
+        """Auto mode uses Gmail when both Gmail and Resend are available."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "user@gmail.com")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "gmail_auto_123"}
+
+        with (
+            patch("aden_tools.tools.email_tool.email_tool.httpx.post", return_value=mock_response),
+            patch("resend.Emails.send") as mock_resend,
+        ):
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+            )
+
+        assert result["success"] is True
+        assert result["provider"] == "gmail"
+        mock_resend.assert_not_called()
+
+    def test_auto_falls_back_to_resend(self, send_email_fn, monkeypatch):
+        """Auto mode falls back to Resend when Gmail is not available."""
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+        monkeypatch.setenv("EMAIL_FROM", "test@example.com")
+
+        with patch("resend.Emails.send") as mock_send:
+            mock_send.return_value = {"id": "resend_fallback"}
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+            )
+
+        assert result["success"] is True
+        assert result["provider"] == "resend"
+
+    def test_gmail_no_from_email_ok(self, send_email_fn, monkeypatch):
+        """Gmail works without from_email (defaults to authenticated user)."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_gmail_token")
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        monkeypatch.delenv("EMAIL_FROM", raising=False)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "gmail_no_from"}
+
+        with patch("aden_tools.tools.email_tool.email_tool.httpx.post", return_value=mock_response):
+            result = send_email_fn(
+                to="test@example.com",
+                subject="Test",
+                html="<p>Hi</p>",
+                provider="gmail",
+            )
+
+        assert result["success"] is True
+        assert result["provider"] == "gmail"

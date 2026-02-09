@@ -1,0 +1,265 @@
+{
+  "agent": {
+    "id": "twitter_outreach",
+    "name": "Personalized Twitter Outreach",
+    "version": "1.0.0",
+    "description": "Given a Twitter/X handle and outreach context, research the target's profile (bio, tweets, interests), craft a personalized outreach email referencing their specific activity, and send it after user approval."
+  },
+  "graph": {
+    "id": "twitter_outreach-graph",
+    "goal_id": "twitter-outreach",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "send"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Collect the target Twitter handle, outreach purpose, and recipient email from the user",
+        "node_type": "event_loop",
+        "input_keys": [],
+        "output_keys": [
+          "twitter_handle",
+          "outreach_context",
+          "recipient_email"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are the intake assistant for a personalized Twitter outreach agent.\n\n**STEP 1 \u2014 Respond to the user (text only, NO tool calls):**\nGreet the user and ask them to provide:\n1. The Twitter/X handle of the person they want to reach out to\n2. The purpose/context of the outreach (e.g., partnership opportunity, hiring, collaboration, introduction)\n3. The recipient's email address\n\nBe friendly and concise. If the user provides partial info, ask for what's missing.\n\n**STEP 2 \u2014 After the user provides ALL three pieces of information, call set_output:**\n- set_output(\"twitter_handle\", \"<the Twitter handle, including @>\")\n- set_output(\"outreach_context\", \"<the outreach purpose/context>\")\n- set_output(\"recipient_email\", \"<the email address>\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "research",
+        "name": "Research",
+        "description": "Research the target's Twitter/X profile \u2014 bio, recent tweets, interests, and topics they engage with",
+        "node_type": "event_loop",
+        "input_keys": [
+          "twitter_handle"
+        ],
+        "output_keys": [
+          "profile_summary"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a Twitter/X profile researcher. Your job is to thoroughly research a person's public Twitter/X presence.\n\nGiven the Twitter handle provided in your inputs, do the following:\n\n1. Use web_search to find their Twitter/X profile and any relevant public information about them.\n2. Use web_scrape to read their Twitter/X profile page (try https://x.com/{handle} or https://twitter.com/{handle}).\n3. Extract and analyze:\n   - Their bio and self-description\n   - Recent tweets and topics they post about\n   - Professional interests, projects, or accomplishments\n   - Any recurring themes or passions\n   - Specific tweets worth referencing in outreach\n4. Look for additional context (personal website, blog, other social profiles mentioned in bio).\n\nCompile a comprehensive profile summary that would help someone write a highly personalized outreach email.\n\nUse set_output(\"profile_summary\", <your detailed summary as a string>) to store your findings.\n\nDo NOT return raw JSON. Use the set_output tool to produce outputs.",
+        "tools": [
+          "web_search",
+          "web_scrape"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "draft-review",
+        "name": "Draft & Review",
+        "description": "Draft a personalized outreach email using profile research, present to user for review, and iterate until approved",
+        "node_type": "event_loop",
+        "input_keys": [
+          "outreach_context",
+          "recipient_email",
+          "profile_summary"
+        ],
+        "output_keys": [
+          "approved_email"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an expert email copywriter specializing in personalized outreach.\n\nYou have been given:\n- A profile summary of the target person (from their Twitter/X)\n- The outreach context/purpose\n- The recipient's email address\n\n**STEP 1 \u2014 Draft and present the email (text only, NO tool calls):**\n\nUsing the profile research, draft a personalized outreach email that:\n- References at least 2 specific details from their Twitter profile (tweets, interests, projects)\n- Clearly connects to the outreach purpose\n- Includes a specific, relevant call to action\n- Is professional but conversational and authentic \u2014 NOT spammy, robotic, or overly formal\n- Is concise (under 300 words)\n\nPresent the complete email draft to the user, formatted clearly with Subject line and Body.\nThen ask: \"Would you like any changes, or shall I send this?\"\n\nIf the user requests changes, revise the email and present the updated version. Keep iterating until the user is satisfied.\n\n**STEP 2 \u2014 After the user explicitly approves the email, call set_output:**\n- set_output(\"approved_email\", \"<the final approved email text including subject line>\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "send",
+        "name": "Send",
+        "description": "Send the approved outreach email to the recipient",
+        "node_type": "event_loop",
+        "input_keys": [
+          "approved_email",
+          "recipient_email"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are responsible for sending the approved outreach email.\n\nYou have the approved email text and the recipient's email address in your inputs.\n\nParse the subject line and body from the approved_email, then use the send_email tool to send it to the recipient_email address.\n\nAfter sending successfully, call:\n- set_output(\"delivery_status\", \"sent\")\n\nIf there is an error sending, call:\n- set_output(\"delivery_status\", \"failed: <error details>\")\n\nDo NOT return raw JSON. Use the set_output tool to produce outputs.",
+        "tools": [
+          "send_email"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-research",
+        "source": "intake",
+        "target": "research",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "research-to-draft-review",
+        "source": "research",
+        "target": "draft-review",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "draft-review-to-send",
+        "source": "draft-review",
+        "target": "send",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Given a Twitter/X handle and outreach context, research the target's profile (bio, tweets, interests), craft a personalized outreach email referencing their specific activity, and send it after user approval.",
+    "created_at": "2026-02-05T13:32:44.573661"
+  },
+  "goal": {
+    "id": "twitter-outreach",
+    "name": "Personalized Twitter Outreach",
+    "description": "Given a Twitter/X handle and outreach context, research the target's profile (bio, tweets, interests), craft a personalized outreach email referencing their specific activity, and send it after user approval.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "profile-research",
+        "description": "Agent extracts meaningful information from target's Twitter profile including bio, recent tweets, interests, and topics they engage with",
+        "metric": "research_quality",
+        "target": "Identifies at least 3 distinct profile details",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "email-personalization",
+        "description": "Drafted email references at least 2 specific details from the target's Twitter profile",
+        "metric": "personalization_score",
+        "target": "At least 2 specific references to profile content",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "clear-cta",
+        "description": "Email includes a specific relevant call to action",
+        "metric": "cta_present",
+        "target": "Email contains clear call to action",
+        "weight": 0.15,
+        "met": false
+      },
+      {
+        "id": "user-approval-gate",
+        "description": "Email is presented to user for review and only sent after explicit approval with opportunity to request edits",
+        "metric": "approval_obtained",
+        "target": "User explicitly approves before send",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "successful-delivery",
+        "description": "Email is sent successfully via the send_email tool",
+        "metric": "delivery_status",
+        "target": "Email sent without errors",
+        "weight": 0.15,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "no-spam",
+        "description": "Email must not use spammy language, clickbait, or aggressive sales tactics",
+        "constraint_type": "quality",
+        "category": "content",
+        "check": ""
+      },
+      {
+        "id": "approval-required",
+        "description": "Must never send an email without explicit user approval",
+        "constraint_type": "safety",
+        "category": "process",
+        "check": ""
+      },
+      {
+        "id": "tone-appropriate",
+        "description": "Email tone must be professional, authentic, and conversational \u2014 not robotic or overly formal",
+        "constraint_type": "quality",
+        "category": "content",
+        "check": ""
+      },
+      {
+        "id": "privacy-respect",
+        "description": "Only use publicly available information from the target's Twitter profile",
+        "constraint_type": "safety",
+        "category": "ethics",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-05 13:30:59.934460",
+    "updated_at": "2026-02-05 13:30:59.934462"
+  },
+  "required_tools": [
+    "web_scrape",
+    "send_email",
+    "web_search"
+  ],
+  "metadata": {
+    "created_at": "2026-02-05T13:32:44.573712",
+    "node_count": 4,
+    "edge_count": 3
+  }
+}
