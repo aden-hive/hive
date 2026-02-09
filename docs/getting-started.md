@@ -1,6 +1,8 @@
 # Getting Started
 
-This guide will help you set up the Aden Agent Framework and build your first agent.
+This guide helps you go from **cloned repo → first agent running**.
+
+If you want a high‑level mental model first, read **[First 15 Minutes with Hive](articles/first-15-minutes-with-hive.md)**, then come back here for commands.
 
 ## Prerequisites
 
@@ -77,7 +79,7 @@ This demonstrates the core runtime loop using pure Python functions, skipping th
 
 ```
 hive/
-├── core/                   # Core Framework
+├── core/                   # Core framework package (Python)
 │   ├── framework/          # Agent runtime, graph executor
 │   │   ├── builder/        # Agent builder utilities
 │   │   ├── credentials/    # Credential management
@@ -92,10 +94,10 @@ hive/
 │   │   └── tui/            # Terminal UI dashboard
 │   └── pyproject.toml      # Package metadata
 │
-├── tools/                  # MCP Tools Package
+├── tools/                  # MCP tools project (separate Python package)
 │   ├── mcp_server.py       # MCP server entry point
 │   └── src/aden_tools/     # Tools for agent capabilities
-│       └── tools/          # Individual tool implementations
+│       └── tools/          # Individual MCP tool implementations
 │           ├── web_search_tool/
 │           ├── web_scrape_tool/
 │           └── file_system_toolkits/
@@ -117,6 +119,12 @@ hive/
 └── docs/                   # Documentation
 ```
 
+**Why does `tools/src/aden_tools/tools` look duplicated?**
+
+- `tools/` is the **project root** for the tools package (like a typical Python package layout).
+- `src/aden_tools/` is the **importable package** (`import aden_tools`).
+- `src/aden_tools/tools/` holds **individual MCP tools** that agents can call (file system, web search, etc.).
+
 ## Running an Agent
 
 ```bash
@@ -130,6 +138,18 @@ hive run exports/my_agent --input '{"task": "Your input here"}'
 hive run exports/my_agent --tui
 
 ```
+
+You can also run agents purely via Python modules if you prefer:
+
+```bash
+# Equivalent to `hive run` using Python directly
+PYTHONPATH=exports uv run python -m my_agent run --input '{
+  "task": "Your input here"
+}'
+```
+
+- **`PYTHONPATH=core:exports`** makes the `framework` package and your `exports/` agents importable.
+- **`hive`** is a thin CLI wrapper around the same runtime (see `core/framework/cli.py`); the TUI (`hive tui`) sits on top of the same runner.
 
 ## API Keys Setup
 
@@ -170,6 +190,15 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 4. **Build Agents**: Use `/hive` skill in Claude Code
 5. **Custom Tools**: Learn to integrate MCP servers
 6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
+
+## Key Concepts (Glossary)
+
+- **Hive framework (`core/`)**: Python runtime that executes agent graphs, manages state, and talks to LLMs.
+- **Tools package (`tools/` / `aden_tools`)**: Collection of MCP tools (file system, web, data, etc.) that agents can call.
+- **Agent package (`exports/my_agent/`)**: Your generated agent, including `agent.json`, `tools.py`, tests, and code.
+- **MCP server**: A process that exposes tools over the Model Context Protocol so coding agents (Claude, Cursor) can call them safely.
+- **Claude Code / Cursor skills**: Pre-built workflows (like `/building-agents-construction`, `/testing-agent`) that orchestrate Hive and MCP tools for you.
+- **TUI (coming soon)**: Text‑based UI for inspecting agents and runs; will sit on top of the same CLI and runtime you use here.
 
 ## Troubleshooting
 

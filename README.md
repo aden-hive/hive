@@ -43,6 +43,7 @@ Build autonomous, reliable, self-improving AI agents without hardcoding workflow
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
 https://github.com/user-attachments/assets/846c0cc7-ffd6-47fa-b4b7-495494857a55
+If you're new and want a mental model before running any commands, start with **[First 15 Minutes with Hive](docs/articles/first-15-minutes-with-hive.md)**.
 
 ## Who Is Hive For?
 
