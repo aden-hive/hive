@@ -63,6 +63,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
     )
+    run_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Run in mock mode (no real API calls).",
+    )
+
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -228,44 +234,34 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
 
     # Run the agent (with TUI or standard)
+    load_kwargs = {"mock_mode": args.mock}
+    if args.model is not None:
+        load_kwargs["model"] = args.model
+
     if getattr(args, "tui", False):
         from framework.tui.app import AdenTUI
 
         async def run_with_tui():
-            try:
-                # Load runner inside the async loop to ensure strict loop affinity
-                # (only one load — avoids spawning duplicate MCP subprocesses)
-                try:
-                    runner = AgentRunner.load(
-                        args.agent_path,
-                        model=args.model,
-                        enable_tui=True,
-                    )
-                except Exception as e:
-                    print(f"Error loading agent: {e}")
-                    return
-
-                # Force setup inside the loop
-                if runner._agent_runtime is None:
-                    runner._setup()
-
-                # Start runtime before TUI so it's ready for user input
-                if runner._agent_runtime and not runner._agent_runtime.is_running:
-                    await runner._agent_runtime.start()
-
-                app = AdenTUI(runner._agent_runtime)
-
-                # TUI handles execution via ChatRepl — user submits input,
-                # ChatRepl calls runtime.trigger_and_wait(). No auto-launch.
-                await app.run_async()
-            except Exception as e:
-                import traceback
-
-                traceback.print_exc()
-                print(f"TUI error: {e}")
-
-            await runner.cleanup_async()
-            return None
+        runner = None
+        try:
+            runner = AgentRunner.load(
+                args.agent_path,
+                enable_tui=True,
+                **load_kwargs,
+            )
+            if runner._agent_runtime is None:
+                runner._setup()
+            if runner._agent_runtime and not runner._agent_runtime.is_running:
+                await runner._agent_runtime.start()
+            app = AdenTUI(runner._agent_runtime)
+            await app.run_async()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"TUI error: {e}")
+        finally:
+            if runner is not None:
+                await runner.cleanup_async()
 
         asyncio.run(run_with_tui())
         print("TUI session ended.")
@@ -275,9 +271,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         try:
             runner = AgentRunner.load(
                 args.agent_path,
-                model=args.model,
                 enable_tui=False,
+                **load_kwargs,
             )
+
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
