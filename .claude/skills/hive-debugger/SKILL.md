@@ -562,15 +562,33 @@ PYTHONPATH=core:exports python -m {agent_name} --tui
 
 ### Find Available Checkpoints:
 
-```bash
-# In TUI:
-/sessions {session_id}
+Use MCP tools to programmatically find and inspect checkpoints:
 
-# This shows all checkpoints with timestamps:
-Available Checkpoints: (3)
-  1. cp_node_complete_intake_143030
-  2. cp_node_complete_research_143115
-  3. cp_pause_research_143130
+```
+# List all sessions to find the failed one
+list_agent_sessions(agent_work_dir="~/.hive/agents/{agent_name}", status="failed")
+
+# Inspect session state
+get_agent_session_state(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}")
+
+# Find clean checkpoints to resume from
+list_agent_checkpoints(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}", is_clean="true")
+
+# Compare checkpoints to understand what changed
+compare_agent_checkpoints(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    session_id="{session_id}",
+    checkpoint_id_before="cp_node_complete_intake_143030",
+    checkpoint_id_after="cp_node_complete_research_143115"
+)
+
+# Inspect memory at a specific checkpoint
+get_agent_checkpoint(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}", checkpoint_id="cp_node_complete_intake_143030")
+```
+
+Or in TUI:
+```bash
+/sessions {session_id}
 ```
 
 **Verification:**
@@ -717,6 +735,80 @@ Let me know when you've run it and I'll help check the logs!"
   )
   ```
 
+### Session & Checkpoint Tools
+
+**list_agent_sessions** - Browse sessions with filtering
+- **When to use:** Finding resumable sessions, identifying failed sessions, Stage 3 triage
+- **Returns:** Session list with status, timestamps, is_resumable, current_node, quality
+- **Example:**
+  ```
+  list_agent_sessions(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      status="failed",
+      limit=10
+  )
+  ```
+
+**get_agent_session_state** - Load full session state (excludes memory values)
+- **When to use:** Inspecting session progress, checking is_resumable, examining path
+- **Returns:** Full state with memory_keys/memory_size instead of memory values
+- **Example:**
+  ```
+  get_agent_session_state(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345"
+  )
+  ```
+
+**get_agent_session_memory** - Get memory contents from a session
+- **When to use:** Stage 5 root cause analysis, inspecting produced data
+- **Returns:** All memory keys+values, or a single key's value
+- **Example:**
+  ```
+  get_agent_session_memory(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      key="twitter_handles"
+  )
+  ```
+
+**list_agent_checkpoints** - List checkpoints for a session
+- **When to use:** Stage 6 recovery, finding clean checkpoints to resume from
+- **Returns:** Checkpoint summaries with type, node, clean status
+- **Example:**
+  ```
+  list_agent_checkpoints(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      is_clean="true"
+  )
+  ```
+
+**get_agent_checkpoint** - Load a specific checkpoint with full state
+- **When to use:** Inspecting exact state at a checkpoint, comparing to current state
+- **Returns:** Full checkpoint: memory snapshot, execution path, metrics
+- **Example:**
+  ```
+  get_agent_checkpoint(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      checkpoint_id="cp_node_complete_intake_143030"
+  )
+  ```
+
+**compare_agent_checkpoints** - Diff memory between two checkpoints
+- **When to use:** Understanding data flow, finding where state diverged
+- **Returns:** Memory diff (added/removed/changed keys) + execution path diff
+- **Example:**
+  ```
+  compare_agent_checkpoints(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      checkpoint_id_before="cp_node_complete_intake_143030",
+      checkpoint_id_after="cp_node_complete_research_143115"
+  )
+  ```
+
 ### Query Patterns
 
 **Pattern 1: Top-Down Investigation** (Most common)
@@ -737,6 +829,16 @@ Let me know when you've run it and I'll help check the logs!"
 Loop every 10 seconds:
   1. L1: Check for new needs_attention runs
   2. If found: Alert and drill into L2
+```
+
+**Pattern 4: Session State + Checkpoint Recovery**
+```
+1. list_agent_sessions: Find failed/paused sessions
+2. get_agent_session_state: Check is_resumable, see execution path
+3. get_agent_session_memory: Inspect what data was produced
+4. list_agent_checkpoints: Find clean checkpoints before failure
+5. compare_agent_checkpoints: Understand what changed between checkpoints
+6. Recommend resume command with specific checkpoint
 ```
 
 ---
