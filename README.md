@@ -415,6 +415,9 @@ Aden's adaptation loop begins working from the first execution. When an agent fa
 Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
 
 ---
+## Beginner Perspective
+Hive helps developers build AI agents that automate business workflows.
+Adding a simple end-to-end business workflow example could help new contributors quickly understand the project.
 
 <p align="center">
   Made with 🔥 Passion in San Francisco
