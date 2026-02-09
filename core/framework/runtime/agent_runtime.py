@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult
 from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
@@ -102,6 +103,7 @@ class AgentRuntime:
         tool_executor: Callable | None = None,
         config: AgentRuntimeConfig | None = None,
         runtime_log_store: Any = None,
+        checkpoint_config: CheckpointConfig | None = None,
     ):
         """
         Initialize agent runtime.
@@ -115,11 +117,13 @@ class AgentRuntime:
             tool_executor: Function to execute tools
             config: Optional runtime configuration
             runtime_log_store: Optional RuntimeLogStore for per-execution logging
+            checkpoint_config: Optional checkpoint configuration for resumable sessions
         """
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
         self._runtime_log_store = runtime_log_store
+        self._checkpoint_config = checkpoint_config
 
         # Initialize storage
         storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
@@ -222,6 +226,7 @@ class AgentRuntime:
                     result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
                     runtime_log_store=self._runtime_log_store,
                     session_store=self._session_store,
+                    checkpoint_config=self._checkpoint_config,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -460,6 +465,7 @@ def create_agent_runtime(
     config: AgentRuntimeConfig | None = None,
     runtime_log_store: Any = None,
     enable_logging: bool = True,
+    checkpoint_config: CheckpointConfig | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -480,6 +486,8 @@ def create_agent_runtime(
             If None and enable_logging=True, creates one automatically.
         enable_logging: Whether to enable runtime logging (default: True).
             Set to False to disable logging entirely.
+        checkpoint_config: Optional checkpoint configuration for resumable sessions.
+            If None, uses default checkpointing behavior.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -500,6 +508,7 @@ def create_agent_runtime(
         tool_executor=tool_executor,
         config=config,
         runtime_log_store=runtime_log_store,
+        checkpoint_config=checkpoint_config,
     )
 
     for spec in entry_points:
