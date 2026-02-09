@@ -66,7 +66,7 @@ class TestCalendlyListEventTypes:
 
         with (
             patch(
-                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.request",
                 side_effect=_calendly_list_responses(),
             ),
         ):
@@ -84,12 +84,12 @@ class TestCalendlyListEventTypes:
 
         with (
             patch(
-                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
-            ) as mock_get,
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 401
-            mock_get.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = calendly_list_event_types_fn()
 
@@ -107,8 +107,8 @@ class TestCalendlyGetAvailability:
 
         with (
             patch(
-                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
-            ) as mock_get,
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -118,7 +118,7 @@ class TestCalendlyGetAvailability:
                     {"resource": {"start_time": "2026-02-01T14:30:00Z", "invitees_remaining": 1}},
                 ]
             }
-            mock_get.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = calendly_get_availability_fn(event_type_uri=event_uri)
 
@@ -126,6 +126,22 @@ class TestCalendlyGetAvailability:
         assert result["count"] == 2
         assert len(result["available_times"]) == 2
         assert result["available_times"][0]["start_time"] == "2026-02-01T14:00:00Z"
+
+    def test_get_availability_date_range_validation(
+        self, calendly_get_availability_fn, monkeypatch
+    ):
+        """Date range exceeding 7 days returns error."""
+        monkeypatch.setenv("CALENDLY_API_TOKEN", "test-token")
+
+        result = calendly_get_availability_fn(
+            event_type_uri="https://api.calendly.com/event_types/et1",
+            start_time="2026-01-01T00:00:00Z",
+            end_time="2026-01-15T00:00:00Z",
+        )
+
+        assert "error" in result
+        assert "7" in result["error"]
+        assert "max_days" in result
 
 
 class TestCalendlyGetBookingLink:
@@ -138,8 +154,8 @@ class TestCalendlyGetBookingLink:
 
         with (
             patch(
-                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
-            ) as mock_get,
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -150,7 +166,7 @@ class TestCalendlyGetBookingLink:
                     "scheduling_url": "https://calendly.com/me/15min",
                 }
             }
-            mock_get.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = calendly_get_booking_link_fn(event_type_uri=event_uri)
 
@@ -164,12 +180,12 @@ class TestCalendlyGetBookingLink:
 
         with (
             patch(
-                "aden_tools.tools.calendly_tool.calendly_tool.httpx.get",
-            ) as mock_get,
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 404
-            mock_get.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = calendly_get_booking_link_fn(
                 event_type_uri="https://api.calendly.com/event_types/nonexistent"
@@ -189,21 +205,21 @@ class TestCalendlyCancelEvent:
 
         with (
             patch(
-                "aden_tools.tools.calendly_tool.calendly_tool.httpx.post",
-            ) as mock_post,
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
             mock_resp.json.return_value = {}
-            mock_post.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             result = calendly_cancel_event_fn(event_uri=event_uri)
 
         assert result["success"] is True
         assert "message" in result
         assert "cancel" in result["message"].lower()
-        mock_post.assert_called_once()
-        call_url = mock_post.call_args[0][0]
+        mock_request.assert_called_once()
+        call_url = mock_request.call_args[0][1]
         assert call_url == f"{event_uri}/cancellation"
 
     def test_cancel_event_with_reason(self, calendly_cancel_event_fn, monkeypatch):
@@ -212,19 +228,19 @@ class TestCalendlyCancelEvent:
 
         with (
             patch(
-                "aden_tools.tools.calendly_tool.calendly_tool.httpx.post",
-            ) as mock_post,
+                "aden_tools.tools.calendly_tool.calendly_tool.httpx.request",
+            ) as mock_request,
         ):
             mock_resp = MagicMock()
             mock_resp.status_code = 200
-            mock_post.return_value = mock_resp
+            mock_request.return_value = mock_resp
 
             calendly_cancel_event_fn(
                 event_uri="https://api.calendly.com/scheduled_events/ev1",
                 reason="Meeting rescheduled",
             )
 
-        call_kwargs = mock_post.call_args[1]
+        call_kwargs = mock_request.call_args[1]
         assert call_kwargs["json"] == {"reason": "Meeting rescheduled"}
 
 

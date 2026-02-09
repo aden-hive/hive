@@ -12,6 +12,7 @@ API Reference: https://developer.calendly.com/api-docs
 from __future__ import annotations
 
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 CALENDLY_API_BASE = "https://api.calendly.com"
+MAX_RETRIES = 2
+MAX_RETRY_WAIT = 60
+MAX_AVAILABILITY_DAYS = 7
 
 
 class _CalendlyClient:
@@ -37,6 +41,26 @@ class _CalendlyClient:
             "Content-Type": "application/json",
         }
 
+    def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Make HTTP request with retry on 429 rate limit."""
+        request_kwargs = {"headers": self._headers, "timeout": 30.0, **kwargs}
+        for attempt in range(MAX_RETRIES + 1):
+            response = httpx.request(method, url, **request_kwargs)
+            if response.status_code == 429 and attempt < MAX_RETRIES:
+                try:
+                    wait = min(float(response.headers.get("Retry-After", 1)), MAX_RETRY_WAIT)
+                except (ValueError, TypeError):
+                    wait = min(2**attempt, MAX_RETRY_WAIT)
+                time.sleep(wait)
+                continue
+            return self._handle_response(response)
+        return self._handle_response(response)
+
     def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
         """Handle Calendly API response."""
         if response.status_code == 401:
@@ -45,6 +69,12 @@ class _CalendlyClient:
             return {"error": "Access forbidden. Check token permissions."}
         if response.status_code == 404:
             return {"error": "Resource not found"}
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After", "60")
+            return {
+                "error": f"Calendly rate limit exceeded. Retry after {retry_after}s",
+                "retry_after": retry_after,
+            }
         if response.status_code >= 400:
             return {"error": f"Calendly API error (HTTP {response.status_code}): {response.text}"}
 
@@ -55,12 +85,7 @@ class _CalendlyClient:
 
     def get_current_user(self) -> dict[str, Any]:
         """Get current authenticated user (for user URI)."""
-        response = httpx.get(
-            f"{CALENDLY_API_BASE}/users/me",
-            headers=self._headers,
-            timeout=30.0,
-        )
-        return self._handle_response(response)
+        return self._request_with_retry("GET", f"{CALENDLY_API_BASE}/users/me")
 
     def list_event_types(self, user_uri: str | None = None) -> dict[str, Any]:
         """List event types for a user."""
@@ -72,13 +97,11 @@ class _CalendlyClient:
             if not user_uri:
                 return {"error": "Could not get user URI from /users/me"}
 
-        response = httpx.get(
+        result = self._request_with_retry(
+            "GET",
             f"{CALENDLY_API_BASE}/event_types",
-            headers=self._headers,
             params={"user": user_uri},
-            timeout=30.0,
         )
-        result = self._handle_response(response)
         if "error" in result:
             return result
 
@@ -107,12 +130,7 @@ class _CalendlyClient:
 
     def get_event_type(self, event_type_uri: str) -> dict[str, Any]:
         """Get a single event type by URI (includes scheduling_url)."""
-        response = httpx.get(
-            event_type_uri,
-            headers=self._headers,
-            timeout=30.0,
-        )
-        result = self._handle_response(response)
+        result = self._request_with_retry("GET", event_type_uri)
         if "error" in result:
             return result
         resource = result.get("resource", {})
@@ -136,21 +154,34 @@ class _CalendlyClient:
         if not start_time or not end_time:
             now = datetime.now(UTC)
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end = start + timedelta(days=7)
+            end = start + timedelta(days=MAX_AVAILABILITY_DAYS)
             start_time = start.isoformat().replace("+00:00", "Z")
             end_time = end.isoformat().replace("+00:00", "Z")
+        else:
+            try:
+                start_dt = datetime.fromisoformat(
+                    start_time.replace("Z", "+00:00").replace("z", "+00:00")
+                )
+                end_dt = datetime.fromisoformat(
+                    end_time.replace("Z", "+00:00").replace("z", "+00:00")
+                )
+                if (end_dt - start_dt).days > MAX_AVAILABILITY_DAYS:
+                    return {
+                        "error": f"Date range exceeds {MAX_AVAILABILITY_DAYS} day limit",
+                        "max_days": MAX_AVAILABILITY_DAYS,
+                    }
+            except (ValueError, TypeError):
+                pass
 
-        response = httpx.get(
+        result = self._request_with_retry(
+            "GET",
             f"{CALENDLY_API_BASE}/event_type_available_times",
-            headers=self._headers,
             params={
                 "event_type": event_type_uri,
                 "start_time": start_time,
                 "end_time": end_time,
             },
-            timeout=30.0,
         )
-        result = self._handle_response(response)
         if "error" in result:
             return result
 
@@ -180,13 +211,11 @@ class _CalendlyClient:
         if reason:
             body["reason"] = reason
 
-        response = httpx.post(
+        result = self._request_with_retry(
+            "POST",
             f"{event_uri}/cancellation",
-            headers=self._headers,
             json=body,
-            timeout=30.0,
         )
-        result = self._handle_response(response)
         if "error" in result:
             return result
         return {"success": True, "message": "Event cancelled"}
