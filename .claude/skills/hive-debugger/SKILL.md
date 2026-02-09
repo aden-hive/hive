@@ -34,7 +34,7 @@ Before using this skill, ensure:
 1. You have an exported agent in `exports/{agent_name}/`
 2. The agent has been run at least once (logs exist)
 3. Runtime logging is enabled (default in Hive framework)
-4. You have access to the agent's working directory at `~/.hive/{agent_name}/`
+4. You have access to the agent's working directory at `~/.hive/agents/{agent_name}/`
 
 ---
 
@@ -51,7 +51,7 @@ Before using this skill, ensure:
    - Confirm the agent exists in `exports/{agent_name}/`
 
 2. **Determine agent working directory:**
-   - Calculate: `~/.hive/{agent_name}/`
+   - Calculate: `~/.hive/agents/{agent_name}/`
    - Verify this directory exists and contains session logs
 
 3. **Read agent configuration:**
@@ -495,11 +495,96 @@ max_node_visits=3  # Prevent getting stuck
 - Confirm it calls set_output eventually
 ```
 
+#### Template 6: Checkpoint Recovery (Post-Fix Resume)
+
+```markdown
+## Recovery Strategy: Resume from Last Clean Checkpoint
+
+**Situation:** You've fixed the issue, but the failed session is stuck mid-execution
+
+**Solution:** Resume execution from a checkpoint before the failure
+
+### Option A: Auto-Resume from Latest Checkpoint (Recommended)
+
+Use CLI arguments to auto-resume when launching TUI:
+
+```bash
+PYTHONPATH=core:exports python -m {agent_name} --tui \
+    --resume-session {session_id}
+```
+
+This will:
+- Load session state from `state.json`
+- Continue from where it paused/failed
+- Apply your fixes immediately
+
+### Option B: Resume from Specific Checkpoint (Time-Travel)
+
+If you need to go back to an earlier point:
+
+```bash
+PYTHONPATH=core:exports python -m {agent_name} --tui \
+    --resume-session {session_id} \
+    --checkpoint {checkpoint_id}
+```
+
+Example:
+```bash
+PYTHONPATH=core:exports python -m deep_research_agent --tui \
+    --resume-session session_20260208_143022_abc12345 \
+    --checkpoint cp_node_complete_intake_143030
+```
+
+### Option C: Use TUI Commands
+
+Alternatively, launch TUI normally and use commands:
+
+```bash
+# Launch TUI
+PYTHONPATH=core:exports python -m {agent_name} --tui
+
+# In TUI, use commands:
+/resume {session_id}                    # Resume from session state
+/recover {session_id} {checkpoint_id}   # Recover from specific checkpoint
+```
+
+### When to Use Each Option:
+
+**Use `/resume` (or --resume-session) when:**
+- You fixed credentials and want to retry
+- Agent paused and you want to continue
+- Agent failed and you want to retry from last state
+
+**Use `/recover` (or --resume-session + --checkpoint) when:**
+- You need to go back to an earlier checkpoint
+- You want to try a different path from a specific point
+- Debugging requires time-travel to earlier state
+
+### Find Available Checkpoints:
+
+```bash
+# In TUI:
+/sessions {session_id}
+
+# This shows all checkpoints with timestamps:
+Available Checkpoints: (3)
+  1. cp_node_complete_intake_143030
+  2. cp_node_complete_research_143115
+  3. cp_pause_research_143130
+```
+
+**Verification:**
+- Use `--resume-session` to test your fix immediately
+- No need to re-run from the beginning
+- Session continues with your code changes applied
+```
+
 **Selecting the right template:**
 - Match the issue category from Stage 4
 - Customize with specific details from Stage 5
 - Include actual error messages and code snippets
 - Provide file paths and line numbers when possible
+- **Always include recovery commands** (Template 6) after providing fix recommendations
 
 ---
 
@@ -532,7 +617,7 @@ max_node_visits=3  # Prevent getting stuck
    **Check if issue is resolved:**
    ```
    query_runtime_logs(
-       agent_work_dir="~/.hive/{agent_name}",
+       agent_work_dir="~/.hive/agents/{agent_name}",
        status="needs_attention",
        limit=5
    )
@@ -542,7 +627,7 @@ max_node_visits=3  # Prevent getting stuck
    **Verify specific node behavior:**
    ```
    query_runtime_log_details(
-       agent_work_dir="~/.hive/{agent_name}",
+       agent_work_dir="~/.hive/agents/{agent_name}",
        run_id="{new_run_id}",
        node_id="{fixed_node_id}"
    )
@@ -671,7 +756,7 @@ You: "I'll help debug the twitter_outreach agent. Let me gather context..."
 Context:
 - Agent: twitter_outreach
 - Goal: twitter-outreach-multi-loop
-- Working Dir: ~/.hive/twitter_outreach
+- Working Dir: ~/.hive/agents/twitter_outreach
 - Success Criteria: ["Successfully send 5 personalized outreach messages"]
 - Constraints: ["Must verify handle exists", "Must personalize message"]
 - Nodes: intake-collector, profile-analyzer, message-composer, outreach-sender
@@ -834,12 +919,12 @@ Your agent should now work correctly!"
 ## Storage Locations Reference
 
 **New unified storage (default):**
-- Logs: `~/.hive/{agent_name}/sessions/session_YYYYMMDD_HHMMSS_{uuid}/logs/`
-- State: `~/.hive/{agent_name}/sessions/{session_id}/state.json`
-- Conversations: `~/.hive/{agent_name}/sessions/{session_id}/conversations/`
+- Logs: `~/.hive/agents/{agent_name}/sessions/session_YYYYMMDD_HHMMSS_{uuid}/logs/`
+- State: `~/.hive/agents/{agent_name}/sessions/{session_id}/state.json`
+- Conversations: `~/.hive/agents/{agent_name}/sessions/{session_id}/conversations/`
 
 **Old storage (deprecated, still supported):**
-- Logs: `~/.hive/{agent_name}/runtime_logs/runs/{run_id}/`
+- Logs: `~/.hive/agents/{agent_name}/runtime_logs/runs/{run_id}/`
 
 The MCP tools automatically check both locations.
 

@@ -1,10 +1,10 @@
 # Contributing to Aden Agent Framework
 
-Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors. We’re especially looking for help building tools, integrations([check #2805](https://github.com/adenhq/hive/issues/2805)), and example agents for the framework. If you’re interested in extending its functionality, this is the perfect place to start. 
+Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors. We’re especially looking for help building tools, integrations ([check #2805](https://github.com/adenhq/hive/issues/2805)), and example agents for the framework. If you’re interested in extending its functionality, this is the perfect place to start. 
 
 ## Code of Conduct
 
-By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
+By participating in this project, you agree to abide by our [Code of Conduct](docs/CODE_OF_CONDUCT.md).
 
 ## Issue Assignment Policy
 

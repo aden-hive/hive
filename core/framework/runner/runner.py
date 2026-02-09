@@ -308,9 +308,9 @@ class AgentRunner:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            # Use persistent storage in ~/.hive by default
+            # Use persistent storage in ~/.hive/agents/{agent_name}/ per RUNTIME_LOGGING.md spec
             home = Path.home()
-            default_storage = home / ".hive" / "storage" / agent_path.name
+            default_storage = home / ".hive" / "agents" / agent_path.name
             default_storage.mkdir(parents=True, exist_ok=True)
             self._storage_path = default_storage
             self._temp_dir = None
@@ -395,7 +395,7 @@ class AgentRunner:
         Args:
             agent_path: Path to agent folder
             mock_mode: If True, use mock LLM responses
-            storage_path: Path for runtime storage (defaults to ~/.hive/storage/{name})
+            storage_path: Path for runtime storage (defaults to ~/.hive/agents/{name})
             model: LLM model to use (reads from agent's default_config if None)
             enable_tui: If True, forces use of AgentRuntime with EventBus
 
@@ -741,6 +741,17 @@ class AgentRunner:
         # Create AgentRuntime with all entry points
         log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
 
+        # Enable checkpointing by default for resumable sessions
+        from framework.graph.checkpoint_config import CheckpointConfig
+
+        checkpoint_config = CheckpointConfig(
+            enabled=True,
+            checkpoint_on_node_start=False,  # Only checkpoint after nodes complete
+            checkpoint_on_node_complete=True,
+            checkpoint_max_age_days=7,
+            async_checkpoint=True,  # Non-blocking
+        )
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -750,6 +761,7 @@ class AgentRunner:
             tools=tools,
             tool_executor=tool_executor,
             runtime_log_store=log_store,
+            checkpoint_config=checkpoint_config,
         )
 
     async def run(
