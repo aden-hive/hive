@@ -562,6 +562,11 @@ class AgentRunner:
 
     def _setup(self) -> None:
         """Set up runtime, LLM, and executor."""
+        # Configure structured logging (auto-detects JSON vs human-readable)
+        from framework.observability import configure_logging
+
+        configure_logging(level="INFO", format="auto")
+
         # Set up session context for tools (workspace_id, agent_id, session_id)
         workspace_id = "default"  # Could be derived from storage path
         agent_id = self.graph.id or "unknown"
