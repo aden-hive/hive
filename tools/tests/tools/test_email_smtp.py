@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastmcp import FastMCP
 
 from aden_tools.tools.email_tool import register_tools
@@ -22,14 +21,14 @@ class TestSMTPProvider:
         monkeypatch.setenv("EMAIL_FROM", "bot@example.com")
 
         mcp = FastMCP("test-server")
-        
+
         with patch("smtplib.SMTP") as mock_smtp_class:
             mock_smtp_instance = MagicMock()
             mock_smtp_class.return_value.__enter__.return_value = mock_smtp_instance
-            
+
             register_tools(mcp)
             send_email_fn = mcp._tool_manager._tools["send_email"].fn
-           
+
             result = send_email_fn(
                 to="test@example.com",
                 subject="Test SMTP",
@@ -84,10 +83,10 @@ class TestSMTPProvider:
 
         with patch("smtplib.SMTP") as mock_smtp_class:
             mock_smtp_class.side_effect = Exception("Connection refused")
-            
+
             register_tools(mcp)
             send_email_fn = mcp._tool_manager._tools["send_email"].fn
-           
+
             result = send_email_fn(
                 to="test@example.com",
                 subject="Test",
@@ -113,10 +112,10 @@ class TestSMTPProvider:
         with patch("smtplib.SMTP") as mock_smtp_class:
             mock_smtp_instance = MagicMock()
             mock_smtp_class.return_value.__enter__.return_value = mock_smtp_instance
-            
+
             register_tools(mcp)
             send_email_fn = mcp._tool_manager._tools["send_email"].fn
-           
+
             result = send_email_fn(
                 to="test@example.com",
                 subject="Test",
@@ -142,10 +141,10 @@ class TestSMTPProvider:
         with patch("smtplib.SMTP") as mock_smtp_class:
             mock_smtp_instance = MagicMock()
             mock_smtp_class.return_value.__enter__.return_value = mock_smtp_instance
-            
+
             register_tools(mcp)
             send_email_fn = mcp._tool_manager._tools["send_email"].fn
-           
+
             result = send_email_fn(
                 to="test@example.com",
                 subject="Test",

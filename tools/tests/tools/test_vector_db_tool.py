@@ -123,7 +123,9 @@ class TestVectorUpsert:
         assert result["success"] is True
         assert result["id"] == "doc123"
         mock_store.upsert.assert_called_once_with(
-            id="doc123", text="Test document content", metadata={"type": "github_issue", "number": 42}
+            id="doc123",
+            text="Test document content",
+            metadata={"type": "github_issue", "number": 42},
         )
 
     @patch("aden_tools.tools.vector_db_tool.chromadb.ChromaDBStore")

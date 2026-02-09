@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 class EmailClient:
     """Standalone email client for direct usage (e.g. by agents)."""
-    
+
     def __init__(self, credentials: dict | None = None):
         if credentials:
             self.resend_api_key = credentials.get("resend")
@@ -57,9 +57,9 @@ class EmailClient:
         import smtplib
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
-        
+
         if not self.smtp_config["host"] or not self.smtp_config["password"]:
-             return {"error": "SMTP server/password not configured"}
+            return {"error": "SMTP server/password not configured"}
 
         msg = MIMEMultipart("alternative")
         msg["From"] = from_email
@@ -70,19 +70,14 @@ class EmailClient:
         if bcc:
             msg["Bcc"] = ", ".join(bcc)
         msg.attach(MIMEText(html, "html"))
-        
+
         try:
             with smtplib.SMTP(self.smtp_config["host"], self.smtp_config["port"]) as server:
                 server.starttls()
                 server.login(self.smtp_config["username"], self.smtp_config["password"])
                 server.send_message(msg)
-            
-            return {
-                "success": True,
-                "provider": "smtp",
-                "to": to,
-                "subject": subject
-            }
+
+            return {"success": True, "provider": "smtp", "to": to, "subject": subject}
         except Exception as e:
             return {"error": f"SMTP send failed: {e}"}
 
@@ -223,37 +218,48 @@ class EmailClient:
 
         # Requirements check
         if provider == "resend" and not from_email:
-             return {"error": "Sender email is required for Resend"}
-             
+            return {"error": "Sender email is required for Resend"}
+
         if not from_email and not gmail_available and (resend_available or smtp_available):
-             # Try to resolve from SMTP username if available
-             from_email = self.smtp_config.get("username")
-             if not from_email:
-                 return {"error": "Sender email is required"}
+            # Try to resolve from SMTP username if available
+            from_email = self.smtp_config.get("username")
+            if not from_email:
+                return {"error": "Sender email is required"}
 
         try:
             # 1. Explicit Provider
             if provider == "gmail":
-                if not gmail_available: return {"error": "Gmail credentials not configured"}
-                return self._send_via_gmail(self.gmail_access_token, to_list, subject, html, from_email, cc_list, bcc_list)
-                
+                if not gmail_available:
+                    return {"error": "Gmail credentials not configured"}
+                return self._send_via_gmail(
+                    self.gmail_access_token, to_list, subject, html, from_email, cc_list, bcc_list
+                )
+
             if provider == "resend":
-                if not resend_available: return {"error": "Resend credentials not configured"}
-                return self._send_via_resend(self.resend_api_key, to_list, subject, html, from_email, cc_list, bcc_list)
-            
+                if not resend_available:
+                    return {"error": "Resend credentials not configured"}
+                return self._send_via_resend(
+                    self.resend_api_key, to_list, subject, html, from_email, cc_list, bcc_list
+                )
+
             if provider == "smtp":
-                if not smtp_available: return {"error": "SMTP credentials not configured"}
+                if not smtp_available:
+                    return {"error": "SMTP credentials not configured"}
                 return self._send_via_smtp(to_list, subject, html, from_email, cc_list, bcc_list)
 
             # 2. Auto Provider
             if gmail_available:
-                return self._send_via_gmail(self.gmail_access_token, to_list, subject, html, from_email, cc_list, bcc_list)
-            
+                return self._send_via_gmail(
+                    self.gmail_access_token, to_list, subject, html, from_email, cc_list, bcc_list
+                )
+
             if resend_available:
-                return self._send_via_resend(self.resend_api_key, to_list, subject, html, from_email, cc_list, bcc_list)
-                
+                return self._send_via_resend(
+                    self.resend_api_key, to_list, subject, html, from_email, cc_list, bcc_list
+                )
+
             if smtp_available:
-                 return self._send_via_smtp(to_list, subject, html, from_email, cc_list, bcc_list)
+                return self._send_via_smtp(to_list, subject, html, from_email, cc_list, bcc_list)
 
             return {
                 "error": "No email credentials configured",
@@ -269,7 +275,7 @@ def register_tools(
     credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register email tools with the MCP server."""
-    
+
     # Initialize client (will capture env vars if credentials is None)
     creds_dict = None
     if credentials:
@@ -277,7 +283,7 @@ def register_tools(
             "resend": credentials.get("resend"),
             "google": credentials.get("google"),
         }
-    
+
     client = EmailClient(creds_dict)
 
     @mcp.tool()

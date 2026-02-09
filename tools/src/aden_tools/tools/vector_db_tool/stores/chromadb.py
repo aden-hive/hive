@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 class ChromaDBStore:
     """ChromaDB adapter for vector storage and similarity search."""
-    
+
     def __init__(
         self,
         persist_directory: str = "./chroma_db",
@@ -21,7 +21,6 @@ class ChromaDBStore:
     ):
         """
         Initialize ChromaDB client.
-        
         Args:
             persist_directory: Path to persist the database
             collection_name: Name of the collection to use
@@ -32,7 +31,7 @@ class ChromaDBStore:
         )
         self.collection_name = collection_name
         self._collection: Collection | None = None
-    
+
     def get_collection(self) -> Collection:
         """Get or create the collection."""
         if self._collection is None:
@@ -41,7 +40,7 @@ class ChromaDBStore:
                 metadata={"hnsw:space": "cosine"},
             )
         return self._collection
-    
+
     def upsert(
         self,
         ids: list[str],
@@ -50,12 +49,10 @@ class ChromaDBStore:
     ) -> dict[str, Any]:
         """
         Add or update documents in the collection.
-        
         Args:
             ids: List of document IDs
             documents: List of document texts
             metadatas: Optional list of metadata dictionaries
-            
         Returns:
             Dict with success status
         """
@@ -69,7 +66,7 @@ class ChromaDBStore:
             return {"success": True, "count": len(ids)}
         except Exception as e:
             return {"error": f"Failed to upsert documents: {e}"}
-    
+
     def search(
         self,
         query_texts: list[str],
@@ -78,12 +75,10 @@ class ChromaDBStore:
     ) -> dict[str, Any]:
         """
         Search for similar documents.
-        
         Args:
             query_texts: List of query texts
             n_results: Number of results to return per query
             where: Optional metadata filter
-            
         Returns:
             Dict with search results
         """
@@ -97,14 +92,12 @@ class ChromaDBStore:
             return {"success": True, "data": results}
         except Exception as e:
             return {"error": f"Failed to search documents: {e}"}
-    
+
     def delete(self, ids: list[str]) -> dict[str, Any]:
         """
         Delete documents by ID.
-        
         Args:
             ids: List of document IDs to delete
-            
         Returns:
             Dict with success status
         """
@@ -114,11 +107,10 @@ class ChromaDBStore:
             return {"success": True, "deleted_count": len(ids)}
         except Exception as e:
             return {"error": f"Failed to delete documents: {e}"}
-    
+
     def count(self) -> dict[str, Any]:
         """
         Get the count of documents in the collection.
-        
         Returns:
             Dict with count
         """

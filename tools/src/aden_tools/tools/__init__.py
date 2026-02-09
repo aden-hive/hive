@@ -94,18 +94,18 @@ def register_all_tools(
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
-    
+
     # GitHub Tool - Comprehensive GitHub API wrapper
     # Supports: repos, issues, PRs, search, branches, users
     # Credentials: GITHUB_TOKEN env var or CredentialStoreAdapter
     register_github(mcp, credentials=credentials)
-    
+
     # Email Tool - Multi-provider email sender
     # Supports: Gmail (OAuth), Resend (API key), SMTP (app passwords)
     # Auto-detection: Gmail → Resend → SMTP
     # Credentials: GOOGLE_ACCESS_TOKEN, RESEND_API_KEY, or SMTP_* env vars
     register_email(mcp, credentials=credentials)
-    
+
     register_hubspot(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
@@ -162,7 +162,7 @@ def register_all_tools(
         "github_update_issue",
         "github_get_issue_timeline",  # NEW: Get issue timeline events
         "github_get_issue_comments",  # NEW: Get issue comments
-        "github_list_repo_labels",    # NEW: List repository labels
+        "github_list_repo_labels",  # NEW: List repository labels
         "github_list_pull_requests",
         "github_get_pull_request",
         "github_create_pull_request",
