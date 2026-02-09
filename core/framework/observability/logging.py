@@ -221,10 +221,8 @@ def configure_logging(
         ]
         for logger_name in third_party_loggers:
             logger = logging.getLogger(logger_name)
-            # Clear existing handlers (which may have colors) and add our JSON
-            # formatter
+            # Clear existing handlers so records propagate to root and use our formatter there
             logger.handlers.clear()
-            logger.addHandler(handler)
             logger.propagate = True  # Still propagate to root for consistency
 
 
