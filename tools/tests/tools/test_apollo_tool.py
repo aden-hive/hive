@@ -104,7 +104,6 @@ class TestApolloClient:
         mock_post.assert_called_once_with(
             f"{APOLLO_API_BASE}/people/match",
             headers=self.client._headers,
-            params=None,
             json={
                 "email": "john@acme.com",
                 "reveal_personal_emails": False,
@@ -154,6 +153,8 @@ class TestApolloClient:
         call_json = mock_post.call_args.kwargs["json"]
         assert call_json["name"] == "John Doe"
         assert call_json["domain"] == "acme.com"
+        # POST uses JSON body only; no query params (per Apollo API docs)
+        assert "params" not in mock_post.call_args.kwargs
 
     @patch("aden_tools.tools.apollo_tool.apollo_tool.httpx.post")
     def test_enrich_person_with_reveal_flags(self, mock_post):
@@ -384,6 +385,29 @@ class TestApolloClient:
         assert len(result["results"]) == 1
         assert result["results"][0]["name"] == "Tech Startup"
         assert result["results"][0]["industry"] == "Technology"
+
+    @patch("aden_tools.tools.apollo_tool.apollo_tool.httpx.post")
+    def test_post_with_retry_on_timeout(self, mock_post):
+        """Transient timeout then success returns result."""
+        mock_post.side_effect = [
+            httpx.TimeoutException("timed out"),
+            MagicMock(
+                status_code=200,
+                json=MagicMock(return_value={"person": {"id": "p123", "email": "j@x.com"}}),
+            ),
+        ]
+        result = self.client.enrich_person(email="j@x.com")
+        assert mock_post.call_count == 2
+        assert result.get("match_found") is True
+        assert result.get("person", {}).get("id") == "p123"
+
+    @patch("aden_tools.tools.apollo_tool.apollo_tool.httpx.post")
+    def test_post_retry_exhausted_raises(self, mock_post):
+        """After retries exhausted, TimeoutException is raised."""
+        mock_post.side_effect = httpx.TimeoutException("timed out")
+        with pytest.raises(httpx.TimeoutException):
+            self.client.enrich_person(email="j@x.com")
+        assert mock_post.call_count == 3  # 1 initial + 2 retries
 
 
 # --- MCP tool registration and credential tests ---

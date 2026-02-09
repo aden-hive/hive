@@ -16,10 +16,15 @@ API Reference: https://apolloio.github.io/apollo-api-docs/
 from __future__ import annotations
 
 import os
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from fastmcp import FastMCP
+
+# Retry config for transient failures (timeouts, connection errors)
+APOLLO_REQUEST_RETRIES = 2
+APOLLO_REQUEST_RETRY_BACKOFF_SEC = 1.0
 
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
@@ -41,6 +46,24 @@ class _ApolloClient:
             "Cache-Control": "no-cache",
             "X-Api-Key": self._api_key,
         }
+
+    def _post_with_retry(
+        self, url: str, json_body: dict[str, Any], timeout: float = 30.0
+    ) -> httpx.Response:
+        """POST with optional retries on transient network errors."""
+        for attempt in range(APOLLO_REQUEST_RETRIES + 1):
+            try:
+                return httpx.post(
+                    url,
+                    headers=self._headers,
+                    json=json_body,
+                    timeout=timeout,
+                )
+            except (httpx.TimeoutException, httpx.RequestError):
+                if attempt < APOLLO_REQUEST_RETRIES:
+                    time.sleep(APOLLO_REQUEST_RETRY_BACKOFF_SEC)
+                else:
+                    raise
 
     def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
         """Handle common HTTP error codes."""
@@ -99,11 +122,9 @@ class _ApolloClient:
         if domain:
             body["domain"] = domain
 
-        response = httpx.post(
+        response = self._post_with_retry(
             f"{APOLLO_API_BASE}/people/match",
-            headers=self._headers,
-            params=body if not email and not linkedin_url else None,
-            json=body,
+            json_body=body,
             timeout=30.0,
         )
         result = self._handle_response(response)
@@ -149,10 +170,9 @@ class _ApolloClient:
             "domain": domain,
         }
 
-        response = httpx.post(
+        response = self._post_with_retry(
             f"{APOLLO_API_BASE}/organizations/enrich",
-            headers=self._headers,
-            json=body,
+            json_body=body,
             timeout=30.0,
         )
         result = self._handle_response(response)
@@ -224,10 +244,9 @@ class _ApolloClient:
         if technologies:
             body["currently_using_any_of_technology_uids"] = technologies
 
-        response = httpx.post(
+        response = self._post_with_retry(
             f"{APOLLO_API_BASE}/mixed_people/search",
-            headers=self._headers,
-            json=body,
+            json_body=body,
             timeout=30.0,
         )
         result = self._handle_response(response)
@@ -292,10 +311,9 @@ class _ApolloClient:
         if technologies:
             body["currently_using_any_of_technology_uids"] = technologies
 
-        response = httpx.post(
+        response = self._post_with_retry(
             f"{APOLLO_API_BASE}/mixed_companies/search",
-            headers=self._headers,
-            json=body,
+            json_body=body,
             timeout=30.0,
         )
         result = self._handle_response(response)
