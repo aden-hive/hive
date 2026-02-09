@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from framework.schemas.decision import Decision, Outcome
+from framework.storage.memory import MemoryProvider
 
 if TYPE_CHECKING:
     from framework.graph.goal import Goal
@@ -436,6 +437,37 @@ class OutcomeAggregator:
             "criteria_tracked": len(self._criterion_status),
             "streams_seen": len({d.stream_id for d in self._decisions}),
         }
+
+    async def summarize_and_persist(self, memory: MemoryProvider, user_id: str | None = None) -> dict[str, Any]:
+        """
+        Summarize the current goal progress and persist it to long-term memory.
+        
+        This turns agent outputs/decisions into 'learned facts' for future runs.
+        """
+        progress = await self.evaluate_goal_progress()
+        
+        # Construct summary content
+        summary_lines = [
+            f"Goal: {self.goal.description}",
+            f"Status: {progress['recommendation']}",
+            f"Progress: {progress['overall_progress']:.0%}",
+            "Key Outcomes:"
+        ]
+        
+        for cid, status in progress["criteria_status"].items():
+            state = "Met" if status["met"] else f"Partial ({status['progress']:.0%})"
+            summary_lines.append(f"- {status['description']}: {state}")
+            
+        content = "\n".join(summary_lines)
+        
+        metadata = {
+            "type": "goal_summary",
+            "goal_id": self.goal.id,
+            "timestamp": datetime.now().isoformat(),
+            "metrics": progress["metrics"]
+        }
+        
+        return await memory.add(content=content, user_id=user_id, metadata=metadata)
 
     # === RESET OPERATIONS ===
 

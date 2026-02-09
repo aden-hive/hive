@@ -18,6 +18,7 @@ from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
+from framework.storage.memory import MemoryProvider
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -99,6 +100,7 @@ class AgentRuntime:
         llm: "LLMProvider | None" = None,
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
+        memory: MemoryProvider | None = None,
         config: AgentRuntimeConfig | None = None,
     ):
         """
@@ -133,6 +135,7 @@ class AgentRuntime:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
+        self._memory = memory
 
         # Entry points and streams
         self._entry_points: dict[str, EntryPointSpec] = {}
@@ -231,8 +234,12 @@ class AgentRuntime:
 
             self._streams.clear()
 
-            # Stop storage
-            await self._storage.stop()
+            # If memory provider is configured, persist the final state
+            if self._memory:
+                try:
+                    await self._outcome_aggregator.summarize_and_persist(self._memory)
+                except Exception as e:
+                    logger.error(f"Failed to persist goal to memory during shutdown: {e}")
 
             self._running = False
             logger.info("AgentRuntime stopped")
@@ -268,6 +275,19 @@ class AgentRuntime:
         stream = self._streams.get(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
+
+        # Automatic Context Hydration from Memori
+        if self._memory:
+            # Determine query for recall - prioritize explicit query, then any string content
+            recall_query = input_data.get("query") or input_data.get("content")
+            if recall_query and isinstance(recall_query, str):
+                try:
+                    memories = await self._memory.recall(recall_query)
+                    if memories:
+                        input_data["_memori_context"] = memories
+                        logger.info(f"Hydrated {len(memories)} memories for execution")
+                except Exception as e:
+                    logger.warning(f"Failed to recall from Memori: {e}")
 
         return await stream.execute(input_data, correlation_id, session_state)
 
@@ -428,6 +448,7 @@ def create_agent_runtime(
     llm: "LLMProvider | None" = None,
     tools: list["Tool"] | None = None,
     tool_executor: Callable | None = None,
+    memory: MemoryProvider | None = None,
     config: AgentRuntimeConfig | None = None,
 ) -> AgentRuntime:
     """
@@ -455,6 +476,7 @@ def create_agent_runtime(
         llm=llm,
         tools=tools,
         tool_executor=tool_executor,
+        memory=memory,
         config=config,
     )
 
