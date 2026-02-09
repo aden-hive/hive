@@ -94,7 +94,12 @@ class FileConversationStore:
             if not self._parts_dir.exists():
                 return
             for f in self._parts_dir.glob("*.json"):
-                file_seq = int(f.stem)
+                if not f.stem.isdigit():
+                    continue
+                try:
+                    file_seq = int(f.stem)
+                except ValueError:
+                    continue  # Should be covered by isdigit(), but safe
                 if file_seq < seq:
                     f.unlink()
 
