@@ -667,3 +667,14 @@ class GraphSpec(BaseModel):
                             seen_keys[key] = node_id
 
         return errors
+
+    def to_mermaid(self) -> str:
+        """Export this graph to a Mermaid flowchart diagram string.
+
+        Returns:
+            A string containing valid Mermaid flowchart syntax suitable for
+            rendering in GitHub, markdown viewers, or Mermaid-compatible tools.
+        """
+        from framework.graph.mermaid import to_mermaid
+
+        return to_mermaid(self)
