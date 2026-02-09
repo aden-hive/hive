@@ -85,6 +85,16 @@ This installs:
 - All required dependencies
 
 ### Build Your First Agent
+### Before You Start
+
+Hive’s agent-building workflow assumes the use of Claude Code or a compatible MCP-enabled IDE (such as Cursor).
+
+When running commands like `/building-agents-construction`, you are interacting with a coding agent that:
+- Translates natural language goals into agent graphs
+- Generates connection logic and test scaffolding
+- Iterates on agent design based on feedback and failures
+
+If you are new to Claude Code or MCP-based workflows, reviewing the environment setup and IDE integration steps first will make the Quick Start smoother.
 
 ```bash
 # Install Claude Code skills (one-time)
