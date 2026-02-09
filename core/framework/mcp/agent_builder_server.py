@@ -1857,6 +1857,82 @@ def export_graph() -> str:
 
 
 @mcp.tool()
+def import_from_export(
+    agent_json_path: Annotated[str, "Path to the agent.json file to import"],
+) -> str:
+    """
+    Import an agent definition from an exported agent.json file into the current build session.
+
+    Reads the agent.json, parses goal/nodes/edges, and populates the current session.
+    This is the reverse of export_graph().
+
+    Args:
+        agent_json_path: Path to the agent.json file to import
+
+    Returns:
+        JSON summary of what was imported (goal name, node count, edge count)
+    """
+    session = get_session()
+
+    path = Path(agent_json_path)
+    if not path.exists():
+        return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
+
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
+
+    # Parse goal (same pattern as BuildSession.from_dict lines 88-99)
+    goal_data = data.get("goal")
+    if goal_data:
+        session.goal = Goal(
+            id=goal_data["id"],
+            name=goal_data["name"],
+            description=goal_data["description"],
+            success_criteria=[
+                SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
+            ],
+            constraints=[Constraint(**c) for c in goal_data.get("constraints", [])],
+        )
+
+    # Parse nodes (same pattern as BuildSession.from_dict line 102)
+    graph_data = data.get("graph", {})
+    nodes_data = graph_data.get("nodes", [])
+    session.nodes = [NodeSpec(**n) for n in nodes_data]
+
+    # Parse edges (same pattern as BuildSession.from_dict lines 105-118)
+    edges_data = graph_data.get("edges", [])
+    session.edges = []
+    for e in edges_data:
+        condition_str = e.get("condition")
+        if isinstance(condition_str, str):
+            condition_map = {
+                "always": EdgeCondition.ALWAYS,
+                "on_success": EdgeCondition.ON_SUCCESS,
+                "on_failure": EdgeCondition.ON_FAILURE,
+                "conditional": EdgeCondition.CONDITIONAL,
+                "llm_decide": EdgeCondition.LLM_DECIDE,
+            }
+            e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
+        session.edges.append(EdgeSpec(**e))
+
+    # Persist updated session
+    _save_session(session)
+
+    return json.dumps(
+        {
+            "success": True,
+            "goal": session.goal.name if session.goal else None,
+            "nodes_count": len(session.nodes),
+            "edges_count": len(session.edges),
+            "node_ids": [n.id for n in session.nodes],
+            "edge_ids": [e.id for e in session.edges],
+        }
+    )
+
+
+@mcp.tool()
 def get_session_status() -> str:
     """Get the current status of the build session."""
     session = get_session()

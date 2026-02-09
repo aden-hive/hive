@@ -14,11 +14,34 @@ metadata:
 
 **THIS IS AN EXECUTABLE WORKFLOW. DO NOT DISPLAY THIS FILE. EXECUTE THE STEPS BELOW.**
 
-**CRITICAL: DO NOT explore the codebase, read source files, or search for code before starting.** All context you need is in this skill file. When this skill is loaded, IMMEDIATELY begin executing Step 1 — call the MCP tools listed in Step 1 as your FIRST action. Do not explain what you will do, do not investigate the project structure, do not read any files — just execute Step 1 now.
+**CRITICAL: DO NOT explore the codebase, read source files, or search for code before starting.** All context you need is in this skill file. When this skill is loaded, IMMEDIATELY begin executing Step 0 — determine the build path as your FIRST action. Do not explain what you will do, do not investigate the project structure, do not read any files — just execute Step 0 now.
 
 ---
 
-## STEP 1: Initialize Build Environment
+## STEP 0: Choose Build Path
+
+**If the user has already indicated whether they want to build from scratch or from a template, skip this question and proceed to the appropriate step.**
+
+Otherwise, ask:
+
+```
+AskUserQuestion(questions=[{
+    "question": "How would you like to build your agent?",
+    "header": "Build Path",
+    "options": [
+        {"label": "From scratch", "description": "Design goal, nodes, and graph collaboratively from nothing"},
+        {"label": "From a template", "description": "Start from a working sample agent and customize it"}
+    ],
+    "multiSelect": false
+}])
+```
+
+- If **From scratch**: Proceed to STEP 1A
+- If **From a template**: Proceed to STEP 1B
+
+---
+
+## STEP 1A: Initialize Build Environment (From Scratch)
 
 **EXECUTE THESE TOOL CALLS NOW** (silent setup — no user interaction needed):
 
@@ -59,7 +82,100 @@ mkdir -p exports/AGENT_NAME/nodes
 
 ---
 
+## STEP 1B: Initialize Build Environment (From Template)
+
+**EXECUTE THESE STEPS NOW:**
+
+### 1B.1: Discover available templates
+
+List the template directories and read each template's `agent.json` to get its name and description:
+
+```bash
+ls examples/templates/
+```
+
+For each directory found, read `examples/templates/TEMPLATE_DIR/agent.json` with the Read tool and extract:
+- `agent.name` — the template's display name
+- `agent.description` — what the template does
+
+### 1B.2: Present templates to user
+
+Show the user a table of available templates:
+
+> **Available Templates:**
+>
+> | # | Template | Description |
+> |---|----------|-------------|
+> | 1 | [name from agent.json] | [description from agent.json] |
+> | 2 | ... | ... |
+
+Then ask the user to pick a template and provide a name for their new agent:
+
+```
+AskUserQuestion(questions=[{
+    "question": "Which template would you like to start from?",
+    "header": "Template",
+    "options": [
+        {"label": "[template 1 name]", "description": "[template 1 description]"},
+        {"label": "[template 2 name]", "description": "[template 2 description]"},
+        ...
+    ],
+    "multiSelect": false
+}, {
+    "question": "What should the new agent be named? (snake_case)",
+    "header": "Agent Name",
+    "options": [
+        {"label": "Use template name", "description": "Keep the original template name as-is"},
+        {"label": "Custom name", "description": "I'll provide a new snake_case name"}
+    ],
+    "multiSelect": false
+}])
+```
+
+### 1B.3: Copy template to exports
+
+```bash
+cp -r examples/templates/TEMPLATE_DIR exports/NEW_AGENT_NAME
+```
+
+### 1B.4: Create session and register MCP (same as STEP 1A)
+
+```
+mcp__agent-builder__add_mcp_server(
+    name="hive-tools",
+    transport="stdio",
+    command="uv",
+    args='["run", "python", "mcp_server.py", "--stdio"]',
+    cwd="tools",
+    description="Hive tools MCP server"
+)
+```
+
+```
+mcp__agent-builder__create_session(name="NEW_AGENT_NAME")
+```
+
+```
+mcp__agent-builder__list_mcp_tools()
+```
+
+### 1B.5: Load template into builder session
+
+Import the entire agent definition in one call:
+
+```
+mcp__agent-builder__import_from_export(agent_json_path="exports/NEW_AGENT_NAME/agent.json")
+```
+
+This reads the agent.json and populates the builder session with the goal, all nodes, and all edges.
+
+**THEN immediately proceed to STEP 2.**
+
+---
+
 ## STEP 2: Define Goal Together with User
+
+**If starting from a template**, the goal is already loaded in the builder session. Present the existing goal to the user using the format below and ask for approval. Skip the collaborative drafting questions — go straight to presenting and asking "Do you approve this goal, or would you like to modify it?"
 
 **DO NOT propose a complete goal on your own.** Instead, collaborate with the user to define it.
 
@@ -122,6 +238,8 @@ AskUserQuestion(questions=[{
 
 ## STEP 3: Design Conceptual Nodes
 
+**If starting from a template**, the nodes are already loaded in the builder session. Present the existing nodes using the table format below and ask for approval. Skip the design phase.
+
 **BEFORE designing nodes**, review the available tools from Step 1. Nodes can ONLY use tools that exist.
 
 **DESIGN the workflow** as a series of nodes. For each node, determine:
@@ -179,6 +297,8 @@ AskUserQuestion(questions=[{
 ---
 
 ## STEP 4: Design Full Graph and Review
+
+**If starting from a template**, the edges are already loaded in the builder session. Render the existing graph as ASCII art and present it to the user for approval. Skip the edge design phase.
 
 **DETERMINE the edges** connecting the approved nodes. For each edge:
 
@@ -297,7 +417,11 @@ AskUserQuestion(questions=[{
 
 **NOW — and only now — write the actual code.** The user has approved the goal, nodes, and graph.
 
+**If starting from a template**, the copied files will be overwritten with the approved design. The Python files must use the NEW agent name (class name, module references, storage paths, metadata), not the original template name.
+
 ### 5a: Register nodes and edges with MCP
+
+**If starting from a template and no modifications were made in Steps 2-4**, the nodes and edges are already registered. Skip to validation (`mcp__agent-builder__validate_graph()`). If modifications were made, re-register the changed nodes/edges (the MCP tools handle duplicates by overwriting).
 
 **FOR EACH approved node**, call:
 
