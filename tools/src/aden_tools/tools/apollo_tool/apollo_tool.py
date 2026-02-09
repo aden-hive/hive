@@ -99,10 +99,10 @@ class _ApolloClient:
         if domain:
             body["domain"] = domain
 
+        # Apollo API expects JSON request bodies; avoid mixing params and json
         response = httpx.post(
             f"{APOLLO_API_BASE}/people/match",
             headers=self._headers,
-            params=body if not email and not linkedin_url else None,
             json=body,
             timeout=30.0,
         )
