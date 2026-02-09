@@ -70,31 +70,6 @@ configure_logging(level="INFO", format="auto")
   - `"human"` - Human-readable with colors
   - `"auto"` - Detects from `LOG_FORMAT` env var or `ENV=production`
 
-### Programmatic Configuration
-
-Configure logging explicitly in your code:
-
-```python
-from framework.observability import configure_logging
-
-# Human-readable (development)
-configure_logging(level="DEBUG", format="human")
-
-# JSON (production)
-configure_logging(level="INFO", format="json")
-
-# Auto-detect from environment
-configure_logging(level="INFO", format="auto")
-```
-
-### Configuration Options
-
-- **level**: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, `"CRITICAL"`
-- **format**: 
-  - `"json"` - Machine-parseable JSON (one line per log entry)
-  - `"human"` - Human-readable with colors
-  - `"auto"` - Detects from `LOG_FORMAT` env var or `ENV=production`
-
 ## Log Format Examples
 
 ### JSON Format (Machine-parseable)
@@ -123,10 +98,10 @@ configure_logging(level="INFO", format="auto")
 
 ## Trace Context Fields
 
-The following fields are automatically included in all logs:
+When the framework sets trace context, these fields are included in all logs. IDs are 32 hex (W3C/OTel-aligned, no prefixes).
 
-- **trace_id**: 32 hex chars (W3C Trace Context compliant)
-- **execution_id**: 32 hex chars (run/session correlation)
+- **trace_id**: Trace identifier
+- **execution_id**: Run/session correlation
 - **agent_id**: Agent/graph identifier
 - **goal_id**: Goal being pursued
 - **node_id**: Current node (when set)
@@ -181,7 +156,7 @@ The framework automatically sets trace context at key points:
 - **GraphExecutor.execute()**: Adds `agent_id`
 - **Node execution**: Adds `node_id`
 
-You don't need to manually set context - it propagates automatically via ContextVar.
+Propagation is automatic via ContextVar.
 
 ## Advanced Usage
 
