@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
+from .cloudinary_tool import register_cloudinary
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
@@ -79,6 +80,7 @@ def register_all_tools(
     register_hubspot(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_cloudinary(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -209,6 +211,11 @@ def register_all_tools(
         "slack_kick_user_from_channel",
         "slack_delete_file",
         "slack_get_team_stats",
+        "cloudinary_upload",
+        "cloudinary_transform",
+        "cloudinary_get_asset",
+        "cloudinary_delete",
+        "cloudinary_list_assets",
     ]
 
 
