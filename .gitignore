@@ -70,8 +70,11 @@ exports/*
 
 .claude/settings.local.json
 
-.venv
-
 docs/github-issues/*
 core/tests/*dumps/*
 screenshots/*
+
+# Virtual environments
+.venv/
+venv/
+env/

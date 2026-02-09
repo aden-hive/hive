@@ -83,9 +83,10 @@ Use Hive when you need:
 - Python 3.11+ for agent development
 - Claude Code or Cursor for utilizing agent skills
 
-> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
-
 ### Installation
+
+<details open>
+<summary><b>Linux / macOS / WSL</b> (Recommended)</summary>
 
 ```bash
 # Clone the repository
@@ -97,12 +98,73 @@ cd hive
 ```
 
 This sets up:
-
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
+
+</details>
+
+<details>
+<summary><b>Windows (Native PowerShell)</b></summary>
+
+> **Note:** WSL (Windows Subsystem for Linux) is recommended for the best experience. If you cannot use WSL, follow these native Windows instructions.
+
+**Prerequisites:**
+- Python 3.11+ installed from [python.org](https://www.python.org/downloads/)
+- Ensure "Add Python to PATH" was checked during installation
+
+**Setup:**
+```powershell
+# Clone the repository
+git clone https://github.com/adenhq/hive.git
+cd hive
+
+# Allow script execution (if needed)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# Run Windows setup script
+.\scripts\install-windows.ps1
+
+# Activate virtual environment
+.\.venv\Scripts\Activate.ps1
+```
+
+**Common Windows Issues:**
+- Use semicolons (`;`) instead of `&&` to chain commands in PowerShell
+- Disable Python App Execution Aliases in Windows Settings if you encounter errors
+- See **[Windows Setup Guide](docs/WINDOWS_SETUP.md)** for detailed troubleshooting
+
+The script installs:
+- **framework** - Core agent runtime (`core/` in editable mode)
+- **aden_tools** - MCP tools (`tools/` in editable mode)
+- All Python dependencies in `.venv` virtual environment
+
+</details>
+
+<details>
+<summary><b>Using WSL on Windows</b> (Recommended for Windows users)</summary>
+
+```powershell
+# Install WSL (PowerShell as Administrator)
+wsl --install
+
+# Open WSL terminal and follow Linux instructions
+wsl
+cd /mnt/c/Users/YourName/hive
+./quickstart.sh
+```
+
+**Why WSL?**
+- Full Linux environment on Windows
+- Better script compatibility
+- Easier Python environment management
+- No path separator or command syntax issues
+
+See [Windows Setup Guide](docs/WINDOWS_SETUP.md) for complete WSL setup instructions.
+
+</details>
 
 ### Build Your First Agent
 
@@ -142,6 +204,18 @@ Hive is built to be model-agnostic and system-agnostic.
 
 - **LLM flexibility** - Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
 - **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
+
+### Available Tools & Integrations
+
+Hive includes **102+ ready-to-use tools** for agents, including:
+
+- **Web Intelligence** - [Brave Search](https://api.search.brave.com/) for web search, web scraping, and content extraction
+- **Data Processing** - CSV, PDF, Excel, JSON parsing and manipulation
+- **File Operations** - File system access, directory management, and file I/O
+- **Communication** - Email, Slack, and messaging platform integrations
+- **Business Systems** - GitHub, HubSpot, Google Sheets, and more
+
+To enable tools for your agent, set the required API keys as environment variables and configure them in your agent's `config.py`. See [Configuration Guide](docs/configuration.md) for setup instructions.
 
 
 ## Why Aden

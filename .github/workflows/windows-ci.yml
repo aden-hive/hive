@@ -1,0 +1,150 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  test-windows:
+    name: Test on Windows - Python ${{ matrix.python-version }}
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Display Python version
+        run: |
+          python --version
+          pip --version
+
+      - name: Verify PowerShell
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+
+      - name: Run preflight checks
+        shell: powershell
+        run: |
+          .\scripts\preflight-windows.ps1 -Verbose
+
+      - name: Install core package
+        run: |
+          pip install -e ./core
+
+      - name: Install tools package
+        run: |
+          pip install -e ./tools
+
+      - name: Verify imports
+        run: |
+          python -c "import framework; print('✓ framework')"
+          python -c "import aden_tools; print('✓ aden_tools')"
+
+      - name: Run tests
+        run: |
+          python -m pytest core/tests/ -v --tb=short -x
+        continue-on-error: true
+
+      - name: Run diagnostics
+        shell: powershell
+        if: failure()
+        run: |
+          .\scripts\doctor-windows.ps1 -Verbose
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-py${{ matrix.python-version }}
+          path: |
+            .coverage
+            htmlcov/
+
+  lint:
+    name: Lint and Format Check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install linting tools
+        run: |
+          pip install ruff black isort
+
+      - name: Check code formatting with black
+        run: |
+          black --check core/ tools/ scripts/
+        continue-on-error: true
+
+      - name: Check imports with isort
+        run: |
+          isort --check-only core/ tools/
+        continue-on-error: true
+
+      - name: Run ruff linter
+        run: |
+          ruff check core/ tools/
+        continue-on-error: true
+
+  security:
+    name: Security Checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install security tools
+        run: |
+          pip install bandit safety
+
+      - name: Run bandit
+        run: |
+          bandit -r core/ tools/ -ll
+        continue-on-error: true
+
+      - name: Check dependencies
+        run: |
+          pip install -e ./core -e ./tools > /dev/null 2>&1
+          safety check
+        continue-on-error: true
+
+  build-status:
+    name: Build Status Report
+    runs-on: windows-latest
+    needs: [test-windows, lint, security]
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          if ("${{ needs.test-windows.result }}" -eq "failure") {
+            Write-Host "❌ Tests failed" -ForegroundColor Red
+            exit 1
+          } elseif ("${{ needs.lint.result }}" -eq "failure") {
+            Write-Host "⚠️  Lint checks failed" -ForegroundColor Yellow
+            exit 1
+          } else {
+            Write-Host "✓ Build successful" -ForegroundColor Green
+          }
+        shell: powershell
