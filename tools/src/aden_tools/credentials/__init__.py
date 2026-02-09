@@ -36,6 +36,7 @@ Credential categories:
 - llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
 - email.py: Email provider credentials (resend, google/gmail)
+- apollo.py: Apollo.io API credentials
 - github.py: GitHub API credentials
 - hubspot.py: HubSpot CRM credentials
 - slack.py: Slack workspace credentials
@@ -49,6 +50,7 @@ To add a new credential:
 3. If new category, import and merge it in this __init__.py
 """
 
+from .apollo import APOLLO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .email import EMAIL_CREDENTIALS
@@ -71,6 +73,7 @@ CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
     **EMAIL_CREDENTIALS,
+    **APOLLO_CREDENTIALS,
     **GITHUB_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
     **SLACK_CREDENTIALS,
@@ -104,4 +107,5 @@ __all__ = [
     "GITHUB_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
     "SLACK_CREDENTIALS",
+    "APOLLO_CREDENTIALS",
 ]

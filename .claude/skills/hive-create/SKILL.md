@@ -507,7 +507,7 @@ EventLoopNodes are **auto-created** by `GraphExecutor` at runtime. Both direct `
 from framework.graph.executor import GraphExecutor
 from framework.runtime.core import Runtime
 
-storage_path = Path.home() / ".hive" / "my_agent"
+storage_path = Path.home() / ".hive" / "agents" / "my_agent"
 storage_path.mkdir(parents=True, exist_ok=True)
 runtime = Runtime(storage_path)
 
