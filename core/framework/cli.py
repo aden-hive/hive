@@ -14,6 +14,12 @@ Testing commands:
     python -m core test-debug <goal_id> <test_id>
     python -m core test-list <goal_id>
     python -m core test-stats <goal_id>
+
+Scorecard commands:
+    python -m core scorecard <agent_path>
+    python -m core scorecard <agent_path> --time-window 7d
+    python -m core scorecard <agent_path> --format json
+    python -m core scorecard <agent_path> --compare old_scorecard.json
 """
 
 import argparse
@@ -39,6 +45,11 @@ def main():
     from framework.testing.cli import register_testing_commands
 
     register_testing_commands(subparsers)
+
+    # Register scorecard commands (scorecard)
+    from framework.builder.cli import register_scorecard_commands
+
+    register_scorecard_commands(subparsers)
 
     args = parser.parse_args()
 
