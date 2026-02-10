@@ -64,6 +64,7 @@ Job done is considered as:
 5. The developer can monitor the logs and costs for their users
 6. The product achieves success (like Unity), long term
 
+```
 **Summary:**
 The common denominator:
 1. Can create an agent
@@ -71,7 +72,7 @@ The common denominator:
 3. Can maintain the agent
 4. Can deploy the agent
 5. Can iterate on the agent
-
+```
 
 
 ## Onboarding Experience
@@ -82,8 +83,7 @@ For others, they will likely want to try existing agents first to see how well t
 
 ## Agent Generation
 
-
-
+[To be complete]
 
 ## Integration
 
@@ -115,10 +115,12 @@ These are what happen:
 
 ## Iteration (building) - More like debugging
 
+[To be complete]
 
 
 ## Iteration (production) - Evolution and inventiveness
 
+[To be complete]
 
 ## Automomous
 Core should remain the same, different deployment flag
@@ -134,13 +136,19 @@ Cloud observabiltiy product
 
 ## How guardrail is done
 
+[To be complete]
+
 ## How we make reliability
 
 
 Breakages still happens, even in the most best business process: Being reliable is to be adaptive and fix the problems 
 
+[To be complete]
+
 
 ## Developer trust
+
+[To be complete]
 
 
 ## What Success Looks Like for Them
@@ -149,4 +157,4 @@ In short, the common ground is having the agent "used in prod."
 
 ## Deployment Strategy
 
-How the developers deploy their agents...
+How the developers deploy their agents. Autonomous and interactive agent might be different. Human in the loop might need hooks and sdks
