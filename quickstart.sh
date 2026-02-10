@@ -303,9 +303,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-sonnet-4-5-20250929"
-        ["openai"]="gpt-4o"
-        ["gemini"]="gemini-3.0-flash-preview"
+        ["anthropic"]="claude-haiku-4-5"
+        ["openai"]="gpt-5-mini"
+        ["gemini"]="gemini-3-flash-preview"
         ["groq"]="moonshotai/kimi-k2-instruct-0905"
         ["cerebras"]="zai-glm-4.7"
         ["mistral"]="mistral-large-latest"
