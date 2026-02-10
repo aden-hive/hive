@@ -7,6 +7,7 @@ handles all the structured logging.
 """
 
 import logging
+import threading
 import uuid
 from collections.abc import Callable
 from datetime import datetime
@@ -59,6 +60,7 @@ class Runtime:
         self.storage = FileStorage(storage_path)
         self._current_run: Run | None = None
         self._current_node: str = "unknown"
+        self._lock = threading.Lock()
 
     # === RUN LIFECYCLE ===
 
@@ -89,12 +91,13 @@ class Runtime:
             goal_id=goal_id,
         )
 
-        self._current_run = Run(
-            id=run_id,
-            goal_id=goal_id,
-            goal_description=goal_description,
-            input_data=input_data or {},
-        )
+        with self._lock:
+            self._current_run = Run(
+                id=run_id,
+                goal_id=goal_id,
+                goal_description=goal_description,
+                input_data=input_data or {},
+            )
 
         return run_id
 
@@ -112,23 +115,28 @@ class Runtime:
             narrative: Human-readable summary of what happened
             output_data: Final output of the run
         """
-        if self._current_run is None:
-            # Gracefully handle case where run was already ended or never started
-            # This can happen during exception handling cascades
-            logger.warning("end_run called but no run in progress (already ended or never started)")
-            return
+        with self._lock:
+            if self._current_run is None:
+                # Gracefully handle case where run was already ended or never started
+                # This can happen during exception handling cascades
+                logger.warning(
+                    "end_run called but no run in progress "
+                    "(already ended or never started)"
+                )
+                return
 
-        status = RunStatus.COMPLETED if success else RunStatus.FAILED
-        self._current_run.output_data = output_data or {}
-        self._current_run.complete(status, narrative)
+            status = RunStatus.COMPLETED if success else RunStatus.FAILED
+            self._current_run.output_data = output_data or {}
+            self._current_run.complete(status, narrative)
 
-        # Save to storage
-        self.storage.save_run(self._current_run)
-        self._current_run = None
+            # Save to storage
+            self.storage.save_run(self._current_run)
+            self._current_run = None
 
     def set_node(self, node_id: str) -> None:
         """Set the current node context for subsequent decisions."""
-        self._current_node = node_id
+        with self._lock:
+            self._current_node = node_id
 
     @property
     def current_run(self) -> Run | None:
@@ -176,12 +184,7 @@ class Runtime:
         Returns:
             The decision ID (use to record outcome later), or empty string if no run
         """
-        if self._current_run is None:
-            # Gracefully handle case where run ended during exception handling
-            logger.warning(f"decide called but no run in progress: {intent}")
-            return ""
-
-        # Build Option objects
+        # Build Option objects outside the lock (no shared state needed)
         option_objects = []
         for opt in options:
             option_objects.append(
@@ -196,22 +199,29 @@ class Runtime:
                 )
             )
 
-        # Create decision
-        decision_id = f"dec_{len(self._current_run.decisions)}"
-        decision = Decision(
-            id=decision_id,
-            node_id=node_id or self._current_node,
-            intent=intent,
-            decision_type=decision_type,
-            options=option_objects,
-            chosen_option_id=chosen,
-            reasoning=reasoning,
-            active_constraints=constraints or [],
-            input_context=context or {},
-        )
+        with self._lock:
+            if self._current_run is None:
+                # Gracefully handle case where run ended during exception handling
+                logger.warning(f"decide called but no run in progress: {intent}")
+                return ""
 
-        self._current_run.add_decision(decision)
-        return decision_id
+            # Atomic decision ID generation using UUID to avoid collisions
+            decision_id = f"dec_{uuid.uuid4().hex[:8]}"
+
+            decision = Decision(
+                id=decision_id,
+                node_id=node_id or self._current_node,
+                intent=intent,
+                decision_type=decision_type,
+                options=option_objects,
+                chosen_option_id=chosen,
+                reasoning=reasoning,
+                active_constraints=constraints or [],
+                input_context=context or {},
+            )
+
+            self._current_run.add_decision(decision)
+            return decision_id
 
     def record_outcome(
         self,
@@ -239,14 +249,7 @@ class Runtime:
             tokens_used: LLM tokens consumed
             latency_ms: Time taken in milliseconds
         """
-        if self._current_run is None:
-            # Gracefully handle case where run ended during exception handling
-            # This can happen in cascading error scenarios
-            logger.warning(
-                f"record_outcome called but no run in progress (decision_id={decision_id})"
-            )
-            return
-
+        # Build Outcome outside the lock (no shared state needed)
         outcome = Outcome(
             success=success,
             result=result,
@@ -257,7 +260,27 @@ class Runtime:
             latency_ms=latency_ms,
         )
 
-        self._current_run.record_outcome(decision_id, outcome)
+        with self._lock:
+            if self._current_run is None:
+                # Gracefully handle case where run ended during exception handling
+                # This can happen in cascading error scenarios
+                logger.warning(
+                    f"record_outcome called but no run in progress (decision_id={decision_id})"
+                )
+                return
+
+            # Validate decision ID exists before recording
+            decision_exists = any(
+                d.id == decision_id for d in self._current_run.decisions
+            )
+            if not decision_exists:
+                logger.warning(
+                    f"record_outcome called with unknown decision_id={decision_id}; "
+                    f"known IDs: {[d.id for d in self._current_run.decisions]}"
+                )
+                return
+
+            self._current_run.record_outcome(decision_id, outcome)
 
     # === PROBLEM RECORDING ===
 
@@ -285,21 +308,22 @@ class Runtime:
         Returns:
             The problem ID, or empty string if no run in progress
         """
-        if self._current_run is None:
-            # Gracefully handle case where run ended during exception handling
-            # Log the problem since we can't store it, then return empty ID
-            logger.warning(
-                f"report_problem called but no run in progress: [{severity}] {description}"
-            )
-            return ""
+        with self._lock:
+            if self._current_run is None:
+                # Gracefully handle case where run ended during exception handling
+                # Log the problem since we can't store it, then return empty ID
+                logger.warning(
+                    f"report_problem called but no run in progress: [{severity}] {description}"
+                )
+                return ""
 
-        return self._current_run.add_problem(
-            severity=severity,
-            description=description,
-            decision_id=decision_id,
-            root_cause=root_cause,
-            suggested_fix=suggested_fix,
-        )
+            return self._current_run.add_problem(
+                severity=severity,
+                description=description,
+                decision_id=decision_id,
+                root_cause=root_cause,
+                suggested_fix=suggested_fix,
+            )
 
     # === CONVENIENCE METHODS ===
 

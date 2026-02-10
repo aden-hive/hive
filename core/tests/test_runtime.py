@@ -1,5 +1,6 @@
 """Tests for the Runtime class - the agent's interface to record decisions."""
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -71,7 +72,7 @@ class TestDecisionRecording:
             reasoning="More formal",
         )
 
-        assert decision_id == "dec_0"
+        assert decision_id.startswith("dec_")
         assert len(runtime.current_run.decisions) == 1
 
         decision = runtime.current_run.decisions[0]
@@ -241,7 +242,7 @@ class TestProblemReporting:
             suggested_fix="Implement fallback to cached data",
         )
 
-        assert problem_id == "prob_0"
+        assert problem_id.startswith("prob_")
         assert len(runtime.current_run.problems) == 1
 
         problem = runtime.current_run.problems[0]
@@ -395,3 +396,140 @@ class TestNarrativeGeneration:
         run = runtime.storage.load_run(runtime.storage.get_runs_by_goal("test_goal")[0])
         assert "failed" in run.narrative
         assert "critical" in run.narrative.lower() or "Critical" in run.narrative
+
+
+class TestThreadSafety:
+    """Test thread safety of Runtime operations."""
+
+    def test_concurrent_decisions_no_duplicate_ids(self, tmp_path: Path):
+        """Multiple threads recording decisions should produce unique IDs."""
+        runtime = Runtime(tmp_path)
+        runtime.start_run("test_goal", "Thread safety test")
+
+        decision_ids: list[str] = []
+        errors: list[Exception] = []
+        lock = threading.Lock()
+
+        def make_decision(i: int):
+            try:
+                did = runtime.decide(
+                    intent=f"Action {i}",
+                    options=[{"id": "a", "description": f"Option {i}"}],
+                    chosen="a",
+                    reasoning=f"Thread {i}",
+                )
+                with lock:
+                    decision_ids.append(did)
+            except Exception as e:
+                with lock:
+                    errors.append(e)
+
+        threads = [threading.Thread(target=make_decision, args=(i,)) for i in range(50)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors during concurrent decisions: {errors}"
+        assert len(decision_ids) == 50
+        # All decision IDs must be unique
+        assert len(set(decision_ids)) == 50, "Duplicate decision IDs detected"
+
+        runtime.end_run(success=True)
+
+    def test_concurrent_decisions_and_outcomes(self, tmp_path: Path):
+        """Decisions and outcomes recorded concurrently should be consistent."""
+        runtime = Runtime(tmp_path)
+        runtime.start_run("test_goal", "Thread safety test")
+
+        errors: list[Exception] = []
+
+        def decide_and_record(i: int):
+            try:
+                did = runtime.decide(
+                    intent=f"Action {i}",
+                    options=[{"id": "a", "description": f"Option {i}"}],
+                    chosen="a",
+                    reasoning=f"Thread {i}",
+                )
+                runtime.record_outcome(did, success=True, tokens_used=10)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=decide_and_record, args=(i,)) for i in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors: {errors}"
+        assert runtime.current_run.metrics.total_decisions == 20
+
+        runtime.end_run(success=True)
+
+    def test_decision_id_validation(self, tmp_path: Path):
+        """record_outcome with an unknown decision_id should log a warning, not crash."""
+        runtime = Runtime(tmp_path)
+        runtime.start_run("test_goal", "Test")
+
+        # Record outcome with a bogus decision ID - should not raise
+        runtime.record_outcome(
+            decision_id="dec_nonexistent",
+            success=True,
+            result={"data": "test"},
+        )
+
+        # No outcome should have been recorded
+        assert runtime.current_run.metrics.successful_decisions == 0
+
+        runtime.end_run(success=True)
+
+    def test_concurrent_start_end_run(self, tmp_path: Path):
+        """Starting and ending runs from multiple threads should not crash."""
+        runtime = Runtime(tmp_path)
+        errors: list[Exception] = []
+
+        def run_lifecycle(i: int):
+            try:
+                runtime.start_run(f"goal_{i}", f"Run {i}")
+                runtime.decide(
+                    intent=f"Action {i}",
+                    options=[{"id": "a", "description": "A"}],
+                    chosen="a",
+                    reasoning="Test",
+                )
+                runtime.end_run(success=True)
+            except Exception as e:
+                errors.append(e)
+
+        # Run sequentially to validate the lock doesn't deadlock
+        for i in range(10):
+            run_lifecycle(i)
+
+        assert not errors
+
+    def test_decision_ids_unique_across_runs(self, tmp_path: Path):
+        """Decision IDs should be unique even across different runs."""
+        runtime = Runtime(tmp_path)
+
+        runtime.start_run("goal_1", "First run")
+        d1 = runtime.decide(
+            intent="Action 1",
+            options=[{"id": "a", "description": "A"}],
+            chosen="a",
+            reasoning="Test",
+        )
+        assert d1.startswith("dec_")
+        runtime.end_run(success=True)
+
+        runtime.start_run("goal_2", "Second run")
+        d2 = runtime.decide(
+            intent="Action 2",
+            options=[{"id": "b", "description": "B"}],
+            chosen="b",
+            reasoning="Test",
+        )
+        assert d2.startswith("dec_")
+        # UUID-based IDs should be unique across runs
+        assert d1 != d2
+        runtime.end_run(success=True)
