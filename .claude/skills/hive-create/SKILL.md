@@ -217,7 +217,7 @@ Use the user's selection (or their custom description if they chose "Other") as 
 
 **DO NOT propose a complete goal on your own.** Instead, collaborate with the user to define it.
 
-### 2a: Fast Discovery (3-5 Turns)
+### 2a: Fast Discovery (3-8 Turns)
 
 **The core principle**: Discovery should feel like progress, not paperwork. The stakeholder should walk away feeling like you understood them faster than anyone else would have.
 
@@ -307,23 +307,6 @@ Your questions should be **narrow, specific, and consequential**. Never ask what
 
 ---
 
-#### 2a.5: Lock Scope in One Exchange
-
-Once they've confirmed or corrected your playback, close the loop:
-
-> "Got it. Here's what I'll build first:
-> - [concrete deliverable 1]
-> - [concrete deliverable 2]
-> - [concrete deliverable 3]
->
-> Holding off on [X] and [Y] for now — we can add those once the core is solid.
->
-> I'm assuming [key assumption]. I'll start with [first piece]. Sound good?"
-
-One decision point. Yes or no. Then you're building.
-
----
-
 #### Conversation Flow (3-5 Turns)
 
 | Turn | Who | What |
@@ -334,7 +317,7 @@ One decision point. Yes or no. Then you're building.
 | 4 | Agent | Adjusts model, confirms MVP scope, states assumptions, declares starting point |
 | *(5)* | *(Only if Turn 3 revealed something that fundamentally changes the approach)* |
 
-**If you're going in circles, you need a different question, not more questions.**
+**AFTER the conversation, IMMEDIATELY proceed to 2b. DO NOT skip to building.**
 
 ---
 
@@ -345,28 +328,15 @@ One decision point. Yes or no. Then you're building.
 | Open with a list of questions | Open with what you understood from their request |
 | "What are your requirements?" | "Here's what I think you need — am I right?" |
 | Ask about every edge case | Handle with smart defaults, flag in summary |
-| 10+ turn discovery conversation | 3-5 turns. Start building, iterate with real software. |
+| 10+ turn discovery conversation | 3-8 turns. Start building, iterate with real software. |
+| Being lazy nd not understand what user want to achieve | Understand "what" and "why |
 | Ask for permission to start | State your plan and start |
 | Wait for certainty | Start at 80% confidence, iterate the rest |
 | Ask what tech/tools to use | That's your job. Decide, disclose, move on. |
 
 ---
 
-#### Discovery Summary
 
-After the conversation, produce this before moving to 2b:
-
-> **Discovery Summary**
->
-> **Problem**: [2-3 sentences in user's language]
-> **Solution**: [what we're building, core approach]
-> **Users**: [who, how often, context — 1-2 lines]
-> **Domain Model**: [key entities and relationships — "A Project has many Tasks. Each Task has an Owner and Status."]
-> **MVP Scope**:
-> - Building now: [concrete deliverables]
-> - Later: [deferred items]
-> **Key Flow**: [trigger → steps → outcome]
-> **Assumptions**: [what you're assuming — user can correct]
 
 ### 2b: Capability Assessment
 
