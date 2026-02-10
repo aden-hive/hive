@@ -37,6 +37,7 @@
 </p>
 
 ## Overview
+**Naming:** Hive is the agent framework and CLI (this repository). Aden is the company that develops Hive. The formal name is **Aden Hive Agent Framework**.
 
 Build autonomous, reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
 

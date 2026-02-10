@@ -1,6 +1,7 @@
 # Getting Started
 
-This guide will help you set up the Aden Agent Framework and build your first agent.
+This guide will help you set up Hive (the Aden Hive Agent Framework) and build your first agent.
+
 
 ## Prerequisites
 
