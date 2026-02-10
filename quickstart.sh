@@ -113,31 +113,60 @@ if ! command -v python &> /dev/null && ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Prefer a Python >= 3.11 if multiple are installed (common on macOS).
+# Prefer a Python >= 3.11 if multiple are installed (common on macOS / mixed Windows setups).
 PYTHON_CMD=""
-for CANDIDATE in python3.11 python3.12 python3.13 python3 python; do
-    if command -v "$CANDIDATE" &> /dev/null; then
-        PYTHON_MAJOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.major)')
-        PYTHON_MINOR=$("$CANDIDATE" -c 'import sys; print(sys.version_info.minor)')
+PYTHON_VERSION=""
+
+for CANDIDATE in python3.13 python3.12 python3.11 python3 python; do
+    # Skip if the command is not available at all.
+    if ! command -v "$CANDIDATE" > /dev/null 2>&1; then
+        continue
+    fi
+
+    # NOTE: We intentionally run the version check inside an `if` condition so that
+    # failures (e.g. Windows Store stubs that print "Python was not found") do NOT
+    # trigger `set -e` and abort the script.
+    if VERSION_OUTPUT=$("$CANDIDATE" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null); then
+        PYTHON_MAJOR=${VERSION_OUTPUT%%.*}
+        PYTHON_MINOR=${VERSION_OUTPUT#*.}
+
         if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 11 ]; then
             PYTHON_CMD="$CANDIDATE"
+            PYTHON_VERSION="$VERSION_OUTPUT"
             break
         fi
     fi
 done
 
 if [ -z "$PYTHON_CMD" ]; then
-    # Fall back to python3/python just for a helpful detected version in the error message.
-    PYTHON_CMD="python3"
-    if ! command -v python3 &> /dev/null; then
-        PYTHON_CMD="python"
-    fi
+    # As a last resort, fall back to python3/python just to get *some* version info
+    # for the error message below. We still avoid crashing on broken launchers.
+    for FALLBACK in python3 python; do
+        if command -v "$FALLBACK" > /dev/null 2>&1; then
+            if VERSION_OUTPUT=$("$FALLBACK" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null); then
+                PYTHON_CMD="$FALLBACK"
+                PYTHON_VERSION="$VERSION_OUTPUT"
+                PYTHON_MAJOR=${VERSION_OUTPUT%%.*}
+                PYTHON_MINOR=${VERSION_OUTPUT#*.}
+                break
+            fi
+        fi
+    done
 fi
 
-# Check Python version (for logging/error messages)
-PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-PYTHON_MAJOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.major)')
-PYTHON_MINOR=$($PYTHON_CMD -c 'import sys; print(sys.version_info.minor)')
+# If we still don't have a suitable Python, bail out with a clear message.
+if [ -z "$PYTHON_CMD" ] || [ -z "$PYTHON_VERSION" ]; then
+    echo -e "${RED}Python 3.11+ is required but a suitable interpreter was not found.${NC}"
+    echo ""
+    echo "Detected Python executables are either missing or not functional (e.g., Windows Store stubs)."
+    echo "Please install a real Python 3.11+ from https://python.org and ensure it is on your PATH,"
+    echo "then run this script again."
+    exit 1
+fi
+
+# At this point we know PYTHON_CMD points to a working Python and PYTHON_VERSION is set.
+PYTHON_MAJOR=${PYTHON_VERSION%%.*}
+PYTHON_MINOR=${PYTHON_VERSION#*.}
 
 if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 11 ]); then
     echo -e "${RED}Python 3.11+ is required (found $PYTHON_VERSION)${NC}"
