@@ -1,11 +1,12 @@
 # Developer success
 Our value and principle is developer success. We truly care about helping developers achieve their goals — not just shipping features, but ensuring every developer who uses Hive can build, debug, deploy, and iterate on agents that work in production. Developer success means our developers succeed in their own work: automating real business processes, shipping products, and growing their capabilities. If our developers aren't winning, we aren't winning.
 
-## Developer we're going after
-
+## Developer profiles
+From what we currently see, these are the developers who will achieve success with our framework the earliest with our framework
+- IT Specialists and Consultants
 - Individual developers who want to build a product
 - Developers who want to get a job done (they have a real-world business process)
-- Developers who want to learn how they can level up
+- Developers Who Want to learn and become a business process owner
 - One-man CEOs
 
 ## How They Find Us & Why They Use Us
