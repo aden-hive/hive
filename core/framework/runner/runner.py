@@ -621,7 +621,7 @@ class AgentRunner:
         elif model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
             return "ANTHROPIC_API_KEY"
         elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
-            return "GOOGLE_API_KEY"
+            return "GEMINI_API_KEY"
         elif model_lower.startswith("mistral/"):
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
