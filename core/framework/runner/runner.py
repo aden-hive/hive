@@ -20,6 +20,7 @@ from framework.graph.edge import (
 from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
+from framework.runner.config_validator import validate_agent_config
 from framework.runner.tool_registry import ToolRegistry
 
 # Multi-entry-point runtime imports
@@ -449,8 +450,16 @@ class AgentRunner:
         if not agent_json_path.exists():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
+        # with open(agent_json_path) as f:
+        #     graph, goal = load_agent_export(f.read())
+
         with open(agent_json_path) as f:
-            graph, goal = load_agent_export(f.read())
+            raw_config = json.load(f)
+
+        # Validate config before processing
+        validate_agent_config(raw_config, config_path=str(agent_json_path))
+
+        graph, goal = load_agent_export(raw_config)
 
         return cls(
             agent_path=agent_path,
