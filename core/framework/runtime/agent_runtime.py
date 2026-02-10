@@ -9,6 +9,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -38,6 +39,19 @@ class AgentRuntimeConfig:
     max_history: int = 1000
     execution_result_max: int = 1000
     execution_result_ttl_seconds: float | None = None
+
+
+@dataclass
+class MigrationPlan:
+    """Plan describing how to migrate keys from an old graph to a new graph.
+
+    - `key_mapping`: maps old_node_id.output_key -> new_node_id.input_key
+    - `drop_keys`: keys that should be dropped explicitly during migration
+    """
+
+    key_mapping: dict[str, str] = field(default_factory=dict)
+    drop_keys: list[str] = field(default_factory=list)
+    notes: str | None = None
 
 
 class AgentRuntime:
@@ -149,6 +163,8 @@ class AgentRuntime:
         # State
         self._running = False
         self._lock = asyncio.Lock()
+        
+        self._pending_migration: "MigrationPlan" | None = None
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
@@ -246,6 +262,43 @@ class AgentRuntime:
 
             self._running = False
             logger.info("AgentRuntime stopped")
+
+        async def restart_with_evolution(self, new_graph: "GraphSpec", plan: "MigrationPlan" | None = None) -> None:
+            """
+            Restart the runtime with an evolved `GraphSpec`.
+
+            This is a lifecycle hook / API entrypoint for implementing state
+            migration when the graph schema or topology changes. The current
+            implementation stores the provided `plan` and replaces the graph,
+            but the actual migration logic is intentionally left unimplemented
+            as a follow-up so that a careful migration strategy can be designed
+            and reviewed.
+
+            Args:
+                new_graph: The evolved GraphSpec to switch to.
+                plan: Optional MigrationPlan describing key mappings and drops.
+            """
+            logger.info("restart_with_evolution called: preparing to apply migration plan")
+
+            async with self._lock:
+                
+                was_running = self._running
+                if was_running:
+                    await self.stop()
+
+               
+                self._pending_migration = plan
+
+              
+                self.graph = new_graph
+
+               
+                logger.info("Migration plan stored; migration execution not implemented yet")
+
+                if was_running:
+                   await self.start()
+
+                raise NotImplementedError("restart_with_evolution(): migration logic not implemented")
 
     async def trigger(
         self,
