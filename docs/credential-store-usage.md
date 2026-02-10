@@ -90,7 +90,7 @@ from core.framework.credentials import (
 )
 
 # Option 1: Encrypted file storage (recommended for production)
-store = CredentialStore.with_encrypted_storage("/var/hive/credentials")
+store = CredentialStore.with_encrypted_storage("~/.hive/credentials")
 
 # Option 2: Environment variable storage (backward compatible)
 store = CredentialStore.with_env_storage({
@@ -103,7 +103,7 @@ store = CredentialStore(storage=InMemoryStorage())
 
 # Option 4: Custom storage configuration
 storage = EncryptedFileStorage(
-    base_path="/var/hive/credentials",
+    base_path="~/.hive/credentials",
     key_env_var="HIVE_CREDENTIAL_KEY"  # Encryption key from env
 )
 store = CredentialStore(storage=storage)
@@ -253,18 +253,18 @@ Encrypts credentials at rest using Fernet (AES-128-CBC + HMAC).
 from core.framework.credentials import EncryptedFileStorage
 
 # The encryption key is read from HIVE_CREDENTIAL_KEY env var
-storage = EncryptedFileStorage("/var/hive/credentials")
+storage = EncryptedFileStorage("~/.hive/credentials")
 
 # Or provide the key directly (32-byte Fernet key)
 storage = EncryptedFileStorage(
-    base_path="/var/hive/credentials",
+    base_path="~/.hive/credentials",
     encryption_key=b"your-32-byte-fernet-key-here..."
 )
 ```
 
 **Directory structure:**
 ```
-/var/hive/credentials/
+~/.hive/credentials/
 ├── credentials/
 │   ├── brave_search.enc    # Encrypted credential JSON
 │   └── github_oauth.enc
@@ -305,7 +305,7 @@ Combines multiple storage backends with fallback.
 from core.framework.credentials import CompositeStorage, EncryptedFileStorage, EnvVarStorage
 
 storage = CompositeStorage(
-    primary=EncryptedFileStorage("/var/hive/credentials"),
+    primary=EncryptedFileStorage("~/.hive/credentials"),
     fallbacks=[
         EnvVarStorage({"brave_search": "BRAVE_SEARCH_API_KEY"})
     ]
@@ -762,7 +762,7 @@ credentials = CredentialManager()
 from aden_tools.credentials import CredentialStoreAdapter
 from core.framework.credentials import CredentialStore
 
-store = CredentialStore.with_encrypted_storage("/var/hive/credentials")
+store = CredentialStore.with_encrypted_storage("~/.hive/credentials")
 credentials = CredentialStoreAdapter(store)
 
 # All existing code works unchanged
@@ -790,7 +790,7 @@ from core.framework.credentials import CredentialStore, CompositeStorage, Encryp
 
 # Use encrypted storage as primary, env vars as fallback
 storage = CompositeStorage(
-    primary=EncryptedFileStorage("/var/hive/credentials"),
+    primary=EncryptedFileStorage("~/.hive/credentials"),
     fallbacks=[EnvVarStorage({"brave_search": "BRAVE_SEARCH_API_KEY"})]
 )
 
@@ -809,7 +809,7 @@ credentials = CredentialStoreAdapter(store)
 
 ```python
 # Always use EncryptedFileStorage for production
-store = CredentialStore.with_encrypted_storage("/var/hive/credentials")
+store = CredentialStore.with_encrypted_storage("~/.hive/credentials")
 ```
 
 ### 2. Protect the Encryption Key

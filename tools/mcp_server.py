@@ -65,11 +65,10 @@ from fastmcp import FastMCP  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import PlainTextResponse  # noqa: E402
 
-from aden_tools.credentials import CredentialError, CredentialManager  # noqa: E402
+from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
 from aden_tools.tools import register_all_tools  # noqa: E402
 
-# Create credential manager
-credentials = CredentialManager()
+credentials = CredentialStoreAdapter.default()
 
 # Tier 1: Validate startup-required credentials (if any)
 try:
@@ -81,7 +80,7 @@ except CredentialError as e:
 
 mcp = FastMCP("tools")
 
-# Register all tools with the MCP server, passing credential manager
+# Register all tools with the MCP server, passing credential store
 tools = register_all_tools(mcp, credentials=credentials)
 # Only print to stdout in HTTP mode (STDIO mode requires clean stdout for JSON-RPC)
 if "--stdio" not in sys.argv:

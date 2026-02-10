@@ -2,7 +2,7 @@
 HashiCorp Vault storage adapter.
 
 Provides integration with HashiCorp Vault for enterprise secret management.
-Requires the 'hvac' package: pip install hvac
+Requires the 'hvac' package: uv pip install hvac
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ class HashiCorpVaultStorage(CredentialStorage):
         - AWS IAM auth method
 
     Requirements:
-        pip install hvac
+        uv pip install hvac
     """
 
     def __init__(
@@ -97,7 +97,7 @@ class HashiCorpVaultStorage(CredentialStorage):
             import hvac
         except ImportError as e:
             raise ImportError(
-                "HashiCorp Vault support requires 'hvac'. Install with: pip install hvac"
+                "HashiCorp Vault support requires 'hvac'. Install with: uv pip install hvac"
             ) from e
 
         self._url = url
