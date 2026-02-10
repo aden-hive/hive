@@ -255,7 +255,6 @@ Respond with ONLY a JSON object:
 
             # Parse response
             import re
-
             json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
@@ -679,3 +678,227 @@ class GraphSpec(BaseModel):
                             seen_keys[key] = node_id
 
         return errors
+
+    def _sanitize_id(self, node_id: str) -> str:
+        """
+        Sanitize node ID for use in Mermaid/DOT diagrams.
+
+        Replaces special characters that could break diagram syntax.
+        """
+        import re
+        # Replace non-alphanumeric characters (except underscore) with underscore
+        sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", node_id)
+        # Ensure it doesn't start with a number
+        if sanitized and sanitized[0].isdigit():
+            sanitized = f"n_{sanitized}"
+        return sanitized
+
+    def _escape_label(self, text: str, for_format: str = "mermaid") -> str:
+        """
+        Escape special characters in labels for diagram formats.
+
+        Args:
+            text: The text to escape
+            for_format: "mermaid" or "dot"
+        """
+        if for_format == "mermaid":
+            # Order matters: escape angle brackets first, then quotes, then newlines
+            # This prevents <br/> from being escaped
+            text = text.replace("<", "&lt;")
+            text = text.replace(">", "&gt;")
+            text = text.replace('"', "&quot;")
+            # Replace newlines AFTER escaping, so <br/> stays intact
+            text = text.replace("\n", "<br/>")
+        else:  # dot
+            # Escape quotes and backslashes
+            text = text.replace("\\", "\\\\")
+            text = text.replace('"', '\\"')
+            text = text.replace("\n", "\\n")
+        return text
+
+    def _get_node_color(self, node_id: str) -> tuple[str, str]:
+        """
+        Get fill and stroke colors for a node based on its role.
+
+        Returns:
+            Tuple of (fill_color, stroke_color)
+        """
+        # Check node roles in priority order
+        async_entry_nodes = {ep.entry_node for ep in self.async_entry_points}
+
+        if node_id == self.entry_node:
+            return ("#90EE90", "#228B22")  # Light green for entry
+        elif node_id in self.terminal_nodes:
+            return ("#FFB6C1", "#DC143C")  # Light pink for terminal
+        elif node_id in self.pause_nodes:
+            return ("#FFD700", "#FFA500")  # Gold for HITL/pause
+        elif node_id in async_entry_nodes:
+            return ("#87CEEB", "#4682B4")  # Light blue for async entry
+        else:
+            return ("#FFFFFF", "#333333")  # White for regular
+
+    def _get_edge_label(self, edge: EdgeSpec, truncate: int = 30) -> str:
+        """
+        Get display label for an edge condition.
+
+        Args:
+            edge: The edge specification
+            truncate: Max length for condition expressions
+        """
+        if edge.condition == EdgeCondition.ALWAYS:
+            return "always"
+        elif edge.condition == EdgeCondition.ON_SUCCESS:
+            return "on_success"
+        elif edge.condition == EdgeCondition.ON_FAILURE:
+            return "on_failure"
+        elif edge.condition == EdgeCondition.LLM_DECIDE:
+            return "llm_decide"
+        elif edge.condition == EdgeCondition.CONDITIONAL:
+            expr = edge.condition_expr or ""
+            if len(expr) > truncate:
+                expr = expr[:truncate-3] + "..."
+            return f"if: {expr}"
+        return ""
+
+    def to_mermaid(
+        self,
+        direction: str = "TD",
+        include_conditions: bool = True,
+        include_node_type: bool = True,
+    ) -> str:
+        """
+        Export graph as Mermaid diagram syntax.
+
+        Generates a flowchart that can be rendered in GitHub, documentation,
+        or any Mermaid-compatible viewer.
+
+        Args:
+            direction: Graph direction - "TD" (top-down), "LR" (left-right),
+                      "BT" (bottom-top), "RL" (right-left)
+            include_conditions: Show edge condition labels
+            include_node_type: Show node type in node labels
+
+        Returns:
+            Mermaid diagram string
+
+        Example:
+            >>> print(graph.to_mermaid())
+            graph TD
+                input_parser["Input Parser<br/><i>llm_generate</i>"]
+                calculator["Calculator<br/><i>llm_tool_use</i>"]
+                input_parser -->|always| calculator
+                style input_parser fill:#90EE90,stroke:#228B22
+        """
+        lines = [f"graph {direction}"]
+
+        # Generate node definitions
+        for node in self.nodes:
+            safe_id = self._sanitize_id(node.id)
+            name = self._escape_label(node.name, "mermaid")
+
+            if include_node_type:
+                node_type = getattr(node, "node_type", "unknown")
+                label = f"{name}<br/><i>{node_type}</i>"
+            else:
+                label = name
+
+            lines.append(f'    {safe_id}["{label}"]')
+
+        # Add blank line before edges
+        if self.nodes and self.edges:
+            lines.append("")
+
+        # Generate edge definitions
+        for edge in self.edges:
+            source_id = self._sanitize_id(edge.source)
+            target_id = self._sanitize_id(edge.target)
+
+            if include_conditions:
+                label = self._get_edge_label(edge)
+                label = self._escape_label(label, "mermaid")
+                lines.append(f"    {source_id} -->|{label}| {target_id}")
+            else:
+                lines.append(f"    {source_id} --> {target_id}")
+
+        # Add blank line before styles
+        if self.nodes:
+            lines.append("")
+
+        # Generate node styles
+        for node in self.nodes:
+            safe_id = self._sanitize_id(node.id)
+            fill, stroke = self._get_node_color(node.id)
+            lines.append(f"    style {safe_id} fill:{fill},stroke:{stroke}")
+
+        return "\n".join(lines)
+
+    def to_dot(
+        self,
+        include_conditions: bool = True,
+        include_node_type: bool = True,
+    ) -> str:
+        """
+        Export graph as Graphviz DOT format.
+
+        Generates a DOT file that can be rendered with Graphviz tools
+        (dot, neato, etc.) or online viewers.
+
+        Args:
+            include_conditions: Show edge condition labels
+            include_node_type: Show node type in node labels
+
+        Returns:
+            DOT format string
+
+        Example:
+            >>> print(graph.to_dot())
+            digraph "calculator-graph" {
+                rankdir=TD;
+                node [shape=box, style="rounded,filled"];
+                input_parser [label="Input Parser\\n(llm_generate)", fillcolor="#90EE90"];
+                ...
+            }
+        """
+        graph_id = self._escape_label(self.id, "dot")
+        lines = [
+            f'digraph "{graph_id}" {{',
+            "    rankdir=TD;",
+            '    node [shape=box, style="rounded,filled", fontname="Arial"];',
+            '    edge [fontname="Arial", fontsize=10];',
+            "",
+            "    // Nodes",
+        ]
+
+        # Generate node definitions
+        for node in self.nodes:
+            safe_id = self._sanitize_id(node.id)
+            name = self._escape_label(node.name, "dot")
+            fill, _ = self._get_node_color(node.id)
+
+            if include_node_type:
+                node_type = getattr(node, "node_type", "unknown")
+                label = f"{name}\\n({node_type})"
+            else:
+                label = name
+
+            lines.append(f'    {safe_id} [label="{label}", fillcolor="{fill}"];')
+
+        # Add blank line before edges
+        lines.append("")
+        lines.append("    // Edges")
+
+        # Generate edge definitions
+        for edge in self.edges:
+            source_id = self._sanitize_id(edge.source)
+            target_id = self._sanitize_id(edge.target)
+
+            if include_conditions:
+                label = self._get_edge_label(edge)
+                label = self._escape_label(label, "dot")
+                lines.append(f'    {source_id} -> {target_id} [label="{label}"];')
+            else:
+                lines.append(f"    {source_id} -> {target_id};")
+
+        lines.append("}")
+
+        return "\n".join(lines)
