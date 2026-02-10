@@ -717,6 +717,16 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ local settings... "
+if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -f "$SCRIPT_DIR/.claude/settings.local.json.example" ]; then
+    cp "$SCRIPT_DIR/.claude/settings.local.json.example" "$SCRIPT_DIR/.claude/settings.local.json"
+    echo -e "${GREEN}copied from example${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
 echo -n "  ⬡ credential store... "
 if [ -n "$HIVE_CREDENTIAL_KEY" ] && [ -d "$HOME/.hive/credentials/credentials" ]; then
     echo -e "${GREEN}ok${NC}"

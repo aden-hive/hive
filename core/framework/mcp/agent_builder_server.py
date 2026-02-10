@@ -14,13 +14,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
+# Project root resolution.  This file lives at core/framework/mcp/agent_builder_server.py,
+# so the project root (where exports/ lives) is four parents up.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
 # Ensure exports/ is on sys.path so AgentRunner can import agent modules.
-_framework_dir = Path(__file__).resolve().parent.parent  # core/framework/ -> core/
-_project_root = _framework_dir.parent  # core/ -> project root
-_exports_dir = _project_root / "exports"
+_exports_dir = _PROJECT_ROOT / "exports"
 if _exports_dir.is_dir() and str(_exports_dir) not in sys.path:
     sys.path.insert(0, str(_exports_dir))
-del _framework_dir, _project_root, _exports_dir
+del _exports_dir
 
 from mcp.server import FastMCP  # noqa: E402
 
@@ -541,6 +543,9 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     """
     Validate and normalize agent_path.
 
+    Resolves relative paths against _PROJECT_ROOT since the MCP server's
+    cwd (core/) differs from the user's cwd (project root).
+
     Returns:
         (Path, None) if valid
         (None, error_json) if invalid
@@ -554,6 +559,12 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
         )
 
     path = Path(agent_path)
+
+    # Resolve relative paths against project root (not MCP server's cwd)
+    if not path.is_absolute() and not path.exists():
+        resolved = _PROJECT_ROOT / path
+        if resolved.exists():
+            path = resolved
 
     if not path.exists():
         return None, json.dumps(
@@ -2939,18 +2950,15 @@ def _format_success_criteria(criteria: list[SuccessCriterion]) -> str:
 
 # Test template for Claude to use when writing tests
 CONSTRAINT_TEST_TEMPLATE = '''@pytest.mark.asyncio
-async def test_constraint_{constraint_id}_{scenario}(mock_mode):
+async def test_constraint_{constraint_id}_{scenario}(runner, auto_responder, mock_mode):
     """Test: {description}"""
-    result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
-
-    # IMPORTANT: result is an ExecutionResult object with these attributes:
-    # - result.success: bool - whether the agent succeeded
-    # - result.output: dict - the agent's output data (access data here!)
-    # - result.error: str or None - error message if failed
+    await auto_responder.start()
+    try:
+        result = await runner.run({{"key": "value"}})
+    finally:
+        await auto_responder.stop()
 
     assert result.success, f"Agent failed: {{result.error}}"
-
-    # Access output data via result.output
     output_data = result.output or {{}}
 
     # Add constraint-specific assertions here
@@ -2958,18 +2966,15 @@ async def test_constraint_{constraint_id}_{scenario}(mock_mode):
 '''
 
 SUCCESS_TEST_TEMPLATE = '''@pytest.mark.asyncio
-async def test_success_{criteria_id}_{scenario}(mock_mode):
+async def test_success_{criteria_id}_{scenario}(runner, auto_responder, mock_mode):
     """Test: {description}"""
-    result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
-
-    # IMPORTANT: result is an ExecutionResult object with these attributes:
-    # - result.success: bool - whether the agent succeeded
-    # - result.output: dict - the agent's output data (access data here!)
-    # - result.error: str or None - error message if failed
+    await auto_responder.start()
+    try:
+        result = await runner.run({{"key": "value"}})
+    finally:
+        await auto_responder.stop()
 
     assert result.success, f"Agent failed: {{result.error}}"
-
-    # Access output data via result.output
     output_data = result.output or {{}}
 
     # Add success criteria-specific assertions here
@@ -3025,7 +3030,6 @@ def generate_constraint_tests(
         test_type="Constraint",
         agent_name=agent_module,
         description=f"Tests for constraints defined in goal: {goal.name}",
-        agent_module=agent_module,
     )
 
     # Return guidelines + data for Claude to write tests directly
@@ -3041,14 +3045,22 @@ def generate_constraint_tests(
                 "max_tests": 5,
                 "naming_convention": "test_constraint_<constraint_id>_<scenario>",
                 "required_decorator": "@pytest.mark.asyncio",
-                "required_fixture": "mock_mode",
-                "agent_call_pattern": "await default_agent.run(input_dict, mock_mode=mock_mode)",
+                "required_fixtures": "runner, auto_responder, mock_mode",
+                "agent_call_pattern": "await runner.run(input_dict)",
+                "auto_responder_pattern": (
+                    "await auto_responder.start()\n"
+                    "try:\n"
+                    "    result = await runner.run(input_dict)\n"
+                    "finally:\n"
+                    "    await auto_responder.stop()"
+                ),
                 "result_type": "ExecutionResult with .success, .output (dict), .error",
                 "critical_rules": [
                     "Every test function MUST be async with @pytest.mark.asyncio",
-                    "Every test MUST accept mock_mode as a parameter",
-                    "Use await default_agent.run(input, mock_mode=mock_mode)",
-                    "default_agent is already imported - do NOT add imports",
+                    "Every test MUST accept runner, auto_responder, and mock_mode fixtures",
+                    "Use await runner.run(input) -- NOT default_agent.run()",
+                    "Start auto_responder before running, stop in finally block",
+                    "runner and auto_responder are from conftest.py -- do NOT import them",
                     "NEVER call result.get() - use result.output.get() instead",
                     "Always check result.success before accessing result.output",
                 ],
@@ -3112,7 +3124,6 @@ def generate_success_tests(
         test_type="Success criteria",
         agent_name=agent_module,
         description=f"Tests for success criteria defined in goal: {goal.name}",
-        agent_module=agent_module,
     )
 
     # Return guidelines + data for Claude to write tests directly
@@ -3134,14 +3145,22 @@ def generate_success_tests(
                 "max_tests": 12,
                 "naming_convention": "test_success_<criteria_id>_<scenario>",
                 "required_decorator": "@pytest.mark.asyncio",
-                "required_fixture": "mock_mode",
-                "agent_call_pattern": "await default_agent.run(input_dict, mock_mode=mock_mode)",
+                "required_fixtures": "runner, auto_responder, mock_mode",
+                "agent_call_pattern": "await runner.run(input_dict)",
+                "auto_responder_pattern": (
+                    "await auto_responder.start()\n"
+                    "try:\n"
+                    "    result = await runner.run(input_dict)\n"
+                    "finally:\n"
+                    "    await auto_responder.stop()"
+                ),
                 "result_type": "ExecutionResult with .success, .output (dict), .error",
                 "critical_rules": [
                     "Every test function MUST be async with @pytest.mark.asyncio",
-                    "Every test MUST accept mock_mode as a parameter",
-                    "Use await default_agent.run(input, mock_mode=mock_mode)",
-                    "default_agent is already imported - do NOT add imports",
+                    "Every test MUST accept runner, auto_responder, and mock_mode fixtures",
+                    "Use await runner.run(input) -- NOT default_agent.run()",
+                    "Start auto_responder before running, stop in finally block",
+                    "runner and auto_responder are from conftest.py -- do NOT import them",
                     "NEVER call result.get() - use result.output.get() instead",
                     "Always check result.success before accessing result.output",
                 ],
@@ -3238,11 +3257,13 @@ def run_tests(
     # Add short traceback and quiet summary
     cmd.append("--tb=short")
 
-    # Set PYTHONPATH to project root so agents can import from core.framework
+    # Set PYTHONPATH so framework and agent packages are importable
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
-    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+    core_path = project_root / "core"
+    exports_path = project_root / "exports"
+    env["PYTHONPATH"] = f"{core_path}:{exports_path}:{project_root}:{pythonpath}"
 
     # Run pytest
     try:
@@ -3712,7 +3733,11 @@ def check_missing_credentials(
 
         from framework.runner import AgentRunner
 
-        runner = AgentRunner.load(agent_path)
+        path, err = _validate_agent_path(agent_path)
+        if err:
+            return err
+
+        runner = AgentRunner.load(str(path))
         runner.validate()
 
         store = _get_credential_store()
@@ -3912,7 +3937,11 @@ def verify_credentials(
     try:
         from framework.runner import AgentRunner
 
-        runner = AgentRunner.load(agent_path)
+        path, err = _validate_agent_path(agent_path)
+        if err:
+            return err
+
+        runner = AgentRunner.load(str(path))
         validation = runner.validate()
 
         return json.dumps(

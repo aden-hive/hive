@@ -109,12 +109,14 @@ Write(
 #### Test writing rules
 
 - Every test MUST be `async` with `@pytest.mark.asyncio`
-- Every test MUST accept `mock_mode` parameter
-- Use `await default_agent.run(input, mock_mode=mock_mode)`
+- Every test MUST accept `runner, auto_responder, mock_mode` fixtures
+- Use `await auto_responder.start()` before running, `await auto_responder.stop()` in `finally`
+- Use `await runner.run(input_dict)` — this goes through AgentRunner → AgentRuntime → ExecutionStream
 - Access output via `result.output.get("key")` — NEVER `result.output["key"]`
 - `result.success=True` means no exception, NOT goal achieved — always check output
 - Write 8-15 tests total, not 30+
 - Each real test costs ~3 seconds + LLM tokens
+- NEVER use `default_agent.run()` — it bypasses the runtime (no sessions, no logs, client-facing nodes hang)
 
 #### Step 1d: Check existing tests
 
@@ -178,7 +180,7 @@ run_tests(goal_id, agent_path, fail_fast=True)
 run_tests(goal_id, agent_path, parallel=4)
 ```
 
-**Note:** `run_tests` calls `default_agent.run()` which does NOT enable checkpointing. For checkpoint-based recovery, use CLI execution. Use `run_tests` for quick regression checks and final verification.
+**Note:** `run_tests` uses `AgentRunner` with `tmp_path` storage, so sessions are isolated per test run. For checkpoint-based recovery with persistent sessions, use CLI execution. Use `run_tests` for quick regression checks and final verification.
 
 ---
 
@@ -431,10 +433,11 @@ Common tool credentials:
 
 ### Mock Mode Limitations
 
-Mock mode (`--mock` flag or `mock_mode=True`) is **ONLY for structure validation**:
+Mock mode (`--mock` flag or `MOCK_MODE=1`) is **ONLY for structure validation**:
 
 - Validates graph structure (nodes, edges, connections)
-- Tests that code doesn't crash on execution
+- Validates that `AgentRunner.load()` succeeds and the agent is importable
+- Does NOT execute event_loop agents — MockLLMProvider never calls `set_output`, so event_loop nodes loop forever
 - Does NOT test LLM reasoning, content quality, or constraint validation
 - Does NOT test real API integrations or tool use
 
@@ -623,9 +626,13 @@ Each real test costs ~3 seconds + LLM tokens. 12 tests = ~36 seconds, $0.12.
 ### Happy Path
 ```python
 @pytest.mark.asyncio
-async def test_happy_path(mock_mode):
+async def test_happy_path(runner, auto_responder, mock_mode):
     """Test normal successful execution."""
-    result = await default_agent.run({"query": "python tutorials"}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "python tutorials"})
+    finally:
+        await auto_responder.stop()
     assert result.success, f"Agent failed: {result.error}"
     output = result.output or {}
     assert output.get("report"), "No report produced"
@@ -634,9 +641,13 @@ async def test_happy_path(mock_mode):
 ### Boundary Condition
 ```python
 @pytest.mark.asyncio
-async def test_minimum_sources(mock_mode):
+async def test_minimum_sources(runner, auto_responder, mock_mode):
     """Test at minimum source threshold."""
-    result = await default_agent.run({"query": "niche topic"}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "niche topic"})
+    finally:
+        await auto_responder.stop()
     assert result.success, f"Agent failed: {result.error}"
     output = result.output or {}
     sources = output.get("sources", [])
@@ -647,9 +658,13 @@ async def test_minimum_sources(mock_mode):
 ### Error Handling
 ```python
 @pytest.mark.asyncio
-async def test_empty_input(mock_mode):
+async def test_empty_input(runner, auto_responder, mock_mode):
     """Test graceful handling of empty input."""
-    result = await default_agent.run({"query": ""}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": ""})
+    finally:
+        await auto_responder.stop()
     # Agent should either fail gracefully or produce an error message
     output = result.output or {}
     assert not result.success or output.get("error"), "Should handle empty input"
@@ -658,9 +673,13 @@ async def test_empty_input(mock_mode):
 ### Feedback Loop
 ```python
 @pytest.mark.asyncio
-async def test_feedback_loop_terminates(mock_mode):
+async def test_feedback_loop_terminates(runner, auto_responder, mock_mode):
     """Test that feedback loops don't run forever."""
-    result = await default_agent.run({"query": "test"}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "test"})
+    finally:
+        await auto_responder.stop()
     visits = result.node_visit_counts or {}
     for node_id, count in visits.items():
         assert count <= 5, f"Node {node_id} visited {count} times — possible infinite loop"
@@ -752,6 +771,7 @@ uv run hive run exports/{agent_name} \
 
 | Don't | Do Instead |
 |-------|-----------|
+| Use `default_agent.run()` in tests | Use `runner.run()` with `auto_responder` fixtures (goes through AgentRuntime) |
 | Re-run entire agent when a late node fails | Resume from last clean checkpoint |
 | Treat `result.success` as goal achieved | Check `result.output` for actual criteria |
 | Access `result.output["key"]` directly | Use `result.output.get("key")` |

@@ -48,9 +48,13 @@ Write(
     content=result["file_header"] + '''
 
 @pytest.mark.asyncio
-async def test_success_source_diversity(mock_mode):
+async def test_success_source_diversity(runner, auto_responder, mock_mode):
     """At least 5 diverse sources are found."""
-    result = await default_agent.run({"query": "impact of remote work on productivity"}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "impact of remote work on productivity"})
+    finally:
+        await auto_responder.stop()
     assert result.success, f"Agent failed: {result.error}"
     output = result.output or {}
     sources = output.get("sources", [])
@@ -58,9 +62,13 @@ async def test_success_source_diversity(mock_mode):
         assert len(sources) >= 5, f"Expected >= 5 sources, got {len(sources)}"
 
 @pytest.mark.asyncio
-async def test_success_citation_coverage(mock_mode):
+async def test_success_citation_coverage(runner, auto_responder, mock_mode):
     """Every factual claim in the report cites its source."""
-    result = await default_agent.run({"query": "climate change effects on agriculture"}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "climate change effects on agriculture"})
+    finally:
+        await auto_responder.stop()
     assert result.success, f"Agent failed: {result.error}"
     output = result.output or {}
     report = output.get("report", "")
@@ -68,26 +76,38 @@ async def test_success_citation_coverage(mock_mode):
     assert "[1]" in str(report) or "[source" in str(report).lower(), "Report lacks citations"
 
 @pytest.mark.asyncio
-async def test_success_report_completeness(mock_mode):
+async def test_success_report_completeness(runner, auto_responder, mock_mode):
     """Report addresses the original research question."""
     query = "pros and cons of nuclear energy"
-    result = await default_agent.run({"query": query}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": query})
+    finally:
+        await auto_responder.stop()
     assert result.success, f"Agent failed: {result.error}"
     output = result.output or {}
     report = output.get("report", "")
     assert len(str(report)) > 200, f"Report too short: {len(str(report))} chars"
 
 @pytest.mark.asyncio
-async def test_empty_query_handling(mock_mode):
+async def test_empty_query_handling(runner, auto_responder, mock_mode):
     """Agent handles empty input gracefully."""
-    result = await default_agent.run({"query": ""}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": ""})
+    finally:
+        await auto_responder.stop()
     output = result.output or {}
     assert not result.success or output.get("error"), "Should handle empty query"
 
 @pytest.mark.asyncio
-async def test_feedback_loop_terminates(mock_mode):
+async def test_feedback_loop_terminates(runner, auto_responder, mock_mode):
     """Feedback loop between review and research terminates."""
-    result = await default_agent.run({"query": "quantum computing basics"}, mock_mode=mock_mode)
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "quantum computing basics"})
+    finally:
+        await auto_responder.stop()
     visits = result.node_visit_counts or {}
     for node_id, count in visits.items():
         assert count <= 5, f"Node {node_id} visited {count} times"
