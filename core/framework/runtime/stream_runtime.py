@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from framework.observability import set_trace_context
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.concurrent import ConcurrentStorage
@@ -119,6 +120,16 @@ class StreamRuntime:
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id = f"run_{self.stream_id}_{timestamp}_{uuid.uuid4().hex[:8]}"
+        trace_id = uuid.uuid4().hex
+        otel_execution_id = uuid.uuid4().hex  # 32 hex, OTel/W3C-aligned for logs
+
+        set_trace_context(
+            trace_id=trace_id,
+            execution_id=otel_execution_id,
+            run_id=run_id,
+            goal_id=goal_id,
+            stream_id=self.stream_id,
+        )
 
         run = Run(
             id=run_id,

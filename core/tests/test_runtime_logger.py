@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from framework.observability import clear_trace_context, set_trace_context
 from framework.runtime.runtime_log_schemas import (
     NodeDetail,
     NodeStepLog,
@@ -463,6 +464,114 @@ class TestRuntimeLogger:
         assert tool_logs.steps[0].input_tokens == 100
         assert tool_logs.steps[0].verdict == "RETRY"
         assert tool_logs.steps[2].verdict == "ACCEPT"
+
+    @pytest.mark.asyncio
+    async def test_trace_context_populated_in_l1_l2_l3(self, tmp_path: Path):
+        """With trace context set, L3/L2/L1 entries include trace_id, span_id, execution_id."""
+        set_trace_context(
+            trace_id="a1b2c3d4e5f6789012345678abcdef01",
+            execution_id="b2c3d4e5f6789012345678abcdef0123",
+        )
+        try:
+            store = RuntimeLogStore(tmp_path / "logs")
+            rl = RuntimeLogger(store=store, agent_id="test-agent")
+            run_id = rl.start_run("goal-1")
+
+            rl.log_step(
+                node_id="node-1",
+                node_type="event_loop",
+                step_index=0,
+                llm_text="Step.",
+                input_tokens=10,
+                output_tokens=5,
+            )
+            rl.log_node_complete(
+                node_id="node-1",
+                node_name="Search",
+                node_type="event_loop",
+                success=True,
+                exit_status="success",
+            )
+            await rl.end_run(
+                status="success",
+                duration_ms=100,
+                node_path=["node-1"],
+                execution_quality="clean",
+            )
+
+            # L3: tool_logs
+            tool_logs = await store.load_tool_logs(run_id)
+            assert tool_logs is not None
+            assert len(tool_logs.steps) == 1
+            step = tool_logs.steps[0]
+            assert step.trace_id == "a1b2c3d4e5f6789012345678abcdef01"
+            assert step.execution_id == "b2c3d4e5f6789012345678abcdef0123"
+            assert len(step.span_id) == 16
+            assert all(c in "0123456789abcdef" for c in step.span_id)
+
+            # L2: details
+            details = await store.load_details(run_id)
+            assert details is not None
+            assert len(details.nodes) == 1
+            nd = details.nodes[0]
+            assert nd.trace_id == "a1b2c3d4e5f6789012345678abcdef01"
+            assert len(nd.span_id) == 16
+
+            # L1: summary
+            summary = await store.load_summary(run_id)
+            assert summary is not None
+            assert summary.trace_id == "a1b2c3d4e5f6789012345678abcdef01"
+            assert summary.execution_id == "b2c3d4e5f6789012345678abcdef0123"
+        finally:
+            clear_trace_context()
+
+    @pytest.mark.asyncio
+    async def test_trace_context_empty_when_not_set(self, tmp_path: Path):
+        """Without trace context, L3/L2/L1 trace_id and execution_id are empty."""
+        clear_trace_context()
+        store = RuntimeLogStore(tmp_path / "logs")
+        rl = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rl.start_run("goal-1")
+
+        rl.log_step(
+            node_id="node-1",
+            node_type="event_loop",
+            step_index=0,
+            llm_text="Step.",
+            input_tokens=10,
+            output_tokens=5,
+        )
+        rl.log_node_complete(
+            node_id="node-1",
+            node_name="Search",
+            node_type="event_loop",
+            success=True,
+            exit_status="success",
+        )
+        await rl.end_run(
+            status="success",
+            duration_ms=100,
+            node_path=["node-1"],
+            execution_quality="clean",
+        )
+
+        # L3: trace_id and execution_id from context should be empty
+        tool_logs = await store.load_tool_logs(run_id)
+        assert tool_logs is not None
+        assert len(tool_logs.steps) == 1
+        assert tool_logs.steps[0].trace_id == ""
+        assert tool_logs.steps[0].execution_id == ""
+
+        # L2
+        details = await store.load_details(run_id)
+        assert details is not None
+        assert details.nodes[0].trace_id == ""
+
+        # L1
+        summary = await store.load_summary(run_id)
+        assert summary is not None
+        assert summary.trace_id == ""
+        assert summary.execution_id == ""
 
     @pytest.mark.asyncio
     async def test_multi_node_lifecycle(self, tmp_path: Path):
