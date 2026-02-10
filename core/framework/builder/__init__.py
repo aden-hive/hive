@@ -2,12 +2,12 @@
 
 from framework.builder.query import BuilderQuery
 from framework.builder.workflow import (
-    GraphBuilder,
-    BuildSession,
     BuildPhase,
-    ValidationResult,
+    BuildSession,
+    GraphBuilder,
     TestCase,
     TestResult,
+    ValidationResult,
 )
 
 __all__ = [

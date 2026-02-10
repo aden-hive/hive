@@ -1,6 +1,7 @@
 """LLM Provider abstraction for pluggable LLM backends."""
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -8,6 +9,7 @@ from typing import Any
 @dataclass
 class LLMResponse:
     """Response from an LLM call."""
+
     content: str
     model: str
     input_tokens: int = 0
@@ -19,6 +21,7 @@ class LLMResponse:
 @dataclass
 class Tool:
     """A tool the LLM can use."""
+
     name: str
     description: str
     parameters: dict[str, Any] = field(default_factory=dict)
@@ -27,6 +30,7 @@ class Tool:
 @dataclass
 class ToolUse:
     """A tool call requested by the LLM."""
+
     id: str
     name: str
     input: dict[str, Any]
@@ -35,6 +39,7 @@ class ToolUse:
 @dataclass
 class ToolResult:
     """Result of executing a tool."""
+
     tool_use_id: str
     content: str
     is_error: bool = False
@@ -86,7 +91,7 @@ class LLMProvider(ABC):
         messages: list[dict[str, Any]],
         system: str,
         tools: list[Tool],
-        tool_executor: callable,
+        tool_executor: Callable[["ToolUse"], "ToolResult"],
         max_iterations: int = 10,
     ) -> LLMResponse:
         """
@@ -103,3 +108,45 @@ class LLMProvider(ABC):
             Final LLMResponse after tool use completes
         """
         pass
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator["StreamEvent"]:
+        """
+        Stream a completion as an async iterator of StreamEvents.
+
+        Default implementation wraps complete() with synthetic events.
+        Subclasses SHOULD override for true streaming.
+
+        Tool orchestration is the CALLER's responsibility:
+        - Caller detects ToolCallEvent, executes tool, adds result
+          to messages, calls stream() again.
+        """
+        from framework.llm.stream_events import (
+            FinishEvent,
+            TextDeltaEvent,
+            TextEndEvent,
+        )
+
+        response = self.complete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
+        )
+        yield TextDeltaEvent(content=response.content, snapshot=response.content)
+        yield TextEndEvent(full_text=response.content)
+        yield FinishEvent(
+            stop_reason=response.stop_reason,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            model=response.model,
+        )
+
+
+# Deferred import target for type annotation
+from framework.llm.stream_events import StreamEvent as StreamEvent  # noqa: E402, F401

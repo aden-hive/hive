@@ -6,20 +6,21 @@ summaries and metrics that Builder needs to understand what happened.
 """
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
-from enum import Enum
 
 from pydantic import BaseModel, Field, computed_field
 
 from framework.schemas.decision import Decision, Outcome
 
 
-class RunStatus(str, Enum):
+class RunStatus(StrEnum):
     """Status of a run."""
+
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-    STUCK = "stuck"           # Making no progress
+    STUCK = "stuck"  # Making no progress
     CANCELLED = "cancelled"
 
 
@@ -29,6 +30,7 @@ class Problem(BaseModel):
 
     Problems are surfaced explicitly so Builder can focus on what needs fixing.
     """
+
     id: str
     severity: str = Field(description="critical, warning, or minor")
     description: str
@@ -42,6 +44,7 @@ class Problem(BaseModel):
 
 class RunMetrics(BaseModel):
     """Quantitative metrics about a run."""
+
     total_decisions: int = 0
     successful_decisions: int = 0
     failed_decisions: int = 0
@@ -68,6 +71,7 @@ class Run(BaseModel):
 
     Contains all decisions, problems, and metrics from a single run.
     """
+
     id: str
     goal_id: str
     started_at: datetime = Field(default_factory=datetime.now)
@@ -191,6 +195,7 @@ class RunSummary(BaseModel):
 
     This is what I (Builder) want to see first when analyzing runs.
     """
+
     run_id: str
     goal_id: str
     status: RunStatus

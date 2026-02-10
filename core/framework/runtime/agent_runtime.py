@@ -7,16 +7,19 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult
-from framework.runtime.shared_state import SharedStateManager
-from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import ExecutionStream, EntryPointSpec
+from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
+from framework.runtime.outcome_aggregator import OutcomeAggregator
+from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
+from framework.storage.session_store import SessionStore
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -29,6 +32,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentRuntimeConfig:
     """Configuration for AgentRuntime."""
+
     max_concurrent_executions: int = 100
     cache_ttl: float = 60.0
     batch_interval: float = 0.1
@@ -98,6 +102,8 @@ class AgentRuntime:
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
         config: AgentRuntimeConfig | None = None,
+        runtime_log_store: Any = None,
+        checkpoint_config: CheckpointConfig | None = None,
     ):
         """
         Initialize agent runtime.
@@ -110,17 +116,25 @@ class AgentRuntime:
             tools: Available tools
             tool_executor: Function to execute tools
             config: Optional runtime configuration
+            runtime_log_store: Optional RuntimeLogStore for per-execution logging
+            checkpoint_config: Optional checkpoint configuration for resumable sessions
         """
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
+        self._runtime_log_store = runtime_log_store
+        self._checkpoint_config = checkpoint_config
 
         # Initialize storage
+        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
         self._storage = ConcurrentStorage(
-            base_path=storage_path,
+            base_path=storage_path_obj,
             cache_ttl=self._config.cache_ttl,
             batch_interval=self._config.batch_interval,
         )
+
+        # Initialize SessionStore for unified sessions (always enabled)
+        self._session_store = SessionStore(storage_path_obj)
 
         # Initialize shared components
         self._state_manager = SharedStateManager()
@@ -210,6 +224,9 @@ class AgentRuntime:
                     tool_executor=self._tool_executor,
                     result_retention_max=self._config.execution_result_max,
                     result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
+                    runtime_log_store=self._runtime_log_store,
+                    session_store=self._session_store,
+                    checkpoint_config=self._checkpoint_config,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -289,8 +306,29 @@ class AgentRuntime:
             ExecutionResult or None if timeout
         """
         exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
-        stream = self._streams[entry_point_id]
+        stream = self._streams.get(entry_point_id)
+        if stream is None:
+            raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
+
+    async def inject_input(self, node_id: str, content: str) -> bool:
+        """Inject user input into a running client-facing node.
+
+        Routes input to the EventLoopNode identified by ``node_id``
+        across all active streams. Used by the TUI ChatRepl to deliver
+        user responses during client-facing node execution.
+
+        Args:
+            node_id: The node currently waiting for input
+            content: The user's input text
+
+        Returns:
+            True if input was delivered, False if no matching node found
+        """
+        for stream in self._streams.values():
+            if await stream.inject_input(node_id, content):
+                return True
+        return False
 
     async def get_goal_progress(self) -> dict[str, Any]:
         """
@@ -415,6 +453,7 @@ class AgentRuntime:
 
 # === CONVENIENCE FACTORY ===
 
+
 def create_agent_runtime(
     graph: "GraphSpec",
     goal: "Goal",
@@ -424,11 +463,15 @@ def create_agent_runtime(
     tools: list["Tool"] | None = None,
     tool_executor: Callable | None = None,
     config: AgentRuntimeConfig | None = None,
+    runtime_log_store: Any = None,
+    enable_logging: bool = True,
+    checkpoint_config: CheckpointConfig | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
 
     Convenience factory that creates runtime and registers entry points.
+    Runtime logging is enabled by default for observability.
 
     Args:
         graph: Graph specification
@@ -439,10 +482,23 @@ def create_agent_runtime(
         tools: Available tools
         tool_executor: Tool executor function
         config: Runtime configuration
+        runtime_log_store: Optional RuntimeLogStore for per-execution logging.
+            If None and enable_logging=True, creates one automatically.
+        enable_logging: Whether to enable runtime logging (default: True).
+            Set to False to disable logging entirely.
+        checkpoint_config: Optional checkpoint configuration for resumable sessions.
+            If None, uses default checkpointing behavior.
 
     Returns:
         Configured AgentRuntime (not yet started)
     """
+    # Auto-create runtime log store if logging is enabled and not provided
+    if enable_logging and runtime_log_store is None:
+        from framework.runtime.runtime_log_store import RuntimeLogStore
+
+        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        runtime_log_store = RuntimeLogStore(storage_path_obj / "runtime_logs")
+
     runtime = AgentRuntime(
         graph=graph,
         goal=goal,
@@ -451,6 +507,8 @@ def create_agent_runtime(
         tools=tools,
         tool_executor=tool_executor,
         config=config,
+        runtime_log_store=runtime_log_store,
+        checkpoint_config=checkpoint_config,
     )
 
     for spec in entry_points:

@@ -2,7 +2,7 @@ name: Auto-close duplicate issues
 description: Auto-closes issues that are duplicates of existing issues
 on:
   schedule:
-    - cron: "0 9 * * *"
+    - cron: "0 */6 * * *"
   workflow_dispatch:
 
 jobs:
@@ -21,6 +21,9 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      - name: Run auto-close-duplicates tests
+        run: bun test scripts/auto-close-duplicates
 
       - name: Auto-close duplicate issues
         run: bun run scripts/auto-close-duplicates.ts

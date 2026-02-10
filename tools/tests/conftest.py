@@ -1,10 +1,11 @@
 """Shared fixtures for tools tests."""
-import pytest
+
 from pathlib import Path
 
+import pytest
 from fastmcp import FastMCP
 
-from aden_tools.credentials import CredentialManager
+from aden_tools.credentials import CredentialStoreAdapter
 
 
 @pytest.fixture
@@ -14,13 +15,15 @@ def mcp() -> FastMCP:
 
 
 @pytest.fixture
-def mock_credentials() -> CredentialManager:
-    """Create a CredentialManager with mock test credentials."""
-    return CredentialManager.for_testing({
-        "anthropic": "test-anthropic-api-key",
-        "brave_search": "test-brave-api-key",
-        # Add other mock credentials as needed
-    })
+def mock_credentials() -> CredentialStoreAdapter:
+    """Create a CredentialStoreAdapter with mock test credentials."""
+    return CredentialStoreAdapter.for_testing(
+        {
+            "anthropic": "test-anthropic-api-key",
+            "brave_search": "test-brave-api-key",
+            # Add other mock credentials as needed
+        }
+    )
 
 
 @pytest.fixture

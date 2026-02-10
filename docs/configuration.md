@@ -1,189 +1,211 @@
 # Configuration Guide
 
-Hive uses a centralized configuration system based on a single `config.yaml` file. This makes it easy to configure the entire application from one place.
+Aden Hive is a Python-based agent framework. Configuration is handled through environment variables and agent-level config files. There is no centralized `config.yaml` or Docker Compose setup.
 
-## Configuration Flow
+## Configuration Overview
 
 ```
-config.yaml  -->  generate-env.ts  -->  .env files
-                                        ├── .env (root, for Docker)
-                                        ├── honeycomb/.env (frontend)
-                                        └── hive/.env (backend)
+~/.hive/configuration.json  (global defaults: provider, model, max_tokens)
+Environment variables        (API keys, runtime flags)
+Agent config.py              (per-agent settings: model, tools, storage)
+pyproject.toml               (package metadata and dependencies)
+.mcp.json                    (MCP server connections)
 ```
 
-## Getting Started
+## Global Configuration (~/.hive/configuration.json)
 
-1. Copy the example configuration:
-   ```bash
-   cp config.yaml.example config.yaml
-   ```
+The `quickstart.sh` script creates this file during setup. It stores the default LLM provider, model, and max_tokens used by all agents unless overridden in an agent's own `config.py`.
 
-2. Edit `config.yaml` with your settings
-
-3. Generate environment files:
-   ```bash
-   npm run generate:env
-   ```
-
-## Configuration Options
-
-### Application Settings
-
-```yaml
-app:
-  # Application name - displayed in UI and logs
-  name: Hive
-
-  # Environment mode
-  # - development: enables debug features, verbose logging
-  # - production: optimized for performance, minimal logging
-  # - test: for running tests
-  environment: development
-
-  # Log level: debug, info, warn, error
-  log_level: info
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 8192,
+    "api_key_env_var": "ANTHROPIC_API_KEY"
+  },
+  "created_at": "2026-01-15T12:00:00+00:00"
+}
 ```
 
-### Server Configuration
+The default `max_tokens` value (8192) is defined as `DEFAULT_MAX_TOKENS` in `framework.graph.edge` and re-exported from `framework.graph`. Each agent's `RuntimeConfig` reads from this file at startup. To change defaults, either re-run `quickstart.sh` or edit the file directly.
 
-```yaml
-server:
-  frontend:
-    # Port for the React frontend
-    port: 3000
+## Environment Variables
 
-  backend:
-    # Port for the Node.js API
-    port: 4000
-
-    # Host to bind (0.0.0.0 = all interfaces)
-    host: 0.0.0.0
-```
-
-### Database Configuration
-
-```yaml
-database:
-  # PostgreSQL connection URL
-  url: postgresql://user:password@localhost:5432/hive
-
-  # For SQLite (local development)
-  # url: sqlite:./data/hive.db
-```
-
-**Connection URL Format:**
-```
-postgresql://[user]:[password]@[host]:[port]/[database]
-```
-
-### Authentication
-
-```yaml
-auth:
-  # JWT secret key for signing tokens
-  # IMPORTANT: Change this in production!
-  # Generate with: openssl rand -base64 32
-  jwt_secret: your-secret-key
-
-  # Token expiration time
-  # Examples: 1h, 7d, 30d
-  jwt_expires_in: 7d
-```
-
-### CORS Configuration
-
-```yaml
-cors:
-  # Allowed origin for cross-origin requests
-  # Set to your frontend URL in production
-  origin: http://localhost:3000
-```
-
-### Feature Flags
-
-```yaml
-features:
-  # Enable/disable user registration
-  registration: true
-
-  # Enable API rate limiting
-  rate_limiting: false
-
-  # Enable request logging
-  request_logging: true
-```
-
-## Environment-Specific Configuration
-
-You can create environment-specific config files:
-
-- `config.yaml` - Your main configuration (git-ignored)
-- `config.yaml.example` - Template with safe defaults (committed)
-
-For different environments, you might want separate files:
+### LLM Providers (at least one required for real execution)
 
 ```bash
-# Development
-cp config.yaml.example config.yaml
-# Edit for development settings
+# Anthropic (primary provider)
+export ANTHROPIC_API_KEY="sk-ant-..."
 
-# Production
-cp config.yaml.example config.production.yaml
-# Edit for production settings
+# OpenAI (optional, for GPT models via LiteLLM)
+export OPENAI_API_KEY="sk-..."
+
+# Cerebras (optional, used by output cleaner and some nodes)
+export CEREBRAS_API_KEY="..."
+
+# Groq (optional, fast inference)
+export GROQ_API_KEY="..."
 ```
 
-## Docker Compose Integration
+The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
 
-The root `.env` file is used by Docker Compose. Key variables:
+### Search & Tools (optional)
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FRONTEND_PORT` | Frontend container port | 3000 |
-| `BACKEND_PORT` | Backend container port | 4000 |
-| `NODE_ENV` | Node environment | production |
-| `DATABASE_URL` | Database connection | - |
-| `JWT_SECRET` | Auth secret key | - |
+```bash
+# Web search for agents (Brave Search)
+export BRAVE_SEARCH_API_KEY="..."
+
+# Exa Search (alternative web search)
+export EXA_API_KEY="..."
+```
+
+### Runtime Flags
+
+```bash
+# Run agents without LLM calls (structure-only validation)
+export MOCK_MODE=1
+
+# Custom credentials storage path (default: ~/.aden/credentials)
+export ADEN_CREDENTIALS_PATH="/custom/path"
+
+# Custom agent storage path (default: /tmp)
+export AGENT_STORAGE_PATH="/custom/storage"
+```
+
+## Agent Configuration
+
+Each agent package in `exports/` contains its own `config.py`:
+
+```python
+# exports/my_agent/config.py
+CONFIG = {
+    "model": "anthropic/claude-sonnet-4-5-20250929",  # Default LLM model
+    "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.graph
+    "temperature": 0.7,
+    "tools": ["web_search", "pdf_read"],   # MCP tools to enable
+    "storage_path": "/tmp/my_agent",       # Runtime data location
+}
+```
+
+If `model` or `max_tokens` are omitted, the agent loads defaults from `~/.hive/configuration.json`.
+
+### Agent Graph Specification
+
+Agent behavior is defined in `agent.json` (or constructed in `agent.py`):
+
+```json
+{
+  "id": "my_agent",
+  "name": "My Agent",
+  "goal": {
+    "success_criteria": [...],
+    "constraints": [...]
+  },
+  "nodes": [...],
+  "edges": [...]
+}
+```
+
+See the [Getting Started Guide](getting-started.md) for building agents.
+
+## MCP Server Configuration
+
+MCP (Model Context Protocol) servers are configured in `.mcp.json` at the project root:
+
+```json
+{
+  "mcpServers": {
+    "agent-builder": {
+      "command": "uv",
+      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
+      "cwd": "core"
+    },
+    "tools": {
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools"
+    }
+  }
+}
+```
+
+The tools MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
+
+## Storage
+
+Aden Hive uses **file-based persistence** (no database required):
+
+```
+{storage_path}/
+  runs/{run_id}.json          # Complete execution traces
+  indexes/
+    by_goal/{goal_id}.json    # Runs indexed by goal
+    by_status/{status}.json   # Runs indexed by status
+    by_node/{node_id}.json    # Runs indexed by node
+  summaries/{run_id}.json     # Quick-load run summaries
+```
+
+Storage is managed by `framework.storage.FileStorage`. No external database setup is needed.
+
+## IDE Setup
+
+### VS Code
+
+Add to `.vscode/settings.json`:
+
+```json
+{
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/core",
+    "${workspaceFolder}/exports"
+  ]
+}
+```
+
+### PyCharm
+
+1. Open Project Settings > Project Structure
+2. Mark `core` as Sources Root
+3. Mark `exports` as Sources Root
 
 ## Security Best Practices
 
-1. **Never commit `config.yaml`** - It may contain secrets
-2. **Use strong JWT secrets** - Generate with `openssl rand -base64 32`
-3. **Restrict CORS in production** - Set to your exact frontend URL
-4. **Use environment variables for CI/CD** - Override config in deployments
-
-## Updating Configuration
-
-After changing `config.yaml`:
-
-```bash
-# Regenerate .env files
-npm run generate:env
-
-# Restart services
-docker compose restart
-# or
-docker compose up --build
-```
+1. **Never commit API keys** - Use environment variables or `.env` files
+2. **`.env` is git-ignored** - Copy `.env.example` to `.env` at the project root and fill in your values
+3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
+4. **Credential isolation** - Each tool validates its own credentials at runtime
 
 ## Troubleshooting
 
-### Changes Not Taking Effect
+### "ModuleNotFoundError: No module named 'framework'"
 
-1. Ensure you ran `npm run generate:env`
-2. Restart the services
-3. Check if the correct `.env` file is being loaded
-
-### Configuration Validation Errors
-
-The backend validates configuration on startup. Check logs for specific errors:
+Install the core package:
 
 ```bash
-docker compose logs hive
+cd core && uv pip install -e .
 ```
 
-### Missing Environment Variables
+### API key not found
 
-If a required variable is missing, add it to:
-1. `config.yaml.example` (with safe default)
-2. `config.yaml` (with your value)
-3. `scripts/generate-env.ts` (to generate it)
+Ensure the environment variable is set in your current shell session:
+
+```bash
+echo $ANTHROPIC_API_KEY  # Should print your key
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+```
+
+### Agent not found
+
+Run from the project root with PYTHONPATH:
+
+```bash
+PYTHONPATH=exports uv run python -m my_agent validate
+```
+
+See [Environment Setup](./environment-setup.md) for detailed installation instructions.

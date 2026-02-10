@@ -9,16 +9,16 @@ Allows streams to:
 
 import asyncio
 import logging
-import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Awaitable, Callable
+from enum import StrEnum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     """Types of events that can be published."""
 
     # Execution lifecycle
@@ -41,6 +41,28 @@ class EventType(str, Enum):
     STREAM_STARTED = "stream_started"
     STREAM_STOPPED = "stream_stopped"
 
+    # Node event-loop lifecycle
+    NODE_LOOP_STARTED = "node_loop_started"
+    NODE_LOOP_ITERATION = "node_loop_iteration"
+    NODE_LOOP_COMPLETED = "node_loop_completed"
+
+    # LLM streaming observability
+    LLM_TEXT_DELTA = "llm_text_delta"
+    LLM_REASONING_DELTA = "llm_reasoning_delta"
+
+    # Tool lifecycle
+    TOOL_CALL_STARTED = "tool_call_started"
+    TOOL_CALL_COMPLETED = "tool_call_completed"
+
+    # Client I/O (client_facing=True nodes only)
+    CLIENT_OUTPUT_DELTA = "client_output_delta"
+    CLIENT_INPUT_REQUESTED = "client_input_requested"
+
+    # Internal node observability (client_facing=False nodes)
+    NODE_INTERNAL_OUTPUT = "node_internal_output"
+    NODE_INPUT_BLOCKED = "node_input_blocked"
+    NODE_STALLED = "node_stalled"
+
     # Custom events
     CUSTOM = "custom"
 
@@ -48,8 +70,10 @@ class EventType(str, Enum):
 @dataclass
 class AgentEvent:
     """An event in the agent system."""
+
     type: EventType
     stream_id: str
+    node_id: str | None = None  # Which node emitted this event
     execution_id: str | None = None
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
@@ -60,6 +84,7 @@ class AgentEvent:
         return {
             "type": self.type.value,
             "stream_id": self.stream_id,
+            "node_id": self.node_id,
             "execution_id": self.execution_id,
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
@@ -74,10 +99,12 @@ EventHandler = Callable[[AgentEvent], Awaitable[None]]
 @dataclass
 class Subscription:
     """A subscription to events."""
+
     id: str
     event_types: set[EventType]
     handler: EventHandler
     filter_stream: str | None = None  # Only receive events from this stream
+    filter_node: str | None = None  # Only receive events from this node
     filter_execution: str | None = None  # Only receive events from this execution
 
 
@@ -136,6 +163,7 @@ class EventBus:
         event_types: list[EventType],
         handler: EventHandler,
         filter_stream: str | None = None,
+        filter_node: str | None = None,
         filter_execution: str | None = None,
     ) -> str:
         """
@@ -145,6 +173,7 @@ class EventBus:
             event_types: Types of events to receive
             handler: Async function to call when event occurs
             filter_stream: Only receive events from this stream
+            filter_node: Only receive events from this node
             filter_execution: Only receive events from this execution
 
         Returns:
@@ -158,6 +187,7 @@ class EventBus:
             event_types=set(event_types),
             handler=handler,
             filter_stream=filter_stream,
+            filter_node=filter_node,
             filter_execution=filter_execution,
         )
 
@@ -193,7 +223,7 @@ class EventBus:
         async with self._lock:
             self._event_history.append(event)
             if len(self._event_history) > self._max_history:
-                self._event_history = self._event_history[-self._max_history:]
+                self._event_history = self._event_history[-self._max_history :]
 
         # Find matching subscriptions
         matching_handlers: list[EventHandler] = []
@@ -214,6 +244,10 @@ class EventBus:
 
         # Check stream filter
         if subscription.filter_stream and subscription.filter_stream != event.stream_id:
+            return False
+
+        # Check node filter
+        if subscription.filter_node and subscription.filter_node != event.node_id:
             return False
 
         # Check execution filter
@@ -249,13 +283,15 @@ class EventBus:
         correlation_id: str | None = None,
     ) -> None:
         """Emit execution started event."""
-        await self.publish(AgentEvent(
-            type=EventType.EXECUTION_STARTED,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={"input": input_data or {}},
-            correlation_id=correlation_id,
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={"input": input_data or {}},
+                correlation_id=correlation_id,
+            )
+        )
 
     async def emit_execution_completed(
         self,
@@ -265,13 +301,15 @@ class EventBus:
         correlation_id: str | None = None,
     ) -> None:
         """Emit execution completed event."""
-        await self.publish(AgentEvent(
-            type=EventType.EXECUTION_COMPLETED,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={"output": output or {}},
-            correlation_id=correlation_id,
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_COMPLETED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={"output": output or {}},
+                correlation_id=correlation_id,
+            )
+        )
 
     async def emit_execution_failed(
         self,
@@ -281,13 +319,15 @@ class EventBus:
         correlation_id: str | None = None,
     ) -> None:
         """Emit execution failed event."""
-        await self.publish(AgentEvent(
-            type=EventType.EXECUTION_FAILED,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={"error": error},
-            correlation_id=correlation_id,
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_FAILED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={"error": error},
+                correlation_id=correlation_id,
+            )
+        )
 
     async def emit_goal_progress(
         self,
@@ -296,14 +336,16 @@ class EventBus:
         criteria_status: dict[str, Any],
     ) -> None:
         """Emit goal progress event."""
-        await self.publish(AgentEvent(
-            type=EventType.GOAL_PROGRESS,
-            stream_id=stream_id,
-            data={
-                "progress": progress,
-                "criteria_status": criteria_status,
-            },
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.GOAL_PROGRESS,
+                stream_id=stream_id,
+                data={
+                    "progress": progress,
+                    "criteria_status": criteria_status,
+                },
+            )
+        )
 
     async def emit_constraint_violation(
         self,
@@ -313,15 +355,17 @@ class EventBus:
         description: str,
     ) -> None:
         """Emit constraint violation event."""
-        await self.publish(AgentEvent(
-            type=EventType.CONSTRAINT_VIOLATION,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={
-                "constraint_id": constraint_id,
-                "description": description,
-            },
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.CONSTRAINT_VIOLATION,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={
+                    "constraint_id": constraint_id,
+                    "description": description,
+                },
+            )
+        )
 
     async def emit_state_changed(
         self,
@@ -333,17 +377,261 @@ class EventBus:
         scope: str,
     ) -> None:
         """Emit state changed event."""
-        await self.publish(AgentEvent(
-            type=EventType.STATE_CHANGED,
-            stream_id=stream_id,
-            execution_id=execution_id,
-            data={
-                "key": key,
-                "old_value": old_value,
-                "new_value": new_value,
-                "scope": scope,
-            },
-        ))
+        await self.publish(
+            AgentEvent(
+                type=EventType.STATE_CHANGED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={
+                    "key": key,
+                    "old_value": old_value,
+                    "new_value": new_value,
+                    "scope": scope,
+                },
+            )
+        )
+
+    # === NODE EVENT-LOOP PUBLISHERS ===
+
+    async def emit_node_loop_started(
+        self,
+        stream_id: str,
+        node_id: str,
+        execution_id: str | None = None,
+        max_iterations: int | None = None,
+    ) -> None:
+        """Emit node loop started event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_LOOP_STARTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"max_iterations": max_iterations},
+            )
+        )
+
+    async def emit_node_loop_iteration(
+        self,
+        stream_id: str,
+        node_id: str,
+        iteration: int,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node loop iteration event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_LOOP_ITERATION,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"iteration": iteration},
+            )
+        )
+
+    async def emit_node_loop_completed(
+        self,
+        stream_id: str,
+        node_id: str,
+        iterations: int,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node loop completed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_LOOP_COMPLETED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"iterations": iterations},
+            )
+        )
+
+    # === LLM STREAMING PUBLISHERS ===
+
+    async def emit_llm_text_delta(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        snapshot: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit LLM text delta event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.LLM_TEXT_DELTA,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"content": content, "snapshot": snapshot},
+            )
+        )
+
+    async def emit_llm_reasoning_delta(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit LLM reasoning delta event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.LLM_REASONING_DELTA,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"content": content},
+            )
+        )
+
+    # === TOOL LIFECYCLE PUBLISHERS ===
+
+    async def emit_tool_call_started(
+        self,
+        stream_id: str,
+        node_id: str,
+        tool_use_id: str,
+        tool_name: str,
+        tool_input: dict[str, Any] | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit tool call started event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.TOOL_CALL_STARTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "tool_input": tool_input or {},
+                },
+            )
+        )
+
+    async def emit_tool_call_completed(
+        self,
+        stream_id: str,
+        node_id: str,
+        tool_use_id: str,
+        tool_name: str,
+        result: str = "",
+        is_error: bool = False,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit tool call completed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.TOOL_CALL_COMPLETED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "result": result,
+                    "is_error": is_error,
+                },
+            )
+        )
+
+    # === CLIENT I/O PUBLISHERS ===
+
+    async def emit_client_output_delta(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        snapshot: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit client output delta event (client_facing=True nodes)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.CLIENT_OUTPUT_DELTA,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"content": content, "snapshot": snapshot},
+            )
+        )
+
+    async def emit_client_input_requested(
+        self,
+        stream_id: str,
+        node_id: str,
+        prompt: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit client input requested event (client_facing=True nodes)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.CLIENT_INPUT_REQUESTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"prompt": prompt},
+            )
+        )
+
+    # === INTERNAL NODE PUBLISHERS ===
+
+    async def emit_node_internal_output(
+        self,
+        stream_id: str,
+        node_id: str,
+        content: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node internal output event (client_facing=False nodes)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_INTERNAL_OUTPUT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"content": content},
+            )
+        )
+
+    async def emit_node_stalled(
+        self,
+        stream_id: str,
+        node_id: str,
+        reason: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node stalled event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_STALLED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"reason": reason},
+            )
+        )
+
+    async def emit_node_input_blocked(
+        self,
+        stream_id: str,
+        node_id: str,
+        prompt: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node input blocked event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_INPUT_BLOCKED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"prompt": prompt},
+            )
+        )
 
     # === QUERY OPERATIONS ===
 
@@ -396,6 +684,7 @@ class EventBus:
         self,
         event_type: EventType,
         stream_id: str | None = None,
+        node_id: str | None = None,
         execution_id: str | None = None,
         timeout: float | None = None,
     ) -> AgentEvent | None:
@@ -405,6 +694,7 @@ class EventBus:
         Args:
             event_type: Type of event to wait for
             stream_id: Filter by stream
+            node_id: Filter by node
             execution_id: Filter by execution
             timeout: Maximum time to wait (seconds)
 
@@ -424,6 +714,7 @@ class EventBus:
             event_types=[event_type],
             handler=handler,
             filter_stream=stream_id,
+            filter_node=node_id,
             filter_execution=execution_id,
         )
 
@@ -432,7 +723,7 @@ class EventBus:
             if timeout:
                 try:
                     await asyncio.wait_for(event_received.wait(), timeout=timeout)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     return None
             else:
                 await event_received.wait()

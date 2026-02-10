@@ -8,9 +8,15 @@ Philosophy: Google Strictness + Apple UX
 - Guided error messages with clear next steps
 
 Usage:
-    # In mcp_server.py (startup validation)
-    credentials = CredentialManager()
-    credentials.validate_startup()
+    from aden_tools.credentials import CredentialStoreAdapter
+    from framework.credentials import CredentialStore
+
+    # With encrypted storage (production)
+    store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
+    credentials = CredentialStoreAdapter(store)
+
+    # With composite storage (encrypted primary + env fallback)
+    credentials = CredentialStoreAdapter.default()
 
     # In agent runner (validate at agent load time)
     credentials.validate_for_tools(["web_search", "file_read"])
@@ -19,35 +25,87 @@ Usage:
     api_key = credentials.get("brave_search")
 
     # In tests
-    creds = CredentialManager.for_testing({"brave_search": "test-key"})
+    creds = CredentialStoreAdapter.for_testing({"brave_search": "test-key"})
+
+    # Template resolution
+    headers = credentials.resolve_headers({
+        "Authorization": "Bearer {{github_oauth.access_token}}"
+    })
 
 Credential categories:
 - llm.py: LLM provider credentials (anthropic, openai, etc.)
 - search.py: Search tool credentials (brave_search, google_search, etc.)
+- email.py: Email provider credentials (resend, google/gmail)
+- apollo.py: Apollo.io API credentials
+- github.py: GitHub API credentials
+- hubspot.py: HubSpot CRM credentials
+- slack.py: Slack workspace credentials
+
+Note: Tools that don't need credentials simply omit the 'credentials' parameter
+from their register_tools() function. This convention is enforced by CI tests.
 
 To add a new credential:
 1. Find the appropriate category file (or create a new one)
 2. Add the CredentialSpec to that file's dictionary
 3. If new category, import and merge it in this __init__.py
 """
-from .base import CredentialError, CredentialManager, CredentialSpec
+
+from .apollo import APOLLO_CREDENTIALS
+from .base import CredentialError, CredentialSpec
+from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
+from .email import EMAIL_CREDENTIALS
+from .github import GITHUB_CREDENTIALS
+from .health_check import HealthCheckResult, check_credential_health
+from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
+from .shell_config import (
+    add_env_var_to_shell_config,
+    detect_shell,
+    get_shell_config_path,
+    get_shell_source_command,
+)
+from .slack import SLACK_CREDENTIALS
+from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
+    **EMAIL_CREDENTIALS,
+    **APOLLO_CREDENTIALS,
+    **GITHUB_CREDENTIALS,
+    **HUBSPOT_CREDENTIALS,
+    **SLACK_CREDENTIALS,
 }
 
 __all__ = [
     # Core classes
     "CredentialSpec",
-    "CredentialManager",
+    "CredentialStoreAdapter",
     "CredentialError",
+    # Credential store adapter (replaces deprecated CredentialManager)
+    "CredentialStoreAdapter",
+    # Health check utilities
+    "HealthCheckResult",
+    "check_credential_health",
+    # Browser utilities for OAuth2 flows
+    "open_browser",
+    "get_aden_auth_url",
+    "get_aden_setup_url",
+    # Shell config utilities
+    "detect_shell",
+    "get_shell_config_path",
+    "get_shell_source_command",
+    "add_env_var_to_shell_config",
     # Merged registry
     "CREDENTIAL_SPECS",
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
+    "EMAIL_CREDENTIALS",
+    "GITHUB_CREDENTIALS",
+    "HUBSPOT_CREDENTIALS",
+    "SLACK_CREDENTIALS",
+    "APOLLO_CREDENTIALS",
 ]

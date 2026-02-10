@@ -7,6 +7,9 @@ from ..security import get_secure_path
 
 def register_tools(mcp: FastMCP) -> None:
     """Register file view tools with the MCP server."""
+    if getattr(mcp, "_file_tools_registered", False):
+        return
+    mcp._file_tools_registered = True
 
     @mcp.tool()
     def view_file(
@@ -53,7 +56,7 @@ def register_tools(mcp: FastMCP) -> None:
             if not os.path.isfile(secure_path):
                 return {"error": f"Path is not a file: {path}"}
 
-            with open(secure_path, "r", encoding=encoding) as f:
+            with open(secure_path, encoding=encoding) as f:
                 content = f.read()
 
             if len(content.encode(encoding)) > max_size:

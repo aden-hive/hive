@@ -11,7 +11,6 @@ our edges can be created dynamically by a Builder agent based on the goal.
 
 Edge Types:
 - always: Always traverse after source completes
-- always: Always traverse after source completes
 - on_success: Traverse only if source succeeds
 - on_failure: Traverse only if source fails
 - conditional: Traverse based on expression evaluation (SAFE SUBSET ONLY)
@@ -22,21 +21,24 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
+from enum import StrEnum
 from typing import Any
-from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from framework.graph.safe_eval import safe_eval
 
+DEFAULT_MAX_TOKENS = 8192
 
-class EdgeCondition(str, Enum):
+
+class EdgeCondition(StrEnum):
     """When an edge should be traversed."""
-    ALWAYS = "always"           # Always after source completes
-    ON_SUCCESS = "on_success"   # Only if source succeeds
-    ON_FAILURE = "on_failure"   # Only if source fails
-    CONDITIONAL = "conditional" # Based on expression
-    LLM_DECIDE = "llm_decide"   # Let LLM decide based on goal and context
+
+    ALWAYS = "always"  # Always after source completes
+    ON_SUCCESS = "on_success"  # Only if source succeeds
+    ON_FAILURE = "on_failure"  # Only if source fails
+    CONDITIONAL = "conditional"  # Based on expression
+    LLM_DECIDE = "llm_decide"  # Let LLM decide based on goal and context
 
 
 class EdgeSpec(BaseModel):
@@ -71,6 +73,7 @@ class EdgeSpec(BaseModel):
             description="Only filter if results need refinement to meet goal",
         )
     """
+
     id: str
     source: str = Field(description="Source node ID")
     target: str = Field(description="Target node ID")
@@ -79,20 +82,17 @@ class EdgeSpec(BaseModel):
     condition: EdgeCondition = EdgeCondition.ALWAYS
     condition_expr: str | None = Field(
         default=None,
-        description="Expression for CONDITIONAL edges, e.g., 'output.confidence > 0.8'"
+        description="Expression for CONDITIONAL edges, e.g., 'output.confidence > 0.8'",
     )
 
     # Data flow
     input_mapping: dict[str, str] = Field(
         default_factory=dict,
-        description="Map source outputs to target inputs: {target_key: source_key}"
+        description="Map source outputs to target inputs: {target_key: source_key}",
     )
 
     # Priority for multiple outgoing edges
-    priority: int = Field(
-        default=0,
-        description="Higher priority edges are evaluated first"
-    )
+    priority: int = Field(default=0, description="Higher priority edges are evaluated first")
 
     # Metadata
     description: str = ""
@@ -158,6 +158,10 @@ class EdgeSpec(BaseModel):
         memory: dict[str, Any],
     ) -> bool:
         """Evaluate a conditional expression."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         if not self.condition_expr:
             return True
 
@@ -167,18 +171,31 @@ class EdgeSpec(BaseModel):
             "output": output,
             "memory": memory,
             "result": output.get("result"),
-            "true": True,   # Allow lowercase true/false in conditions
+            "true": True,  # Allow lowercase true/false in conditions
             "false": False,
             **memory,  # Unpack memory keys directly into context
         }
 
         try:
             # Safe evaluation using AST-based whitelist
-            return bool(safe_eval(self.condition_expr, context))
+            result = bool(safe_eval(self.condition_expr, context))
+            # Log the evaluation for visibility
+            # Extract the variable names used in the expression for debugging
+            expr_vars = {
+                k: repr(context[k])
+                for k in context
+                if k not in ("output", "memory", "result", "true", "false")
+                and k in self.condition_expr
+            }
+            logger.info(
+                "  Edge %s: condition '%s' → %s  (vars: %s)",
+                self.id,
+                self.condition_expr,
+                result,
+                expr_vars or "none matched",
+            )
+            return result
         except Exception as e:
-            # Log the error for debugging
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
             logger.warning(f"         Available context keys: {list(context.keys())}")
@@ -238,7 +255,8 @@ Respond with ONLY a JSON object:
 
             # Parse response
             import re
-            json_match = re.search(r'\{[^{}]*\}', response.content, re.DOTALL)
+
+            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
                 proceed = data.get("proceed", False)
@@ -246,6 +264,7 @@ Respond with ONLY a JSON object:
 
                 # Log the decision (using basic print for now)
                 import logging
+
                 logger = logging.getLogger(__name__)
                 logger.info(f"      🤔 LLM routing decision: {'PROCEED' if proceed else 'SKIP'}")
                 logger.info(f"         Reason: {reasoning}")
@@ -255,6 +274,7 @@ Respond with ONLY a JSON object:
         except Exception as e:
             # Fallback: proceed on success
             import logging
+
             logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ LLM routing failed, defaulting to on_success: {e}")
             return source_success
@@ -307,28 +327,24 @@ class AsyncEntryPointSpec(BaseModel):
             isolation_level="shared",
         )
     """
+
     id: str = Field(description="Unique identifier for this entry point")
     name: str = Field(description="Human-readable name")
     entry_node: str = Field(description="Node ID to start execution from")
     trigger_type: str = Field(
         default="manual",
-        description="How this entry point is triggered: webhook, api, timer, event, manual"
+        description="How this entry point is triggered: webhook, api, timer, event, manual",
     )
     trigger_config: dict[str, Any] = Field(
         default_factory=dict,
-        description="Trigger-specific configuration (e.g., webhook URL, timer interval)"
+        description="Trigger-specific configuration (e.g., webhook URL, timer interval)",
     )
     isolation_level: str = Field(
-        default="shared",
-        description="State isolation: isolated, shared, or synchronized"
+        default="shared", description="State isolation: isolated, shared, or synchronized"
     )
-    priority: int = Field(
-        default=0,
-        description="Execution priority (higher = more priority)"
-    )
+    priority: int = Field(default=0, description="Execution priority (higher = more priority)")
     max_concurrent: int = Field(
-        default=10,
-        description="Maximum concurrent executions for this entry point"
+        default=10, description="Maximum concurrent executions for this entry point"
     )
 
     model_config = {"extra": "allow"}
@@ -373,6 +389,7 @@ class GraphSpec(BaseModel):
             edges=[...],
         )
     """
+
     id: str
     goal_id: str
     version: str = "1.0.0"
@@ -381,53 +398,66 @@ class GraphSpec(BaseModel):
     entry_node: str = Field(description="ID of the first node to execute")
     entry_points: dict[str, str] = Field(
         default_factory=dict,
-        description="Named entry points for resuming execution. Format: {name: node_id}"
+        description="Named entry points for resuming execution. Format: {name: node_id}",
     )
     async_entry_points: list[AsyncEntryPointSpec] = Field(
         default_factory=list,
-        description="Asynchronous entry points for concurrent execution streams (used with AgentRuntime)"
+        description=(
+            "Asynchronous entry points for concurrent execution streams (used with AgentRuntime)"
+        ),
     )
     terminal_nodes: list[str] = Field(
-        default_factory=list,
-        description="IDs of nodes that end execution"
+        default_factory=list, description="IDs of nodes that end execution"
     )
     pause_nodes: list[str] = Field(
-        default_factory=list,
-        description="IDs of nodes that pause execution for HITL input"
+        default_factory=list, description="IDs of nodes that pause execution for HITL input"
     )
 
     # Components
     nodes: list[Any] = Field(  # NodeSpec, but avoiding circular import
-        default_factory=list,
-        description="All node specifications"
+        default_factory=list, description="All node specifications"
     )
-    edges: list[EdgeSpec] = Field(
-        default_factory=list,
-        description="All edge specifications"
-    )
+    edges: list[EdgeSpec] = Field(default_factory=list, description="All edge specifications")
 
     # Shared memory keys
     memory_keys: list[str] = Field(
-        default_factory=list,
-        description="Keys available in shared memory"
+        default_factory=list, description="Keys available in shared memory"
     )
 
     # Default LLM settings
     default_model: str = "claude-haiku-4-5-20251001"
-    max_tokens: int = 1024
+    max_tokens: int = Field(default=None)  # resolved by _resolve_max_tokens validator
+
+    # Cleanup LLM for JSON extraction fallback (fast/cheap model preferred)
+    # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b or
+    # ANTHROPIC_API_KEY -> claude-3-5-haiku as fallback
+    cleanup_llm_model: str | None = None
 
     # Execution limits
-    max_steps: int = Field(
-        default=100,
-        description="Maximum node executions before timeout"
-    )
+    max_steps: int = Field(default=100, description="Maximum node executions before timeout")
     max_retries_per_node: int = 3
+
+    # EventLoopNode configuration (from configure_loop)
+    loop_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="EventLoopNode configuration (max_iterations, max_tool_calls_per_turn, etc.)",
+    )
 
     # Metadata
     description: str = ""
     created_by: str = ""  # "human" or "builder_agent"
 
     model_config = {"extra": "allow"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_max_tokens(cls, values: Any) -> Any:
+        """Resolve max_tokens from the global config store when not explicitly set."""
+        if isinstance(values, dict) and values.get("max_tokens") is None:
+            from framework.config import get_max_tokens
+
+            values["max_tokens"] = get_max_tokens()
+        return values
 
     def get_node(self, node_id: str) -> Any | None:
         """Get a node by ID."""
@@ -455,6 +485,42 @@ class GraphSpec(BaseModel):
     def get_incoming_edges(self, node_id: str) -> list[EdgeSpec]:
         """Get all edges entering a node."""
         return [e for e in self.edges if e.target == node_id]
+
+    def detect_fan_out_nodes(self) -> dict[str, list[str]]:
+        """
+        Detect nodes that fan-out to multiple targets.
+
+        A fan-out occurs when a node has multiple outgoing edges with the same
+        condition (typically ON_SUCCESS) that should execute in parallel.
+
+        Returns:
+            Dict mapping source_node_id -> list of parallel target_node_ids
+        """
+        fan_outs: dict[str, list[str]] = {}
+        for node in self.nodes:
+            outgoing = self.get_outgoing_edges(node.id)
+            # Fan-out: multiple edges with ON_SUCCESS condition
+            success_edges = [e for e in outgoing if e.condition == EdgeCondition.ON_SUCCESS]
+            if len(success_edges) > 1:
+                fan_outs[node.id] = [e.target for e in success_edges]
+        return fan_outs
+
+    def detect_fan_in_nodes(self) -> dict[str, list[str]]:
+        """
+        Detect nodes that receive from multiple sources (fan-in / convergence).
+
+        A fan-in occurs when a node has multiple incoming edges, meaning
+        it should wait for all predecessor branches to complete.
+
+        Returns:
+            Dict mapping target_node_id -> list of source_node_ids
+        """
+        fan_ins: dict[str, list[str]] = {}
+        for node in self.nodes:
+            incoming = self.get_incoming_edges(node.id)
+            if len(incoming) > 1:
+                fan_ins[node.id] = [e.source for e in incoming]
+        return fan_ins
 
     def get_entry_point(self, session_state: dict | None = None) -> str:
         """
@@ -507,7 +573,8 @@ class GraphSpec(BaseModel):
             # Check entry node exists
             if not self.get_node(entry_point.entry_node):
                 errors.append(
-                    f"Async entry point '{entry_point.id}' references missing node '{entry_point.entry_node}'"
+                    f"Async entry point '{entry_point.id}' references "
+                    f"missing node '{entry_point.entry_node}'"
                 )
 
             # Validate isolation level
@@ -565,12 +632,50 @@ class GraphSpec(BaseModel):
 
         for node in self.nodes:
             if node.id not in reachable:
-                # Skip this error if the node is a pause node, entry point target, or async entry point
-                # (pause/resume architecture and async entry points make these reachable)
-                if (node.id in self.pause_nodes or
-                    node.id in self.entry_points.values() or
-                    node.id in async_entry_nodes):
+                # Skip if node is a pause node, entry point target, or async entry
+                # (pause/resume architecture and async entry points make reachable)
+                if (
+                    node.id in self.pause_nodes
+                    or node.id in self.entry_points.values()
+                    or node.id in async_entry_nodes
+                ):
                     continue
                 errors.append(f"Node '{node.id}' is unreachable from entry")
+
+        # Client-facing fan-out validation
+        fan_outs = self.detect_fan_out_nodes()
+        for source_id, targets in fan_outs.items():
+            client_facing_targets = [
+                t
+                for t in targets
+                if self.get_node(t) and getattr(self.get_node(t), "client_facing", False)
+            ]
+            if len(client_facing_targets) > 1:
+                errors.append(
+                    f"Fan-out from '{source_id}' has multiple client-facing nodes: "
+                    f"{client_facing_targets}. Only one branch may be client-facing."
+                )
+
+        # Output key overlap on parallel event_loop nodes
+        for source_id, targets in fan_outs.items():
+            event_loop_targets = [
+                t
+                for t in targets
+                if self.get_node(t) and getattr(self.get_node(t), "node_type", "") == "event_loop"
+            ]
+            if len(event_loop_targets) > 1:
+                seen_keys: dict[str, str] = {}
+                for node_id in event_loop_targets:
+                    node = self.get_node(node_id)
+                    for key in getattr(node, "output_keys", []):
+                        if key in seen_keys:
+                            errors.append(
+                                f"Fan-out from '{source_id}': event_loop nodes "
+                                f"'{seen_keys[key]}' and '{node_id}' both write to "
+                                f"output_key '{key}'. Parallel event_loop nodes must "
+                                f"have disjoint output_keys to prevent last-wins data loss."
+                            )
+                        else:
+                            seen_keys[key] = node_id
 
         return errors
