@@ -951,16 +951,8 @@ async def test_client_facing_node_streams_output():
         config=LoopConfig(max_iterations=5),
     )
 
-    # Client-facing text-only turns block for user input (by design).
-    # Signal shutdown when the node requests input so it exits cleanly.
-    async def on_input_requested(event: AgentEvent) -> None:
-        node.signal_shutdown()
-
-    bus.subscribe(
-        event_types=[EventType.CLIENT_INPUT_REQUESTED],
-        handler=on_input_requested,
-    )
-
+    # Text-only on client_facing does not block (no ask_user called),
+    # so the node completes without needing a shutdown workaround.
     result = await node.execute(ctx)
 
     assert result.success

@@ -486,29 +486,12 @@ class EventLoopNode(NodeProtocol):
 
             # 6h. Client-facing input blocking
             #
-            # For client_facing nodes, block for user input when:
-            #   - The LLM explicitly called ask_user(), OR
-            #   - The LLM produced a turn with no real tool calls
-            #     (text-only or set_output-only).
-            #
-            # Before the first user interaction, set_output alone does
-            # NOT prevent blocking — the node must present its output
-            # to the user first.  After the user has interacted at
-            # least once, set_output-only turns flow through (the LLM
-            # is finishing up based on user input).
-            #
-            # After user input, always fall through to judge evaluation
-            # (6i).  The judge handles all acceptance decisions.
-            if user_interaction_count == 0:
-                # No user interaction yet — block unless ask_user or
-                # real tools were called (set_output alone is not enough)
-                needs_user_input = user_input_requested or not real_tool_results
-            else:
-                # User has already interacted — set_output can bypass
-                needs_user_input = user_input_requested or (
-                    not real_tool_results and not outputs_set
-                )
-            if ctx.node_spec.client_facing and needs_user_input:
+            # Block ONLY when the LLM explicitly calls ask_user().
+            # Text-only turns and set_output-only turns flow through
+            # without blocking, allowing progress updates and summaries
+            # to stream freely.  After user input arrives, fall through
+            # to judge evaluation (6i) — the judge handles acceptance.
+            if ctx.node_spec.client_facing and user_input_requested:
                 if self._shutdown:
                     await self._publish_loop_completed(stream_id, node_id, iteration + 1)
                     latency_ms = int((time.time() - start_time) * 1000)
