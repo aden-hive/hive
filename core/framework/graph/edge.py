@@ -24,9 +24,11 @@ given the current goal, context, and execution state.
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from framework.graph.safe_eval import safe_eval
+
+DEFAULT_MAX_TOKENS = 8192
 
 
 class EdgeCondition(StrEnum):
@@ -424,7 +426,7 @@ class GraphSpec(BaseModel):
 
     # Default LLM settings
     default_model: str = "claude-haiku-4-5-20251001"
-    max_tokens: int = 1024
+    max_tokens: int = Field(default=None)  # resolved by _resolve_max_tokens validator
 
     # Cleanup LLM for JSON extraction fallback (fast/cheap model preferred)
     # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b or
@@ -446,6 +448,16 @@ class GraphSpec(BaseModel):
     created_by: str = ""  # "human" or "builder_agent"
 
     model_config = {"extra": "allow"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_max_tokens(cls, values: Any) -> Any:
+        """Resolve max_tokens from the global config store when not explicitly set."""
+        if isinstance(values, dict) and values.get("max_tokens") is None:
+            from framework.config import get_max_tokens
+
+            values["max_tokens"] = get_max_tokens()
+        return values
 
     def get_node(self, node_id: str) -> Any | None:
         """Get a node by ID."""
