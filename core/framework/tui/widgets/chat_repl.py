@@ -639,9 +639,8 @@ class ChatRepl(Vertical):
         self._check_and_show_resumable_sessions()
 
         # Show agent intro message if available
-        intro = getattr(self.runtime, "intro_message", "")
-        if intro:
-            history.write(f"[bold blue]Agent:[/bold blue] {intro}\n")
+        if self.runtime.intro_message:
+            history.write(f"[bold blue]Agent:[/bold blue] {self.runtime.intro_message}\n")
         else:
             history.write(
                 "[dim]Quick start: /sessions to see previous sessions, "
