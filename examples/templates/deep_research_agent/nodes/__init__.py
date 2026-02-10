@@ -23,6 +23,8 @@ Have a brief conversation to clarify what they need.
 
 Keep it short. Don't over-ask.
 
+After your message, call ask_user() to wait for the user's response.
+
 **STEP 2 — After the user confirms, call set_output:**
 - set_output("research_brief", "A clear paragraph describing exactly what to research, \
 what questions to answer, what scope to cover, and how deep to go.")
@@ -93,6 +95,8 @@ Present the research findings to the user clearly and concisely.
 End by asking: Are they satisfied, or do they want deeper research? \
 Should we proceed to writing the final report?
 
+After your presentation, call ask_user() to wait for the user's response.
+
 **STEP 2 — After the user responds, call set_output:**
 - set_output("needs_more_research", "true")  — if they want more
 - set_output("needs_more_research", "false") — if they're satisfied
@@ -147,8 +151,11 @@ Tell the user the report is ready and include the file:// URI from
 serve_file_to_user so they can click it to open. Give a brief summary
 of what the report covers. Ask if they have questions.
 
+After presenting the link, call ask_user() to wait for the user's response.
+
 **STEP 3 — After the user responds:**
 - Answer follow-up questions from the research material
+- Call ask_user() again if they might have more questions
 - When the user is satisfied: set_output("delivery_status", "completed")
 """,
     tools=["save_data", "serve_file_to_user", "load_data", "list_data_files"],

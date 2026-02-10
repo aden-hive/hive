@@ -207,17 +207,8 @@ async def _interactive_shell(verbose=False):
 
                 if result.success:
                     output = result.output
-                    if "report_content" in output:
-                        click.echo("\n--- Report ---\n")
-                        click.echo(output["report_content"])
-                        click.echo("\n")
-                    if "references" in output:
-                        click.echo("--- References ---\n")
-                        for ref in output.get("references", []):
-                            click.echo(
-                                f"  [{ref.get('number', '?')}] {ref.get('title', '')} - {ref.get('url', '')}"
-                            )
-                        click.echo("\n")
+                    status = output.get("delivery_status", "unknown")
+                    click.echo(f"\nResearch complete (status: {status})\n")
                 else:
                     click.echo(f"\nResearch failed: {result.error}\n")
 

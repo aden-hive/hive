@@ -5,11 +5,30 @@ Aden Hive is a Python-based agent framework. Configuration is handled through en
 ## Configuration Overview
 
 ```
-Environment variables     (API keys, runtime flags)
-Agent config.py           (per-agent settings: model, tools, storage)
-pyproject.toml            (package metadata and dependencies)
-.mcp.json                 (MCP server connections)
+~/.hive/configuration.json  (global defaults: provider, model, max_tokens)
+Environment variables        (API keys, runtime flags)
+Agent config.py              (per-agent settings: model, tools, storage)
+pyproject.toml               (package metadata and dependencies)
+.mcp.json                    (MCP server connections)
 ```
+
+## Global Configuration (~/.hive/configuration.json)
+
+The `quickstart.sh` script creates this file during setup. It stores the default LLM provider, model, and max_tokens used by all agents unless overridden in an agent's own `config.py`.
+
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 8192,
+    "api_key_env_var": "ANTHROPIC_API_KEY"
+  },
+  "created_at": "2026-01-15T12:00:00+00:00"
+}
+```
+
+The default `max_tokens` value (8192) is defined as `DEFAULT_MAX_TOKENS` in `framework.graph.edge` and re-exported from `framework.graph`. Each agent's `RuntimeConfig` reads from this file at startup. To change defaults, either re-run `quickstart.sh` or edit the file directly.
 
 ## Environment Variables
 
@@ -61,13 +80,15 @@ Each agent package in `exports/` contains its own `config.py`:
 ```python
 # exports/my_agent/config.py
 CONFIG = {
-    "model": "claude-haiku-4-5-20251001",  # Default LLM model
-    "max_tokens": 4096,
+    "model": "anthropic/claude-sonnet-4-5-20250929",  # Default LLM model
+    "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.graph
     "temperature": 0.7,
     "tools": ["web_search", "pdf_read"],   # MCP tools to enable
     "storage_path": "/tmp/my_agent",       # Runtime data location
 }
 ```
+
+If `model` or `max_tokens` are omitted, the agent loads defaults from `~/.hive/configuration.json`.
 
 ### Agent Graph Specification
 

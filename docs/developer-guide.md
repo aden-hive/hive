@@ -163,6 +163,7 @@ hive/                                    # Repository root
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
 │   │   ├── mcp/                         # MCP server integration
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
+|   |   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
 │   │   ├── runtime/                     # Runtime environment
 │   │   ├── schemas/                     # Data schemas
 │   │   ├── storage/                     # File-based persistence
