@@ -63,29 +63,153 @@ mkdir -p exports/AGENT_NAME/nodes
 
 **A responsible engineer doesn't jump into building. First, understand the problem and be transparent about what the framework can and cannot do.**
 
-### 2a: Deep Discovery
+### 2a: Fast Discovery (3-5 Turns)
 
-**ASK the user these questions** (don't skip any — gaps here cause problems later):
+**The core principle**: Discovery should feel like progress, not paperwork. The stakeholder should walk away feeling like you understood them faster than anyone else would have.
 
-> I've set up the build environment. Before we design your agent, I need to understand your use case deeply.
->
-> **Core Purpose:**
-> 1. What problem are you trying to solve? (not just "what should it do" but "why does this matter")
-> 2. Who will use this agent? (you personally, your team, end users)
-> 3. How often will it run? (one-off, daily, on-demand, continuously)
->
-> **Interaction Model:**
-> 4. Does it need to have conversations with users, or run autonomously?
-> 5. Does it need human approval/review checkpoints?
-> 6. What does the input look like? (free-form text, structured data, files, URLs)
-> 7. What does the output look like? (reports, actions, data files, API calls)
->
-> **External Dependencies:**
-> 8. What external services/APIs does it need to access?
-> 9. Is there data it needs to fetch in real-time vs. work with provided data?
-> 10. Any authentication or credentials required?
+**The #1 Rule: Respect Their Time.** Every question must earn its place by:
+1. **Preventing a costly wrong turn** — you're about to build the wrong thing
+2. **Unlocking a shortcut** — their answer lets you simplify the design
+3. **Surfacing a dealbreaker** — there's a constraint that changes everything
 
-**WAIT for user responses.** Take notes on what they say.
+If a question doesn't do one of these, don't ask it. Make an assumption, state it, and move on.
+
+---
+
+#### Step 1: Let Them Talk, But Listen Like an Architect
+
+When the stakeholder describes what they want, don't just hear the words — listen for the architecture underneath. While they talk, mentally construct:
+
+- **The actors**: Who are the people/systems involved?
+- **The trigger**: What kicks off the workflow?
+- **The core loop**: What's the main thing that happens repeatedly?
+- **The output**: What's the valuable thing produced at the end?
+- **The pain**: What about today's situation is broken, slow, or missing?
+
+You are extracting a **domain model** from natural language in real time. Most stakeholders won't give you this structure explicitly — they'll give you a story. Your job is to hear the structure inside the story.
+
+| They say... | You're hearing... |
+|-------------|-------------------|
+| Nouns they repeat | Your entities |
+| Verbs they emphasize | Your core operations |
+| Frustrations they mention | Your design constraints |
+| Workarounds they describe | What the system must replace |
+| People they name | Your user types |
+
+---
+
+#### Step 2: Use Domain Knowledge to Fill In the Blanks
+
+You have broad knowledge of how systems work. Use it aggressively.
+
+If they say "I need a research agent," you already know it probably involves: search, summarization, source tracking, and iteration. Don't ask about each — use them as your starting mental model and let their specifics override your defaults.
+
+If they say "I need to monitor files and alert me," you know this probably involves: watch patterns, triggers, notifications, and state tracking.
+
+**The key move**: Take your general knowledge of the domain and merge it with the specifics they've given you. The result is a draft understanding that's 60-80% right before you've asked a single question. Your questions close the remaining 20-40%.
+
+---
+
+#### Step 3: Play Back a Proposed Model (Not a List of Questions)
+
+After listening, present a **concrete picture** of what you think they need. Make it specific enough that they can spot what's wrong.
+
+**Pattern: "Here's what I heard — tell me where I'm off"**
+
+> "OK here's how I'm picturing this: [User type] needs to [core action]. Right now they're [current painful workflow]. What you want is [proposed solution that replaces the pain].
+>
+> The way I'd structure this: [key entities] connected by [key relationships], with the main flow being [trigger → steps → outcome].
+>
+> For v1, I'd focus on [the one thing that delivers the most value] and hold off on [things that can wait].
+>
+> Before I start — [1-2 specific questions you genuinely can't infer]."
+
+Why this works:
+- **Proves you were listening** — they don't feel like they have to repeat themselves
+- **Shows competence** — you're already thinking in systems
+- **Fast to correct** — "no, it's more like X" takes 10 seconds vs. answering 15 questions
+- **Creates momentum** — heading toward building, not more talking
+
+---
+
+#### Step 4: Ask Only What You Cannot Infer
+
+Your questions should be **narrow, specific, and consequential**. Never ask what you could answer yourself.
+
+**Good questions** (high-stakes, can't infer):
+- "Who's the primary user — you or your end customers?"
+- "Is this replacing a spreadsheet, or is there literally nothing today?"
+- "Does this need to integrate with anything, or standalone?"
+- "Is there existing data to migrate, or starting fresh?"
+
+**Bad questions** (low-stakes, inferable):
+- "What should happen if there's an error?" *(handle gracefully, obviously)*
+- "Should it have search?" *(if there's a list, yes)*
+- "How should we handle permissions?" *(follow standard patterns)*
+- "What tools should I use?" *(your call, not theirs)*
+
+---
+
+#### Step 5: Lock Scope in One Exchange
+
+Once they've confirmed or corrected your playback, close the loop:
+
+> "Got it. Here's what I'll build first:
+> - [concrete deliverable 1]
+> - [concrete deliverable 2]
+> - [concrete deliverable 3]
+>
+> Holding off on [X] and [Y] for now — we can add those once the core is solid.
+>
+> I'm assuming [key assumption]. I'll start with [first piece]. Sound good?"
+
+One decision point. Yes or no. Then you're building.
+
+---
+
+#### Conversation Flow (3-5 Turns)
+
+| Turn | Who | What |
+|------|-----|------|
+| 1 | User | Describes what they need |
+| 2 | Agent | Plays back understanding as a proposed model. Asks 1-2 critical questions max. |
+| 3 | User | Corrects, confirms, or adds detail |
+| 4 | Agent | Adjusts model, confirms v1 scope, states assumptions, declares starting point |
+| *(5)* | *(Only if Turn 3 revealed something that fundamentally changes the approach)* |
+
+**If you're going in circles, you need a different question, not more questions.**
+
+---
+
+#### Anti-Patterns
+
+| Don't | Do Instead |
+|-------|------------|
+| Open with a list of questions | Open with what you understood from their request |
+| "What are your requirements?" | "Here's what I think you need — am I right?" |
+| Ask about every edge case | Handle with smart defaults, flag in summary |
+| 10+ turn discovery conversation | 3-5 turns. Start building, iterate with real software. |
+| Ask for permission to start | State your plan and start |
+| Wait for certainty | Start at 80% confidence, iterate the rest |
+| Ask what tech/tools to use | That's your job. Decide, disclose, move on. |
+
+---
+
+#### Discovery Summary
+
+After the conversation, produce this before moving to 2b:
+
+> **Discovery Summary**
+>
+> **Problem**: [2-3 sentences in user's language]
+> **Solution**: [what we're building, core approach]
+> **Users**: [who, how often, context — 1-2 lines]
+> **Domain Model**: [key entities and relationships — "A Project has many Tasks. Each Task has an Owner and Status."]
+> **V1 Scope**:
+> - Will build: [concrete deliverables]
+> - Won't build yet: [deferred items]
+> **Key Flow**: [trigger → steps → outcome]
+> **Assumptions**: [what you're assuming — user can correct]
 
 ### 2b: Capability Assessment
 
