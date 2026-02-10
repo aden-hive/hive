@@ -1,2 +1,22 @@
+# Production Hardening and Cost Transparency in Hive
+
+## Overview
+
+As Hive workflows move toward production environments, reliability and cost visibility become essential for safe and scalable deployment.
+
+This document proposes enhancements to improve workflow resilience, failure recovery, and execution cost awareness.
+
+## Production Hardening
+
+### Retry Policies
+
+Allow workflows or nodes to define retry behavior.
+
+Example:
+
+```yaml
+retry:
+  max_attempts: 3
+  strategy: exponential_backoff
 
 
