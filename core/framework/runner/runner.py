@@ -8,8 +8,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from framework.config import get_hive_config, get_preferred_model
 from framework.graph import Goal
-from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.edge import (
+    DEFAULT_MAX_TOKENS,
+    AsyncEntryPointSpec,
+    EdgeCondition,
+    EdgeSpec,
+    GraphSpec,
+)
 from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
@@ -27,9 +34,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-# Configuration paths
-HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
 
 
 def _ensure_credential_key_env() -> None:
@@ -58,17 +62,6 @@ def _ensure_credential_key_env() -> None:
 
 
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
-
-
-def get_hive_config() -> dict[str, Any]:
-    """Load hive configuration from ~/.hive/configuration.json."""
-    if not HIVE_CONFIG_FILE.exists():
-        return {}
-    try:
-        with open(HIVE_CONFIG_FILE) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
 
 
 def get_claude_code_token() -> str | None:
@@ -268,11 +261,7 @@ class AgentRunner:
     @staticmethod
     def _resolve_default_model() -> str:
         """Resolve the default model from ~/.hive/configuration.json."""
-        config = get_hive_config()
-        llm = config.get("llm", {})
-        if llm.get("provider") and llm.get("model"):
-            return f"{llm['provider']}/{llm['model']}"
-        return "anthropic/claude-sonnet-4-20250514"
+        return get_preferred_model()
 
     def __init__(
         self,
@@ -425,7 +414,11 @@ class AgentRunner:
                 if agent_config and hasattr(agent_config, "model"):
                     model = agent_config.model
 
-            max_tokens = getattr(agent_config, "max_tokens", 1024) if agent_config else 1024
+            if agent_config and hasattr(agent_config, "max_tokens"):
+                max_tokens = agent_config.max_tokens
+            else:
+                hive_config = get_hive_config()
+                max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
 
             # Build GraphSpec from module-level variables
             graph = GraphSpec(
@@ -562,6 +555,11 @@ class AgentRunner:
 
     def _setup(self) -> None:
         """Set up runtime, LLM, and executor."""
+        # Configure structured logging (auto-detects JSON vs human-readable)
+        from framework.observability import configure_logging
+
+        configure_logging(level="INFO", format="auto")
+
         # Set up session context for tools (workspace_id, agent_id, session_id)
         workspace_id = "default"  # Could be derived from storage path
         agent_id = self.graph.id or "unknown"
@@ -741,6 +739,17 @@ class AgentRunner:
         # Create AgentRuntime with all entry points
         log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
 
+        # Enable checkpointing by default for resumable sessions
+        from framework.graph.checkpoint_config import CheckpointConfig
+
+        checkpoint_config = CheckpointConfig(
+            enabled=True,
+            checkpoint_on_node_start=False,  # Only checkpoint after nodes complete
+            checkpoint_on_node_complete=True,
+            checkpoint_max_age_days=7,
+            async_checkpoint=True,  # Non-blocking
+        )
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -750,6 +759,7 @@ class AgentRunner:
             tools=tools,
             tool_executor=tool_executor,
             runtime_log_store=log_store,
+            checkpoint_config=checkpoint_config,
         )
 
     async def run(

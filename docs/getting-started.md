@@ -93,12 +93,12 @@ hive/
 │   └── pyproject.toml      # Package metadata
 │
 ├── tools/                  # MCP Tools Package
+│   ├── mcp_server.py       # MCP server entry point
 │   └── src/aden_tools/     # Tools for agent capabilities
-│       ├── tools/          # Individual tool implementations
-│       │   ├── web_search_tool/
-│       │   ├── web_scrape_tool/
-│       │   └── file_system_toolkits/
-│       └── mcp_server.py   # HTTP MCP server
+│       └── tools/          # Individual tool implementations
+│           ├── web_search_tool/
+│           ├── web_scrape_tool/
+│           └── file_system_toolkits/
 │
 ├── exports/                # Agent Packages (user-generated, not in repo)
 │   └── your_agent/         # Your agents created via /hive
