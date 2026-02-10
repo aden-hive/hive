@@ -19,14 +19,18 @@ metadata:
 
 **THIS IS AN EXECUTABLE WORKFLOW. DO NOT explore the codebase or read source files. ROUTE to the correct skill IMMEDIATELY.**
 
-When this skill is loaded, determine what the user needs and invoke the appropriate skill NOW:
-- **User wants to build an agent** (from scratch or from a template) → Invoke `/hive-create` immediately
-- **User wants to test an agent** → Invoke `/hive-test` immediately
-- **User wants to learn concepts** → Invoke `/hive-concepts` immediately
-- **User wants patterns/optimization** → Invoke `/hive-patterns` immediately
-- **User wants to set up credentials** → Invoke `/hive-credentials` immediately
-- **User has a failing/broken agent** → Invoke `/hive-debugger` immediately
-- **Unclear what user needs** → Ask the user (do NOT explore the codebase to figure it out)
+When this skill is loaded, **ALWAYS use the AskUserQuestion tool** to present options:
+
+```
+Use AskUserQuestion with these options:
+- "Build a new agent" → Then invoke /hive-create
+- "Test an existing agent" → Then invoke /hive-test
+- "Learn agent concepts" → Then invoke /hive-concepts
+- "Optimize agent design" → Then invoke /hive-patterns
+- "Set up credentials" → Then invoke /hive-credentials
+- "Debug a failing agent" → Then invoke /hive-debugger
+- "Other" (please describe what you want to achieve)
+```
 
 **DO NOT:** Read source files, explore the codebase, search for code, or do any investigation before routing. The sub-skills handle all of that.
 
@@ -73,7 +77,6 @@ Use this meta-skill when:
 
 ## Phase 0: Understand Concepts (Optional)
 
-**Duration**: 5-10 minutes
 **Skill**: `/hive-concepts`
 **Input**: Questions about agent architecture
 
@@ -95,7 +98,6 @@ Use this meta-skill when:
 
 ## Phase 1: Build Agent Structure
 
-**Duration**: 15-30 minutes
 **Skill**: `/hive-create`
 **Input**: User requirements ("Build an agent that...") or a template to start from
 
@@ -166,7 +168,6 @@ exports/agent_name/
 
 ## Phase 1.5: Optimize Design (Optional)
 
-**Duration**: 10-15 minutes
 **Skill**: `/hive-patterns`
 **Input**: Completed agent structure
 
@@ -191,11 +192,8 @@ exports/agent_name/
 
 ## Phase 2: Test & Validate
 
-**Duration**: 20-40 minutes
 **Skill**: `/hive-test`
 **Input**: Working agent from Phase 1
-
-### What This Phase Does
 
 ### What This Phase Does
 
