@@ -194,6 +194,7 @@ This reads the agent.json and populates the builder session with the goal, all n
 ---
 
 ## STEP 2: Define Goal Together with User
+**A responsible engineer doesn't jump into building. First, understand the problem and be transparent about what the framework can and cannot do.**
 
 **If starting from a template**, the goal is already loaded in the builder session. Present the existing goal to the user using the format below and ask for approval. Skip the collaborative drafting questions — go straight to presenting and asking "Do you approve this goal, or would you like to modify it?"
 
@@ -201,7 +202,7 @@ This reads the agent.json and populates the builder session with the goal, all n
 
 ```
 AskUserQuestion(questions=[{
-    "question": "What kind of agent do you want to build?",
+    "question": "What kind of agent do you want to build? Select an option below, or choose 'Other' to describe your own.",
     "header": "Agent type",
     "options": [
         {"label": "Data collection", "description": "Gathers information from the web, analyzes it, and produces a report or sends outreach (e.g. market research, news digest, email campaigns, competitive analysis)"},
@@ -712,9 +713,7 @@ AskUserQuestion(questions=[{
 | `__init__.py` | `from .agent import OldNameAgent` import |
 | `__init__.py` | `__all__` list entry |
 
-### 5a: Register nodes and edges with MCP
-
-**If starting from a template and no modifications were made in Steps 2-4**, the nodes and edges are already registered. Skip to validation (`mcp__agent-builder__validate_graph()`). If modifications were made, re-register the changed nodes/edges (the MCP tools handle duplicates by overwriting).
+**If starting from a template and no modifications were made in Steps 2-5**, the nodes and edges are already registered. Skip to validation (`mcp__agent-builder__validate_graph()`). If modifications were made, re-register the changed nodes/edges (the MCP tools handle duplicates by overwriting).
 
 **FOR EACH approved node**, call:
 
