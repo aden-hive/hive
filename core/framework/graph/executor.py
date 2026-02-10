@@ -368,7 +368,7 @@ class GraphExecutor:
             # Check if resuming from paused_at (session state resume)
             paused_at = session_state.get("paused_at") if session_state else None
             node_ids = [n.id for n in graph.nodes]
-            self.logger.info(f"🔍 Debug: paused_at={paused_at}, available node IDs={node_ids}")
+            self.logger.debug(f"paused_at={paused_at}, available node IDs={node_ids}")
 
             if paused_at and graph.get_node(paused_at) is not None:
                 # Resume from paused_at node directly (works for any node, not just pause_nodes)
