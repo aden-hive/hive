@@ -170,6 +170,22 @@ class GraphBuilder:
 
         return validation
 
+    async def generate_preview(self):
+        """Generate a preview of the goal."""
+        from framework.builder.preview import PreviewGenerator
+        
+        if not self.session.goal:
+            raise ValueError("Goal must be set before generating preview")
+            
+        generator = PreviewGenerator()
+        preview = await generator.generate_preview(self.session.goal)
+        
+        # Store preview in goal
+        self.session.goal.approved_preview = preview.model_dump()
+        self._save_session()
+        
+        return preview
+
     def _validate_goal(self, goal: Goal) -> ValidationResult:
         """Validate a goal definition."""
         errors = []

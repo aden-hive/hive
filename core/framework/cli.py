@@ -19,6 +19,7 @@ Testing commands:
 import argparse
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 
 def _configure_paths():
@@ -58,7 +59,9 @@ def _configure_paths():
 
 
 def main():
+    """Main entry point for the CLI."""
     _configure_paths()
+    load_dotenv()
 
     parser = argparse.ArgumentParser(
         prog="hive",
@@ -81,6 +84,11 @@ def main():
     from framework.testing.cli import register_testing_commands
 
     register_testing_commands(subparsers)
+
+    # Register builder commands (preview)
+    from framework.builder.cli import register_preview_commands
+
+    register_preview_commands(subparsers)
 
     args = parser.parse_args()
 

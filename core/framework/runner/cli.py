@@ -926,7 +926,10 @@ def cmd_shell(args: argparse.Namespace) -> int:
             return 1
 
     try:
-        runner = AgentRunner.load(agent_path)
+        runner = AgentRunner.load(
+            agent_path, 
+            model=getattr(args, "model", "gemini/gemini-2.5-flash")
+        )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

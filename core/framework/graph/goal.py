@@ -141,6 +141,12 @@ class Goal(BaseModel):
         default_factory=dict, description="Expected output format"
     )
 
+    # Preview data for build guidance
+    approved_preview: dict[str, Any] | None = Field(
+        default=None, 
+        description="Preview structure approved by user, serves as a hint for the builder"
+    )
+
     # Versioning for evolution
     version: str = "1.0.0"
     parent_version: str | None = None
