@@ -141,7 +141,9 @@ Run the agent via CLI. This creates sessions with checkpoints at `~/.hive/agents
 uv run hive run exports/{agent_name} --input '{"query": "test topic"}'
 ```
 
-Sessions and checkpoints are saved automatically. For agents with client-facing nodes that require user interaction, the user must launch the TUI manually in a separate terminal (Claude Code cannot interact with TUI apps).
+Sessions and checkpoints are saved automatically.
+
+**Client-facing nodes**: Agents with `client_facing=True` nodes (interactive conversation) work in headless mode when run from a real terminal — the agent streams output to stdout and reads user input from stdin via a `>>> ` prompt. In non-interactive shells (like Claude Code's Bash tool), client-facing nodes will hang because there is no stdin. For testing interactive agents from Claude Code, use `run_tests` with mock mode or have the user run the agent manually in their terminal.
 
 #### Automated regression (for CI or final verification)
 
@@ -760,6 +762,7 @@ uv run hive run exports/{agent_name} \
 | Use `run_tests` for iterative debugging | Use headless CLI with checkpoints for iterative debugging |
 | Use headless CLI for final regression | Use `run_tests` for automated regression |
 | Use `--tui` from Claude Code | Use headless `run` command — TUI hangs in non-interactive shells |
+| Test client-facing nodes from Claude Code | Use mock mode, or have the user run the agent in their terminal |
 | Run tests without reading goal first | Always understand the goal before writing tests |
 | Skip Phase 3 analysis and guess | Use session + log tools to identify root cause |
 

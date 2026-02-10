@@ -428,7 +428,6 @@ def cmd_run(args: argparse.Namespace) -> int:
                     runner = AgentRunner.load(
                         args.agent_path,
                         model=args.model,
-                        enable_tui=True,
                     )
                 except Exception as e:
                     print(f"Error loading agent: {e}")
@@ -469,7 +468,6 @@ def cmd_run(args: argparse.Namespace) -> int:
             runner = AgentRunner.load(
                 args.agent_path,
                 model=args.model,
-                enable_tui=False,
             )
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
@@ -1260,7 +1258,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
             runner = AgentRunner.load(
                 agent_path,
                 model=args.model,
-                enable_tui=True,
             )
         except Exception as e:
             print(f"Error loading agent: {e}")

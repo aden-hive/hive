@@ -274,6 +274,7 @@ class EventLoopNode(NodeProtocol):
 
         # 5. Stall detection state
         recent_responses: list[str] = []
+        user_interaction_count = 0  # tracks how many times this node blocked for user input
 
         # 6. Main loop
         for iteration in range(start_iteration, self._config.max_iterations):
@@ -485,14 +486,29 @@ class EventLoopNode(NodeProtocol):
 
             # 6h. Client-facing input blocking
             #
-            # For client_facing nodes, block for user input only when the
-            # LLM explicitly called ask_user().  Text-only turns without
-            # ask_user flow through without blocking, allowing progress
-            # updates and summaries to stream freely.
+            # For client_facing nodes, block for user input when:
+            #   - The LLM explicitly called ask_user(), OR
+            #   - The LLM produced a turn with no real tool calls
+            #     (text-only or set_output-only).
+            #
+            # Before the first user interaction, set_output alone does
+            # NOT prevent blocking — the node must present its output
+            # to the user first.  After the user has interacted at
+            # least once, set_output-only turns flow through (the LLM
+            # is finishing up based on user input).
             #
             # After user input, always fall through to judge evaluation
             # (6i).  The judge handles all acceptance decisions.
-            if ctx.node_spec.client_facing and user_input_requested:
+            if user_interaction_count == 0:
+                # No user interaction yet — block unless ask_user or
+                # real tools were called (set_output alone is not enough)
+                needs_user_input = user_input_requested or not real_tool_results
+            else:
+                # User has already interacted — set_output can bypass
+                needs_user_input = user_input_requested or (
+                    not real_tool_results and not outputs_set
+                )
+            if ctx.node_spec.client_facing and needs_user_input:
                 if self._shutdown:
                     await self._publish_loop_completed(stream_id, node_id, iteration + 1)
                     latency_ms = int((time.time() - start_time) * 1000)
@@ -578,6 +594,7 @@ class EventLoopNode(NodeProtocol):
                         latency_ms=latency_ms,
                     )
 
+                user_interaction_count += 1
                 recent_responses.clear()
                 # Fall through to judge evaluation (6i)
 
@@ -824,6 +841,12 @@ class EventLoopNode(NodeProtocol):
 
         Returns True if input arrived, False if shutdown was signaled.
         """
+        # Clear BEFORE emitting so that synchronous handlers (e.g. the
+        # headless stdin handler) can call inject_event() during the emit
+        # and the signal won't be lost.  TUI handlers return immediately
+        # without injecting, so the wait still blocks until the user types.
+        self._input_ready.clear()
+
         if self._event_bus:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.node_id,
@@ -831,7 +854,6 @@ class EventLoopNode(NodeProtocol):
                 prompt="",
             )
 
-        self._input_ready.clear()
         await self._input_ready.wait()
         return not self._shutdown
 
@@ -1283,6 +1305,24 @@ class EventLoopNode(NodeProtocol):
                 accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
             )
             if not missing:
+                # Safety check: when ALL output keys are nullable and NONE
+                # have been set, the node produced nothing useful.  Retry
+                # instead of accepting an empty result — this prevents
+                # client-facing nodes from terminating before the user
+                # ever interacts, and non-client-facing nodes from
+                # short-circuiting without doing their work.
+                output_keys = ctx.node_spec.output_keys or []
+                nullable_keys = set(ctx.node_spec.nullable_output_keys or [])
+                all_nullable = output_keys and nullable_keys >= set(output_keys)
+                none_set = not any(accumulator.get(k) is not None for k in output_keys)
+                if all_nullable and none_set:
+                    return JudgeVerdict(
+                        action="RETRY",
+                        feedback=(
+                            f"No output keys have been set yet. "
+                            f"Use set_output to set at least one of: {output_keys}"
+                        ),
+                    )
                 return JudgeVerdict(action="ACCEPT")
             else:
                 return JudgeVerdict(
