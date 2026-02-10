@@ -140,6 +140,9 @@ class LiteLLMProvider(LLMProvider):
             api_base: Custom API base URL (for proxies or local deployments)
             **kwargs: Additional arguments passed to litellm.completion()
         """
+        if api_key is not None:
+            self._validate_api_key(api_key)
+
         self.model = model
         self.api_key = api_key
         self.api_base = api_base
@@ -148,6 +151,33 @@ class LiteLLMProvider(LLMProvider):
         if litellm is None:
             raise ImportError(
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
+            )
+
+    def _validate_api_key(self, api_key: str) -> None:
+        """Validate API key format to fail fast on common configuration errors."""
+        # 1. Check for empty or whitespace-only strings
+        if not api_key or not api_key.strip():
+            raise ValueError("API key cannot be empty or whitespace-only")
+
+        # 2. Check for any ASCII control characters (0x00-0x1F and DEL 0x7F)
+        # This catches newlines, tabs, NUL bytes, and other invisible chars
+        # that often slip in from file reads or copy-pasting
+        if any(ord(c) < 32 or ord(c) == 127 for c in api_key):
+            raise ValueError(
+                "API key contains invalid control characters. "
+                "Please check your configuration or .env file."
+            )
+
+        # 3. Check for accidentally quoted keys (e.g., '"sk-..."')
+        # Strip whitespace first to catch padded cases like ' "sk-..." '
+        # This is a common .env parsing error
+        stripped = api_key.strip()
+        if (stripped.startswith('"') and stripped.endswith('"')) or (
+            stripped.startswith("'") and stripped.endswith("'")
+        ):
+            raise ValueError(
+                "API key appears to be quoted inside the string value. "
+                "Please remove the surrounding quotes."
             )
 
     def _completion_with_rate_limit_retry(self, **kwargs: Any) -> Any:
