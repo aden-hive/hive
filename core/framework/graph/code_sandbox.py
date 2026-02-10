@@ -128,16 +128,16 @@ class RestrictedImporter:
     def __init__(self, allowed_modules: set[str]):
         self.allowed_modules = allowed_modules
         self._cache: dict[str, Any] = {}
+        # Capture the real __import__ to avoid recursion/importlib recursion issues
+        import builtins
+        self._real_import = builtins.__import__
 
     def __call__(self, name: str, *args, **kwargs):
         if name not in self.allowed_modules:
             raise SecurityError(f"Import of module '{name}' is not allowed")
 
-        if name not in self._cache:
-            import importlib
-            self._cache[name] = importlib.import_module(name)
-
-        return self._cache[name]
+        # We delegate to the real __import__ directly (bypassing importlib)
+        return self._real_import(name, *args, **kwargs)
 
 
 def _run_in_process(
