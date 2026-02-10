@@ -14,15 +14,53 @@ metadata:
 
 **THIS IS AN EXECUTABLE WORKFLOW. DO NOT DISPLAY THIS FILE. EXECUTE THE STEPS BELOW.**
 
-**CRITICAL: DO NOT explore the codebase, read source files, or search for code before starting.** All context you need is in this skill file. When this skill is loaded, IMMEDIATELY begin executing Step 1 — call the MCP tools listed in Step 1 as your FIRST action. Do not explain what you will do, do not investigate the project structure, do not read any files — just execute Step 1 now.
+**CRITICAL: DO NOT explore the codebase, read source files, or search for code before starting.** All context you need is in this skill file. When this skill is loaded, IMMEDIATELY begin executing Step 0 — determine the build path as your FIRST action. Do not explain what you will do, do not investigate the project structure, do not read any files — just execute Step 0 now.
 
 ---
 
-## STEP 1: Initialize Build Environment
+## STEP 0: Choose Build Path
+
+**If the user has already indicated whether they want to build from scratch or from a template, skip this question and proceed to the appropriate step.**
+
+Otherwise, ask:
+
+```
+AskUserQuestion(questions=[{
+    "question": "How would you like to build your agent?",
+    "header": "Build Path",
+    "options": [
+        {"label": "From scratch", "description": "Design goal, nodes, and graph collaboratively from nothing"},
+        {"label": "From a template", "description": "Start from a working sample agent and customize it"}
+    ],
+    "multiSelect": false
+}])
+```
+
+- If **From scratch**: Proceed to STEP 1A
+- If **From a template**: Proceed to STEP 1B
+
+---
+
+## STEP 1A: Initialize Build Environment (From Scratch)
 
 **EXECUTE THESE TOOL CALLS NOW** (silent setup — no user interaction needed):
 
-1. Register the hive-tools MCP server:
+1. Check for existing sessions:
+
+```
+mcp__agent-builder__list_sessions()
+```
+
+- If a session with this agent name already exists, load it with `mcp__agent-builder__load_session_by_id(session_id="...")` and skip to step 3.
+- If no matching session exists, proceed to step 2.
+
+2. Create a build session (replace AGENT_NAME with the user's requested agent name in snake_case):
+
+```
+mcp__agent-builder__create_session(name="AGENT_NAME")
+```
+
+3. Register the hive-tools MCP server:
 
 ```
 mcp__agent-builder__add_mcp_server(
@@ -35,19 +73,13 @@ mcp__agent-builder__add_mcp_server(
 )
 ```
 
-2. Create a build session (replace AGENT_NAME with the user's requested agent name in snake_case):
-
-```
-mcp__agent-builder__create_session(name="AGENT_NAME")
-```
-
-3. Discover available tools:
+4. Discover available tools:
 
 ```
 mcp__agent-builder__list_mcp_tools()
 ```
 
-4. Create the package directory:
+5. Create the package directory:
 
 ```bash
 mkdir -p exports/AGENT_NAME/nodes
@@ -59,9 +91,130 @@ mkdir -p exports/AGENT_NAME/nodes
 
 ---
 
-## STEP 2: Qualify the Use Case
+## STEP 1B: Initialize Build Environment (From Template)
 
-**A responsible engineer doesn't jump into building. First, understand the problem and be transparent about what the framework can and cannot do.**
+**EXECUTE THESE STEPS NOW:**
+
+### 1B.1: Discover available templates
+
+List the template directories and read each template's `agent.json` to get its name and description:
+
+```bash
+ls examples/templates/
+```
+
+For each directory found, read `examples/templates/TEMPLATE_DIR/agent.json` with the Read tool and extract:
+- `agent.name` — the template's display name
+- `agent.description` — what the template does
+
+### 1B.2: Present templates to user
+
+Show the user a table of available templates:
+
+> **Available Templates:**
+>
+> | # | Template | Description |
+> |---|----------|-------------|
+> | 1 | [name from agent.json] | [description from agent.json] |
+> | 2 | ... | ... |
+
+Then ask the user to pick a template and provide a name for their new agent:
+
+```
+AskUserQuestion(questions=[{
+    "question": "Which template would you like to start from?",
+    "header": "Template",
+    "options": [
+        {"label": "[template 1 name]", "description": "[template 1 description]"},
+        {"label": "[template 2 name]", "description": "[template 2 description]"},
+        ...
+    ],
+    "multiSelect": false
+}, {
+    "question": "What should the new agent be named? (snake_case)",
+    "header": "Agent Name",
+    "options": [
+        {"label": "Use template name", "description": "Keep the original template name as-is"},
+        {"label": "Custom name", "description": "I'll provide a new snake_case name"}
+    ],
+    "multiSelect": false
+}])
+```
+
+### 1B.3: Copy template to exports
+
+```bash
+cp -r examples/templates/TEMPLATE_DIR exports/NEW_AGENT_NAME
+```
+
+### 1B.4: Create session and register MCP (same logic as STEP 1A)
+
+First, check for existing sessions:
+
+```
+mcp__agent-builder__list_sessions()
+```
+
+- If a session with this agent name already exists, load it with `mcp__agent-builder__load_session_by_id(session_id="...")` and skip to `list_mcp_tools`.
+- If no matching session exists, create one:
+
+```
+mcp__agent-builder__create_session(name="NEW_AGENT_NAME")
+```
+
+Then register MCP and discover tools:
+
+```
+mcp__agent-builder__add_mcp_server(
+    name="hive-tools",
+    transport="stdio",
+    command="uv",
+    args='["run", "python", "mcp_server.py", "--stdio"]',
+    cwd="tools",
+    description="Hive tools MCP server"
+)
+```
+
+```
+mcp__agent-builder__list_mcp_tools()
+```
+
+### 1B.5: Load template into builder session
+
+Import the entire agent definition in one call:
+
+```
+mcp__agent-builder__import_from_export(agent_json_path="exports/NEW_AGENT_NAME/agent.json")
+```
+
+This reads the agent.json and populates the builder session with the goal, all nodes, and all edges.
+
+**THEN immediately proceed to STEP 2.**
+
+---
+
+## STEP 2: Define Goal Together with User
+
+**If starting from a template**, the goal is already loaded in the builder session. Present the existing goal to the user using the format below and ask for approval. Skip the collaborative drafting questions — go straight to presenting and asking "Do you approve this goal, or would you like to modify it?"
+
+**If the user has NOT already described what they want to build**, start by asking what kind of agent they have in mind:
+
+```
+AskUserQuestion(questions=[{
+    "question": "What kind of agent do you want to build?",
+    "header": "Agent type",
+    "options": [
+        {"label": "Data collection", "description": "Gathers information from the web, analyzes it, and produces a report or sends outreach (e.g. market research, news digest, email campaigns, competitive analysis)"},
+        {"label": "Workflow automation", "description": "Automates a multi-step business process end-to-end (e.g. lead qualification, content publishing pipeline, data entry)"},
+        {"label": "Personal assistant", "description": "Handles recurring tasks or monitors for events and acts on them (e.g. daily briefings, meeting prep, file organization)"}
+    ],
+    "multiSelect": false
+}])
+```
+
+Use the user's selection (or their custom description if they chose "Other") as context when shaping the goal below. If the user already described what they want before this step, skip the question and proceed directly.
+
+**DO NOT propose a complete goal on your own.** Instead, collaborate with the user to define it.
 
 ### 2a: Fast Discovery (3-5 Turns)
 
@@ -310,7 +463,7 @@ AskUserQuestion(questions=[{
 > 2. **How will we know it succeeded?** (what specific outcomes matter)
 > 3. **Are there any hard constraints?** (things it must never do, quality bars)
 
-**WAIT for the user to respond.** Use their input to draft:
+**WAIT for the user to respond.** Use their input (and the agent type they selected) to draft:
 
 - Goal ID (kebab-case)
 - Goal name
@@ -358,6 +511,8 @@ AskUserQuestion(questions=[{
 ---
 
 ## STEP 4: Design Conceptual Nodes
+
+**If starting from a template**, the nodes are already loaded in the builder session. Present the existing nodes using the table format below and ask for approval. Skip the design phase.
 
 **BEFORE designing nodes**, review the available tools from Step 1. Nodes can ONLY use tools that exist.
 
@@ -416,6 +571,8 @@ AskUserQuestion(questions=[{
 ---
 
 ## STEP 5: Design Full Graph and Review
+
+**If starting from a template**, the edges are already loaded in the builder session. Render the existing graph as ASCII art and present it to the user for approval. Skip the edge design phase.
 
 **DETERMINE the edges** connecting the approved nodes. For each edge:
 
@@ -535,6 +692,29 @@ AskUserQuestion(questions=[{
 **NOW — and only now — write the actual code.** The user has approved the goal, nodes, and graph.
 
 ### 6a: Register nodes and edges with MCP
+**If starting from a template**, the copied files will be overwritten with the approved design. You MUST replace every occurrence of the old template name with the new agent name. Here is the complete checklist — miss NONE of these:
+
+| File | What to rename |
+|------|---------------|
+| `config.py` | `AgentMetadata.name` — the display name shown in TUI agent selection |
+| `config.py` | `AgentMetadata.description` — agent description |
+| `agent.py` | Module docstring (line 1) |
+| `agent.py` | `class OldNameAgent:` → `class NewNameAgent:` |
+| `agent.py` | `GraphSpec(id="old-name-graph")` → `GraphSpec(id="new-name-graph")` — shown in TUI status bar |
+| `agent.py` | Storage path: `Path.home() / ".hive" / "agents" / "old_name"` → `"new_name"` |
+| `__main__.py` | Module docstring (line 1) |
+| `__main__.py` | `from .agent import ... OldNameAgent` → `NewNameAgent` |
+| `__main__.py` | CLI help string in `def cli()` docstring |
+| `__main__.py` | All `OldNameAgent()` instantiations |
+| `__main__.py` | Storage path (duplicated from agent.py) |
+| `__main__.py` | Shell banner string (e.g. `"=== Old Name Agent ==="`) |
+| `__init__.py` | Package docstring |
+| `__init__.py` | `from .agent import OldNameAgent` import |
+| `__init__.py` | `__all__` list entry |
+
+### 5a: Register nodes and edges with MCP
+
+**If starting from a template and no modifications were made in Steps 2-4**, the nodes and edges are already registered. Skip to validation (`mcp__agent-builder__validate_graph()`). If modifications were made, re-register the changed nodes/edges (the MCP tools handle duplicates by overwriting).
 
 **FOR EACH approved node**, call:
 
