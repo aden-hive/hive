@@ -460,9 +460,14 @@ result: HealthCheckResult = check_credential_health("hubspot", token_value)
 The local encrypted store requires `HIVE_CREDENTIAL_KEY` to encrypt/decrypt credentials.
 
 - If the user doesn't have one, `EncryptedFileStorage` will auto-generate one and log it
-- The user MUST persist this key (e.g., in `~/.bashrc` or a secrets manager)
+- The user MUST persist this key (e.g., in `~/.bashrc`/`~/.zshrc` or a secrets manager)
 - Without this key, stored credentials cannot be decrypted
-- This is the ONLY secret that should live in `~/.bashrc` or environment config
+
+**Shell config rule:** Only TWO keys belong in shell config (`~/.zshrc`/`~/.bashrc`):
+- `HIVE_CREDENTIAL_KEY` — encryption key for the credential store
+- `ADEN_API_KEY` — Aden platform auth key (needed before the store can sync)
+
+All other API keys (Brave, Google, HubSpot, etc.) must go in the encrypted store only. **Never offer to add them to shell config.**
 
 If `HIVE_CREDENTIAL_KEY` is not set:
 
@@ -475,6 +480,7 @@ If `HIVE_CREDENTIAL_KEY` is not set:
 - **NEVER** log, print, or echo credential values in tool output
 - **NEVER** store credentials in plaintext files, git-tracked files, or agent configs
 - **NEVER** hardcode credentials in source code
+- **NEVER** offer to save API keys to shell config (`~/.zshrc`/`~/.bashrc`) — the **only** keys that belong in shell config are `HIVE_CREDENTIAL_KEY` and `ADEN_API_KEY`. All other credentials (Brave, Google, HubSpot, GitHub, Resend, etc.) go in the encrypted store only.
 - **ALWAYS** use `SecretStr` from Pydantic when handling credential values in Python
 - **ALWAYS** use the local encrypted store (`~/.hive/credentials`) for persistence
 - **ALWAYS** run health checks before storing credentials (when possible)
@@ -605,7 +611,7 @@ All credentials are now configured:
 │                                                                             │
 │  1. RUN YOUR AGENT:                                                         │
 │                                                                             │
-│     PYTHONPATH=core:exports python -m research-agent tui                    │
+│     hive tui                                                                │
 │                                                                             │
 │  2. IF YOU ENCOUNTER ISSUES, USE THE DEBUGGER:                              │
 │                                                                             │

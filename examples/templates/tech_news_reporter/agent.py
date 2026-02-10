@@ -225,9 +225,7 @@ class TechNewsReporterAgent:
             session_state=session_state,
         )
 
-    async def run(
-        self, context: dict, session_state=None
-    ) -> ExecutionResult:
+    async def run(self, context: dict, session_state=None) -> ExecutionResult:
         """Run the agent (convenience method for single execution)."""
         await self.start()
         try:

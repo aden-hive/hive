@@ -638,10 +638,15 @@ class ChatRepl(Vertical):
         # Check for resumable sessions
         self._check_and_show_resumable_sessions()
 
-        history.write(
-            "[dim]Quick start: /sessions to see previous sessions, "
-            "/pause to pause execution[/dim]\n"
-        )
+        # Show agent intro message if available
+        intro = getattr(self.runtime, "intro_message", "")
+        if intro:
+            history.write(f"[bold blue]Agent:[/bold blue] {intro}\n")
+        else:
+            history.write(
+                "[dim]Quick start: /sessions to see previous sessions, "
+                "/pause to pause execution[/dim]\n"
+            )
 
     def _check_and_show_resumable_sessions(self) -> None:
         """Check for non-terminated sessions and prompt user."""

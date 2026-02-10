@@ -878,7 +878,7 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
 
     # Initialize the metadata index
     if [ ! -f "$HIVE_CRED_DIR/metadata/index.json" ]; then
-        echo '{}' > "$HIVE_CRED_DIR/metadata/index.json"
+        echo '{"credentials": {}, "version": "1.0"}' > "$HIVE_CRED_DIR/metadata/index.json"
     fi
 
     echo -e "${GREEN}  ✓ Credential store initialized at ~/.hive/credentials/${NC}"

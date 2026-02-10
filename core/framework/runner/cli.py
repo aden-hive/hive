@@ -336,6 +336,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     # Set logging level (quiet by default for cleaner output)
@@ -376,6 +377,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                         model=args.model,
                         enable_tui=True,
                     )
+                except CredentialError as e:
+                    print(f"\n{e}", file=sys.stderr)
+                    return
                 except Exception as e:
                     print(f"Error loading agent: {e}")
                     return
@@ -1136,6 +1140,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
     """Browse agents and launch the interactive TUI dashboard."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
     from framework.tui.app import AdenTUI
 
@@ -1187,6 +1192,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 model=args.model,
                 enable_tui=True,
             )
+        except CredentialError as e:
+            print(f"\n{e}", file=sys.stderr)
+            return
         except Exception as e:
             print(f"Error loading agent: {e}")
             return

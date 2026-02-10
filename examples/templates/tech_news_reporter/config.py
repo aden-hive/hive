@@ -16,6 +16,11 @@ class AgentMetadata:
         "summarize key stories, and produce a well-organized report "
         "for the user to read."
     )
+    intro_message: str = (
+        "Hi! I'm your tech news reporter. I'll search the web for the latest technology "
+        "and AI news, then put together a clear summary for you. What topic or area "
+        "should I cover?"
+    )
 
 
 metadata = AgentMetadata()

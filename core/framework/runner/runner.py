@@ -272,6 +272,7 @@ class AgentRunner:
         storage_path: Path | None = None,
         model: str | None = None,
         enable_tui: bool = False,
+        intro_message: str = "",
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -284,6 +285,7 @@ class AgentRunner:
             storage_path: Path for runtime storage (defaults to temp)
             model: Model to use (reads from agent config or ~/.hive/configuration.json if None)
             enable_tui: If True, forces use of AgentRuntime with EventBus
+            intro_message: Optional greeting shown to user on TUI load
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -291,6 +293,7 @@ class AgentRunner:
         self.mock_mode = mock_mode
         self.model = model or self._resolve_default_model()
         self.enable_tui = enable_tui
+        self.intro_message = intro_message
 
         # Set up storage
         if storage_path:
@@ -319,6 +322,10 @@ class AgentRunner:
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
 
+        # Validate credentials before spawning MCP servers.
+        # Fails fast with actionable guidance — no MCP noise on screen.
+        self._validate_credentials()
+
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
         if tools_path.exists():
@@ -328,6 +335,74 @@ class AgentRunner:
         mcp_config_path = agent_path / "mcp_servers.json"
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
+
+    def _validate_credentials(self) -> None:
+        """Check that required credentials are available before spawning MCP servers.
+
+        Raises CredentialError with actionable guidance if any are missing.
+        Uses graph node specs + CREDENTIAL_SPECS — no tool registry needed.
+        """
+        required_tools: set[str] = set()
+        for node in self.graph.nodes:
+            if node.tools:
+                required_tools.update(node.tools)
+        if not required_tools:
+            return
+
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+
+            from framework.credentials import CredentialStore
+            from framework.credentials.storage import (
+                CompositeStorage,
+                EncryptedFileStorage,
+                EnvVarStorage,
+            )
+        except ImportError:
+            return  # aden_tools not installed, skip check
+
+        # Build credential store (same logic as validate())
+        env_mapping = {
+            (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
+        }
+        storages: list = [EnvVarStorage(env_mapping=env_mapping)]
+        if os.environ.get("HIVE_CREDENTIAL_KEY"):
+            storages.insert(0, EncryptedFileStorage())
+        if len(storages) == 1:
+            storage = storages[0]
+        else:
+            storage = CompositeStorage(primary=storages[0], fallbacks=storages[1:])
+        store = CredentialStore(storage=storage)
+
+        # Build tool→credential mapping and check
+        tool_to_cred: dict[str, str] = {}
+        for cred_name, spec in CREDENTIAL_SPECS.items():
+            for tool_name in spec.tools:
+                tool_to_cred[tool_name] = cred_name
+
+        missing: list[str] = []
+        checked: set[str] = set()
+        for tool_name in sorted(required_tools):
+            cred_name = tool_to_cred.get(tool_name)
+            if cred_name is None or cred_name in checked:
+                continue
+            checked.add(cred_name)
+            spec = CREDENTIAL_SPECS[cred_name]
+            cred_id = spec.credential_id or cred_name
+            if spec.required and not store.is_available(cred_id):
+                affected = sorted(t for t in required_tools if t in spec.tools)
+                entry = f"  {spec.env_var} for {', '.join(affected)}"
+                if spec.help_url:
+                    entry += f"\n    Get it at: {spec.help_url}"
+                missing.append(entry)
+
+        if missing:
+            from framework.credentials.models import CredentialError
+
+            lines = ["Missing required credentials:\n"]
+            lines.extend(missing)
+            lines.append("\nTo fix: run /hive-credentials in Claude Code.")
+            raise CredentialError("\n".join(lines))
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -420,6 +495,12 @@ class AgentRunner:
                 hive_config = get_hive_config()
                 max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
 
+            # Read intro_message from agent metadata (shown on TUI load)
+            agent_metadata = getattr(agent_module, "metadata", None)
+            intro_message = ""
+            if agent_metadata and hasattr(agent_metadata, "intro_message"):
+                intro_message = agent_metadata.intro_message
+
             # Build GraphSpec from module-level variables
             graph = GraphSpec(
                 id=f"{agent_path.name}-graph",
@@ -442,6 +523,7 @@ class AgentRunner:
                 storage_path=storage_path,
                 model=model,
                 enable_tui=enable_tui,
+                intro_message=intro_message,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
@@ -761,6 +843,9 @@ class AgentRunner:
             runtime_log_store=log_store,
             checkpoint_config=checkpoint_config,
         )
+
+        # Pass intro_message through for TUI display
+        self._agent_runtime.intro_message = self.intro_message
 
     async def run(
         self,
