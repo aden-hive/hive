@@ -76,7 +76,7 @@ If a question doesn't do one of these, don't ask it. Make an assumption, state i
 
 ---
 
-#### Step 1: Let Them Talk, But Listen Like an Architect
+#### 2a.1: Let Them Talk, But Listen Like an Architect
 
 When the stakeholder describes what they want, don't just hear the words — listen for the architecture underneath. While they talk, mentally construct:
 
@@ -98,7 +98,7 @@ You are extracting a **domain model** from natural language in real time. Most s
 
 ---
 
-#### Step 2: Use Domain Knowledge to Fill In the Blanks
+#### 2a.2: Use Domain Knowledge to Fill In the Blanks
 
 You have broad knowledge of how systems work. Use it aggressively.
 
@@ -110,7 +110,7 @@ If they say "I need to monitor files and alert me," you know this probably invol
 
 ---
 
-#### Step 3: Play Back a Proposed Model (Not a List of Questions)
+#### 2a.3: Play Back a Proposed Model (Not a List of Questions)
 
 After listening, present a **concrete picture** of what you think they need. Make it specific enough that they can spot what's wrong.
 
@@ -132,7 +132,7 @@ Why this works:
 
 ---
 
-#### Step 4: Ask Only What You Cannot Infer
+#### 2a.4: Ask Only What You Cannot Infer
 
 Your questions should be **narrow, specific, and consequential**. Never ask what you could answer yourself.
 
@@ -150,7 +150,7 @@ Your questions should be **narrow, specific, and consequential**. Never ask what
 
 ---
 
-#### Step 5: Lock Scope in One Exchange
+#### 2a.5: Lock Scope in One Exchange
 
 Once they've confirmed or corrected your playback, close the loop:
 
