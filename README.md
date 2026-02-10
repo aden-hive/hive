@@ -105,24 +105,147 @@ This sets up:
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
 
-### Build Your First Agent
+## Building Your First Agent
+
+This section walks you through building, testing, and running your first goal-driven agent using the Aden Hive framework.  
+It is designed for **first-time users** and assumes no prior agent-building experience.
+
+---
+
+### Prerequisites
+
+- **Python 3.11+** (recommended: 3.11 or 3.12)
+- **Git**
+- **Node.js** (required for the TUI)
+- macOS / Linux  
+  - Windows users should use **WSL 2**
+
+---
+
+### 1. Environment Setup (Recommended)
+
+The fastest and safest way to get started is using the automated setup script.
 
 ```bash
-# Build an agent using Claude Code
-claude> /hive
-
-# Test your agent
-claude> /hive-debugger
-
-# (at separate terminal) Launch the interactive dashboard
-hive tui
-
-# Or run directly
-hive run exports/your_agent_name --input '{"key": "value"}'
+./quickstart.sh
 ```
+This script will:
+
+- **Verify** Python version
+- **Install** the core framework package
+- **Install** the tools package
+- **Initialize** the encrypted credentials store
+- **Configure** a default LLM provide
+- **Fix** known dependency conflicts
+- **Validate** the installation
+
+Windows users:
+Run this inside WSL 2 for full compatibility.
+
+### 2. Verify installation
+After setup completes, verify everything is installed correctly:   
+```bash
+uv run python -c "import framework; print('✓ framework OK')"
+uv run python -c "import aden_tools; print('✓ tools OK')"
+uv run python -c "import litellm; print('✓ litellm OK')"
+```
+If all checks pass, you’re ready to build.
+
+### 3. Build an Agent (Claude Code)
+Start the interactive agent builder:
+```bash
+claude> /hive
+```
+You will be guided to:
+
+- **Define** your agent’s goal
+- **Design** workflow nodes
+- **Connect** logic paths
+- **Generate** the agent package under exports/
+
+This creates the initial agent structure required for development.
+
+### 4. Understand Agent Concepts
+Before adding logic, review the core architecture:
+
+```bash
+claude> /hive-concepts
+```
+
+You’ll learn:
+- **Agent** file structure
+- **Goals**, constraints, and success criteria
+- **Node** types (LLM, tool-use, router, function)
+- **How** tools are discovered and validated
+
+### 5. Apply Best-Practice Patterns
+Optimize your agent design using recommended patterns:  
+
+```bash
+claude> /hive-patterns
+```
+
+This helps you:
+- **Add** pause/resume flows
+- **Improve** robustness with retries and fallbacks
+- **Avoid** common agent anti-patterns
+
+### 6. Test Your Agent
+Validate behavior before running in production:
+
+```bash
+claude> /hive-test
+```
+
+This will:
+- **Generate** test guidelines
+- **Create** goal-based tests under exports/{agent}/tests/
+- **Help** debug failures and iterate safely
+
+### 7. Run Agents
+
+Once your agent is built and tested, you can run it using the Hive CLI.
+
+Recommended (interactive dashboard):
+
+```bash
+hive tui
+```
+
+Run a specific agent directly:
+
+```bash
+hive run exports/your_agent_name --input '{"task": "Your input here"}'
+```
+
+For advanced usage and alternative run modes, see Run Agents below.
+
+### 8. Common Issues (Quick Fixes)
+PEP 668 error (externally-managed-environment)
+
+```bash
+uv venv
+source .venv/bin/activate
+./quickstart.sh
+```
+
+Module not found (framework / aden_tools)
+
+```bash
+cd core && uv pip install -e .
+cd ../tools && uv pip install -e .
+```
+
+Next Steps
+
+- **Explore** example agents in exports/
+- **Review** .claude/skills/ for advanced workflows
+
+Read the full documentation for deployment and orchestration
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
 
+---
 ## Features
 
 - **[Goal-Driven Development](docs/key_concepts/goals_outcome.md)** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
@@ -200,7 +323,7 @@ flowchart LR
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **[Adaptiveness](docs/key_concepts/evolution.md)** → On failure, the system evolves the graph and redeploys automatically
 
-## Run Agents
+## Run Agents (CLI Reference)
 
 The `hive` CLI is the primary interface for running agents.
 
