@@ -122,7 +122,7 @@ hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 ##  Coding Agent Support
 
-### Opencode (Recommended)
+### Opencode 
 Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
 
 1. **Setup:** Run the quickstart script or `python setup_opencode.py`.

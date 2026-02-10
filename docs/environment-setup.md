@@ -538,13 +538,9 @@ python setup_opencode.py
 - **Example Agents:** [exports/](../exports/)
 - **Agent Building Guide:** [.claude/skills/hive-create/SKILL.md](../.claude/skills/hive-create/SKILL.md)
 - **Testing Guide:** [.claude/skills/hive-test/SKILL.md](../.claude/skills/hive-test/SKILL.md)
-## Opencode Setup
 
-[Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
 
-### Automatic Setup
-Run the setup script in the root directory:
-```bash
+
 
 ## Contributing
 
