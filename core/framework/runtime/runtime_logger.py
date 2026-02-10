@@ -77,6 +77,54 @@ class RuntimeLogger:
         self._store.ensure_run_dir(self._run_id)
         return self._run_id
 
+    def log_node_start(
+        self,
+        node_id: str,
+        node_name: str,
+        node_type: str,
+        step_index: int = 0,
+        input_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Record the start of a node execution.
+
+        Args:
+            node_id: ID of the node starting
+            node_name: Human-readable name
+            node_type: Type of node (function, llm, etc.)
+            step_index: Step index (usually 0 for start)
+            input_data: Optional input data for context
+        """
+        # OTel / trace context: from observability ContextVar (empty if not set)
+        ctx = get_trace_context()
+        trace_id = ctx.get("trace_id", "")
+        execution_id = ctx.get("execution_id", "")
+        span_id = uuid.uuid4().hex[:16]  # OTel 16-hex span_id per step
+
+        # We reuse NodeStepLog for start events, marking them specially
+        step_log = NodeStepLog(
+            node_id=node_id,
+            node_type=node_type,
+            step_index=step_index,
+            llm_text="",  # No LLM text at start
+            tool_calls=[],
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=0,
+            verdict="NODE_STARTED",  # Special verdict to indicate start
+            verdict_feedback=f"Node {node_name} started",
+            error="",
+            stacktrace="",
+            is_partial=False,
+            trace_id=trace_id,
+            span_id=span_id,
+            execution_id=execution_id,
+        )
+
+        with self._lock:
+            # Use append_step to log this "start event" to tool_logs.jsonl
+            # This ensures we have a timestamped entry for start
+            self._store.append_step(self._run_id, step_log)
+
     def log_step(
         self,
         node_id: str,

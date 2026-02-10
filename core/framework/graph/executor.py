@@ -34,6 +34,12 @@ from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
 from framework.observability import set_trace_context
+from framework.observability.hooks import NoOpHooks, ObservabilityHooks
+from framework.observability.types import (
+    NodeCompleteEvent,
+    NodeErrorEvent,
+    NodeStartEvent,
+)
 from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
@@ -171,6 +177,9 @@ class GraphExecutor:
         self.runtime_logger = runtime_logger
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
+
+        # Get observability hooks from runtime (or use NoOp)
+        self._hooks: ObservabilityHooks = getattr(runtime, "_hooks", NoOpHooks())
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -575,6 +584,29 @@ class GraphExecutor:
                         stream_id=self._stream_id, node_id=current_node_id
                     )
 
+                # Ensure runtime logging has a START entry for this node (Audit Trail)
+                if self.runtime_logger:
+                    self.runtime_logger.log_node_start(
+                        node_id=node_spec.id,
+                        node_name=node_spec.name,
+                        node_type=node_spec.node_type,
+                        step_index=0,
+                        input_data=None,  # Optimization: don't log full input data in L3
+                    )
+
+                # Emit observability hook: on_node_start
+                try:
+                    await self._hooks.on_node_start(
+                        NodeStartEvent(
+                            run_id=self.runtime._current_run.id if self.runtime._current_run else "",
+                            node_id=node_spec.id,
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                        )
+                    )
+                except Exception:
+                    self.logger.debug("on_node_start hook failed (non-fatal)", exc_info=True)
+
                 # Execute node
                 self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
@@ -596,6 +628,46 @@ class GraphExecutor:
                         tokens_used=result.tokens_used,
                         latency_ms=result.latency_ms,
                     )
+
+                # Emit observability hook: on_node_complete
+                try:
+                    run_id = self.runtime._current_run.id if self.runtime._current_run else ""
+                    if result.success:
+                        await self._hooks.on_node_complete(
+                            NodeCompleteEvent(
+                                run_id=run_id,
+                                node_id=node_spec.id,
+                                node_name=node_spec.name,
+                                node_type=node_spec.node_type,
+                                success=True,
+                                latency_ms=result.latency_ms,
+                                tokens_used=result.tokens_used,
+                            )
+                        )
+                    else:
+                        await self._hooks.on_node_complete(
+                            NodeCompleteEvent(
+                                run_id=run_id,
+                                node_id=node_spec.id,
+                                node_name=node_spec.name,
+                                node_type=node_spec.node_type,
+                                success=False,
+                                latency_ms=result.latency_ms,
+                                tokens_used=result.tokens_used,
+                            )
+                        )
+                        if result.error:
+                            await self._hooks.on_node_error(
+                                NodeErrorEvent(
+                                    run_id=run_id,
+                                    node_id=node_spec.id,
+                                    node_name=node_spec.name,
+                                    node_type=node_spec.node_type,
+                                    error=result.error,
+                                )
+                            )
+                except Exception:
+                    self.logger.debug("on_node_complete hook failed (non-fatal)", exc_info=True)
 
                 if result.success:
                     # Validate output before accepting it.

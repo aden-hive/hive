@@ -6,6 +6,9 @@ that Builder can analyze. The agent calls simple methods, and the runtime
 handles all the structured logging.
 """
 
+from __future__ import annotations
+
+import asyncio
 import logging
 import uuid
 from collections.abc import Callable
@@ -14,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from framework.observability import set_trace_context
+from framework.observability.hooks import NoOpHooks, ObservabilityHooks
+from framework.observability.types import DecisionEvent, RunCompleteEvent, RunStartEvent
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.backend import FileStorage
@@ -55,10 +60,41 @@ class Runtime:
         runtime.end_run(success=True, narrative="Qualified 10 leads successfully")
     """
 
-    def __init__(self, storage_path: str | Path):
+    def __init__(
+        self,
+        storage_path: str | Path,
+        observability_hooks: ObservabilityHooks | None = None,
+    ):
         self.storage = FileStorage(storage_path)
         self._current_run: Run | None = None
         self._current_node: str = "unknown"
+        self._hooks: ObservabilityHooks = observability_hooks or NoOpHooks()
+
+    def _emit_hook_safe(self, coro: Any) -> None:
+        """Fire-and-forget an async hook from sync code.
+
+        Schedules the coroutine on the running event loop if available.
+        Exceptions in the hook are logged and swallowed — never disrupts
+        agent execution.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # No event loop — skip
+
+        task = loop.create_task(coro)
+        task.add_done_callback(self._hook_task_done)
+
+    @staticmethod
+    def _hook_task_done(task: asyncio.Task) -> None:
+        """Callback to log errors from fire-and-forget hook tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.debug(
+                "Observability hook failed (non-fatal): %s", exc, exc_info=exc
+            )
 
     # === RUN LIFECYCLE ===
 
@@ -96,6 +132,15 @@ class Runtime:
             input_data=input_data or {},
         )
 
+        # Emit observability hook
+        self._emit_hook_safe(
+            self._hooks.on_run_start(
+                RunStartEvent(
+                    run_id=run_id, goal_id=goal_id, input_data=input_data or {}
+                )
+            )
+        )
+
         return run_id
 
     def end_run(
@@ -121,6 +166,16 @@ class Runtime:
         status = RunStatus.COMPLETED if success else RunStatus.FAILED
         self._current_run.output_data = output_data or {}
         self._current_run.complete(status, narrative)
+
+        # Emit observability hook
+        self._emit_hook_safe(
+            self._hooks.on_run_complete(
+                RunCompleteEvent(
+                    run_id=self._current_run.id,
+                    status="success" if success else "failure",
+                )
+            )
+        )
 
         # Save to storage
         self.storage.save_run(self._current_run)
@@ -211,6 +266,22 @@ class Runtime:
         )
 
         self._current_run.add_decision(decision)
+
+        # Emit observability hook
+        self._emit_hook_safe(
+            self._hooks.on_decision_made(
+                DecisionEvent(
+                    run_id=self._current_run.id,
+                    decision_id=decision_id,
+                    node_id=node_id or self._current_node,
+                    intent=intent,
+                    chosen=chosen,
+                    reasoning=reasoning,
+                    options_count=len(options),
+                )
+            )
+        )
+
         return decision_id
 
     def record_outcome(

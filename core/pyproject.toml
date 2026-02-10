@@ -20,6 +20,13 @@ dependencies = [
 
 [project.optional-dependencies]
 tui = ["textual>=0.75.0"]
+observability = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+    "opentelemetry-exporter-prometheus>=0.50b0",
+    "prometheus-client>=0.20.0",
+]
 
 [project.scripts]
 hive = "framework.cli:main"

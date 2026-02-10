@@ -332,6 +332,62 @@ class TestRuntimeLogger:
         assert data["input_tokens"] == 100
 
     @pytest.mark.asyncio
+    async def test_log_node_start_writes_to_disk(self, tmp_path: Path):
+        """log_node_start writes a NODE_STARTED event to tool_logs.jsonl."""
+        store = RuntimeLogStore(tmp_path / "logs")
+        rl = RuntimeLogger(store=store, agent_id="test-agent")
+        run_id = rl.start_run("goal-1")
+
+        rl.log_node_start(
+            node_id="node-1",
+            node_name="Search Node",
+            node_type="event_loop",
+        )
+
+        # Verify the file exists and has one line with NODE_STARTED
+        jsonl_path = tmp_path / "logs" / "runs" / run_id / "tool_logs.jsonl"
+        assert jsonl_path.exists()
+        lines = [line for line in jsonl_path.read_text().strip().split("\n") if line]
+        assert len(lines) == 1
+
+        data = json.loads(lines[0])
+        assert data["node_id"] == "node-1"
+        assert data["node_type"] == "event_loop"
+        assert data["verdict"] == "NODE_STARTED"
+        assert data["verdict_feedback"] == "Node Search Node started"
+        assert data["step_index"] == 0
+        assert data["error"] == ""
+
+    @pytest.mark.asyncio
+    async def test_log_node_start_with_trace_context(self, tmp_path: Path):
+        """log_node_start includes trace context when set."""
+        set_trace_context(
+            trace_id="a1b2c3d4e5f6789012345678abcdef01",
+            execution_id="b2c3d4e5f6789012345678abcdef0123",
+        )
+        try:
+            store = RuntimeLogStore(tmp_path / "logs")
+            rl = RuntimeLogger(store=store, agent_id="test-agent")
+            run_id = rl.start_run("goal-1")
+
+            rl.log_node_start(
+                node_id="node-1",
+                node_name="Search Node",
+                node_type="event_loop",
+            )
+
+            loaded = await store.load_tool_logs(run_id)
+            assert loaded is not None
+            assert len(loaded.steps) == 1
+            step = loaded.steps[0]
+            assert step.trace_id == "a1b2c3d4e5f6789012345678abcdef01"
+            assert step.execution_id == "b2c3d4e5f6789012345678abcdef0123"
+            assert len(step.span_id) == 16
+            assert step.verdict == "NODE_STARTED"
+        finally:
+            clear_trace_context()
+
+    @pytest.mark.asyncio
     async def test_log_node_complete_writes_to_disk_immediately(self, tmp_path: Path):
         store = RuntimeLogStore(tmp_path / "logs")
         rl = RuntimeLogger(store=store, agent_id="test-agent")

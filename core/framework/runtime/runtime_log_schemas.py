@@ -44,8 +44,8 @@ class NodeStepLog(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     latency_ms: int = 0
-    # EventLoopNode only:
-    verdict: str = ""  # "ACCEPT"|"RETRY"|"ESCALATE"|"CONTINUE"
+    # EventLoopNode verdicts + lifecycle events:
+    verdict: str = ""  # "ACCEPT"|"RETRY"|"ESCALATE"|"CONTINUE"|"NODE_STARTED"
     verdict_feedback: str = ""
     # Error tracking:
     error: str = ""  # Error message if step failed
