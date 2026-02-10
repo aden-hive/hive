@@ -67,10 +67,13 @@ mkdir -p exports/AGENT_NAME/nodes
 
 **The core principle**: Discovery should feel like progress, not paperwork. The stakeholder should walk away feeling like you understood them faster than anyone else would have.
 
-**The #1 Rule: Respect Their Time.** Every question must earn its place by:
+**Communication sytle**: Be concise. Say less. Mean more. Impatient stakeholders don't want a wall of text — they want to know you get it. Every sentence you say should either move the conversation forward or prove you understood something. If it does neither, cut it.
+
+**Ask Question Rules: Respect Their Time.** Every question must earn its place by:
 1. **Preventing a costly wrong turn** — you're about to build the wrong thing
 2. **Unlocking a shortcut** — their answer lets you simplify the design
 3. **Surfacing a dealbreaker** — there's a constraint that changes everything
+4. **Provide Options** - Provide options to your questions if possible, but also always allow the user to type something beyong the options.
 
 If a question doesn't do one of these, don't ask it. Make an assumption, state it, and move on.
 
@@ -120,7 +123,7 @@ After listening, present a **concrete picture** of what you think they need. Mak
 >
 > The way I'd structure this: [key entities] connected by [key relationships], with the main flow being [trigger → steps → outcome].
 >
-> For v1, I'd focus on [the one thing that delivers the most value] and hold off on [things that can wait].
+> For the MVP, I'd focus on [the one thing that delivers the most value] and hold off on [things that can wait].
 >
 > Before I start — [1-2 specific questions you genuinely can't infer]."
 
@@ -174,7 +177,7 @@ One decision point. Yes or no. Then you're building.
 | 1 | User | Describes what they need |
 | 2 | Agent | Plays back understanding as a proposed model. Asks 1-2 critical questions max. |
 | 3 | User | Corrects, confirms, or adds detail |
-| 4 | Agent | Adjusts model, confirms v1 scope, states assumptions, declares starting point |
+| 4 | Agent | Adjusts model, confirms MVP scope, states assumptions, declares starting point |
 | *(5)* | *(Only if Turn 3 revealed something that fundamentally changes the approach)* |
 
 **If you're going in circles, you need a different question, not more questions.**
@@ -205,9 +208,9 @@ After the conversation, produce this before moving to 2b:
 > **Solution**: [what we're building, core approach]
 > **Users**: [who, how often, context — 1-2 lines]
 > **Domain Model**: [key entities and relationships — "A Project has many Tasks. Each Task has an Owner and Status."]
-> **V1 Scope**:
-> - Will build: [concrete deliverables]
-> - Won't build yet: [deferred items]
+> **MVP Scope**:
+> - Building now: [concrete deliverables]
+> - Later: [deferred items]
 > **Key Flow**: [trigger → steps → outcome]
 > **Assumptions**: [what you're assuming — user can correct]
 
