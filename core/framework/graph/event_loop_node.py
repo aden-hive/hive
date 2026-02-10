@@ -1011,7 +1011,7 @@ class EventLoopNode(NodeProtocol):
                         is_error=result.is_error,
                     )
                     if not result.is_error:
-                        value = tc.tool_input["value"]
+                        value = tc.tool_input.get("value", "")
                         # Parse JSON strings into native types so downstream
                         # consumers get lists/dicts instead of serialised JSON,
                         # and the hallucination validator skips non-string values.
@@ -1022,8 +1022,9 @@ class EventLoopNode(NodeProtocol):
                                     value = parsed
                             except (json.JSONDecodeError, TypeError):
                                 pass
-                        await accumulator.set(tc.tool_input["key"], value)
-                        outputs_set_this_turn.append(tc.tool_input["key"])
+                        key = tc.tool_input.get("key", "")
+                        await accumulator.set(key, value)
+                        outputs_set_this_turn.append(key)
                     logged_tool_calls.append(
                         {
                             "tool_use_id": tc.tool_use_id,
