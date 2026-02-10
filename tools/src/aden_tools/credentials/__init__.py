@@ -53,6 +53,7 @@ To add a new credential:
 from .apollo import APOLLO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
+from .datadog import DATADOG_CREDENTIALS
 from .email import EMAIL_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
@@ -73,6 +74,7 @@ CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
     **SEARCH_CREDENTIALS,
     **EMAIL_CREDENTIALS,
+    **DATADOG_CREDENTIALS,
     **APOLLO_CREDENTIALS,
     **GITHUB_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
@@ -104,6 +106,7 @@ __all__ = [
     "LLM_CREDENTIALS",
     "SEARCH_CREDENTIALS",
     "EMAIL_CREDENTIALS",
+    "DATADOG_CREDENTIALS",
     "GITHUB_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
     "SLACK_CREDENTIALS",

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
+from .datadog_tool import register_tools as register_datadog
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
@@ -77,6 +78,7 @@ def register_all_tools(
     # email supports multiple providers (Resend) with auto-detection
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    register_datadog(mcp)
     register_apollo(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
 
@@ -109,6 +111,9 @@ def register_all_tools(
         "save_data",
         "list_data_files",
         "serve_file_to_user",
+        "datadog_list_logs",
+        "datadog_get_metrics",
+        "datadog_get_monitor_status",
         "csv_read",
         "csv_write",
         "csv_append",
