@@ -103,8 +103,22 @@ This sets up:
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
+### Try it first
+
+See Hive in action with a template agent (no building required):
+
+```bash
+# Run a research agent
+hive run examples/templates/deep_research_agent --input '{"topic": "AI agents in 2025"}'
+
+# Or browse and run interactively
+hive tui
+
 
 ### Build Your First Agent
+```md
+Your agents go in `exports/`. You can copy a template from `examples/templates/`
+to get started, or build one using the skills above.
 
 ```bash
 # Build an agent using Claude Code
