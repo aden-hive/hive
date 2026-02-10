@@ -528,7 +528,7 @@ export AGENT_STORAGE_PATH="/custom/storage"
 ### Automatic Setup
 Run the setup script in the root directory:
 ```bash
-python setup_opencode.py
+
 ```
 
 ## Additional Resources
