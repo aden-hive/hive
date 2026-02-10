@@ -20,7 +20,7 @@ metadata:
 **THIS IS AN EXECUTABLE WORKFLOW. DO NOT explore the codebase or read source files. ROUTE to the correct skill IMMEDIATELY.**
 
 When this skill is loaded, determine what the user needs and invoke the appropriate skill NOW:
-- **User wants to build an agent** → Invoke `/hive-create` immediately
+- **User wants to build an agent** (from scratch or from a template) → Invoke `/hive-create` immediately
 - **User wants to test an agent** → Invoke `/hive-test` immediately
 - **User wants to learn concepts** → Invoke `/hive-concepts` immediately
 - **User wants patterns/optimization** → Invoke `/hive-patterns` immediately
@@ -97,7 +97,7 @@ Use this meta-skill when:
 
 **Duration**: 15-30 minutes
 **Skill**: `/hive-create`
-**Input**: User requirements ("Build an agent that...")
+**Input**: User requirements ("Build an agent that...") or a template to start from
 
 ### What This Phase Does
 
@@ -287,6 +287,19 @@ User: "Build an agent (first time)"
 → Use /hive-patterns (optimize design)
 → Use /hive-test (validate)
 → Done: Production-ready agent
+```
+
+### Pattern 1c: Build from Template
+
+```
+User: "Build an agent based on the deep research template"
+→ Use /hive-create
+→ Select "From a template" path
+→ Pick template, name new agent
+→ Review/modify goal, nodes, graph
+→ Agent exported with customizations
+→ Use /hive-test
+→ Done: Customized agent
 ```
 
 ### Pattern 2: Test Existing Agent
@@ -492,6 +505,7 @@ The workflow is **flexible** - skip phases as needed, iterate freely, and adapt 
 - Have clear requirements
 - Ready to write code
 - Want step-by-step guidance
+- Want to start from an existing template and customize it
 
 **Choose hive-patterns when:**
 - Agent structure complete
