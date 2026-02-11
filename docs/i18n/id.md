@@ -121,6 +121,17 @@ hive tui
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 
+## Dukungan Coding Agent
+### Opencode 
+Hive menyertakan dukungan native untuk [Opencode](https://github.com/opencode-ai/opencode).
+
+1. **Setup:** Jalankan script quickstart 
+2. **Launch:** Buka Opencode di root project.
+3. **Activate:** Ketik `/hive` di chat untuk beralih ke Hive Agent.
+4. **Verify:** Minta agent *"List your tools"* untuk mengonfirmasi koneksi.
+
+Agent memiliki akses ke semua skill Hive dan dapat melakukan scaffold agent, menambahkan tool, dan debug workflow secara langsung dari chat.
+
 **[📖 Panduan Setup Lengkap](../environment-setup.md)** - Instruksi detail untuk pengembangan agent
 
 ## Fitur

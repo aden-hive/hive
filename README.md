@@ -10,8 +10,7 @@
   <a href="docs/i18n/pt.md">Português</a> |
   <a href="docs/i18n/ja.md">日本語</a> |
   <a href="docs/i18n/ru.md">Русский</a> |
-  <a href="docs/i18n/ko.md">한국어</a> |
-  <a href="docs/i18n/id.md">Bahasa Indonesia</a>
+  <a href="docs/i18n/ko.md">한국어</a>
 </p>
 
 <p align="center">
@@ -76,6 +75,7 @@ Use Hive when you need:
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
 - **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
 
@@ -120,6 +120,16 @@ hive tui
 # Or run directly
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
+##  Coding Agent Support
+### Opencode 
+Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
+
+1. **Setup:** Run the quickstart script 
+2. **Launch:** Open Opencode in the project root.
+3. **Activate:** Type `/hive` in the chat to switch to the Hive Agent.
+4. **Verify:** Ask the agent *"List your tools"* to confirm the connection.
+
+The agent has access to all Hive skills and can scaffold agents, add tools, and debug workflows directly from the chat.
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
 
