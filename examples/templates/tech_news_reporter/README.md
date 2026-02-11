@@ -102,12 +102,23 @@ print(result.status)
 
 ### Input Schema
 
-The agent's entry node `intake` requires:
+Example Input:
+```json
+{
+  "topic": "AI news"
+}
+```
 
+The agent's entry node `intake` accepts either a specific technology/AI topic or a general news request from the user.
 
 ### Output Schema
 
+Example Output:
+A structured HTML report containing recent technology and AI news summaries along with source links.
+
 Terminal nodes: `compile-report`
+
+
 
 ## Version History
 
