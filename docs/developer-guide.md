@@ -656,7 +656,6 @@ lsof -i :4000
 # Kill process
 kill -9 <PID>
 
-# Or change ports in config.yaml and regenerate
 ```
 
 ### Environment Variables Not Loading
