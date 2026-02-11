@@ -421,6 +421,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                 model=args.model,
                 enable_tui=False,
             )
+        except CredentialError as e:
+            print(f"\n{e}", file=sys.stderr)
+            return 1
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -524,10 +527,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_info(args: argparse.Namespace) -> int:
     """Show agent information."""
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     try:
         runner = AgentRunner.load(args.agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -587,10 +594,14 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate an exported agent."""
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     try:
         runner = AgentRunner.load(args.agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -907,6 +918,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     # Configure logging to show runtime visibility
@@ -931,6 +943,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
     try:
         runner = AgentRunner.load(agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

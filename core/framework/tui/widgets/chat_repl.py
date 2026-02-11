@@ -85,7 +85,7 @@ class ChatRepl(Vertical):
         self._pending_ask_question: str = ""
         self._resume_session = resume_session
         self._resume_checkpoint = resume_checkpoint
-        self._session_index: list[str] = []  # Ordered session IDs from last /sessions or /resume listing
+        self._session_index: list[str] = []  # IDs from last listing
 
         # Dedicated event loop for agent execution.
         # Keeps blocking runtime code (LLM calls, MCP tools) off
@@ -173,12 +173,8 @@ class ChatRepl(Vertical):
                 if 0 <= idx < len(self._session_index):
                     session_id = self._session_index[idx]
                 else:
-                    self._write_history(
-                        f"[bold red]Error:[/bold red] No session at index {arg}"
-                    )
-                    self._write_history(
-                        "  Use [bold]/resume[/bold] to see available sessions"
-                    )
+                    self._write_history(f"[bold red]Error:[/bold red] No session at index {arg}")
+                    self._write_history("  Use [bold]/resume[/bold] to see available sessions")
                     return
             else:
                 session_id = arg
@@ -328,9 +324,7 @@ class ChatRepl(Vertical):
                     status_colored = f"[dim]{status}[/dim]"
 
                 # Session line with index and label
-                self._write_history(
-                    f"  [bold]{index}.[/bold] {label}  {status_colored}"
-                )
+                self._write_history(f"  [bold]{index}.[/bold] {label}  {status_colored}")
                 self._write_history(f"     [dim]{session_id}[/dim]")
                 self._write_history("")  # Blank line
 
@@ -338,9 +332,7 @@ class ChatRepl(Vertical):
                 self._write_history(f"   [dim red]Error reading: {e}[/dim red]")
 
         if self._session_index:
-            self._write_history(
-                "[dim]Use [bold]/resume <number>[/bold] to resume a session[/dim]"
-            )
+            self._write_history("[dim]Use [bold]/resume <number>[/bold] to resume a session[/dim]")
 
     async def _show_session_details(self, storage_path: Path, session_id: str) -> None:
         """Show detailed information about a specific session."""
@@ -740,9 +732,7 @@ class ChatRepl(Vertical):
 
                     self._write_history(f"  [bold]{i}.[/bold] {label}  {status_colored}")
 
-                self._write_history(
-                    "\n  Type [bold]/resume <number>[/bold] to continue a session"
-                )
+                self._write_history("\n  Type [bold]/resume <number>[/bold] to continue a session")
                 self._write_history("  Or just type your input to start a new session\n")
 
         except Exception:

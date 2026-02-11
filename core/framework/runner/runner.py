@@ -346,8 +346,7 @@ class AgentRunner:
         for node in self.graph.nodes:
             if node.tools:
                 required_tools.update(node.tools)
-        if not required_tools:
-            return
+        node_types: set[str] = {node.node_type for node in self.graph.nodes}
 
         try:
             from aden_tools.credentials import CREDENTIAL_SPECS
@@ -374,14 +373,19 @@ class AgentRunner:
             storage = CompositeStorage(primary=storages[0], fallbacks=storages[1:])
         store = CredentialStore(storage=storage)
 
-        # Build tool→credential mapping and check
+        # Build reverse mappings
         tool_to_cred: dict[str, str] = {}
+        node_type_to_cred: dict[str, str] = {}
         for cred_name, spec in CREDENTIAL_SPECS.items():
             for tool_name in spec.tools:
                 tool_to_cred[tool_name] = cred_name
+            for nt in spec.node_types:
+                node_type_to_cred[nt] = cred_name
 
         missing: list[str] = []
         checked: set[str] = set()
+
+        # Check tool credentials
         for tool_name in sorted(required_tools):
             cred_name = tool_to_cred.get(tool_name)
             if cred_name is None or cred_name in checked:
@@ -392,6 +396,21 @@ class AgentRunner:
             if spec.required and not store.is_available(cred_id):
                 affected = sorted(t for t in required_tools if t in spec.tools)
                 entry = f"  {spec.env_var} for {', '.join(affected)}"
+                if spec.help_url:
+                    entry += f"\n    Get it at: {spec.help_url}"
+                missing.append(entry)
+
+        # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
+        for nt in sorted(node_types):
+            cred_name = node_type_to_cred.get(nt)
+            if cred_name is None or cred_name in checked:
+                continue
+            checked.add(cred_name)
+            spec = CREDENTIAL_SPECS[cred_name]
+            cred_id = spec.credential_id or cred_name
+            if spec.required and not store.is_available(cred_id):
+                affected_types = sorted(t for t in node_types if t in spec.node_types)
+                entry = f"  {spec.env_var} for {', '.join(affected_types)} nodes"
                 if spec.help_url:
                     entry += f"\n    Get it at: {spec.help_url}"
                 missing.append(entry)
