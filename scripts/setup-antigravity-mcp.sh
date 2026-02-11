@@ -2,9 +2,9 @@
 #
 # setup-antigravity-mcp.sh - Write Antigravity/Claude MCP config with auto-detected paths
 #
-# Run from anywhere inside the hive repo. Writes ~/.gemini/mcp.json (and optionally
-# ~/.claude/mcp.json) with absolute cwd paths so the IDE can connect to agent-builder
-# and tools MCP servers without manual path editing.
+# Run from anywhere inside the hive repo. Writes ~/.gemini/antigravity/mcp_config.json
+# (and optionally ~/.claude/mcp.json) with absolute cwd paths so the IDE can connect
+# to agent-builder and tools MCP servers without manual path editing.
 #
 set -e
 
@@ -33,10 +33,10 @@ TOOLS_DIR="$(cd "$REPO_ROOT/tools" && pwd)"
 PYTHON_CMD="python3"
 command -v python3 &>/dev/null || PYTHON_CMD="python"
 
-mkdir -p "$HOME/.gemini"
+mkdir -p "$HOME/.gemini/antigravity"
 
 # Build config with absolute paths (no merge; script is for initial setup)
-cat > "$HOME/.gemini/mcp.json" << EOF
+cat > "$HOME/.gemini/antigravity/mcp_config.json" << EOF
 {
   "mcpServers": {
     "agent-builder": {
@@ -59,11 +59,11 @@ cat > "$HOME/.gemini/mcp.json" << EOF
 }
 EOF
 
-echo "Wrote $HOME/.gemini/mcp.json (cwd: $CORE_DIR, $TOOLS_DIR)"
+echo "Wrote $HOME/.gemini/antigravity/mcp_config.json (cwd: $CORE_DIR, $TOOLS_DIR)"
 
 if [ "$1" = "--claude" ]; then
   mkdir -p "$HOME/.claude"
-  cp "$HOME/.gemini/mcp.json" "$HOME/.claude/mcp.json"
+  cp "$HOME/.gemini/antigravity/mcp_config.json" "$HOME/.claude/mcp.json"
   echo "Wrote $HOME/.claude/mcp.json"
 fi
 
