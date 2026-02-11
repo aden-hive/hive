@@ -15,7 +15,7 @@ def register_tools(mcp: FastMCP) -> None:
     """Register chunking tools with the MCP server."""
 
     @mcp.tool()
-    def vector_chunk_text(
+    def vector_db_chunk_text(
         text: str,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,

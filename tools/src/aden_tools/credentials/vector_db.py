@@ -10,10 +10,10 @@ VECTOR_DB_CREDENTIALS = {
     "vector_db": CredentialSpec(
         env_var="CHROMA_PERSIST_DIR",  # Using persist dir as the primary "credential" env var
         tools=[
-            "vector_upsert",
-            "vector_search",
-            "vector_delete",
-            "vector_count",
+            "vector_db_upsert",
+            "vector_db_search",
+            "vector_db_delete",
+            "vector_db_count",
         ],
         required=False,  # Can use defaults
         startup_required=False,

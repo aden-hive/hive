@@ -12,14 +12,14 @@ from aden_tools.tools.vector_db_tool import register_tools
 def vector_search_fn(mcp: FastMCP):
     """Register and return the vector_search tool function."""
     register_tools(mcp)
-    return mcp._tool_manager._tools["vector_search"].fn
+    return mcp._tool_manager._tools["vector_db_search"].fn
 
 
 @pytest.fixture
 def vector_upsert_fn(mcp: FastMCP):
     """Register and return the vector_upsert tool function."""
     register_tools(mcp)
-    return mcp._tool_manager._tools["vector_upsert"].fn
+    return mcp._tool_manager._tools["vector_db_upsert"].fn
 
 
 class TestVectorSearch:

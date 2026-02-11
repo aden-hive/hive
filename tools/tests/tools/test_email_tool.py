@@ -29,6 +29,12 @@ class TestSendEmail:
         """Send without credentials returns helpful error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        # Also clear SMTP vars to prevent local leaks
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        monkeypatch.delenv("SMTP_PORT", raising=False)
+        monkeypatch.delenv("SMTP_USERNAME", raising=False)
+        monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
@@ -41,6 +47,7 @@ class TestSendEmail:
         """Explicit resend provider without key returns error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("SMTP_HOST", raising=False)  # Ensure no SMTP fallback interference
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_email_fn(
@@ -56,6 +63,11 @@ class TestSendEmail:
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
         monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
         monkeypatch.delenv("EMAIL_FROM", raising=False)
+        # Clear SMTP to ensure no fallback resolution of from_email
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        monkeypatch.delenv("SMTP_PORT", raising=False)
+        monkeypatch.delenv("SMTP_USERNAME", raising=False)
+        monkeypatch.delenv("SMTP_PASSWORD", raising=False)
 
         result = send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
 
@@ -64,17 +76,20 @@ class TestSendEmail:
         assert "help" in result
 
     def test_from_email_falls_back_to_env_var(self, send_email_fn, monkeypatch):
-        """EMAIL_FROM env var is used when from_email not provided."""
+        """EMAIL_FROM env var is used if from_email arg is missing."""
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
-        monkeypatch.setenv("EMAIL_FROM", "default@company.com")
-
+        monkeypatch.setenv("EMAIL_FROM", "env_user@example.com")
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        # Clear SMTP to ensure we are testing EMAIL_FROM, not SMTP username
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        monkeypatch.delenv("SMTP_USERNAME", raising=False)
         with patch("resend.Emails.send") as mock_send:
             mock_send.return_value = {"id": "email_env"}
             result = send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
 
         assert result["success"] is True
         call_args = mock_send.call_args[0][0]
-        assert call_args["from"] == "default@company.com"
+        assert call_args["from"] == "env_user@example.com"
 
     def test_explicit_from_email_overrides_env_var(self, send_email_fn, monkeypatch):
         """Explicit from_email overrides EMAIL_FROM env var."""
@@ -337,6 +352,10 @@ class TestSendBudgetAlertEmail:
         """Budget alert without credentials returns error."""
         monkeypatch.delenv("RESEND_API_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("SMTP_HOST", raising=False)
+        monkeypatch.delenv("SMTP_PORT", raising=False)
+        monkeypatch.delenv("SMTP_USERNAME", raising=False)
+        monkeypatch.delenv("SMTP_PASSWORD", raising=False)
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
         result = send_budget_alert_fn(

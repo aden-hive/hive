@@ -25,24 +25,92 @@ class EmailClient:
     """Standalone email client for direct usage (e.g. by agents)."""
 
     def __init__(self, credentials: dict | None = None):
-        if credentials:
-            self.resend_api_key = credentials.get("resend")
-            self.gmail_access_token = credentials.get("google")
-            self.smtp_config = credentials.get("smtp")
-        else:
-            self.resend_api_key = os.getenv("RESEND_API_KEY")
-            self.gmail_access_token = os.getenv("GOOGLE_ACCESS_TOKEN")
-            self.smtp_config = {
-                "host": os.getenv("SMTP_HOST"),
-                "port": int(os.getenv("SMTP_PORT", "587")),
-                "username": os.getenv("SMTP_USERNAME"),
-                "password": os.getenv("SMTP_PASSWORD"),
-            }
+        """
+        Initialize EmailClient.
+
+        Args:
+            credentials: Optional dictionary or CredentialStoreAdapter-like object
+                       containing credentials.
+        """
+        self._credentials = credentials
+        self._use_env_vars = credentials is None
+
+        # These are now accessed dynamically via properties
+        self._resend_api_key = None
+        self._gmail_access_token = None
+        self._smtp_config = None
+
+        # Backward compatibility for direct dict usage (if users passed a dict with keys)
+        if isinstance(credentials, dict):
+            self._resend_api_key = credentials.get("resend")
+            self._gmail_access_token = credentials.get("google")
+            self._smtp_config = credentials.get("smtp")
+
+    @property
+    def resend_api_key(self) -> str | None:
+        if self._use_env_vars:
+            return os.getenv("RESEND_API_KEY")
+
+        # Check explicit dict value first
+        if self._resend_api_key:
+            return self._resend_api_key
+
+        # Try dynamic lookup from adapter
+        if self._credentials and hasattr(self._credentials, "get"):
+            try:
+                return self._credentials.get("resend")
+            except Exception:
+                pass
+        return None
+
+    @property
+    def gmail_access_token(self) -> str | None:
+        if self._use_env_vars:
+            return os.getenv("GOOGLE_ACCESS_TOKEN")
+
+        if self._gmail_access_token:
+            return self._gmail_access_token
+
+        if self._credentials and hasattr(self._credentials, "get"):
+            try:
+                return self._credentials.get("google")
+            except Exception:
+                pass
+        return None
+
+    @property
+    def smtp_config(self) -> dict | None:
+        if self._use_env_vars:
+            host = os.getenv("SMTP_HOST")
+            port = int(os.getenv("SMTP_PORT", "587"))
+            username = os.getenv("SMTP_USERNAME")
+            password = os.getenv("SMTP_PASSWORD")
+            if host and password:
+                return {
+                    "host": host,
+                    "port": port,
+                    "username": username,
+                    "password": password,
+                }
+            return None
+
+        if self._smtp_config:
+            return self._smtp_config
+
+        if self._credentials and hasattr(self._credentials, "get"):
+            try:
+                val = self._credentials.get("smtp")
+                if val and isinstance(val, dict):
+                    return val
+            except Exception:
+                pass
+        return None
 
     def _resolve_from_email(self, from_email: str | None) -> str | None:
         if from_email:
             return from_email
-        return os.getenv("EMAIL_FROM") or os.getenv("SMTP_USERNAME")
+        smtp_user = self.smtp_config.get("username") if self.smtp_config else None
+        return os.getenv("EMAIL_FROM") or smtp_user
 
     def _send_via_smtp(
         self,
@@ -214,7 +282,9 @@ class EmailClient:
 
         gmail_available = bool(self.gmail_access_token)
         resend_available = bool(self.resend_api_key)
-        smtp_available = bool(self.smtp_config.get("host") and self.smtp_config.get("password"))
+        smtp_available = False
+        if self.smtp_config:
+            smtp_available = bool(self.smtp_config.get("host") and self.smtp_config.get("password"))
 
         # Requirements check
         if provider == "resend" and not from_email:
@@ -222,22 +292,32 @@ class EmailClient:
 
         if not from_email and not gmail_available and (resend_available or smtp_available):
             # Try to resolve from SMTP username if available
-            from_email = self.smtp_config.get("username")
+            if self.smtp_config:
+                from_email = self.smtp_config.get("username")
             if not from_email:
-                return {"error": "Sender email is required"}
+                return {
+                    "error": "Sender email is required",
+                    "help": "Set EMAIL_FROM env var or provide from_email argument",
+                }
 
         try:
             # 1. Explicit Provider
             if provider == "gmail":
                 if not gmail_available:
-                    return {"error": "Gmail credentials not configured"}
+                    return {
+                        "error": "Gmail credentials not configured",
+                        "help": "Set GOOGLE_ACCESS_TOKEN or run `aden auth login`",
+                    }
                 return self._send_via_gmail(
                     self.gmail_access_token, to_list, subject, html, from_email, cc_list, bcc_list
                 )
 
             if provider == "resend":
                 if not resend_available:
-                    return {"error": "Resend credentials not configured"}
+                    return {
+                        "error": "Resend credentials not configured",
+                        "help": "Set RESEND_API_KEY environment variable",
+                    }
                 return self._send_via_resend(
                     self.resend_api_key, to_list, subject, html, from_email, cc_list, bcc_list
                 )
