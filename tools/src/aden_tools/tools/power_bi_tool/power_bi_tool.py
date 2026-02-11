@@ -72,6 +72,39 @@ class _PowerBIClient:
         )
         return self._handle_response(response)
 
+    def get_datasets(self, workspace_id: str) -> dict[str, Any]:
+        """Get list of datasets in a workspace."""
+        response = httpx.get(
+            f"{POWER_BI_API_BASE}/groups/{workspace_id}/datasets",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def get_reports(self, workspace_id: str) -> dict[str, Any]:
+        """Get list of reports in a workspace."""
+        response = httpx.get(
+            f"{POWER_BI_API_BASE}/groups/{workspace_id}/reports",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def export_report(
+        self, workspace_id: str, report_id: str, format: str = "PDF"
+    ) -> dict[str, Any]:
+        """Export a report to PDF or PPTX."""
+        if format.upper() not in ["PDF", "PPTX"]:
+            return {"error": f"Invalid format: {format}. Must be PDF or PPTX"}
+        
+        response = httpx.post(
+            f"{POWER_BI_API_BASE}/groups/{workspace_id}/reports/{report_id}/Export",
+            headers=self._headers,
+            json={"format": format.upper()},
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
@@ -97,8 +130,6 @@ def register_tools(
                 "help": "Set POWER_BI_ACCESS_TOKEN environment variable or configure via credential store",
             }
         return _PowerBIClient(token)
-
-    # --- Workspaces ---
 
     @mcp.tool()
     def power_bi_get_workspaces() -> dict:
@@ -138,4 +169,71 @@ def register_tools(
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
-            return {"error": "Network error: {e}"}
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def power_bi_get_datasets(workspace_id: str) -> dict:
+        """
+        Get list of datasets in a Power BI workspace.
+
+        Args:
+            workspace_id: The Power BI workspace ID
+
+        Returns:
+            Dict with list of datasets or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_datasets(workspace_id)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def power_bi_get_reports(workspace_id: str) -> dict:
+        """
+        Get list of reports in a Power BI workspace.
+
+        Args:
+            workspace_id: The Power BI workspace ID
+
+        Returns:
+            Dict with list of reports or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.get_reports(workspace_id)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def power_bi_export_report(
+        workspace_id: str, report_id: str, format: str = "PDF"
+    ) -> dict:
+        """
+        Export a Power BI report to PDF or PPTX.
+
+        Args:
+            workspace_id: The Power BI workspace ID
+            report_id: The report ID to export
+            format: Export format - "PDF" or "PPTX" (default: "PDF")
+
+        Returns:
+            Dict with export result or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.export_report(workspace_id, report_id, format)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
