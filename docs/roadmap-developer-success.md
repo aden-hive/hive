@@ -202,6 +202,9 @@ Iteration is not always improving everything. To help the developers, version co
 ## Agent Personality
 Developers want to put their own soul into the agent. What remain the same across the evolution is important. Developer success is not about having the agent constantly changing. It is about you know the goal and the personality of the agent will not chanage, and it just adapt to the environment to solve problems.
 
+## Memory Management
+Hive nodes have a built in machanism handling node memory and the logic passing memory around. To implementing cross session memory or implement custom logic handling memory. Developers can use the memory tools to implement that.
+
 # Deployment
 
 ## (Optional) How agent runtime works
@@ -209,6 +212,13 @@ Developers need to understand how data are transfered during agent runtime, how 
 
 ## Local Deployment
 By default we support deployment through docker. 
+1. Pre-flight Validation (Critical)
+2. One-Command Deployment (`hive deploy local my_agent`)
+3. Credential Handling in Containers (local credentials + Aden Cloud Credentials for Oauth)
+4. Persistence & State
+5. Debugging/logging/memory Access (start from just commands)
+6. Expose hooks and apis as SDK
+7. Documentation Deliverables
 
 ## Cloud Deployment
 For users who want zero-ops deployment, easier integration and credential management, and logging, Aden cloud is ideal. Users who don’t want to manage infra get secure defaults, scaling, and observability out of the box—at the cost of less low-level control and some vendor lock-in.
@@ -217,8 +227,8 @@ For users who want zero-ops deployment, easier integration and credential manage
 Autonomous and interactive modes look different, but the core should remain the same, and the deployment strategy should also be consistent.
 
 ## Performance
-Not a focus at the moment
-Speed of run, hellucination
+Not a focus at the moment,
+Speed of run,  process pools, hellucination
 
 ## How we collect data
 Self-reported issues
@@ -226,14 +236,11 @@ Cloud observabiltiy product
 
 ## Runtime guardrails
 
-[To be complete]
+Hive provides built-in safety mechanisms to keep agents within bounds
 
 ## How we make reliability
 
 Breakages still happens, even in the most best business process: Being reliable is to be adaptive and fix the problems 
-
-[To be complete]
-
 
 ## Developer trust
 
