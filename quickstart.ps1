@@ -605,7 +605,7 @@ if ($credKey) {
 
     $indexFile = Join-Path $credMetaDir "index.json"
     if (-not (Test-Path $indexFile)) {
-        "{}" | Set-Content -Path $indexFile -Encoding UTF8
+        '{"credentials": {}, "version": "1.0"}' | Set-Content -Path $indexFile -Encoding UTF8
     }
 
     Write-Ok "Credential store initialized at ~/.hive/credentials/"

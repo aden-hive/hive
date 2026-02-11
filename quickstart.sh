@@ -224,10 +224,10 @@ echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Configuring LLM provider...${NC
 echo ""
 
 # ============================================================
-# Step 3: Verify Python Imports
+# Step 4: Verify Python Imports
 # ============================================================
 
-echo -e "${BLUE}Step 3: Verifying Python imports...${NC}"
+echo -e "${BLUE}Step 4: Verifying Python imports...${NC}"
 echo ""
 
 IMPORT_ERRORS=0
@@ -269,10 +269,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 5: Verify Claude Code Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
+echo -e "${BLUE}Step 5: Verifying Claude Code skills...${NC}"
 echo ""
 
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
@@ -802,10 +802,16 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
         read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
 
         if [ -n "$API_KEY" ]; then
-            # Save to shell rc file
-            echo "" >> "$SHELL_RC_FILE"
-            echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
-            echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+            # Save to shell rc file (avoid duplicates on re-run)
+            if ! grep -q "export $SELECTED_ENV_VAR=" "$SHELL_RC_FILE" 2>/dev/null; then
+                echo "" >> "$SHELL_RC_FILE"
+                echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
+                echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+            else
+                # Update existing entry in-place
+                sed -i.bak "s|^export ${SELECTED_ENV_VAR}=.*|export ${SELECTED_ENV_VAR}=\"${API_KEY}\"|" "$SHELL_RC_FILE"
+                rm -f "${SHELL_RC_FILE}.bak"
+            fi
             export "$SELECTED_ENV_VAR=$API_KEY"
             echo ""
             echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
@@ -835,10 +841,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 5: Initialize Credential Store
+# Step 6: Initialize Credential Store
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Initializing credential store...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Initializing credential store...${NC}"
 echo ""
 echo -e "${DIM}The credential store encrypts API keys and secrets for your agents.${NC}"
 echo ""
@@ -860,10 +866,12 @@ else
     else
         echo -e "${GREEN}ok${NC}"
 
-        # Save to shell rc file
-        echo "" >> "$SHELL_RC_FILE"
-        echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SHELL_RC_FILE"
-        echo "export HIVE_CREDENTIAL_KEY=\"$GENERATED_KEY\"" >> "$SHELL_RC_FILE"
+        # Save to shell rc file (avoid duplicates on re-run)
+        if ! grep -q "export HIVE_CREDENTIAL_KEY=" "$SHELL_RC_FILE" 2>/dev/null; then
+            echo "" >> "$SHELL_RC_FILE"
+            echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SHELL_RC_FILE"
+            echo "export HIVE_CREDENTIAL_KEY=\"$GENERATED_KEY\"" >> "$SHELL_RC_FILE"
+        fi
         export HIVE_CREDENTIAL_KEY="$GENERATED_KEY"
 
         echo -e "${GREEN}  ✓ Encryption key saved to $SHELL_RC_FILE${NC}"
@@ -898,10 +906,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 6: Verify Setup
+# Step 7: Verify Setup
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Verifying installation...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Verifying installation...${NC}"
 echo ""
 
 ERRORS=0
@@ -971,10 +979,10 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 # ============================================================
-# Step 7: Install hive CLI globally
+# Step 8: Install hive CLI globally
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Installing hive CLI...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 8: Installing hive CLI...${NC}"
 echo ""
 
 # Ensure ~/.local/bin exists and is in PATH
