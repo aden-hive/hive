@@ -153,9 +153,49 @@ When you register the `tools` MCP server, the following tools become available:
 
 - **web_search**: Search the web using Brave Search API
 - **web_scrape**: Scrape content from a URL
-- **file_read**: Read file contents
+- **file_read**: Read file contents - [examples/mcp_servers.json](examples/mcp_servers.json) - Example configuration
 - **file_write**: Write content to a file
 - **pdf_read**: Extract text from PDF files
+
+## Snowflake (Official MCP Server)
+
+Snowflake provides an official MCP server for advanced integration, including SQL queries and Cortex AI capabilities. While Hive offers a native `snowflake_tool` for basic SQL operations, you may prefer the managed server for complex scenarios or Cortex integration.
+
+### Configuration (Docker)
+
+To use the official Snowflake MCP server, configure it via `mcp_servers.json` using Docker:
+
+```json
+{
+  "servers": [
+    {
+      "name": "snowflake",
+      "transport": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e", "SNOWFLAKE_ACCOUNT",
+        "-e", "SNOWFLAKE_USER",
+        "-e", "SNOWFLAKE_PASSWORD",
+        "-e", "SNOWFLAKE_HOST",
+        "-e", "SNOWFLAKE_WAREHOUSE",
+        "mcp/snowflake"
+      ],
+      "env": {
+        "SNOWFLAKE_ACCOUNT": "${SNOWFLAKE_ACCOUNT}",
+        "SNOWFLAKE_USER": "${SNOWFLAKE_USER}",
+        "SNOWFLAKE_PASSWORD": "${SNOWFLAKE_PASSWORD}",
+        "SNOWFLAKE_HOST": "${SNOWFLAKE_HOST}",
+        "SNOWFLAKE_WAREHOUSE": "${SNOWFLAKE_WAREHOUSE}"
+      }
+    }
+  ]
+}
+```
+
+Ensure environment variables are set correctly for the Docker container to access Snowflake.
 
 ## Environment Variables
 
