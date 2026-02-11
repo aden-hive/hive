@@ -209,7 +209,7 @@ if (-not $uvCmd) {
 
 # If still not found, install it
 if (-not $uvCmd) {
-    Write-Warn "uv not found. Installing..."
+    Write-Warn "uv not found. Installing... (manual install: https://astral.sh/uv)"
     try {
         # Official uv installer for Windows
         Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
