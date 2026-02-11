@@ -125,7 +125,7 @@ To enable Opencode integration:
 3. Restart Opencode to load the MCP servers
 4. Switch to the Hive agent
 * **Tools:** Accesses `agent-builder` and standard `tools` via standard MCP protocols over stdio.
-```
+
 ### Verify Setup
 
 ```bash
