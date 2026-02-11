@@ -10,10 +10,10 @@ Usage:
     hive shell exports/my-agent
 
 Testing commands:
-    hive test-run <agent_path> --goal <goal_id>
-    hive test-debug <goal_id> <test_id>
-    hive test-list <goal_id>
-    hive test-stats <goal_id>
+    hive test-run <goal_id> [--output-dir DIR]
+    hive test-debug <goal_id> <test_id> [--trace]
+    hive test-list <goal_id> [--status STATUS]
+    hive test-stats <goal_id> [--format json]
 """
 
 import argparse

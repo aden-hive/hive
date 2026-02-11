@@ -112,7 +112,7 @@ feat(component): add new feature description
 ## Project Structure
 
 - `core/` - Core framework (agent runtime, graph executor, protocols)
-- `tools/` - MCP Tools Package (tools for agent capabilities)
+- `tools/` - MCP Tools Package (source located in `tools/src/aden_tools`)
 - `exports/` - Agent packages and examples
 - `docs/` - Documentation
 - `scripts/` - Build and utility scripts
@@ -142,8 +142,8 @@ make check
 # Run core framework tests (mirrors CI test job)
 make test
 
-# Or run tests directly
-cd core && pytest tests/ -v
+# Or run tests directly (from repo root)
+PYTHONPATH=core pytest core/tests/ -v
 
 # Run tools package tests (when contributing to tools/)
 cd tools && uv run pytest tests/ -v

@@ -99,8 +99,8 @@ cd hive
 
 This sets up:
 
-- **framework** - Core agent runtime and graph executor (in `core/.venv`)
-- **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
+- **framework** - Core agent runtime and graph executor (source in `core/framework`)
+- **tools** - MCP server and standard tool library (source in `tools/src/aden_tools`)
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
@@ -209,6 +209,13 @@ flowchart LR
 3. **[Workers Execute](docs/key_concepts/worker_agent.md)** → SDK-wrapped nodes run with full observability and tool access
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **[Adaptiveness](docs/key_concepts/evolution.md)** → On failure, the system evolves the graph and redeploys automatically
+ 
+### Agent Execution Lifecycle
+
+1. **Planning**: Goal is decomposed into a node graph.
+2. **Execution**: Graph is traversed; nodes execute tools/LLM calls.
+3. **Evaluation**: Output is checked against success criteria.
+4. **Adaptation**: If criteria fail, the graph is modified and re-run.
 
 ## Run Agents
 
@@ -230,9 +237,31 @@ hive shell
 
 The TUI scans both `exports/` and `examples/templates/` for available agents.
 
+### Verifying Successful Execution
+
+What to look for:
+1. **Exit Code 0**: Indicates the Python process finished without crashing.
+2. **Result output**: A JSON object printed to stdout (e.g., `{"status": "success", "data": ...}`).
+3. **Logs**: Check `hive.log` or TUI event stream for step-by-step execution details.
+
+
 > **Using Python directly (alternative):** You can also run agents with `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
 
 See [environment-setup.md](docs/environment-setup.md) for complete setup instructions.
+
+## Development
+
+### Running Tests
+
+To run tests locally, you must set the `PYTHONPATH` to include the `core` directory.
+
+```bash
+# Run all tests
+PYTHONPATH=core pytest
+
+# Run specific test file
+PYTHONPATH=core pytest core/tests/test_agent_runner.py
+```
 
 ## Documentation
 
