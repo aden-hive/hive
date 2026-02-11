@@ -347,6 +347,7 @@ class TestCompositeStorage:
         cred = storage.load("test")
 
         # Should get from primary
+        assert cred is not None
         assert cred.get_key("k") == "primary"
 
     def test_fallback_when_not_in_primary(self):
@@ -362,6 +363,7 @@ class TestCompositeStorage:
         storage = CompositeStorage(primary, [fallback])
         cred = storage.load("test")
 
+        assert cred is not None
         assert cred.get_key("k") == "fallback"
 
     def test_write_to_primary_only(self):

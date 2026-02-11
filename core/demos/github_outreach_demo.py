@@ -53,8 +53,8 @@ sys.path.insert(0, str(_HIVE_DIR / "tools" / "src"))
 sys.path.insert(0, str(_HIVE_DIR))
 
 from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter  # noqa: E402
-from core.framework.credentials import CredentialStore  # noqa: E402
 
+from framework.credentials import CredentialStore  # noqa: E402
 from framework.credentials.storage import (  # noqa: E402
     CompositeStorage,
     EncryptedFileStorage,
@@ -751,7 +751,7 @@ EDGES = [
 GRAPH = GraphSpec(
     id="github_outreach_pipeline",
     goal_id="outreach_goal",
-    name="GitHub Outreach Pipeline",
+    description="GitHub Outreach Pipeline",
     entry_node="intake",
     nodes=list(NODE_SPECS.values()),
     edges=EDGES,

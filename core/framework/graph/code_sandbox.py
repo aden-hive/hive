@@ -288,7 +288,7 @@ class CodeSandbox:
             with self._timeout_context(self.timeout_seconds):
                 # Compile and execute
                 compiled = compile(code, "<sandbox>", "exec")
-                exec(compiled, namespace)
+                exec(compiled, namespace)  # nosec B102 - intentional sandboxed execution with restricted builtins
 
             execution_time_ms = int((time.time() - start_time) * 1000)
 
@@ -358,7 +358,7 @@ class CodeSandbox:
 
         try:
             with self._timeout_context(self.timeout_seconds):
-                result = eval(expression, namespace)
+                result = eval(expression, namespace)  # nosec B307 - intentional sandboxed eval with restricted builtins
 
             return SandboxResult(success=True, result=result)
 

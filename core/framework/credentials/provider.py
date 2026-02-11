@@ -59,7 +59,7 @@ class CredentialProvider(ABC):
 
         Examples: 'static', 'oauth2', 'my_custom_auth'
         """
-        pass
+        ...
 
     @property
     @abstractmethod
@@ -70,7 +70,7 @@ class CredentialProvider(ABC):
         Returns:
             List of CredentialType enums this provider supports
         """
-        pass
+        ...
 
     @abstractmethod
     def refresh(self, credential: CredentialObject) -> CredentialObject:
@@ -92,7 +92,7 @@ class CredentialProvider(ABC):
         Raises:
             CredentialRefreshError: If refresh fails
         """
-        pass
+        ...
 
     @abstractmethod
     def validate(self, credential: CredentialObject) -> bool:
@@ -110,7 +110,7 @@ class CredentialProvider(ABC):
         Returns:
             True if credential is valid, False otherwise
         """
-        pass
+        ...
 
     def should_refresh(self, credential: CredentialObject) -> bool:
         """
