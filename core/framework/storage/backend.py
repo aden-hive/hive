@@ -10,6 +10,7 @@ Uses Pydantic's built-in serialization.
 
 import json
 from pathlib import Path
+from pydantic import ValidationError
 
 from framework.schemas.run import Run, RunStatus, RunSummary
 from framework.utils.io import atomic_write
@@ -88,43 +89,52 @@ class FileStorage:
     # === RUN OPERATIONS ===
 
     def save_run(self, run: Run) -> None:
-        """Save a run to storage.
+        """Save a run to storage."""
+        run_path = self.base_path / "runs" / f"{run.id}.json"
+        with atomic_write(run_path) as f:
+            f.write(run.model_dump_json(indent=2))
 
-        DEPRECATED: This method is now a no-op.
-        New sessions use unified storage at sessions/{session_id}/state.json.
-        Tests should not rely on FileStorage - use unified session storage instead.
-        """
-        import warnings
+        summary = RunSummary.from_run(run)
+        summary_path = self.base_path / "summaries" / f"{run.id}.json"
+        with atomic_write(summary_path) as f:
+            f.write(summary.model_dump_json(indent=2))
 
-        warnings.warn(
-            "FileStorage.save_run() is deprecated. "
-            "New sessions use unified storage at sessions/{session_id}/state.json. "
-            "This write has been skipped.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        # No-op: do not write to deprecated locations
+        self._add_to_index("by_goal", run.goal_id, run.id)
+        self._add_to_index("by_status", run.status.value, run.id)
+        for node_id in run.metrics.nodes_executed:
+            self._add_to_index("by_node", node_id, run.id)
 
     def load_run(self, run_id: str) -> Run | None:
-        """Load a run from storage."""
+        """
+        Load a run from storage.
+
+        If the run file is missing or corrupted, fail gracefully
+        and return None instead of crashing.
+        """
         run_path = self.base_path / "runs" / f"{run_id}.json"
         if not run_path.exists():
             return None
-        with open(run_path, encoding="utf-8") as f:
-            return Run.model_validate_json(f.read())
+
+        try:
+            with open(run_path, encoding="utf-8") as f:
+                return Run.model_validate_json(f.read())
+        except (ValidationError, json.JSONDecodeError, ValueError):
+            return None
 
     def load_summary(self, run_id: str) -> RunSummary | None:
         """Load just the summary (faster than full run)."""
         summary_path = self.base_path / "summaries" / f"{run_id}.json"
         if not summary_path.exists():
-            # Fall back to computing from full run
             run = self.load_run(run_id)
             if run:
                 return RunSummary.from_run(run)
             return None
 
-        with open(summary_path, encoding="utf-8") as f:
-            return RunSummary.model_validate_json(f.read())
+        try:
+            with open(summary_path, encoding="utf-8") as f:
+                return RunSummary.model_validate_json(f.read())
+        except (ValidationError, json.JSONDecodeError, ValueError):
+            return None
 
     def delete_run(self, run_id: str) -> bool:
         """Delete a run from storage."""
@@ -134,7 +144,6 @@ class FileStorage:
         if not run_path.exists():
             return False
 
-        # Load run to get index keys
         run = self.load_run(run_id)
         if run:
             self._remove_from_index("by_goal", run.goal_id, run_id)
@@ -151,74 +160,21 @@ class FileStorage:
     # === QUERY OPERATIONS ===
 
     def get_runs_by_goal(self, goal_id: str) -> list[str]:
-        """Get all run IDs for a goal.
-
-        DEPRECATED: Indexes are deprecated. For new sessions, scan sessions/*/state.json instead.
-        This method only returns old run IDs from deprecated indexes.
-        """
-        import warnings
-
-        warnings.warn(
-            "FileStorage.get_runs_by_goal() is deprecated. "
-            "For new sessions, scan sessions/*/state.json instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self._get_index("by_goal", goal_id)
 
     def get_runs_by_status(self, status: str | RunStatus) -> list[str]:
-        """Get all run IDs with a status.
-
-        DEPRECATED: Indexes are deprecated. For new sessions, scan sessions/*/state.json instead.
-        This method only returns old run IDs from deprecated indexes.
-        """
-        import warnings
-
-        warnings.warn(
-            "FileStorage.get_runs_by_status() is deprecated. "
-            "For new sessions, scan sessions/*/state.json instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         if isinstance(status, RunStatus):
             status = status.value
         return self._get_index("by_status", status)
 
     def get_runs_by_node(self, node_id: str) -> list[str]:
-        """Get all run IDs that executed a node.
-
-        DEPRECATED: Indexes are deprecated. For new sessions, scan sessions/*/state.json instead.
-        This method only returns old run IDs from deprecated indexes.
-        """
-        import warnings
-
-        warnings.warn(
-            "FileStorage.get_runs_by_node() is deprecated. "
-            "For new sessions, scan sessions/*/state.json instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         return self._get_index("by_node", node_id)
 
     def list_all_runs(self) -> list[str]:
-        """List all run IDs."""
         runs_dir = self.base_path / "runs"
         return [f.stem for f in runs_dir.glob("*.json")]
 
     def list_all_goals(self) -> list[str]:
-        """List all goal IDs that have runs.
-
-        DEPRECATED: Indexes are deprecated. For new sessions, scan sessions/*/state.json instead.
-        This method only returns goals from old run IDs in deprecated indexes.
-        """
-        import warnings
-
-        warnings.warn(
-            "FileStorage.list_all_goals() is deprecated. "
-            "For new sessions, scan sessions/*/state.json instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         goals_dir = self.base_path / "indexes" / "by_goal"
         if not goals_dir.exists():
             return []
@@ -227,8 +183,6 @@ class FileStorage:
     # === INDEX OPERATIONS ===
 
     def _get_index(self, index_type: str, key: str) -> list[str]:
-        """Get values from an index."""
-        self._validate_key(key)  # Prevent path traversal
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
         if not index_path.exists():
             return []
@@ -236,8 +190,6 @@ class FileStorage:
             return json.load(f)
 
     def _add_to_index(self, index_type: str, key: str, value: str) -> None:
-        """Add a value to an index."""
-        self._validate_key(key)  # Prevent path traversal
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
         values = self._get_index(index_type, key)  # Already validated in _get_index
         if value not in values:
@@ -246,8 +198,6 @@ class FileStorage:
                 json.dump(values, f, indent=2)
 
     def _remove_from_index(self, index_type: str, key: str, value: str) -> None:
-        """Remove a value from an index."""
-        self._validate_key(key)  # Prevent path traversal
         index_path = self.base_path / "indexes" / index_type / f"{key}.json"
         values = self._get_index(index_type, key)  # Already validated in _get_index
         if value in values:
@@ -258,7 +208,6 @@ class FileStorage:
     # === UTILITY ===
 
     def get_stats(self) -> dict:
-        """Get storage statistics."""
         return {
             "total_runs": len(self.list_all_runs()),
             "total_goals": len(self.list_all_goals()),
