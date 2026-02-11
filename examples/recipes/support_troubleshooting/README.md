@@ -1,4 +1,4 @@
-# Recipe: Basic Troubleshooting
+# Recipe: Support Troubleshooting
 
 Handling "Level 1" tech support for your platform or website.
 
