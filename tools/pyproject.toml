@@ -30,6 +30,8 @@ dependencies = [
     "playwright-stealth>=1.0.5",
     "litellm>=1.81.0",
     "resend>=2.0.0",
+    "praw>=7.7.1",
+    "prawcore>=2.4.0",
     "framework",
 ]
 

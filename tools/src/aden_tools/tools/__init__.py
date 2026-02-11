@@ -43,6 +43,7 @@ from .file_system_toolkits.write_to_file import register_tools as register_write
 from .github_tool import register_tools as register_github
 from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
+from .reddit_tool import register_tools as register_reddit
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .slack_tool import register_tools as register_slack
 from .web_scrape_tool import register_tools as register_web_scrape
@@ -79,6 +80,7 @@ def register_all_tools(
     register_hubspot(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_reddit(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -209,6 +211,24 @@ def register_all_tools(
         "slack_kick_user_from_channel",
         "slack_delete_file",
         "slack_get_team_stats",
+        # Reddit tools
+        "reddit_search_posts",
+        "reddit_get_subreddit_new",
+        "reddit_get_subreddit_hot",
+        "reddit_get_post",
+        "reddit_get_comments",
+        "reddit_submit_post",
+        "reddit_reply_to_post",
+        "reddit_reply_to_comment",
+        "reddit_edit_comment",
+        "reddit_delete_comment",
+        "reddit_get_user_profile",
+        "reddit_upvote",
+        "reddit_downvote",
+        "reddit_save_post",
+        "reddit_remove_post",
+        "reddit_approve_post",
+        "reddit_ban_user",
     ]
 
 
