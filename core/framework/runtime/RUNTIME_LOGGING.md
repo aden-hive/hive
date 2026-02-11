@@ -197,7 +197,16 @@ class NodeStepLog:
     tokens_used: int
     latency_ms: int
     # ... detailed execution state
+    # Trace context (OTel-aligned; empty if observability context not set):
+    trace_id: str   # From set_trace_context (OTel trace)
+    span_id: str    # 16 hex chars per step (OTel span)
+    parent_span_id: str  # Optional; for nested span hierarchy
+    execution_id: str    # Session/run correlation id
 ```
+
+L3 entries include `trace_id`, `span_id`, and `execution_id` for correlation and **OpenTelemetry (OTel) compatibility**. When the framework sets trace context (e.g. via `Runtime.start_run()` or `StreamRuntime.start_run()`), these fields are populated automatically so L3 data can be exported to OTel backends without schema changes.
+
+**L2: NodeDetail** also includes `trace_id` and `span_id`; **L1: RunSummaryLog** includes `trace_id` and `execution_id` for the same correlation.
 
 ---
 
@@ -215,7 +224,7 @@ Three MCP tools provide access to the logging system:
 
 ```python
 query_runtime_logs(
-    agent_work_dir: str,        # e.g., "~/.hive/agents/twitter_outreach"
+    agent_work_dir: str,        # e.g., "~/.hive/agents/deep_research_agent"
     status: str = "",           # "needs_attention", "success", "failure", "degraded"
     limit: int = 20
 ) -> dict  # {"runs": [...], "total": int}
@@ -362,14 +371,14 @@ query_runtime_log_raw(agent_work_dir, run_id)
 ```python
 # 1. Find problematic runs (L1)
 result = query_runtime_logs(
-    agent_work_dir="~/.hive/agents/twitter_outreach",
+    agent_work_dir="~/.hive/agents/deep_research_agent",
     status="needs_attention"
 )
 run_id = result["runs"][0]["run_id"]
 
 # 2. Identify failing nodes (L2)
 details = query_runtime_log_details(
-    agent_work_dir="~/.hive/agents/twitter_outreach",
+    agent_work_dir="~/.hive/agents/deep_research_agent",
     run_id=run_id,
     needs_attention_only=True
 )
@@ -377,7 +386,7 @@ problem_node = details["nodes"][0]["node_id"]
 
 # 3. Analyze root cause (L3)
 raw = query_runtime_log_raw(
-    agent_work_dir="~/.hive/agents/twitter_outreach",
+    agent_work_dir="~/.hive/agents/deep_research_agent",
     run_id=run_id,
     node_id=problem_node
 )
@@ -487,7 +496,7 @@ logger.start_run(goal_id, session_id=execution_id)
 ```json
 {
   "run_id": "session_20260206_115718_e22339c5",
-  "goal_id": "twitter-outreach-multi-loop",
+  "goal_id": "deep-research",
   "status": "degraded",
   "started_at": "2026-02-06T11:57:18.593081",
   "ended_at": "2026-02-06T11:58:45.123456",
@@ -520,9 +529,10 @@ logger.start_run(goal_id, session_id=execution_id)
 **Written:** Incrementally (append per step)
 **Format:** JSONL (one JSON object per line)
 
+Each line includes **trace context** when the framework has set it (via the observability module): `trace_id`, `span_id`, `parent_span_id` (optional), and `execution_id`. These align with OpenTelemetry/W3C TraceContext so L3 data can be exported to OTel backends without schema changes.
+
 ```jsonl
-{"node_id":"intake-collector","step_index":3,"tool_calls":[{"tool":"web_search","args":{"query":"@RomuloNevesOf"}}],"tool_results":[{"status":"success","data":"..."}],"verdict":"RETRY","verdict_feedback":"Missing required output 'twitter_handles'. You found the handle but didn't call set_output.","llm_response_text":"I found the profile...","tokens_used":1234,"latency_ms":2500}
-{"node_id":"intake-collector","step_index":4,"tool_calls":[{"tool":"web_search","args":{"query":"@RomuloNevesOf twitter"}}],"tool_results":[{"status":"success","data":"..."}],"verdict":"RETRY","verdict_feedback":"Still missing 'twitter_handles'.","llm_response_text":"Found more info...","tokens_used":1456,"latency_ms":2300}
+{"node_id":"intake-collector","step_index":3,"trace_id":"54e80d7b5bd6409dbc3217e5cd16a4fd","span_id":"a1b2c3d4e5f67890","execution_id":"b4c348ec54e80d7b5bd6409dbc3217e50","tool_calls":[...],"verdict":"RETRY",...}
 ```
 
 **Why JSONL?**

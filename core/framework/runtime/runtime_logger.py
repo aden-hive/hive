@@ -26,6 +26,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from framework.observability import get_trace_context
 from framework.runtime.runtime_log_schemas import (
     NodeDetail,
     NodeStepLog,
@@ -64,10 +65,8 @@ class RuntimeLogger:
             The run_id (same as session_id if provided)
         """
         if session_id:
-            # Use provided session_id as run_id (unified sessions)
             self._run_id = session_id
         else:
-            # Generate run_id in old format (backward compatibility)
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
             short_uuid = uuid.uuid4().hex[:8]
             self._run_id = f"{ts}_{short_uuid}"
@@ -118,6 +117,12 @@ class RuntimeLogger:
                 )
             )
 
+        # OTel / trace context: from observability ContextVar (empty if not set)
+        ctx = get_trace_context()
+        trace_id = ctx.get("trace_id", "")
+        execution_id = ctx.get("execution_id", "")
+        span_id = uuid.uuid4().hex[:16]  # OTel 16-hex span_id per step
+
         step_log = NodeStepLog(
             node_id=node_id,
             node_type=node_type,
@@ -132,6 +137,9 @@ class RuntimeLogger:
             error=error,
             stacktrace=stacktrace,
             is_partial=is_partial,
+            trace_id=trace_id,
+            span_id=span_id,
+            execution_id=execution_id,
         )
 
         with self._lock:
@@ -190,6 +198,11 @@ class RuntimeLogger:
             needs_attention = True
             attention_reasons.append(f"Many iterations: {total_steps}")
 
+        # OTel / trace context for L2 correlation
+        ctx = get_trace_context()
+        trace_id = ctx.get("trace_id", "")
+        span_id = uuid.uuid4().hex[:16]  # Optional node-level span
+
         detail = NodeDetail(
             node_id=node_id,
             node_name=node_name,
@@ -210,6 +223,8 @@ class RuntimeLogger:
             continue_count=continue_count,
             needs_attention=needs_attention,
             attention_reasons=attention_reasons,
+            trace_id=trace_id,
+            span_id=span_id,
         )
 
         with self._lock:
@@ -274,6 +289,11 @@ class RuntimeLogger:
             for nd in node_details:
                 attention_reasons.extend(nd.attention_reasons)
 
+            # OTel / trace context for L1 correlation
+            ctx = get_trace_context()
+            trace_id = ctx.get("trace_id", "")
+            execution_id = ctx.get("execution_id", "")
+
             summary = RunSummaryLog(
                 run_id=self._run_id,
                 agent_id=self._agent_id,
@@ -288,6 +308,8 @@ class RuntimeLogger:
                 started_at=self._started_at,
                 duration_ms=duration_ms,
                 execution_quality=execution_quality,
+                trace_id=trace_id,
+                execution_id=execution_id,
             )
 
             await self._store.save_summary(self._run_id, summary)

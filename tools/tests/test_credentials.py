@@ -1,5 +1,7 @@
 """Tests for CredentialStoreAdapter."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from aden_tools.credentials import (
@@ -484,3 +486,130 @@ class TestSpecCompleteness:
                 assert spec.credential_group == "", (
                     f"Credential '{name}' has unexpected credential_group='{spec.credential_group}'"
                 )
+
+
+class TestCredentialStoreAdapterAdenSync:
+    """Tests for Aden sync branch in CredentialStoreAdapter.default()."""
+
+    def _patch_encrypted_storage(self, tmp_path):
+        """Patch EncryptedFileStorage to use a temp directory."""
+        from framework.credentials.storage import EncryptedFileStorage
+
+        original_init = EncryptedFileStorage.__init__
+
+        def patched_init(self_inner, base_path=None, **kwargs):
+            original_init(self_inner, base_path=str(tmp_path / "creds"), **kwargs)
+
+        return patch.object(EncryptedFileStorage, "__init__", patched_init)
+
+    def test_default_with_aden_key_creates_aden_store(self, monkeypatch, tmp_path):
+        """When ADEN_API_KEY is set, default() wires up AdenSyncProvider."""
+        monkeypatch.setenv("ADEN_API_KEY", "test-aden-key")
+        monkeypatch.setenv("ADEN_API_URL", "https://test.adenhq.com")
+
+        mock_client = MagicMock()
+        mock_client.list_integrations.return_value = []
+
+        with (
+            self._patch_encrypted_storage(tmp_path),
+            patch(
+                "framework.credentials.aden.AdenCredentialClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "framework.credentials.aden.AdenClientConfig",
+            ),
+        ):
+            adapter = CredentialStoreAdapter.default()
+
+        # Verify AdenSyncProvider is registered
+        provider = adapter.store.get_provider("aden_sync")
+        assert provider is not None
+
+    def test_default_without_aden_key_uses_env_fallback(self, monkeypatch, tmp_path):
+        """When ADEN_API_KEY is not set, default() uses env-only storage."""
+        monkeypatch.delenv("ADEN_API_KEY", raising=False)
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-brave-key")
+
+        with self._patch_encrypted_storage(tmp_path):
+            adapter = CredentialStoreAdapter.default()
+
+        # No Aden provider should be registered
+        assert adapter.store.get_provider("aden_sync") is None
+        # Env vars still work
+        assert adapter.get("brave_search") == "test-brave-key"
+
+    def test_default_aden_non_aden_cred_falls_through_to_env(self, monkeypatch, tmp_path):
+        """Non-Aden credentials (e.g. brave_search) resolve from env vars even with Aden."""
+        monkeypatch.setenv("ADEN_API_KEY", "test-aden-key")
+        monkeypatch.setenv("ADEN_API_URL", "https://test.adenhq.com")
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-from-env")
+
+        mock_client = MagicMock()
+        mock_client.list_integrations.return_value = []
+        # Aden returns None for brave_search (404 → None)
+        mock_client.get_credential.return_value = None
+
+        with (
+            self._patch_encrypted_storage(tmp_path),
+            patch(
+                "framework.credentials.aden.AdenCredentialClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "framework.credentials.aden.AdenClientConfig",
+            ),
+        ):
+            adapter = CredentialStoreAdapter.default()
+
+        assert adapter.get("brave_search") == "brave-from-env"
+
+    def test_default_aden_sync_failure_falls_back_gracefully(self, monkeypatch, tmp_path):
+        """If Aden initial sync fails, adapter is still created and env vars work."""
+        monkeypatch.setenv("ADEN_API_KEY", "test-aden-key")
+        monkeypatch.setenv("ADEN_API_URL", "https://test.adenhq.com")
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-fallback")
+
+        mock_client = MagicMock()
+        mock_client.list_integrations.side_effect = Exception("Connection refused")
+        mock_client.get_credential.return_value = None
+
+        with (
+            self._patch_encrypted_storage(tmp_path),
+            patch(
+                "framework.credentials.aden.AdenCredentialClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "framework.credentials.aden.AdenClientConfig",
+            ),
+        ):
+            adapter = CredentialStoreAdapter.default()
+
+        # Adapter was created despite sync failure
+        assert adapter is not None
+        assert adapter.get("brave_search") == "brave-fallback"
+
+    def test_default_aden_import_error_falls_back(self, monkeypatch, tmp_path):
+        """If Aden imports fail (e.g. missing httpx), fall back to default storage."""
+        monkeypatch.setenv("ADEN_API_KEY", "test-aden-key")
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-fallback")
+
+        import builtins
+
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "framework.credentials.aden":
+                raise ImportError(f"No module named '{name}'")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            self._patch_encrypted_storage(tmp_path),
+            patch.object(builtins, "__import__", side_effect=mock_import),
+        ):
+            adapter = CredentialStoreAdapter.default()
+
+        # Fell back to default — env vars still work, no Aden provider
+        assert adapter.store.get_provider("aden_sync") is None
+        assert adapter.get("brave_search") == "brave-fallback"
