@@ -163,7 +163,6 @@ class EdgeSpec(BaseModel):
     ) -> bool:
         """Evaluate a conditional expression."""
 
-
         if not self.condition_expr:
             return True
 
