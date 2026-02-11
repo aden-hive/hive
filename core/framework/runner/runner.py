@@ -686,7 +686,9 @@ class AgentRunner:
             else:
                 # Fall back to environment variable
                 # First check api_key_env_var from config (set by quickstart)
-                api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(self.model)
+                api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
+                    self.model
+                )
                 if api_key_env and os.environ.get(api_key_env):
                     self._llm = LiteLLMProvider(model=self.model)
                 else:
