@@ -669,6 +669,7 @@ AskUserQuestion(questions=[{
 |------|---------------|
 | `config.py` | `AgentMetadata.name` — the display name shown in TUI agent selection |
 | `config.py` | `AgentMetadata.description` — agent description |
+| `config.py` | `AgentMetadata.intro_message` — greeting shown to user when TUI loads |
 | `agent.py` | Module docstring (line 1) |
 | `agent.py` | `class OldNameAgent:` → `class NewNameAgent:` |
 | `agent.py` | `GraphSpec(id="old-name-graph")` → `GraphSpec(id="new-name-graph")` — shown in TUI status bar |
@@ -735,7 +736,7 @@ mcp__agent-builder__export_graph()
 
 **THEN write the Python package files** using the exported data. Create these files in `exports/AGENT_NAME/`:
 
-1. `config.py` - Runtime configuration with model settings
+1. `config.py` - Runtime configuration with model settings and `AgentMetadata` (including `intro_message` — the greeting shown when TUI loads)
 2. `nodes/__init__.py` - All NodeSpec definitions
 3. `agent.py` - Goal, edges, graph config, and agent class
 4. `__init__.py` - Package exports

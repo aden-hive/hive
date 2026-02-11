@@ -82,8 +82,10 @@ class ChatRepl(Vertical):
         self._streaming_snapshot: str = ""
         self._waiting_for_input: bool = False
         self._input_node_id: str | None = None
+        self._pending_ask_question: str = ""
         self._resume_session = resume_session
         self._resume_checkpoint = resume_checkpoint
+        self._session_index: list[str] = []  # IDs from last listing
 
         # Dedicated event loop for agent execution.
         # Keeps blocking runtime code (LLM calls, MCP tools) off
@@ -138,8 +140,9 @@ class ChatRepl(Vertical):
             self._write_history("""[bold cyan]Available Commands:[/bold cyan]
   [bold]/sessions[/bold]                    - List all sessions for this agent
   [bold]/sessions[/bold] <session_id>       - Show session details and checkpoints
-  [bold]/resume[/bold]                     - Resume latest paused/failed session
-  [bold]/resume[/bold] <session_id>         - Resume session from where it stopped
+  [bold]/resume[/bold]                      - List sessions and pick one to resume
+  [bold]/resume[/bold] <number>             - Resume session by list number
+  [bold]/resume[/bold] <session_id>         - Resume session by ID
   [bold]/recover[/bold] <session_id> <cp_id> - Recover from specific checkpoint
   [bold]/pause[/bold]                      - Pause current execution (Ctrl+Z)
   [bold]/help[/bold]                       - Show this help message
@@ -147,8 +150,9 @@ class ChatRepl(Vertical):
 [dim]Examples:[/dim]
   /sessions                              [dim]# List all sessions[/dim]
   /sessions session_20260208_143022      [dim]# Show session details[/dim]
-  /resume                                [dim]# Resume latest session (from state)[/dim]
-  /resume session_20260208_143022        [dim]# Resume specific session (from state)[/dim]
+  /resume                                [dim]# Show numbered session list[/dim]
+  /resume 1                              [dim]# Resume first listed session[/dim]
+  /resume session_20260208_143022        [dim]# Resume by full session ID[/dim]
   /recover session_20260208_143022 cp_xxx [dim]# Recover from specific checkpoint[/dim]
   /pause                                 [dim]# Pause (or Ctrl+Z)[/dim]
 """)
@@ -156,15 +160,25 @@ class ChatRepl(Vertical):
             session_id = parts[1].strip() if len(parts) > 1 else None
             await self._cmd_sessions(session_id)
         elif cmd == "/resume":
-            # Resume from session state (not checkpoint-based)
             if len(parts) < 2:
-                session_id = await self._find_latest_resumable_session()
-                if not session_id:
-                    self._write_history("[bold red]No resumable sessions found[/bold red]")
-                    self._write_history("  Tip: Use [bold]/sessions[/bold] to see all sessions")
+                # No arg → show session list so user can pick one
+                await self._cmd_sessions(None)
+                return
+
+            arg = parts[1].strip()
+
+            # Numeric index → resolve from last listing
+            if arg.isdigit():
+                idx = int(arg) - 1  # 1-based to 0-based
+                if 0 <= idx < len(self._session_index):
+                    session_id = self._session_index[idx]
+                else:
+                    self._write_history(f"[bold red]Error:[/bold red] No session at index {arg}")
+                    self._write_history("  Use [bold]/resume[/bold] to see available sessions")
                     return
             else:
-                session_id = parts[1].strip()
+                session_id = arg
+
             await self._cmd_resume(session_id)
         elif cmd == "/recover":
             # Recover from specific checkpoint
@@ -241,6 +255,15 @@ class ChatRepl(Vertical):
         except Exception:
             return None
 
+    def _get_session_label(self, state: dict) -> str:
+        """Extract the first user message from input_data as a human-readable label."""
+        input_data = state.get("input_data", {})
+        for value in input_data.values():
+            if isinstance(value, str) and value.strip():
+                label = value.strip()
+                return label[:60] + "..." if len(label) > 60 else label
+        return "(no input)"
+
     async def _list_sessions(self, storage_path: Path) -> None:
         """List all sessions for the agent."""
         self._write_history("[bold cyan]Available Sessions:[/bold cyan]")
@@ -264,6 +287,11 @@ class ChatRepl(Vertical):
 
         self._write_history(f"[dim]Found {len(session_dirs)} session(s)[/dim]\n")
 
+        # Reset the session index for numeric lookups
+        self._session_index = []
+
+        import json
+
         for session_dir in session_dirs[:10]:  # Show last 10 sessions
             session_id = session_dir.name
             state_file = session_dir / "state.json"
@@ -273,12 +301,15 @@ class ChatRepl(Vertical):
 
             # Read session state
             try:
-                import json
-
                 with open(state_file) as f:
                     state = json.load(f)
 
+                # Track this session for /resume <number> lookup
+                self._session_index.append(session_id)
+                index = len(self._session_index)
+
                 status = state.get("status", "unknown").upper()
+                label = self._get_session_label(state)
 
                 # Status with color
                 if status == "COMPLETED":
@@ -292,24 +323,16 @@ class ChatRepl(Vertical):
                 else:
                     status_colored = f"[dim]{status}[/dim]"
 
-                # Check for checkpoints
-                checkpoint_dir = session_dir / "checkpoints"
-                checkpoint_count = 0
-                if checkpoint_dir.exists():
-                    checkpoint_files = list(checkpoint_dir.glob("cp_*.json"))
-                    checkpoint_count = len(checkpoint_files)
-
-                # Session line
-                self._write_history(f"📋 [bold]{session_id}[/bold]")
-                self._write_history(f"   Status: {status_colored}  Checkpoints: {checkpoint_count}")
-
-                if checkpoint_count > 0:
-                    self._write_history(f"   [dim]Resume: /resume {session_id}[/dim]")
-
+                # Session line with index and label
+                self._write_history(f"  [bold]{index}.[/bold] {label}  {status_colored}")
+                self._write_history(f"     [dim]{session_id}[/dim]")
                 self._write_history("")  # Blank line
 
             except Exception as e:
                 self._write_history(f"   [dim red]Error reading: {e}[/dim red]")
+
+        if self._session_index:
+            self._write_history("[dim]Use [bold]/resume <number>[/bold] to resume a session[/dim]")
 
     async def _show_session_details(self, storage_path: Path, session_id: str) -> None:
         """Show detailed information about a specific session."""
@@ -638,10 +661,14 @@ class ChatRepl(Vertical):
         # Check for resumable sessions
         self._check_and_show_resumable_sessions()
 
-        history.write(
-            "[dim]Quick start: /sessions to see previous sessions, "
-            "/pause to pause execution[/dim]\n"
-        )
+        # Show agent intro message if available
+        if self.runtime.intro_message:
+            history.write(f"[bold blue]Agent:[/bold blue] {self.runtime.intro_message}\n")
+        else:
+            history.write(
+                "[dim]Quick start: /sessions to see previous sessions, "
+                "/pause to pause execution[/dim]\n"
+            )
 
     def _check_and_show_resumable_sessions(self) -> None:
         """Check for non-terminated sessions and prompt user."""
@@ -678,16 +705,20 @@ class ChatRepl(Vertical):
                             {
                                 "session_id": session_dir.name,
                                 "status": status.upper(),
+                                "label": self._get_session_label(state),
                             }
                         )
                 except Exception:
                     continue
 
             if resumable:
-                self._write_history("\n[bold yellow]⚠ Non-terminated sessions found:[/bold yellow]")
+                # Populate session index so /resume <number> works immediately
+                self._session_index = [s["session_id"] for s in resumable[:3]]
+
+                self._write_history("\n[bold yellow]Non-terminated sessions found:[/bold yellow]")
                 for i, session in enumerate(resumable[:3], 1):  # Show top 3
                     status = session["status"]
-                    session_id = session["session_id"]
+                    label = session["label"]
 
                     # Color code status
                     if status == "PAUSED":
@@ -699,15 +730,10 @@ class ChatRepl(Vertical):
                     else:
                         status_colored = f"[dim]{status}[/dim]"
 
-                    self._write_history(f"  {i}. {session_id[:32]}... [{status_colored}]")
+                    self._write_history(f"  [bold]{i}.[/bold] {label}  {status_colored}")
 
-                self._write_history("\n[bold cyan]What would you like to do?[/bold cyan]")
-                self._write_history("  • Type [bold]/resume[/bold] to continue the latest session")
-                self._write_history(
-                    f"  • Type [bold]/resume {resumable[0]['session_id']}[/bold] "
-                    "for specific session"
-                )
-                self._write_history("  • Or just type your input to start a new session\n")
+                self._write_history("\n  Type [bold]/resume <number>[/bold] to continue a session")
+                self._write_history("  Or just type your input to start a new session\n")
 
         except Exception:
             # Silently fail - don't block TUI startup
@@ -829,8 +855,16 @@ class ChatRepl(Vertical):
 
     def handle_tool_started(self, tool_name: str, tool_input: dict[str, Any]) -> None:
         """Handle a tool call starting."""
-        # Update indicator to show tool activity
         indicator = self.query_one("#processing-indicator", Label)
+
+        if tool_name == "ask_user":
+            # Stash the question for handle_input_requested() to display.
+            # Suppress the generic "Tool: ask_user" line.
+            self._pending_ask_question = tool_input.get("question", "")
+            indicator.update("Preparing question...")
+            return
+
+        # Update indicator to show tool activity
         indicator.update(f"Using tool: {tool_name}...")
 
         # Write a discrete status line to history
@@ -838,6 +872,11 @@ class ChatRepl(Vertical):
 
     def handle_tool_completed(self, tool_name: str, result: str, is_error: bool) -> None:
         """Handle a tool call completing."""
+        if tool_name == "ask_user":
+            # Suppress the synthetic "Waiting for user input..." result.
+            # The actual question is displayed by handle_input_requested().
+            return
+
         result_str = str(result)
         preview = result_str[:200] + "..." if len(result_str) > 200 else result_str
         preview = preview.replace("\n", " ")
@@ -868,6 +907,7 @@ class ChatRepl(Vertical):
         self._streaming_snapshot = ""
         self._waiting_for_input = False
         self._input_node_id = None
+        self._pending_ask_question = ""
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", Input)
@@ -886,6 +926,7 @@ class ChatRepl(Vertical):
         self._current_exec_id = None
         self._streaming_snapshot = ""
         self._waiting_for_input = False
+        self._pending_ask_question = ""
         self._input_node_id = None
 
         # Re-enable input
@@ -902,9 +943,17 @@ class ChatRepl(Vertical):
         and sets a flag so the next submission routes to inject_input().
         """
         # Flush accumulated streaming text as agent output
-        if self._streaming_snapshot:
-            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
+        flushed_snapshot = self._streaming_snapshot
+        if flushed_snapshot:
+            self._write_history(f"[bold blue]Agent:[/bold blue] {flushed_snapshot}")
             self._streaming_snapshot = ""
+
+        # Display the ask_user question if stashed and not already
+        # present in the streaming snapshot (avoids double-display).
+        question = self._pending_ask_question
+        self._pending_ask_question = ""
+        if question and question not in flushed_snapshot:
+            self._write_history(f"[bold blue]Agent:[/bold blue] {question}")
 
         self._waiting_for_input = True
         self._input_node_id = node_id or None
