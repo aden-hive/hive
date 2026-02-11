@@ -33,6 +33,7 @@ from framework.graph.node import (
 from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
+from framework.observability import set_trace_context
 from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
@@ -228,6 +229,9 @@ class GraphExecutor:
         Returns:
             ExecutionResult with output and metrics
         """
+        # Add agent_id to trace context for correlation
+        set_trace_context(agent_id=graph.id)
+
         # Validate graph
         errors = graph.validate()
         if errors:
@@ -364,7 +368,7 @@ class GraphExecutor:
             # Check if resuming from paused_at (session state resume)
             paused_at = session_state.get("paused_at") if session_state else None
             node_ids = [n.id for n in graph.nodes]
-            self.logger.info(f"🔍 Debug: paused_at={paused_at}, available node IDs={node_ids}")
+            self.logger.debug(f"paused_at={paused_at}, available node IDs={node_ids}")
 
             if paused_at and graph.get_node(paused_at) is not None:
                 # Resume from paused_at node directly (works for any node, not just pause_nodes)
@@ -404,7 +408,6 @@ class GraphExecutor:
 
         if self.runtime_logger:
             # Extract session_id from storage_path if available (for unified sessions)
-            # storage_path format: base_path/sessions/{session_id}/
             session_id = ""
             if self._storage_path and self._storage_path.name.startswith("session_"):
                 session_id = self._storage_path.name
@@ -501,6 +504,21 @@ class GraphExecutor:
                     continue
 
                 path.append(current_node_id)
+
+                # Clear stale nullable outputs from previous visits.
+                # When a node is re-visited (e.g. review → process-batch → review),
+                # nullable outputs from the PREVIOUS visit linger in shared memory.
+                # This causes stale edge conditions to fire (e.g. "feedback is not None"
+                # from visit 1 triggers even when visit 2 sets "final_summary" instead).
+                # Clearing them ensures only the CURRENT visit's outputs affect routing.
+                if node_visit_counts.get(current_node_id, 0) > 1:
+                    nullable_keys = getattr(node_spec, "nullable_output_keys", None) or []
+                    for key in nullable_keys:
+                        if memory.read(key) is not None:
+                            memory.write(key, None, validate=False)
+                            self.logger.info(
+                                f"   🧹 Cleared stale nullable output '{key}' from previous visit"
+                            )
 
                 # Check if pause (HITL) before execution
                 if current_node_id in graph.pause_nodes:

@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__agent-builder__create_session",
+      "mcp__agent-builder__set_goal",
+      "mcp__agent-builder__add_node",
+      "mcp__agent-builder__add_edge",
+      "mcp__agent-builder__configure_loop",
+      "mcp__agent-builder__add_mcp_server",
+      "mcp__agent-builder__validate_graph",
+      "mcp__agent-builder__export_graph",
+      "mcp__agent-builder__load_session_by_id",
+      "Bash(git status:*)",
+      "Bash(gh run view:*)",
+      "Bash(uv run:*)",
+      "Bash(env:*)",
+      "mcp__agent-builder__test_node",
+      "mcp__agent-builder__list_mcp_tools",
+      "Bash(python -m py_compile:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(source:*)",
+      "mcp__agent-builder__update_node",
+      "mcp__agent-builder__check_missing_credentials",
+      "mcp__agent-builder__list_stored_credentials",
+      "Bash(find:*)",
+      "mcp__agent-builder__run_tests",
+      "Bash(PYTHONPATH=core:exports:tools/src uv run pytest:*)",
+      "mcp__agent-builder__list_agent_sessions",
+      "mcp__agent-builder__generate_constraint_tests",
+      "mcp__agent-builder__generate_success_tests"
+    ]
+  },
+  "enabledMcpjsonServers": ["agent-builder", "tools"]
+}

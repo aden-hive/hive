@@ -951,7 +951,7 @@ async def test_client_facing_node_streams_output():
         config=LoopConfig(max_iterations=5),
     )
 
-    # Text-only on client_facing no longer blocks (no ask_user called),
+    # Text-only on client_facing does not block (no ask_user called),
     # so the node completes without needing a shutdown workaround.
     result = await node.execute(ctx)
 

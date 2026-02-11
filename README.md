@@ -120,6 +120,16 @@ hive tui
 # Or run directly
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
+##  Coding Agent Support
+### Opencode 
+Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
+
+1. **Setup:** Run the quickstart script 
+2. **Launch:** Open Opencode in the project root.
+3. **Activate:** Type `/hive` in the chat to switch to the Hive Agent.
+4. **Verify:** Ask the agent *"List your tools"* to confirm the connection.
+
+The agent has access to all Hive skills and can scaffold agents, add tools, and debug workflows directly from the chat.
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
 
