@@ -69,9 +69,21 @@ You do NOT have web search — instead, scrape news directly from known sites.
    - Recency (past week)
    - Significance and diversity of topics
 
+   CRITICAL: Copy URLs EXACTLY as they appear in the "href" field of the scraped
+   links. Do NOT reconstruct, guess, or modify URLs from memory. Use the verbatim
+   href value from the web_scrape result.
+
 3. For each selected article, use web_scrape with max_length=3000 on the
    individual article URL to get the content. Extract: title, source name,
    URL, publication date, a 2-3 sentence summary, and the main topic category.
+
+4. **VERIFY LINKS** — Before producing your final output, verify each article URL
+   by checking the web_scrape result you got in step 3:
+   - If the scrape returned content successfully, the URL is verified — use it as-is.
+   - If the scrape returned an error or the page was not found (404, timeout, etc.),
+     go back to the front page links from step 1 and pick a different article URL
+     to replace it. Scrape the replacement to confirm it works.
+   - Only include articles whose URLs returned successful scrape results.
 
 **Output format:**
 Use set_output("articles_data", <JSON string>) with this structure:
@@ -94,12 +106,13 @@ Use set_output("articles_data", <JSON string>) with this structure:
 
 **Rules:**
 - Only include REAL articles with REAL URLs you scraped. Never fabricate.
+- The "url" field MUST be a URL you successfully scraped. Never invent URLs.
 - Focus on news from the past week.
 - Aim for at least 3 distinct topic categories.
 - Keep summaries factual and concise.
 - If a site fails to load, skip it and move on to the next.
 - Always use max_length to limit scraped content (5000 for front pages, 3000 for articles).
-- Work in batches: scrape front pages first, then articles. Don't scrape everything at once.
+- Work in batches: scrape front pages first, then articles, then verify. Don't scrape everything at once.
 """,
     tools=["web_scrape"],
 )
