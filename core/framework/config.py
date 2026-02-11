@@ -6,6 +6,7 @@ helper functions.
 """
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,7 @@ def get_hive_config() -> dict[str, Any]:
     if not HIVE_CONFIG_FILE.exists():
         return {}
     try:
-        with open(HIVE_CONFIG_FILE) as f:
+        with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
@@ -48,6 +49,15 @@ def get_max_tokens() -> int:
     return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
 
 
+def get_api_key() -> str | None:
+    """Return the API key from the environment variable specified in configuration."""
+    llm = get_hive_config().get("llm", {})
+    api_key_env_var = llm.get("api_key_env_var")
+    if api_key_env_var:
+        return os.environ.get(api_key_env_var)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # RuntimeConfig – shared across agent templates
 # ---------------------------------------------------------------------------
@@ -60,5 +70,5 @@ class RuntimeConfig:
     model: str = field(default_factory=get_preferred_model)
     temperature: float = 0.7
     max_tokens: int = field(default_factory=get_max_tokens)
-    api_key: str | None = None
+    api_key: str | None = field(default_factory=get_api_key)
     api_base: str | None = None

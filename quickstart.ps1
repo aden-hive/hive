@@ -15,7 +15,9 @@
     Requires: PowerShell 5.1+ and Python 3.11+
 #>
 
-$ErrorActionPreference = "Stop"
+# Use "Continue" so stderr from external tools (uv, python) does not
+# terminate the script.  Errors are handled via $LASTEXITCODE checks.
+$ErrorActionPreference = "Continue"
 
 # ============================================================
 # Colors / helpers
@@ -179,12 +181,49 @@ Write-Host ""
 # ============================================================
 
 $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+
+# If uv not in PATH, check if it exists in default location
+if (-not $uvCmd) {
+    $uvDir = Join-Path $env:USERPROFILE ".local\bin"
+    $uvExePath = Join-Path $uvDir "uv.exe"
+
+    if (Test-Path $uvExePath) {
+        Write-Host "  uv found at $uvExePath, updating PATH..." -ForegroundColor Yellow
+
+        # Add to User PATH
+        $currentUserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+        if (-not $currentUserPath.Contains($uvDir)) {
+            $newUserPath = $currentUserPath + ";" + $uvDir
+            [System.Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+        }
+
+        # Refresh PATH for current session
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+
+        if ($uvCmd) {
+            Write-Ok "uv is now in PATH"
+        }
+    }
+}
+
+# If still not found, install it
 if (-not $uvCmd) {
     Write-Warn "uv not found. Installing..."
     try {
         # Official uv installer for Windows
         Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
-        # Refresh PATH so we can find the newly installed uv
+
+        # Ensure uv directory is in User PATH for future sessions
+        $uvDir = Join-Path $env:USERPROFILE ".local\bin"
+        $currentUserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+        if (-not $currentUserPath.Contains($uvDir)) {
+            $newUserPath = $currentUserPath + ";" + $uvDir
+            [System.Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+            Write-Host "  Added $uvDir to User PATH" -ForegroundColor Green
+        }
+
+        # Refresh PATH for current session
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
         $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
     } catch {
@@ -217,19 +256,11 @@ Push-Location $ScriptDir
 try {
     if (Test-Path "pyproject.toml") {
         Write-Host "  Installing workspace packages... " -NoNewline
-        # 1. Temporarily allow status messages without crashing
-        $oldPref = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
 
-        # 2. Capture the output as a string
-        $syncOutput = & uv sync 2>&1 | Out-String
+        $syncOutput = & uv sync 2>&1
+        $syncExitCode = $LASTEXITCODE
 
-        # 3. Save the actual exit code from uv
-        $actualExitCode = $LASTEXITCODE
-
-        # 4. Restore the strict setting
-        $ErrorActionPreference = $oldPref
-        if ($LASTEXITCODE -eq 0) {
+        if ($syncExitCode -eq 0) {
             Write-Ok "workspace packages installed"
         } else {
             Write-Fail "workspace installation failed"
@@ -243,15 +274,19 @@ try {
 
     # Install Playwright browser
     Write-Host "  Installing Playwright browser... " -NoNewline
-    $null = & uv run $PythonCmd -c "import playwright" 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        $null = & uv run $PythonCmd -m playwright install chromium 2>&1
-        if ($LASTEXITCODE -eq 0) {
+    $null = & uv run python -c "import playwright" 2>&1
+    $importExitCode = $LASTEXITCODE
+    if ($importExitCode -eq 0) {
+        $null = & uv run python -m playwright install chromium 2>&1
+        $playwrightExitCode = $LASTEXITCODE
+
+        if ($playwrightExitCode -eq 0) {
             Write-Ok "ok"
         } else {
             Write-Warn "skipped (install manually: uv run python -m playwright install chromium)"
         }
     } else {
+
         Write-Warn "skipped"
     }
 } finally {
@@ -279,7 +314,7 @@ $imports = @(
 
 foreach ($imp in $imports) {
     Write-Host "  $($imp.Label)... " -NoNewline
-    $null = & uv run $PythonCmd -c "import $($imp.Module)" 2>&1
+    $null = & uv run python -c "import $($imp.Module)" 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Ok "ok"
     } elseif ($imp.Required) {
@@ -579,7 +614,7 @@ Write-Step -Number "6" -Text "Step 6: Initializing credential store..."
 Write-Color -Text "The credential store encrypts API keys and secrets for your agents." -Color DarkGray
 Write-Host ""
 
-$HiveCredDir = [System.IO.Path]::Combine($env:USERPROFILE, ".hive", "credentials")
+$HiveCredDir = Join-Path (Join-Path $env:USERPROFILE ".hive") "credentials"
 
 # Check if HIVE_CREDENTIAL_KEY is already set
 $credKey = [System.Environment]::GetEnvironmentVariable("HIVE_CREDENTIAL_KEY", "User")
@@ -590,7 +625,7 @@ if ($credKey) {
 } else {
     Write-Host "  Generating encryption key... " -NoNewline
     try {
-        $generatedKey = & uv run $PythonCmd -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
+        $generatedKey = & uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
         if ($LASTEXITCODE -eq 0 -and $generatedKey) {
             Write-Ok "ok"
             [System.Environment]::SetEnvironmentVariable("HIVE_CREDENTIAL_KEY", $generatedKey.Trim(), "User")
@@ -621,7 +656,7 @@ if ($credKey) {
     Write-Ok "Credential store initialized at ~/.hive/credentials/"
 
     Write-Host "  Verifying credential store... " -NoNewline
-    $verifyOut = & uv run $PythonCmd -c "from framework.credentials.storage import EncryptedFileStorage; storage = EncryptedFileStorage(); print('ok')" 2>$null
+    $verifyOut = & uv run python -c "from framework.credentials.storage import EncryptedFileStorage; storage = EncryptedFileStorage(); print('ok')" 2>$null
     if ($verifyOut -match "ok") {
         Write-Ok "ok"
     } else {
@@ -645,20 +680,20 @@ $verifications = @(
 
 foreach ($v in $verifications) {
     Write-Host "  $([char]0x2B21) $($v.Label)... " -NoNewline
-    $null = & uv run $PythonCmd -c $v.Cmd 2>&1
+    $null = & uv run python -c $v.Cmd 2>&1
     if ($LASTEXITCODE -eq 0) { Write-Ok "ok" }
     else { Write-Fail "failed"; $verifyErrors++ }
 }
 
 Write-Host "  $([char]0x2B21) litellm... " -NoNewline
-$null = & uv run $PythonCmd -c "import litellm" 2>&1
+$null = & uv run python -c "import litellm" 2>&1
 if ($LASTEXITCODE -eq 0) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host "  $([char]0x2B21) MCP config... " -NoNewline
 if (Test-Path (Join-Path $ScriptDir ".mcp.json")) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host "  $([char]0x2B21) skills... " -NoNewline
-$skillsDir = [System.IO.Path]::Combine($ScriptDir, ".claude", "skills")
+$skillsDir = Join-Path (Join-Path $ScriptDir ".claude") "skills"
 if (Test-Path $skillsDir) {
     $skillCount = (Get-ChildItem -Directory $skillsDir -ErrorAction SilentlyContinue).Count
     Write-Ok "$skillCount found"
@@ -667,7 +702,7 @@ if (Test-Path $skillsDir) {
 }
 
 Write-Host "  $([char]0x2B21) credential store... " -NoNewline
-$credStoreDir = [System.IO.Path]::Combine($env:USERPROFILE, ".hive", "credentials", "credentials")
+$credStoreDir = Join-Path (Join-Path (Join-Path $env:USERPROFILE ".hive") "credentials") "credentials"
 if ($credKey -and (Test-Path $credStoreDir)) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host ""
@@ -683,51 +718,21 @@ if ($verifyErrors -gt 0) {
 
 Write-Step -Number "8" -Text "Step 8: Installing hive CLI..."
 
-# Create a hive.ps1 wrapper in the project root that can be added to PATH
+# Verify hive.ps1 wrapper exists in project root
 $hivePs1Path = Join-Path $ScriptDir "hive.ps1"
-
-$hivePs1Content = @"
-#!/usr/bin/env pwsh
-# Wrapper script for the Hive CLI (Windows).
-# Uses uv to run the hive command in the project's virtual environment.
-
-`$ErrorActionPreference = "Stop"
-`$ScriptDir = Split-Path -Parent `$MyInvocation.MyCommand.Definition
-
-if ((Get-Location).Path -ne `$ScriptDir) {
-    Write-Error "hive must be run from the project directory.``nCurrent directory: `$(Get-Location)``nExpected directory: `$ScriptDir``n``nRun: cd `$ScriptDir"
-    exit 1
+if (Test-Path $hivePs1Path) {
+    Write-Ok "hive.ps1 wrapper found in project root"
+} else {
+    Write-Fail "hive.ps1 not found -- please restore it from version control"
 }
-
-if (-not (Test-Path (Join-Path `$ScriptDir "pyproject.toml")) -or -not (Test-Path (Join-Path `$ScriptDir "core"))) {
-    Write-Error "Not a valid Hive project directory: `$ScriptDir"
-    exit 1
-}
-
-if (-not (Test-Path (Join-Path `$ScriptDir ".venv"))) {
-    Write-Error "Virtual environment not found. Run .\quickstart.ps1 first to set up the project."
-    exit 1
-}
-
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Error "uv is not installed. Run .\quickstart.ps1 first."
-    exit 1
-}
-
-& uv run hive @args
-"@
-
-Set-Content -Path $hivePs1Path -Value $hivePs1Content -Encoding UTF8
-Write-Ok "hive.ps1 wrapper created in project root"
 
 # Optionally add project dir to User PATH
 $currentUserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 if ($currentUserPath -notlike "*$ScriptDir*") {
-    Write-Host ""
-    Write-Host "  To run 'hive' from anywhere, add this directory to your PATH:"
-    Write-Color -Text "  `$env:Path += `";$ScriptDir`"" -Color Cyan
-    Write-Host "  Or permanently:"
-    Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('Path', `$env:Path + ';$ScriptDir', 'User')" -Color Cyan
+    $newUserPath = $currentUserPath + ";" + $ScriptDir
+    [System.Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    Write-Ok "Project directory added to User PATH"
 } else {
     Write-Ok "Project directory already in PATH"
 }
@@ -787,13 +792,31 @@ Write-Host "  You can start an example agent or an agent built by yourself:"
 Write-Color -Text "     .\hive.ps1 tui" -Color Cyan
 Write-Host ""
 
+Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
+Write-Host ""
+Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
+Write-Host ""
+Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
+Write-Host ""
+Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
+Write-Host 'restart your terminal for them to take effect in new sessions.'
+Write-Host ""
+Write-Host "After restarting, test with:" -ForegroundColor Cyan
+Write-Color -Text "  .\hive.ps1 tui" -Color Cyan
+Write-Host ""
+
 if ($SelectedProviderId -or $credKey) {
-    Write-Color -Text "Note:" -Color White -NoNewline
-    Write-Host " Environment variables were saved at the User level."
-    Write-Host "  They will be available in new PowerShell sessions automatically."
-    Write-Host "  For the current session, they are already active."
+    Write-Color -Text "Note:" -Color White
+    Write-Host "• uv has been added to your User PATH"
+    if ($SelectedProviderId) {
+        Write-Host "• $SelectedEnvVar is set for LLM access"
+    }
+    if ($credKey) {
+        Write-Host "• HIVE_CREDENTIAL_KEY is set for credential encryption"
+    }
+    Write-Host "• All variables will persist across reboots"
     Write-Host ""
 }
 
-Write-Color -Text "Run .\quickstart.ps1 again to reconfigure." -Color DarkGray
+Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
 Write-Host ""
