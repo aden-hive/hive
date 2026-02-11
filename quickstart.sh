@@ -66,7 +66,7 @@ prompt_choice() {
 
     local choice
     while true; do
-        read -r -p "Enter choice (1-${#options[@]}): " choice
+        read -r -p "Enter choice (1-${#options[@]}): " choice || true
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
             PROMPT_CHOICE=$((choice - 1))
             return 0
@@ -602,8 +602,7 @@ prompt_model_selection() {
 
     local choice
     while true; do
-        read -r -p "Enter choice [1]: " choice
-        choice="${choice:-1}"
+        read -r -p "Enter choice (1-$count): " choice || true
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
             local idx=$((choice - 1))
             SELECTED_MODEL="$(get_model_choice_id "$provider_id" "$idx")"
@@ -721,7 +720,7 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
         echo ""
 
         while true; do
-            read -r -p "Enter choice (1-$max_choice): " choice
+            read -r -p "Enter choice (1-$max_choice): " choice || true
             if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$max_choice" ]; then
                 if [ "$choice" -eq "$max_choice" ]; then
                     # Fall through to the manual provider selection below

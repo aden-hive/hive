@@ -141,6 +141,12 @@ for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTI
 - **In shell config but NOT in current session** — run `source ~/.zshrc` (or `~/.bashrc`) first, then proceed
 - **Not set anywhere** — `EncryptedFileStorage` will auto-generate one. After storing, tell the user to persist it: `export HIVE_CREDENTIAL_KEY="{generated_key}"` in their shell profile
 
+> **⚠️ IMPORTANT: After adding `HIVE_CREDENTIAL_KEY` to the user's shell config, always display:**
+> ```
+> ⚠️  Environment variables were added to your shell config.
+>     Open a NEW TERMINAL for them to take effect outside this session.
+> ```
+
 #### Option 1: Aden Platform (OAuth)
 
 This is the recommended flow for supported integrations (HubSpot, etc.).
@@ -201,6 +207,12 @@ if success:
     print(f"Saved to {config_path}")
     print(f"Run: {source_cmd}")
 ```
+
+> **⚠️ IMPORTANT: After adding `ADEN_API_KEY` to the user's shell config, always display:**
+> ```
+> ⚠️  Environment variables were added to your shell config.
+>     Open a NEW TERMINAL for them to take effect outside this session.
+> ```
 
 Also save to `~/.hive/configuration.json` for the framework:
 
@@ -607,6 +619,10 @@ All credentials are now configured:
 │                      ✅ CREDENTIALS CONFIGURED                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
+│     OPEN A NEW TERMINAL before running commands below.                      │
+│     Environment variables were saved to your shell config but               │
+│     only take effect in new terminal sessions.                              │
+│                                                                             │
 │  NEXT STEPS:                                                                │
 │                                                                             │
 │  1. RUN YOUR AGENT:                                                         │
@@ -618,7 +634,7 @@ All credentials are now configured:
 │     /hive-debugger                                                          │
 │                                                                             │
 │     The debugger analyzes runtime logs, identifies retry loops, tool        │
-│     failures, stalled execution, and provides actionable fix suggestions.  │
+│     failures, stalled execution, and provides actionable fix suggestions.   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
