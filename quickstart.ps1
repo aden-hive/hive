@@ -217,7 +217,18 @@ Push-Location $ScriptDir
 try {
     if (Test-Path "pyproject.toml") {
         Write-Host "  Installing workspace packages... " -NoNewline
-        $syncOutput = & uv sync 2>&1
+        # 1. Temporarily allow status messages without crashing
+        $oldPref = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+
+        # 2. Capture the output as a string
+        $syncOutput = & uv sync 2>&1 | Out-String
+
+        # 3. Save the actual exit code from uv
+        $actualExitCode = $LASTEXITCODE
+
+        # 4. Restore the strict setting
+        $ErrorActionPreference = $oldPref
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "workspace packages installed"
         } else {
