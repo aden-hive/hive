@@ -75,7 +75,7 @@ def register_all_tools(
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
     register_github(mcp, credentials=credentials)
-    # email supports multiple providers (Resend) with auto-detection
+    # email supports multiple providers (Gmail, Resend)
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
@@ -137,7 +137,6 @@ def register_all_tools(
         "github_get_user_profile",
         "github_get_user_emails",
         "send_email",
-        "send_budget_alert_email",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",

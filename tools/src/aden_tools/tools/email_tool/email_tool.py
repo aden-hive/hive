@@ -4,8 +4,6 @@ Email Tool - Send emails using multiple providers.
 Supports:
 - Gmail (GOOGLE_ACCESS_TOKEN, via Aden OAuth2)
 - Resend (RESEND_API_KEY)
-
-Auto-detection: If provider="auto", tries Gmail first, then Resend.
 """
 
 from __future__ import annotations
@@ -116,17 +114,16 @@ def register_tools(
             "subject": subject,
         }
 
-    def _get_credentials() -> dict:
-        """Get available email credentials."""
+    def _get_credential(provider: Literal["resend", "gmail"]) -> str | None:
+        """Get the credential for the requested provider."""
+        if provider == "gmail":
+            if credentials is not None:
+                return credentials.get("google")
+            return os.getenv("GOOGLE_ACCESS_TOKEN")
+        # resend
         if credentials is not None:
-            return {
-                "resend_api_key": credentials.get("resend"),
-                "gmail_access_token": credentials.get("google"),  # Google OAuth for Gmail
-            }
-        return {
-            "resend_api_key": os.getenv("RESEND_API_KEY"),
-            "gmail_access_token": os.getenv("GOOGLE_ACCESS_TOKEN"),
-        }
+            return credentials.get("resend")
+        return os.getenv("RESEND_API_KEY")
 
     def _resolve_from_email(from_email: str | None) -> str | None:
         """Resolve sender address: explicit param > EMAIL_FROM env var."""
@@ -149,8 +146,8 @@ def register_tools(
         to: str | list[str],
         subject: str,
         html: str,
+        provider: Literal["resend", "gmail"],
         from_email: str | None = None,
-        provider: Literal["auto", "resend", "gmail"] = "auto",
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
     ) -> dict:
@@ -178,70 +175,34 @@ def register_tools(
             bcc_list = None
             subject = f"[TEST -> {', '.join(original_to)}] {subject}"
 
-        creds = _get_credentials()
-        gmail_available = bool(creds["gmail_access_token"])
-        resend_available = bool(creds["resend_api_key"])
-
-        # Gmail doesn't require from_email (defaults to authenticated user).
-        # Resend always requires it.
-        needs_from_email = provider == "resend" or (
-            provider == "auto" and not gmail_available and resend_available
-        )
-        if not from_email and needs_from_email:
+        # Resend always requires from_email; Gmail defaults to authenticated user.
+        if provider == "resend" and not from_email:
             return {
                 "error": "Sender email is required",
                 "help": "Pass from_email or set EMAIL_FROM environment variable",
             }
 
-        try:
+        credential = _get_credential(provider)
+        if not credential:
             if provider == "gmail":
-                if not gmail_available:
-                    return {
-                        "error": "Gmail credentials not configured",
-                        "help": "Connect Gmail via hive.adenhq.com",
-                    }
-                return _send_via_gmail(
-                    creds["gmail_access_token"],
-                    to_list,
-                    subject,
-                    html,
-                    from_email,
-                    cc_list,
-                    bcc_list,
-                )
-
-            if provider == "resend":
-                if not resend_available:
-                    return {
-                        "error": "Resend credentials not configured",
-                        "help": "Set RESEND_API_KEY environment variable. "
-                        "Get a key at https://resend.com/api-keys",
-                    }
-                return _send_via_resend(
-                    creds["resend_api_key"], to_list, subject, html, from_email, cc_list, bcc_list
-                )
-
-            # auto: Gmail first (user's own identity), then Resend
-            if gmail_available:
-                return _send_via_gmail(
-                    creds["gmail_access_token"],
-                    to_list,
-                    subject,
-                    html,
-                    from_email,
-                    cc_list,
-                    bcc_list,
-                )
-            if resend_available:
-                return _send_via_resend(
-                    creds["resend_api_key"], to_list, subject, html, from_email, cc_list, bcc_list
-                )
-
+                return {
+                    "error": "Gmail credentials not configured",
+                    "help": "Connect Gmail via hive.adenhq.com",
+                }
             return {
-                "error": "No email credentials configured",
-                "help": "Connect Gmail via hive.adenhq.com or set RESEND_API_KEY",
+                "error": "Resend credentials not configured",
+                "help": "Set RESEND_API_KEY environment variable. "
+                "Get a key at https://resend.com/api-keys",
             }
 
+        try:
+            if provider == "gmail":
+                return _send_via_gmail(
+                    credential, to_list, subject, html, from_email, cc_list, bcc_list
+                )
+            return _send_via_resend(
+                credential, to_list, subject, html, from_email, cc_list, bcc_list
+            )
         except Exception as e:
             return {"error": f"Email send failed: {e}"}
 
@@ -250,8 +211,8 @@ def register_tools(
         to: str | list[str],
         subject: str,
         html: str,
+        provider: Literal["resend", "gmail"],
         from_email: str | None = None,
-        provider: Literal["auto", "resend", "gmail"] = "auto",
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
     ) -> dict:
@@ -259,7 +220,6 @@ def register_tools(
         Send an email.
 
         Supports multiple email providers:
-        - "auto": Tries Gmail first, then Resend (default)
         - "gmail": Use Gmail API (requires Gmail OAuth2 via Aden)
         - "resend": Use Resend API (requires RESEND_API_KEY)
 
@@ -267,9 +227,9 @@ def register_tools(
             to: Recipient email address(es). Single string or list of strings.
             subject: Email subject line (1-998 chars per RFC 2822).
             html: Email body as HTML string.
+            provider: Email provider to use ("gmail" or "resend"). Required.
             from_email: Sender email address. Falls back to EMAIL_FROM env var if not provided.
                         Optional for Gmail (defaults to authenticated user's address).
-            provider: Email provider to use ("auto", "gmail", or "resend").
             cc: CC recipient(s). Single string or list of strings. Optional.
             bcc: BCC recipient(s). Single string or list of strings. Optional.
 
@@ -277,74 +237,4 @@ def register_tools(
             Dict with send result including provider used and message ID,
             or error dict with "error" and optional "help" keys.
         """
-        return _send_email_impl(to, subject, html, from_email, provider, cc, bcc)
-
-    @mcp.tool()
-    def send_budget_alert_email(
-        to: str | list[str],
-        budget_name: str,
-        current_spend: float,
-        budget_limit: float,
-        currency: str = "USD",
-        from_email: str | None = None,
-        provider: Literal["auto", "resend", "gmail"] = "auto",
-        cc: str | list[str] | None = None,
-        bcc: str | list[str] | None = None,
-    ) -> dict:
-        """
-        Send a budget alert email notification.
-
-        Generates a formatted HTML email for budget threshold alerts
-        and sends it via the configured email provider.
-
-        Args:
-            to: Recipient email address(es).
-            budget_name: Name of the budget (e.g., "Marketing Q1").
-            current_spend: Current spending amount.
-            budget_limit: Budget limit amount.
-            currency: Currency code (default: "USD").
-            from_email: Sender email address. Falls back to EMAIL_FROM env var if not provided.
-                        Optional for Gmail (defaults to authenticated user's address).
-            provider: Email provider to use ("auto", "gmail", or "resend").
-            cc: CC recipient(s). Single string or list of strings. Optional.
-            bcc: BCC recipient(s). Single string or list of strings. Optional.
-
-        Returns:
-            Dict with send result or error dict.
-        """
-        percentage = (current_spend / budget_limit * 100) if budget_limit > 0 else 0
-
-        if percentage >= 100:
-            severity = "EXCEEDED"
-            color = "#dc2626"
-        elif percentage >= 90:
-            severity = "CRITICAL"
-            color = "#ea580c"
-        elif percentage >= 75:
-            severity = "WARNING"
-            color = "#ca8a04"
-        else:
-            severity = "INFO"
-            color = "#2563eb"
-
-        subject = f"[{severity}] Budget Alert: {budget_name} at {percentage:.0f}%"
-        html = f"""
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: {color};">Budget Alert: {severity}</h2>
-            <p><strong>Budget:</strong> {budget_name}</p>
-            <p><strong>Current Spend:</strong> {currency} {current_spend:,.2f}</p>
-            <p><strong>Budget Limit:</strong> {currency} {budget_limit:,.2f}</p>
-            <p><strong>Usage:</strong>
-                <span style="color: {color}; font-weight: bold;">{percentage:.1f}%</span></p>
-        </div>
-        """
-
-        return _send_email_impl(
-            to=to,
-            subject=subject,
-            html=html,
-            from_email=from_email,
-            provider=provider,
-            cc=cc,
-            bcc=bcc,
-        )
+        return _send_email_impl(to, subject, html, provider, from_email, cc, bcc)

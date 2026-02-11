@@ -9,7 +9,7 @@ from .base import CredentialSpec
 EMAIL_CREDENTIALS = {
     "resend": CredentialSpec(
         env_var="RESEND_API_KEY",
-        tools=["send_email", "send_budget_alert_email"],
+        tools=["send_email"],
         node_types=[],
         required=False,
         startup_required=False,
@@ -35,7 +35,7 @@ EMAIL_CREDENTIALS = {
     ),
     "google": CredentialSpec(
         env_var="GOOGLE_ACCESS_TOKEN",
-        tools=["send_email", "send_budget_alert_email"],
+        tools=["send_email"],
         node_types=[],
         required=False,
         startup_required=False,
