@@ -55,6 +55,7 @@ from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
 from .port_scanner import register_tools as register_port_scanner
+from .razorpay_tool import register_tools as register_razorpay
 from .risk_scorer import register_tools as register_risk_scorer
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
@@ -106,6 +107,7 @@ def register_all_tools(
     register_calendar(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_razorpay(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
@@ -221,6 +223,12 @@ def register_all_tools(
         "query_runtime_logs",
         "query_runtime_log_details",
         "query_runtime_log_raw",
+        "razorpay_list_payments",
+        "razorpay_get_payment",
+        "razorpay_create_payment_link",
+        "razorpay_list_invoices",
+        "razorpay_get_invoice",
+        "razorpay_create_refund",
         "scholar_search",
         "scholar_get_citations",
         "scholar_get_author",
