@@ -19,16 +19,24 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
 
-
 def get_hive_config() -> dict[str, Any]:
     """Load hive configuration from ~/.hive/configuration.json."""
     if not HIVE_CONFIG_FILE.exists():
         return {}
+
     try:
         with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Invalid JSON in Hive configuration file: {HIVE_CONFIG_FILE}\n"
+            f"JSON error: {e}"
+        ) from e
+    except OSError as e:
+        raise OSError(
+            f"Failed to read Hive configuration file: {HIVE_CONFIG_FILE}\n"
+            f"OS error: {e}"
+        ) from e
 
 
 # ---------------------------------------------------------------------------
