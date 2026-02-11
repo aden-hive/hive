@@ -528,9 +528,7 @@ export AGENT_STORAGE_PATH="/custom/storage"
 ### Automatic Setup
 Run the setup script in the root directory:
 ```bash
-
 ```
-
 ## Additional Resources
 
 - **Framework Documentation:** [core/README.md](../core/README.md)
@@ -538,9 +536,6 @@ Run the setup script in the root directory:
 - **Example Agents:** [exports/](../exports/)
 - **Agent Building Guide:** [.claude/skills/hive-create/SKILL.md](../.claude/skills/hive-create/SKILL.md)
 - **Testing Guide:** [.claude/skills/hive-test/SKILL.md](../.claude/skills/hive-test/SKILL.md)
-
-
-
 
 ## Contributing
 

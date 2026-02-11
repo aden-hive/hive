@@ -116,7 +116,7 @@ Skills are also available in Cursor. To enable:
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
 4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
-```markdown
+
 ### Opencode Support
 To enable Opencode integration:
 
