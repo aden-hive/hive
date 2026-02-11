@@ -60,13 +60,13 @@ class EdgeSpec(BaseModel):
             input_mapping={"result": "value_to_format"}
         )
 
-        # Conditional routing based on output
+        # Conditional routing based on output (use dict access, not dot notation)
         EdgeSpec(
             id="validate-to-retry",
             source="validator",
             target="retry_handler",
             condition=EdgeCondition.CONDITIONAL,
-            condition_expr="output.confidence < 0.8",
+            condition_expr='output.get("confidence", 0) < 0.8',
         )
 
         # LLM-powered routing (goal-aware)
@@ -167,15 +167,16 @@ class EdgeSpec(BaseModel):
         if not self.condition_expr:
             return True
 
-        # Build evaluation context
-        # Include memory keys directly for easier access in conditions
+        # Build evaluation context.
+        # Unpack memory first so reserved keys always take precedence.
         context = {
+            **memory,  # Memory keys available directly; placed first so
+            # reserved names below cannot be shadowed.
             "output": output,
             "memory": memory,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **memory,  # Unpack memory keys directly into context
         }
 
         try:
