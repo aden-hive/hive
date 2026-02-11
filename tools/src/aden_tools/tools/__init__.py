@@ -25,6 +25,7 @@ from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
+from .gmail_tool import register_tools as register_gmail
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -77,6 +78,8 @@ def register_all_tools(
     register_github(mcp, credentials=credentials)
     # email supports multiple providers (Gmail, Resend)
     register_email(mcp, credentials=credentials)
+    # Gmail inbox management (read, trash, modify labels)
+    register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
@@ -137,6 +140,11 @@ def register_all_tools(
         "github_get_user_profile",
         "github_get_user_emails",
         "send_email",
+        "gmail_list_messages",
+        "gmail_get_message",
+        "gmail_trash_message",
+        "gmail_modify_message",
+        "gmail_batch_modify_messages",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",

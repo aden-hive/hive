@@ -35,7 +35,14 @@ EMAIL_CREDENTIALS = {
     ),
     "google": CredentialSpec(
         env_var="GOOGLE_ACCESS_TOKEN",
-        tools=["send_email"],
+        tools=[
+            "send_email",
+            "gmail_list_messages",
+            "gmail_get_message",
+            "gmail_trash_message",
+            "gmail_modify_message",
+            "gmail_batch_modify_messages",
+        ],
         node_types=[],
         required=False,
         startup_required=False,
