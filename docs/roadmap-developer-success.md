@@ -96,8 +96,8 @@ The common denominator:
 Marketing is often the most time-consuming "distraction" for a CEO. You provide the vision; they provide the volume.
 
 - [Social Media Management](../examples/recipes/social_media_management/): Scheduling posts, replying to comments, and monitoring trends.
+- [News Jacking](../examples/recipes/news_jacking/): Personalized outreach triggered by real-time company news (funding, hires, press mentions).
 - [Newsletter Production](../examples/recipes/newsletter_production/): Taking your raw ideas or voice memos and turning them into a polished weekly email.
-- [Ad Campaign Monitoring](../examples/recipes/ad_campaign_monitoring/): Checking daily spends on Meta/Google ads and flagging if the Cost Per Acquisition (CPA) spikes.
 - [CRM Update Agent](../examples/recipes/crm_hygiene/): Ensuring every lead has a follow-up date and a status update.
 
 ### 2. Customer Success
@@ -105,11 +105,12 @@ You shouldn't be the one answering "How do I reset my password?" but you should 
 
 - [Inquiry Triaging](../examples/recipes/inquiry_triaging/): Sorting the "tire kickers" from the "hot leads."
 - [Onboarding Assistance](../examples/recipes/onboarding_assistance/): Helping new clients set up their accounts or sending out "Welcome" kits.
+- [Customer support & Troubleshooting](../examples/recipes/support_troubleshooting/): Handling "Level 1" tech support for your platform or website.
 
 ### 3. Operations Automation
 This is your right hand. They keep the gears greased so you don't get stuck in the "admin trap."
 
-- [Inbox Management](../examples/recipes/inbox_management/): Clearing out the spam and highlighting the three emails that actually need your brain.
+- [Email Inbox Management](../examples/recipes/inbox_management/): Clearing out the spam and highlighting the three emails that actually need your brain.
 - [Invoicing & Collections](../examples/recipes/invoicing_collections/): Sending out bills and—more importantly—politely chasing down the people who haven't paid them.
 - [Data Keeper](../examples/recipes/data_keeper/): Pull data and reports from multiple data sources, and union them in one place.
 - [Travel & Calendar Coordination](../examples/recipes/calendar_coordination/): Protecting your "Deep Work" time from getting fragmented by random 15-minute meetings.
@@ -119,7 +120,6 @@ Unless you are a developer, tech debt will kill your productivity. A part-timer 
 
 - [Quality Assurance](../examples/recipes/quality_assurance/): Testing new features or links before they go live to ensure nothing is broken.
 - [Documentation](../examples/recipes/documentation/): Turning your messy processes into clean Standard Operating Procedures (SOPs).
-- [Basic Troubleshooting](../examples/recipes/basic_troubleshooting/): Handling "Level 1" tech support for your platform or website.
 - [Issue Triaging](../examples/recipes/issue_triaging/): Categorizing and routing incoming bug reports by severity.
 
 ## Installation
