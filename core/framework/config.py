@@ -46,7 +46,10 @@ def get_preferred_model() -> str:
 
 def get_max_tokens() -> int:
     """Return the configured max_tokens, falling back to DEFAULT_MAX_TOKENS."""
-    return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+    value = get_hive_config().get("llm", {}).get("max_tokens")
+    if value is None:
+        return DEFAULT_MAX_TOKENS
+    return int(value)
 
 
 def get_api_key() -> str | None:

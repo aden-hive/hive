@@ -8,10 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from framework.config import get_hive_config, get_preferred_model
+from framework.config import get_hive_config, get_max_tokens, get_preferred_model
 from framework.graph import Goal
 from framework.graph.edge import (
-    DEFAULT_MAX_TOKENS,
     AsyncEntryPointSpec,
     EdgeCondition,
     EdgeSpec,
@@ -500,8 +499,7 @@ class AgentRunner:
             if agent_config and hasattr(agent_config, "max_tokens"):
                 max_tokens = agent_config.max_tokens
             else:
-                hive_config = get_hive_config()
-                max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+                max_tokens = get_max_tokens()
 
             # Read intro_message from agent metadata (shown on TUI load)
             agent_metadata = getattr(agent_module, "metadata", None)
