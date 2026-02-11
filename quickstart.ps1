@@ -217,7 +217,18 @@ Push-Location $ScriptDir
 try {
     if (Test-Path "pyproject.toml") {
         Write-Host "  Installing workspace packages... " -NoNewline
-        $syncOutput = & uv sync 2>&1
+        # 1. Temporarily allow status messages without crashing
+        $oldPref = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+
+        # 2. Capture the output as a string
+        $syncOutput = & uv sync 2>&1 | Out-String
+
+        # 3. Save the actual exit code from uv
+        $actualExitCode = $LASTEXITCODE
+
+        # 4. Restore the strict setting
+        $ErrorActionPreference = $oldPref
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "workspace packages installed"
         } else {
@@ -501,7 +512,6 @@ if (-not $SelectedProviderId) {
             if ($apiKey) {
                 # Persist as a User-level environment variable (survives reboots)
                 [System.Environment]::SetEnvironmentVariable($SelectedEnvVar, $apiKey, "User")
-                $env:$SelectedEnvVar = $apiKey
                 # Also set in current session
                 Set-Item -Path "Env:\$SelectedEnvVar" -Value $apiKey
                 Write-Host ""
@@ -569,7 +579,7 @@ Write-Step -Number "6" -Text "Step 6: Initializing credential store..."
 Write-Color -Text "The credential store encrypts API keys and secrets for your agents." -Color DarkGray
 Write-Host ""
 
-$HiveCredDir = Join-Path $env:USERPROFILE ".hive" "credentials"
+$HiveCredDir = [System.IO.Path]::Combine($env:USERPROFILE, ".hive", "credentials")
 
 # Check if HIVE_CREDENTIAL_KEY is already set
 $credKey = [System.Environment]::GetEnvironmentVariable("HIVE_CREDENTIAL_KEY", "User")
@@ -648,7 +658,7 @@ Write-Host "  $([char]0x2B21) MCP config... " -NoNewline
 if (Test-Path (Join-Path $ScriptDir ".mcp.json")) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host "  $([char]0x2B21) skills... " -NoNewline
-$skillsDir = Join-Path $ScriptDir ".claude" "skills"
+$skillsDir = [System.IO.Path]::Combine($ScriptDir, ".claude", "skills")
 if (Test-Path $skillsDir) {
     $skillCount = (Get-ChildItem -Directory $skillsDir -ErrorAction SilentlyContinue).Count
     Write-Ok "$skillCount found"
@@ -657,7 +667,7 @@ if (Test-Path $skillsDir) {
 }
 
 Write-Host "  $([char]0x2B21) credential store... " -NoNewline
-$credStoreDir = Join-Path $env:USERPROFILE ".hive" "credentials" "credentials"
+$credStoreDir = [System.IO.Path]::Combine($env:USERPROFILE, ".hive", "credentials", "credentials")
 if ($credKey -and (Test-Path $credStoreDir)) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host ""
