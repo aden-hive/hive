@@ -480,6 +480,9 @@ class NodeContext:
     # Runtime logging (optional)
     runtime_logger: Any = None  # RuntimeLogger | None — uses Any to avoid import
 
+    # Pause control (optional) - asyncio.Event for pause requests
+    pause_event: Any = None  # asyncio.Event | None
+
 
 @dataclass
 class NodeResult:
@@ -1131,7 +1134,7 @@ Keep the same JSON structure but with shorter content values.
                 decision_id=decision_id,
                 success=True,
                 result=response.content,
-                tokens_used=response.input_tokens + response.output_tokens,
+                tokens_used=total_input_tokens + total_output_tokens,
                 latency_ms=latency_ms,
             )
 
@@ -1230,7 +1233,7 @@ Keep the same JSON structure but with shorter content values.
                         success=False,
                         error=_extraction_error,
                         output={},
-                        tokens_used=response.input_tokens + response.output_tokens,
+                        tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
                     )
                     # JSON extraction failed completely - still strip code blocks
@@ -1272,7 +1275,7 @@ Keep the same JSON structure but with shorter content values.
             return NodeResult(
                 success=True,
                 output=output,
-                tokens_used=response.input_tokens + response.output_tokens,
+                tokens_used=total_input_tokens + total_output_tokens,
                 latency_ms=latency_ms,
             )
 

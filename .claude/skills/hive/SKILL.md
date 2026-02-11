@@ -19,14 +19,18 @@ metadata:
 
 **THIS IS AN EXECUTABLE WORKFLOW. DO NOT explore the codebase or read source files. ROUTE to the correct skill IMMEDIATELY.**
 
-When this skill is loaded, determine what the user needs and invoke the appropriate skill NOW:
-- **User wants to build an agent** → Invoke `/hive-create` immediately
-- **User wants to test an agent** → Invoke `/hive-test` immediately
-- **User wants to learn concepts** → Invoke `/hive-concepts` immediately
-- **User wants patterns/optimization** → Invoke `/hive-patterns` immediately
-- **User wants to set up credentials** → Invoke `/hive-credentials` immediately
-- **User has a failing/broken agent** → Invoke `/hive-debugger` immediately
-- **Unclear what user needs** → Ask the user (do NOT explore the codebase to figure it out)
+When this skill is loaded, **ALWAYS use the AskUserQuestion tool** to present options:
+
+```
+Use AskUserQuestion with these options:
+- "Build a new agent" → Then invoke /hive-create
+- "Test an existing agent" → Then invoke /hive-test
+- "Learn agent concepts" → Then invoke /hive-concepts
+- "Optimize agent design" → Then invoke /hive-patterns
+- "Set up credentials" → Then invoke /hive-credentials
+- "Debug a failing agent" → Then invoke /hive-debugger
+- "Other" (please describe what you want to achieve)
+```
 
 **DO NOT:** Read source files, explore the codebase, search for code, or do any investigation before routing. The sub-skills handle all of that.
 
@@ -73,7 +77,6 @@ Use this meta-skill when:
 
 ## Phase 0: Understand Concepts (Optional)
 
-**Duration**: 5-10 minutes
 **Skill**: `/hive-concepts`
 **Input**: Questions about agent architecture
 
@@ -95,9 +98,8 @@ Use this meta-skill when:
 
 ## Phase 1: Build Agent Structure
 
-**Duration**: 15-30 minutes
 **Skill**: `/hive-create`
-**Input**: User requirements ("Build an agent that...")
+**Input**: User requirements ("Build an agent that...") or a template to start from
 
 ### What This Phase Does
 
@@ -166,7 +168,6 @@ exports/agent_name/
 
 ## Phase 1.5: Optimize Design (Optional)
 
-**Duration**: 10-15 minutes
 **Skill**: `/hive-patterns`
 **Input**: Completed agent structure
 
@@ -191,22 +192,21 @@ exports/agent_name/
 
 ## Phase 2: Test & Validate
 
-**Duration**: 20-40 minutes
 **Skill**: `/hive-test`
 **Input**: Working agent from Phase 1
 
 ### What This Phase Does
 
-Creates comprehensive test suite:
-- Constraint tests (verify hard requirements)
-- Success criteria tests (measure goal achievement)
-- Edge case tests (handle failures gracefully)
-- Integration tests (end-to-end workflows)
+Guides the creation and execution of a comprehensive test suite:
+- Constraint tests
+- Success criteria tests
+- Edge case tests
+- Integration tests
 
 ### Process
 
 1. **Analyze agent** - Read goal, constraints, success criteria
-2. **Generate tests** - Create pytest files in `exports/agent_name/tests/`
+2. **Generate tests** - The calling agent writes pytest files in `exports/agent_name/tests/` using hive-test guidelines and templates
 3. **User approval** - Review and approve each test
 4. **Run evaluation** - Execute tests and collect results
 5. **Debug failures** - Identify and fix issues
@@ -285,6 +285,19 @@ User: "Build an agent (first time)"
 → Use /hive-patterns (optimize design)
 → Use /hive-test (validate)
 → Done: Production-ready agent
+```
+
+### Pattern 1c: Build from Template
+
+```
+User: "Build an agent based on the deep research template"
+→ Use /hive-create
+→ Select "From a template" path
+→ Pick template, name new agent
+→ Review/modify goal, nodes, graph
+→ Agent exported with customizations
+→ Use /hive-test
+→ Done: Customized agent
 ```
 
 ### Pattern 2: Test Existing Agent
@@ -490,6 +503,7 @@ The workflow is **flexible** - skip phases as needed, iterate freely, and adapt 
 - Have clear requirements
 - Ready to write code
 - Want step-by-step guidance
+- Want to start from an existing template and customize it
 
 **Choose hive-patterns when:**
 - Agent structure complete
