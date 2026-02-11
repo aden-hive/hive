@@ -224,7 +224,7 @@ Three MCP tools provide access to the logging system:
 
 ```python
 query_runtime_logs(
-    agent_work_dir: str,        # e.g., "~/.hive/agents/twitter_outreach"
+    agent_work_dir: str,        # e.g., "~/.hive/agents/deep_research_agent"
     status: str = "",           # "needs_attention", "success", "failure", "degraded"
     limit: int = 20
 ) -> dict  # {"runs": [...], "total": int}
@@ -371,14 +371,14 @@ query_runtime_log_raw(agent_work_dir, run_id)
 ```python
 # 1. Find problematic runs (L1)
 result = query_runtime_logs(
-    agent_work_dir="~/.hive/agents/twitter_outreach",
+    agent_work_dir="~/.hive/agents/deep_research_agent",
     status="needs_attention"
 )
 run_id = result["runs"][0]["run_id"]
 
 # 2. Identify failing nodes (L2)
 details = query_runtime_log_details(
-    agent_work_dir="~/.hive/agents/twitter_outreach",
+    agent_work_dir="~/.hive/agents/deep_research_agent",
     run_id=run_id,
     needs_attention_only=True
 )
@@ -386,7 +386,7 @@ problem_node = details["nodes"][0]["node_id"]
 
 # 3. Analyze root cause (L3)
 raw = query_runtime_log_raw(
-    agent_work_dir="~/.hive/agents/twitter_outreach",
+    agent_work_dir="~/.hive/agents/deep_research_agent",
     run_id=run_id,
     node_id=problem_node
 )
@@ -496,7 +496,7 @@ logger.start_run(goal_id, session_id=execution_id)
 ```json
 {
   "run_id": "session_20260206_115718_e22339c5",
-  "goal_id": "twitter-outreach-multi-loop",
+  "goal_id": "deep-research",
   "status": "degraded",
   "started_at": "2026-02-06T11:57:18.593081",
   "ended_at": "2026-02-06T11:58:45.123456",

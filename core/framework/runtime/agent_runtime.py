@@ -154,6 +154,9 @@ class AgentRuntime:
         self._running = False
         self._lock = asyncio.Lock()
 
+        # Optional greeting shown to user on TUI load (set by AgentRunner)
+        self.intro_message: str = ""
+
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
         Register a named entry point for the agent.
