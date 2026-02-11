@@ -162,8 +162,13 @@ def _load_session(session_id: str) -> BuildSession:
     if not session_file.exists():
         raise ValueError(f"Session '{session_id}' not found")
 
-    with open(session_file) as f:
-        data = json.load(f)
+    try:
+        with open(session_file) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Session '{session_id}' has corrupted data and cannot be loaded: {exc}"
+        ) from exc
 
     return BuildSession.from_dict(data)
 
@@ -655,9 +660,7 @@ def add_node(
         max_node_visits=max_node_visits,
     )
 
-    session.nodes.append(node)
-
-    # Validate
+    # Validate BEFORE persisting
     errors = []
     warnings = []
 
@@ -700,7 +703,10 @@ def add_node(
                 f"output_keys {output_keys_list}"
             )
 
-    _save_session(session)  # Auto-save
+    # Only persist valid nodes to avoid corrupting session state
+    if not errors:
+        session.nodes.append(node)
+        _save_session(session)  # Auto-save
 
     return json.dumps(
         {
