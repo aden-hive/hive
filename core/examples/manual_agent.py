@@ -56,7 +56,7 @@ async def main():
         name="Greeter",
         description="Generates a simple greeting",
         node_type="function",
-        function="greet",  # Matches the registered function name
+        function="greet",  # Name for documentation (not used for registration)
         input_keys=["name"],
         output_keys=["greeting"],
     )
@@ -99,9 +99,25 @@ async def main():
     executor = GraphExecutor(runtime=runtime)
 
     # 7. Register Function Implementations
-    # Connect string names in NodeSpecs to actual Python functions
-    executor.register_function("greeter", greet)
-    executor.register_function("uppercaser", uppercase)
+    # IMPORTANT: Register using the NODE ID (not the function field in NodeSpec)
+    # The executor looks up nodes by their ID, not the "function" field
+    # Format: executor.register_function(node_id, python_callable)
+    print("🔧 Registering function nodes...")
+    executor.register_function("greeter", greet)      # node_id="greeter" -> greet()
+    executor.register_function("uppercaser", uppercase)  # node_id="uppercaser" -> uppercase()
+    
+    # Verify registration succeeded
+    registered_nodes = list(executor.node_registry.keys())
+    print(f"✓ Registered {len(registered_nodes)} function node(s): {registered_nodes}")
+    
+    # Validate all function nodes are registered
+    function_node_ids = [n.id for n in graph.nodes if n.node_type == "function"]
+    missing = set(function_node_ids) - set(registered_nodes)
+    if missing:
+        raise RuntimeError(
+            f"Function nodes not registered: {missing}. "
+            f"Call executor.register_function() for each function node."
+        )
 
     # 8. Execute Agent
     print("▶ Executing agent with input: name='Alice'...")
