@@ -694,15 +694,16 @@ class AgentRunner:
                 self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
             else:
                 # Fall back to environment variable
-                api_key_env = self._get_api_key_env_var(self.model)
-                # Gemini: allow GOOGLE_API_KEY as fallback for users who set it
+                # First check api_key_env_var from config (set by quickstart)
+                api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
+                    self.model
+                )
                 if (
                     api_key_env == "GEMINI_API_KEY"
                     and not os.environ.get("GEMINI_API_KEY")
                     and os.environ.get("GOOGLE_API_KEY")
                 ):
                     os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
-
                 if api_key_env and os.environ.get(api_key_env):
                     self._llm = LiteLLMProvider(model=self.model)
                 else:
