@@ -124,52 +124,53 @@ Unless you are a developer, tech debt will kill your productivity. A part-timer 
 
 ## Installation
 
-Install the prer-requisites like python
-Install quickstart
+Install the prerequisites like Python, then install the quickstart package.
 
-## use existing agent
-If user would like to 
+## Use Existing Agent
 
-These are what happen:
-(User) Hive run xxxx / Hive tui xxxx
-(automatically) A quick, engineering validation check on if the agent has all the pre-requisits
-(User) Type something in the TUI or trigger event source (like email received)
-(automatically) Agent run, outcome happens and is recorded
-(if failed) Tell the user where the logs are saved
+To run an existing agent:
 
-## Agent generation (alternative to using existing agent)
+1. Run `hive run <agent_name>` or `hive tui <agent_name>`
+2. Hive automatically validates that your agent has all required prerequisites
+3. Type something in the TUI or trigger an event source (like receiving an email)
+4. Your agent runs, and the outcome is recorded
+5. If something fails, you'll see where the logs are saved
 
-For "Developers who want to get a job done" and the "Individual product developer," they will likely want to try generating the agent themselves. see [## agent generation]
+## Agent Generation (Alternative to Using Existing Agent)
 
-For others, they will likely want to try existing agents first to see how well the agent can work. see [## use existing agent]
+If you want to build something custom, you can generate your own agent from scratch. See [Agent Generation](#agent-generation).
 
-If user find somethign they can't fulfill with the framework, they can choose to contribute by share it in an issue or in the discord channel 
+If you prefer to start with a working example first, try running an existing agent to see how it works. See [Use Existing Agent](#use-existing-agent).
+
+If you find something you can't accomplish with the framework, you can contribute by opening an issue or sharing your feedback in our Discord channel.
 
 ## Agent Testing
 
-Interactive testing: Run `hive tui` and test the agent in a tui
+**Interactive testing:** Run `hive tui` to test your agent in a terminal UI.
 
-Autonomous testing: Run `hive run XXX --debug` and trigger the event source. Testing events, especially the scheduled event can be hard. It would be benificial if we provide some developer tools to finish them.
+**Autonomous testing:** Run `hive run <agent_name> --debug` and trigger the event source. Testing scheduled events can be tricky—Hive provides developer tools to help you simulate them.
 
-(after commercial ready stage) Sample agent testing without installation: We host some sample agents on cloud and provide them to the users to test directly without installation
+**Try before you install:** You can test sample agents hosted in the cloud without any local installation.
 
 ## Integration
-Users can't even finish testing without setting up the integration correctly.
 
-Happy path: In the goal setting, the agent do the job super well
+You need to set up integrations correctly before testing can succeed.
 
-mid path: After negotiation, the agent explicitly told the user
+**Happy path:** Your agent accomplishes the goal exactly as specified.
 
-Sad path: After negotiation and tried to build a one off integration for certain tools
+**Mid path:** After negotiation, your agent explicitly tells you what it can and cannot do.
+
+**Sad path:** After negotiation, you may need to build a one-off integration for certain tools.
 
 ## Agent Debugging
-If any error / unexpected behavior happens during testing, the developer need to be able to debug the agent
+
+When errors or unexpected behavior happen during testing, you need to be able to debug your agent effectively.
 
 ## Logging
 
-To make it easier for user to have a AI-assisted experience checking log and get reported the insight with high signal/noise ratio,
+Hive gives you an AI-assisted experience for checking logs and getting high signal-to-noise insights.
 
-Hive uses a **three-level observability** for tracking agent execution:
+Hive uses **three-level observability** for tracking agent execution:
 
 | Level | What it captures | File |
 |-------|------------------|------|
@@ -177,71 +178,84 @@ Hive uses a **three-level observability** for tracking agent execution:
 | **L2 (Details)** | Per-node results — retries, verdicts, latency, attention reasons | `details.jsonl` |
 | **L3 (Tool Logs)** | Step-by-step execution — tool calls, LLM responses, judge feedback | `tool_logs.jsonl` |
 
-## (Optional) How graph works
-Developers need to understand node memory works, how tools are called. for them to fix and improve the agent they built.  see `docs/key_concepts` for details
+## (Optional) How Graph Works
 
-## **first success**
-By here, the developer should already finish running one of their first agent and get a grasp of how the agent frameworks works. They can very well trying to use it for the real use cases, which often invoice updating the current agennt
+To fix and improve your agent, you need to understand how node memory works and how tools are called. See `docs/key_concepts` for details.
 
-Anything before the first success is not negotiateble something we need to ensure running as smooth as possible
+## **First Success**
 
-## Iteration (building) - More like debugging
+By this point, you should have run your first agent and understand how the framework works. You're ready to use it for real use cases, which often means updating and customizing your agent.
 
-After the MVP agent/sample agent runs. Developer want to iterate the agent by biggering the use cases. 
+Everything before your first success should run as smoothly as possible—this is non-negotiable.
 
-## Iteration (production) - Evolution and inventiveness
+## Contribution
 
-Afterthe MVP is deployed. Which taste and judgement are still came from the human developers, AI was a significen force multiplier for rapidly iterating and solving problems.
+If you encounter issues creating your desired agent, or find that the integrations aren't sufficient for your use case, open an issue or let us know in our Discord channel.
 
-For Aden cloud hive, the production evolution is fully automatic. Aden queen bee run a natural selection by deploying,  evaluating and improving. 
+## Iteration (Building) - More Like Debugging
+
+After your MVP agent or sample agent runs, you'll want to iterate by expanding the use cases.
+
+## Iteration (Production) - Evolution and Inventiveness
+
+After your MVP is deployed, your taste and judgment still drive the direction—AI is a significant force multiplier for rapidly iterating and solving problems.
+
+With Aden Cloud Hive, production evolution is fully automatic. The Aden Queen Bee runs natural selection by deploying, evaluating, and improving your agents.
 
 ## Version Control
 
-Iteration is not always improving everything. To help the developers, version control helps them getting back to the previous version , ike how git works. They run this command `hive git restore` to to 
+Iteration doesn't always improve everything. Version control helps you get back to a previous version, like how git works. Run `hive git restore` to revert changes.
 
 ## Agent Personality
-Developers want to put their own soul into the agent. What remain the same across the evolution is important. Developer success is not about having the agent constantly changing. It is about you know the goal and the personality of the agent will not chanage, and it just adapt to the environment to solve problems.
+
+You can put your own soul into your agent. What remains constant across evolution matters. Success isn't about having your agent constantly changing—it's about knowing that your goal and personality stay fixed while your agent adapts to solve problems.
 
 ## Memory Management
-Hive nodes have a built in machanism handling node memory and the logic passing memory around. To implementing cross session memory or implement custom logic handling memory. Developers can use the memory tools to implement that.
+
+Hive nodes have a built-in mechanism for handling node memory and passing memory between nodes. To implement cross-session memory or custom memory logic, use the memory tools.
 
 # Deployment
 
-## (Optional) How agent runtime works
-Developers need to understand how data are transfered during agent runtime, how memory works, how tools works. for them to fix and improve the agent they built.  see ./agent_runtime.md for details
+## (Optional) How Agent Runtime Works
+
+To fix and improve your agent, you need to understand how data transfers during runtime, how memory works, and how tools work. See `./agent_runtime.md` for details.
 
 ## Local Deployment
-By default we support deployment through docker. 
+
+By default, Hive supports deployment through Docker.
+
 1. Pre-flight Validation (Critical)
 2. One-Command Deployment (`hive deploy local my_agent`)
-3. Credential Handling in Containers (local credentials + Aden Cloud Credentials for Oauth)
+3. Credential Handling in Containers (local credentials + Aden Cloud Credentials for OAuth)
 4. Persistence & State
-5. Debugging/logging/memory Access (start from just commands)
-6. Expose hooks and apis as SDK
+5. Debugging/Logging/Memory Access (start with CLI commands)
+6. Expose Hooks and APIs as SDK
 7. Documentation Deliverables
 
 ## Cloud Deployment
-For users who want zero-ops deployment, easier integration and credential management, and logging, Aden cloud is ideal. Users who don’t want to manage infra get secure defaults, scaling, and observability out of the box—at the cost of less low-level control and some vendor lock-in.
+
+If you want zero-ops deployment, easier integration and credential management, and built-in logging, Aden Cloud is ideal. You get secure defaults, scaling, and observability out of the box—at the cost of less low-level control and some vendor lock-in.
 
 ## Deployment Strategy
-Autonomous and interactive modes look different, but the core should remain the same, and the deployment strategy should also be consistent.
+
+Autonomous and interactive modes look different, but the core remains the same, and your deployment strategy should be consistent across both.
 
 ## Performance
-Not a focus at the moment,
-Speed of run,  process pools, hellucination
 
-## How we collect data
-Self-reported issues
-Cloud observabiltiy product
+Not a focus at the moment. Speed of execution, process pools, and hallucination handling are future considerations.
 
-## Runtime guardrails
+## How We Collect Data
 
-Hive provides built-in safety mechanisms to keep agents within bounds
+Self-reported issues and cloud observability products.
 
-## How we make reliability
+## Runtime Guardrails
 
-Breakages still happens, even in the most best business process: Being reliable is to be adaptive and fix the problems 
+Hive provides built-in safety mechanisms to keep your agents within bounds.
 
-## Developer trust
+## How We Make Reliability
 
-[To be complete]
+Breakages still happen, even in the best business processes. Being reliable means being adaptive and fixing problems when they arise.
+
+## Developer Trust
+
+To deploy your agent for production use, Hive provides transparency in runtime, sufficient control, and guardrails to avoid catastrophic results.
