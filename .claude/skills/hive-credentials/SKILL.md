@@ -141,6 +141,12 @@ for f in ~/.zshrc ~/.bashrc ~/.profile; do [ -f "$f" ] && grep -q 'HIVE_CREDENTI
 - **In shell config but NOT in current session** — run `source ~/.zshrc` (or `~/.bashrc`) first, then proceed
 - **Not set anywhere** — `EncryptedFileStorage` will auto-generate one. After storing, tell the user to persist it: `export HIVE_CREDENTIAL_KEY="{generated_key}"` in their shell profile
 
+> **⚠️ IMPORTANT: After adding `HIVE_CREDENTIAL_KEY` to the user's shell config, always display:**
+> ```
+> ⚠️  Environment variables were added to your shell config.
+>     Open a NEW TERMINAL for them to take effect outside this session.
+> ```
+
 #### Option 1: Aden Platform (OAuth)
 
 This is the recommended flow for supported integrations (HubSpot, etc.).
@@ -201,6 +207,12 @@ if success:
     print(f"Saved to {config_path}")
     print(f"Run: {source_cmd}")
 ```
+
+> **⚠️ IMPORTANT: After adding `ADEN_API_KEY` to the user's shell config, always display:**
+> ```
+> ⚠️  Environment variables were added to your shell config.
+>     Open a NEW TERMINAL for them to take effect outside this session.
+> ```
 
 Also save to `~/.hive/configuration.json` for the framework:
 
@@ -460,9 +472,14 @@ result: HealthCheckResult = check_credential_health("hubspot", token_value)
 The local encrypted store requires `HIVE_CREDENTIAL_KEY` to encrypt/decrypt credentials.
 
 - If the user doesn't have one, `EncryptedFileStorage` will auto-generate one and log it
-- The user MUST persist this key (e.g., in `~/.bashrc` or a secrets manager)
+- The user MUST persist this key (e.g., in `~/.bashrc`/`~/.zshrc` or a secrets manager)
 - Without this key, stored credentials cannot be decrypted
-- This is the ONLY secret that should live in `~/.bashrc` or environment config
+
+**Shell config rule:** Only TWO keys belong in shell config (`~/.zshrc`/`~/.bashrc`):
+- `HIVE_CREDENTIAL_KEY` — encryption key for the credential store
+- `ADEN_API_KEY` — Aden platform auth key (needed before the store can sync)
+
+All other API keys (Brave, Google, HubSpot, etc.) must go in the encrypted store only. **Never offer to add them to shell config.**
 
 If `HIVE_CREDENTIAL_KEY` is not set:
 
@@ -475,6 +492,7 @@ If `HIVE_CREDENTIAL_KEY` is not set:
 - **NEVER** log, print, or echo credential values in tool output
 - **NEVER** store credentials in plaintext files, git-tracked files, or agent configs
 - **NEVER** hardcode credentials in source code
+- **NEVER** offer to save API keys to shell config (`~/.zshrc`/`~/.bashrc`) — the **only** keys that belong in shell config are `HIVE_CREDENTIAL_KEY` and `ADEN_API_KEY`. All other credentials (Brave, Google, HubSpot, GitHub, Resend, etc.) go in the encrypted store only.
 - **ALWAYS** use `SecretStr` from Pydantic when handling credential values in Python
 - **ALWAYS** use the local encrypted store (`~/.hive/credentials`) for persistence
 - **ALWAYS** run health checks before storing credentials (when possible)
@@ -601,18 +619,22 @@ All credentials are now configured:
 │                      ✅ CREDENTIALS CONFIGURED                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
+│     OPEN A NEW TERMINAL before running commands below.                      │
+│     Environment variables were saved to your shell config but               │
+│     only take effect in new terminal sessions.                              │
+│                                                                             │
 │  NEXT STEPS:                                                                │
 │                                                                             │
 │  1. RUN YOUR AGENT:                                                         │
 │                                                                             │
-│     PYTHONPATH=core:exports python -m research-agent tui                    │
+│     hive tui                                                                │
 │                                                                             │
 │  2. IF YOU ENCOUNTER ISSUES, USE THE DEBUGGER:                              │
 │                                                                             │
 │     /hive-debugger                                                          │
 │                                                                             │
 │     The debugger analyzes runtime logs, identifies retry loops, tool        │
-│     failures, stalled execution, and provides actionable fix suggestions.  │
+│     failures, stalled execution, and provides actionable fix suggestions.   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```

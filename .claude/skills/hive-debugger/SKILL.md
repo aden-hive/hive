@@ -47,7 +47,7 @@ Before using this skill, ensure:
 **What to do:**
 
 1. **Ask the developer which agent needs debugging:**
-   - Get agent name (e.g., "twitter_outreach", "deep_research_agent")
+   - Get agent name (e.g., "deep_research_agent", "deep_research_agent")
    - Confirm the agent exists in `exports/{agent_name}/`
 
 2. **Determine agent working directory:**
@@ -66,7 +66,7 @@ Before using this skill, ensure:
 
 4. **Store context for the debugging session:**
    - agent_name
-   - agent_work_dir (e.g., `/home/user/.hive/twitter_outreach`)
+   - agent_work_dir (e.g., `/home/user/.hive/deep_research_agent`)
    - goal_id
    - success_criteria
    - constraints
@@ -74,19 +74,19 @@ Before using this skill, ensure:
 
 **Example:**
 ```
-Developer: "My twitter_outreach agent keeps failing"
+Developer: "My deep_research_agent agent keeps failing"
 
-You: "I'll help debug the twitter_outreach agent. Let me gather context..."
+You: "I'll help debug the deep_research_agent agent. Let me gather context..."
 
-[Read exports/twitter_outreach/agent.json]
+[Read exports/deep_research_agent/agent.json]
 
 Context gathered:
-- Agent: twitter_outreach
-- Goal: twitter-outreach-multi-loop
-- Working Directory: /home/user/.hive/twitter_outreach
-- Success Criteria: ["Successfully send 5 personalized outreach messages"]
-- Constraints: ["Must verify handle exists", "Must personalize message"]
-- Nodes: ["intake-collector", "profile-analyzer", "message-composer", "outreach-sender"]
+- Agent: deep_research_agent
+- Goal: deep-research
+- Working Directory: /home/user/.hive/deep_research_agent
+- Success Criteria: ["Produce a comprehensive research report with cited sources"]
+- Constraints: ["Must cite all sources", "Must cover multiple perspectives"]
+- Nodes: ["intake", "research", "analysis", "report-writer"]
 ```
 
 ---
@@ -224,7 +224,7 @@ Which run would you like to investigate?
 ```
 Diagnosis for session_20260206_115718_e22339c5:
 
-Problem Node: intake-collector
+Problem Node: research
 ├─ Exit Status: escalate
 ├─ Retry Count: 5 (HIGH)
 ├─ Verdict Counts: {RETRY: 5, ESCALATE: 1}
@@ -232,7 +232,7 @@ Problem Node: intake-collector
 ├─ Total Steps: 8
 └─ Categories: Missing Outputs + Retry Loops
 
-Root Issue: The intake-collector node is stuck in a retry loop because it's not setting required outputs.
+Root Issue: The research node is stuck in a retry loop because it's not setting required outputs.
 ```
 
 ---
@@ -293,25 +293,25 @@ Root Issue: The intake-collector node is stuck in a retry loop because it's not 
 
 **Example Output:**
 ```
-Root Cause Analysis for intake-collector:
+Root Cause Analysis for research:
 
 Step-by-step breakdown:
 
 Step 3:
-- Tool Call: web_search(query="@RomuloNevesOf")
-- Result: Found Twitter profile information
+- Tool Call: web_search(query="latest AI regulations 2026")
+- Result: Found relevant articles and sources
 - Verdict: RETRY
-- Feedback: "Missing required output 'twitter_handles'. You found the handle but didn't call set_output."
+- Feedback: "Missing required output 'research_findings'. You found sources but didn't call set_output."
 
 Step 4:
-- Tool Call: web_search(query="@RomuloNevesOf twitter")
-- Result: Found additional Twitter information
+- Tool Call: web_search(query="AI regulation policy 2026")
+- Result: Found additional policy information
 - Verdict: RETRY
-- Feedback: "Still missing 'twitter_handles'. Use set_output to save your findings."
+- Feedback: "Still missing 'research_findings'. Use set_output to save your findings."
 
 Steps 5-7: Similar pattern continues...
 
-ROOT CAUSE: The node is successfully finding Twitter handles via web_search, but the LLM is not calling set_output to save the results. It keeps searching for more information instead of completing the task.
+ROOT CAUSE: The node is successfully finding research sources via web_search, but the LLM is not calling set_output to save the results. It keeps searching for more information instead of completing the task.
 ```
 
 ---
@@ -562,15 +562,33 @@ PYTHONPATH=core:exports python -m {agent_name} --tui
 
 ### Find Available Checkpoints:
 
-```bash
-# In TUI:
-/sessions {session_id}
+Use MCP tools to programmatically find and inspect checkpoints:
 
-# This shows all checkpoints with timestamps:
-Available Checkpoints: (3)
-  1. cp_node_complete_intake_143030
-  2. cp_node_complete_research_143115
-  3. cp_pause_research_143130
+```
+# List all sessions to find the failed one
+list_agent_sessions(agent_work_dir="~/.hive/agents/{agent_name}", status="failed")
+
+# Inspect session state
+get_agent_session_state(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}")
+
+# Find clean checkpoints to resume from
+list_agent_checkpoints(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}", is_clean="true")
+
+# Compare checkpoints to understand what changed
+compare_agent_checkpoints(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    session_id="{session_id}",
+    checkpoint_id_before="cp_node_complete_intake_143030",
+    checkpoint_id_after="cp_node_complete_research_143115"
+)
+
+# Inspect memory at a specific checkpoint
+get_agent_checkpoint(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}", checkpoint_id="cp_node_complete_intake_143030")
+```
+
+Or in TUI:
+```bash
+/sessions {session_id}
 ```
 
 **Verification:**
@@ -653,7 +671,7 @@ Available Checkpoints: (3)
 
 **Example interaction:**
 ```
-Developer: "I applied the fix to intake-collector. How do I verify it works?"
+Developer: "I applied the fix to research. How do I verify it works?"
 
 You: "Great! Let's verify the fix with these steps:
 
@@ -665,11 +683,11 @@ You: "Great! Let's verify the fix with these steps:
    [Use query_runtime_logs to check for attention flags]
 
 3. Verify the specific node:
-   [Use query_runtime_log_details for intake-collector]
+   [Use query_runtime_log_details for research]
 
 Expected results:
 - No 'needs_attention' flags
-- intake-collector shows exit_status='success'
+- research shows exit_status='success'
 - retry_count should be 0
 
 Let me know when you've run it and I'll help check the logs!"
@@ -687,7 +705,7 @@ Let me know when you've run it and I'll help check the logs!"
 - **Example:**
   ```
   query_runtime_logs(
-      agent_work_dir="/home/user/.hive/twitter_outreach",
+      agent_work_dir="/home/user/.hive/deep_research_agent",
       status="needs_attention",
       limit=20
   )
@@ -699,7 +717,7 @@ Let me know when you've run it and I'll help check the logs!"
 - **Example:**
   ```
   query_runtime_log_details(
-      agent_work_dir="/home/user/.hive/twitter_outreach",
+      agent_work_dir="/home/user/.hive/deep_research_agent",
       run_id="session_20260206_115718_e22339c5",
       needs_attention_only=True
   )
@@ -711,9 +729,83 @@ Let me know when you've run it and I'll help check the logs!"
 - **Example:**
   ```
   query_runtime_log_raw(
-      agent_work_dir="/home/user/.hive/twitter_outreach",
+      agent_work_dir="/home/user/.hive/deep_research_agent",
       run_id="session_20260206_115718_e22339c5",
-      node_id="intake-collector"
+      node_id="research"
+  )
+  ```
+
+### Session & Checkpoint Tools
+
+**list_agent_sessions** - Browse sessions with filtering
+- **When to use:** Finding resumable sessions, identifying failed sessions, Stage 3 triage
+- **Returns:** Session list with status, timestamps, is_resumable, current_node, quality
+- **Example:**
+  ```
+  list_agent_sessions(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      status="failed",
+      limit=10
+  )
+  ```
+
+**get_agent_session_state** - Load full session state (excludes memory values)
+- **When to use:** Inspecting session progress, checking is_resumable, examining path
+- **Returns:** Full state with memory_keys/memory_size instead of memory values
+- **Example:**
+  ```
+  get_agent_session_state(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345"
+  )
+  ```
+
+**get_agent_session_memory** - Get memory contents from a session
+- **When to use:** Stage 5 root cause analysis, inspecting produced data
+- **Returns:** All memory keys+values, or a single key's value
+- **Example:**
+  ```
+  get_agent_session_memory(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      key="twitter_handles"
+  )
+  ```
+
+**list_agent_checkpoints** - List checkpoints for a session
+- **When to use:** Stage 6 recovery, finding clean checkpoints to resume from
+- **Returns:** Checkpoint summaries with type, node, clean status
+- **Example:**
+  ```
+  list_agent_checkpoints(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      is_clean="true"
+  )
+  ```
+
+**get_agent_checkpoint** - Load a specific checkpoint with full state
+- **When to use:** Inspecting exact state at a checkpoint, comparing to current state
+- **Returns:** Full checkpoint: memory snapshot, execution path, metrics
+- **Example:**
+  ```
+  get_agent_checkpoint(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      checkpoint_id="cp_node_complete_intake_143030"
+  )
+  ```
+
+**compare_agent_checkpoints** - Diff memory between two checkpoints
+- **When to use:** Understanding data flow, finding where state diverged
+- **Returns:** Memory diff (added/removed/changed keys) + execution path diff
+- **Example:**
+  ```
+  compare_agent_checkpoints(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      checkpoint_id_before="cp_node_complete_intake_143030",
+      checkpoint_id_after="cp_node_complete_research_143115"
   )
   ```
 
@@ -739,27 +831,37 @@ Loop every 10 seconds:
   2. If found: Alert and drill into L2
 ```
 
+**Pattern 4: Session State + Checkpoint Recovery**
+```
+1. list_agent_sessions: Find failed/paused sessions
+2. get_agent_session_state: Check is_resumable, see execution path
+3. get_agent_session_memory: Inspect what data was produced
+4. list_agent_checkpoints: Find clean checkpoints before failure
+5. compare_agent_checkpoints: Understand what changed between checkpoints
+6. Recommend resume command with specific checkpoint
+```
+
 ---
 
 ## Complete Example Walkthrough
 
-### Scenario: twitter_outreach Agent Failing
+### Scenario: deep_research_agent Agent Failing
 
-**Developer says:** "My twitter_outreach agent keeps failing. It's not finding Twitter handles correctly."
+**Developer says:** "My deep_research_agent keeps failing. It's not saving research findings correctly."
 
 #### Stage 1: Setup
 ```
-You: "I'll help debug the twitter_outreach agent. Let me gather context..."
+You: "I'll help debug the deep_research_agent agent. Let me gather context..."
 
-[Read exports/twitter_outreach/agent.json]
+[Read exports/deep_research_agent/agent.json]
 
 Context:
-- Agent: twitter_outreach
-- Goal: twitter-outreach-multi-loop
-- Working Dir: ~/.hive/agents/twitter_outreach
+- Agent: deep_research_agent
+- Goal: deep-research
+- Working Dir: ~/.hive/agents/deep_research_agent
 - Success Criteria: ["Successfully send 5 personalized outreach messages"]
 - Constraints: ["Must verify handle exists", "Must personalize message"]
-- Nodes: intake-collector, profile-analyzer, message-composer, outreach-sender
+- Nodes: research, profile-analyzer, message-composer, outreach-sender
 ```
 
 #### Stage 2: Mode Selection
@@ -791,31 +893,31 @@ You: "Analyzing node-level details..."
 [Call query_runtime_log_details for the session]
 
 Results:
-- Problem Node: intake-collector
+- Problem Node: research
 - Exit Status: escalate
 - Retry Count: 5
 - Verdict Counts: {RETRY: 5, ESCALATE: 1}
 - Attention Reasons: ["high_retry_count", "missing_outputs"]
 - Total Steps: 8
 
-Diagnosis: intake-collector has retry loop + missing outputs issue
+Diagnosis: research has retry loop + missing outputs issue
 Category: Missing Outputs + Retry Loops
 ```
 
 #### Stage 5: Root Cause (L3)
 ```
-You: "Drilling into detailed logs for intake-collector..."
+You: "Drilling into detailed logs for research..."
 
-[Call query_runtime_log_raw for node intake-collector]
+[Call query_runtime_log_raw for node research]
 
 Evidence:
-Step 3: web_search("@RomuloNevesOf") → Found profile
+Step 3: web_search("latest AI regulations 2026") → Found articles
   Verdict: RETRY
-  Feedback: "Missing required output 'twitter_handles'. You found the handle but didn't call set_output."
+  Feedback: "Missing required output 'research_findings'. You found sources but didn't call set_output."
 
-Step 4: web_search("@RomuloNevesOf twitter") → Found more info
+Step 4: web_search("AI regulation policy 2026") → Found more info
   Verdict: RETRY
-  Feedback: "Still missing 'twitter_handles'. Use set_output to save your findings."
+  Feedback: "Still missing 'research_findings'. Use set_output to save your findings."
 
 Steps 5-7: Same pattern repeats...
 
@@ -826,37 +928,37 @@ ROOT CAUSE: Node successfully finds handles but LLM doesn't call set_output. It 
 ```
 You: "Here's the fix for this issue:
 
-## Issue: intake-collector Not Setting Outputs
+## Issue: research Node Not Setting Outputs
 
-**Root Cause:** Node successfully finds Twitter handles but doesn't call set_output
+**Root Cause:** Node successfully finds research sources but doesn't call set_output
 
 **Category:** Missing Outputs
 
-**File to edit:** exports/twitter_outreach/nodes/intake_collector.py
+**File to edit:** exports/deep_research_agent/nodes/research.py
 
 **Changes:**
 Update the system_prompt to emphasize the output requirement:
 
 ```python
 system_prompt = """
-You are the Intake Collector for the Twitter outreach agent.
+You are the Research node for the deep research agent.
 
 Your task:
-1. Extract Twitter handle from user input (URL or @mention)
-2. Verify it's a valid Twitter handle format
-3. **CRITICAL: Call set_output(twitter_handles=[handle]) immediately after finding valid handle**
+1. Search for relevant sources on the research topic
+2. Extract key findings from each source
+3. **CRITICAL: Call set_output(research_findings=[...]) immediately after gathering sufficient findings**
 
-IMPORTANT: You MUST call set_output even if you found the handle on the first try.
-Do not continue searching once you have a valid handle - set output and finish.
+IMPORTANT: You MUST call set_output even if you found findings on the first search.
+Do not continue searching indefinitely - set output and finish once you have enough data.
 
 Output format:
 {
-  "twitter_handles": ["@handle1", "@handle2", ...]
+  "research_findings": [{"source": "...", "summary": "...", "url": "..."}, ...]
 }
 """
 ```
 
-**Why this works:** The explicit instruction to call set_output immediately prevents the LLM from continuing to search after finding the handle.
+**Why this works:** The explicit instruction to call set_output immediately prevents the LLM from continuing to search after finding sufficient sources.
 ```
 
 #### Stage 7: Verification
@@ -880,13 +982,13 @@ You: "Checking now..."
 [Call query_runtime_log_details for the new run]
 
 Results:
-- Node: intake-collector
+- Node: research
 - Exit Status: success ✓
 - Retry Count: 0 ✓
 - Total Steps: 2 ✓
 - No attention flags ✓
 
-"Perfect! The fix worked. The intake-collector now:
+"Perfect! The fix worked. The research now:
 - Completes successfully on first try
 - No retries needed
 - Calls set_output properly

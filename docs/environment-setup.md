@@ -65,28 +65,26 @@ source .venv/bin/activate
 
 If you prefer to set up manually or the script fails:
 
-### 1. Install Core Framework
+### 1. Sync Workspace Dependencies
 
 ```bash
-cd core
-uv pip install -e .
+# From repository root - this creates a single .venv at the root
+uv sync
 ```
 
-### 2. Install Tools Package
+> **Note:** The `uv sync` command uses the workspace configuration in `pyproject.toml` to install both `core` (framework) and `tools` (aden_tools) packages together. This is the recommended approach over individual `pip install -e` commands which may fail due to circular dependencies.
+
+### 2. Activate the Virtual Environment
 
 ```bash
-cd tools
-uv pip install -e .
+# Linux/macOS
+source .venv/bin/activate
+
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
 ```
 
-### 3. Upgrade OpenAI Package
-
-```bash
-# litellm requires openai >= 1.0.0
-uv pip install --upgrade "openai>=1.0.0"
-```
-
-### 4. Verify Installation
+### 3. Verify Installation
 
 ```bash
 uv run python -c "import framework; print('✓ framework OK')"
@@ -281,18 +279,20 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ### "ModuleNotFoundError: No module named 'framework'"
 
-**Solution:** Install the core package:
+**Solution:** Sync the workspace dependencies:
 
 ```bash
-cd core && uv pip install -e .
+# From repository root
+uv sync
 ```
 
 ### "ModuleNotFoundError: No module named 'aden_tools'"
 
-**Solution:** Install the tools package:
+**Solution:** Sync the workspace dependencies:
 
 ```bash
-cd tools && uv pip install -e .
+# From repository root
+uv sync
 ```
 
 Or run the setup script:
@@ -350,15 +350,14 @@ The Hive framework consists of three Python packages:
 
 ```
 hive/
+├── .venv/                   # Single workspace venv (created by uv sync)
 ├── core/                    # Core framework (runtime, graph executor, LLM providers)
 │   ├── framework/
-│   ├── .venv/              # Created by quickstart.sh
 │   └── pyproject.toml
 │
 ├── tools/                   # Tools and MCP servers
 │   ├── src/
 │   │   └── aden_tools/     # Actual package location
-│   ├── .venv/              # Created by quickstart.sh
 │   └── pyproject.toml
 │
 ├── exports/                 # Agent packages (user-created, gitignored)
@@ -368,28 +367,29 @@ hive/
     └── templates/           # Pre-built template agents
 ```
 
-## Separate Virtual Environments
+## Virtual Environment Setup
 
-Hive primarily uses **uv** to create and manage separate virtual environments for `core` and `tools`.
+Hive uses **uv workspaces** to manage dependencies. When you run `uv sync` from the repository root, a **single `.venv`** is created at the root containing both packages.
 
-The project uses separate virtual environments to:
+### Benefits of Workspace Mode
 
-- Isolate dependencies and avoid conflicts
-- Allow independent development and testing of each package
-- Enable MCP servers to run with their specific dependencies
+- **Single environment** - No need to switch between multiple venvs
+- **Unified dependencies** - Consistent package versions across core and tools
+- **Simpler development** - One activation, access to everything
 
 ### How It Works
 
-When you run `./quickstart.sh`, `uv` sets up:
+When you run `./quickstart.sh` or `uv sync`:
 
-1. **core/.venv/** - Contains the `framework` package and its dependencies (anthropic, litellm, mcp, etc.)
-2. **tools/.venv/** - Contains the `aden_tools` package and its dependencies (beautifulsoup4, pandas, etc.)
+1. **/.venv/** - Single root virtual environment is created
+2. Both `framework` (from core/) and `aden_tools` (from tools/) are installed
+3. All dependencies (anthropic, litellm, beautifulsoup4, pandas, etc.) are resolved together
 
-If you need to refresh environments manually, use `uv`:
+If you need to refresh the environment:
 
 ```bash
-cd core && uv sync
-cd ../tools && uv sync
+# From repository root
+uv sync
 ```
 
 ### Cross-Package Imports
@@ -521,7 +521,15 @@ export ADEN_CREDENTIALS_PATH="/custom/path"
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
+## Opencode Setup
 
+[Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
+
+### Automatic Setup
+Run the quickstart script in the root directorys:
+```bash
+./quickstart.sh
+```
 ## Additional Resources
 
 - **Framework Documentation:** [core/README.md](../core/README.md)
