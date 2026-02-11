@@ -501,7 +501,6 @@ if (-not $SelectedProviderId) {
             if ($apiKey) {
                 # Persist as a User-level environment variable (survives reboots)
                 [System.Environment]::SetEnvironmentVariable($SelectedEnvVar, $apiKey, "User")
-
                 # Also set in current session
                 Set-Item -Path "Env:\$SelectedEnvVar" -Value $apiKey
                 Write-Host ""
