@@ -303,8 +303,8 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-opus-4-6"
-        ["openai"]="gpt-5.2"
+        ["anthropic"]="claude-haiku-4-5"
+        ["openai"]="gpt-5-mini"
         ["gemini"]="gemini-3-flash-preview"
         ["groq"]="moonshotai/kimi-k2-instruct-0905"
         ["cerebras"]="zai-glm-4.7"
@@ -942,6 +942,16 @@ echo -n "  ⬡ skills... "
 if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
     SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
     echo -e "${GREEN}${SKILL_COUNT} found${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
+echo -n "  ⬡ local settings... "
+if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -f "$SCRIPT_DIR/.claude/settings.local.json.example" ]; then
+    cp "$SCRIPT_DIR/.claude/settings.local.json.example" "$SCRIPT_DIR/.claude/settings.local.json"
+    echo -e "${GREEN}copied from example${NC}"
 else
     echo -e "${YELLOW}--${NC}"
 fi

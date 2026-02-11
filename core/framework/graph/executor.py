@@ -505,6 +505,21 @@ class GraphExecutor:
 
                 path.append(current_node_id)
 
+                # Clear stale nullable outputs from previous visits.
+                # When a node is re-visited (e.g. review → process-batch → review),
+                # nullable outputs from the PREVIOUS visit linger in shared memory.
+                # This causes stale edge conditions to fire (e.g. "feedback is not None"
+                # from visit 1 triggers even when visit 2 sets "final_summary" instead).
+                # Clearing them ensures only the CURRENT visit's outputs affect routing.
+                if node_visit_counts.get(current_node_id, 0) > 1:
+                    nullable_keys = getattr(node_spec, "nullable_output_keys", None) or []
+                    for key in nullable_keys:
+                        if memory.read(key) is not None:
+                            memory.write(key, None, validate=False)
+                            self.logger.info(
+                                f"   🧹 Cleared stale nullable output '{key}' from previous visit"
+                            )
+
                 # Check if pause (HITL) before execution
                 if current_node_id in graph.pause_nodes:
                     self.logger.info(f"⏸ Paused at HITL node: {node_spec.name}")
