@@ -7,6 +7,88 @@ import sys
 from pathlib import Path
 
 
+def _validate_json_input(input_str: str, param_name: str = "--input") -> dict | None:
+    """Validate JSON input and provide helpful error messages.
+
+    Args:
+        input_str: The JSON string to validate
+        param_name: The parameter name for error messages
+
+    Returns:
+        Parsed dict if valid, None if invalid (error printed to stderr)
+    """
+    try:
+        return json.loads(input_str)
+    except json.JSONDecodeError as e:
+        # Provide helpful, actionable error message
+        print(f"\nError: Invalid JSON format for {param_name}", file=sys.stderr)
+        print("-" * 50, file=sys.stderr)
+
+        # Explain what went wrong
+        error_desc = _describe_json_error(e, input_str)
+        print(f"\n  Problem: {error_desc}", file=sys.stderr)
+
+        # Show context around the error
+        if e.pos is not None:
+            _show_error_context(input_str, e.pos, file=sys.stderr)
+
+        # Show correct format examples
+        print("\n  Correct format examples:", file=sys.stderr)
+        print(f'    {param_name} \'{{"key": "value"}}\'', file=sys.stderr)
+        print(f'    {param_name} \'{{"name": "test", "count": 42}}\'', file=sys.stderr)
+        print(file=sys.stderr)
+
+        return None
+
+
+def _describe_json_error(e: json.JSONDecodeError, input_str: str) -> str:
+    """Generate a human-readable description of the JSON error."""
+    msg = e.msg.lower() if e.msg else "unknown error"
+
+    # Common error patterns and their explanations
+    if "expecting property name" in msg:
+        return "Missing quotes around key names. JSON requires double quotes around all keys."
+    elif "expecting value" in msg:
+        return "Missing a value after a colon. Each key must have a value."
+    elif "unterminated string" in msg or "end of file" in msg:
+        return "Missing closing quote. String values must be enclosed in double quotes."
+    elif "expecting ':' delimiter" in msg:
+        return 'Missing colon between key and value. Use format: "key": "value"'
+    elif "expecting ',' delimiter" in msg:
+        return "Missing comma between items. Separate key-value pairs with commas."
+    elif "extra data" in msg:
+        return "Unexpected characters after the JSON object. Check for typos."
+    elif "unmatched" in msg:
+        return "Unmatched bracket or brace. Make sure all { } and [ ] are properly closed."
+    else:
+        # Fall back to the original message with position hint
+        if e.pos is not None and e.pos < len(input_str):
+            char = input_str[e.pos] if e.pos < len(input_str) else "end"
+            return f"{e.msg} at position {e.pos} (character: '{char}')"
+        return e.msg
+
+
+def _show_error_context(input_str: str, error_pos: int, file=sys.stderr) -> None:
+    """Show the input with a pointer to the error location."""
+    # Extract context around the error
+    start = max(0, error_pos - 10)
+    end = min(len(input_str), error_pos + 10)
+
+    context = input_str[start:end]
+    pointer_pos = error_pos - start
+
+    # Truncate if too long
+    if start > 0:
+        context = "..." + context
+        pointer_pos += 3
+    if end < len(input_str):
+        context = context + "..."
+
+    print("\n  Input near error:", file=file)
+    print(f"    {context}", file=file)
+    print(f"    {' ' * pointer_pos}^--- here", file=file)
+
+
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
     """Register runner commands with the main CLI."""
 
@@ -404,16 +486,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Load input context
     context = {}
     if args.input:
-        try:
-            context = json.loads(args.input)
-        except json.JSONDecodeError as e:
-            print(f"Error parsing --input JSON: {e}", file=sys.stderr)
+        context = _validate_json_input(args.input, "--input")
+        if context is None:
             return 1
     elif args.input_file:
         try:
             with open(args.input_file) as f:
-                context = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
+                content = f.read()
+            context = _validate_json_input(content, "--input-file")
+            if context is None:
+                return 1
+        except FileNotFoundError:
+            print(f"Error: Input file not found: {args.input_file}", file=sys.stderr)
+            return 1
+        except OSError as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
             return 1
 
@@ -761,11 +847,9 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     """Dispatch request to multiple agents via orchestrator."""
     from framework.runner import AgentOrchestrator
 
-    # Parse input
-    try:
-        context = json.loads(args.input)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing --input JSON: {e}", file=sys.stderr)
+    # Parse input with helpful validation
+    context = _validate_json_input(args.input, "--input")
+    if context is None:
         return 1
 
     # Find agents
