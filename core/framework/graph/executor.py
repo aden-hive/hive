@@ -427,6 +427,7 @@ class GraphExecutor:
                 data_dir=str(self._storage_path / "data"),
             )
 
+        node_spec = None  # Pre-initialise so the except handler never hits UnboundLocalError
         try:
             while steps < graph.max_steps:
                 steps += 1
@@ -1652,7 +1653,9 @@ class GraphExecutor:
 
         # Handle failures based on config
         if failed_branches:
-            failed_names = [graph.get_node(b.node_id).name for b in failed_branches]
+            failed_names = [
+                n.name if (n := graph.get_node(b.node_id)) else b.node_id for b in failed_branches
+            ]
             if self._parallel_config.on_branch_failure == "fail_all":
                 raise RuntimeError(f"Parallel execution failed: branches {failed_names} failed")
             elif self._parallel_config.on_branch_failure == "continue_others":
