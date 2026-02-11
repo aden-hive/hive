@@ -22,6 +22,32 @@ Each recipe is a markdown file (or folder with a markdown file) containing:
 
 ## Available recipes
 
+### Sales & Marketing
 | Recipe | Description |
 |--------|-------------|
-| [marketing_agent](marketing_agent/) | Multi-channel marketing content generator with audience analysis and A/B copy variants |
+| [social_media_management](social_media_management/) | Schedule posts, reply to comments, monitor trends |
+| [newsletter_production](newsletter_production/) | Transform voice memos and ideas into polished emails |
+| [ad_campaign_monitoring](ad_campaign_monitoring/) | Monitor ad spend and flag CPA spikes |
+| [crm_hygiene](crm_hygiene/) | Ensure every lead has follow-up dates and status |
+
+### Customer Success
+| Recipe | Description |
+|--------|-------------|
+| [inquiry_triaging](inquiry_triaging/) | Sort tire kickers from hot leads |
+| [onboarding_assistance](onboarding_assistance/) | Guide new clients through setup and welcome kits |
+
+### Operations Automation
+| Recipe | Description |
+|--------|-------------|
+| [inbox_management](inbox_management/) | Clear spam and surface emails that need your brain |
+| [invoicing_collections](invoicing_collections/) | Send invoices and chase overdue payments |
+| [data_keeper](data_keeper/) | Pull data from multiple sources into unified reports |
+| [calendar_coordination](calendar_coordination/) | Protect Deep Work time and book travel |
+
+### Technical & Product Maintenance
+| Recipe | Description |
+|--------|-------------|
+| [quality_assurance](quality_assurance/) | Test features and links before they go live |
+| [documentation](documentation/) | Turn messy processes into clean SOPs |
+| [basic_troubleshooting](basic_troubleshooting/) | Handle Level 1 tech support |
+| [issue_triaging](issue_triaging/) | Categorize and route bug reports by severity |

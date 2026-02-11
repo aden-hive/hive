@@ -78,32 +78,54 @@ The common denominator:
 5. Can iterate on the agent
 ```
 
+## Basic use cases (we shall have template for each one of these)
 
-## Onboarding Experience
+- Github issue triaging agent
+- Tech&AI news digest agent
+- Research report agent
+- Teams daily digest and to-dos
+- Discord autoreply bot
+- Finance stock digest
+- WhatsApp auto response agent
+- Email followup agent
+- Meeting time coordination agent
 
-For "Developers who want to get a job done" and the "Individual product developer," they will likely want to try generating the agent themselves. see [## agent generation]
+## Intermediate use cases
 
-For others, they will likely want to try existing agents first to see how well the agent can work. see [## use existing agent]
+### 1. Sales & Marketing
+Marketing is often the most time-consuming "distraction" for a CEO. You provide the vision; they provide the volume.
 
-## Agent Generation
+- [Social Media Management](../examples/recipes/social_media_management/): Scheduling posts, replying to comments, and monitoring trends.
+- [Newsletter Production](../examples/recipes/newsletter_production/): Taking your raw ideas or voice memos and turning them into a polished weekly email.
+- [Ad Campaign Monitoring](../examples/recipes/ad_campaign_monitoring/): Checking daily spends on Meta/Google ads and flagging if the Cost Per Acquisition (CPA) spikes.
+- [CRM Update Agent](../examples/recipes/crm_hygiene/): Ensuring every lead has a follow-up date and a status update.
 
-[To be complete]
+### 2. Customer Success
+You shouldn't be the one answering "How do I reset my password?" but you should be the one closing $10k deals.
 
-## Integration
+- [Inquiry Triaging](../examples/recipes/inquiry_triaging/): Sorting the "tire kickers" from the "hot leads."
+- [Onboarding Assistance](../examples/recipes/onboarding_assistance/): Helping new clients set up their accounts or sending out "Welcome" kits.
 
-Happy path: In the goal setting, the agent do the job super well
+### 3. Operations Automation
+This is your right hand. They keep the gears greased so you don't get stuck in the "admin trap."
 
-mid path: After negotiation, the agent explicitly told the user
+- [Inbox Management](../examples/recipes/inbox_management/): Clearing out the spam and highlighting the three emails that actually need your brain.
+- [Invoicing & Collections](../examples/recipes/invoicing_collections/): Sending out bills and—more importantly—politely chasing down the people who haven't paid them.
+- [Data Keeper](../examples/recipes/data_keeper/): Pull data and reports from multiple data sources, and union them in one place.
+- [Travel & Calendar Coordination](../examples/recipes/calendar_coordination/): Protecting your "Deep Work" time from getting fragmented by random 15-minute meetings.
 
-Sad path: After negotiation and tried to build a one off integration for certain tools
+### 4. The Technical & Product Maintenance
+Unless you are a developer, tech debt will kill your productivity. A part-timer can keep the lights on.
 
-## Agent Testing
+- [Quality Assurance](../examples/recipes/quality_assurance/): Testing new features or links before they go live to ensure nothing is broken.
+- [Documentation](../examples/recipes/documentation/): Turning your messy processes into clean Standard Operating Procedures (SOPs).
+- [Basic Troubleshooting](../examples/recipes/basic_troubleshooting/): Handling "Level 1" tech support for your platform or website.
+- [Issue Triaging](../examples/recipes/issue_triaging/): Categorizing and routing incoming bug reports by severity.
 
-Interactive testing: 
+## Installation
 
-Autonomous testing: 
-
-## How agent runtime works
+Install the prer-requisites like python
+Install quickstart
 
 ## use existing agent
 If user would like to 
@@ -115,35 +137,98 @@ These are what happen:
 (automatically) Agent run, outcome happens and is recorded
 (if failed) Tell the user where the logs are saved
 
+## Agent generation (alternative to using existing agent)
 
+For "Developers who want to get a job done" and the "Individual product developer," they will likely want to try generating the agent themselves. see [## agent generation]
+
+For others, they will likely want to try existing agents first to see how well the agent can work. see [## use existing agent]
+
+If user find somethign they can't fulfill with the framework, they can choose to contribute by share it in an issue or in the discord channel 
+
+## Agent Testing
+
+Interactive testing: Run `hive tui` and test the agent in a tui
+
+Autonomous testing: Run `hive run XXX --debug` and trigger the event source. Testing events, especially the scheduled event can be hard. It would be benificial if we provide some developer tools to finish them.
+
+(after commercial ready stage) Sample agent testing without installation: We host some sample agents on cloud and provide them to the users to test directly without installation
+
+## Integration
+Users can't even finish testing without setting up the integration correctly.
+
+Happy path: In the goal setting, the agent do the job super well
+
+mid path: After negotiation, the agent explicitly told the user
+
+Sad path: After negotiation and tried to build a one off integration for certain tools
+
+## Agent Debugging
+If any error / unexpected behavior happens during testing, the developer need to be able to debug the agent
+
+## Logging
+
+To make it easier for user to have a AI-assisted experience checking log and get reported the insight with high signal/noise ratio,
+
+Hive uses a **three-level observability** for tracking agent execution:
+
+| Level | What it captures | File |
+|-------|------------------|------|
+| **L1 (Summary)** | Run outcomes — success/failure, execution quality, attention flags | `summary.json` |
+| **L2 (Details)** | Per-node results — retries, verdicts, latency, attention reasons | `details.jsonl` |
+| **L3 (Tool Logs)** | Step-by-step execution — tool calls, LLM responses, judge feedback | `tool_logs.jsonl` |
+
+## (Optional) How graph works
+Developers need to understand node memory works, how tools are called. for them to fix and improve the agent they built.  see `docs/key_concepts` for details
+
+## **first success**
+By here, the developer should already finish running one of their first agent and get a grasp of how the agent frameworks works. They can very well trying to use it for the real use cases, which often invoice updating the current agennt
+
+Anything before the first success is not negotiateble something we need to ensure running as smooth as possible
 
 ## Iteration (building) - More like debugging
 
-[To be complete]
-
+After the MVP agent/sample agent runs. Developer want to iterate the agent by biggering the use cases. 
 
 ## Iteration (production) - Evolution and inventiveness
 
-[To be complete]
+Afterthe MVP is deployed. Which taste and judgement are still came from the human developers, AI was a significen force multiplier for rapidly iterating and solving problems.
 
-## Automomous
-Core should remain the same, different deployment flag
+For Aden cloud hive, the production evolution is fully automatic. Aden queen bee run a natural selection by deploying,  evaluating and improving. 
+
+## Version Control
+
+Iteration is not always improving everything. To help the developers, version control helps them getting back to the previous version , ike how git works. They run this command `hive git restore` to to 
+
+## Agent Personality
+Developers want to put their own soul into the agent. What remain the same across the evolution is important. Developer success is not about having the agent constantly changing. It is about you know the goal and the personality of the agent will not chanage, and it just adapt to the environment to solve problems.
+
+# Deployment
+
+## (Optional) How agent runtime works
+Developers need to understand how data are transfered during agent runtime, how memory works, how tools works. for them to fix and improve the agent they built.  see ./agent_runtime.md for details
+
+## Local Deployment
+By default we support deployment through docker. 
+
+## Cloud Deployment
+For users who want zero-ops deployment, easier integration and credential management, and logging, Aden cloud is ideal. Users who don’t want to manage infra get secure defaults, scaling, and observability out of the box—at the cost of less low-level control and some vendor lock-in.
+
+## Deployment Strategy
+Autonomous and interactive modes look different, but the core should remain the same, and the deployment strategy should also be consistent.
 
 ## Performance
 Not a focus at the moment
 Speed of run, hellucination
 
-
 ## How we collect data
 Self-reported issues
 Cloud observabiltiy product
 
-## How guardrail is done
+## Runtime guardrails
 
 [To be complete]
 
 ## How we make reliability
-
 
 Breakages still happens, even in the most best business process: Being reliable is to be adaptive and fix the problems 
 
@@ -153,12 +238,3 @@ Breakages still happens, even in the most best business process: Being reliable 
 ## Developer trust
 
 [To be complete]
-
-
-## What Success Looks Like for Them
-
-In short, the common ground is having the agent "used in prod."
-
-## Deployment Strategy
-
-How the developers deploy their agents. Autonomous and interactive agent might be different. Human in the loop might need hooks and sdks
