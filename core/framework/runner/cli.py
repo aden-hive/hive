@@ -390,6 +390,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     # Set logging level (quiet by default for cleaner output)
@@ -429,6 +430,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                         args.agent_path,
                         model=args.model,
                     )
+                except CredentialError as e:
+                    print(f"\n{e}", file=sys.stderr)
+                    return
                 except Exception as e:
                     print(f"Error loading agent: {e}")
                     return
@@ -469,6 +473,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                 args.agent_path,
                 model=args.model,
             )
+        except CredentialError as e:
+            print(f"\n{e}", file=sys.stderr)
+            return 1
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -593,10 +600,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_info(args: argparse.Namespace) -> int:
     """Show agent information."""
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     try:
         runner = AgentRunner.load(args.agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -656,10 +667,14 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate an exported agent."""
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     try:
         runner = AgentRunner.load(args.agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -976,6 +991,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     # Configure logging to show runtime visibility
@@ -1000,6 +1016,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
     try:
         runner = AgentRunner.load(agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -1209,6 +1228,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
     """Browse agents and launch the interactive TUI dashboard."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
     from framework.tui.app import AdenTUI
 
@@ -1259,6 +1279,9 @@ def cmd_tui(args: argparse.Namespace) -> int:
                 agent_path,
                 model=args.model,
             )
+        except CredentialError as e:
+            print(f"\n{e}", file=sys.stderr)
+            return
         except Exception as e:
             print(f"Error loading agent: {e}")
             return
