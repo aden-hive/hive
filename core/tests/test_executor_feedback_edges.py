@@ -117,7 +117,7 @@ async def test_visit_limit_skips_node(runtime, goal):
     graph = GraphSpec(
         id="cycle_graph",
         goal_id="g1",
-        name="Cycle Graph",
+        description="Cycle Graph",
         entry_node="a",
         nodes=[node_a, node_b],
         edges=[
@@ -175,7 +175,7 @@ async def test_visit_limit_allows_multiple(runtime, goal):
     graph = GraphSpec(
         id="cycle_graph",
         goal_id="g1",
-        name="Cycle Graph",
+        description="Cycle Graph",
         entry_node="a",
         nodes=[node_a, node_b],
         edges=[
@@ -231,7 +231,7 @@ async def test_visit_limit_zero_unlimited(runtime, goal):
     graph = GraphSpec(
         id="cycle_graph",
         goal_id="g1",
-        name="Cycle Graph",
+        description="Cycle Graph",
         entry_node="a",
         nodes=[node_a, node_b],
         edges=[
@@ -297,7 +297,7 @@ async def test_conditional_feedback_edge(runtime, goal):
     graph = GraphSpec(
         id="feedback_graph",
         goal_id="g1",
-        name="Feedback Graph",
+        description="Feedback Graph",
         entry_node="director",
         nodes=[director, writer, output_node],
         edges=[
@@ -392,7 +392,7 @@ async def test_conditional_feedback_false(runtime, goal):
     graph = GraphSpec(
         id="feedback_graph",
         goal_id="g1",
-        name="Feedback Graph",
+        description="Feedback Graph",
         entry_node="director",
         nodes=[director, writer, output_node],
         edges=[
@@ -473,7 +473,7 @@ async def test_visit_counts_in_result(runtime, goal):
     graph = GraphSpec(
         id="linear_graph",
         goal_id="g1",
-        name="Linear Graph",
+        description="Linear Graph",
         entry_node="a",
         nodes=[node_a, node_b],
         edges=[
@@ -531,7 +531,7 @@ async def test_conditional_priority_prevents_fanout(runtime, goal):
     graph = GraphSpec(
         id="priority_graph",
         goal_id="g1",
-        name="Priority Graph",
+        description="Priority Graph",
         entry_node="writer",
         nodes=[writer, output_node, director],
         edges=[

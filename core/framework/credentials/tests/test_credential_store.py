@@ -345,7 +345,7 @@ class TestCompositeStorage:
 
         storage = CompositeStorage(primary, [fallback])
         cred = storage.load("test")
-
+        assert cred is not None
         # Should get from primary
         assert cred.get_key("k") == "primary"
 
@@ -361,7 +361,7 @@ class TestCompositeStorage:
 
         storage = CompositeStorage(primary, [fallback])
         cred = storage.load("test")
-
+        assert cred is not None
         assert cred.get_key("k") == "fallback"
 
     def test_write_to_primary_only(self):
@@ -599,6 +599,7 @@ class TestCredentialStore:
         store.register_usage(spec)
 
         errors = store.validate_for_usage("test")
+        assert len(errors) > 0
         assert "api_key" in errors[0]
 
     def test_caching(self):

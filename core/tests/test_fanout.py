@@ -149,7 +149,7 @@ def _make_fanout_graph(
     return GraphSpec(
         id="fanout_graph",
         goal_id="g1",
-        name="Fanout Graph",
+        description="Fanout Graph",
         entry_node="source",
         nodes=nodes,
         edges=edges,
@@ -408,7 +408,7 @@ async def test_single_edge_no_parallel_overhead(runtime, goal):
     graph = GraphSpec(
         id="seq_graph",
         goal_id="g1",
-        name="Sequential",
+        description="Sequential",
         entry_node="n1",
         nodes=[n1, n2],
         edges=[EdgeSpec(id="e1", source="n1", target="n2", condition=EdgeCondition.ON_SUCCESS)],

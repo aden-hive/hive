@@ -385,7 +385,7 @@ def sanitize_output(result):
 ```python
 async def audit_log(event):
     log_entry = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "event_type": event.type,
         "agent_id": event.agent_id,
         "user_id": event.user_id,

@@ -156,7 +156,7 @@ async def test_event_loop_max_retries_forced_zero(runtime):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="el_fail",
         nodes=[node_spec],
         edges=[],
@@ -191,7 +191,7 @@ async def test_event_loop_max_retries_zero_no_warning(runtime, caplog):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="el_zero",
         nodes=[node_spec],
         edges=[],
@@ -228,7 +228,7 @@ async def test_event_loop_max_retries_positive_logs_warning(runtime, caplog):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="el_warn",
         nodes=[node_spec],
         edges=[],

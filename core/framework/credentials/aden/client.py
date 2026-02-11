@@ -32,7 +32,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -434,7 +434,7 @@ class AdenCredentialClient:
                 json={
                     "operation": operation,
                     "status": status,
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "timestamp": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "metadata": metadata or {},
                 },
             )

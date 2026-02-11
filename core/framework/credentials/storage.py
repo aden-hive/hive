@@ -41,7 +41,7 @@ class CredentialStorage(ABC):
         Args:
             credential: The credential object to save
         """
-        pass
+        ...
 
     @abstractmethod
     def load(self, credential_id: str) -> CredentialObject | None:
@@ -54,7 +54,7 @@ class CredentialStorage(ABC):
         Returns:
             CredentialObject if found, None otherwise
         """
-        pass
+        ...
 
     @abstractmethod
     def delete(self, credential_id: str) -> bool:
@@ -67,7 +67,7 @@ class CredentialStorage(ABC):
         Returns:
             True if the credential existed and was deleted, False otherwise
         """
-        pass
+        ...
 
     @abstractmethod
     def list_all(self) -> list[str]:
@@ -77,7 +77,7 @@ class CredentialStorage(ABC):
         Returns:
             List of credential IDs
         """
-        pass
+        ...
 
     @abstractmethod
     def exists(self, credential_id: str) -> bool:
@@ -90,7 +90,7 @@ class CredentialStorage(ABC):
         Returns:
             True if credential exists, False otherwise
         """
-        pass
+        ...
 
 
 class EncryptedFileStorage(CredentialStorage):

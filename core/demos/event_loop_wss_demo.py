@@ -35,8 +35,8 @@ sys.path.insert(0, str(_HIVE_DIR))  # core.framework.* (for aden_tools imports)
 import os  # noqa: E402
 
 from aden_tools.credentials import CREDENTIAL_SPECS, CredentialStoreAdapter  # noqa: E402
-from core.framework.credentials import CredentialStore  # noqa: E402
 
+from framework.credentials import CredentialStore  # noqa: E402
 from framework.credentials.storage import (  # noqa: E402
     CompositeStorage,
     EncryptedFileStorage,

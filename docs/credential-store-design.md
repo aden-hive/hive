@@ -91,7 +91,7 @@ class CredentialType(str, Enum):
 ### CredentialKey
 
 ```python
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, Optional
 from pydantic import BaseModel, SecretStr, Field
 
@@ -111,7 +111,7 @@ class CredentialKey(BaseModel):
         """Check if this key has expired."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() >= self.expires_at
+        return datetime.now(UTC) >= self.expires_at
 
     def get_secret_value(self) -> str:
         """Get the actual secret value (use sparingly)."""
@@ -158,8 +158,8 @@ class CredentialObject(BaseModel):
     # Metadata
     description: str = ""
     tags: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def get_key(self, key_name: str) -> Optional[str]:
         """Get a specific key's value."""
@@ -180,7 +180,7 @@ class CredentialObject(BaseModel):
             value=SecretStr(value),
             expires_at=expires_at
         )
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     @property
     def needs_refresh(self) -> bool:
@@ -192,7 +192,7 @@ class CredentialObject(BaseModel):
 
     def record_usage(self) -> None:
         """Record that this credential was used."""
-        self.last_used = datetime.utcnow()
+        self.last_used = datetime.now(UTC)
         self.use_count += 1
 ```
 
@@ -376,7 +376,7 @@ Providers handle credential lifecycle operations (refresh, validate, revoke).
 
 ```python
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import List
 import logging
 
@@ -444,7 +444,7 @@ class CredentialProvider(ABC):
         Override for custom logic.
         """
         buffer = timedelta(minutes=5)
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         for key in credential.keys.values():
             if key.expires_at is not None:
@@ -735,7 +735,7 @@ class EnvVarStorage(CredentialStorage):
 ```python
 import threading
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 class CredentialStore:
@@ -986,7 +986,7 @@ class OAuth2Token:
         """Check if token is expired (with 5-minute buffer)."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() >= (self.expires_at - timedelta(minutes=5))
+        return datetime.now(UTC) >= (self.expires_at - timedelta(minutes=5))
 
     @property
     def can_refresh(self) -> bool:
@@ -1095,7 +1095,7 @@ class BaseOAuth2Provider(CredentialProvider):
         if new_token.refresh_token:
             credential.set_key("refresh_token", new_token.refresh_token)
 
-        credential.last_refreshed = datetime.utcnow()
+        credential.last_refreshed = datetime.now(UTC)
         return credential
 
     def validate(self, credential: CredentialObject) -> bool:
@@ -1553,7 +1553,7 @@ store.save_credential(CredentialObject(
         "access_token": CredentialKey(
             name="access_token",
             value=SecretStr("ya29.xxx"),
-            expires_at=datetime.utcnow() + timedelta(hours=1)
+            expires_at=datetime.now(UTC) + timedelta(hours=1)
         ),
         "refresh_token": CredentialKey(
             name="refresh_token",

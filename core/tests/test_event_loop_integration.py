@@ -349,7 +349,7 @@ async def test_event_loop_node_in_graph(runtime):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="el_node",
         nodes=[node_spec],
         edges=[],
@@ -810,7 +810,7 @@ async def test_event_loop_no_executor_retry(runtime):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="el_fail",
         nodes=[node_spec],
         edges=[],
@@ -882,7 +882,7 @@ async def test_context_handoff_between_nodes(runtime):
     graph = GraphSpec(
         id="handoff_graph",
         goal_id="test_goal",
-        name="Handoff Graph",
+        description="Handoff Graph",
         entry_node="enrichment",
         nodes=[enrichment_spec, strategy_spec],
         edges=[
@@ -1062,7 +1062,7 @@ async def test_mixed_node_graph(runtime):
     graph = GraphSpec(
         id="pipeline_graph",
         goal_id="test_goal",
-        name="Pipeline Graph",
+        description="Pipeline Graph",
         entry_node="load",
         nodes=[load_spec, process_spec, format_spec],
         edges=[
@@ -1146,7 +1146,7 @@ async def test_fan_out_rejects_overlapping_output_keys(runtime):
     graph = GraphSpec(
         id="fanout_graph",
         goal_id="test_goal",
-        name="Fan Out Graph",
+        description="Fan Out Graph",
         entry_node="source",
         nodes=[source_spec, branch_a_spec, branch_b_spec],
         edges=[

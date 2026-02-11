@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tui = ["textual>=0.75.0"]
+vault = ["hvac"]
 
 [project.scripts]
 hive = "framework.cli:main"

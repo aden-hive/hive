@@ -87,7 +87,7 @@ async def test_executor_respects_custom_max_retries_high(runtime):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="flaky_node",
         nodes=[node_spec],
         edges=[],
@@ -131,7 +131,7 @@ async def test_executor_respects_custom_max_retries_low(runtime):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="fragile_node",
         nodes=[node_spec],
         edges=[],
@@ -174,7 +174,7 @@ async def test_executor_respects_default_max_retries(runtime):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="default_node",
         nodes=[node_spec],
         edges=[],
@@ -219,7 +219,7 @@ async def test_executor_max_retries_two_succeeds_on_second(runtime):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="two_retry_node",
         nodes=[node_spec],
         edges=[],

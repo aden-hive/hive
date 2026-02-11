@@ -120,7 +120,7 @@ async def test_on_failure_edge_followed_after_max_retries(runtime, goal):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="failing",
         nodes=nodes,
         edges=edges,
@@ -165,7 +165,7 @@ async def test_no_on_failure_edge_still_terminates(runtime, goal):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="failing",
         nodes=[nodes[0]],
         edges=[],
@@ -230,7 +230,7 @@ async def test_on_failure_edge_not_followed_on_success(runtime, goal):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="working",
         nodes=nodes,
         edges=edges,
@@ -286,7 +286,7 @@ async def test_on_failure_edge_with_zero_retries(runtime, goal):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="fragile",
         nodes=nodes,
         edges=edges,
@@ -342,7 +342,7 @@ async def test_on_failure_handler_appears_in_path(runtime, goal):
     graph = GraphSpec(
         id="test_graph",
         goal_id="test_goal",
-        name="Test Graph",
+        description="Test Graph",
         entry_node="failing",
         nodes=nodes,
         edges=edges,
