@@ -212,7 +212,7 @@ classDef done fill:#9e9e9e,color:#fff,stroke:#757575
 
 ### Sample Agents
 - [ ] Knowledge Agent
-- [ ] Blog Writer Agent
+- [x] Blog Writer Agent
 - [ ] SDR Agent
 
 ---

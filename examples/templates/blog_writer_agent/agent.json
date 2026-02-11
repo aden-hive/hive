@@ -1,0 +1,448 @@
+{
+  "agent": {
+    "id": "blog_writer_agent",
+    "name": "Blog Writer Agent",
+    "version": "1.0.0",
+    "description": "Business-focused blog writer that researches sources, builds positioning, drafts content, and publishes a cited Markdown post with SEO metadata and HITL checkpoints."
+  },
+  "graph": {
+    "id": "blog-writer-agent-graph",
+    "goal_id": "business-blog-writer",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "publish"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Blog Intake",
+        "description": "Clarify topic, audience, business angle, CTA, and constraints",
+        "node_type": "event_loop",
+        "input_keys": [
+          "topic"
+        ],
+        "output_keys": [
+          "brief",
+          "audience",
+          "angle",
+          "cta",
+          "tone",
+          "length_words"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a blog intake strategist for a business audience.\nYour goal is to define a clear writing brief the rest of the pipeline can execute.\n\n**STEP 1 — Ask or confirm (text only, NO tool calls):**\n1. Read the provided topic.\n2. If it is vague, ask 2-3 short questions:\n   - Target audience (role/industry/seniority)\n   - Desired business angle or POV\n   - Primary call-to-action (CTA)\n   - Desired length range (e.g., 1200–2000 words)\n3. If it is clear, summarize your understanding and ask for confirmation.\n\nKeep it concise. End by asking for confirmation.\nThen call ask_user().\n\n**STEP 2 — After the user responds, call set_output:**\n- set_output(\"brief\", \"A single paragraph business-focused brief with scope and intent.\")\n- set_output(\"audience\", \"e.g., B2B product leaders in SaaS\")\n- set_output(\"angle\", \"e.g., strategic perspective or contrarian POV\")\n- set_output(\"cta\", \"e.g., book a demo / subscribe / download guide\")\n- set_output(\"tone\", \"e.g., crisp, authoritative, analytical\")\n- set_output(\"length_words\", \"e.g., 1500\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "research",
+        "name": "Research Topic",
+        "description": "Search the web, scrape sources, and extract evidence",
+        "node_type": "event_loop",
+        "input_keys": [
+          "brief"
+        ],
+        "output_keys": [
+          "findings",
+          "sources"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a research agent for a business blog post.\nUse web_search and web_scrape to gather authoritative sources.\n\nWork in phases:\n1. Search with 3-5 diverse queries.\n2. Scrape 5-8 high-quality sources.\n3. Extract key evidence with URLs for citation.\n\nRules:\n- Prefer .gov, .edu, established publications, and reputable industry reports.\n- Capture direct, attributable facts (stats, benchmarks, quotes, timelines).\n- Track which URL supports each claim.\n\nWhen done, call set_output:\n- set_output(\"findings\", \"Bullet list of key facts/insights. Each bullet must include its source URL.\")\n- set_output(\"sources\", [{\"url\": \"...\", \"title\": \"...\", \"summary\": \"...\"}])",
+        "tools": [
+          "web_search",
+          "web_scrape",
+          "load_data",
+          "save_data",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "positioning",
+        "name": "Positioning & Thesis",
+        "description": "Synthesize a business thesis and outline based on research",
+        "node_type": "event_loop",
+        "input_keys": [
+          "brief",
+          "findings"
+        ],
+        "output_keys": [
+          "thesis",
+          "outline"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a strategist. Turn findings into a strong business thesis and outline.\n\nRequirements:\n- The thesis must be a clear, opinionated POV suitable for a business audience.\n- The outline should include 5-8 sections with H2/H3 structure.\n- Each section should reference which findings it will cite.\n\nReturn:\n- set_output(\"thesis\", \"1-2 sentence thesis\")\n- set_output(\"outline\", \"Structured outline with section titles and bullets\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "outline_review",
+        "name": "Outline Review",
+        "description": "Present thesis + outline and gather user approval or changes",
+        "node_type": "event_loop",
+        "input_keys": [
+          "brief",
+          "thesis",
+          "outline"
+        ],
+        "output_keys": [
+          "needs_outline_changes",
+          "outline_feedback"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Present the thesis and outline for approval.\n\n**STEP 1 — Present (text only, NO tool calls):**\n1. Thesis (1-2 sentences)\n2. Outline (numbered sections with brief bullets)\n3. Ask: approve or request changes?\n\nThen call ask_user().\n\n**STEP 2 — After user responds, call set_output:**\n- set_output(\"needs_outline_changes\", \"true\" or \"false\")\n- set_output(\"outline_feedback\", \"What to change, if any\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "write_draft",
+        "name": "Write Draft",
+        "description": "Write the business blog draft with citations",
+        "node_type": "event_loop",
+        "input_keys": [
+          "brief",
+          "thesis",
+          "outline",
+          "findings",
+          "outline_feedback",
+          "revision_notes"
+        ],
+        "output_keys": [
+          "draft_md"
+        ],
+        "nullable_output_keys": [
+          "outline_feedback",
+          "revision_notes"
+        ],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Write a full business blog draft in Markdown.\n\nRequirements:\n- 1500–3000 words unless brief says otherwise.\n- Business tone: crisp, authoritative, analytical.\n- Include citations with numbered references like [1], [2] tied to sources.\n- Use headings and subheadings from the outline.\n- Ensure the CTA is included near the end.\n\nIf outline_feedback exists, incorporate it.\nIf revision_notes exists, this is a revision pass. Focus on addressing the specific\nfeedback in revision_notes while preserving the overall structure.\n\nReturn:\n- set_output(\"draft_md\", \"Markdown draft with citations\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "seo_optimize",
+        "name": "SEO Optimization",
+        "description": "Optimize title, meta description, and keywords",
+        "node_type": "event_loop",
+        "input_keys": [
+          "draft_md",
+          "brief"
+        ],
+        "output_keys": [
+          "optimized_md",
+          "seo_metadata"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Optimize the draft for SEO without hurting clarity.\n\nTasks:\n- Provide an SEO title (<= 60 chars)\n- Provide a meta description (<= 155 chars)\n- Provide 6-10 primary keywords\n- Lightly refine the draft to improve readability and keyword placement\n\nReturn:\n- set_output(\"optimized_md\", \"Revised Markdown\")\n- set_output(\"seo_metadata\", {\"title\": \"...\", \"meta_description\": \"...\", \"keywords\": [\"...\"]})",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "quality_gate",
+        "name": "Quality Gate",
+        "description": "Evaluate draft vs. brief and request revisions if needed",
+        "node_type": "event_loop",
+        "input_keys": [
+          "optimized_md",
+          "seo_metadata",
+          "brief"
+        ],
+        "output_keys": [
+          "needs_revision",
+          "revision_notes"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Review the draft against the brief and provide a structured quality check.\n\n**STEP 1 — Present (text only, NO tool calls):**\nScore the draft on:\n1. Audience fit\n2. Business clarity\n3. Evidence + citations\n4. Thesis strength\n5. CTA presence\n6. SEO basics\n\nThen ask: approve for publishing or request changes?\nCall ask_user().\n\n**STEP 2 — After user responds, call set_output:**\n- set_output(\"needs_revision\", \"true\" or \"false\")\n- set_output(\"revision_notes\", \"Concrete edits if changes are needed\")",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 3,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "publish",
+        "name": "Publish Blog",
+        "description": "Save the blog post and provide a downloadable link",
+        "node_type": "event_loop",
+        "input_keys": [
+          "optimized_md",
+          "seo_metadata",
+          "sources"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "Publish the final blog post as a Markdown file and provide a clickable link.\n\n**STEP 1 — Save artifacts (tool calls, NO text to user yet):**\n1. Save the blog:\n   save_data(filename=\"blog_post.md\", data=<optimized_md>)\n2. Save metadata:\n   save_data(filename=\"blog_metadata.json\", data=<seo_metadata JSON>)\n3. Serve the blog file:\n   serve_file_to_user(filename=\"blog_post.md\", label=\"Blog Post\")\n\n**STEP 2 — Present the link (text only):**\nProvide the file:// URI from serve_file_to_user. Summarize what was delivered\n(title, keywords), and ask if they want a revision.\nCall ask_user().\n\n**STEP 3 — After user responds:**\n- If they want changes, set_output(\"delivery_status\", \"revision_requested\")\n- If satisfied, set_output(\"delivery_status\", \"completed\")",
+        "tools": [
+          "save_data",
+          "serve_file_to_user",
+          "load_data",
+          "list_data_files"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-research",
+        "source": "intake",
+        "target": "research",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "research-to-positioning",
+        "source": "research",
+        "target": "positioning",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "positioning-to-outline-review",
+        "source": "positioning",
+        "target": "outline_review",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "outline-review-to-positioning",
+        "source": "outline_review",
+        "target": "positioning",
+        "condition": "conditional",
+        "condition_expr": "str(needs_outline_changes).lower() == 'true'",
+        "priority": 2,
+        "input_mapping": {}
+      },
+      {
+        "id": "outline-review-to-draft",
+        "source": "outline_review",
+        "target": "write_draft",
+        "condition": "conditional",
+        "condition_expr": "str(needs_outline_changes).lower() != 'true'",
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "draft-to-seo",
+        "source": "write_draft",
+        "target": "seo_optimize",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "seo-to-quality",
+        "source": "seo_optimize",
+        "target": "quality_gate",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "quality-to-draft",
+        "source": "quality_gate",
+        "target": "write_draft",
+        "condition": "conditional",
+        "condition_expr": "str(needs_revision).lower() == 'true'",
+        "priority": 2,
+        "input_mapping": {}
+      },
+      {
+        "id": "quality-to-publish",
+        "source": "quality_gate",
+        "target": "publish",
+        "condition": "conditional",
+        "condition_expr": "str(needs_revision).lower() != 'true'",
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 140,
+    "max_retries_per_node": 3,
+    "description": "Business-focused blog writer with research, positioning, SEO, and HITL review loops.",
+    "created_at": "2026-02-11T00:00:00.000000"
+  },
+  "goal": {
+    "id": "business-blog-writer",
+    "name": "Business Blog Writer",
+    "description": "Create a business-focused blog post with strong positioning, credible sources, and clear SEO metadata — with human checkpoints.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "source-quality",
+        "description": "Use multiple authoritative sources",
+        "metric": "source_count",
+        "target": ">=5",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "citation-coverage",
+        "description": "All factual claims in the blog cite a source",
+        "metric": "citation_coverage",
+        "target": "100%",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "outline-approval",
+        "description": "User approves thesis + outline before drafting",
+        "metric": "user_approval",
+        "target": "true",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "seo-basics",
+        "description": "Blog includes title, meta description, and keywords",
+        "metric": "seo_metadata_complete",
+        "target": "true",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "cta-present",
+        "description": "Clear business CTA included",
+        "metric": "cta_present",
+        "target": "true",
+        "weight": 0.2,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "no-hallucination",
+        "description": "Only include information found in sources",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      },
+      {
+        "id": "source-attribution",
+        "description": "Every claim must cite its source with numbered references",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      },
+      {
+        "id": "human-checkpoints",
+        "description": "User approves outline and final quality gate",
+        "constraint_type": "functional",
+        "category": "interaction",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-11 00:00:00.000000",
+    "updated_at": "2026-02-11 00:00:00.000000"
+  },
+  "required_tools": [
+    "list_data_files",
+    "load_data",
+    "save_data",
+    "serve_file_to_user",
+    "web_scrape",
+    "web_search"
+  ],
+  "metadata": {
+    "created_at": "2026-02-11T00:00:00.000000",
+    "node_count": 8,
+    "edge_count": 9
+  }
+}
