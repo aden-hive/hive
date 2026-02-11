@@ -28,9 +28,18 @@ def register_tools(
     def _get_chroma_config() -> dict[str, str]:
         """Get ChromaDB configuration from environment."""
         return {
-            "persist_directory": os.getenv("CHROMA_PERSIST_DIR", "./chroma_db"),
+            "persist_directory": os.getenv("CHROMA_PERSIST_DIR"),
             "collection_name": os.getenv("CHROMA_COLLECTION_NAME", "default_collection"),
         }
+
+    def _ensure_config(config: dict) -> dict | None:
+        """Check if config is valid, return error dict if not."""
+        if not config["persist_directory"]:
+            return {
+                "error": "ChromaDB persistence directory not configured",
+                "help": "Set CHROMA_PERSIST_DIR environment variable",
+            }
+        return None
 
     @mcp.tool()
     def vector_upsert(
@@ -64,6 +73,10 @@ def register_tools(
 
         try:
             config = _get_chroma_config()
+            # If explicit paths not provided, check env vars
+            if not persist_directory and (error := _ensure_config(config)):
+                return error
+
             store = ChromaDBStore(
                 persist_directory=persist_directory or config["persist_directory"],
                 collection_name=collection_name or config["collection_name"],
@@ -100,6 +113,9 @@ def register_tools(
 
         try:
             config = _get_chroma_config()
+            if not persist_directory and (error := _ensure_config(config)):
+                return error
+
             store = ChromaDBStore(
                 persist_directory=persist_directory or config["persist_directory"],
                 collection_name=collection_name or config["collection_name"],
@@ -132,6 +148,9 @@ def register_tools(
 
         try:
             config = _get_chroma_config()
+            if not persist_directory and (error := _ensure_config(config)):
+                return error
+
             store = ChromaDBStore(
                 persist_directory=persist_directory or config["persist_directory"],
                 collection_name=collection_name or config["collection_name"],
@@ -159,6 +178,9 @@ def register_tools(
 
         try:
             config = _get_chroma_config()
+            if not persist_directory and (error := _ensure_config(config)):
+                return error
+
             store = ChromaDBStore(
                 persist_directory=persist_directory or config["persist_directory"],
                 collection_name=collection_name or config["collection_name"],

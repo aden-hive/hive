@@ -60,9 +60,12 @@ class TestVectorSearch:
 
         result = vector_search_fn(query_texts=["test"])
 
-        assert result["success"] is True
-        # Default collection name should be used
-        mock_store_class.assert_called_once()
+        result = vector_search_fn(query_texts=["test"])
+
+        assert "error" in result
+        assert "ChromaDB persistence directory not configured" in result["error"]
+        assert "help" in result
+        mock_store_class.assert_not_called()
 
     @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_search_with_filters(self, mock_store_class, vector_search_fn, monkeypatch):
@@ -81,10 +84,11 @@ class TestVectorSearch:
         )
 
         assert result["success"] is True
-        call_kwargs = mock_store.search.call_args.kwargs
         # args: query_texts, n_results, where
         # mock_store.search(["test"], 3, where)
-        mock_store.search.assert_called_once_with(["test"], 3, {"type": "github_issue", "state": "open"})
+        mock_store.search.assert_called_once_with(
+            ["test"], 3, {"type": "github_issue", "state": "open"}
+        )
 
     @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_search_error_handling(self, mock_store_class, vector_search_fn, monkeypatch):
