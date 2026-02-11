@@ -9,11 +9,13 @@ Use the Hive agent framework (MCP servers and skills) inside [Antigravity IDE](h
 **Repo root** = the folder that contains `core/`, `tools/`, and `.antigravity/` (where you cloned the project).
 
 1. **Open a terminal** and go to the hive repo root (e.g. `cd ~/hive`).
-2. **Run the setup script** (use `./` so the script runs from this repo; don’t use `/scripts/...`):
+2. **Run the setup script** (use `./` so the script runs from this repo; don't use `/scripts/...`):
    ```bash
    ./scripts/setup-antigravity-mcp.sh
    ```
 3. **Restart Antigravity IDE.** You should see **agent-builder** and **tools** as available MCP servers.
+
+> **Important:** Always restart/refresh Antigravity IDE after running the setup script or making any changes to MCP configuration. The IDE only loads MCP servers on startup.
 
 Done. For details, prerequisites, and troubleshooting, read on.
 
@@ -56,15 +58,17 @@ This installs the framework and MCP packages and checks that the server can star
 
 ### Step 2: Register MCP servers with Antigravity
 
-Antigravity reads MCP config from your **user config file** (`~/.gemini/mcp.json`), not from the project. The easiest way is to run the setup script from the **hive repo folder**:
+Antigravity reads MCP config from your **user config file** (`~/.gemini/antigravity/mcp_config.json`), not from the project. The easiest way is to run the setup script from the **hive repo folder**:
 
 ```bash
 ./scripts/setup-antigravity-mcp.sh
 ```
 
-The script finds the repo root, writes `~/.gemini/mcp.json` with the right paths, and you don’t edit any paths by hand.
+The script finds the repo root, writes `~/.gemini/antigravity/mcp_config.json` with the right paths, and you don't edit any paths by hand.
 
-Then **restart Antigravity IDE**. The **agent-builder** and **tools** servers should show up.
+> **Important:** Always restart/refresh Antigravity IDE after running the setup script. MCP servers are only loaded on IDE startup.
+
+The **agent-builder** and **tools** servers should show up after restart.
 
 **Using Claude Code instead?** Run:
 
@@ -84,13 +88,14 @@ If the IDE says `cwd` is not allowed in the MCP config, you can **ignore it**. `
 
 Skills are guides (workflow, building, testing) in `.antigravity/skills/` (they point to `.claude/skills/`). If Antigravity doesn’t show a “skills” UI, open those folders in the project and use the files as reference while you use the MCP tools.
 
-| Skill | What it’s for |
+| Skill | What it's for |
 |-------|----------------|
-| **agent-workflow** | End-to-end workflow for building and testing agents |
-| **building-agents-core** | Core ideas for goal-driven agents |
-| **building-agents-construction** | Step-by-step agent construction |
-| **building-agents-patterns** | Patterns and best practices |
-| **testing-agent** | Goal-based evaluation and testing |
+| **hive** | End-to-end workflow for building and testing agents |
+| **hive-concepts** | Core ideas for goal-driven agents |
+| **hive-create** | Step-by-step agent construction |
+| **hive-patterns** | Patterns and best practices |
+| **hive-test** | Goal-based evaluation and testing |
+| **hive-credentials** | Set up and manage agent credentials |
 
 ---
 
@@ -102,7 +107,7 @@ Skills are guides (workflow, building, testing) in `.antigravity/skills/` (they 
 └── skills/           # Symlinks to .claude/skills/
 ```
 
-The **setup script** writes your **user** config (`~/.gemini/mcp.json`) using paths from **this repo**. The file in `.antigravity/` is the template; Antigravity itself uses the file in your home directory.
+The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_config.json`) using paths from **this repo**. The file in `.antigravity/` is the template; Antigravity itself uses the file in your home directory.
 
 ---
 
@@ -137,7 +142,7 @@ Check the Hive + Antigravity integration:
 
 1. MCP: List available MCP servers/tools. Confirm that "agent-builder" and "tools" (or equivalent) are connected. If not, tell the user to run ./scripts/setup-antigravity-mcp.sh from the hive repo root, then restart Antigravity (see docs/antigravity-setup.md).
 
-2. Skills: Confirm that the project has .antigravity/skills/ (or .claude/skills/) with: agent-workflow, building-agents-core, building-agents-construction, building-agents-patterns, testing-agent.
+2. Skills: Confirm that the project has .antigravity/skills/ (or .claude/skills/) with: hive, hive-concepts, hive-create, hive-patterns, hive-test, hive-credentials.
 
 3. Result: Reply with PASS (MCP + skills OK), PARTIAL (only skills or only MCP), or FAIL (neither), and one line on what to fix if not PASS.
 ```
@@ -150,7 +155,7 @@ If you get **PARTIAL** (e.g. MCP not connected), run `./scripts/setup-antigravit
 
 Use this only if you don’t want to run the setup script. Replace `/path/to/hive` with your actual repo root (e.g. the output of `pwd` when you’re in the hive folder).
 
-Save as `~/.gemini/mcp.json` (Antigravity) or `~/.claude/mcp.json` (Claude Code), then restart the IDE.
+Save as `~/.gemini/antigravity/mcp_config.json` (Antigravity) or `~/.claude/mcp.json` (Claude Code), then **restart the IDE** to load the new configuration.
 
 ```json
 {
@@ -187,7 +192,7 @@ From the **repo root**:
 
 ```bash
 test -f .antigravity/mcp_config.json && echo "OK: mcp_config.json" || echo "MISSING"
-for s in agent-workflow building-agents-core building-agents-construction building-agents-patterns testing-agent; do
+for s in hive hive-concepts hive-create hive-patterns hive-test hive-credentials; do
   test -L .antigravity/skills/$s && test -d .antigravity/skills/$s && echo "OK: $s" || echo "BROKEN: $s"
 done
 ```
