@@ -6,7 +6,7 @@ import time
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Footer, Input, Label
+from textual.widgets import Footer, Label, TextArea
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import AgentEvent, EventType
@@ -180,13 +180,13 @@ class AdenTUI(App):
         scrollbar-color: $primary;
     }
 
-    Input {
+    TextArea {
         background: $surface;
         border: tall $primary;
         margin-top: 1;
     }
 
-    Input:focus {
+    TextArea:focus {
         border: tall $accent;
     }
 
@@ -504,8 +504,8 @@ class AdenTUI(App):
         original_chat_border = chat_widget.styles.border_left
         chat_widget.styles.border_left = ("none", "transparent")
 
-        # Hide all Input widget borders
-        input_widgets = self.query("Input")
+        # Hide all TextArea widget borders
+        input_widgets = self.query("TextArea")
         original_input_borders = []
         for input_widget in input_widgets:
             original_input_borders.append(input_widget.styles.border)
@@ -580,8 +580,8 @@ class AdenTUI(App):
         # Send /sessions command to chat input
         try:
             chat_repl = self.query_one(ChatRepl)
-            chat_input = chat_repl.query_one("#chat-input", Input)
-            chat_input.value = "/sessions"
+            chat_input = chat_repl.query_one("#chat-input", TextArea)
+            chat_input.text = "/sessions"
             # Trigger submission
             self.notify(
                 "💡 Type /sessions in the chat to see all sessions",
