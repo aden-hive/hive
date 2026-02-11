@@ -44,4 +44,3 @@ uv run python -m exports.my_research_agent --input '{"topic": "..."}'
 |----------|-------------|
 | [deep_research_agent](deep_research_agent/) | Interactive research agent that searches diverse sources, evaluates findings with user checkpoints, and produces a cited HTML report |
 | [tech_news_reporter](tech_news_reporter/) | Researches the latest technology and AI news from the web and produces a well-organized report |
-| [twitter_outreach](twitter_outreach/) | Researches a Twitter/X profile, crafts a personalized outreach email, and sends it after user approval |

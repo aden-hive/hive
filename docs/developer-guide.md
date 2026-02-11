@@ -116,6 +116,16 @@ Skills are also available in Cursor. To enable:
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
 4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
+
+### Opencode Support
+To enable Opencode integration:
+
+1. Create/Ensure `.opencode/` directory exists
+2. Configure MCP servers in `.opencode/mcp.json`
+3. Restart Opencode to load the MCP servers
+4. Switch to the Hive agent
+* **Tools:** Accesses `agent-builder` and standard `tools` via standard MCP protocols over stdio.
+
 ### Verify Setup
 
 ```bash
