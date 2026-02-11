@@ -478,7 +478,7 @@ async def resume_session(
 
 ```bash
 # List resumable sessions
-hive sessions list --agent twitter_outreach --status failed
+hive sessions list --agent deep_research_agent --status failed
 
 # Show checkpoints for a session
 hive sessions checkpoints session_20260208_143022_abc12345

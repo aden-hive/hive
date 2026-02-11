@@ -49,8 +49,8 @@ You may submit PRs without prior assignment for:
    make check    # Lint and format checks (ruff check + ruff format --check on core/ and tools/)
    make test     # Core tests (cd core && pytest tests/ -v)
    ```
-6. Commit your changes following our commit conventions
-7. Push to your fork and submit a Pull Request
+8. Commit your changes following our commit conventions
+9. Push to your fork and submit a Pull Request
 
 ## Development Setup
 
@@ -144,6 +144,9 @@ make test
 
 # Or run tests directly
 cd core && pytest tests/ -v
+
+# Run tools package tests (when contributing to tools/)
+cd tools && uv run pytest tests/ -v
 
 # Run tests for a specific agent
 PYTHONPATH=exports uv run python -m agent_name test
