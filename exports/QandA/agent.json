@@ -1,0 +1,32 @@
+{
+  "graph": {
+    "id": "q_and_a_agent",
+    "description": "A simple Q&A agent designed to answer questions understandably and clearly.",
+    "version": "1.0.0",
+    "entry_node": "generate_answer",
+    "terminal_nodes": ["generate_answer"],
+    "nodes": [
+      {
+        "id": "generate_answer",
+        "name": "Generate Answer",
+        "description": "Generates a clear and understandable answer to the user's question.",
+        "node_type": "llm_generate",
+        "system_prompt": "You are a helpful and knowledgeable assistant. Your goal is to answer the user's question as clearly and understandably as possible. Avoid jargon unless necessary, and explain complex concepts simply. Focus on providing a direct and accurate response.",
+        "input_keys": ["question"],
+        "output_keys": ["answer"]
+      }
+    ],
+    "edges": []
+  },
+  "goal": {
+    "id": "q_and_a_goal",
+    "name": "Answer Questions Effectively",
+    "description": "Provide clear and helpful answers to user questions.",
+    "success_criteria": [
+      {
+        "id": "sc1",
+        "description": "The user receives a clear and understandable answer."
+      }
+    ]
+  }
+}
