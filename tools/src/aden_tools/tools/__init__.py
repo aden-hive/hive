@@ -248,11 +248,11 @@ def register_all_tools(
         "slack_delete_file",
         "slack_get_team_stats",
         # Vector DB tools
-        "vector_db_upsert",
-        "vector_db_search",
-        "vector_db_delete",
-        "vector_db_count",
-        "vector_db_chunk_text",
+        "vector_upsert",
+        "vector_search",
+        "vector_delete",
+        "vector_count",
+        "vector_chunk_text",
     ]
 
 

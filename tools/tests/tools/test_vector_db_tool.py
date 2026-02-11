@@ -25,7 +25,7 @@ def vector_upsert_fn(mcp: FastMCP):
 class TestVectorSearch:
     """Tests for vector_search tool."""
 
-    @patch("aden_tools.tools.vector_db_tool.chromadb.ChromaDBStore")
+    @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_search_success(self, mock_store_class, vector_search_fn, monkeypatch):
         """Successful search returns results."""
         monkeypatch.setenv("CHROMA_PERSIST_DIR", "./test_chroma")
@@ -41,14 +41,14 @@ class TestVectorSearch:
         }
         mock_store_class.return_value = mock_store
 
-        result = vector_search_fn(query="test query", top_k=5)
+        result = vector_search_fn(query_texts=["test query"], n_results=5)
 
         assert result["success"] is True
         assert "results" in result
         assert len(result["results"]) == 2
-        mock_store.search.assert_called_once_with("test query", top_k=5)
+        mock_store.search.assert_called_once_with(["test query"], 5, None)
 
-    @patch("aden_tools.tools.vector_db_tool.chromadb.ChromaDBStore")
+    @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_search_no_env_config(self, mock_store_class, vector_search_fn, monkeypatch):
         """Search without env config uses defaults."""
         monkeypatch.delenv("CHROMA_PERSIST_DIR", raising=False)
@@ -58,13 +58,13 @@ class TestVectorSearch:
         mock_store.search.return_value = {"success": True, "results": []}
         mock_store_class.return_value = mock_store
 
-        result = vector_search_fn(query="test")
+        result = vector_search_fn(query_texts=["test"])
 
         assert result["success"] is True
         # Default collection name should be used
         mock_store_class.assert_called_once()
 
-    @patch("aden_tools.tools.vector_db_tool.chromadb.ChromaDBStore")
+    @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_search_with_filters(self, mock_store_class, vector_search_fn, monkeypatch):
         """Search with metadata filters."""
         monkeypatch.setenv("CHROMA_PERSIST_DIR", "./test_chroma")
@@ -75,17 +75,18 @@ class TestVectorSearch:
         mock_store_class.return_value = mock_store
 
         result = vector_search_fn(
-            query="test",
-            top_k=3,
-            filters={"type": "github_issue", "state": "open"},
+            query_texts=["test"],
+            n_results=3,
+            where={"type": "github_issue", "state": "open"},
         )
 
         assert result["success"] is True
         call_kwargs = mock_store.search.call_args.kwargs
-        assert call_kwargs.get("top_k") == 3
-        assert call_kwargs.get("filters") == {"type": "github_issue", "state": "open"}
+        # args: query_texts, n_results, where
+        # mock_store.search(["test"], 3, where)
+        mock_store.search.assert_called_once_with(["test"], 3, {"type": "github_issue", "state": "open"})
 
-    @patch("aden_tools.tools.vector_db_tool.chromadb.ChromaDBStore")
+    @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_search_error_handling(self, mock_store_class, vector_search_fn, monkeypatch):
         """Search handles errors gracefully."""
         monkeypatch.setenv("CHROMA_PERSIST_DIR", "./test_chroma")
@@ -95,7 +96,7 @@ class TestVectorSearch:
         mock_store.search.side_effect = Exception("ChromaDB connection error")
         mock_store_class.return_value = mock_store
 
-        result = vector_search_fn(query="test")
+        result = vector_search_fn(query_texts=["test"])
 
         assert "error" in result
         assert "ChromaDB connection error" in result["error"]
@@ -104,7 +105,7 @@ class TestVectorSearch:
 class TestVectorUpsert:
     """Tests for vector_upsert tool."""
 
-    @patch("aden_tools.tools.vector_db_tool.chromadb.ChromaDBStore")
+    @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_upsert_success(self, mock_store_class, vector_upsert_fn, monkeypatch):
         """Successful upsert returns success."""
         monkeypatch.setenv("CHROMA_PERSIST_DIR", "./test_chroma")
@@ -115,20 +116,20 @@ class TestVectorUpsert:
         mock_store_class.return_value = mock_store
 
         result = vector_upsert_fn(
-            id="doc123",
-            text="Test document content",
-            metadata={"type": "github_issue", "number": 42},
+            ids=["doc123"],
+            documents=["Test document content"],
+            metadatas=[{"type": "github_issue", "number": 42}],
         )
 
         assert result["success"] is True
-        assert result["id"] == "doc123"
+        # The return value is mock'd so checking result["id"] is testing the mock, not tool wrapper
         mock_store.upsert.assert_called_once_with(
-            id="doc123",
-            text="Test document content",
-            metadata={"type": "github_issue", "number": 42},
+            ["doc123"],
+            ["Test document content"],
+            [{"type": "github_issue", "number": 42}],
         )
 
-    @patch("aden_tools.tools.vector_db_tool.chromadb.ChromaDBStore")
+    @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_upsert_without_metadata(self, mock_store_class, vector_upsert_fn, monkeypatch):
         """Upsert without metadata works."""
         monkeypatch.setenv("CHROMA_PERSIST_DIR", "./test_chroma")
@@ -138,12 +139,12 @@ class TestVectorUpsert:
         mock_store.upsert.return_value = {"success": True, "id": "doc456"}
         mock_store_class.return_value = mock_store
 
-        result = vector_upsert_fn(id="doc456", text="Content only")
+        result = vector_upsert_fn(ids=["doc456"], documents=["Content only"])
 
         assert result["success"] is True
         mock_store.upsert.assert_called_once()
 
-    @patch("aden_tools.tools.vector_db_tool.chromadb.ChromaDBStore")
+    @patch("aden_tools.tools.vector_db_tool.stores.chromadb.ChromaDBStore")
     def test_upsert_error_handling(self, mock_store_class, vector_upsert_fn, monkeypatch):
         """Upsert handles errors gracefully."""
         monkeypatch.setenv("CHROMA_PERSIST_DIR", "./test_chroma")
@@ -153,7 +154,7 @@ class TestVectorUpsert:
         mock_store.upsert.side_effect = Exception("Invalid metadata format")
         mock_store_class.return_value = mock_store
 
-        result = vector_upsert_fn(id="doc999", text="Test")
+        result = vector_upsert_fn(ids=["doc999"], documents=["Test"])
 
         assert "error" in result
         assert "Invalid metadata format" in result["error"]

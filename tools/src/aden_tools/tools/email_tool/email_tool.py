@@ -26,18 +26,38 @@ class EmailClient:
 
     def __init__(self, credentials: dict | None = None):
         if credentials:
-            self.resend_api_key = credentials.get("resend")
-            self.gmail_access_token = credentials.get("google")
-            self.smtp_config = credentials.get("smtp")
+            self._resend_api_key = credentials.get("resend")
+            self._gmail_access_token = credentials.get("google")
+            self._smtp_config = credentials.get("smtp") or {}
+            self._use_env_vars = False
         else:
-            self.resend_api_key = os.getenv("RESEND_API_KEY")
-            self.gmail_access_token = os.getenv("GOOGLE_ACCESS_TOKEN")
-            self.smtp_config = {
+            self._resend_api_key = None
+            self._gmail_access_token = None
+            self._smtp_config = None
+            self._use_env_vars = True
+
+    @property
+    def resend_api_key(self) -> str | None:
+        if self._use_env_vars:
+            return os.getenv("RESEND_API_KEY")
+        return self._resend_api_key
+
+    @property
+    def gmail_access_token(self) -> str | None:
+        if self._use_env_vars:
+            return os.getenv("GOOGLE_ACCESS_TOKEN")
+        return self._gmail_access_token
+
+    @property
+    def smtp_config(self) -> dict:
+        if self._use_env_vars:
+            return {
                 "host": os.getenv("SMTP_HOST"),
                 "port": int(os.getenv("SMTP_PORT", "587")),
                 "username": os.getenv("SMTP_USERNAME"),
                 "password": os.getenv("SMTP_PASSWORD"),
             }
+        return self._smtp_config
 
     def _resolve_from_email(self, from_email: str | None) -> str | None:
         if from_email:
@@ -224,27 +244,39 @@ class EmailClient:
             # Try to resolve from SMTP username if available
             from_email = self.smtp_config.get("username")
             if not from_email:
-                return {"error": "Sender email is required"}
+                return {
+                    "error": "Sender email is required",
+                    "help": "Set EMAIL_FROM env var or provide from_email argument",
+                }
 
         try:
             # 1. Explicit Provider
             if provider == "gmail":
                 if not gmail_available:
-                    return {"error": "Gmail credentials not configured"}
+                    return {
+                        "error": "Gmail credentials not configured",
+                        "help": "Set GOOGLE_ACCESS_TOKEN or run `aden auth login`",
+                    }
                 return self._send_via_gmail(
                     self.gmail_access_token, to_list, subject, html, from_email, cc_list, bcc_list
                 )
 
             if provider == "resend":
                 if not resend_available:
-                    return {"error": "Resend credentials not configured"}
+                    return {
+                        "error": "Resend credentials not configured",
+                        "help": "Set RESEND_API_KEY environment variable",
+                    }
                 return self._send_via_resend(
                     self.resend_api_key, to_list, subject, html, from_email, cc_list, bcc_list
                 )
 
             if provider == "smtp":
                 if not smtp_available:
-                    return {"error": "SMTP credentials not configured"}
+                    return {
+                        "error": "SMTP credentials not configured",
+                        "help": "Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD",
+                    }
                 return self._send_via_smtp(to_list, subject, html, from_email, cc_list, bcc_list)
 
             # 2. Auto Provider

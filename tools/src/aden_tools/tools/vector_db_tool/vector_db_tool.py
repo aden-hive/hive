@@ -33,7 +33,7 @@ def register_tools(
         }
 
     @mcp.tool()
-    def vector_db_upsert(
+    def vector_upsert(
         ids: list[str],
         documents: list[str],
         metadatas: list[dict[str, Any]] | None = None,
@@ -73,7 +73,7 @@ def register_tools(
             return {"error": f"Vector DB upsert failed: {e}"}
 
     @mcp.tool()
-    def vector_db_search(
+    def vector_search(
         query_texts: list[str],
         n_results: int = 5,
         where: dict[str, Any] | None = None,
@@ -109,7 +109,7 @@ def register_tools(
             return {"error": f"Vector DB search failed: {e}"}
 
     @mcp.tool()
-    def vector_db_delete(
+    def vector_delete(
         ids: list[str],
         collection_name: str | None = None,
         persist_directory: str | None = None,
@@ -141,7 +141,7 @@ def register_tools(
             return {"error": f"Vector DB delete failed: {e}"}
 
     @mcp.tool()
-    def vector_db_count(
+    def vector_count(
         collection_name: str | None = None,
         persist_directory: str | None = None,
     ) -> dict:
@@ -168,7 +168,7 @@ def register_tools(
             return {"error": f"Vector DB count failed: {e}"}
 
     @mcp.tool()
-    def vector_db_chunk_text(
+    def vector_chunk_text(
         text: str,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
