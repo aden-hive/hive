@@ -143,7 +143,7 @@ def main():
     logger.info("The MCP server is now ready to use!")
     logger.info("")
     logger.info(f"{Colors.BLUE}To start the MCP server manually:{Colors.NC}")
-    logger.info("  python -m framework.mcp.agent_builder_server")
+    logger.info("  uv run python -m framework.mcp.agent_builder_server")
     logger.info("")
     logger.info(f"{Colors.BLUE}MCP Configuration location:{Colors.NC}")
     logger.info(f"  {mcp_config_path}")

@@ -5,21 +5,21 @@ Tool library for the Aden agent framework. Provides a collection of tools that A
 ## Installation
 
 ```bash
-pip install -e tools
+uv pip install -e tools
 ```
 
 For development:
 
 ```bash
-pip install -e "tools[dev]"
+uv pip install -e "tools[dev]"
 ```
 
 ## Environment Setup
 
-Some tools require API keys to function. Copy the example file and add your credentials:
+Some tools require API keys to function. Credentials are managed through the encrypted credential store at `~/.hive/credentials`, which is configured automatically during initial setup:
 
 ```bash
-cp .env.example .env
+./quickstart.sh
 ```
 
 | Variable               | Required For                  | Get Key                                                 |
@@ -31,14 +31,14 @@ cp .env.example .env
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
-Alternatively, export as environment variables:
+Alternatively, export credentials as environment variables:
 
 ```bash
 export ANTHROPIC_API_KEY=your-key-here
 export BRAVE_SEARCH_API_KEY=your-key-here
 ```
 
-See [.env.example](.env.example) for details.
+See the [credentials module](src/aden_tools/credentials/) for details on how credentials are resolved.
 
 ## Quick Start
 
