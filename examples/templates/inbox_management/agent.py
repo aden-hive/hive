@@ -143,6 +143,11 @@ entry_node = "intake"
 entry_points = {"start": "intake"}
 pause_nodes = []
 terminal_nodes = ["report"]
+loop_config = {
+    "max_iterations": 100,
+    "max_tool_calls_per_turn": 20,
+    "max_history_tokens": 32000,
+}
 
 
 class InboxManagementAgent:
@@ -180,11 +185,7 @@ class InboxManagementAgent:
             edges=self.edges,
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
-            loop_config={
-                "max_iterations": 100,
-                "max_tool_calls_per_turn": 20,
-                "max_history_tokens": 32000,
-            },
+            loop_config=loop_config,
         )
 
     def _setup(self, mock_mode=False) -> GraphExecutor:

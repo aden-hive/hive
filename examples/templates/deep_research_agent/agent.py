@@ -177,6 +177,14 @@ class DeepResearchAgent:
         """Set up the executor with all components."""
         from pathlib import Path
 
+        from framework.credentials.validation import (
+            ensure_credential_key_env,
+            validate_agent_credentials,
+        )
+
+        ensure_credential_key_env()
+        validate_agent_credentials(self.nodes)
+
         storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
         storage_path.mkdir(parents=True, exist_ok=True)
 

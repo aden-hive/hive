@@ -21,14 +21,14 @@
       {
         "id": "intake",
         "name": "Intake",
-        "description": "Receive and validate input parameters: triage rules and max_emails. Present the interpreted rules back to the user for confirmation before proceeding.",
+        "description": "Receive and validate input parameters: rules and max_emails. Present the interpreted rules back to the user for confirmation before proceeding.",
         "node_type": "event_loop",
         "input_keys": [
           "rules",
           "max_emails"
         ],
         "output_keys": [
-          "triage_rules",
+          "rules",
           "max_emails"
         ],
         "nullable_output_keys": [],
@@ -49,10 +49,10 @@
       {
         "id": "fetch-emails",
         "name": "Fetch Emails",
-        "description": "Fetch unread emails from Gmail up to the configured batch limit. Only retrieves emails with the UNREAD label.",
+        "description": "Fetch emails from the Gmail inbox up to the configured batch limit. Processes emails in small batches across multiple iterations to stay within tool call limits. Saves results to a file.",
         "node_type": "event_loop",
         "input_keys": [
-          "triage_rules",
+          "rules",
           "max_emails"
         ],
         "output_keys": [
@@ -61,10 +61,11 @@
         "nullable_output_keys": [],
         "input_schema": {},
         "output_schema": {},
-        "system_prompt": "You are an inbox management assistant. Your job is to fetch unread emails from Gmail.\n\n**IMPORTANT CONSTRAINTS:**\n- ONLY fetch emails that are UNREAD. Use the query \"is:unread\" with gmail_list_messages.\n- Fetch at most the number specified in max_emails (from context).\n- For each email returned by gmail_list_messages, use gmail_get_message to get its full details (subject, from, snippet, body, labels).\n\n**PROCESS:**\n1. Call gmail_list_messages with query \"is:unread\" and max_results set to the max_emails value.\n2. For each message in the results, call gmail_get_message to get full details.\n3. Collect all email data into a structured list.\n4. Call set_output(\"emails\", <JSON string of the email list>).\n\nEach email in the list should include: id, subject, from, date, snippet, body (or body preview), and current labels.\n\nIf there are no unread emails, set_output(\"emails\", \"[]\") \u2014 an empty list is valid.",
+        "system_prompt": "You are an inbox management assistant. Your job is to fetch emails from the Gmail inbox.\n\n**CRITICAL \u2014 WORK IN SMALL BATCHES:**\nYou MUST limit yourself to at most 25 tool calls per iteration. This means:\n- First iteration: call gmail_list_messages ONCE, then call gmail_get_message for UP TO 24 of the returned messages. If there are more messages remaining, do NOT call set_output yet \u2014 just stop and wait for the next iteration.\n- Subsequent iterations: continue calling gmail_get_message for remaining messages from the current page (up to 25 calls per iteration). When the current page is done and you need more emails, call gmail_list_messages with the page_token to get the next page.\n- Final iteration: once you have fetched enough emails (up to max_emails) or there are no more pages, save to file and set output.\n\n**IMPORTANT CONSTRAINTS:**\n- Fetch emails from the inbox using the query \"label:INBOX\" with gmail_list_messages.\n- Fetch at most the number specified in max_emails (from context).\n- Use max_results of 50 per gmail_list_messages call (to keep pages manageable).\n\n**CRITICAL \u2014 Message IDs:**\n- gmail_list_messages returns objects with BOTH \"id\" and \"threadId\". These are DIFFERENT values.\n- You MUST use the \"id\" field (NOT \"threadId\") when calling gmail_get_message.\n- If gmail_get_message returns {\"error\": \"Message not found\"}, SKIP that message and continue.\n\n**PROCESS (repeat across iterations):**\n1. If this is your first iteration, call gmail_list_messages with query \"label:INBOX\" and max_results=50.\n2. Call gmail_get_message for up to 24 messages (using the \"id\" field, NOT \"threadId\").\n3. Keep a running count of all emails fetched so far across all iterations.\n4. If you still need more emails AND there are more messages on the current page or a next_page_token exists:\n   - Do NOT call set_output yet. Stop and wait for the next iteration to continue.\n5. Once you have fetched enough emails (reached max_emails) or exhausted all pages:\n   a. Build a JSON array of all collected emails.\n   b. Call save_data(filename=\"emails.json\", data=<the JSON array as a string>) to write the emails to a file.\n   c. Call set_output(\"emails\", \"emails.json\") \u2014 pass ONLY the filename, NOT the email data.\n\n**CRITICAL \u2014 DO NOT pass email data directly to set_output. The data is too large. Always save to file first with save_data, then pass the filename.**\n\nEach email should include: id, subject, from, date, snippet, and current labels.\n\nIf there are no emails, set_output(\"emails\", \"[]\").",
         "tools": [
           "gmail_list_messages",
-          "gmail_get_message"
+          "gmail_get_message",
+          "save_data"
         ],
         "model": null,
         "function": null,
@@ -79,10 +80,10 @@
       {
         "id": "classify-and-act",
         "name": "Classify and Act",
-        "description": "Classify each email against the user's triage rules, then execute the appropriate Gmail actions (trash, archive, mark important, add labels).",
+        "description": "Execute the user's rules on each email using the appropriate Gmail actions, with batch operations where possible. Loads emails from a file saved by the fetch-emails node.",
         "node_type": "event_loop",
         "input_keys": [
-          "triage_rules",
+          "rules",
           "emails"
         ],
         "output_keys": [
@@ -91,11 +92,12 @@
         "nullable_output_keys": [],
         "input_schema": {},
         "output_schema": {},
-        "system_prompt": "You are an inbox management assistant. Your job is to classify emails and take action based on the user's triage rules.\n\n**TRIAGE RULES** are provided in the context as \"triage_rules\". Apply these rules to each email.\n\n**AVAILABLE ACTIONS:**\n1. **TRASH** \u2014 For spam, unwanted emails. Use gmail_trash_message(message_id).\n2. **ARCHIVE** \u2014 For low-priority, newsletters. Use gmail_modify_message(message_id, remove_labels=[\"INBOX\"]) to remove from inbox but keep in All Mail.\n3. **MARK IMPORTANT** \u2014 For urgent, action-needed emails. Use gmail_modify_message(message_id, add_labels=[\"IMPORTANT\"]).\n4. **CATEGORIZE** \u2014 Add urgency labels. Use gmail_modify_message(message_id, add_labels=[<category>]) where category is one of: \"Action Needed\", \"FYI\", \"Waiting On\".\n\n**IMPORTANT CONSTRAINTS:**\n- NEVER modify read emails. The emails list from context contains ONLY unread emails, so you are safe to act on all of them.\n- Apply the MOST appropriate action to each email based on the rules.\n- An email can have BOTH an action (trash/archive/mark important) AND a category (Action Needed/FYI/Waiting On) if appropriate \u2014 but trashed emails don't need a category.\n\n**PROCESS:**\n1. Read the emails list from context.\n2. For each email, classify it against the triage rules.\n3. Execute the appropriate Gmail action(s) for each email.\n4. Track every action taken: {email_id, subject, from, classification, action, category}.\n5. After processing ALL emails, call set_output(\"actions_taken\", <JSON string of the actions list>).\n\nIf the emails list is empty, set_output(\"actions_taken\", \"[]\").",
+        "system_prompt": "You are an inbox management assistant. Your job is to execute the user's rules on their emails.\n\n**STEP 1 \u2014 LOAD EMAILS FROM FILE:**\nThe \"emails\" key in context contains a FILENAME (e.g. \"emails.json\"), NOT the actual email data.\nYou MUST call load_data(filename=<the filename from context>) to retrieve the email list.\nUse pagination (offset/limit) if the file is large \u2014 load_data returns 50 lines at a time by default.\n\n**RULES** are provided in the context as \"rules\". Read them carefully \u2014 they tell you exactly what to do.\n\nIf the rules say to apply ONE action to ALL emails (e.g. \"mark all as unread\"), just do that. Do NOT classify or categorize emails unless the rules specifically ask for it.\n\n**AVAILABLE ACTIONS (use ONLY these Gmail system labels):**\n1. **TRASH** \u2014 Use gmail_trash_message(message_id) individually.\n2. **SPAM** \u2014 Use gmail_batch_modify_messages(message_ids=[...], add_labels=[\"SPAM\"], remove_labels=[\"INBOX\"]).\n3. **MARK IMPORTANT** \u2014 Use gmail_batch_modify_messages(message_ids=[...], add_labels=[\"IMPORTANT\"]).\n4. **MARK AS UNREAD** \u2014 Use gmail_batch_modify_messages(message_ids=[...], add_labels=[\"UNREAD\"]).\n5. **MARK AS READ** \u2014 Use gmail_batch_modify_messages(message_ids=[...], remove_labels=[\"UNREAD\"]).\n6. **ARCHIVE** \u2014 Use gmail_batch_modify_messages(message_ids=[...], remove_labels=[\"INBOX\"]).\n7. **STAR** \u2014 Use gmail_batch_modify_messages(message_ids=[...], add_labels=[\"STARRED\"]).\n\n**CRITICAL \u2014 VALID GMAIL LABELS ONLY:**\nYou can ONLY use these system label IDs: INBOX, UNREAD, IMPORTANT, STARRED, SPAM, TRASH, SENT, DRAFT, CATEGORY_PERSONAL, CATEGORY_SOCIAL, CATEGORY_PROMOTIONS, CATEGORY_UPDATES, CATEGORY_FORUMS.\nDo NOT use custom labels like \"FYI\", \"Action Needed\", or \"Waiting On\" \u2014 these will cause API errors.\n\n**IMPORTANT \u2014 USE BATCH OPERATIONS TO MINIMIZE TOOL CALLS:**\n- Group emails by action and execute in bulk using gmail_batch_modify_messages \u2014 one call per action group.\n- Only use gmail_trash_message individually for emails that need trashing.\n- Process in batches of up to 25 tool calls per iteration. If you have more actions, stop and continue in the next iteration.\n\n**PROCESS:**\n1. Load emails from the file using load_data(filename=<emails filename from context>). Page through with offset/limit if needed.\n2. Read the rules from context.\n3. For each email, determine what action the rules require.\n4. Group emails by action and execute batch operations.\n5. Track every action: {email_id, subject, from, action}.\n6. After processing ALL emails, call set_output(\"actions_taken\", <JSON string of the actions list>).\n\nIf the emails list is empty, set_output(\"actions_taken\", \"[]\").",
         "tools": [
           "gmail_trash_message",
           "gmail_modify_message",
-          "gmail_batch_modify_messages"
+          "gmail_batch_modify_messages",
+          "load_data"
         ],
         "model": null,
         "function": null,
@@ -110,7 +112,7 @@
       {
         "id": "report",
         "name": "Report",
-        "description": "Generate a summary report of all triage actions taken, organized by category.",
+        "description": "Generate a summary report of all actions taken, organized by action type.",
         "node_type": "event_loop",
         "input_keys": [
           "actions_taken"
@@ -253,7 +255,9 @@
     "gmail_list_messages",
     "gmail_get_message",
     "gmail_trash_message",
-    "gmail_batch_modify_messages"
+    "gmail_batch_modify_messages",
+    "save_data",
+    "load_data"
   ],
   "metadata": {
     "created_at": "2026-02-11T19:09:55.831691",

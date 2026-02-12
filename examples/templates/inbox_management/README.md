@@ -6,7 +6,7 @@
 
 ## Overview
 
-Automatically triage unread Gmail emails using user-defined free-text rules. Fetch unread emails (configurable batch size, default 100), classify each by urgency and type, then take appropriate actions — trash spam, archive low-priority messages, mark important emails, and categorize the rest as Action Needed, FYI, or Waiting On.
+Automatically manage Gmail inbox emails using user-defined free-text rules. Fetch emails from the inbox (configurable batch size, default 100, supports pagination for any count), then take appropriate actions — trash junk, mark spam, mark important, mark as unread/read, archive, star, and categorize for reporting.
 
 ## Architecture
 
@@ -19,22 +19,22 @@ intake → fetch-emails → classify-and-act → report
 ### Nodes (4 total)
 
 1. **intake** (event_loop)
-   - Receive and validate input parameters: triage rules and max_emails. Present the interpreted rules back to the user for confirmation before proceeding.
+   - Receive and validate input parameters: rules and max_emails. Present the interpreted rules back to the user for confirmation.
    - Reads: `rules, max_emails`
-   - Writes: `triage_rules, max_emails`
+   - Writes: `rules, max_emails`
    - Client-facing: Yes (blocks for user input)
 2. **fetch-emails** (event_loop)
-   - Fetch unread emails from Gmail up to the configured batch limit. Only retrieves emails with the UNREAD label.
-   - Reads: `triage_rules, max_emails`
+   - Fetch emails from the Gmail inbox up to the configured batch limit. Processes in small batches across multiple iterations.
+   - Reads: `rules, max_emails`
    - Writes: `emails`
    - Tools: `gmail_list_messages, gmail_get_message`
 3. **classify-and-act** (event_loop)
-   - Classify each email against the user's triage rules, then execute the appropriate Gmail actions (trash, archive, mark important, add labels).
-   - Reads: `triage_rules, emails`
+   - Execute the user's rules on each email using the appropriate Gmail actions (trash, spam, mark important, mark unread/read, archive, star).
+   - Reads: `rules, emails`
    - Writes: `actions_taken`
    - Tools: `gmail_trash_message, gmail_modify_message, gmail_batch_modify_messages`
 4. **report** (event_loop)
-   - Generate a summary report of all triage actions taken, organized by category.
+   - Generate a summary report of all actions taken, organized by action type.
    - Reads: `actions_taken`
    - Writes: `summary_report`
 
@@ -49,30 +49,32 @@ intake → fetch-emails → classify-and-act → report
 
 ### Success Criteria
 
-**Each unread email is classified according to the user's free-text rules with appropriate urgency category (action needed, FYI, waiting on) and type (spam, newsletter, important, etc.)** (weight 0.3)
+**Each email is acted upon according to the user's free-text rules** (weight 0.3)
 - Metric: classification_match_rate
 - Target: >=90%
-**Trash, archive, mark-important, and label actions are applied correctly to the right emails based on classification** (weight 0.25)
+**Trash, spam, mark-important, mark-unread, mark-read, archive, star actions are applied correctly using only valid Gmail system labels** (weight 0.25)
 - Metric: action_correctness
 - Target: >=95%
-**Only unread emails are fetched and processed; read emails are never modified** (weight 0.2)
-- Metric: read_email_modifications
-- Target: 0
-**Produces a summary report showing what was done: how many trashed, archived, marked important, and categorized, with email subjects listed per category** (weight 0.15)
+**Only inbox emails are fetched and processed (label:INBOX scope)** (weight 0.2)
+- Metric: inbox_scope_accuracy
+- Target: 100%
+**Produces a summary report showing what was done, with email subjects listed per action** (weight 0.15)
 - Metric: report_completeness
 - Target: 100%
-**All fetched emails up to the configured max are classified and acted upon; none are silently skipped** (weight 0.1)
+**All fetched emails up to the configured max are processed; none are silently skipped** (weight 0.1)
 - Metric: emails_processed_ratio
 - Target: 100%
 
 ### Constraints
 
-**Must never modify, trash, or relabel emails that are already read** (hard)
+**Must only fetch and process emails from the inbox (label:INBOX)** (hard)
 - Category: safety
 **Must not process more emails than the configured max_emails parameter** (hard)
 - Category: operational
-**Archiving removes from inbox but preserves the email; only explicit trash rules move emails to trash** (hard)
+**Marking as spam moves to spam folder but preserves the email; only explicit trash rules permanently delete emails** (hard)
 - Category: safety
+**Must only use valid Gmail system labels; custom labels like 'FYI' or 'Action Needed' must NOT be applied via Gmail API** (hard)
+- Category: operational
 
 ## Required Tools
 
