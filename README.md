@@ -93,8 +93,20 @@ Use Hive when you need:
 git clone https://github.com/adenhq/hive.git
 cd hive
 
-# Run quickstart setup
+# Run quickstart setup (Unix / macOS / WSL / Git Bash)
 ./quickstart.sh
+```
+
+On **Windows (PowerShell)**, run the quickstart with:
+
+```powershell
+.\quickstart.ps1
+```
+
+If you get "script execution is disabled", run it with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\quickstart.ps1
 ```
 
 This sets up:
