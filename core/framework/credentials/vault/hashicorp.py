@@ -19,7 +19,7 @@ from ..storage import CredentialStorage
 
 try:
     from hvac.exceptions import InvalidPath, Forbidden, Unauthorized, VaultError
-except ImportError:
+except Exception:
     class VaultError(Exception):
         pass
     class InvalidPath(VaultError):
