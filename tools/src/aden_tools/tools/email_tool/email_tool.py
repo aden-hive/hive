@@ -1,5 +1,5 @@
 """
-Email Tool - Send emails using multiple providers.
+Email Tool - Send and reply to emails using multiple providers.
 
 Supports:
 - Gmail (GOOGLE_ACCESS_TOKEN, via Aden OAuth2)
@@ -238,3 +238,159 @@ def register_tools(
             or error dict with "error" and optional "help" keys.
         """
         return _send_email_impl(to, subject, html, provider, from_email, cc, bcc)
+
+    def _fetch_original_message(access_token: str, message_id: str) -> dict:
+        """Fetch the original message to extract threading info."""
+        response = httpx.get(
+            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            params={"format": "metadata", "metadataHeaders": ["Message-ID", "Subject", "From"]},
+            timeout=30.0,
+        )
+
+        if response.status_code == 401:
+            return {
+                "error": "Gmail token expired or invalid",
+                "help": "Re-authorize via hive.adenhq.com",
+            }
+        if response.status_code == 404:
+            return {"error": f"Original message not found: {message_id}"}
+        if response.status_code != 200:
+            return {
+                "error": f"Gmail API error (HTTP {response.status_code}): {response.text}",
+            }
+
+        data = response.json()
+        headers = {h["name"]: h["value"] for h in data.get("payload", {}).get("headers", [])}
+        return {
+            "thread_id": data.get("threadId"),
+            "message_id_header": headers.get("Message-ID", headers.get("Message-Id", "")),
+            "subject": headers.get("Subject", ""),
+            "from": headers.get("From", ""),
+        }
+
+    @mcp.tool()
+    def gmail_reply_email(
+        message_id: str,
+        html: str,
+        cc: str | list[str] | None = None,
+        bcc: str | list[str] | None = None,
+    ) -> dict:
+        """
+        Reply to a Gmail message, keeping it in the same thread.
+
+        Fetches the original message to get threading info (threadId, Message-ID,
+        subject, sender), then sends a reply with proper In-Reply-To and References
+        headers so it appears as a threaded reply in Gmail.
+
+        Args:
+            message_id: The Gmail message ID to reply to.
+            html: Reply body as HTML string.
+            cc: CC recipient(s). Single string or list of strings. Optional.
+            bcc: BCC recipient(s). Single string or list of strings. Optional.
+
+        Returns:
+            Dict with send result including reply message ID and threadId,
+            or error dict with "error" and optional "help" keys.
+        """
+        import base64
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        if not message_id or not message_id.strip():
+            return {"error": "message_id is required"}
+        if not html:
+            return {"error": "Reply body (html) is required"}
+
+        credential = _get_credential("gmail")
+        if not credential:
+            return {
+                "error": "Gmail credentials not configured",
+                "help": "Connect Gmail via hive.adenhq.com",
+            }
+
+        # Fetch original message for threading info
+        try:
+            original = _fetch_original_message(credential, message_id)
+        except httpx.HTTPError as e:
+            return {"error": f"Failed to fetch original message: {e}"}
+
+        if "error" in original:
+            return original
+
+        thread_id = original["thread_id"]
+        original_message_id = original["message_id_header"]
+        original_subject = original["subject"]
+        reply_to_address = original["from"]
+
+        # Build reply subject
+        subject = original_subject
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+
+        # Build MIME message with threading headers
+        msg = MIMEMultipart("alternative")
+        msg["To"] = reply_to_address
+        msg["Subject"] = subject
+        if original_message_id:
+            msg["In-Reply-To"] = original_message_id
+            msg["References"] = original_message_id
+
+        cc_list = _normalize_recipients(cc)
+        bcc_list = _normalize_recipients(bcc)
+        if cc_list:
+            msg["Cc"] = ", ".join(cc_list)
+        if bcc_list:
+            msg["Bcc"] = ", ".join(bcc_list)
+
+        msg.attach(MIMEText(html, "html"))
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+
+        # Testing override
+        override_to = os.getenv("EMAIL_OVERRIDE_TO")
+        if override_to:
+            # Rebuild with overridden recipient
+            msg.replace_header("To", override_to)
+            if "Cc" in msg:
+                del msg["Cc"]
+            if "Bcc" in msg:
+                del msg["Bcc"]
+            msg.replace_header("Subject", f"[TEST -> {reply_to_address}] {subject}")
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+
+        try:
+            response = httpx.post(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+                headers={
+                    "Authorization": f"Bearer {credential}",
+                    "Content-Type": "application/json",
+                },
+                json={"raw": raw, "threadId": thread_id},
+                timeout=30.0,
+            )
+        except httpx.HTTPError as e:
+            return {"error": f"Failed to send reply: {e}"}
+
+        if response.status_code == 401:
+            return {
+                "error": "Gmail token expired or invalid",
+                "help": "Re-authorize via hive.adenhq.com",
+            }
+        if response.status_code != 200:
+            return {
+                "error": f"Gmail API error (HTTP {response.status_code}): {response.text}",
+            }
+
+        data = response.json()
+        return {
+            "success": True,
+            "provider": "gmail",
+            "id": data.get("id", ""),
+            "threadId": data.get("threadId", ""),
+            "to": reply_to_address,
+            "subject": subject,
+        }

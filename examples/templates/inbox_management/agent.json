@@ -1,0 +1,263 @@
+{
+  "agent": {
+    "id": "inbox_management",
+    "name": "Inbox Management",
+    "version": "1.0.0",
+    "description": "Automatically triage unread Gmail emails using user-defined free-text rules. Fetch unread emails (configurable batch size, default 100), classify each by urgency and type, then take appropriate actions \u2014 trash spam, archive low-priority messages, mark important emails, and categorize the rest as Action Needed, FYI, or Waiting On."
+  },
+  "graph": {
+    "id": "inbox_management-graph",
+    "goal_id": "inbox-management",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "report"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Receive and validate input parameters: triage rules and max_emails. Present the interpreted rules back to the user for confirmation before proceeding.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "rules",
+          "max_emails"
+        ],
+        "output_keys": [
+          "triage_rules",
+          "max_emails"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an inbox management assistant. The user has provided triage rules for managing their unread emails.\n\n**STEP 1 \u2014 Respond to the user (text only, NO tool calls):**\n\nRead the user's triage rules from the input context. Present a clear summary of how you will categorize and act on their emails:\n\n- What will be TRASHED (spam, unwanted)\n- What will be ARCHIVED (low-priority, newsletters)\n- What will be marked IMPORTANT (urgent, action-needed)\n- How emails will be CATEGORIZED (Action Needed, FYI, Waiting On)\n\nAlso confirm the batch size (max_emails). If max_emails is not provided, default to 100.\n\nAsk the user to confirm: \"Does this look right? I'll proceed once you confirm.\"\n\n**STEP 2 \u2014 After the user confirms, call set_output:**\n\n- set_output(\"triage_rules\", <the confirmed triage rules as a clear text description>)\n- set_output(\"max_emails\", <the confirmed max_emails as a string number, e.g. \"100\">)",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true
+      },
+      {
+        "id": "fetch-emails",
+        "name": "Fetch Emails",
+        "description": "Fetch unread emails from Gmail up to the configured batch limit. Only retrieves emails with the UNREAD label.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "triage_rules",
+          "max_emails"
+        ],
+        "output_keys": [
+          "emails"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an inbox management assistant. Your job is to fetch unread emails from Gmail.\n\n**IMPORTANT CONSTRAINTS:**\n- ONLY fetch emails that are UNREAD. Use the query \"is:unread\" with gmail_list_messages.\n- Fetch at most the number specified in max_emails (from context).\n- For each email returned by gmail_list_messages, use gmail_get_message to get its full details (subject, from, snippet, body, labels).\n\n**PROCESS:**\n1. Call gmail_list_messages with query \"is:unread\" and max_results set to the max_emails value.\n2. For each message in the results, call gmail_get_message to get full details.\n3. Collect all email data into a structured list.\n4. Call set_output(\"emails\", <JSON string of the email list>).\n\nEach email in the list should include: id, subject, from, date, snippet, body (or body preview), and current labels.\n\nIf there are no unread emails, set_output(\"emails\", \"[]\") \u2014 an empty list is valid.",
+        "tools": [
+          "gmail_list_messages",
+          "gmail_get_message"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "classify-and-act",
+        "name": "Classify and Act",
+        "description": "Classify each email against the user's triage rules, then execute the appropriate Gmail actions (trash, archive, mark important, add labels).",
+        "node_type": "event_loop",
+        "input_keys": [
+          "triage_rules",
+          "emails"
+        ],
+        "output_keys": [
+          "actions_taken"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an inbox management assistant. Your job is to classify emails and take action based on the user's triage rules.\n\n**TRIAGE RULES** are provided in the context as \"triage_rules\". Apply these rules to each email.\n\n**AVAILABLE ACTIONS:**\n1. **TRASH** \u2014 For spam, unwanted emails. Use gmail_trash_message(message_id).\n2. **ARCHIVE** \u2014 For low-priority, newsletters. Use gmail_modify_message(message_id, remove_labels=[\"INBOX\"]) to remove from inbox but keep in All Mail.\n3. **MARK IMPORTANT** \u2014 For urgent, action-needed emails. Use gmail_modify_message(message_id, add_labels=[\"IMPORTANT\"]).\n4. **CATEGORIZE** \u2014 Add urgency labels. Use gmail_modify_message(message_id, add_labels=[<category>]) where category is one of: \"Action Needed\", \"FYI\", \"Waiting On\".\n\n**IMPORTANT CONSTRAINTS:**\n- NEVER modify read emails. The emails list from context contains ONLY unread emails, so you are safe to act on all of them.\n- Apply the MOST appropriate action to each email based on the rules.\n- An email can have BOTH an action (trash/archive/mark important) AND a category (Action Needed/FYI/Waiting On) if appropriate \u2014 but trashed emails don't need a category.\n\n**PROCESS:**\n1. Read the emails list from context.\n2. For each email, classify it against the triage rules.\n3. Execute the appropriate Gmail action(s) for each email.\n4. Track every action taken: {email_id, subject, from, classification, action, category}.\n5. After processing ALL emails, call set_output(\"actions_taken\", <JSON string of the actions list>).\n\nIf the emails list is empty, set_output(\"actions_taken\", \"[]\").",
+        "tools": [
+          "gmail_trash_message",
+          "gmail_modify_message",
+          "gmail_batch_modify_messages"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      },
+      {
+        "id": "report",
+        "name": "Report",
+        "description": "Generate a summary report of all triage actions taken, organized by category.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "actions_taken"
+        ],
+        "output_keys": [
+          "summary_report"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an inbox management assistant. Your job is to generate a clear summary report of the triage actions taken.\n\n**READ the actions_taken list from context.** It contains objects with: email_id, subject, from, classification, action, category.\n\n**GENERATE a summary report with these sections:**\n\n1. **Overview** \u2014 Total emails processed, breakdown by action (trashed, archived, marked important, categorized only).\n\n2. **Trashed** \u2014 List of emails that were trashed, with subject and sender.\n\n3. **Archived** \u2014 List of emails that were archived, with subject and sender.\n\n4. **Marked Important** \u2014 List of emails marked important, with subject and sender.\n\n5. **By Category:**\n   - **Action Needed** \u2014 Emails requiring user action\n   - **FYI** \u2014 Informational emails\n   - **Waiting On** \u2014 Emails waiting for a response from others\n\n6. **No Action Taken** \u2014 Any emails that didn't match any rules (if applicable).\n\nFormat the report as clean, readable text (not JSON).\n\nAfter generating the report, call:\n- set_output(\"summary_report\", <the formatted report text>)",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-fetch-emails",
+        "source": "intake",
+        "target": "fetch-emails",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "fetch-emails-to-classify",
+        "source": "fetch-emails",
+        "target": "classify-and-act",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "classify-to-report",
+        "source": "classify-and-act",
+        "target": "report",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Automatically triage unread Gmail emails using user-defined free-text rules. Fetch unread emails (configurable batch size, default 100), classify each by urgency and type, then take appropriate actions \u2014 trash spam, archive low-priority messages, mark important emails, and categorize the rest as Action Needed, FYI, or Waiting On.",
+    "created_at": "2026-02-11T19:09:55.831652"
+  },
+  "goal": {
+    "id": "inbox-management",
+    "name": "Inbox Management",
+    "description": "Automatically triage unread Gmail emails using user-defined free-text rules. Fetch unread emails (configurable batch size, default 100), classify each by urgency and type, then take appropriate actions \u2014 trash spam, archive low-priority messages, mark important emails, and categorize the rest as Action Needed, FYI, or Waiting On.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "email-classification-accuracy",
+        "description": "Each unread email is classified according to the user's free-text rules with appropriate urgency category (action needed, FYI, waiting on) and type (spam, newsletter, important, etc.)",
+        "metric": "classification_match_rate",
+        "target": ">=90%",
+        "weight": 0.3,
+        "met": false
+      },
+      {
+        "id": "correct-action-execution",
+        "description": "Trash, archive, mark-important, and label actions are applied correctly to the right emails based on classification",
+        "metric": "action_correctness",
+        "target": ">=95%",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "unread-only-guarantee",
+        "description": "Only unread emails are fetched and processed; read emails are never modified",
+        "metric": "read_email_modifications",
+        "target": "0",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "classification-report",
+        "description": "Produces a summary report showing what was done: how many trashed, archived, marked important, and categorized, with email subjects listed per category",
+        "metric": "report_completeness",
+        "target": "100%",
+        "weight": 0.15,
+        "met": false
+      },
+      {
+        "id": "batch-completeness",
+        "description": "All fetched emails up to the configured max are classified and acted upon; none are silently skipped",
+        "metric": "emails_processed_ratio",
+        "target": "100%",
+        "weight": 0.1,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "no-read-email-modification",
+        "description": "Must never modify, trash, or relabel emails that are already read",
+        "constraint_type": "hard",
+        "category": "safety",
+        "check": ""
+      },
+      {
+        "id": "respect-batch-limit",
+        "description": "Must not process more emails than the configured max_emails parameter",
+        "constraint_type": "hard",
+        "category": "operational",
+        "check": ""
+      },
+      {
+        "id": "non-destructive-default",
+        "description": "Archiving removes from inbox but preserves the email; only explicit trash rules move emails to trash",
+        "constraint_type": "hard",
+        "category": "safety",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-11 19:07:16.319634",
+    "updated_at": "2026-02-11 19:07:16.319645"
+  },
+  "required_tools": [
+    "gmail_modify_message",
+    "gmail_list_messages",
+    "gmail_get_message",
+    "gmail_trash_message",
+    "gmail_batch_modify_messages"
+  ],
+  "metadata": {
+    "created_at": "2026-02-11T19:09:55.831691",
+    "node_count": 4,
+    "edge_count": 3
+  }
+}

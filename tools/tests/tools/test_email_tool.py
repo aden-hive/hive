@@ -15,6 +15,13 @@ def send_email_fn(mcp: FastMCP):
     return mcp._tool_manager._tools["send_email"].fn
 
 
+@pytest.fixture
+def reply_email_fn(mcp: FastMCP):
+    """Register and return the gmail_reply_email tool function."""
+    register_tools(mcp)
+    return mcp._tool_manager._tools["gmail_reply_email"].fn
+
+
 class TestSendEmail:
     """Tests for send_email tool."""
 
@@ -108,7 +115,9 @@ class TestSendEmail:
         monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
         monkeypatch.setenv("EMAIL_FROM", "test@example.com")
 
-        result = send_email_fn(to="test@example.com", subject="", html="<p>Hi</p>", provider="resend")
+        result = send_email_fn(
+            to="test@example.com", subject="", html="<p>Hi</p>", provider="resend"
+        )
 
         assert "error" in result
 
@@ -424,7 +433,7 @@ class TestGmailProvider:
         mock_response.status_code = 403
         mock_response.text = "Insufficient permissions"
 
-        with patch("aden_tools.tools.email_tool.email_tool.httpx.post", return_value=mock_response):
+        with patch(_HTTPX_POST, return_value=mock_response):
             result = send_email_fn(
                 to="test@example.com",
                 subject="Test",
@@ -445,7 +454,7 @@ class TestGmailProvider:
         mock_response.status_code = 401
         mock_response.text = "Invalid credentials"
 
-        with patch("aden_tools.tools.email_tool.email_tool.httpx.post", return_value=mock_response):
+        with patch(_HTTPX_POST, return_value=mock_response):
             result = send_email_fn(
                 to="test@example.com",
                 subject="Test",
@@ -467,7 +476,7 @@ class TestGmailProvider:
         mock_response.status_code = 200
         mock_response.json.return_value = {"id": "gmail_no_from"}
 
-        with patch("aden_tools.tools.email_tool.email_tool.httpx.post", return_value=mock_response):
+        with patch(_HTTPX_POST, return_value=mock_response):
             result = send_email_fn(
                 to="test@example.com",
                 subject="Test",
@@ -486,3 +495,174 @@ class TestProviderRequired:
         """Calling send_email without provider raises TypeError."""
         with pytest.raises(TypeError):
             send_email_fn(to="test@example.com", subject="Test", html="<p>Hi</p>")
+
+
+_HTTPX_GET = "aden_tools.tools.email_tool.email_tool.httpx.get"
+_HTTPX_POST = "aden_tools.tools.email_tool.email_tool.httpx.post"
+
+
+def _mock_original_message_response():
+    """Helper: mock response for fetching the original message."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {
+        "id": "orig_123",
+        "threadId": "thread_abc",
+        "payload": {
+            "headers": [
+                {"name": "Message-ID", "value": "<orig@mail.gmail.com>"},
+                {"name": "Subject", "value": "Hello there"},
+                {"name": "From", "value": "sender@example.com"},
+            ]
+        },
+    }
+    return resp
+
+
+class TestGmailReplyEmail:
+    """Tests for gmail_reply_email tool."""
+
+    def test_missing_credentials(self, reply_email_fn, monkeypatch):
+        """Reply without credentials returns error."""
+        monkeypatch.delenv("GOOGLE_ACCESS_TOKEN", raising=False)
+
+        result = reply_email_fn(message_id="msg_123", html="<p>Reply</p>")
+
+        assert "error" in result
+        assert "Gmail credentials not configured" in result["error"]
+
+    def test_empty_message_id(self, reply_email_fn, monkeypatch):
+        """Empty message_id returns error."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+
+        result = reply_email_fn(message_id="", html="<p>Reply</p>")
+
+        assert "error" in result
+        assert "message_id" in result["error"]
+
+    def test_empty_html(self, reply_email_fn, monkeypatch):
+        """Empty html body returns error."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+
+        result = reply_email_fn(message_id="msg_123", html="")
+
+        assert "error" in result
+        assert "body" in result["error"].lower() or "html" in result["error"].lower()
+
+    def test_original_message_not_found(self, reply_email_fn, monkeypatch):
+        """404 when fetching original message returns error."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+
+        with patch(_HTTPX_GET, return_value=mock_resp):
+            result = reply_email_fn(message_id="nonexistent", html="<p>Reply</p>")
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
+    def test_successful_reply(self, reply_email_fn, monkeypatch):
+        """Successful reply returns success with threadId."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+
+        mock_get_resp = _mock_original_message_response()
+        mock_send_resp = MagicMock()
+        mock_send_resp.status_code = 200
+        mock_send_resp.json.return_value = {"id": "reply_456", "threadId": "thread_abc"}
+
+        with patch(_HTTPX_GET, return_value=mock_get_resp):
+            with patch(_HTTPX_POST, return_value=mock_send_resp) as mock_post:
+                result = reply_email_fn(message_id="orig_123", html="<p>My reply</p>")
+
+        assert result["success"] is True
+        assert result["provider"] == "gmail"
+        assert result["id"] == "reply_456"
+        assert result["threadId"] == "thread_abc"
+        assert result["to"] == "sender@example.com"
+        assert result["subject"] == "Re: Hello there"
+
+        # Verify threadId was sent in the request body
+        call_kwargs = mock_post.call_args
+        assert call_kwargs[1]["json"]["threadId"] == "thread_abc"
+        assert "raw" in call_kwargs[1]["json"]
+
+    def test_reply_preserves_existing_re_prefix(self, reply_email_fn, monkeypatch):
+        """Subject already starting with Re: is not double-prefixed."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+
+        mock_get_resp = MagicMock()
+        mock_get_resp.status_code = 200
+        mock_get_resp.json.return_value = {
+            "id": "orig_re",
+            "threadId": "thread_re",
+            "payload": {
+                "headers": [
+                    {"name": "Message-ID", "value": "<re@mail.gmail.com>"},
+                    {"name": "Subject", "value": "Re: Already replied"},
+                    {"name": "From", "value": "sender@example.com"},
+                ]
+            },
+        }
+
+        mock_send_resp = MagicMock()
+        mock_send_resp.status_code = 200
+        mock_send_resp.json.return_value = {"id": "reply_re", "threadId": "thread_re"}
+
+        with patch(_HTTPX_GET, return_value=mock_get_resp):
+            with patch(_HTTPX_POST, return_value=mock_send_resp):
+                result = reply_email_fn(message_id="orig_re", html="<p>Reply</p>")
+
+        assert result["subject"] == "Re: Already replied"
+
+    def test_reply_with_cc(self, reply_email_fn, monkeypatch):
+        """Reply with CC recipients includes them in the message."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+
+        mock_get_resp = _mock_original_message_response()
+        mock_send_resp = MagicMock()
+        mock_send_resp.status_code = 200
+        mock_send_resp.json.return_value = {"id": "reply_cc", "threadId": "thread_abc"}
+
+        with patch(_HTTPX_GET, return_value=mock_get_resp):
+            with patch(_HTTPX_POST, return_value=mock_send_resp) as mock_post:
+                result = reply_email_fn(
+                    message_id="orig_123",
+                    html="<p>Reply with CC</p>",
+                    cc=["cc@example.com"],
+                )
+
+        assert result["success"] is True
+        # Verify the raw message was sent (CC is embedded in the MIME message)
+        assert "raw" in mock_post.call_args[1]["json"]
+
+    def test_send_401_returns_token_error(self, reply_email_fn, monkeypatch):
+        """401 on send returns token expired error."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "expired_token")
+
+        mock_get_resp = _mock_original_message_response()
+        mock_send_resp = MagicMock()
+        mock_send_resp.status_code = 401
+
+        with patch(_HTTPX_GET, return_value=mock_get_resp):
+            with patch(_HTTPX_POST, return_value=mock_send_resp):
+                result = reply_email_fn(message_id="orig_123", html="<p>Reply</p>")
+
+        assert "error" in result
+        assert "expired" in result["error"].lower() or "invalid" in result["error"].lower()
+
+    def test_send_api_error(self, reply_email_fn, monkeypatch):
+        """Non-200 on send returns API error."""
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+
+        mock_get_resp = _mock_original_message_response()
+        mock_send_resp = MagicMock()
+        mock_send_resp.status_code = 403
+        mock_send_resp.text = "Insufficient permissions"
+
+        with patch(_HTTPX_GET, return_value=mock_get_resp):
+            with patch(_HTTPX_POST, return_value=mock_send_resp):
+                result = reply_email_fn(message_id="orig_123", html="<p>Reply</p>")
+
+        assert "error" in result
+        assert "403" in result["error"]
