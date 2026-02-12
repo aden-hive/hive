@@ -862,6 +862,13 @@ Keep the same JSON structure but with shorter content values.
         start = time.time()
         _step_index = 0
         _captured_tool_calls: list[dict] = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+
+        def _accumulate_tokens(llm_response: Any) -> None:
+            nonlocal total_input_tokens, total_output_tokens
+            total_input_tokens += getattr(llm_response, "input_tokens", 0) or 0
+            total_output_tokens += getattr(llm_response, "output_tokens", 0) or 0
 
         try:
             # Build messages
@@ -940,6 +947,8 @@ Keep the same JSON structure but with shorter content values.
                     max_tokens=ctx.max_tokens,
                 )
 
+            _accumulate_tokens(response)
+
             # Check for truncation and retry with compaction if needed
             expects_json = (
                 ctx.node_spec.node_type in ("llm_generate", "llm_tool_use")
@@ -981,6 +990,7 @@ Keep the same JSON structure but with shorter content values.
                         json_mode=use_json_mode,
                         max_tokens=ctx.max_tokens,
                     )
+                _accumulate_tokens(response)
 
             if self._is_truncated(response) and expects_json:
                 logger.warning(
@@ -993,14 +1003,9 @@ Keep the same JSON structure but with shorter content values.
                 ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
             )
             validation_attempt = 0
-            total_input_tokens = 0
-            total_output_tokens = 0
             current_messages = messages.copy()
 
             while True:
-                total_input_tokens += response.input_tokens
-                total_output_tokens += response.output_tokens
-
                 # Log the response
                 response_preview = (
                     response.content[:200] if len(response.content) > 200 else response.content
@@ -1070,6 +1075,7 @@ Keep the same JSON structure but with shorter content values.
                                         json_mode=use_json_mode,
                                         max_tokens=ctx.max_tokens,
                                     )
+                                _accumulate_tokens(response)
                                 continue  # Retry validation
                             else:
                                 # Max retries exceeded
@@ -1134,7 +1140,7 @@ Keep the same JSON structure but with shorter content values.
                 decision_id=decision_id,
                 success=True,
                 result=response.content,
-                tokens_used=response.input_tokens + response.output_tokens,
+                tokens_used=total_input_tokens + total_output_tokens,
                 latency_ms=latency_ms,
             )
 
@@ -1213,8 +1219,8 @@ Keep the same JSON structure but with shorter content values.
                             step_index=_step_index,
                             llm_text=response.content,
                             tool_calls=_captured_tool_calls,
-                            input_tokens=response.input_tokens,
-                            output_tokens=response.output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
                             latency_ms=latency_ms,
                         )
                         ctx.runtime_logger.log_node_complete(
@@ -1224,16 +1230,16 @@ Keep the same JSON structure but with shorter content values.
                             success=False,
                             error=_extraction_error,
                             total_steps=_step_index + 1,
-                            tokens_used=response.input_tokens + response.output_tokens,
-                            input_tokens=response.input_tokens,
-                            output_tokens=response.output_tokens,
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
                             latency_ms=latency_ms,
                         )
                     return NodeResult(
                         success=False,
                         error=_extraction_error,
                         output={},
-                        tokens_used=response.input_tokens + response.output_tokens,
+                        tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
                     )
                     # JSON extraction failed completely - still strip code blocks
@@ -1256,8 +1262,8 @@ Keep the same JSON structure but with shorter content values.
                     step_index=_step_index,
                     llm_text=response.content,
                     tool_calls=_captured_tool_calls,
-                    input_tokens=response.input_tokens,
-                    output_tokens=response.output_tokens,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
                     latency_ms=latency_ms,
                 )
                 ctx.runtime_logger.log_node_complete(
@@ -1266,16 +1272,16 @@ Keep the same JSON structure but with shorter content values.
                     node_type=ctx.node_spec.node_type,
                     success=True,
                     total_steps=_step_index + 1,
-                    tokens_used=response.input_tokens + response.output_tokens,
-                    input_tokens=response.input_tokens,
-                    output_tokens=response.output_tokens,
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
                     latency_ms=latency_ms,
                 )
 
             return NodeResult(
                 success=True,
                 output=output,
-                tokens_used=response.input_tokens + response.output_tokens,
+                tokens_used=total_input_tokens + total_output_tokens,
                 latency_ms=latency_ms,
             )
 
