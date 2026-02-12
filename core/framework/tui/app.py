@@ -6,7 +6,7 @@ import time
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Footer, Label, TextArea
+from textual.widgets import Footer, Label
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import AgentEvent, EventType
@@ -180,13 +180,13 @@ class AdenTUI(App):
         scrollbar-color: $primary;
     }
 
-    TextArea {
+    ChatTextArea {
         background: $surface;
         border: tall $primary;
         margin-top: 1;
     }
 
-    TextArea:focus {
+    ChatTextArea:focus {
         border: tall $accent;
     }
 
@@ -505,7 +505,7 @@ class AdenTUI(App):
         chat_widget.styles.border_left = ("none", "transparent")
 
         # Hide all TextArea widget borders
-        input_widgets = self.query("TextArea")
+        input_widgets = self.query("ChatTextArea")
         original_input_borders = []
         for input_widget in input_widgets:
             original_input_borders.append(input_widget.styles.border)
@@ -575,19 +575,12 @@ class AdenTUI(App):
                 timeout=5,
             )
 
-    def action_show_sessions(self) -> None:
+    async def action_show_sessions(self) -> None:
         """Show sessions list (bound to Ctrl+R)."""
         # Send /sessions command to chat input
         try:
             chat_repl = self.query_one(ChatRepl)
-            chat_input = chat_repl.query_one("#chat-input", TextArea)
-            chat_input.text = "/sessions"
-            # Trigger submission
-            self.notify(
-                "💡 Type /sessions in the chat to see all sessions",
-                severity="information",
-                timeout=3,
-            )
+            await chat_repl._submit_input("/sessions")
         except Exception:
             self.notify(
                 "Use /sessions command to see all sessions",
