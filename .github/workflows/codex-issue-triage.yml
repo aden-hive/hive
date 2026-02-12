@@ -24,33 +24,21 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Resolve issue context
+      - name: Resolve issue number
         id: issue_ctx
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_ISSUE: ${{ github.event.inputs.issue_number }}
           EVENT_ISSUE: ${{ github.event.issue.number }}
-          EVENT_TITLE: ${{ github.event.issue.title }}
-          EVENT_BODY: ${{ github.event.issue.body }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "issue_number=$INPUT_ISSUE" >> "$GITHUB_OUTPUT"
-            echo "issue_title=Manual triage request" >> "$GITHUB_OUTPUT"
-            echo "issue_body=Triggered via workflow_dispatch for issue #$INPUT_ISSUE" >> "$GITHUB_OUTPUT"
           else
             echo "issue_number=$EVENT_ISSUE" >> "$GITHUB_OUTPUT"
-            {
-              echo "issue_title<<EOF"
-              echo "$EVENT_TITLE"
-              echo "EOF"
-              echo "issue_body<<EOF"
-              echo "$EVENT_BODY"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run Codex triage
@@ -63,14 +51,10 @@ jobs:
           prompt: |
             You are triaging a GitHub issue for the repository ${{ github.repository }}.
 
-            Issue number: #${{ steps.issue_ctx.outputs.issue_number }}
-            Issue title: ${{ steps.issue_ctx.outputs.issue_title }}
-            Issue body:
-            ---
-            ${{ steps.issue_ctx.outputs.issue_body }}
-            ---
+            Use the GitHub CLI to fetch the full issue details:
+            gh issue view ${{ steps.issue_ctx.outputs.issue_number }} --repo ${{ github.repository }}
 
-            Produce a concise triage report with these sections:
+            Then produce a concise triage report with these sections:
             1) Category (bug, enhancement, question, documentation, invalid)
             2) Size estimate (small, medium, large)
             3) Duplicate risk (low/medium/high) with 1-2 keywords to search

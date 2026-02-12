@@ -923,11 +923,11 @@ if ! prompt_yes_no "  Configure Codex integration files now?" "y"; then
 fi
 
 if [ "$CODEX_SETUP_ENABLED" = true ]; then
-mkdir -p "$SCRIPT_DIR/.codex"
-mkdir -p "$SCRIPT_DIR/.agents/skills"
+    mkdir -p "$SCRIPT_DIR/.codex"
+    mkdir -p "$SCRIPT_DIR/.agents/skills"
 
-if [ ! -f "$SCRIPT_DIR/.codex/config.toml" ]; then
-    cat > "$SCRIPT_DIR/.codex/config.toml" <<'EOF'
+    if [ ! -f "$SCRIPT_DIR/.codex/config.toml" ]; then
+        cat > "$SCRIPT_DIR/.codex/config.toml" <<'EOF'
 # Project-level Codex config for Hive.
 
 [mcp_servers.agent-builder]
@@ -940,12 +940,12 @@ command = "uv"
 args = ["run", "--directory", "tools", "mcp_server.py", "--stdio"]
 cwd = "."
 EOF
-    echo -e "${GREEN}  ✓ Created .codex/config.toml${NC}"
-    CODEX_CHANGES=$((CODEX_CHANGES + 1))
-fi
+        echo -e "${GREEN}  ✓ Created .codex/config.toml${NC}"
+        CODEX_CHANGES=$((CODEX_CHANGES + 1))
+    fi
 
-if [ ! -f "$SCRIPT_DIR/AGENTS.md" ]; then
-    cat > "$SCRIPT_DIR/AGENTS.md" <<'EOF'
+    if [ ! -f "$SCRIPT_DIR/AGENTS.md" ]; then
+        cat > "$SCRIPT_DIR/AGENTS.md" <<'EOF'
 # Hive Agent Instructions (Codex)
 
 Use skills from `.agents/skills`:
@@ -965,32 +965,32 @@ Shortcut Handling:
 - Treat `hive`, `hive-create`, `hive-concepts`, `hive-patterns`, `hive-test`, and `hive-credentials` as workflow invocation phrases.
 - Users do not need to type skill file paths when using these phrases.
 EOF
-    echo -e "${GREEN}  ✓ Created AGENTS.md${NC}"
-    CODEX_CHANGES=$((CODEX_CHANGES + 1))
-fi
-
-for skill in "${REQUIRED_CODEX_SKILLS[@]}"; do
-    target="../../.claude/skills/$skill"
-    link_path="$SCRIPT_DIR/.agents/skills/$skill"
-
-    if [ -L "$link_path" ] || [ -d "$link_path" ]; then
-        continue
+        echo -e "${GREEN}  ✓ Created AGENTS.md${NC}"
+        CODEX_CHANGES=$((CODEX_CHANGES + 1))
     fi
 
-    if ln -s "$target" "$link_path" 2>/dev/null; then
-        echo -e "${GREEN}  ✓ Linked .agents/skills/$skill${NC}"
-        CODEX_CHANGES=$((CODEX_CHANGES + 1))
-    elif cp -R "$SCRIPT_DIR/.claude/skills/$skill" "$link_path" 2>/dev/null; then
-        echo -e "${YELLOW}  ⚠ Copied .agents/skills/$skill (symlink unavailable)${NC}"
-        CODEX_CHANGES=$((CODEX_CHANGES + 1))
-    else
-        echo -e "${YELLOW}  ⚠ Could not create .agents/skills/$skill${NC}"
-    fi
-done
+    for skill in "${REQUIRED_CODEX_SKILLS[@]}"; do
+        target="../../.claude/skills/$skill"
+        link_path="$SCRIPT_DIR/.agents/skills/$skill"
 
-if [ "$CODEX_CHANGES" -eq 0 ]; then
-    echo -e "${GREEN}  ✓ Codex setup already present${NC}"
-fi
+        if [ -L "$link_path" ] || [ -d "$link_path" ]; then
+            continue
+        fi
+
+        if ln -s "$target" "$link_path" 2>/dev/null; then
+            echo -e "${GREEN}  ✓ Linked .agents/skills/$skill${NC}"
+            CODEX_CHANGES=$((CODEX_CHANGES + 1))
+        elif cp -R "$SCRIPT_DIR/.claude/skills/$skill" "$link_path" 2>/dev/null; then
+            echo -e "${YELLOW}  ⚠ Copied .agents/skills/$skill (symlink unavailable)${NC}"
+            CODEX_CHANGES=$((CODEX_CHANGES + 1))
+        else
+            echo -e "${YELLOW}  ⚠ Could not create .agents/skills/$skill${NC}"
+        fi
+    done
+
+    if [ "$CODEX_CHANGES" -eq 0 ]; then
+        echo -e "${GREEN}  ✓ Codex setup already present${NC}"
+    fi
 fi
 
 echo ""
