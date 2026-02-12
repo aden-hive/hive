@@ -1,4 +1,3 @@
-````md
 # Using Aden Hive with Kilo Code CLI
 
 This directory enables the use of **Kilo Code CLI** as an alternative coding agent surface for the Aden Hive framework, alongside Claude Code and Cursor.
