@@ -64,7 +64,7 @@ To use the agent builder with Claude Desktop or other MCP clients, add this to y
     "agent-builder": {
       "command": "python",
       "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "/path/to/goal-agent"
+      "cwd": "/path/to/hive"
     }
   }
 }
