@@ -82,6 +82,11 @@ def main():
 
     register_testing_commands(subparsers)
 
+    # Register health / gate commands (health, gate)
+    from framework.net.cli import register_health_commands
+
+    register_health_commands(subparsers)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
