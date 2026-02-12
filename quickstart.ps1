@@ -122,6 +122,18 @@ function Test-DefenderExclusions {
     #>
     param([string[]]$Paths)
     
+    # Security: Define safe path prefixes (project + user directories only)
+    $safePrefixes = @(
+        $ScriptDir,         # Project directory
+        $env:LOCALAPPDATA,  # User local appdata
+        $env:APPDATA        # User roaming appdata
+    )
+    
+    # Normalize and filter null/empty values
+    $safePrefixes = $safePrefixes | Where-Object { $_ } | ForEach-Object {
+        [System.IO.Path]::GetFullPath($_)
+    }
+    
     try {
         # Check if Defender cmdlets are available (may not exist on older Windows)
         $mpModule = Get-Module -ListAvailable -Name Defender -ErrorAction SilentlyContinue
@@ -146,10 +158,34 @@ function Test-DefenderExclusions {
         $existing = $prefs.ExclusionPath
         if (-not $existing) { $existing = @() }
         
+        # Normalize existing paths for comparison
+        $existing = $existing | Where-Object { $_ } | ForEach-Object {
+            [System.IO.Path]::GetFullPath($_)
+        }
+        
         # Normalize paths and find missing exclusions
         $missing = @()
         foreach ($path in $Paths) {
             $normalized = [System.IO.Path]::GetFullPath($path)
+            
+            # Security: Ensure path is within safe boundaries
+            $isSafe = $false
+            foreach ($prefix in $safePrefixes) {
+                if ($normalized -like "$prefix*") {
+                    $isSafe = $true
+                    break
+                }
+            }
+            
+            if (-not $isSafe) {
+                Write-Warn "Security: Refusing to exclude path outside safe boundaries: $normalized"
+                continue
+            }
+            
+            # Info: Warn if path doesn't exist yet (but still process it)
+            if (-not (Test-Path $path -ErrorAction SilentlyContinue)) {
+                Write-Verbose "Path does not exist yet: $path (will be excluded when created)"
+            }
             
             # Check if path or any parent is already excluded
             $alreadyExcluded = $false
