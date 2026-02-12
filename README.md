@@ -435,6 +435,114 @@ Hive focuses on generating agents that run real business processes, rather than 
 
 ---
 
+## Quality Gates & Autofix
+
+### TL;DR
+
+Every PR to `main` runs:
+1. **CodeQL Code Scanning** — static analysis for security vulnerabilities (Python + JS/TS)
+2. **Copilot Autofix** — AI-suggested patches for CodeQL alerts (always review before accepting)
+3. **CI checks** — lint, unit tests, and agent export validation must pass
+
+Weekly scheduled scans catch issues in code that bypassed PR checks.
+
+### How Copilot Autofix Works
+
+When CodeQL finds a vulnerability in your PR:
+1. An alert annotation appears on the affected line
+2. Copilot Autofix may propose a fix directly in the alert
+3. You review the suggestion, test locally, and accept or modify
+4. Alerts are also visible under **Security → Code scanning alerts**
+
+### Branch Protection (Required Checks)
+
+Before merging any PR to `main`, the following checks must pass:
+- `Analyze (python)` / `Analyze (javascript-typescript)` — CodeQL
+- `Lint Python` — Ruff linting and formatting
+- `Test Python Framework` — pytest on core/
+- `Test Tools` — pytest on tools/
+
+#### Enable via UI
+1. Go to **Settings → Branches → Add branch protection rule**
+2. Branch name pattern: `main`
+3. Check **Require status checks to pass before merging**
+4. Search and add: `Analyze (python)`, `Lint Python`, `Test Python Framework`
+5. Check **Require branches to be up to date before merging**
+6. Check **Include administrators**
+7. Save
+
+#### Enable via GH CLI
+
+```bash
+gh api \
+  -X PUT \
+  -H "Accept: application/vnd.github+json" \
+  /repos/kostasuser01gr/hive/branches/main/protection \
+  --input - <<'EOF'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["Analyze (python)", "Lint Python", "Test Python Framework"]
+  },
+  "enforce_admins": true,
+  "required_pull_request_reviews": null,
+  "restrictions": null
+}
+EOF
+```
+
+---
+
+## Sentry Copilot Extension
+
+### Installation
+1. Open **VS Code / Codespaces** → Extensions → search **"Sentry"** → Install
+2. Connect to your Sentry project: run `Sentry: Connect` from the Command Palette and authenticate with your Sentry org
+3. Ensure your project DSN is set in `.env` (see `.env.example` if available)
+
+### Usage in PR Flow
+- Open Copilot Chat and mention `@sentry` to pull in error context from your Sentry project
+- Ask for fix suggestions: _"@sentry suggest a fix for the latest unhandled exception in the agent runner"_
+- Generate tests: _"@sentry generate unit tests covering the error path in commit \<SHA\>"_
+- Sentry surfaces production errors relevant to your PR diff — review them before merging
+
+### Prompt Examples
+```
+@sentry What are the top unresolved issues affecting the agent TUI?
+@sentry Suggest a minimal fix and generate tests for the IndexError in core/framework/runner.py
+@sentry Show me recent errors related to the files changed in this PR
+```
+
+---
+
+## Docker Copilot
+
+> Hive includes a Dockerfile at `tools/Dockerfile`. Use Docker Copilot to optimize and secure it.
+
+### Installation
+1. Install the **Docker** extension in VS Code / Codespaces
+2. Ensure Docker Desktop (or Docker Engine) is running locally or in your Codespace
+
+### Optimization Prompts
+Use these in Copilot Chat to improve your Docker setup:
+
+```
+@docker Optimize tools/Dockerfile for smaller image size using multi-stage builds
+@docker Add a HEALTHCHECK instruction to tools/Dockerfile
+@docker Review tools/Dockerfile for security best practices
+@docker What base image should I use for a Python 3.11 CLI application?
+@docker Scan this Dockerfile for common vulnerabilities and misconfigurations
+```
+
+### Best Practices
+- Use multi-stage builds to separate build dependencies from runtime
+- Pin base image versions (e.g., `python:3.11-slim` not `python:latest`)
+- Add `.dockerignore` to exclude unnecessary files
+- Use non-root users in production images
+- Add `HEALTHCHECK` for orchestrated deployments
+
+---
+
 <p align="center">
   Made with 🔥 Passion in San Francisco
 </p>

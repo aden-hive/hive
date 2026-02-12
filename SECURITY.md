@@ -36,6 +36,22 @@ We consider security research conducted in accordance with this policy to be:
 - Authorized concerning any relevant anti-circumvention laws
 - Exempt from restrictions in our Terms of Service that would interfere with conducting security research
 
+## Code Scanning & Copilot Autofix
+
+This repository uses **GitHub Code Scanning (CodeQL)** on every pull request targeting `main` and on a weekly schedule (Monday 03:00 UTC).
+
+### How It Works
+
+- **PR Annotations**: CodeQL alerts appear as inline annotations on pull requests. Review them before merging.
+- **Security Tab**: All alerts are also visible under the repo's **Security → Code scanning alerts** tab.
+- **Copilot Autofix**: GitHub Copilot may suggest patches for certain CodeQL alerts directly in the PR. **Always review and test these suggestions locally and in CI before merging.** Do not rely solely on automated fixes for high-risk changes.
+
+### Scope
+
+- **Languages**: Python, JavaScript/TypeScript
+- **Schedule**: On every PR to `main` + weekly scan
+- **Workflow**: `.github/workflows/codeql.yml`
+
 ## Security Best Practices for Users
 
 1. **Keep Updated**: Always run the latest version
