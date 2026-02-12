@@ -861,6 +861,8 @@ Keep the same JSON structure but with shorter content values.
 
         start = time.time()
         _step_index = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
         _captured_tool_calls: list[dict] = []
 
         try:
@@ -953,6 +955,9 @@ Keep the same JSON structure but with shorter content values.
                 and expects_json
                 and compaction_attempt < self.max_compaction_retries
             ):
+                # Accumulate tokens from the response we're about to discard
+                total_input_tokens += response.input_tokens
+                total_output_tokens += response.output_tokens
                 compaction_attempt += 1
                 logger.warning(
                     f"      ⚠ Response truncated (stop_reason: {response.stop_reason}), "
@@ -993,8 +998,6 @@ Keep the same JSON structure but with shorter content values.
                 ctx.node_spec.max_validation_retries if ctx.node_spec.output_model else 0
             )
             validation_attempt = 0
-            total_input_tokens = 0
-            total_output_tokens = 0
             current_messages = messages.copy()
 
             while True:
@@ -1213,8 +1216,8 @@ Keep the same JSON structure but with shorter content values.
                             step_index=_step_index,
                             llm_text=response.content,
                             tool_calls=_captured_tool_calls,
-                            input_tokens=response.input_tokens,
-                            output_tokens=response.output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
                             latency_ms=latency_ms,
                         )
                         ctx.runtime_logger.log_node_complete(
@@ -1224,9 +1227,9 @@ Keep the same JSON structure but with shorter content values.
                             success=False,
                             error=_extraction_error,
                             total_steps=_step_index + 1,
-                            tokens_used=response.input_tokens + response.output_tokens,
-                            input_tokens=response.input_tokens,
-                            output_tokens=response.output_tokens,
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
                             latency_ms=latency_ms,
                         )
                     return NodeResult(
@@ -1256,8 +1259,8 @@ Keep the same JSON structure but with shorter content values.
                     step_index=_step_index,
                     llm_text=response.content,
                     tool_calls=_captured_tool_calls,
-                    input_tokens=response.input_tokens,
-                    output_tokens=response.output_tokens,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
                     latency_ms=latency_ms,
                 )
                 ctx.runtime_logger.log_node_complete(
@@ -1266,9 +1269,9 @@ Keep the same JSON structure but with shorter content values.
                     node_type=ctx.node_spec.node_type,
                     success=True,
                     total_steps=_step_index + 1,
-                    tokens_used=response.input_tokens + response.output_tokens,
-                    input_tokens=response.input_tokens,
-                    output_tokens=response.output_tokens,
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
                     latency_ms=latency_ms,
                 )
 
