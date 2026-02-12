@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
+from .dynamics365_tool import register_tools as register_dynamics365
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
@@ -74,6 +75,7 @@ def register_all_tools(
     register_grep_search(mcp)
     register_execute_command(mcp)
     register_csv(mcp)
+    register_dynamics365(mcp, credentials=credentials)
 
     return [
         "example_tool",
@@ -93,6 +95,17 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "dynamics365_search_accounts",
+        "dynamics365_get_account",
+        "dynamics365_create_account",
+        "dynamics365_update_account",
+        "dynamics365_delete_account",
+        "dynamics365_search_contacts",
+        "dynamics365_create_contact",
+        "dynamics365_search_opportunities",
+        "dynamics365_create_opportunity",
+        "dynamics365_check_inventory",
+        "dynamics365_search_invoices",
     ]
 
 

@@ -28,6 +28,7 @@ cp .env.example .env
 | `BRAVE_SEARCH_API_KEY` | `web_search` tool (Brave)     | [brave.com/search/api](https://brave.com/search/api/)   |
 | `GOOGLE_API_KEY`       | `web_search` tool (Google)    | [console.cloud.google.com](https://console.cloud.google.com/) |
 | `GOOGLE_CSE_ID`        | `web_search` tool (Google)    | [programmablesearchengine.google.com](https://programmablesearchengine.google.com/) |
+| `DYNAMICS365_CREDENTIALS` | `dynamics365` tools        | [Azure Portal](https://portal.azure.com/) -> App Registrations |
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
@@ -75,6 +76,7 @@ python mcp_server.py
 | `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
+| `dynamics365`          | Manage Microsoft Dynamics 365 entities (ERP/CRM) |
 
 ## Project Structure
 
