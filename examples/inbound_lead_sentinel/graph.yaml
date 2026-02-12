@@ -1,0 +1,18 @@
+nodes:
+  - name: enrich_node
+    type: python
+    entrypoint: agent.enrich_lead
+
+  - name: scoring_node
+    type: python
+    entrypoint: agent.score_lead
+
+  - name: salesforce_node
+    type: python
+    entrypoint: agent.route_to_salesforce
+
+edges:
+  - from: enrich_node
+    to: scoring_node
+  - from: scoring_node
+    to: salesforce_node
