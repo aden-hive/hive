@@ -131,15 +131,15 @@ hive run exports/my_agent --tui
 
 ### CLI Command Reference
 
-| Command | Description |
-|---------|-------------|
-| `hive tui` | Browse agents and launch TUI dashboard |
-| `hive run <path>` | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
-| `hive shell [path]` | Interactive REPL (`--multi`, `--no-approve`) |
-| `hive info <path>` | Show agent details |
-| `hive validate <path>` | Validate agent structure |
-| `hive list [dir]` | List available agents |
-| `hive dispatch [dir]` | Multi-agent orchestration |
+| Command                | Description                                                             |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `hive tui`             | Browse agents and launch TUI dashboard                                  |
+| `hive run <path>`      | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
+| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
+| `hive info <path>`     | Show agent details                                                      |
+| `hive validate <path>` | Validate agent structure                                                |
+| `hive list [dir]`      | List available agents                                                   |
+| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
 
 ### Using Python directly (alternative)
 
@@ -521,15 +521,19 @@ export ADEN_CREDENTIALS_PATH="/custom/path"
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
+
 ## Opencode Setup
 
 [Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
 
 ### Automatic Setup
-Run the quickstart script in the root directorys:
+
+Run the quickstart script in the root directory:
+
 ```bash
 ./quickstart.sh
 ```
+
 ## Additional Resources
 
 - **Framework Documentation:** [core/README.md](../core/README.md)

@@ -215,10 +215,10 @@ hive/                                    # Repository root
 ├── scripts/                             # Utility scripts
 │   └── auto-close-duplicates.ts         # GitHub duplicate issue closer
 │
+├── .agent/                        # Antigravity IDE: mcp_config.json + skills (symlinks)
 ├── quickstart.sh                        # Interactive setup wizard
 ├── README.md                            # Project overview
 ├── CONTRIBUTING.md                      # Contribution guidelines
-├── CHANGELOG.md                         # Version history
 ├── LICENSE                              # Apache 2.0 License
 ├── docs/CODE_OF_CONDUCT.md              # Community guidelines
 └── SECURITY.md                          # Security policy
@@ -656,7 +656,6 @@ lsof -i :4000
 # Kill process
 kill -9 <PID>
 
-# Or change ports in config.yaml and regenerate
 ```
 
 ### Environment Variables Not Loading

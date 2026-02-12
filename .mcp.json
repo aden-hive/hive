@@ -4,11 +4,6 @@
       "command": "uv",
       "args": ["run", "-m", "framework.mcp.agent_builder_server"],
       "cwd": "core"
-    },
-    "tools": {
-      "command": "uv",
-      "args": ["run", "mcp_server.py", "--stdio"],
-      "cwd": "tools"
     }
   }
 }
