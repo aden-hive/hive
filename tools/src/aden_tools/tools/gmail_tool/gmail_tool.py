@@ -97,7 +97,7 @@ def register_tools(
     @mcp.tool()
     def gmail_list_messages(
         query: str = "is:unread",
-        max_results: int = 20,
+        max_results: int = 100,
         page_token: str | None = None,
     ) -> dict:
         """
@@ -109,7 +109,7 @@ def register_tools(
 
         Args:
             query: Gmail search query (default: "is:unread").
-            max_results: Maximum messages to return (1-100, default 20).
+            max_results: Maximum messages to return (1-500, default 100).
             page_token: Token for fetching the next page of results.
 
         Returns:
@@ -121,7 +121,7 @@ def register_tools(
         if isinstance(token, dict):
             return token
 
-        max_results = max(1, min(100, max_results))
+        max_results = max(1, min(500, max_results))
 
         params: dict[str, str | int] = {"q": query, "maxResults": max_results}
         if page_token:

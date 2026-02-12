@@ -152,7 +152,7 @@ class TestListMessages:
         with patch(HTTPX_MODULE, return_value=mock_resp) as mock_req:
             list_fn(max_results=999)
 
-        assert mock_req.call_args[1]["params"]["maxResults"] == 100
+        assert mock_req.call_args[1]["params"]["maxResults"] == 500
 
     def test_list_token_expired(self, list_fn, monkeypatch):
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "expired")

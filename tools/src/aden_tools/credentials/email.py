@@ -36,7 +36,8 @@ EMAIL_CREDENTIALS = {
     "google": CredentialSpec(
         env_var="GOOGLE_ACCESS_TOKEN",
         tools=[
-            "send_email",
+            # send_email is excluded: it's a multi-provider tool that checks
+            # credentials at runtime based on the provider parameter.
             "gmail_reply_email",
             "gmail_list_messages",
             "gmail_get_message",
@@ -45,7 +46,7 @@ EMAIL_CREDENTIALS = {
             "gmail_batch_modify_messages",
         ],
         node_types=[],
-        required=False,
+        required=True,
         startup_required=False,
         help_url="https://hive.adenhq.com",
         description="Google OAuth2 access token (via Aden) - used for Gmail",
