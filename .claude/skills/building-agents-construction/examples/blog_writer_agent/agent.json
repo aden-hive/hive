@@ -1,41 +1,553 @@
 {
-  "name": "Blog Writer Agent",
-  "version": "1.0.0",
-  "description": "Generate SEO-optimized blog posts by researching topics, creating structured outlines, and producing polished markdown with citations.",
-  "entry_point": "blog_writer_agent",
-  "author": "siddiquiaffan",
-  "tags": ["content", "seo", "blog", "writing", "research"],
-  "category": "content-generation",
-  "pipeline": {
-    "nodes": [
-      "analyze-topic",
-      "research-topic",
-      "fetch-sources",
-      "create-outline",
-      "write-draft",
-      "seo-optimize",
-      "quality-check",
+"agent": {
+    "id": "blog_writer_agent",
+    "name": "Blog Writer Agent",
+    "version": "1.0.0",
+    "description": "SEO-optimized blog post generator that researches any topic, creates structured outlines, and produces polished markdown posts with citations and YAML frontmatter."
+},
+"graph": {
+    "id": "blog-writer-agent-graph",
+    "goal_id": "seo-blog-writer",
+    "version": "1.0.0",
+    "entry_node": "analyze-topic",
+    "entry_points": {
+        "start": "analyze-topic"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
       "save-blog"
     ],
-    "entry": "analyze-topic",
-    "terminal": "save-blog"
-  },
-  "tools": ["web_search", "web_scrape", "write_to_file"],
-  "input_schema": {
-    "topic": {
-      "type": "string",
-      "description": "The blog topic to research and write about",
-      "required": true
-    }
-  },
-  "output_schema": {
-    "final_content": {
-      "type": "string",
-      "description": "The complete blog post in markdown format"
+    "nodes": [
+        {
+            "id": "analyze-topic",
+            "name": "Analyze Topic",
+            "description": "Parse the blog topic to extract keywords, angles, target audience, and content type",
+            "node_type": "llm_generate",
+            "input_keys": [
+                "topic"
+            ],
+            "output_keys": [
+                "keywords",
+                "angles",
+                "target_audience",
+                "content_type"
+            ],
+            "nullable_output_keys": [],
+            "input_schema": {},
+            "output_schema": {
+                "keywords": {
+                    "type": "array",
+                    "required": true,
+                    "description": "List of 5-10 SEO-relevant keywords and phrases"
+                },
+        "angles": {
+            "type": "array",
+            "required": true,
+            "description": "List of 3-5 content angles to cover"
+        },
+        "target_audience": {
+            "type": "string",
+            "required": true,
+            "description": "Description of the target audience persona"
+        },
+        "content_type": {
+            "type": "string",
+            "required": true,
+            "description": "Blog format: 'how-to', 'listicle', 'deep-dive', 'opinion', or 'guide'"
+        }
     },
-    "file_path": {
-      "type": "string",
-      "description": "Path where the blog post was saved"
-    }
+    "system_prompt": "You are a content strategist specializing in SEO blog planning. Given a blog topic, analyze it thoroughly.\n\nYour task:\n1. Extract 5-10 SEO-relevant keywords and long-tail phrases\n2. Identify 3-5 unique content angles to make the post comprehensive\n3. Define the target audience persona (who would search for this?)\n4. Determine the best content format (how-to, listicle, deep-dive, opinion, guide)\n\nCRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks.\n\nReturn this JSON structure:\n{\n  \"keywords\": [\"primary keyword\", \"secondary keyword\", \"long-tail phrase\", ...],\n  \"angles\": [\"angle 1 - overview\", \"angle 2 - practical tips\", \"angle 3 - expert insights\"],\n  \"target_audience\": \"Description of who this post is for, their knowledge level, and what they want to learn\",\n  \"content_type\": \"deep-dive\"\n}",
+    "tools": [],
+    "model": null,
+    "function": null,
+    "routes": {},
+    "max_retries": 3,
+    "retry_on": [],
+    "max_node_visits": 1,
+    "output_model": null,
+    "max_validation_retries": 2,
+    "client_facing": false
+},
+{
+    "id": "research-topic",
+    "name": "Research Topic",
+    "description": "Execute web searches using keywords to find 5+ authoritative sources",
+    "node_type": "llm_tool_use",
+    "input_keys": [
+        "keywords",
+        "angles",
+        "topic"
+    ],
+    "output_keys": [
+        "search_results",
+        "source_urls"
+    ],
+    "nullable_output_keys": [],
+    "input_schema": {},
+    "output_schema": {
+        "search_results": {
+            "type": "string",
+            "required": true,
+            "description": "Summary of what was found across searches"
+        },
+        "source_urls": {
+            "type": "array",
+            "required": true,
+            "description": "List of source URLs discovered"
+        }
+    },
+    "system_prompt": "You are a research assistant for blog writing. Use the web_search tool to find authoritative sources.\n\nYour task:\n1. Search using the provided keywords and topic\n2. Focus on finding authoritative, recent, and diverse sources\n3. Aim for 5+ unique sources covering different angles\n4. Prefer sources with data, expert opinions, and practical examples\n\nAfter searching, return JSON with found sources:\n{\n  \"search_results\": \"Brief summary of what information was found\",\n  \"source_urls\": [\"url1\", \"url2\", \"url3\", ...]\n}",
+    "tools": [
+        "web_search"
+    ],
+    "model": null,
+    "function": null,
+    "routes": {},
+    "max_retries": 3,
+    "retry_on": [],
+    "max_node_visits": 1,
+    "output_model": null,
+    "max_validation_retries": 2,
+    "client_facing": false
+},
+{
+    "id": "fetch-sources",
+    "name": "Fetch Sources",
+    "description": "Fetch and extract content from discovered source URLs",
+    "node_type": "llm_tool_use",
+    "input_keys": [
+        "source_urls",
+        "keywords"
+    ],
+    "output_keys": [
+        "fetched_sources",
+        "fetch_errors"
+    ],
+    "nullable_output_keys": [],
+    "input_schema": {},
+    "output_schema": {
+        "fetched_sources": {
+            "type": "array",
+            "required": true,
+            "description": "List of fetched source objects with url, title, and relevant content excerpts"
+        },
+        "fetch_errors": {
+            "type": "array",
+            "required": true,
+            "description": "List of URLs that failed to fetch"
+        }
+    },
+    "system_prompt": "You are a content fetcher for blog research. Use web_scrape tool to retrieve content from URLs.\n\nYour task:\n1. Fetch content from each source URL using web_scrape tool\n2. Extract the most relevant excerpts related to the keywords\n3. Note the title and key data points from each source\n4. Track any URLs that failed to fetch\n\nAfter fetching, return JSON:\n{\n  \"fetched_sources\": [\n    {\"url\": \"...\", \"title\": \"...\", \"content\": \"relevant excerpts and key data points...\"},\n    ...\n  ],\n  \"fetch_errors\": [\"url that failed\", ...]\n}",
+    "tools": [
+        "web_scrape"
+    ],
+    "model": null,
+    "function": null,
+    "routes": {},
+    "max_retries": 3,
+    "retry_on": [],
+    "max_node_visits": 1,
+    "output_model": null,
+    "max_validation_retries": 2,
+    "client_facing": false
+},
+{
+    "id": "create-outline",
+    "name": "Create Outline",
+    "description": "Structure the blog post with H2/H3 sections, intro, body, and conclusion",
+    "node_type": "llm_generate",
+    "input_keys": [
+        "fetched_sources",
+        "angles",
+        "target_audience",
+        "content_type",
+        "topic"
+    ],
+    "output_keys": [
+        "outline",
+        "section_count",
+        "estimated_word_count"
+    ],
+    "nullable_output_keys": [],
+    "input_schema": {},
+    "output_schema": {
+        "outline": {
+            "type": "array",
+            "required": true,
+            "description": "Ordered list of sections with heading, level (h2/h3), key points, and target word count"
+        },
+        "section_count": {
+            "type": "number",
+            "required": true,
+            "description": "Total number of sections in the outline"
+        },
+        "estimated_word_count": {
+            "type": "number",
+            "required": true,
+            "description": "Estimated total word count for the blog post"
+        }
+    },
+    "system_prompt": "You are a content architect. Create a detailed blog post outline optimized for the content type and audience.\n\nYour task:\n1. Structure the post with clear H2 and H3 sections\n2. Include an engaging introduction hook\n3. Organize body sections by the identified angles\n4. Add a strong conclusion with a call to action\n5. Target 1500-3000 words total\n6. Note which sources support each section\n\nCRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks.\n\nReturn JSON:\n{\n  \"outline\": [\n    {\"heading\": \"Introduction: Hook the reader\", \"level\": \"h2\", \"key_points\": [\"hook\", \"thesis\", \"preview\"], \"target_words\": 200},\n    {\"heading\": \"Section Title\", \"level\": \"h2\", \"key_points\": [\"point 1\", \"point 2\"], \"target_words\": 400},\n    {\"heading\": \"Sub-section\", \"level\": \"h3\", \"key_points\": [\"detail\"], \"target_words\": 200},\n    {\"heading\": \"Conclusion\", \"level\": \"h2\", \"key_points\": [\"summary\", \"call to action\"], \"target_words\": 150}\n  ],\n  \"section_count\": 8,\n  \"estimated_word_count\": 2000\n}",
+    "tools": [],
+    "model": null,
+    "function": null,
+    "routes": {},
+    "max_retries": 3,
+    "retry_on": [],
+    "max_node_visits": 1,
+    "output_model": null,
+    "max_validation_retries": 2,
+    "client_facing": false
+},
+{
+    "id": "write-draft",
+    "name": "Write Draft",
+    "description": "Generate a 1500-3000 word blog post with inline citations following the outline",
+    "node_type": "llm_generate",
+    "input_keys": [
+        "outline",
+        "fetched_sources",
+        "target_audience",
+        "topic"
+    ],
+    "output_keys": [
+        "draft_content",
+        "citations",
+        "word_count"
+    ],
+    "nullable_output_keys": [],
+    "input_schema": {},
+    "output_schema": {
+        "draft_content": {
+            "type": "string",
+            "required": true,
+            "description": "Full markdown blog post with inline citations [n]"
+        },
+        "citations": {
+            "type": "array",
+            "required": true,
+            "description": "List of citation objects with number, url, and title"
+        },
+        "word_count": {
+            "type": "number",
+            "required": true,
+            "description": "Actual word count of the draft"
+        }
+    },
+    "system_prompt": "You are an expert blog writer. Write a compelling, well-researched blog post following the provided outline.\n\nYour task:\n1. Follow the outline structure exactly (use the headings as markdown ## and ###)\n2. Write engaging, clear prose for the target audience\n3. Include inline citations as [1], [2], etc. for all factual claims\n4. Use smooth transitions between sections\n5. Write an attention-grabbing introduction\n6. End with a strong conclusion and call to action\n7. Target 1500-3000 words\n\nWriting style:\n- Professional but conversational\n- Use short paragraphs (2-4 sentences)\n- Include bullet points or numbered lists where appropriate\n- Add relevant examples and data points from sources\n\nCRITICAL: Return ONLY raw JSON. NO markdown wrapping around the JSON itself.\n\nReturn JSON:\n{\n  \"draft_content\": \"# Blog Title\\n\\n## Introduction\\n\\nEngaging opening paragraph [1]...\\n\\n## Section...\\n\",\n  \"citations\": [\n    {\"number\": 1, \"url\": \"https://...\", \"title\": \"Source Title\"},\n    ...\n  ],\n  \"word_count\": 2100\n}",
+    "tools": [],
+    "model": null,
+    "function": null,
+    "routes": {},
+    "max_retries": 3,
+    "retry_on": [],
+    "max_node_visits": 1,
+    "output_model": null,
+    "max_validation_retries": 2,
+    "client_facing": false
+},
+{
+    "id": "seo-optimize",
+    "name": "SEO Optimize",
+    "description": "Add meta description, optimize headers for keywords, and suggest tags",
+    "node_type": "llm_generate",
+    "input_keys": [
+        "draft_content",
+        "keywords",
+        "topic"
+    ],
+    "output_keys": [
+        "optimized_content",
+        "meta_description",
+        "seo_title",
+        "suggested_tags"
+    ],
+    "nullable_output_keys": [],
+    "input_schema": {},
+    "output_schema": {
+        "optimized_content": {
+            "type": "string",
+            "required": true,
+            "description": "SEO-optimized blog content with improved headers and keyword placement"
+        },
+        "meta_description": {
+            "type": "string",
+            "required": true,
+            "description": "Meta description for SEO (150-160 characters)"
+        },
+        "seo_title": {
+            "type": "string",
+            "required": true,
+            "description": "SEO-optimized title tag (50-60 characters)"
+        },
+        "suggested_tags": {
+            "type": "array",
+            "required": true,
+            "description": "List of 5-8 tags/categories for the post"
+        }
+    },
+        "system_prompt": "You are an SEO specialist. Optimize the blog post for search engines while maintaining readability.\n\nYour task:\n1. Optimize the H1 title for the primary keyword (50-60 characters)\n2. Ensure H2/H3 headers include relevant keywords naturally\n3. Write a compelling meta description (150-160 characters)\n4. Add keyword variations throughout the content naturally (avoid stuffing)\n5. Suggest 5-8 relevant tags/categories\n6. Ensure the first paragraph contains the primary keyword\n7. Add a clear, keyword-rich conclusion\n\nIMPORTANT:\n- Do NOT change the meaning or factual content\n- Keep all citations intact\n- Maintain the original writing quality\n- Keyword insertion must feel natural\n\nCRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks.\n\nReturn JSON:\n{\n  \"optimized_content\": \"# SEO-Optimized Title\\n\\n## Improved Section Headers...\\n\",\n  \"meta_description\": \"Compelling 150-160 character description with primary keyword\",\n  \"seo_title\": \"SEO Title | Brand (50-60 chars)\",\n  \"suggested_tags\": [\"tag1\", \"tag2\", \"tag3\", ...]\n}",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false
+    },
+    {
+        "id": "quality-check",
+        "name": "Quality Check",
+        "description": "Verify citations, check readability, and fix any issues in the blog post",
+        "node_type": "llm_generate",
+        "input_keys": [
+            "optimized_content",
+            "citations",
+            "meta_description"
+        ],
+        "output_keys": [
+            "quality_score",
+            "issues",
+            "final_content"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {
+        "quality_score": {
+            "type": "number",
+            "required": true,
+            "description": "Quality score 0-1"
+        },
+        "issues": {
+            "type": "array",
+            "required": true,
+            "description": "List of issues found and whether they were fixed"
+        },
+        "final_content": {
+            "type": "string",
+            "required": true,
+            "description": "Final corrected blog post content"
+        }
+    },
+    "system_prompt": "You are a blog editor and quality assurance reviewer. Check the blog post thoroughly.\n\nCheck for:\n1. Uncited claims (factual statements without [n] citation)\n2. Broken citations (references to non-existent numbers)\n3. Readability (clear prose, good paragraph length, logical flow)\n4. Grammar and spelling errors\n5. SEO elements (meta description length, keyword presence in headers)\n6. Completeness (intro, body sections, conclusion, call to action)\n7. Consistency (tone, formatting, citation style)\n\nIf issues are found, fix them in the final content.\n\nCRITICAL: Return ONLY raw JSON. NO markdown, NO code blocks.\n\nReturn JSON:\n{\n  \"quality_score\": 0.92,\n  \"issues\": [\n    {\"type\": \"uncited_claim\", \"location\": \"paragraph 3\", \"description\": \"Added citation [4]\", \"fixed\": true},\n    {\"type\": \"readability\", \"location\": \"section 2\", \"description\": \"Split long paragraph\", \"fixed\": true}\n  ],\n  \"final_content\": \"Corrected full blog post with all issues fixed...\"\n}",
+    "tools": [],
+    "model": null,
+    "function": null,
+    "routes": {},
+    "max_retries": 3,
+    "retry_on": [],
+    "max_node_visits": 1,
+    "output_model": null,
+    "max_validation_retries": 2,
+    "client_facing": false
+},
+    {
+        "id": "save-blog",
+        "name": "Save Blog",
+        "description": "Write the final blog post to a local markdown file with YAML frontmatter",
+        "node_type": "llm_tool_use",
+        "input_keys": [
+            "final_content",
+            "meta_description",
+            "seo_title",
+            "suggested_tags",
+            "citations",
+            "topic"
+        ],
+        "output_keys": [
+            "file_path",
+            "save_status"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {
+        "file_path": {
+            "type": "string",
+            "required": true,
+            "description": "Path where blog post was saved"
+        },
+        "save_status": {
+            "type": "string",
+            "required": true,
+            "description": "Status of save operation"
+        }
+    },
+    "system_prompt": "You are a file manager. Save the blog post to disk as a polished markdown file.\n\nYour task:\n1. Generate a filename from the topic (slugified, with date)\n2. Add YAML frontmatter with title, description, tags, date, and author\n3. Append the references section at the bottom\n4. Use the write_to_file tool to save as markdown\n5. Save to the ./blog_posts/ directory\n\nFilename format: blog_YYYY-MM-DD_topic-slug.md\n\nFile structure:\n---\ntitle: \"SEO Title\"\ndescription: \"Meta description\"\ndate: YYYY-MM-DD\ntags: [tag1, tag2, ...]\nauthor: \"Hive Blog Writer Agent\"\n---\n\n[Blog content here]\n\n## References\n\n1. [Title](url)\n2. [Title](url)\n...\n\nReturn JSON:\n{\n  \"file_path\": \"blog_posts/blog_2026-02-10_topic-name.md\",\n  \"save_status\": \"success\"\n}",
+    "tools": [
+        "write_to_file"
+    ],
+    "model": null,
+    "function": null,
+    "routes": {},
+    "max_retries": 3,
+    "retry_on": [],
+    "max_node_visits": 1,
+    "output_model": null,
+    "max_validation_retries": 2,
+    "client_facing": false
+}
+],
+"edges": [
+{
+    "id": "analyze-to-research",
+    "source": "analyze-topic",
+    "target": "research-topic",
+    "condition": "on_success",
+    "condition_expr": null,
+    "priority": 1,
+    "input_mapping": {}
+},
+{
+    "id": "research-to-fetch",
+    "source": "research-topic",
+    "target": "fetch-sources",
+    "condition": "on_success",
+    "condition_expr": null,
+    "priority": 1,
+    "input_mapping": {}
+},
+{
+    "id": "fetch-to-outline",
+    "source": "fetch-sources",
+    "target": "create-outline",
+    "condition": "on_success",
+    "condition_expr": null,
+    "priority": 1,
+    "input_mapping": {}
+},
+{
+    "id": "outline-to-write",
+    "source": "create-outline",
+    "target": "write-draft",
+    "condition": "on_success",
+    "condition_expr": null,
+    "priority": 1,
+    "input_mapping": {}
+},
+{
+    "id": "write-to-seo",
+    "source": "write-draft",
+    "target": "seo-optimize",
+    "condition": "on_success",
+    "condition_expr": null,
+    "priority": 1,
+    "input_mapping": {}
+},
+{
+    "id": "seo-to-quality",
+    "source": "seo-optimize",
+    "target": "quality-check",
+    "condition": "on_success",
+    "condition_expr": null,
+    "priority": 1,
+    "input_mapping": {}
+},
+{
+    "id": "quality-to-save",
+    "source": "quality-check",
+    "target": "save-blog",
+    "condition": "on_success",
+    "condition_expr": null,
+    "priority": 1,
+    "input_mapping": {}
+}
+],
+"max_steps": 100,
+"max_retries_per_node": 3,
+"description": "SEO-optimized blog post generator that researches any topic, creates structured outlines, and produces polished markdown posts with citations and YAML frontmatter.",
+"created_at": "2026-02-10T00:00:00.000000"
+},
+"goal": {
+"id": "seo-blog-writer",
+"name": "SEO Blog Writer",
+"description": "Research any topic and produce a well-structured, SEO-optimized blog post with citations, saved as a polished markdown file.",
+"status": "draft",
+"success_criteria": [
+{
+    "id": "word-count",
+    "description": "Blog post is 1500-3000 words",
+    "metric": "word_count",
+    "target": "1500-3000",
+    "weight": 0.15,
+    "met": false
+},
+{
+    "id": "citations",
+    "description": "All factual claims cite their sources",
+    "metric": "citation_coverage",
+    "target": "100%",
+    "weight": 0.20,
+    "met": false
+},
+{
+    "id": "seo-optimization",
+    "description": "Post includes meta description, keyword-optimized headers, and tags",
+    "metric": "seo_score",
+    "target": "85%",
+    "weight": 0.20,
+    "met": false
+},
+{
+    "id": "readability",
+    "description": "Clear, engaging prose with good flow and structure",
+    "metric": "readability_score",
+    "target": "85%",
+    "weight": 0.20,
+    "met": false
+},
+{
+    "id": "accuracy",
+    "description": "All information accurately reflects source material",
+    "metric": "accuracy_score",
+    "target": "95%",
+    "weight": 0.25,
+    "met": false
+}
+],
+"constraints": [
+{
+    "id": "no-hallucination",
+    "description": "Only include information found in researched sources",
+    "constraint_type": "hard",
+    "category": "accuracy",
+    "check": ""
+},
+{
+    "id": "seo-compliant",
+    "description": "Follow SEO best practices for meta description, headers, and keyword usage",
+    "constraint_type": "soft",
+    "category": "quality",
+    "check": ""
+},
+{
+    "id": "original-content",
+    "description": "Content must be original; no plagiarized text from sources",
+    "constraint_type": "hard",
+    "category": "quality",
+    "check": ""
+}
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-10 00:00:00.000000",
+    "updated_at": "2026-02-10 00:00:00.000000"
+},
+"required_tools": [
+    "web_search",
+    "web_scrape",
+    "write_to_file"
+],
+"metadata": {
+    "created_at": "2026-02-10T00:00:00.000000",
+    "node_count": 8,
+    "edge_count": 7
   }
 }
