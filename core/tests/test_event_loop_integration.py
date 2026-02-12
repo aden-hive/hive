@@ -929,6 +929,7 @@ async def test_context_handoff_between_nodes(runtime):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Hangs in non-interactive shells (client-facing blocks on stdin)")
 async def test_client_facing_node_streams_output():
     """Client-facing node emits CLIENT_OUTPUT_DELTA events."""
     recorded: list[AgentEvent] = []

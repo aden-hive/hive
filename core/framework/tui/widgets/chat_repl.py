@@ -451,6 +451,7 @@ class ChatRepl(Vertical):
             if paused_at:
                 # Has paused_at - resume from there
                 resume_session_state = {
+                    "resume_session_id": session_id,
                     "paused_at": paused_at,
                     "memory": state.get("memory", {}),
                     "execution_path": progress.get("path", []),
@@ -458,8 +459,13 @@ class ChatRepl(Vertical):
                 }
                 resume_info = f"From node: [cyan]{paused_at}[/cyan]"
             else:
-                # No paused_at - just retry with same input
-                resume_session_state = {}
+                # No paused_at - retry with same input but reuse session directory
+                resume_session_state = {
+                    "resume_session_id": session_id,
+                    "memory": state.get("memory", {}),
+                    "execution_path": progress.get("path", []),
+                    "node_visit_counts": progress.get("node_visit_counts", {}),
+                }
                 resume_info = "Retrying with same input"
 
             # Display resume info
@@ -563,6 +569,7 @@ class ChatRepl(Vertical):
 
             # Create session_state for checkpoint recovery
             recover_session_state = {
+                "resume_session_id": session_id,
                 "resume_from_checkpoint": checkpoint_id,
             }
 

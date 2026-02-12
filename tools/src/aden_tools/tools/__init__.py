@@ -109,6 +109,8 @@ def register_all_tools(
         "execute_command_tool",
         "load_data",
         "save_data",
+        "append_data",
+        "edit_data",
         "list_data_files",
         "serve_file_to_user",
         "csv_read",
