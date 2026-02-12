@@ -65,6 +65,12 @@ class EventType(StrEnum):
 
     # Custom events
     CUSTOM = "custom"
+    # Graph evolution (old_graph, new_graph) for visual diffing and inspection
+    GRAPH_EVOLVED = "graph_evolved"
+    # Request for graph evolution (suggest a new graph) — subscribers (Builder) should listen
+    GRAPH_EVOLUTION_REQUEST = "graph_evolution_request"
+    # Rejected evolution - candidate failed probation or was declined
+    GRAPH_EVOLUTION_REJECTED = "graph_evolution_rejected"
 
 
 @dataclass
@@ -630,6 +636,69 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"prompt": prompt},
+            )
+        )
+
+    async def emit_graph_evolved(
+        self,
+        stream_id: str,
+        old_graph: dict | None,
+        new_graph: dict | None,
+        correlation_id: str | None = None,
+    ) -> None:
+        """Emit a GRAPH_EVOLVED event carrying snapshots of the graph before and after evolution.
+
+        old_graph and new_graph should be serializable representations (dicts) of the graph
+        so consumers (such as the TUI) can compute diffs and render visualizations.
+        """
+        await self.publish(
+            AgentEvent(
+                type=EventType.GRAPH_EVOLVED,
+                stream_id=stream_id,
+                data={"old_graph": old_graph or {}, "new_graph": new_graph or {}},
+                correlation_id=correlation_id,
+            )
+        )
+
+    async def emit_graph_evolution_request(
+        self,
+        stream_id: str,
+        context: dict | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
+        """Emit a request asking Builder/CodingAgent to propose an evolved graph.
+
+        The `context` should include evaluation results, recent decisions, and
+        any other relevant debugging information to help the Builder produce a
+        candidate evolved graph. Consumers should respond by generating a new
+        graph and applying it (e.g., via AgentRuntime.update_graph).
+        """
+        await self.publish(
+            AgentEvent(
+                type=EventType.GRAPH_EVOLUTION_REQUEST,
+                stream_id=stream_id,
+                data={"context": context or {}},
+                correlation_id=correlation_id,
+            )
+        )
+    async def emit_graph_evolution_rejected(
+        self,
+        stream_id: str,
+        validation: dict | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
+        """Emit an event indicating a proposed evolution was rejected.
+
+        `validation` should be a serializable representation of ValidationResult
+        (passed/violations/metrics) so consumers (TUI) can show why the
+        candidate was declined.
+        """
+        await self.publish(
+            AgentEvent(
+                type=EventType.GRAPH_EVOLUTION_REJECTED,
+                stream_id=stream_id,
+                data={"validation": validation or {}},
+                correlation_id=correlation_id,
             )
         )
 

@@ -7,6 +7,8 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
+import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +22,12 @@ from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
 from framework.storage.session_store import SessionStore
+try:
+    # Prefer the full EvolutionGuard implementation if provided by core.safety
+    from core.safety.evolution_guard import EvolutionGuard, ValidationResult
+except Exception:
+    # Fallback to the local skeleton (keeps compatibility during iterative work)
+    from framework.runtime.evolution_guard import EvolutionGuard, ValidationResult
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -104,6 +112,7 @@ class AgentRuntime:
         config: AgentRuntimeConfig | None = None,
         runtime_log_store: Any = None,
         checkpoint_config: CheckpointConfig | None = None,
+        evolution_guard: EvolutionGuard | None = None,
     ):
         """
         Initialize agent runtime.
@@ -145,6 +154,8 @@ class AgentRuntime:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
+        # Optional EvolutionGuard to provide snapshot/probation/rollback hooks
+        self._evolution_guard = evolution_guard
 
         # Entry points and streams
         self._entry_points: dict[str, EntryPointSpec] = {}
@@ -384,6 +395,186 @@ class AgentRuntime:
             return stream.get_result(execution_id)
         return None
 
+    async def update_graph(
+        self,
+        new_graph: "GraphSpec",
+        *,
+        correlation_id: str | None = None,
+        probation_steps: int = 10,
+    ) -> None:
+        """Replace the current graph with a new GraphSpec and emit a GRAPH_EVOLVED event.
+
+        This is a convenience method that callers (e.g. a CodingAgent or management
+        API) can use to notify the runtime that the graph has been updated. The
+        TUI and other subscribers can listen for EventType.GRAPH_EVOLVED to render
+        visual diffs or take other actions.
+        """
+        old_graph = getattr(self, "graph", None)
+
+        # Try to serialize graphs to plain dicts for event payloads
+        def _serialize(g):
+            if g is None:
+                return {}
+            try:
+                return g.model_dump()
+            except Exception:
+                try:
+                    return g.dict()
+                except Exception:
+                    # Fallback: minimal representation
+                    return {"id": getattr(g, "id", str(g))}
+
+        old_ser = _serialize(old_graph)
+        new_ser = _serialize(new_graph)
+
+        # If an EvolutionGuard is provided, run the probation/approval flow.
+        if self._evolution_guard is not None:
+            try:
+                snapshot_id = None
+                try:
+                    snapshot_id = self._evolution_guard.snapshot(old_graph)
+                except Exception:
+                    # Snapshot failing should not silently allow unsafe applies.
+                    logger.exception("EvolutionGuard.snapshot failed; rejecting candidate")
+                    # Emit rejected event with error
+                    await self._event_bus.emit_graph_evolution_rejected(
+                        stream_id="agent_runtime",
+                        validation={"passed": False, "violations": ["snapshot_failed"]},
+                        correlation_id=correlation_id,
+                    )
+                    return
+
+                # Run probation (may be async) to validate candidate behavior
+                try:
+                    result: ValidationResult = await self._evolution_guard.probation_run(
+                        snapshot_id, new_graph, steps=probation_steps
+                    )
+                except Exception:
+                    logger.exception("EvolutionGuard.probation_run failed; rejecting")
+                    try:
+                        if snapshot_id:
+                            self._evolution_guard.rollback(snapshot_id)
+                    except Exception:
+                        logger.exception("EvolutionGuard.rollback failed")
+                    await self._event_bus.emit_graph_evolution_rejected(
+                        stream_id="agent_runtime",
+                        validation={
+                            "passed": False,
+                            "violations": ["probation_error"],
+                        },
+                        correlation_id=correlation_id,
+                    )
+                    return
+
+                # Decide based on guard approve() and ValidationResult
+                approved = False
+                try:
+                    approved = self._evolution_guard.approve(result)
+                except Exception:
+                    logger.exception("EvolutionGuard.approve raised; rejecting candidate")
+                    approved = False
+
+                # Audit the attempt
+                try:
+                    audit_entry = {
+                        "snapshot_id": snapshot_id,
+                        "candidate_graph_id": getattr(new_graph, "id", None),
+                        "result": {
+                            "passed": bool(result.passed),
+                            "violations": result.violations,
+                            "metrics": result.metrics,
+                        },
+                        "correlation_id": correlation_id,
+                        "timestamp": time.time(),
+                    }
+
+                    try:
+                        self._evolution_guard.audit_log(audit_entry)
+                    except Exception:
+                        logger.exception("EvolutionGuard.audit_log failed")
+
+                    # Persist audit entry: prefer runtime_log_store if available,
+                    # otherwise write a JSON file under storage path.
+                    try:
+                        persisted = False
+                        if self._runtime_log_store is not None:
+                            # Best-effort: try common method names
+                            if hasattr(self._runtime_log_store, "write"):
+                                try:
+                                    self._runtime_log_store.write(audit_entry)
+                                    persisted = True
+                                except Exception:
+                                    pass
+                            if not persisted and hasattr(self._runtime_log_store, "append"):
+                                try:
+                                    self._runtime_log_store.append(audit_entry)
+                                    persisted = True
+                                except Exception:
+                                    pass
+
+                        if not persisted:
+                            base = getattr(self._storage, "base_path", Path("."))
+                            audit_dir = Path(base) / "evolution_audit"
+                            audit_dir.mkdir(parents=True, exist_ok=True)
+                            fname = correlation_id or snapshot_id or str(int(time.time() * 1000))
+                            with open(audit_dir / f"{fname}.json", "w", encoding="utf-8") as fh:
+                                json.dump(audit_entry, fh, indent=2, default=str)
+                    except Exception:
+                        logger.exception("Failed to persist evolution audit entry")
+                except Exception:
+                    logger.exception("EvolutionGuard.audit_log failed")
+
+                if not approved:
+                    # Rollback to snapshot and emit REJECTED event with details
+                    try:
+                        if snapshot_id:
+                            self._evolution_guard.rollback(snapshot_id)
+                    except Exception:
+                        logger.exception("EvolutionGuard.rollback failed after rejection")
+
+                    # Publish rejection with validation details so UIs can surface reasons
+                    try:
+                        await self._event_bus.emit_graph_evolution_rejected(
+                            stream_id="agent_runtime",
+                            validation={
+                                "passed": bool(result.passed),
+                                "violations": result.violations,
+                                "metrics": result.metrics,
+                            },
+                            correlation_id=correlation_id,
+                        )
+                    except Exception:
+                        logger.exception("Failed to emit GRAPH_EVOLUTION_REJECTED event")
+
+                    return
+
+                # Approved: proceed to apply below
+            except Exception:
+                logger.exception("Unexpected error in EvolutionGuard flow; rejecting candidate")
+                try:
+                    await self._event_bus.emit_graph_evolution_rejected(
+                        stream_id="agent_runtime",
+                        validation={"passed": False, "violations": ["unexpected_error"]},
+                        correlation_id=correlation_id,
+                    )
+                except Exception:
+                    logger.exception("Failed to emit GRAPH_EVOLUTION_REJECTED")
+                return
+
+        # Replace graph
+        self.graph = new_graph
+
+        # Emit event to notify subscribers
+        try:
+            await self._event_bus.emit_graph_evolved(
+                stream_id="agent_runtime",
+                old_graph=old_ser,
+                new_graph=new_ser,
+                correlation_id=correlation_id,
+            )
+        except Exception:
+            logger.exception("Failed to emit GRAPH_EVOLVED event")
+
     # === EVENT SUBSCRIPTIONS ===
 
     def subscribe_to_events(
@@ -469,6 +660,7 @@ def create_agent_runtime(
     runtime_log_store: Any = None,
     enable_logging: bool = True,
     checkpoint_config: CheckpointConfig | None = None,
+    evolution_guard: EvolutionGuard | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -502,6 +694,17 @@ def create_agent_runtime(
         storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
         runtime_log_store = RuntimeLogStore(storage_path_obj / "runtime_logs")
 
+    # If an EvolutionGuard instance wasn't provided, attempt to instantiate
+    # the concrete implementation from core.safety if available.
+    if evolution_guard is None:
+        try:
+            from core.safety.evolution_guard import EvolutionGuard as ConcreteGuard
+
+            evolution_guard = ConcreteGuard()
+        except Exception:
+            # Leave as None — runtime will operate without guard.
+            evolution_guard = None
+
     runtime = AgentRuntime(
         graph=graph,
         goal=goal,
@@ -512,6 +715,7 @@ def create_agent_runtime(
         config=config,
         runtime_log_store=runtime_log_store,
         checkpoint_config=checkpoint_config,
+        evolution_guard=evolution_guard,
     )
 
     for spec in entry_points:

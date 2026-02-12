@@ -38,6 +38,12 @@ class GraphOverview(Vertical):
         # Per-node status strings shown next to the node in the graph display.
         # e.g. {"planner": "thinking...", "searcher": "web_search..."}
         self._node_status: dict[str, str] = {}
+        # Diff mode state
+        self._diff_mode: bool = False
+        self._last_old_graph: dict | None = None
+        self._last_new_graph: dict | None = None
+        # Selected node index for diff-mode navigation
+        self._selected_index: int | None = None
 
     def compose(self) -> ComposeResult:
         # Use RichLog for formatted output
@@ -117,6 +123,9 @@ class GraphOverview(Vertical):
         display = self.query_one("#graph-display", RichLog)
         display.clear()
 
+        if self._diff_mode and self._last_new_graph is not None:
+            return self._display_graph_diff()
+
         graph = self.runtime.graph
         display.write(f"[bold cyan]Agent Graph:[/bold cyan] {graph.id}\n")
 
@@ -131,6 +140,351 @@ class GraphOverview(Vertical):
         if self.execution_path:
             display.write("")
             display.write(f"[dim]Path:[/dim] {' → '.join(self.execution_path[-5:])}")
+
+    def _serialize_graph(self, graph_obj: object | dict) -> dict:
+        """Normalize graph object or dict into a plain dict with nodes and edges.
+
+        Accepts GraphSpec instances or already-serialized dicts.
+        """
+        if graph_obj is None:
+            return {"nodes": [], "edges": [], "id": ""}
+        if isinstance(graph_obj, dict):
+            return graph_obj
+        # Try to convert pydantic model to dict
+        try:
+            return graph_obj.model_dump()  # Pydantic v2 method
+        except Exception:
+            try:
+                return graph_obj.dict()
+            except Exception:
+                return {"nodes": [], "edges": [], "id": getattr(graph_obj, "id", "")}
+
+    def _display_graph_diff(self) -> None:
+        """Render a visual diff between last_old_graph and last_new_graph.
+
+        Color and symbol legend:
+          [green]+  new node/edge
+          [red]-    removed node/edge
+          [yellow]~ modified node
+        """
+        display = self.query_one("#graph-display", RichLog)
+        display.clear()
+
+        old = self._serialize_graph(self._last_old_graph)
+        new = self._serialize_graph(self._last_new_graph)
+
+        old_nodes = {
+            (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n))): n
+            for n in old.get("nodes", [])
+        }
+        new_nodes = {
+            (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n))): n
+            for n in new.get("nodes", [])
+        }
+
+        old_edges = set()
+        for e in old.get("edges", []):
+            src = e.get("source") if isinstance(e, dict) else getattr(e, "source", None)
+            tgt = e.get("target") if isinstance(e, dict) else getattr(e, "target", None)
+            cond = e.get("condition", "") if isinstance(e, dict) else getattr(e, "condition", "")
+            old_edges.add(f"{src}->{tgt}:{cond}")
+
+        new_edges = set()
+        for e in new.get("edges", []):
+            src = e.get("source") if isinstance(e, dict) else getattr(e, "source", None)
+            tgt = e.get("target") if isinstance(e, dict) else getattr(e, "target", None)
+            cond = e.get("condition", "") if isinstance(e, dict) else getattr(e, "condition", "")
+            new_edges.add(f"{src}->{tgt}:{cond}")
+
+        added_nodes = set(new_nodes.keys()) - set(old_nodes.keys())
+        removed_nodes = set(old_nodes.keys()) - set(new_nodes.keys())
+        modified_nodes = set()
+        for nid in set(new_nodes.keys()).intersection(old_nodes.keys()):
+            # Simple deep-compare of node dicts
+            old_n = old_nodes[nid]
+            new_n = new_nodes[nid]
+            try:
+                if isinstance(old_n, dict) and isinstance(new_n, dict):
+                    if old_n != new_n:
+                        modified_nodes.add(nid)
+                else:
+                    if str(old_n) != str(new_n):
+                        modified_nodes.add(nid)
+            except Exception:
+                continue
+
+        display.write(
+            f"[bold cyan]Graph Diff:[/bold cyan] "
+            f"{new.get('id') or getattr(self.runtime.graph, 'id', '')}\n"
+        )
+
+        # Render each node in new graph order (fall back to runtime graph)
+        ordered = []
+        if new.get("nodes"):
+            ordered = [
+                (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n)))
+                for n in new.get("nodes")
+            ]
+        else:
+            ordered = self._topo_order()
+
+        # Render nodes; keep an index for selection navigation
+        for idx, node_id in enumerate(ordered):
+            if node_id in added_nodes:
+                display.write(f"  [green]+ {node_id}[/green]")
+            elif node_id in modified_nodes:
+                sel_marker = ""
+                if self._selected_index is not None and idx == self._selected_index:
+                    sel_marker = " [bold]<selected>[/bold]"
+                display.write(f"  [yellow]~ {node_id}[/yellow]{sel_marker}")
+                # If this modified node is selected, show per-field diffs
+                if self._selected_index is not None and idx == self._selected_index:
+                    old_n = old_nodes.get(node_id) or {}
+                    new_n = new_nodes.get(node_id) or {}
+                    for line in self._node_property_diffs(old_n, new_n):
+                        display.write(f"    {line}")
+            else:
+                display.write(self._render_node_line(node_id))
+
+            # Show outgoing edges with markers for added/removed
+            # Use edges from new graph when available
+            edges = []
+            for e in new.get("edges", []):
+                src = e.get("source") if isinstance(e, dict) else getattr(e, "source", None)
+                if src == node_id:
+                    tgt = e.get("target") if isinstance(e, dict) else getattr(e, "target", None)
+                    cond = (
+                        e.get("condition", "")
+                        if isinstance(e, dict)
+                        else getattr(e, "condition", "")
+                    )
+                    key = f"{src}->{tgt}:{cond}"
+                    if key in new_edges - old_edges:
+                        connector = f"[green]+──▶ {tgt}[/green]"
+                    else:
+                        connector = f"──▶ {tgt}"
+                    edges.append(f"  {connector}")
+
+            # Also show removed edges originating from this node
+            for e in old.get("edges", []):
+                src = e.get("source") if isinstance(e, dict) else getattr(e, "source", None)
+                if src == node_id:
+                    tgt = e.get("target") if isinstance(e, dict) else getattr(e, "target", None)
+                    cond = (
+                        e.get("condition", "")
+                        if isinstance(e, dict)
+                        else getattr(e, "condition", "")
+                    )
+                    key = f"{src}->{tgt}:{cond}"
+                    if key in old_edges - new_edges:
+                        edges.append(f"  [red]-──▶ {tgt}[/red]")
+
+            for line in edges:
+                display.write(line)
+
+        # Footer with summary
+        display.write("")
+        summary = []
+        if added_nodes:
+            summary.append(f"[green]+{len(added_nodes)} new[/green]")
+        if removed_nodes:
+            summary.append(f"[red]-{len(removed_nodes)} removed[/red]")
+        if modified_nodes:
+            summary.append(f"[yellow]~{len(modified_nodes)} modified[/yellow]")
+        if summary:
+            display.write("Summary: " + " • ".join(summary))
+
+    def _node_property_diffs(self, old_n: dict, new_n: dict) -> list[str]:
+        """Return a list of formatted property-diff strings for a modified node.
+
+        Format: key: [red]old[/red] -> [green]new[/green]
+        """
+        lines: list[str] = []
+        # Normalize to dicts
+        if not isinstance(old_n, dict):
+            try:
+                old_n = old_n.model_dump()
+            except Exception:
+                old_n = {}
+        if not isinstance(new_n, dict):
+            try:
+                new_n = new_n.model_dump()
+            except Exception:
+                new_n = {}
+
+        # Keys to consider (union)
+        keys = sorted(set(list(old_n.keys()) + list(new_n.keys())))
+        for k in keys:
+            ov = old_n.get(k)
+            nv = new_n.get(k)
+            if ov == nv:
+                continue
+            # Shorten large values
+            def short(x):
+                s = str(x)
+                if len(s) > 60:
+                    return s[:57] + "..."
+                return s
+
+            lines.append(f"[dim]{k}:[/dim] [red]{short(ov)}[/red] -> [green]{short(nv)}[/green]")
+        if not lines:
+            lines.append("[dim]No property-level differences found[/dim]")
+        return lines
+
+    def on_key(self, event) -> None:
+        """Handle up/down keys for diff-mode selection navigation."""
+        try:
+            if not self._diff_mode:
+                return
+            # Recompute modified nodes and only navigate among them
+            new = self._serialize_graph(self._last_new_graph or {})
+            old = self._serialize_graph(self._last_old_graph or {})
+
+            ordered = [
+                (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n)))
+                for n in new.get("nodes", [])
+            ]
+
+            # compute modified set (same logic as in _display_graph_diff)
+            old_nodes = {
+                (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n))): n
+                for n in old.get("nodes", [])
+            }
+            new_nodes = {
+                (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n))): n
+                for n in new.get("nodes", [])
+            }
+
+            modified = []
+            for nid in [n for n in ordered if n in old_nodes or n in new_nodes]:
+                if nid in old_nodes and nid in new_nodes:
+                    try:
+                        if old_nodes[nid] != new_nodes[nid]:
+                            modified.append(nid)
+                    except Exception:
+                        if str(old_nodes[nid]) != str(new_nodes[nid]):
+                            modified.append(nid)
+                elif nid in old_nodes or nid in new_nodes:
+                    # added or removed counts as modified for navigation
+                    modified.append(nid)
+
+            if not modified:
+                return
+
+            # initialize selection to first modified if none
+            if self._selected_index is None or self._selected_index >= len(modified):
+                # store selected as index in `modified` list
+                self._selected_index = 0
+
+            if event.key == "up":
+                self._selected_index = max(0, self._selected_index - 1)
+                # map selected_index back to ordered index by finding that node's position
+                self._display_graph_diff()
+            elif event.key == "down":
+                self._selected_index = min(len(modified) - 1, self._selected_index + 1)
+                self._display_graph_diff()
+            elif event.key == "enter":
+                # Show full diff for currently selected modified node
+                try:
+                    # Map to node id
+                    node_id = modified[self._selected_index]
+                except Exception:
+                    node_id = modified[0]
+                self.show_full_diff(node_id)
+        except Exception:
+            pass
+
+    def show_full_diff(self, node_id: str | None = None) -> None:
+        """Show a focused, detailed diff for a node.
+
+        If node_id is None, use the selected node. This writes a detailed
+        block to the widget's display containing the old/new JSON and
+        the per-field diffs produced by `_node_property_diffs`.
+        """
+        display = self.query_one("#graph-display", RichLog)
+        try:
+            old = self._serialize_graph(self._last_old_graph or {})
+            new = self._serialize_graph(self._last_new_graph or {})
+
+            old_nodes = {
+                (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n))): n
+                for n in old.get("nodes", [])
+            }
+            new_nodes = {
+                (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n))): n
+                for n in new.get("nodes", [])
+            }
+
+            # Determine node id
+            nid = node_id
+            if nid is None:
+                # pick selected modified node if possible
+                if self._selected_index is not None:
+                    ordered = [
+                        (n["id"] if isinstance(n, dict) else getattr(n, "id", str(n)))
+                        for n in new.get("nodes", [])
+                    ]
+                    # Recompute modified list
+                    modified = [
+                        x for x in ordered
+                        if (x in old_nodes and x in new_nodes and old_nodes[x] != new_nodes[x])
+                        or (x in old_nodes and x not in new_nodes)
+                        or (x not in old_nodes and x in new_nodes)
+                    ]
+                    if modified:
+                        nid = modified[self._selected_index % len(modified)]
+            if nid is None:
+                display.write("[dim]No node selected for full diff[/dim]")
+                return
+
+            old_node = old_nodes.get(nid)
+            new_node = new_nodes.get(nid)
+
+            import json
+
+            display.clear()
+            display.write(f"[bold cyan]Full diff for node:[/bold cyan] {nid}\n")
+            display.write("[bold]Per-field differences:[/bold]\n")
+            for line in self._node_property_diffs(old_node or {}, new_node or {}):
+                display.write(line)
+
+            display.write("")
+            display.write("[bold]Old node (raw):[/bold]\n")
+            try:
+                display.write(f"[dim]{json.dumps(old_node or {}, indent=2)}[/dim]")
+            except Exception:
+                display.write(f"[dim]{str(old_node)}[/dim]")
+
+            display.write("")
+            display.write("[bold]New node (raw):[/bold]\n")
+            try:
+                display.write(f"[dim]{json.dumps(new_node or {}, indent=2)}[/dim]")
+            except Exception:
+                display.write(f"[dim]{str(new_node)}[/dim]")
+        except Exception:
+            pass
+
+    def handle_graph_evolved(self, old_graph: dict | None, new_graph: dict | None) -> None:
+        """Called when the runtime emits a GRAPH_EVOLVED event.
+
+        Store snapshots and enter diff mode so the user can inspect changes.
+        """
+        self._last_old_graph = old_graph or {}
+        self._last_new_graph = new_graph or {}
+        # Enter diff mode automatically
+        self._diff_mode = True
+        self._display_graph_diff()
+
+    def toggle_diff_mode(self) -> None:
+        """Toggle between live view and diff view."""
+        self._diff_mode = not self._diff_mode
+        if self._diff_mode:
+            # If diff requested but we don't have snapshots, fall back to showing current graph
+            if self._last_new_graph is None:
+                self._last_new_graph = getattr(self.runtime, "graph", None)
+            self._display_graph_diff()
+        else:
+            self._display_graph()
 
     def update_active_node(self, node_id: str) -> None:
         """Update the currently active node."""

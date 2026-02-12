@@ -209,9 +209,11 @@ class AdenTUI(App):
         Binding("super+c", "ctrl_c", "Copy", show=False, priority=True),
         Binding("ctrl+s", "screenshot", "Screenshot (SVG)", show=True, priority=True),
         Binding("ctrl+z", "pause_execution", "Pause", show=True, priority=True),
+    Binding("d", "toggle_diff", "Toggle Graph Diff View", show=True),
         Binding("ctrl+r", "show_sessions", "Sessions", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
+        Binding("enter", "show_full_diff", "Show Node Diff", show=True),
     ]
 
     def __init__(
@@ -350,6 +352,8 @@ class AdenTUI(App):
         EventType.CONSTRAINT_VIOLATION,
         EventType.STATE_CHANGED,
         EventType.NODE_INPUT_BLOCKED,
+        EventType.GRAPH_EVOLVED,
+        EventType.GRAPH_EVOLUTION_REJECTED,
     ]
 
     _LOG_PANE_EVENTS = frozenset(_EVENT_TYPES) - {
@@ -437,6 +441,35 @@ class AdenTUI(App):
                     event.data.get("tool_name", "unknown"),
                     started=True,
                 )
+            elif et == EventType.GRAPH_EVOLVED:
+                # Pass snapshots (may be dicts or model instances) to the widget
+                self.graph_view.handle_graph_evolved(
+                    event.data.get("old_graph"), event.data.get("new_graph")
+                )
+            elif et == EventType.GRAPH_EVOLUTION_REJECTED:
+                # Surface rejection to the user and log details for inspection
+                validation = event.data.get("validation") or {}
+                # Build a short summary
+                violations = validation.get("violations") or validation.get("error_message") or []
+                if isinstance(violations, list):
+                    short = ", ".join(str(v) for v in violations[:3])
+                else:
+                    short = str(violations)
+
+                try:
+                    self.notify(f"Graph evolution rejected: {short}", severity="error", timeout=6)
+                except Exception:
+                    pass
+
+                # Write full validation payload to log pane for debugging
+                try:
+                    import json
+
+                    pretty = json.dumps(validation, indent=2)
+                    self.log_pane.write_log(f"[red]Graph evolution rejected:[/red] {pretty}")
+                except Exception:
+                    # Fallback to minimal info
+                    self.log_pane.write_log(f"[red]Graph evolution rejected[/red]: {short}")
             elif et == EventType.TOOL_CALL_COMPLETED:
                 self.graph_view.handle_tool_call(
                     event.node_id or "",
@@ -636,5 +669,24 @@ class AdenTUI(App):
         try:
             if hasattr(self, "queue_handler"):
                 logging.getLogger().removeHandler(self.queue_handler)
+        except Exception:
+            pass
+
+    def action_toggle_diff(self) -> None:
+        """Toggle the graph diff view (bound to 'd')."""
+        try:
+            self.graph_view.toggle_diff_mode()
+            if self.graph_view._diff_mode:
+                self.notify("Graph Diff view enabled", severity="information", timeout=2)
+            else:
+                self.notify("Graph Live view enabled", severity="information", timeout=2)
+        except Exception:
+            pass
+
+    def action_show_full_diff(self) -> None:
+        """Show a detailed per-node diff for the currently selected node (Enter)."""
+        try:
+            # Forward to widget
+            self.graph_view.show_full_diff()
         except Exception:
             pass

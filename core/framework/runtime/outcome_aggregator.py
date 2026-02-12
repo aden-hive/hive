@@ -308,6 +308,47 @@ class OutcomeAggregator:
                         criteria_status=result["criteria_status"],
                     )
 
+            # If the aggregator recommends adjustment, request a graph evolution
+            # from any Builder/CodingAgent listening on the event bus. Provide
+            # evaluation context and a small recent decisions summary to help
+            # the Builder produce a candidate evolved graph.
+            if self._event_bus and result.get("recommendation") == "adjust":
+                stream_ids = {d.stream_id for d in self._decisions}
+                stream_id = list(stream_ids)[0] if stream_ids else "agent_runtime"
+
+                # Build a lightweight decisions summary (last 10)
+                recent = [
+                    {
+                        "stream_id": d.stream_id,
+                        "execution_id": d.execution_id,
+                        "decision_id": d.decision.id,
+                        "intent": d.decision.intent,
+                        "outcome": (d.outcome.success if d.outcome else None),
+                    }
+                    for d in self._decisions[-10:]
+                ]
+
+                context = {
+                    "evaluation": result,
+                    "recent_decisions": recent,
+                }
+
+                # Emit asynchronously so evaluation returns promptly. Attach a
+                # correlation id so downstream handlers can correlate logs.
+                try:
+                    import uuid
+
+                    correlation_id = str(uuid.uuid4())
+                    asyncio.create_task(
+                        self._event_bus.emit_graph_evolution_request(
+                            stream_id=stream_id,
+                            context=context,
+                            correlation_id=correlation_id,
+                        )
+                    )
+                except Exception:
+                    logger.exception("Failed to emit graph evolution request")
+
             return result
 
     async def _evaluate_criterion(self, criterion: Any) -> CriterionStatus:
