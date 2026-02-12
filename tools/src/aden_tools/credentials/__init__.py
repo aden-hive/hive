@@ -57,6 +57,7 @@ from .email import EMAIL_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
+from .salesforce import SALESFORCE_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .serpapi import SERPAPI_CREDENTIALS
@@ -77,6 +78,7 @@ CREDENTIAL_SPECS = {
     **APOLLO_CREDENTIALS,
     **GITHUB_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
+    **SALESFORCE_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
 }
