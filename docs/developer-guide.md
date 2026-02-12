@@ -219,7 +219,6 @@ hive/                                    # Repository root
 ├── quickstart.sh                        # Interactive setup wizard
 ├── README.md                            # Project overview
 ├── CONTRIBUTING.md                      # Contribution guidelines
-├── CHANGELOG.md                         # Version history
 ├── LICENSE                              # Apache 2.0 License
 ├── docs/CODE_OF_CONDUCT.md              # Community guidelines
 └── SECURITY.md                          # Security policy
