@@ -157,7 +157,7 @@ class TokenLifecycleManager:
             New OAuth2Token
         """
         # Run in executor to avoid blocking
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         token = await loop.run_in_executor(
             None, lambda: self.provider.client_credentials_grant(scopes=scopes)
         )
@@ -287,7 +287,7 @@ class TokenLifecycleManager:
 
     async def _async_refresh_token(self, credential: CredentialObject) -> TokenRefreshResult:
         """Async wrapper for token refresh."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self._sync_refresh_token(credential))
 
     def _sync_refresh_token(self, credential: CredentialObject) -> TokenRefreshResult:

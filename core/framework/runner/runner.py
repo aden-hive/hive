@@ -914,7 +914,7 @@ class AgentRunner:
 
                 node_id = event.node_id
                 try:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     user_input = await loop.run_in_executor(None, input, "\n>>> ")
                 except EOFError:
                     user_input = ""
