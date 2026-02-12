@@ -107,6 +107,25 @@ This installs agent-related Claude Code skills:
 - `/hive-patterns` - Best practices and design patterns
 - `/hive-test` - Test and validate agents
 
+### Cursor IDE Support
+
+Skills are also available in Cursor. To enable:
+
+1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
+2. Run `MCP: Enable` to enable MCP servers
+3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
+4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
+
+
+### Opencode Support
+To enable Opencode integration:
+
+1. Create/Ensure `.opencode/` directory exists
+2. Configure MCP servers in `.opencode/mcp.json`
+3. Restart Opencode to load the MCP servers
+4. Switch to the Hive agent
+* **Tools:** Accesses `agent-builder` and standard `tools` via standard MCP protocols over stdio.
+
 ### Verify Setup
 
 ```bash
@@ -154,10 +173,12 @@ hive/                                    # Repository root
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
 │   │   ├── mcp/                         # MCP server integration
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
+|   |   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
 │   │   ├── runtime/                     # Runtime environment
 │   │   ├── schemas/                     # Data schemas
 │   │   ├── storage/                     # File-based persistence
 │   │   ├── testing/                     # Testing utilities
+│   │   ├── tui/                         # Terminal UI dashboard
 │   │   └── __init__.py
 │   ├── pyproject.toml                   # Package metadata and dependencies
 │   ├── README.md                        # Framework documentation
@@ -180,6 +201,9 @@ hive/                                    # Repository root
 ├── exports/                             # AGENT PACKAGES (user-created, gitignored)
 │   └── your_agent_name/                 # Created via /hive-create
 │
+├── examples/                            # Example agents
+│   └── templates/                       # Pre-built template agents
+│
 ├── docs/                                # Documentation
 │   ├── getting-started.md               # Quick start guide
 │   ├── configuration.md                 # Configuration reference
@@ -191,12 +215,13 @@ hive/                                    # Repository root
 ├── scripts/                             # Utility scripts
 │   └── auto-close-duplicates.ts         # GitHub duplicate issue closer
 │
+├── .agent/                        # Antigravity IDE: mcp_config.json + skills (symlinks)
 ├── quickstart.sh                        # Interactive setup wizard
 ├── README.md                            # Project overview
 ├── CONTRIBUTING.md                      # Contribution guidelines
 ├── CHANGELOG.md                         # Version history
 ├── LICENSE                              # Apache 2.0 License
-├── CODE_OF_CONDUCT.md                   # Community guidelines
+├── docs/CODE_OF_CONDUCT.md              # Community guidelines
 └── SECURITY.md                          # Security policy
 ```
 
@@ -287,21 +312,18 @@ If you prefer to build agents manually:
 ### Running Agents
 
 ```bash
-# Validate agent structure
-PYTHONPATH=exports uv run python -m agent_name validate
+# Browse and run agents interactively (Recommended)
+hive tui
 
-# Show agent information
-PYTHONPATH=exports uv run python -m agent_name info
+# Run a specific agent
+hive run exports/my_agent --input '{"ticket_content": "My login is broken", "customer_id": "CUST-123"}'
 
-# Run agent with input
-PYTHONPATH=exports uv run python -m agent_name run --input '{
-  "ticket_content": "My login is broken",
-  "customer_id": "CUST-123"
-}'
+# Run with TUI dashboard
+hive run exports/my_agent --tui
 
-# Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
 ```
+
+> **Using Python directly:** `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
 
 ---
 
@@ -615,16 +637,10 @@ echo 'ANTHROPIC_API_KEY=your-key-here' >> .env
 
 ### Debugging Agent Execution
 
-```python
-# Add debug logging to your agent
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
+```bash
 # Run with verbose output
-PYTHONPATH=exports uv run python -m agent_name run --input '{...}' --verbose
+hive run exports/my_agent --verbose --input '{"task": "..."}'
 
-# Use mock mode to test without LLM calls
-PYTHONPATH=exports uv run python -m agent_name run --mock --input '{...}'
 ```
 
 ---
@@ -641,7 +657,6 @@ lsof -i :4000
 # Kill process
 kill -9 <PID>
 
-# Or change ports in config.yaml and regenerate
 ```
 
 ### Environment Variables Not Loading

@@ -18,6 +18,8 @@ This will:
 - Check Python version (requires 3.11+)
 - Install the core framework package (`framework`)
 - Install the tools package (`aden_tools`)
+- Initialize encrypted credential store (`~/.hive/credentials`)
+- Configure default LLM provider
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 
@@ -63,28 +65,26 @@ source .venv/bin/activate
 
 If you prefer to set up manually or the script fails:
 
-### 1. Install Core Framework
+### 1. Sync Workspace Dependencies
 
 ```bash
-cd core
-uv pip install -e .
+# From repository root - this creates a single .venv at the root
+uv sync
 ```
 
-### 2. Install Tools Package
+> **Note:** The `uv sync` command uses the workspace configuration in `pyproject.toml` to install both `core` (framework) and `tools` (aden_tools) packages together. This is the recommended approach over individual `pip install -e` commands which may fail due to circular dependencies.
+
+### 2. Activate the Virtual Environment
 
 ```bash
-cd tools
-uv pip install -e .
+# Linux/macOS
+source .venv/bin/activate
+
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
 ```
 
-### 3. Upgrade OpenAI Package
-
-```bash
-# litellm requires openai >= 1.0.0
-uv pip install --upgrade "openai>=1.0.0"
-```
-
-### 4. Verify Installation
+### 3. Verify Installation
 
 ```bash
 uv run python -c "import framework; print('✓ framework OK')"
@@ -110,23 +110,38 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 - Internet connection (for LLM API calls)
 - For Windows users: WSL 2 is recommended for full compatibility.
 
-### API Keys (Optional)
+### API Keys
 
-For running agents with real LLMs:
-
-```bash
-export ANTHROPIC_API_KEY="your-key-here"
-```
-
-Windows (PowerShell):
-
-```powershell
-$env:ANTHROPIC_API_KEY="your-key-here"
-```
+We recommend using quickstart.sh for LLM API credential setup and /hive-credentials for the tools credentials
 
 ## Running Agents
 
-All agent commands must be run from the project root with `PYTHONPATH` set:
+The `hive` CLI is the primary interface for running agents:
+
+```bash
+# Browse and run agents interactively (Recommended)
+hive tui
+
+# Run a specific agent
+hive run exports/my_agent --input '{"task": "Your input here"}'
+
+# Run with TUI dashboard
+hive run exports/my_agent --tui
+```
+
+### CLI Command Reference
+
+| Command                | Description                                                             |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `hive tui`             | Browse agents and launch TUI dashboard                                  |
+| `hive run <path>`      | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
+| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
+| `hive info <path>`     | Show agent details                                                      |
+| `hive validate <path>` | Validate agent structure                                                |
+| `hive list [dir]`      | List available agents                                                   |
+| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
+
+### Using Python directly (alternative)
 
 ```bash
 # From /hive/ directory
@@ -138,24 +153,6 @@ Windows (PowerShell):
 ```powershell
 $env:PYTHONPATH="core;exports"
 python -m agent_name COMMAND
-```
-
-### Example: Support Ticket Agent
-
-```bash
-# Validate agent structure
-PYTHONPATH=exports uv run python -m your_agent_name validate
-
-# Show agent information
-PYTHONPATH=exports uv run python -m your_agent_name info
-
-# Run agent with input
-PYTHONPATH=exports uv run python -m your_agent_name run --input '{
-  "task": "Your input here"
-}'
-
-# Run in mock mode (no LLM calls)
-PYTHONPATH=exports uv run python -m your_agent_name run --mock --input '{...}'
 ```
 
 ## Building New Agents and Run Flow
@@ -175,6 +172,15 @@ This verifies agent-related Claude Code skills are available:
 - `/hive-concepts` - Fundamental concepts
 - `/hive-patterns` - Best practices
 - `/hive-test` - Test and validate agents
+
+### Cursor IDE Support
+
+Skills are also available in Cursor. To enable:
+
+1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
+2. Run `MCP: Enable` to enable MCP servers
+3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
+4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
 ### 2. Build an Agent
 
@@ -273,18 +279,20 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ### "ModuleNotFoundError: No module named 'framework'"
 
-**Solution:** Install the core package:
+**Solution:** Sync the workspace dependencies:
 
 ```bash
-cd core && uv pip install -e .
+# From repository root
+uv sync
 ```
 
 ### "ModuleNotFoundError: No module named 'aden_tools'"
 
-**Solution:** Install the tools package:
+**Solution:** Sync the workspace dependencies:
 
 ```bash
-cd tools && uv pip install -e .
+# From repository root
+uv sync
 ```
 
 Or run the setup script:
@@ -342,35 +350,47 @@ The Hive framework consists of three Python packages:
 
 ```
 hive/
+├── .venv/                   # Single workspace venv (created by uv sync)
 ├── core/                    # Core framework (runtime, graph executor, LLM providers)
 │   ├── framework/
-│   ├── .venv/              # Created by quickstart.sh
 │   └── pyproject.toml
 │
 ├── tools/                   # Tools and MCP servers
 │   ├── src/
 │   │   └── aden_tools/     # Actual package location
-│   ├── .venv/              # Created by quickstart.sh
 │   └── pyproject.toml
 │
-└── exports/                 # Agent packages (user-created, gitignored)
-    └── your_agent_name/     # Created via /hive-create
+├── exports/                 # Agent packages (user-created, gitignored)
+│   └── your_agent_name/     # Created via /hive-create
+│
+└── examples/
+    └── templates/           # Pre-built template agents
 ```
 
-## Separate Virtual Environments
+## Virtual Environment Setup
 
-The project uses **separate virtual environments** for `core` and `tools` packages to:
+Hive uses **uv workspaces** to manage dependencies. When you run `uv sync` from the repository root, a **single `.venv`** is created at the root containing both packages.
 
-- Isolate dependencies and avoid conflicts
-- Allow independent development and testing of each package
-- Enable MCP servers to run with their specific dependencies
+### Benefits of Workspace Mode
+
+- **Single environment** - No need to switch between multiple venvs
+- **Unified dependencies** - Consistent package versions across core and tools
+- **Simpler development** - One activation, access to everything
 
 ### How It Works
 
-When you run `./quickstart.sh` or `uv sync` in each directory:
+When you run `./quickstart.sh` or `uv sync`:
 
-1. **core/.venv/** - Contains the `framework` package and its dependencies (anthropic, litellm, mcp, etc.)
-2. **tools/.venv/** - Contains the `aden_tools` package and its dependencies (beautifulsoup4, pandas, etc.)
+1. **/.venv/** - Single root virtual environment is created
+2. Both `framework` (from core/) and `aden_tools` (from tools/) are installed
+3. All dependencies (anthropic, litellm, beautifulsoup4, pandas, etc.) are resolved together
+
+If you need to refresh the environment:
+
+```bash
+# From repository root
+uv sync
+```
 
 ### Cross-Package Imports
 
@@ -380,38 +400,34 @@ The `core` and `tools` packages are **intentionally independent**:
 - **Communication via MCP**: Tools are exposed to agents through MCP servers, not direct Python imports
 - **Runtime integration**: The agent runner loads tools via the MCP protocol at runtime
 
-If you need to use both packages in a single script (e.g., for testing), you have two options:
+If you need to use both packages in a single script (e.g., for testing), prefer `uv run` with `PYTHONPATH`:
 
 ```bash
-# Option 1: Install both in a shared environment
-uv venv
-source .venv/bin/activate
-uv pip install -e core/ -e tools/
-
-# Option 2: Use PYTHONPATH (for quick testing)
 PYTHONPATH=tools/src uv run python your_script.py
 ```
 
 ### MCP Server Configuration
 
-The `.mcp.json` at project root configures MCP servers to use their respective virtual environments:
+The `.mcp.json` at project root configures MCP servers to run through `uv run` in each package directory:
 
 ```json
 {
   "mcpServers": {
     "agent-builder": {
-      "command": "core/.venv/bin/python",
-      "args": ["-m", "framework.mcp.agent_builder_server"]
+      "command": "uv",
+      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
+      "cwd": "core"
     },
     "tools": {
-      "command": "tools/.venv/bin/python",
-      "args": ["-m", "aden_tools.mcp_server", "--stdio"]
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools"
     }
   }
 }
 ```
 
-This ensures each MCP server runs with its correct dependencies.
+This ensures each MCP server runs with the correct project environment managed by `uv`.
 
 ### Why PYTHONPATH is Required
 
@@ -456,7 +472,11 @@ claude> /hive-test
 ### 5. Run Agent
 
 ```bash
-PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
+# Interactive dashboard
+hive tui
+
+# Or run directly
+hive run exports/your_agent_name --input '{"task": "..."}'
 ```
 
 ## IDE Setup
@@ -500,6 +520,18 @@ export ADEN_CREDENTIALS_PATH="/custom/path"
 
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
+```
+
+## Opencode Setup
+
+[Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
+
+### Automatic Setup
+
+Run the quickstart script in the root directory:
+
+```bash
+./quickstart.sh
 ```
 
 ## Additional Resources

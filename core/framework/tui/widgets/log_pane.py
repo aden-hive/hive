@@ -7,9 +7,9 @@ from datetime import datetime
 
 from textual.app import ComposeResult
 from textual.containers import Container
-from textual.widgets import RichLog
 
 from framework.runtime.event_bus import AgentEvent, EventType
+from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichLog
 
 
 class LogPane(Container):

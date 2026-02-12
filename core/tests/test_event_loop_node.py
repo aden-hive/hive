@@ -447,14 +447,9 @@ class TestEventBusLifecycle:
         ctx = build_ctx(runtime, spec, memory, llm)
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
 
-        # client_facing + text-only blocks for user input; use shutdown to unblock
-        async def auto_shutdown():
-            await asyncio.sleep(0.05)
-            node.signal_shutdown()
-
-        task = asyncio.create_task(auto_shutdown())
+        # Text-only on client_facing no longer blocks (no ask_user), so
+        # the node completes without needing shutdown.
         await node.execute(ctx)
-        await task
 
         assert EventType.CLIENT_OUTPUT_DELTA in received_types
         assert EventType.LLM_TEXT_DELTA not in received_types
@@ -480,11 +475,38 @@ class TestClientFacingBlocking:
         )
 
     @pytest.mark.asyncio
-    async def test_client_facing_blocks_on_text(self, runtime, memory, client_spec):
-        """client_facing + text-only response blocks until inject_event."""
+    async def test_text_only_no_blocking(self, runtime, memory, client_spec):
+        """client_facing + text-only (no ask_user) should NOT block."""
         llm = MockStreamingLLM(
             scenarios=[
-                text_scenario("Hello!"),
+                text_scenario("Hello! Here is your status update."),
+            ]
+        )
+        bus = EventBus()
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+        ctx = build_ctx(runtime, client_spec, memory, llm)
+
+        # Should complete without blocking — no ask_user called, no output_keys required
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        assert llm._call_index >= 1
+
+    @pytest.mark.asyncio
+    async def test_ask_user_triggers_blocking(self, runtime, memory, client_spec):
+        """client_facing + ask_user() blocks until inject_event."""
+        # Give the node an output key so the judge doesn't auto-accept
+        # after the user responds — it needs set_output first.
+        client_spec.output_keys = ["answer"]
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 1: LLM greets user and calls ask_user
+                tool_call_scenario(
+                    "ask_user", {"question": "What do you need?"}, tool_use_id="ask_1"
+                ),
+                # Turn 2: after user responds, LLM processes and sets output
+                tool_call_scenario("set_output", {"key": "answer", "value": "help provided"}),
+                # Turn 3: text finish (implicit judge accepts — output key set)
                 text_scenario("Got your message."),
             ]
         )
@@ -495,21 +517,19 @@ class TestClientFacingBlocking:
         async def user_responds():
             await asyncio.sleep(0.05)
             await node.inject_event("I need help")
-            await asyncio.sleep(0.05)
-            node.signal_shutdown()
 
         user_task = asyncio.create_task(user_responds())
         result = await node.execute(ctx)
         await user_task
 
         assert result.success is True
-        # LLM called once; after inject_event, implicit judge ACCEPTs
-        # (no required output_keys) before a second LLM turn occurs.
-        assert llm._call_index >= 1
+        # LLM called at least twice: once for ask_user turn, once after user responded
+        assert llm._call_index >= 2
+        assert result.output["answer"] == "help provided"
 
     @pytest.mark.asyncio
     async def test_client_facing_does_not_block_on_tools(self, runtime, memory):
-        """client_facing + tool calls should NOT block — judge evaluates normally."""
+        """client_facing + tool calls (no ask_user) should NOT block."""
         spec = NodeSpec(
             id="chat",
             name="Chat",
@@ -518,10 +538,9 @@ class TestClientFacingBlocking:
             output_keys=["result"],
             client_facing=True,
         )
-        # Scenario 1: LLM calls set_output (tool call present → no blocking, judge RETRYs)
-        # Scenario 2: LLM produces text (implicit judge sees output key set → ACCEPT)
-        # But scenario 2 is text-only on client_facing → would block.
-        # So we need shutdown to handle that case.
+        # Scenario 1: LLM calls set_output
+        # Scenario 2: LLM produces text — implicit judge ACCEPTs (output key set)
+        # No ask_user called, so no blocking occurs.
         llm = MockStreamingLLM(
             scenarios=[
                 tool_call_scenario("set_output", {"key": "result", "value": "done"}),
@@ -531,18 +550,8 @@ class TestClientFacingBlocking:
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
         ctx = build_ctx(runtime, spec, memory, llm)
 
-        # After set_output, implicit judge RETRYs (tool calls present).
-        # Next turn: text-only on client_facing → blocks.
-        # But implicit judge should ACCEPT first (output key is set, no tools).
-        # Actually, client_facing check happens BEFORE judge, so it blocks.
-        # Use shutdown as safety net.
-        async def auto_shutdown():
-            await asyncio.sleep(0.1)
-            node.signal_shutdown()
-
-        task = asyncio.create_task(auto_shutdown())
+        # Should complete without blocking — no ask_user called
         result = await node.execute(ctx)
-        await task
 
         assert result.success is True
         assert result.output["result"] == "done"
@@ -568,7 +577,11 @@ class TestClientFacingBlocking:
     @pytest.mark.asyncio
     async def test_signal_shutdown_unblocks(self, runtime, memory, client_spec):
         """signal_shutdown should unblock a waiting client_facing node."""
-        llm = MockStreamingLLM(scenarios=[text_scenario("Waiting...")])
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("ask_user", {"question": "Waiting..."}, tool_use_id="ask_1"),
+            ]
+        )
         bus = EventBus()
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=10))
         ctx = build_ctx(runtime, client_spec, memory, llm)
@@ -585,8 +598,12 @@ class TestClientFacingBlocking:
 
     @pytest.mark.asyncio
     async def test_client_input_requested_event_published(self, runtime, memory, client_spec):
-        """CLIENT_INPUT_REQUESTED should be published when blocking."""
-        llm = MockStreamingLLM(scenarios=[text_scenario("Hello!")])
+        """CLIENT_INPUT_REQUESTED should be published when ask_user blocks."""
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("ask_user", {"question": "Hello!"}, tool_use_id="ask_1"),
+            ]
+        )
         bus = EventBus()
         received = []
 
@@ -611,6 +628,77 @@ class TestClientFacingBlocking:
 
         assert len(received) >= 1
         assert received[0].type == EventType.CLIENT_INPUT_REQUESTED
+
+    @pytest.mark.asyncio
+    async def test_ask_user_with_real_tools(self, runtime, memory):
+        """ask_user alongside real tool calls still triggers blocking."""
+        spec = NodeSpec(
+            id="chat",
+            name="Chat",
+            description="chat node",
+            node_type="event_loop",
+            output_keys=[],
+            client_facing=True,
+        )
+        # LLM calls a real tool AND ask_user in the same turn
+        llm = MockStreamingLLM(
+            scenarios=[
+                [
+                    ToolCallEvent(
+                        tool_use_id="tool_1", tool_name="search", tool_input={"q": "test"}
+                    ),
+                    ToolCallEvent(tool_use_id="ask_1", tool_name="ask_user", tool_input={}),
+                    FinishEvent(
+                        stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"
+                    ),
+                ],
+                text_scenario("Done"),
+            ]
+        )
+
+        def my_executor(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(tool_use_id=tool_use.id, content="result", is_error=False)
+
+        node = EventLoopNode(
+            tool_executor=my_executor,
+            config=LoopConfig(max_iterations=5),
+        )
+        ctx = build_ctx(
+            runtime, spec, memory, llm, tools=[Tool(name="search", description="", parameters={})]
+        )
+
+        async def unblock():
+            await asyncio.sleep(0.05)
+            await node.inject_event("user input")
+
+        task = asyncio.create_task(unblock())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert llm._call_index >= 2
+
+    @pytest.mark.asyncio
+    async def test_ask_user_not_available_non_client_facing(self, runtime, memory):
+        """ask_user tool should NOT be injected for non-client-facing nodes."""
+        spec = NodeSpec(
+            id="internal",
+            name="Internal",
+            description="internal node",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("thinking...")])
+        node = EventLoopNode(config=LoopConfig(max_iterations=2))
+        ctx = build_ctx(runtime, spec, memory, llm)
+
+        await node.execute(ctx)
+
+        # Verify ask_user was NOT in the tools passed to the LLM
+        assert llm._call_index >= 1
+        for call in llm.stream_calls:
+            tool_names = [t.name for t in (call["tools"] or [])]
+            assert "ask_user" not in tool_names
 
 
 # ===========================================================================

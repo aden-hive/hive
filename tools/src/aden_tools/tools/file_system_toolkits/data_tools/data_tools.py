@@ -15,6 +15,8 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from aden_tools.credentials.browser import open_browser
+
 
 def register_tools(mcp: FastMCP) -> None:
     """Register data management tools with the MCP server."""
@@ -142,7 +144,9 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Failed to load data: {str(e)}"}
 
     @mcp.tool()
-    def serve_file_to_user(filename: str, data_dir: str, label: str = "") -> dict:
+    def serve_file_to_user(
+        filename: str, data_dir: str, label: str = "", open_in_browser: bool = False
+    ) -> dict:
         """
         Purpose
             Resolve a sandboxed file path to a fully qualified file URI
@@ -152,6 +156,8 @@ def register_tools(mcp: FastMCP) -> None:
             After saving a file (HTML report, CSV export, etc.) with save_data,
             call this to give the user a clickable link to open it.
             The TUI will render the file:// URI as a clickable link.
+            Set open_in_browser=True to also auto-open the file in the
+            user's default browser.
 
         Rules & Constraints
             filename must be a simple name — no paths or '..'
@@ -162,9 +168,10 @@ def register_tools(mcp: FastMCP) -> None:
             filename: The filename to serve (must exist in data_dir).
             data_dir: Absolute path to the data directory.
             label: Optional display label (defaults to filename).
+            open_in_browser: If True, auto-open the file in the default browser.
 
         Returns:
-            Dict with file_uri, file_path, and label
+            Dict with file_uri, file_path, label, and optionally browser_opened
         """
         if not filename or ".." in filename or "/" in filename or "\\" in filename:
             return {"error": "Invalid filename. Use simple names like 'report.html'"}
@@ -178,12 +185,19 @@ def register_tools(mcp: FastMCP) -> None:
 
             full_path = str(path.resolve())
             file_uri = f"file://{full_path}"
-            return {
+            result = {
                 "success": True,
                 "file_uri": file_uri,
                 "file_path": full_path,
                 "label": label or filename,
             }
+
+            if open_in_browser:
+                opened, msg = open_browser(file_uri)
+                result["browser_opened"] = opened
+                result["browser_message"] = msg
+
+            return result
         except Exception as e:
             return {"error": f"Failed to serve file: {str(e)}"}
 

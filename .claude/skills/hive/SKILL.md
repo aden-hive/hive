@@ -12,19 +12,25 @@ metadata:
     - hive-patterns
     - hive-test
     - hive-credentials
+    - hive-debugger
 ---
 
 # Agent Development Workflow
 
 **THIS IS AN EXECUTABLE WORKFLOW. DO NOT explore the codebase or read source files. ROUTE to the correct skill IMMEDIATELY.**
 
-When this skill is loaded, determine what the user needs and invoke the appropriate skill NOW:
-- **User wants to build an agent** → Invoke `/hive-create` immediately
-- **User wants to test an agent** → Invoke `/hive-test` immediately
-- **User wants to learn concepts** → Invoke `/hive-concepts` immediately
-- **User wants patterns/optimization** → Invoke `/hive-patterns` immediately
-- **User wants to set up credentials** → Invoke `/hive-credentials` immediately
-- **Unclear what user needs** → Ask the user (do NOT explore the codebase to figure it out)
+When this skill is loaded, **ALWAYS use the AskUserQuestion tool** to present options:
+
+```
+Use AskUserQuestion with these options:
+- "Build a new agent" → Then invoke /hive-create
+- "Test an existing agent" → Then invoke /hive-test
+- "Learn agent concepts" → Then invoke /hive-concepts
+- "Optimize agent design" → Then invoke /hive-patterns
+- "Set up credentials" → Then invoke /hive-credentials
+- "Debug a failing agent" → Then invoke /hive-debugger
+- "Other" (please describe what you want to achieve)
+```
 
 **DO NOT:** Read source files, explore the codebase, search for code, or do any investigation before routing. The sub-skills handle all of that.
 
@@ -41,6 +47,7 @@ This workflow orchestrates specialized skills to take you from initial concept t
 3. **Optimize Design** → `/hive-patterns` (optional)
 4. **Setup Credentials** → `/hive-credentials` (if agent uses tools requiring API keys)
 5. **Test & Validate** → `/hive-test`
+6. **Debug Issues** → `/hive-debugger` (if agent fails at runtime)
 
 ## When to Use This Workflow
 
@@ -63,13 +70,13 @@ Use this meta-skill when:
 "Need client-facing nodes or feedback loops" → hive-patterns
 "Set up API keys for my agent" → hive-credentials
 "Test my agent" → hive-test
+"My agent is failing/stuck/has errors" → hive-debugger
 "Not sure what I need" → Read phases below, then decide
 "Agent has structure but needs implementation" → See agent directory STATUS.md
 ```
 
 ## Phase 0: Understand Concepts (Optional)
 
-**Duration**: 5-10 minutes
 **Skill**: `/hive-concepts`
 **Input**: Questions about agent architecture
 
@@ -91,9 +98,8 @@ Use this meta-skill when:
 
 ## Phase 1: Build Agent Structure
 
-**Duration**: 15-30 minutes
 **Skill**: `/hive-create`
-**Input**: User requirements ("Build an agent that...")
+**Input**: User requirements ("Build an agent that...") or a template to start from
 
 ### What This Phase Does
 
@@ -162,7 +168,6 @@ exports/agent_name/
 
 ## Phase 1.5: Optimize Design (Optional)
 
-**Duration**: 10-15 minutes
 **Skill**: `/hive-patterns`
 **Input**: Completed agent structure
 
@@ -187,22 +192,21 @@ exports/agent_name/
 
 ## Phase 2: Test & Validate
 
-**Duration**: 20-40 minutes
 **Skill**: `/hive-test`
 **Input**: Working agent from Phase 1
 
 ### What This Phase Does
 
-Creates comprehensive test suite:
-- Constraint tests (verify hard requirements)
-- Success criteria tests (measure goal achievement)
-- Edge case tests (handle failures gracefully)
-- Integration tests (end-to-end workflows)
+Guides the creation and execution of a comprehensive test suite:
+- Constraint tests
+- Success criteria tests
+- Edge case tests
+- Integration tests
 
 ### Process
 
 1. **Analyze agent** - Read goal, constraints, success criteria
-2. **Generate tests** - Create pytest files in `exports/agent_name/tests/`
+2. **Generate tests** - The calling agent writes pytest files in `exports/agent_name/tests/` using hive-test guidelines and templates
 3. **User approval** - Review and approve each test
 4. **Run evaluation** - Execute tests and collect results
 5. **Debug failures** - Identify and fix issues
@@ -283,6 +287,19 @@ User: "Build an agent (first time)"
 → Done: Production-ready agent
 ```
 
+### Pattern 1c: Build from Template
+
+```
+User: "Build an agent based on the deep research template"
+→ Use /hive-create
+→ Select "From a template" path
+→ Pick template, name new agent
+→ Review/modify goal, nodes, graph
+→ Agent exported with customizations
+→ Use /hive-test
+→ Done: Customized agent
+```
+
 ### Pattern 2: Test Existing Agent
 
 ```
@@ -345,11 +362,23 @@ hive (meta-skill)
     │   ├── Fan-out/fan-in parallel execution
     │   └── Context management and anti-patterns
     │
-    └── hive-test
-        ├── Reads agent goal
-        ├── Generates tests
-        ├── Runs evaluation
-        └── Reports results
+    ├── hive-credentials (utility)
+    │   ├── Detects missing credentials
+    │   ├── Offers auth method choices (Aden OAuth, direct API key)
+    │   ├── Stores securely in ~/.hive/credentials
+    │   └── Validates with health checks
+    │
+    ├── hive-test (validation)
+    │   ├── Reads agent goal
+    │   ├── Generates tests
+    │   ├── Runs evaluation
+    │   └── Reports results
+    │
+    └── hive-debugger (troubleshooting)
+        ├── Monitors runtime logs (L1/L2/L3)
+        ├── Identifies retry loops, tool failures
+        ├── Categorizes issues (10 categories)
+        └── Provides fix recommendations
 ```
 
 ## Troubleshooting
@@ -375,6 +404,13 @@ hive (meta-skill)
 - Verify constraints are met
 - Use `/hive-test` to debug and iterate
 - Fix agent code and re-run tests
+
+### "Agent is failing at runtime"
+
+- Use `/hive-debugger` to analyze runtime logs
+- The debugger identifies retry loops, tool failures, and stalled execution
+- Get actionable fix recommendations with code changes
+- Monitor the agent in real-time during TUI sessions
 
 ### "Not sure which phase I'm in"
 
@@ -448,7 +484,9 @@ This workflow provides a proven path from concept to production-ready agent:
 1. **Learn** with `/hive-concepts` → Understand fundamentals (optional)
 2. **Build** with `/hive-create` → Get validated structure
 3. **Optimize** with `/hive-patterns` → Apply best practices (optional)
-4. **Test** with `/hive-test` → Get verified functionality
+4. **Configure** with `/hive-credentials` → Set up API keys (if needed)
+5. **Test** with `/hive-test` → Get verified functionality
+6. **Debug** with `/hive-debugger` → Fix runtime issues (if needed)
 
 The workflow is **flexible** - skip phases as needed, iterate freely, and adapt to your specific requirements. The goal is **production-ready agents** built with **consistent, repeatable processes**.
 
@@ -465,6 +503,7 @@ The workflow is **flexible** - skip phases as needed, iterate freely, and adapt 
 - Have clear requirements
 - Ready to write code
 - Want step-by-step guidance
+- Want to start from an existing template and customize it
 
 **Choose hive-patterns when:**
 - Agent structure complete
@@ -478,3 +517,10 @@ The workflow is **flexible** - skip phases as needed, iterate freely, and adapt 
 - Ready to validate functionality
 - Need comprehensive test coverage
 - Testing feedback loops, output keys, or fan-out
+
+**Choose hive-debugger when:**
+- Agent is failing or stuck at runtime
+- Seeing retry loops or escalations
+- Tool calls are failing
+- Need to understand why a node isn't completing
+- Want real-time monitoring of agent execution
