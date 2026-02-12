@@ -378,6 +378,21 @@ def _load_resume_state(
             return None
         progress = state_data.get("progress", {})
         paused_at = progress.get("paused_at") or progress.get("resume_from")
+        latest_checkpoint_id = state_data.get("latest_checkpoint_id")
+        if not paused_at and latest_checkpoint_id:
+            checkpoints_dir = session_dir / "checkpoints"
+            cp_path = checkpoints_dir / f"{latest_checkpoint_id}.json"
+            if checkpoints_dir.exists() and cp_path.exists():
+                try:
+                    cp_data = json.loads(cp_path.read_text())
+                    return {
+                        "memory": cp_data.get("shared_memory", {}),
+                        "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
+                        "execution_path": cp_data.get("execution_path", []),
+                        "node_visit_counts": {},
+                    }
+                except (json.JSONDecodeError, OSError):
+                    return None
         return {
             "memory": state_data.get("memory", {}),
             "paused_at": paused_at,
@@ -1670,49 +1685,253 @@ def _interactive_multi(agents_dir: Path) -> int:
 
 def cmd_sessions_list(args: argparse.Namespace) -> int:
     """List agent sessions."""
-    print("⚠ Sessions list command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Status filter: {args.status}")
-    print(f"Has checkpoints: {args.has_checkpoints}")
-    return 1
+    from framework.storage.session_store import SessionStore
+
+    def _format_ts(value: str | None) -> str:
+        if not value:
+            return "-"
+        return value.replace("T", " ")[:19]
+
+    agent_name = Path(args.agent_path).name
+    agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
+    store = SessionStore(agent_work_dir)
+
+    status = None if args.status == "all" else args.status
+    sessions = asyncio.run(store.list_sessions(status=status, limit=1000))
+
+    if args.has_checkpoints:
+        filtered: list = []
+        for s in sessions:
+            session_dir = agent_work_dir / "sessions" / s.session_id
+            has_cp = bool(
+                (getattr(s, "latest_checkpoint_id", None))
+                or (session_dir / "checkpoints" / "index.json").exists()
+            )
+            if has_cp:
+                filtered.append(s)
+        sessions = filtered
+
+    if not sessions:
+        print(f"No sessions found for agent '{agent_name}'.")
+        print(f"Storage: {agent_work_dir}")
+        return 0
+
+    print(f"Agent: {agent_name}")
+    print(f"Storage: {agent_work_dir}")
+    print()
+    header = f"{'SESSION':<32} {'STATUS':<10} {'UPDATED':<19} {'NODE':<20} {'CHECKPOINT':<10}"
+    print(header)
+    print("-" * len(header))
+    for s in sessions:
+        current_node = (s.progress.current_node or s.progress.paused_at or "-")[:20]
+        has_cp = "yes" if (s.latest_checkpoint_id or s.checkpoint_enabled) else "no"
+        print(
+            f"{s.session_id:<32} {str(s.status):<10} {_format_ts(s.timestamps.updated_at):<19} {current_node:<20} {has_cp:<10}"
+        )
+    return 0
 
 
 def cmd_sessions_show(args: argparse.Namespace) -> int:
     """Show detailed session information."""
-    print("⚠ Session show command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    return 1
+    from framework.storage.session_store import SessionStore
+
+    def _format_ts(value: str | None) -> str:
+        if not value:
+            return "-"
+        return value.replace("T", " ")[:19]
+
+    agent_name = Path(args.agent_path).name
+    agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
+    store = SessionStore(agent_work_dir)
+    state = asyncio.run(store.read_state(args.session_id))
+    if state is None:
+        print(f"Error: session not found: {args.session_id}", file=sys.stderr)
+        print(f"Storage: {agent_work_dir}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(state.model_dump_json(indent=2))
+        return 0
+
+    print(f"Agent: {agent_name}")
+    print(f"Storage: {agent_work_dir}")
+    print(f"Session: {state.session_id}")
+    print(f"Status: {state.status}")
+    print(f"Goal: {state.goal_id}")
+    print()
+    print("Timestamps")
+    print(f"  started:   {_format_ts(state.timestamps.started_at)}")
+    print(f"  updated:   {_format_ts(state.timestamps.updated_at)}")
+    print(f"  completed: {_format_ts(state.timestamps.completed_at)}")
+    print(f"  paused:    {_format_ts(state.timestamps.paused_at_time)}")
+    print()
+    print("Progress")
+    print(f"  current_node:  {state.progress.current_node or '-'}")
+    print(f"  paused_at:     {state.progress.paused_at or '-'}")
+    print(f"  resume_from:   {state.progress.resume_from or '-'}")
+    print(f"  steps:         {state.progress.steps_executed}")
+    print(f"  tokens:        {state.progress.total_tokens}")
+    print(f"  quality:       {state.progress.execution_quality}")
+    print()
+    print("Result")
+    print(f"  success: {state.result.success}")
+    if state.result.error:
+        print(f"  error:   {state.result.error}")
+    print()
+    print("Checkpoints")
+    print(f"  enabled: {state.checkpoint_enabled}")
+    print(f"  latest:  {state.latest_checkpoint_id or '-'}")
+    print()
+    print("Commands")
+    print(f"  hive sessions checkpoints {args.agent_path} {state.session_id}")
+    print(f"  hive run {args.agent_path} --resume-session {state.session_id}")
+    if state.latest_checkpoint_id:
+        print(
+            f"  hive run {args.agent_path} --resume-session {state.session_id} --checkpoint {state.latest_checkpoint_id}"
+        )
+    return 0
 
 
 def cmd_sessions_checkpoints(args: argparse.Namespace) -> int:
     """List checkpoints for a session."""
-    print("⚠ Session checkpoints command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
+    from framework.storage.checkpoint_store import CheckpointStore
+
+    def _format_ts(value: str | None) -> str:
+        if not value:
+            return "-"
+        return value.replace("T", " ")[:19]
+
+    agent_name = Path(args.agent_path).name
+    agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
+    session_dir = agent_work_dir / "sessions" / args.session_id
+    if not session_dir.exists():
+        print(f"Error: session not found: {args.session_id}", file=sys.stderr)
+        print(f"Storage: {agent_work_dir}", file=sys.stderr)
+        return 1
+
+    store = CheckpointStore(session_dir)
+    index = asyncio.run(store.load_index())
+    checkpoints = asyncio.run(store.list_checkpoints())
+
+    if not checkpoints:
+        print(f"No checkpoints found for session '{args.session_id}'.")
+        cp_dir = session_dir / "checkpoints"
+        print(f"Directory: {cp_dir}")
+        return 0
+
+    latest = index.latest_checkpoint_id if index else None
+
+    print(f"Agent: {agent_name}")
     print(f"Session: {args.session_id}")
-    return 1
+    if latest:
+        print(f"Latest: {latest}")
+    print()
+    header = f"{'CHECKPOINT':<40} {'TYPE':<16} {'CREATED':<19} {'NODE':<20} {'CLEAN':<5}"
+    print(header)
+    print("-" * len(header))
+    for cp in checkpoints:
+        node = (cp.current_node or cp.next_node or "-")[:20]
+        clean = "yes" if cp.is_clean else "no"
+        print(
+            f"{cp.checkpoint_id:<40} {cp.checkpoint_type:<16} {_format_ts(cp.created_at):<19} {node:<20} {clean:<5}"
+        )
+    print()
+    print("Resume")
+    print(f"  hive run {args.agent_path} --resume-session {args.session_id} --checkpoint <checkpoint_id>")
+    return 0
 
 
 def cmd_pause(args: argparse.Namespace) -> int:
     """Pause a running session."""
-    print("⚠ Pause command not yet implemented")
-    print("This will be available once executor pause integration is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
+    print("Error: pause is not supported from the CLI yet.", file=sys.stderr)
+    print("Run the agent in TUI mode and pause from there, or use pause nodes.", file=sys.stderr)
+    print(f"Agent: {args.agent_path}", file=sys.stderr)
+    print(f"Session: {args.session_id}", file=sys.stderr)
     return 1
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
     """Resume a session from checkpoint."""
-    print("⚠ Resume command not yet implemented")
-    print("This will be available once checkpoint resume integration is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    if args.checkpoint:
-        print(f"Checkpoint: {args.checkpoint}")
+    from framework.credentials.models import CredentialError
+    from framework.runner import AgentRunner
+
+    session_state = _load_resume_state(args.agent_path, args.session_id, args.checkpoint)
+    if session_state is None:
+        print(
+            f"Error: Could not load session state for {args.session_id}",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        runner = AgentRunner.load(
+            args.agent_path,
+            model=None,
+        )
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Error loading agent: {e}", file=sys.stderr)
+        return 1
+
     if args.tui:
-        print("Mode: TUI")
-    return 1
+        from framework.tui.app import AdenTUI
+
+        async def run_with_tui() -> int:
+            try:
+                try:
+                    if runner._agent_runtime is None:
+                        runner._setup()
+                except Exception as e:
+                    print(f"Error setting up runtime: {e}", file=sys.stderr)
+                    return 1
+
+                if runner._agent_runtime is None:
+                    print("Error: runtime not initialized", file=sys.stderr)
+                    return 1
+
+                try:
+                    if not runner._agent_runtime.is_running:
+                        await runner._agent_runtime.start()
+                except Exception as e:
+                    print(f"Error starting runtime: {e}", file=sys.stderr)
+                    return 1
+
+                app = AdenTUI(
+                    runner._agent_runtime,
+                    resume_session=args.session_id,
+                    resume_checkpoint=args.checkpoint,
+                )
+                try:
+                    await app.run_async()
+                except Exception as e:
+                    print(f"TUI error: {e}", file=sys.stderr)
+                    return 1
+                return 0
+            finally:
+                await runner.cleanup_async()
+
+        return asyncio.run(run_with_tui())
+
+    async def run_headless() -> int:
+        try:
+            result = await runner.run(
+                input_data={},
+                session_state=session_state,
+            )
+        finally:
+            await runner.cleanup_async()
+
+        output = {
+            "success": result.success,
+            "error": result.error,
+            "path": result.path,
+            "output": result.output,
+        }
+        if result.paused_at:
+            output["paused_at"] = result.paused_at
+        print(json.dumps(output, indent=2, default=str))
+        return 0 if result.success else 1
+
+    return asyncio.run(run_headless())
