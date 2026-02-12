@@ -3,7 +3,7 @@
 # setup-antigravity-mcp.sh - Write Antigravity/Claude MCP config with auto-detected paths
 #
 # Run from anywhere inside the hive repo. Generates ~/.gemini/antigravity/mcp_config.json
-# based on .antigravity/mcp_config.json template, with absolute paths so the IDE can
+# based on .agent/mcp_config.json template, with absolute paths so the IDE can
 # connect to agent-builder and tools MCP servers without manual path editing.
 #
 set -e
@@ -12,12 +12,12 @@ set -e
 REPO_ROOT=""
 if git rev-parse --show-toplevel &>/dev/null; then
   REPO_ROOT="$(git rev-parse --show-toplevel)"
-elif [ -f ".antigravity/mcp_config.json" ]; then
+elif [ -f ".agent/mcp_config.json" ]; then
   REPO_ROOT="$(pwd)"
 else
   d="$(pwd)"
   while [ -n "$d" ] && [ "$d" != "/" ]; do
-    [ -f "$d/.antigravity/mcp_config.json" ] && REPO_ROOT="$d" && break
+    [ -f "$d/.agent/mcp_config.json" ] && REPO_ROOT="$d" && break
     d="$(dirname "$d")"
   done
 fi
@@ -27,7 +27,7 @@ if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT/core" ] || [ ! -d "$REPO_ROOT/tools
   exit 1
 fi
 
-TEMPLATE="$REPO_ROOT/.antigravity/mcp_config.json"
+TEMPLATE="$REPO_ROOT/.agent/mcp_config.json"
 if [ ! -f "$TEMPLATE" ]; then
   echo "Error: Template not found at $TEMPLATE" >&2
   exit 1
