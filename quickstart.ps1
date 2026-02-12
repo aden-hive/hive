@@ -574,7 +574,17 @@ if (-not $checkResult.DefenderEnabled) {
                     
                     if ($result.Failed.Count -gt 0) {
                         Write-Host ""
-                        Write-Warn "Some exclusions failed:"
+                        
+                        # Calculate and show success rate
+                        $totalPaths = $result.Added.Count + $result.Failed.Count
+                        if ($totalPaths -gt 0) {
+                            $successRate = [math]::Round(($result.Added.Count / $totalPaths) * 100)
+                            Write-Warn "⚠️  Only $($result.Added.Count)/$totalPaths exclusions added ($successRate%)"
+                            Write-Host "Performance benefit may be reduced."
+                            Write-Host ""
+                        }
+                        
+                        Write-Warn "Failed exclusions:"
                         foreach ($failure in $result.Failed) {
                             Write-Warn "  $($failure.Path): $($failure.Error)"
                         }
