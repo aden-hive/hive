@@ -214,6 +214,27 @@ function Test-DefenderExclusions {
     }
 }
 
+function Test-IsDefenderEnabled {
+    <#
+    .SYNOPSIS
+        Quick boolean check if Defender real-time protection is enabled
+    .OUTPUTS
+        Boolean - $true if enabled, $false otherwise
+    #>
+    try {
+        $mpModule = Get-Module -ListAvailable -Name Defender -ErrorAction SilentlyContinue
+        if (-not $mpModule) {
+            return $false
+        }
+        
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        return $status.RealTimeProtectionEnabled
+    } catch {
+        # If we can't check, assume disabled (fail-safe)
+        return $false
+    }
+}
+
 function Add-DefenderExclusions {
     <#
     .SYNOPSIS
@@ -527,22 +548,37 @@ if (-not $checkResult.DefenderEnabled) {
                 }
             }
         } else {
-            # Add exclusions
-            Write-Host "  Adding exclusions... " -NoNewline
-            $result = Add-DefenderExclusions -Paths $checkResult.MissingPaths
-            
-            if ($result.Added.Count -gt 0) {
-                Write-Ok "done"
-                foreach ($path in $result.Added) {
-                    Write-Ok "Excluded: $path"
-                }
-            }
-            
-            if ($result.Failed.Count -gt 0) {
+            # Re-check Defender status before adding (could have changed during prompt)
+            if (-not (Test-IsDefenderEnabled)) {
+                Write-Warn "Defender status changed during setup (now disabled)."
+                Write-Host "Skipping exclusions - they would have no effect."
                 Write-Host ""
-                Write-Warn "Some exclusions failed:"
-                foreach ($failure in $result.Failed) {
-                    Write-Warn "  $($failure.Path): $($failure.Error)"
+            } else {
+                # Add exclusions
+                Write-Host "  Adding exclusions... " -NoNewline
+                
+                # Re-check paths in case something changed
+                $freshCheck = Test-DefenderExclusions -Paths $pathsToExclude
+                if ($freshCheck.MissingPaths.Count -eq 0) {
+                    Write-Ok "already added"
+                    Write-Host "  (Exclusions were added by another process)"
+                } else {
+                    $result = Add-DefenderExclusions -Paths $freshCheck.MissingPaths
+                    
+                    if ($result.Added.Count -gt 0) {
+                        Write-Ok "done"
+                        foreach ($path in $result.Added) {
+                            Write-Ok "Excluded: $path"
+                        }
+                    }
+                    
+                    if ($result.Failed.Count -gt 0) {
+                        Write-Host ""
+                        Write-Warn "Some exclusions failed:"
+                        foreach ($failure in $result.Failed) {
+                            Write-Warn "  $($failure.Path): $($failure.Error)"
+                        }
+                    }
                 }
             }
         }
