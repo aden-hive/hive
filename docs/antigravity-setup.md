@@ -117,10 +117,10 @@ The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_con
 
 - Run the setup script again from the hive repo root: `./scripts/setup-antigravity-mcp.sh`, then restart Antigravity.
 - Make sure Python and deps are installed: from repo root run `./scripts/setup-python.sh`.
-- Check that the servers can start: from repo root run  
-  `cd core && python3 -m framework.mcp.agent_builder_server` (Ctrl+C to stop), and in another terminal  
-  `cd tools && PYTHONPATH=src python3 mcp_server.py --stdio` (Ctrl+C to stop).  
-  If those fail, fix the errors first (e.g. install deps).
+- Check that the servers can start: from repo root run
+  `cd core && uv run -m framework.mcp.agent_builder_server` (Ctrl+C to stop), and in another terminal
+  `cd tools && uv run mcp_server.py --stdio` (Ctrl+C to stop).
+  If those fail, fix the errors first (e.g. install deps with `uv sync`).
 
 **“Module not found” or import errors**
 
@@ -161,26 +161,20 @@ Save as `~/.gemini/antigravity/mcp_config.json` (Antigravity) or `~/.claude/mcp.
 {
   "mcpServers": {
     "agent-builder": {
-      "command": "python3",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "/path/to/hive/core",
-      "env": {
-        "PYTHONPATH": "../tools/src"
-      }
+      "command": "uv",
+      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
+      "cwd": "/path/to/hive/core"
     },
     "tools": {
-      "command": "python3",
-      "args": ["mcp_server.py", "--stdio"],
-      "cwd": "/path/to/hive/tools",
-      "env": {
-        "PYTHONPATH": "src"
-      }
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "/path/to/hive/tools"
     }
   }
 }
 ```
 
-Use `python` instead of `python3` if that’s what you have.
+Make sure `uv` is installed and available in your PATH.
 
 ---
 
@@ -207,10 +201,10 @@ python3 -c "import json; json.load(open('.antigravity/mcp_config.json')); print(
 
 ```bash
 # Terminal 1
-cd core && PYTHONPATH=../tools/src python3 -m framework.mcp.agent_builder_server
+cd core && uv run -m framework.mcp.agent_builder_server
 
 # Terminal 2
-cd tools && PYTHONPATH=src python3 mcp_server.py --stdio
+cd tools && uv run mcp_server.py --stdio
 ```
 
 If both start without errors, the config is fine.

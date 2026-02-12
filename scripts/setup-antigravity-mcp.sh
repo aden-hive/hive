@@ -2,9 +2,9 @@
 #
 # setup-antigravity-mcp.sh - Write Antigravity/Claude MCP config with auto-detected paths
 #
-# Run from anywhere inside the hive repo. Writes ~/.gemini/antigravity/mcp_config.json
-# (and optionally ~/.claude/mcp.json) with absolute cwd paths so the IDE can connect
-# to agent-builder and tools MCP servers without manual path editing.
+# Run from anywhere inside the hive repo. Generates ~/.gemini/antigravity/mcp_config.json
+# based on .antigravity/mcp_config.json template, with absolute cwd paths so the IDE can
+# connect to agent-builder and tools MCP servers without manual path editing.
 #
 set -e
 
@@ -27,39 +27,25 @@ if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT/core" ] || [ ! -d "$REPO_ROOT/tools
   exit 1
 fi
 
+TEMPLATE="$REPO_ROOT/.antigravity/mcp_config.json"
+if [ ! -f "$TEMPLATE" ]; then
+  echo "Error: Template not found at $TEMPLATE" >&2
+  exit 1
+fi
+
 CORE_DIR="$(cd "$REPO_ROOT/core" && pwd)"
 TOOLS_DIR="$(cd "$REPO_ROOT/tools" && pwd)"
 
-PYTHON_CMD="python3"
-command -v python3 &>/dev/null || PYTHON_CMD="python"
-
 mkdir -p "$HOME/.gemini/antigravity"
 
-# Build config with absolute paths (no merge; script is for initial setup)
-cat > "$HOME/.gemini/antigravity/mcp_config.json" << EOF
-{
-  "mcpServers": {
-    "agent-builder": {
-      "command": "$PYTHON_CMD",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "$CORE_DIR",
-      "env": {
-        "PYTHONPATH": "../tools/src"
-      }
-    },
-    "tools": {
-      "command": "$PYTHON_CMD",
-      "args": ["mcp_server.py", "--stdio"],
-      "cwd": "$TOOLS_DIR",
-      "env": {
-        "PYTHONPATH": "src"
-      }
-    }
-  }
-}
-EOF
+# Generate config from template with absolute paths
+sed -e "s|\"cwd\": \"core\"|\"cwd\": \"$CORE_DIR\"|g" \
+    -e "s|\"cwd\": \"tools\"|\"cwd\": \"$TOOLS_DIR\"|g" \
+    "$TEMPLATE" > "$HOME/.gemini/antigravity/mcp_config.json"
 
-echo "Wrote $HOME/.gemini/antigravity/mcp_config.json (cwd: $CORE_DIR, $TOOLS_DIR)"
+echo "Wrote $HOME/.gemini/antigravity/mcp_config.json (from $TEMPLATE)"
+echo "  core  -> $CORE_DIR"
+echo "  tools -> $TOOLS_DIR"
 
 if [ "$1" = "--claude" ]; then
   mkdir -p "$HOME/.claude"
@@ -68,5 +54,7 @@ if [ "$1" = "--claude" ]; then
 fi
 
 echo ""
-echo "Next: Restart Antigravity IDE so it loads the MCP config. Then open this repo; agent-builder and tools should appear."
+echo "Next: Restart Antigravity IDE so it loads the MCP config."
+echo "      Then open this repo; agent-builder and tools should appear."
+echo ""
 echo "For Claude Code, run: $0 --claude"
