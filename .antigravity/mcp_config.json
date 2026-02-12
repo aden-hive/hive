@@ -2,13 +2,13 @@
   "mcpServers": {
     "agent-builder": {
       "command": "uv",
-      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core"
+      "args": ["run", "--directory", "core", "-m", "framework.mcp.agent_builder_server"],
+      "disabled": false
     },
     "tools": {
       "command": "uv",
-      "args": ["run", "mcp_server.py", "--stdio"],
-      "cwd": "tools"
+      "args": ["run", "--directory", "tools", "mcp_server.py", "--stdio"],
+      "disabled": false
     }
   }
 }

@@ -80,11 +80,7 @@ That writes `~/.claude/mcp.json` as well.
 
 **Prefer to do it manually?** See [Manual MCP config](#manual-mcp-config-template) below. You’ll create `~/.gemini/mcp.json` (or `~/.claude/mcp.json`) with absolute paths to your repo’s `core` and `tools` folders.
 
-### Step 3: Ignore the `cwd` warning (if you see it)
-
-If the IDE says `cwd` is not allowed in the MCP config, you can **ignore it**. `cwd` is valid; the warning is from the schema and can be ignored.
-
-### Step 4: Use skills
+### Step 3: Use skills
 
 Skills are guides (workflow, building, testing) in `.antigravity/skills/` (they point to `.claude/skills/`). If Antigravity doesn’t show a “skills” UI, open those folders in the project and use the files as reference while you use the MCP tools.
 
@@ -122,10 +118,10 @@ The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_con
   `cd tools && uv run mcp_server.py --stdio` (Ctrl+C to stop).
   If those fail, fix the errors first (e.g. install deps with `uv sync`).
 
-**“Module not found” or import errors**
+**"Module not found" or import errors**
 
 - Open the **repo root** as the project in the IDE (the folder that has `core/` and `tools/`).
-- If you edited `~/.gemini/mcp.json` by hand, make sure `cwd` is the **absolute** path to `core` and `tools` (e.g. `/Users/you/hive/core` and `/Users/you/hive/tools`).
+- If you edited `~/.gemini/antigravity/mcp_config.json` by hand, make sure `--directory` paths are **absolute** (e.g. `/Users/you/hive/core` and `/Users/you/hive/tools`).
 
 **Skills don’t show up in the UI**
 
@@ -162,19 +158,19 @@ Save as `~/.gemini/antigravity/mcp_config.json` (Antigravity) or `~/.claude/mcp.
   "mcpServers": {
     "agent-builder": {
       "command": "uv",
-      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
-      "cwd": "/path/to/hive/core"
+      "args": ["run", "--directory", "/path/to/hive/core", "-m", "framework.mcp.agent_builder_server"],
+      "disabled": false
     },
     "tools": {
       "command": "uv",
-      "args": ["run", "mcp_server.py", "--stdio"],
-      "cwd": "/path/to/hive/tools"
+      "args": ["run", "--directory", "/path/to/hive/tools", "mcp_server.py", "--stdio"],
+      "disabled": false
     }
   }
 }
 ```
 
-Make sure `uv` is installed and available in your PATH.
+Make sure `uv` is installed and available in your PATH. Note: Use `--directory` in args instead of `cwd` for Antigravity compatibility.
 
 ---
 
