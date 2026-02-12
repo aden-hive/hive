@@ -898,6 +898,104 @@ fi
 echo ""
 
 # ============================================================
+# Step 5b: Bootstrap Codex Setup
+# ============================================================
+
+echo -e "${BLUE}Step 5b: Ensuring Codex setup files...${NC}"
+echo ""
+
+CODEX_CHANGES=0
+REQUIRED_CODEX_SKILLS=(hive hive-create hive-concepts hive-patterns hive-test hive-credentials)
+CODEX_SETUP_ENABLED=true
+
+echo -n "  ⬡ codex CLI... "
+if command -v codex > /dev/null 2>&1; then
+    CODEX_VERSION=$(codex --version 2>/dev/null || echo "installed")
+    echo -e "${GREEN}${CODEX_VERSION}${NC}"
+else
+    echo -e "${YELLOW}not found${NC}"
+    echo -e "${YELLOW}  ⚠ Install Codex CLI from https://github.com/openai/codex${NC}"
+fi
+
+if ! prompt_yes_no "  Configure Codex integration files now?" "y"; then
+    CODEX_SETUP_ENABLED=false
+    echo -e "${YELLOW}  ⏭ Skipped Codex file setup${NC}"
+fi
+
+if [ "$CODEX_SETUP_ENABLED" = true ]; then
+mkdir -p "$SCRIPT_DIR/.codex"
+mkdir -p "$SCRIPT_DIR/.agents/skills"
+
+if [ ! -f "$SCRIPT_DIR/.codex/config.toml" ]; then
+    cat > "$SCRIPT_DIR/.codex/config.toml" <<'EOF'
+# Project-level Codex config for Hive.
+
+[mcp_servers.agent-builder]
+command = "uv"
+args = ["run", "--directory", "core", "-m", "framework.mcp.agent_builder_server"]
+cwd = "."
+
+[mcp_servers.tools]
+command = "uv"
+args = ["run", "--directory", "tools", "mcp_server.py", "--stdio"]
+cwd = "."
+EOF
+    echo -e "${GREEN}  ✓ Created .codex/config.toml${NC}"
+    CODEX_CHANGES=$((CODEX_CHANGES + 1))
+fi
+
+if [ ! -f "$SCRIPT_DIR/AGENTS.md" ]; then
+    cat > "$SCRIPT_DIR/AGENTS.md" <<'EOF'
+# Hive Agent Instructions (Codex)
+
+Use skills from `.agents/skills`:
+- hive
+- hive-create
+- hive-concepts
+- hive-patterns
+- hive-test
+- hive-credentials
+
+Rules:
+- Prefer MCP tools from `agent-builder` and `tools`.
+- Before assuming tool availability, list MCP tools first.
+- Reuse existing Hive skill workflows; do not invent alternative flows unless required.
+
+Shortcut Handling:
+- Treat `hive`, `hive-create`, `hive-concepts`, `hive-patterns`, `hive-test`, and `hive-credentials` as workflow invocation phrases.
+- Users do not need to type skill file paths when using these phrases.
+EOF
+    echo -e "${GREEN}  ✓ Created AGENTS.md${NC}"
+    CODEX_CHANGES=$((CODEX_CHANGES + 1))
+fi
+
+for skill in "${REQUIRED_CODEX_SKILLS[@]}"; do
+    target="../../.claude/skills/$skill"
+    link_path="$SCRIPT_DIR/.agents/skills/$skill"
+
+    if [ -L "$link_path" ] || [ -d "$link_path" ]; then
+        continue
+    fi
+
+    if ln -s "$target" "$link_path" 2>/dev/null; then
+        echo -e "${GREEN}  ✓ Linked .agents/skills/$skill${NC}"
+        CODEX_CHANGES=$((CODEX_CHANGES + 1))
+    elif cp -R "$SCRIPT_DIR/.claude/skills/$skill" "$link_path" 2>/dev/null; then
+        echo -e "${YELLOW}  ⚠ Copied .agents/skills/$skill (symlink unavailable)${NC}"
+        CODEX_CHANGES=$((CODEX_CHANGES + 1))
+    else
+        echo -e "${YELLOW}  ⚠ Could not create .agents/skills/$skill${NC}"
+    fi
+done
+
+if [ "$CODEX_CHANGES" -eq 0 ]; then
+    echo -e "${GREEN}  ✓ Codex setup already present${NC}"
+fi
+fi
+
+echo ""
+
+# ============================================================
 # Step 6: Verify Setup
 # ============================================================
 
@@ -937,10 +1035,74 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ AGENTS.md... "
+if [ -f "$SCRIPT_DIR/AGENTS.md" ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ "$CODEX_SETUP_ENABLED" = false ]; then
+    echo -e "${YELLOW}-- (skipped)${NC}"
+else
+    echo -e "${RED}missing${NC}"
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo -n "  ⬡ Codex MCP config... "
+if [ -f "$SCRIPT_DIR/.codex/config.toml" ]; then
+    if "$PYTHON_CMD" - <<'PY' "$SCRIPT_DIR/.codex/config.toml" > /dev/null 2>&1
+import pathlib
+import sys
+
+config_path = pathlib.Path(sys.argv[1])
+try:
+    import tomllib
+except ModuleNotFoundError:
+    raise SystemExit(1)
+
+with config_path.open("rb") as f:
+    data = tomllib.load(f)
+
+servers = data.get("mcp_servers", {})
+if "agent-builder" not in servers or "tools" not in servers:
+    raise SystemExit(1)
+PY
+    then
+        echo -e "${GREEN}ok${NC}"
+    else
+        echo -e "${RED}failed${NC}"
+        ERRORS=$((ERRORS + 1))
+    fi
+elif [ "$CODEX_SETUP_ENABLED" = false ]; then
+    echo -e "${YELLOW}-- (skipped)${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
 echo -n "  ⬡ skills... "
 if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
     SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
     echo -e "${GREEN}${SKILL_COUNT} found${NC}"
+else
+    if [ "$CODEX_SETUP_ENABLED" = false ]; then
+        echo -e "${YELLOW}-- (skipped)${NC}"
+    else
+        echo -e "${YELLOW}--${NC}"
+    fi
+fi
+
+echo -n "  ⬡ Codex skills... "
+if [ -d "$SCRIPT_DIR/.agents/skills" ]; then
+    MISSING_CODEX_SKILLS=()
+    for skill in "${REQUIRED_CODEX_SKILLS[@]}"; do
+        if [ ! -d "$SCRIPT_DIR/.agents/skills/$skill" ]; then
+            MISSING_CODEX_SKILLS+=("$skill")
+        fi
+    done
+
+    if [ "${#MISSING_CODEX_SKILLS[@]}" -eq 0 ]; then
+        echo -e "${GREEN}${#REQUIRED_CODEX_SKILLS[@]} found${NC}"
+    else
+        echo -e "${RED}missing: ${MISSING_CODEX_SKILLS[*]}${NC}"
+        ERRORS=$((ERRORS + 1))
+    fi
 else
     echo -e "${YELLOW}--${NC}"
 fi

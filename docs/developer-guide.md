@@ -25,7 +25,8 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 | **framework** | `/core`    | Core runtime, graph executor, protocols   | Python 3.11+ |
 | **tools**     | `/tools`   | MCP tools for agent capabilities          | Python 3.11+ |
 | **exports**   | `/exports` | Agent packages (user-created, gitignored) | Python 3.11+ |
-| **skills**    | `.claude`  | Claude Code skills for building/testing   | Markdown     |
+| **skills**    | `.claude`, `.agents` | Shared skills for Claude/Codex/other coding agents | Markdown     |
+| **codex**     | `.codex`   | Codex CLI project configuration (MCP servers) | TOML         |
 
 ### Key Principles
 
@@ -46,7 +47,8 @@ Ensure you have installed:
 - **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.12 or 3.13 recommended)
 - **uv** - Python package manager ([Install](https://docs.astral.sh/uv/getting-started/installation/))
 - **git** - Version control
-- **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional, for using building skills)
+- **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional)
+- **Codex CLI** - [Install](https://github.com/openai/codex) (optional)
 
 Verify installation:
 
@@ -116,6 +118,29 @@ Skills are also available in Cursor. To enable:
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
 4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
+### Codex CLI Support
+
+Hive also supports [OpenAI Codex CLI](https://github.com/openai/codex).
+
+1. Run `./quickstart.sh` from repo root (it bootstraps Codex files if missing)
+2. Verify `.codex/config.toml` exists and contains `agent-builder` + `tools`
+3. Verify `.agents/skills/` includes `hive`, `hive-create`, `hive-concepts`, `hive-patterns`, `hive-test`, `hive-credentials`
+4. Start Codex from the repo root
+
+Codex instructions are routed through project `AGENTS.md` and shared skill directories.
+Codex does not support slash commands like `/hive`; invoke workflows using natural-language prompts.
+
+Example Codex prompts:
+
+```text
+Use the hive skill from .agents/skills/hive and guide me to build an agent named support_triage.
+List MCP tools first, then start the workflow.
+```
+
+```text
+Use .agents/skills/hive-test/SKILL.md to test exports/support_triage and report failures.
+```
+
 
 ### Opencode Support
 To enable Opencode integration:
@@ -164,6 +189,10 @@ hive/                                    # Repository root
 │       ├── hive-concepts/               # Fundamental concepts
 │       ├── hive-patterns/               # Best practices
 │       └── hive-test/                   # Test and validate agents
+├── .codex/                              # Codex CLI project config
+│   └── config.toml                      # Codex MCP server definitions
+├── .agents/                             # Shared skill mountpoint
+│   └── skills/                          # Symlinks to Hive skills
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
