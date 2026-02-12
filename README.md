@@ -22,7 +22,6 @@
   <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
-
 <p align="center">
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
@@ -132,6 +131,16 @@ Hive includes native support for [Opencode](https://github.com/opencode-ai/openc
 The agent has access to all Hive skills and can scaffold agents, add tools, and debug workflows directly from the chat.
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
+
+### Antigravity IDE Support
+
+Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). **Easiest:** open a terminal in the hive repo folder and run (use `./` — the script is inside the repo):
+
+```bash
+./scripts/setup-antigravity-mcp.sh
+```
+
+**Important:** Always restart/refresh Antigravity IDE after running the setup script—MCP servers only load on startup. After restart, **agent-builder** and **tools** MCP servers should connect. Skills are under `.agent/skills/` (symlinks to `.claude/skills/`). See [docs/antigravity-setup.md](docs/antigravity-setup.md) for manual setup and troubleshooting.
 
 ## Features
 

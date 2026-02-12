@@ -215,6 +215,7 @@ hive/                                    # Repository root
 ├── scripts/                             # Utility scripts
 │   └── auto-close-duplicates.ts         # GitHub duplicate issue closer
 │
+├── .agent/                        # Antigravity IDE: mcp_config.json + skills (symlinks)
 ├── quickstart.sh                        # Interactive setup wizard
 ├── README.md                            # Project overview
 ├── CONTRIBUTING.md                      # Contribution guidelines
