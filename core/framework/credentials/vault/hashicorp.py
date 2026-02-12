@@ -377,7 +377,9 @@ class HashiCorpVaultStorage(CredentialStorage):
         # Case 2: Delete specific versions - validate via metadata first
         metadata = self.get_secret_metadata(credential_id)
         if metadata is None:
-            logger.debug(f"Soft delete: credential '{credential_id}' not found when reading metadata")
+            logger.debug(
+                f"Soft delete: credential '{credential_id}' not found when reading metadata"
+            )
             return False
 
         # Build set of existing version numbers from metadata
