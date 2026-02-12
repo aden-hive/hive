@@ -2,15 +2,18 @@
 
 This module provides a client for connecting to MCP servers and invoking their tools.
 Supports both STDIO and HTTP transports using the official MCP Python SDK.
+
+STDIO uses the SDK's stdio_client, HTTP uses the SDK's streamable_http_client.
+Both transports share the same ClientSession-based tool listing and invocation.
 """
 
 import asyncio
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Literal
-
-import httpx
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +68,13 @@ class MCPClient:
         self._session = None
         self._read_stream = None
         self._write_stream = None
-        self._stdio_context = None  # Context manager for stdio_client
-        self._http_client: httpx.Client | None = None
+        self._transport_context = None  # Context manager for transport (stdio or http)
+        self._http_async_client = None  # httpx.AsyncClient for HTTP transport
+        self._get_session_id = None  # Session ID callback from streamable_http_client
         self._tools: dict[str, MCPTool] = {}
         self._connected = False
 
-        # Background event loop for persistent STDIO connection
+        # Background event loop for persistent connection (both transports)
         self._loop = None
         self._loop_thread = None
 
@@ -84,7 +88,7 @@ class MCPClient:
         Returns:
             Result of the coroutine
         """
-        # If we have a persistent loop (for STDIO), use it
+        # If we have a persistent loop (for STDIO or HTTP), use it
         if self._loop is not None:
             # Check if loop is running AND not closed
             if self._loop.is_running() and not self._loop.is_closed():
@@ -99,8 +103,6 @@ class MCPClient:
             asyncio.get_running_loop()
             # If we're here, we're in an async context
             # Create a new thread to run the coroutine
-            import threading
-
             result = None
             exception = None
 
@@ -149,8 +151,6 @@ class MCPClient:
             raise ValueError("command is required for STDIO transport")
 
         try:
-            import threading
-
             from mcp import StdioServerParameters
 
             # Create server parameters
@@ -184,11 +184,11 @@ class MCPClient:
                         from mcp.client.stdio import stdio_client
 
                         # Create persistent stdio client context
-                        self._stdio_context = stdio_client(server_params)
+                        self._transport_context = stdio_client(server_params)
                         (
                             self._read_stream,
                             self._write_stream,
-                        ) = await self._stdio_context.__aenter__()
+                        ) = await self._transport_context.__aenter__()
 
                         # Create persistent session
                         self._session = ClientSession(self._read_stream, self._write_stream)
@@ -226,34 +226,92 @@ class MCPClient:
             raise RuntimeError(f"Failed to connect to MCP server: {e}") from e
 
     def _connect_http(self) -> None:
-        """Connect to MCP server via HTTP transport."""
+        """Connect to MCP server via HTTP transport using MCP SDK with persistent connection.
+
+        Uses the SDK's streamable_http_client for spec-compliant Streamable HTTP transport.
+        This follows the same background event loop pattern as _connect_stdio().
+        """
         if not self.config.url:
             raise ValueError("url is required for HTTP transport")
 
-        self._http_client = httpx.Client(
-            base_url=self.config.url,
-            headers=self.config.headers,
-            timeout=30.0,
-        )
+        # Ensure URL includes the MCP endpoint path.
+        # FastMCP defaults to /mcp for Streamable HTTP transport.
+        parsed = urlparse(self.config.url)
+        if not parsed.path or parsed.path == "/":
+            url = self.config.url.rstrip("/") + "/mcp"
+        else:
+            url = self.config.url
 
-        # Test connection
-        try:
-            response = self._http_client.get("/health")
-            response.raise_for_status()
-            logger.info(
-                f"Connected to MCP server '{self.config.name}' via HTTP at {self.config.url}"
-            )
-        except Exception as e:
-            logger.warning(f"Health check failed for MCP server '{self.config.name}': {e}")
-            # Continue anyway, server might not have health endpoint
+        # Start background event loop for persistent connection
+        loop_started = threading.Event()
+        connection_ready = threading.Event()
+        connection_error = []
+
+        def run_event_loop():
+            """Run event loop in background thread."""
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            loop_started.set()
+
+            async def init_connection():
+                try:
+                    from mcp import ClientSession
+                    from mcp.client.streamable_http import streamable_http_client
+                    from mcp.shared._httpx_utils import create_mcp_http_client
+
+                    # Create httpx.AsyncClient with custom headers for auth
+                    self._http_async_client = create_mcp_http_client(
+                        headers=self.config.headers or None,
+                    )
+
+                    # Create persistent Streamable HTTP client context
+                    self._transport_context = streamable_http_client(
+                        url,
+                        http_client=self._http_async_client,
+                    )
+                    (
+                        self._read_stream,
+                        self._write_stream,
+                        self._get_session_id,
+                    ) = await self._transport_context.__aenter__()
+
+                    # Create persistent session
+                    self._session = ClientSession(self._read_stream, self._write_stream)
+                    await self._session.__aenter__()
+
+                    # Initialize session (MCP spec handshake)
+                    await self._session.initialize()
+
+                    connection_ready.set()
+                except Exception as e:
+                    connection_error.append(e)
+                    connection_ready.set()
+
+            self._loop.create_task(init_connection())
+            self._loop.run_forever()
+
+        self._loop_thread = threading.Thread(target=run_event_loop, daemon=True)
+        self._loop_thread.start()
+
+        # Wait for loop to start
+        loop_started.wait(timeout=5)
+        if not loop_started.is_set():
+            raise RuntimeError("Event loop failed to start")
+
+        # Wait for connection to be ready (HTTP may need longer than STDIO)
+        connection_ready.wait(timeout=30)
+        if connection_error:
+            raise RuntimeError(
+                f"Failed to connect to MCP server '{self.config.name}' "
+                f"via HTTP at {url}: {connection_error[0]}"
+            ) from connection_error[0]
+
+        logger.info(f"Connected to MCP server '{self.config.name}' via HTTP at {url} (persistent)")
 
     def _discover_tools(self) -> None:
         """Discover available tools from the MCP server."""
         try:
-            if self.config.transport == "stdio":
-                tools_list = self._run_async(self._list_tools_stdio_async())
-            else:
-                tools_list = self._list_tools_http()
+            tools_list = self._run_async(self._list_tools_async())
 
             self._tools = {}
             for tool_data in tools_list:
@@ -273,10 +331,10 @@ class MCPClient:
             logger.error(f"Failed to discover tools from '{self.config.name}': {e}")
             raise
 
-    async def _list_tools_stdio_async(self) -> list[dict]:
-        """List tools via STDIO protocol using persistent session."""
+    async def _list_tools_async(self) -> list[dict]:
+        """List tools via persistent MCP session (works for both transports)."""
         if not self._session:
-            raise RuntimeError("STDIO session not initialized")
+            raise RuntimeError("MCP session not initialized")
 
         # List tools using persistent session
         response = await self._session.list_tools()
@@ -293,32 +351,6 @@ class MCPClient:
             )
 
         return tools_list
-
-    def _list_tools_http(self) -> list[dict]:
-        """List tools via HTTP protocol."""
-        if not self._http_client:
-            raise RuntimeError("HTTP client not initialized")
-
-        try:
-            # Use MCP over HTTP protocol
-            response = self._http_client.post(
-                "/mcp/v1",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/list",
-                    "params": {},
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if "error" in data:
-                raise RuntimeError(f"MCP error: {data['error']}")
-
-            return data.get("result", {}).get("tools", [])
-        except Exception as e:
-            raise RuntimeError(f"Failed to list tools via HTTP: {e}") from e
 
     def list_tools(self) -> list[MCPTool]:
         """
@@ -349,15 +381,12 @@ class MCPClient:
         if tool_name not in self._tools:
             raise ValueError(f"Unknown tool: {tool_name}")
 
-        if self.config.transport == "stdio":
-            return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
-        else:
-            return self._call_tool_http(tool_name, arguments)
+        return self._run_async(self._call_tool_async(tool_name, arguments))
 
-    async def _call_tool_stdio_async(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """Call tool via STDIO protocol using persistent session."""
+    async def _call_tool_async(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        """Call tool via persistent MCP session (works for both transports)."""
         if not self._session:
-            raise RuntimeError("STDIO session not initialized")
+            raise RuntimeError("MCP session not initialized")
 
         # Call tool using persistent session
         result = await self._session.call_tool(tool_name, arguments=arguments)
@@ -385,49 +414,21 @@ class MCPClient:
 
         return None
 
-    def _call_tool_http(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        """Call tool via HTTP protocol."""
-        if not self._http_client:
-            raise RuntimeError("HTTP client not initialized")
-
-        try:
-            response = self._http_client.post(
-                "/mcp/v1",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": tool_name,
-                        "arguments": arguments,
-                    },
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            if "error" in data:
-                raise RuntimeError(f"Tool execution error: {data['error']}")
-
-            return data.get("result", {}).get("content", [])
-        except Exception as e:
-            raise RuntimeError(f"Failed to call tool via HTTP: {e}") from e
-
     _CLEANUP_TIMEOUT = 10
     _THREAD_JOIN_TIMEOUT = 12
 
-    async def _cleanup_stdio_async(self) -> None:
-        """Async cleanup for STDIO session and context managers.
+    async def _cleanup_async(self) -> None:
+        """Async cleanup for MCP session and transport context managers.
 
         Cleanup order is critical:
-        - The session must be closed BEFORE the stdio_context because the session
-          depends on the streams provided by stdio_context.
-        - This mirrors the initialization order in _connect_stdio(), where
-          stdio_context is entered first (providing streams), then the session is
-          created with those streams and entered.
+        - The session must be closed BEFORE the transport_context because the session
+          depends on the streams provided by the transport context.
+        - This mirrors the initialization order in _connect_stdio()/_connect_http(),
+          where the transport context is entered first (providing streams), then the
+          session is created with those streams and entered.
         - Do not change this ordering without carefully considering these dependencies.
         """
-        # First: close session (depends on stdio_context streams)
+        # First: close session (depends on transport_context streams)
         try:
             if self._session:
                 await self._session.__aexit__(None, None, None)
@@ -440,22 +441,32 @@ class MCPClient:
         finally:
             self._session = None
 
-        # Second: close stdio_context (provides the underlying streams)
+        # Second: close transport context (provides the underlying streams)
         try:
-            if self._stdio_context:
-                await self._stdio_context.__aexit__(None, None, None)
+            if self._transport_context:
+                await self._transport_context.__aexit__(None, None, None)
         except asyncio.CancelledError:
             logger.warning(
-                "STDIO context cleanup was cancelled; proceeding with best-effort shutdown"
+                "Transport context cleanup was cancelled; proceeding with best-effort shutdown"
             )
         except Exception as e:
-            logger.warning(f"Error closing STDIO context: {e}")
+            logger.warning(f"Error closing transport context: {e}")
         finally:
-            self._stdio_context = None
+            self._transport_context = None
+
+        # Third: close the httpx.AsyncClient if it was created for HTTP transport
+        # The SDK does NOT auto-close a provided http_client, so we must do it.
+        try:
+            if self._http_async_client:
+                await self._http_async_client.aclose()
+        except Exception as e:
+            logger.warning(f"Error closing HTTP async client: {e}")
+        finally:
+            self._http_async_client = None
 
     def disconnect(self) -> None:
         """Disconnect from the MCP server."""
-        # Clean up persistent STDIO connection
+        # Clean up persistent connection (both STDIO and HTTP use background event loop)
         if self._loop is not None:
             cleanup_attempted = False
 
@@ -466,7 +477,7 @@ class MCPClient:
             if self._loop.is_running():
                 try:
                     cleanup_future = asyncio.run_coroutine_threadsafe(
-                        self._cleanup_stdio_async(), self._loop
+                        self._cleanup_async(), self._loop
                     )
                     cleanup_future.result(timeout=self._CLEANUP_TIMEOUT)
                     cleanup_attempted = True
@@ -479,7 +490,7 @@ class MCPClient:
                     cleanup_attempted = True
                     logger.debug(f"Event loop stopped during async cleanup: {e}")
                 except Exception as e:
-                    # Cleanup was attempted but failed (e.g., error in _cleanup_stdio_async())
+                    # Cleanup was attempted but failed (e.g., error in _cleanup_async())
                     cleanup_attempted = True
                     logger.warning(f"Error during async cleanup: {e}")
 
@@ -493,11 +504,11 @@ class MCPClient:
             if not cleanup_attempted:
                 # Fallback: loop exists but is not running (e.g., crashed or stopped externally).
                 # At this point the loop and associated resources are in an undefined state.
-                # The context managers (_session, _stdio_context) were created in the loop's
+                # The context managers (_session, _transport_context) were created in the loop's
                 # thread and may not be safely cleanable from here. Just log and proceed
                 # with reference clearing - the OS will reclaim resources on process exit.
                 logger.warning(
-                    "Event loop for STDIO MCP connection exists but is not running; "
+                    "Event loop for MCP connection exists but is not running; "
                     "skipping async cleanup. Resources may not be fully released."
                 )
 
@@ -506,28 +517,25 @@ class MCPClient:
                 self._loop_thread.join(timeout=self._THREAD_JOIN_TIMEOUT)
                 if self._loop_thread.is_alive():
                     logger.warning(
-                        "Event loop thread for STDIO MCP connection did not terminate "
+                        "Event loop thread for MCP connection did not terminate "
                         f"within {self._THREAD_JOIN_TIMEOUT}s; thread may still be running."
                     )
 
             # Clear remaining references
-            # Note: _session and _stdio_context may already be None if _cleanup_stdio_async()
+            # Note: _session and _transport_context may already be None if _cleanup_async()
             # succeeded. This redundant assignment is intentional for safety in cases where:
             # 1. Cleanup timed out or failed
             # 2. Cleanup was skipped (loop not running)
             # 3. CancelledError interrupted cleanup
             # Setting None to None is safe and ensures clean state.
             self._session = None
-            self._stdio_context = None
+            self._transport_context = None
+            self._http_async_client = None
+            self._get_session_id = None
             self._read_stream = None
             self._write_stream = None
             self._loop = None
             self._loop_thread = None
-
-        # Clean up HTTP client
-        if self._http_client:
-            self._http_client.close()
-            self._http_client = None
 
         self._connected = False
         logger.info(f"Disconnected from MCP server '{self.config.name}'")
