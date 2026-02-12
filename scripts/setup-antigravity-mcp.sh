@@ -3,7 +3,7 @@
 # setup-antigravity-mcp.sh - Write Antigravity/Claude MCP config with auto-detected paths
 #
 # Run from anywhere inside the hive repo. Generates ~/.gemini/antigravity/mcp_config.json
-# based on .antigravity/mcp_config.json template, with absolute cwd paths so the IDE can
+# based on .antigravity/mcp_config.json template, with absolute paths so the IDE can
 # connect to agent-builder and tools MCP servers without manual path editing.
 #
 set -e
@@ -39,8 +39,9 @@ TOOLS_DIR="$(cd "$REPO_ROOT/tools" && pwd)"
 mkdir -p "$HOME/.gemini/antigravity"
 
 # Generate config from template with absolute paths
-sed -e "s|\"cwd\": \"core\"|\"cwd\": \"$CORE_DIR\"|g" \
-    -e "s|\"cwd\": \"tools\"|\"cwd\": \"$TOOLS_DIR\"|g" \
+# Replace relative "core" and "tools" with absolute paths in --directory args
+sed -e "s|\"--directory\", \"core\"|\"--directory\", \"$CORE_DIR\"|g" \
+    -e "s|\"--directory\", \"tools\"|\"--directory\", \"$TOOLS_DIR\"|g" \
     "$TEMPLATE" > "$HOME/.gemini/antigravity/mcp_config.json"
 
 echo "Wrote $HOME/.gemini/antigravity/mcp_config.json (from $TEMPLATE)"
