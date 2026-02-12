@@ -977,6 +977,12 @@ EOF
             continue
         fi
 
+        # Git may check out symlinks as plain files on systems without symlink support.
+        # Remove the plain file so we can replace it with a proper symlink or directory copy.
+        if [ -f "$link_path" ]; then
+            rm -f "$link_path"
+        fi
+
         if ln -s "$target" "$link_path" 2>/dev/null; then
             echo -e "${GREEN}  ✓ Linked .agents/skills/$skill${NC}"
             CODEX_CHANGES=$((CODEX_CHANGES + 1))
@@ -1089,7 +1095,9 @@ else
 fi
 
 echo -n "  ⬡ Codex skills... "
-if [ -d "$SCRIPT_DIR/.agents/skills" ]; then
+if [ "$CODEX_SETUP_ENABLED" = false ]; then
+    echo -e "${YELLOW}-- (skipped)${NC}"
+elif [ -d "$SCRIPT_DIR/.agents/skills" ]; then
     MISSING_CODEX_SKILLS=()
     for skill in "${REQUIRED_CODEX_SKILLS[@]}"; do
         if [ ! -d "$SCRIPT_DIR/.agents/skills/$skill" ]; then
