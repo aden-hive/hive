@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from fastmcp import FastMCP
 
@@ -43,7 +44,9 @@ def batch_fn(gmail_tools):
     return gmail_tools["gmail_batch_modify_messages"]
 
 
-def _mock_response(status_code: int = 200, json_data: dict | None = None, text: str = "") -> MagicMock:
+def _mock_response(
+    status_code: int = 200, json_data: dict | None = None, text: str = ""
+) -> MagicMock:
     """Create a mock httpx.Response."""
     resp = MagicMock()
     resp.status_code = status_code
@@ -95,17 +98,22 @@ class TestCredentials:
 
 
 class TestListMessages:
-
     def test_list_success(self, list_fn, monkeypatch):
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
-        mock_resp = _mock_response(200, {
-            "messages": [{"id": "msg1", "threadId": "t1"}, {"id": "msg2", "threadId": "t2"}],
-            "resultSizeEstimate": 2,
-        })
+        mock_resp = _mock_response(
+            200,
+            {
+                "messages": [{"id": "msg1", "threadId": "t1"}, {"id": "msg2", "threadId": "t2"}],
+                "resultSizeEstimate": 2,
+            },
+        )
         with patch(HTTPX_MODULE, return_value=mock_resp) as mock_req:
             result = list_fn(query="is:unread", max_results=10)
 
-        assert result["messages"] == [{"id": "msg1", "threadId": "t1"}, {"id": "msg2", "threadId": "t2"}]
+        assert result["messages"] == [
+            {"id": "msg1", "threadId": "t1"},
+            {"id": "msg2", "threadId": "t2"},
+        ]
         assert result["result_size_estimate"] == 2
         # Verify correct API call
         call_args = mock_req.call_args
@@ -125,10 +133,13 @@ class TestListMessages:
 
     def test_list_with_page_token(self, list_fn, monkeypatch):
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
-        mock_resp = _mock_response(200, {
-            "messages": [{"id": "msg3", "threadId": "t3"}],
-            "nextPageToken": "page2",
-        })
+        mock_resp = _mock_response(
+            200,
+            {
+                "messages": [{"id": "msg3", "threadId": "t3"}],
+                "nextPageToken": "page2",
+            },
+        )
         with patch(HTTPX_MODULE, return_value=mock_resp) as mock_req:
             result = list_fn(page_token="page1")
 
@@ -153,6 +164,14 @@ class TestListMessages:
         assert "expired" in result["error"].lower() or "invalid" in result["error"].lower()
         assert "help" in result
 
+    def test_list_network_error(self, list_fn, monkeypatch):
+        monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
+        with patch(HTTPX_MODULE, side_effect=httpx.HTTPError("connection refused")):
+            result = list_fn()
+
+        assert "error" in result
+        assert "Request failed" in result["error"]
+
 
 # ---------------------------------------------------------------------------
 # gmail_get_message
@@ -160,23 +179,25 @@ class TestListMessages:
 
 
 class TestGetMessage:
-
     def test_get_metadata(self, get_fn, monkeypatch):
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
-        mock_resp = _mock_response(200, {
-            "id": "msg1",
-            "threadId": "t1",
-            "labelIds": ["INBOX", "UNREAD"],
-            "snippet": "Hey there...",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Hello"},
-                    {"name": "From", "value": "alice@example.com"},
-                    {"name": "To", "value": "bob@example.com"},
-                    {"name": "Date", "value": "Mon, 1 Jan 2026 00:00:00 +0000"},
-                ],
+        mock_resp = _mock_response(
+            200,
+            {
+                "id": "msg1",
+                "threadId": "t1",
+                "labelIds": ["INBOX", "UNREAD"],
+                "snippet": "Hey there...",
+                "payload": {
+                    "headers": [
+                        {"name": "Subject", "value": "Hello"},
+                        {"name": "From", "value": "alice@example.com"},
+                        {"name": "To", "value": "bob@example.com"},
+                        {"name": "Date", "value": "Mon, 1 Jan 2026 00:00:00 +0000"},
+                    ],
+                },
             },
-        })
+        )
         with patch(HTTPX_MODULE, return_value=mock_resp):
             result = get_fn(message_id="msg1")
 
@@ -188,18 +209,22 @@ class TestGetMessage:
 
     def test_get_full_with_body(self, get_fn, monkeypatch):
         import base64
+
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
         body_b64 = base64.urlsafe_b64encode(b"Hello world").decode()
-        mock_resp = _mock_response(200, {
-            "id": "msg2",
-            "threadId": "t2",
-            "labelIds": ["INBOX"],
-            "snippet": "Hello...",
-            "payload": {
-                "headers": [{"name": "Subject", "value": "Test"}],
-                "body": {"data": body_b64},
+        mock_resp = _mock_response(
+            200,
+            {
+                "id": "msg2",
+                "threadId": "t2",
+                "labelIds": ["INBOX"],
+                "snippet": "Hello...",
+                "payload": {
+                    "headers": [{"name": "Subject", "value": "Test"}],
+                    "body": {"data": body_b64},
+                },
             },
-        })
+        )
         with patch(HTTPX_MODULE, return_value=mock_resp):
             result = get_fn(message_id="msg2", format="full")
 
@@ -207,21 +232,25 @@ class TestGetMessage:
 
     def test_get_multipart_body(self, get_fn, monkeypatch):
         import base64
+
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
         plain_b64 = base64.urlsafe_b64encode(b"Plain text body").decode()
-        mock_resp = _mock_response(200, {
-            "id": "msg3",
-            "threadId": "t3",
-            "labelIds": [],
-            "snippet": "Plain...",
-            "payload": {
-                "headers": [],
-                "parts": [
-                    {"mimeType": "text/plain", "body": {"data": plain_b64}},
-                    {"mimeType": "text/html", "body": {"data": "ignored"}},
-                ],
+        mock_resp = _mock_response(
+            200,
+            {
+                "id": "msg3",
+                "threadId": "t3",
+                "labelIds": [],
+                "snippet": "Plain...",
+                "payload": {
+                    "headers": [],
+                    "parts": [
+                        {"mimeType": "text/plain", "body": {"data": plain_b64}},
+                        {"mimeType": "text/html", "body": {"data": "ignored"}},
+                    ],
+                },
             },
-        })
+        )
         with patch(HTTPX_MODULE, return_value=mock_resp):
             result = get_fn(message_id="msg3", format="full")
 
@@ -249,7 +278,6 @@ class TestGetMessage:
 
 
 class TestTrashMessage:
-
     def test_trash_success(self, trash_fn, monkeypatch):
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
         mock_resp = _mock_response(200, {"id": "msg1", "labelIds": ["TRASH"]})
@@ -282,7 +310,6 @@ class TestTrashMessage:
 
 
 class TestModifyMessage:
-
     def test_star_message(self, modify_fn, monkeypatch):
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
         mock_resp = _mock_response(200, {"id": "msg1", "labelIds": ["INBOX", "STARRED"]})
@@ -332,7 +359,6 @@ class TestModifyMessage:
 
 
 class TestBatchModifyMessages:
-
     def test_batch_success(self, batch_fn, monkeypatch):
         monkeypatch.setenv("GOOGLE_ACCESS_TOKEN", "test_token")
         mock_resp = _mock_response(204)

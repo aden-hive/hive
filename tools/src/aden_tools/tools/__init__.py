@@ -25,7 +25,6 @@ from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
-from .gmail_tool import register_tools as register_gmail
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -42,6 +41,7 @@ from .file_system_toolkits.replace_file_content import (
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
+from .gmail_tool import register_tools as register_gmail
 from .hubspot_tool import register_tools as register_hubspot
 from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
@@ -140,6 +140,7 @@ def register_all_tools(
         "github_get_user_profile",
         "github_get_user_emails",
         "send_email",
+        "gmail_reply_email",
         "gmail_list_messages",
         "gmail_get_message",
         "gmail_trash_message",

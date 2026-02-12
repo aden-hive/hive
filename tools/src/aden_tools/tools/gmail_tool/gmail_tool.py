@@ -229,9 +229,7 @@ def register_tools(
                     part_body = part.get("body", {})
                     if part_body.get("data"):
                         try:
-                            return base64.urlsafe_b64decode(part_body["data"]).decode(
-                                "utf-8"
-                            )
+                            return base64.urlsafe_b64decode(part_body["data"]).decode("utf-8")
                         except Exception:
                             pass
         return None
@@ -304,12 +302,12 @@ def register_tools(
             message_id = _sanitize_path_param(message_id, "message_id")
         except ValueError as e:
             return {"error": str(e)}
-        if not add_labels and not remove_labels:
-            return {"error": "At least one of add_labels or remove_labels is required"}
-
         token = _require_token()
         if isinstance(token, dict):
             return token
+
+        if not add_labels and not remove_labels:
+            return {"error": "At least one of add_labels or remove_labels is required"}
 
         body: dict[str, list[str]] = {}
         if add_labels:
@@ -318,9 +316,7 @@ def register_tools(
             body["removeLabelIds"] = remove_labels
 
         try:
-            response = _gmail_request(
-                "POST", f"messages/{message_id}/modify", token, json=body
-            )
+            response = _gmail_request("POST", f"messages/{message_id}/modify", token, json=body)
         except httpx.HTTPError as e:
             return {"error": f"Request failed: {e}"}
 
@@ -357,12 +353,13 @@ def register_tools(
         """
         if not message_ids:
             return {"error": "message_ids list is required and must not be empty"}
-        if not add_labels and not remove_labels:
-            return {"error": "At least one of add_labels or remove_labels is required"}
 
         token = _require_token()
         if isinstance(token, dict):
             return token
+
+        if not add_labels and not remove_labels:
+            return {"error": "At least one of add_labels or remove_labels is required"}
 
         body: dict = {"ids": message_ids}
         if add_labels:
@@ -371,9 +368,7 @@ def register_tools(
             body["removeLabelIds"] = remove_labels
 
         try:
-            response = _gmail_request(
-                "POST", "messages/batchModify", token, json=body
-            )
+            response = _gmail_request("POST", "messages/batchModify", token, json=body)
         except httpx.HTTPError as e:
             return {"error": f"Request failed: {e}"}
 

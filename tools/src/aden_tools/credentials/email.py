@@ -37,6 +37,7 @@ EMAIL_CREDENTIALS = {
         env_var="GOOGLE_ACCESS_TOKEN",
         tools=[
             "send_email",
+            "gmail_reply_email",
             "gmail_list_messages",
             "gmail_get_message",
             "gmail_trash_message",
