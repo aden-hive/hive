@@ -18,9 +18,11 @@
 *.sh text eol=lf
 quickstart.sh text eol=lf
 
-# PowerShell scripts (Windows-friendly)
-*.ps1 text eol=lf
-*.psm1 text eol=lf
+# PowerShell scripts (Windows-native CRLF)
+*.ps1 text eol=crlf
+*.ps1xml text eol=crlf
+*.psd1 text eol=crlf
+*.psm1 text eol=crlf
 
 # Windows batch files (must use CRLF)
 *.bat text eol=crlf
