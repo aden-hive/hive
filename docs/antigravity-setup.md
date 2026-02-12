@@ -6,7 +6,7 @@ Use the Hive agent framework (MCP servers and skills) inside [Antigravity IDE](h
 
 ## Quick start (3 steps)
 
-**Repo root** = the folder that contains `core/`, `tools/`, and `.antigravity/` (where you cloned the project).
+**Repo root** = the folder that contains `core/`, `tools/`, and `.agent/` (where you cloned the project).
 
 1. **Open a terminal** and go to the hive repo root (e.g. `cd ~/hive`).
 2. **Run the setup script** (use `./` so the script runs from this repo; don't use `/scripts/...`):
@@ -25,7 +25,7 @@ Done. For details, prerequisites, and troubleshooting, read on.
 
 - **agent-builder** – Create and manage agents (goals, nodes, edges).
 - **tools** – File operations, web search, and other agent tools.
-- **Skills** – Guided docs for building and testing agents (in `.antigravity/skills/` or `.claude/skills/`).
+- **Skills** – Guided docs for building and testing agents (in `.agent/skills/` or `.claude/skills/`).
 
 ---
 
@@ -82,7 +82,7 @@ That writes `~/.claude/mcp.json` as well.
 
 ### Step 3: Use skills
 
-Skills are guides (workflow, building, testing) in `.antigravity/skills/` (they point to `.claude/skills/`). If Antigravity doesn’t show a “skills” UI, open those folders in the project and use the files as reference while you use the MCP tools.
+Skills are guides (workflow, building, testing) in `.agent/skills/` (they point to `.claude/skills/`). If Antigravity doesn’t show a “skills” UI, open those folders in the project and use the files as reference while you use the MCP tools.
 
 | Skill | What it's for |
 |-------|----------------|
@@ -95,15 +95,15 @@ Skills are guides (workflow, building, testing) in `.antigravity/skills/` (they 
 
 ---
 
-## What’s in the repo (`.antigravity/`)
+## What’s in the repo (`.agent/`)
 
 ```
-.antigravity/
+.agent/
 ├── mcp_config.json   # Template for MCP servers (agent-builder, tools)
 └── skills/           # Symlinks to .claude/skills/
 ```
 
-The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_config.json`) using paths from **this repo**. The file in `.antigravity/` is the template; Antigravity itself uses the file in your home directory.
+The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_config.json`) using paths from **this repo**. The file in `.agent/` is the template; Antigravity itself uses the file in your home directory.
 
 ---
 
@@ -125,7 +125,7 @@ The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_con
 
 **Skills don’t show up in the UI**
 
-- Antigravity may not have a dedicated “skills” panel. Use the files in `.claude/skills/` or `.antigravity/skills/` as docs; the MCP tools (agent-builder, tools) still work.
+- Antigravity may not have a dedicated “skills” panel. Use the files in `.claude/skills/` or `.agent/skills/` as docs; the MCP tools (agent-builder, tools) still work.
 
 ---
 
@@ -138,7 +138,7 @@ Check the Hive + Antigravity integration:
 
 1. MCP: List available MCP servers/tools. Confirm that "agent-builder" and "tools" (or equivalent) are connected. If not, tell the user to run ./scripts/setup-antigravity-mcp.sh from the hive repo root, then restart Antigravity (see docs/antigravity-setup.md).
 
-2. Skills: Confirm that the project has .antigravity/skills/ (or .claude/skills/) with: hive, hive-concepts, hive-create, hive-patterns, hive-test, hive-credentials.
+2. Skills: Confirm that the project has .agent/skills/ (or .claude/skills/) with: hive, hive-concepts, hive-create, hive-patterns, hive-test, hive-credentials.
 
 3. Result: Reply with PASS (MCP + skills OK), PARTIAL (only skills or only MCP), or FAIL (neither), and one line on what to fix if not PASS.
 ```
@@ -181,16 +181,16 @@ From the **repo root**:
 **Check that config and skills exist**
 
 ```bash
-test -f .antigravity/mcp_config.json && echo "OK: mcp_config.json" || echo "MISSING"
+test -f .agent/mcp_config.json && echo "OK: mcp_config.json" || echo "MISSING"
 for s in hive hive-concepts hive-create hive-patterns hive-test hive-credentials; do
-  test -L .antigravity/skills/$s && test -d .antigravity/skills/$s && echo "OK: $s" || echo "BROKEN: $s"
+  test -L .agent/skills/$s && test -d .agent/skills/$s && echo "OK: $s" || echo "BROKEN: $s"
 done
 ```
 
 **Check that the config is valid JSON**
 
 ```bash
-python3 -c "import json; json.load(open('.antigravity/mcp_config.json')); print('OK: valid JSON')"
+python3 -c "import json; json.load(open('.agent/mcp_config.json')); print('OK: valid JSON')"
 ```
 
 **Test that MCP servers start** (two terminals)
