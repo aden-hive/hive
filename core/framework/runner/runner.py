@@ -1122,7 +1122,8 @@ class AgentRunner:
                     warnings.append(warning_msg)
 
             # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
-            node_types = list({node.node_type for node in self.graph.nodes})
+            # Use set directly (membership checks only, order doesn't matter)
+            node_types = {node.node_type for node in self.graph.nodes}
             for nt in node_types:
                 cred_name = node_type_to_cred.get(nt)
                 if cred_name is None or cred_name in checked:

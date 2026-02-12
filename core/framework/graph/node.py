@@ -352,6 +352,71 @@ class SharedMemory:
                         )
             self._data[key] = value
 
+    def write_batch(self, data: dict[str, Any]) -> list[str]:
+        """
+        Write multiple key-value pairs in a single operation.
+
+        More efficient than calling write() multiple times:
+        - Single validation pass
+        - Reduced method call overhead
+
+        Args:
+            data: Dictionary of key-value pairs to write
+
+        Returns:
+            List of keys that were written
+
+        Raises:
+            MemoryWriteError: If any value is invalid
+        """
+        if not data:
+            return []
+
+        keys = []
+        for key, value in data.items():
+            if self._allowed_write and key not in self._allowed_write:
+                raise PermissionError(f"Node not allowed to write key: {key}")
+
+            if isinstance(value, str):
+                # Check for obviously hallucinated content
+                if len(value) > 5000:
+                    # Long strings that look like code are suspicious
+                    if self._contains_code_indicators(value):
+                        logger.warning(
+                            f"⚠ Suspicious write to key '{key}': appears to be code "
+                            f"({len(value)} chars). Consider using validate=False if intended."
+                        )
+                        raise MemoryWriteError(
+                            f"Rejected suspicious content for key '{key}': "
+                            f"appears to be hallucinated code ({len(value)} chars). "
+                            "If this is intentional, use validate=False."
+                        )
+
+            self._data[key] = value
+            keys.append(key)
+
+        return keys
+
+    def read_batch(self, keys: list[str]) -> dict[str, Any]:
+        """
+        Read multiple values in single operation.
+
+        More efficient than calling read() multiple times.
+
+        Args:
+            keys: List of keys to read
+
+        Returns:
+            Dictionary mapping keys to values (missing keys omitted)
+        """
+        result = {}
+        for key in keys:
+            if self._allowed_read and key not in self._allowed_read:
+                raise PermissionError(f"Node not allowed to read key: {key}")
+            if key in self._data:
+                result[key] = self._data[key]
+        return result
+
     def _contains_code_indicators(self, value: str) -> bool:
         """
         Check for code patterns in a string using sampling for efficiency.
