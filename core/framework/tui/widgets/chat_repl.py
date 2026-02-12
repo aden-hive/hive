@@ -22,10 +22,36 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
+from textual.message import Message
 from textual.widgets import Label, TextArea
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichLog
+
+
+class ChatTextArea(TextArea):
+    """TextArea that submits on Enter and inserts newlines on Shift+Enter."""
+
+    class Submitted(Message):
+        """Posted when the user presses Enter."""
+
+        def __init__(self, text: str) -> None:
+            super().__init__()
+            self.text = text
+
+    async def _on_key(self, event) -> None:
+        if event.key == "enter":
+            text = self.text.strip()
+            self.clear()
+            if text:
+                self.post_message(self.Submitted(text))
+            event.stop()
+            event.prevent_default()
+        elif event.key == "shift+enter":
+            event.key = "enter"
+            await super()._on_key(event)
+        else:
+            await super()._on_key(event)
 
 
 class ChatRepl(Vertical):
@@ -56,7 +82,7 @@ class ChatRepl(Vertical):
         display: none;
     }
 
-    ChatRepl > TextArea {
+    ChatRepl > ChatTextArea {
         width: 100%;
         height: auto;
         max-height: 7;
@@ -66,7 +92,7 @@ class ChatRepl(Vertical):
         margin-top: 1;
     }
 
-    ChatRepl > TextArea:focus {
+    ChatRepl > ChatTextArea:focus {
         border: tall $accent;
     }
     """
@@ -109,7 +135,7 @@ class ChatRepl(Vertical):
             min_width=0,
         )
         yield Label("Agent is processing...", id="processing-indicator")
-        yield TextArea(id="chat-input", placeholder="Enter input for agent...")
+        yield ChatTextArea(id="chat-input", placeholder="Enter input for agent...")
 
     # Regex for file:// URIs that are NOT already inside Rich [link=...] markup
     _FILE_URI_RE = re.compile(r"(?<!\[link=)(file://[^\s)\]>*]+)")
@@ -486,7 +512,7 @@ class ChatRepl(Vertical):
             indicator.display = True
 
             # Update placeholder
-            chat_input = self.query_one("#chat-input", TextArea)
+            chat_input = self.query_one("#chat-input", ChatTextArea)
             chat_input.placeholder = "Commands: /pause, /sessions (agent resuming...)"
 
             # Trigger execution with resume state
@@ -573,7 +599,7 @@ class ChatRepl(Vertical):
             indicator.display = True
 
             # Update placeholder
-            chat_input = self.query_one("#chat-input", TextArea)
+            chat_input = self.query_one("#chat-input", ChatTextArea)
             chat_input.placeholder = "Commands: /pause, /sessions (agent recovering...)"
 
             # Trigger execution with checkpoint recovery
@@ -740,18 +766,9 @@ class ChatRepl(Vertical):
             # Silently fail - don't block TUI startup
             pass
 
-    async def on_key(self, event) -> None:
-        """Intercept Enter in TextArea to submit; Shift+Enter inserts newline."""
-        focused = self.app.focused
-        if not isinstance(focused, TextArea):
-            return
-        if event.key == "enter" and not event.shift:
-            event.prevent_default()
-            chat_input = self.query_one("#chat-input", TextArea)
-            user_input = chat_input.text.strip()
-            chat_input.clear()
-            if user_input:
-                await self._submit_input(user_input)
+    async def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
+        """Handle chat input submission."""
+        await self._submit_input(message.text)
 
     async def _submit_input(self, user_input: str) -> None:
         """Handle submitted text — either start new execution or inject input."""
@@ -769,7 +786,7 @@ class ChatRepl(Vertical):
             self._write_history(f"[bold green]You:[/bold green] {user_input}")
 
             # Keep input enabled for commands (but change placeholder)
-            chat_input = self.query_one("#chat-input", TextArea)
+            chat_input = self.query_one("#chat-input", ChatTextArea)
             chat_input.placeholder = "Commands: /pause, /sessions (agent processing...)"
             self._waiting_for_input = False
 
@@ -823,7 +840,7 @@ class ChatRepl(Vertical):
             indicator.display = True
 
             # Keep input enabled for commands during execution
-            chat_input = self.query_one("#chat-input", TextArea)
+            chat_input = self.query_one("#chat-input", ChatTextArea)
             chat_input.placeholder = "Commands available: /pause, /sessions, /help"
 
             # Submit execution to the dedicated agent loop so blocking
@@ -844,7 +861,7 @@ class ChatRepl(Vertical):
             indicator.display = False
             self._current_exec_id = None
             # Re-enable input on error
-            chat_input = self.query_one("#chat-input", TextArea)
+            chat_input = self.query_one("#chat-input", ChatTextArea)
             chat_input.disabled = False
             self._write_history(f"[bold red]Error:[/bold red] {e}")
 
@@ -920,7 +937,7 @@ class ChatRepl(Vertical):
         self._pending_ask_question = ""
 
         # Re-enable input
-        chat_input = self.query_one("#chat-input", TextArea)
+        chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
@@ -940,7 +957,7 @@ class ChatRepl(Vertical):
         self._input_node_id = None
 
         # Re-enable input
-        chat_input = self.query_one("#chat-input", TextArea)
+        chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
@@ -971,7 +988,7 @@ class ChatRepl(Vertical):
         indicator = self.query_one("#processing-indicator", Label)
         indicator.update("Waiting for your input...")
 
-        chat_input = self.query_one("#chat-input", TextArea)
+        chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         chat_input.placeholder = "Type your response..."
         chat_input.focus()
