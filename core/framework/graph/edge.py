@@ -435,6 +435,25 @@ class GraphSpec(BaseModel):
         description="EventLoopNode configuration (max_iterations, max_tool_calls_per_turn, etc.)",
     )
 
+    # Conversation mode
+    conversation_mode: str = Field(
+        default="continuous",
+        description=(
+            "How conversations flow between event_loop nodes. "
+            "'continuous' (default): one conversation threads through all "
+            "event_loop nodes with cumulative tools and layered prompt composition. "
+            "'isolated': each node gets a fresh conversation."
+        ),
+    )
+    identity_prompt: str | None = Field(
+        default=None,
+        description=(
+            "Agent-level identity prompt (Layer 1 of the onion model). "
+            "In continuous mode, this is the static identity that persists "
+            "unchanged across all node transitions. In isolated mode, ignored."
+        ),
+    )
+
     # Metadata
     description: str = ""
     created_by: str = ""  # "human" or "builder_agent"
