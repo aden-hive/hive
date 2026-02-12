@@ -293,8 +293,13 @@ class ExecutionStream:
         if not self._running:
             raise RuntimeError(f"ExecutionStream '{self.stream_id}' is not running")
 
-        # Generate execution ID using unified session format
-        if self._session_store:
+        # When resuming, reuse the original session ID so the execution
+        # continues in the same session directory instead of creating a new one.
+        resume_session_id = session_state.get("resume_session_id") if session_state else None
+
+        if resume_session_id:
+            execution_id = resume_session_id
+        elif self._session_store:
             execution_id = self._session_store.generate_session_id()
         else:
             # Fallback to old format if SessionStore not available (shouldn't happen)
@@ -597,10 +602,22 @@ class ExecutionStream:
                     entry_point=self.entry_spec.id,
                 )
             else:
-                # Create initial state
-                from framework.schemas.session_state import SessionTimestamps
+                # Create initial state — when resuming, preserve the previous
+                # execution's progress so crashes don't lose track of state.
+                from framework.schemas.session_state import (
+                    SessionProgress,
+                    SessionTimestamps,
+                )
 
                 now = datetime.now().isoformat()
+                ss = ctx.session_state or {}
+                progress = SessionProgress(
+                    current_node=ss.get("paused_at") or ss.get("resume_from"),
+                    paused_at=ss.get("paused_at"),
+                    resume_from=ss.get("paused_at") or ss.get("resume_from"),
+                    path=ss.get("execution_path", []),
+                    node_visit_counts=ss.get("node_visit_counts", {}),
+                )
                 state = SessionState(
                     session_id=execution_id,
                     stream_id=self.stream_id,
@@ -613,6 +630,8 @@ class ExecutionStream:
                         started_at=ctx.started_at.isoformat(),
                         updated_at=now,
                     ),
+                    progress=progress,
+                    memory=ss.get("memory", {}),
                     input_data=ctx.input_data,
                 )
 
