@@ -37,7 +37,7 @@ class SessionStore:
         Initialize session store.
 
         Args:
-            base_path: Base path for storage (e.g., ~/.hive/agents/twitter_outreach)
+            base_path: Base path for storage (e.g., ~/.hive/agents/deep_research_agent)
         """
         self.base_path = Path(base_path)
         self.sessions_dir = self.base_path / "sessions"

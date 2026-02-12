@@ -116,6 +116,16 @@ Skills are also available in Cursor. To enable:
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
 4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
+
+### Opencode Support
+To enable Opencode integration:
+
+1. Create/Ensure `.opencode/` directory exists
+2. Configure MCP servers in `.opencode/mcp.json`
+3. Restart Opencode to load the MCP servers
+4. Switch to the Hive agent
+* **Tools:** Accesses `agent-builder` and standard `tools` via standard MCP protocols over stdio.
+
 ### Verify Setup
 
 ```bash
@@ -163,6 +173,7 @@ hive/                                    # Repository root
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
 │   │   ├── mcp/                         # MCP server integration
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
+|   |   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
 │   │   ├── runtime/                     # Runtime environment
 │   │   ├── schemas/                     # Data schemas
 │   │   ├── storage/                     # File-based persistence
@@ -204,10 +215,10 @@ hive/                                    # Repository root
 ├── scripts/                             # Utility scripts
 │   └── auto-close-duplicates.ts         # GitHub duplicate issue closer
 │
+├── .agent/                        # Antigravity IDE: mcp_config.json + skills (symlinks)
 ├── quickstart.sh                        # Interactive setup wizard
 ├── README.md                            # Project overview
 ├── CONTRIBUTING.md                      # Contribution guidelines
-├── CHANGELOG.md                         # Version history
 ├── LICENSE                              # Apache 2.0 License
 ├── docs/CODE_OF_CONDUCT.md              # Community guidelines
 └── SECURITY.md                          # Security policy
@@ -645,7 +656,6 @@ lsof -i :4000
 # Kill process
 kill -9 <PID>
 
-# Or change ports in config.yaml and regenerate
 ```
 
 ### Environment Variables Not Loading
