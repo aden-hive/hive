@@ -420,6 +420,7 @@ class TestZohoCRMHealthChecker:
         assert result.valid is True
         assert result.details.get("rate_limited") is True
 
+
 class TestCheckCredentialHealthDispatcher:
     """Tests for the check_credential_health() top-level dispatcher."""
 
