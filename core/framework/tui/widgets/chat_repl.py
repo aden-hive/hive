@@ -83,6 +83,7 @@ class ChatRepl(Vertical):
         self._waiting_for_input: bool = False
         self._input_node_id: str | None = None
         self._pending_ask_question: str = ""
+        self._active_node_id: str | None = None  # Currently executing node
         self._resume_session = resume_session
         self._resume_checkpoint = resume_checkpoint
         self._session_index: list[str] = []  # IDs from last listing
@@ -785,7 +786,22 @@ class ChatRepl(Vertical):
                 self._write_history(f"[bold red]Error delivering input:[/bold red] {e}")
             return
 
-        # Double-submit guard: reject input while an execution is in-flight
+        # Mid-execution input: inject into the active node's conversation
+        if self._current_exec_id is not None and self._active_node_id:
+            self._write_history(f"[bold green]You:[/bold green] {user_input}")
+            message.input.value = ""
+            node_id = self._active_node_id
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.runtime.inject_input(node_id, user_input),
+                    self._agent_loop,
+                )
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self._write_history(f"[bold red]Error delivering input:[/bold red] {e}")
+            return
+
+        # Double-submit guard: no active node to inject into
         if self._current_exec_id is not None:
             self._write_history("[dim]Agent is still running — please wait.[/dim]")
             return
@@ -914,6 +930,7 @@ class ChatRepl(Vertical):
         self._streaming_snapshot = ""
         self._waiting_for_input = False
         self._input_node_id = None
+        self._active_node_id = None
         self._pending_ask_question = ""
 
         # Re-enable input
@@ -935,6 +952,7 @@ class ChatRepl(Vertical):
         self._waiting_for_input = False
         self._pending_ask_question = ""
         self._input_node_id = None
+        self._active_node_id = None
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", Input)
@@ -972,3 +990,12 @@ class ChatRepl(Vertical):
         chat_input.disabled = False
         chat_input.placeholder = "Type your response..."
         chat_input.focus()
+
+    def handle_node_started(self, node_id: str) -> None:
+        """Track which node is currently executing."""
+        self._active_node_id = node_id
+
+    def handle_node_completed(self, node_id: str) -> None:
+        """Clear active node when it finishes."""
+        if self._active_node_id == node_id:
+            self._active_node_id = None

@@ -409,6 +409,12 @@ class AdenTUI(App):
                     event.node_id or event.data.get("node_id", ""),
                 )
 
+            # Track active node in chat_repl for mid-execution input
+            if et == EventType.NODE_LOOP_STARTED:
+                self.chat_repl.handle_node_started(event.node_id or "")
+            elif et == EventType.NODE_LOOP_COMPLETED:
+                self.chat_repl.handle_node_completed(event.node_id or "")
+
             # --- Graph view events ---
             if et in (
                 EventType.EXECUTION_STARTED,

@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tui = ["textual>=0.75.0"]
+webhook = ["aiohttp>=3.9.0"]
 
 [project.scripts]
 hive = "framework.cli:main"

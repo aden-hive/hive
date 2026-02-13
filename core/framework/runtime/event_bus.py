@@ -66,6 +66,9 @@ class EventType(StrEnum):
     # Context management
     CONTEXT_COMPACTED = "context_compacted"
 
+    # External triggers
+    WEBHOOK_RECEIVED = "webhook_received"
+
     # Custom events
     CUSTOM = "custom"
 
@@ -633,6 +636,30 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"prompt": prompt},
+            )
+        )
+
+    async def emit_webhook_received(
+        self,
+        source_id: str,
+        path: str,
+        method: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        query_params: dict[str, str] | None = None,
+    ) -> None:
+        """Emit webhook received event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.WEBHOOK_RECEIVED,
+                stream_id=source_id,
+                data={
+                    "path": path,
+                    "method": method,
+                    "headers": headers,
+                    "payload": payload,
+                    "query_params": query_params or {},
+                },
             )
         )
 
