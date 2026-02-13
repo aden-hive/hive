@@ -898,91 +898,6 @@ fi
 echo ""
 
 # ============================================================
-# Step 5b: Bootstrap Codex Setup
-# ============================================================
-
-echo -e "${BLUE}Step 5b: Ensuring Codex setup files...${NC}"
-echo ""
-
-CODEX_CHANGES=0
-REQUIRED_CODEX_SKILLS=(hive hive-create hive-concepts hive-patterns hive-test hive-credentials)
-CODEX_SETUP_ENABLED=true
-
-echo -n "  ⬡ codex CLI... "
-if command -v codex > /dev/null 2>&1; then
-    CODEX_VERSION=$(codex --version 2>/dev/null || echo "installed")
-    echo -e "${GREEN}${CODEX_VERSION}${NC}"
-else
-    echo -e "${YELLOW}not found${NC}"
-    echo -e "${YELLOW}  ⚠ Install Codex CLI from https://github.com/openai/codex${NC}"
-fi
-
-if ! prompt_yes_no "  Configure Codex integration files now?" "y"; then
-    CODEX_SETUP_ENABLED=false
-    echo -e "${YELLOW}  ⏭ Skipped Codex file setup${NC}"
-fi
-
-if [ "$CODEX_SETUP_ENABLED" = true ]; then
-    mkdir -p "$SCRIPT_DIR/.agents/skills"
-
-    if [ ! -f "$SCRIPT_DIR/AGENTS.md" ]; then
-        cat > "$SCRIPT_DIR/AGENTS.md" <<'EOF'
-# Hive Agent Instructions (Codex)
-
-Use skills from `.agents/skills`:
-- hive
-- hive-create
-- hive-concepts
-- hive-patterns
-- hive-test
-- hive-credentials
-
-Rules:
-- Prefer MCP tools from `agent-builder` and `tools`.
-- Before assuming tool availability, list MCP tools first.
-- Reuse existing Hive skill workflows; do not invent alternative flows unless required.
-
-Shortcut Handling:
-- Treat `hive`, `hive-create`, `hive-concepts`, `hive-patterns`, `hive-test`, and `hive-credentials` as workflow invocation phrases.
-- Users do not need to type skill file paths when using these phrases.
-EOF
-        echo -e "${GREEN}  ✓ Created AGENTS.md${NC}"
-        CODEX_CHANGES=$((CODEX_CHANGES + 1))
-    fi
-
-    for skill in "${REQUIRED_CODEX_SKILLS[@]}"; do
-        target="../../.claude/skills/$skill"
-        link_path="$SCRIPT_DIR/.agents/skills/$skill"
-
-        if [ -L "$link_path" ] || [ -d "$link_path" ]; then
-            continue
-        fi
-
-        # Git may check out symlinks as plain files on systems without symlink support.
-        # Remove the plain file so we can replace it with a proper symlink or directory copy.
-        if [ -f "$link_path" ]; then
-            rm -f "$link_path"
-        fi
-
-        if ln -s "$target" "$link_path" 2>/dev/null; then
-            echo -e "${GREEN}  ✓ Linked .agents/skills/$skill${NC}"
-            CODEX_CHANGES=$((CODEX_CHANGES + 1))
-        elif cp -R "$SCRIPT_DIR/.claude/skills/$skill" "$link_path" 2>/dev/null; then
-            echo -e "${YELLOW}  ⚠ Copied .agents/skills/$skill (symlink unavailable)${NC}"
-            CODEX_CHANGES=$((CODEX_CHANGES + 1))
-        else
-            echo -e "${YELLOW}  ⚠ Could not create .agents/skills/$skill${NC}"
-        fi
-    done
-
-    if [ "$CODEX_CHANGES" -eq 0 ]; then
-        echo -e "${GREEN}  ✓ Codex setup already present${NC}"
-    fi
-fi
-
-echo ""
-
-# ============================================================
 # Step 6: Verify Setup
 # ============================================================
 
@@ -1022,47 +937,30 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ AGENTS.md... "
-if [ -f "$SCRIPT_DIR/AGENTS.md" ]; then
-    echo -e "${GREEN}ok${NC}"
-elif [ "$CODEX_SETUP_ENABLED" = false ]; then
-    echo -e "${YELLOW}-- (skipped)${NC}"
-else
-    echo -e "${RED}missing${NC}"
-    ERRORS=$((ERRORS + 1))
-fi
-
 echo -n "  ⬡ skills... "
 if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
     SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
     echo -e "${GREEN}${SKILL_COUNT} found${NC}"
 else
-    if [ "$CODEX_SETUP_ENABLED" = false ]; then
-        echo -e "${YELLOW}-- (skipped)${NC}"
-    else
-        echo -e "${YELLOW}--${NC}"
-    fi
+    echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ Codex skills... "
-if [ "$CODEX_SETUP_ENABLED" = false ]; then
-    echo -e "${YELLOW}-- (skipped)${NC}"
-elif [ -d "$SCRIPT_DIR/.agents/skills" ]; then
-    MISSING_CODEX_SKILLS=()
-    for skill in "${REQUIRED_CODEX_SKILLS[@]}"; do
-        if [ ! -d "$SCRIPT_DIR/.agents/skills/$skill" ]; then
-            MISSING_CODEX_SKILLS+=("$skill")
-        fi
-    done
-
-    if [ "${#MISSING_CODEX_SKILLS[@]}" -eq 0 ]; then
-        echo -e "${GREEN}${#REQUIRED_CODEX_SKILLS[@]} found${NC}"
+echo -n "  ⬡ codex CLI... "
+if command -v codex > /dev/null 2>&1; then
+    CODEX_VERSION=$(codex --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
+    # Compare version >= 0.101.0
+    CODEX_MAJOR=$(echo "$CODEX_VERSION" | cut -d. -f1)
+    CODEX_MINOR=$(echo "$CODEX_VERSION" | cut -d. -f2)
+    if [ "$CODEX_MAJOR" -gt 0 ] 2>/dev/null || { [ "$CODEX_MAJOR" -eq 0 ] && [ "$CODEX_MINOR" -ge 101 ]; } 2>/dev/null; then
+        echo -e "${GREEN}${CODEX_VERSION}${NC}"
+        CODEX_AVAILABLE=true
     else
-        echo -e "${RED}missing: ${MISSING_CODEX_SKILLS[*]}${NC}"
-        ERRORS=$((ERRORS + 1))
+        echo -e "${YELLOW}${CODEX_VERSION} (upgrade to 0.101.0+)${NC}"
+        CODEX_AVAILABLE=false
     fi
 else
     echo -e "${YELLOW}--${NC}"
+    CODEX_AVAILABLE=false
 fi
 
 echo -n "  ⬡ local settings... "
@@ -1155,7 +1053,7 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
-echo -e "${BOLD}Build a New Agent:${NC}"
+echo -e "${BOLD}Build a New Agent (Claude):${NC}"
 echo ""
 echo -e "  1. Open Claude Code in this directory:"
 echo -e "     ${CYAN}claude${NC}"
@@ -1166,6 +1064,18 @@ echo ""
 echo -e "  3. Test an existing agent:"
 echo -e "     ${CYAN}/hive-test${NC}"
 echo ""
+
+# Show Codex instructions if available
+if [ "$CODEX_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Build a New Agent (Codex):${NC}"
+    echo ""
+    echo -e "  Codex ${GREEN}${CODEX_VERSION}${NC} is available. To use it with Hive:"
+    echo -e "  1. Restart your terminal (or open a new one)"
+    echo -e "  2. Run: ${CYAN}codex${NC}"
+    echo -e "  3. Type: ${CYAN}use hive${NC}"
+    echo ""
+fi
+
 echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
 echo -e "  Launch the interactive dashboard to browse and run agents:"

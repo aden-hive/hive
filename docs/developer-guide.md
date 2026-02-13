@@ -25,7 +25,7 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 | **framework** | `/core`    | Core runtime, graph executor, protocols   | Python 3.11+ |
 | **tools**     | `/tools`   | MCP tools for agent capabilities          | Python 3.11+ |
 | **exports**   | `/exports` | Agent packages (user-created, gitignored) | Python 3.11+ |
-| **skills**    | `.claude`, `.agents` | Shared skills for Claude/Codex/other coding agents | Markdown     |
+| **skills**    | `.claude`, `.agents`, `.agent` | Shared skills for Claude/Codex/other coding agents | Markdown     |
 | **codex**     | `.codex`   | Codex CLI project configuration (MCP servers) | TOML         |
 
 ### Key Principles
