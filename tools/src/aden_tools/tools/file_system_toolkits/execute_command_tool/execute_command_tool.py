@@ -12,7 +12,7 @@ def execute_command_tool(
     workspace_id: str = "default",
     agent_id: str = "default",
     session_id: str = "default",
-    cwd: str | None = None
+    cwd: str | None = None,
 ) -> dict:
     """
     Purpose
@@ -49,12 +49,7 @@ def execute_command_tool(
             secure_cwd = session_root
 
         result = subprocess.run(
-            command,
-            shell=True,
-            cwd=secure_cwd,
-            capture_output=True,
-            text=True,
-            timeout=60
+            command, shell=True, cwd=secure_cwd, capture_output=True, text=True, timeout=60
         )
 
         return {

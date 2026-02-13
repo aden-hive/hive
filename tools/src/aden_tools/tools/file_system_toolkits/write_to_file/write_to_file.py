@@ -57,6 +57,7 @@ def write_to_file(
     except Exception as e:
         return {"error": f"Failed to write to file: {str(e)}"}
 
+
 # --- 2. THE REGISTRATION (For MCP Server) ---
 def register_tools(mcp: FastMCP) -> None:
     """Register file write tools with the MCP server."""
