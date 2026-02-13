@@ -81,7 +81,7 @@ Use Hive when you need:
 ### Prerequisites
 
 - Python 3.11+ for agent development
-- Claude Code or Cursor for utilizing agent skills
+- Claude Code, Codex CLI, or Cursor for utilizing agent skills
 
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
@@ -120,6 +120,18 @@ hive tui
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 ##  Coding Agent Support
+### Codex CLI
+Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
+
+1. **Config:** `.codex/config.toml` with `agent-builder` MCP server (tracked in git)
+2. **Skills:** `.agents/skills/` symlinks to Hive skills (tracked in git)
+3. **Launch:** Run `codex` in the repo root, then type `use hive`
+
+Example:
+```
+codex> use hive
+```
+
 ### Opencode 
 Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
 
@@ -321,6 +333,7 @@ subgraph Expansion
         j2["Cursor"]
         j3["Opencode"]
         j4["Antigravity"]
+        j5["Codex CLI"]
     end
     subgraph plat["Platform"]
         k1["JavaScript/TypeScript SDK"]

@@ -106,6 +106,10 @@ The `.cursorrules` file at the repo root tells Cursor's AI the project's style r
 
 Antigravity IDE (Google's AI-powered IDE) is supported via `.antigravity/mcp_config.json` and `.antigravity/skills/` (symlinks to `.claude/skills/`). See [antigravity-setup.md](antigravity-setup.md) for setup and troubleshooting.
 
+### Codex CLI
+
+Codex CLI (OpenAI, v0.101.0+) is supported via `.codex/config.toml` (MCP server config) and `.agents/skills/` (symlinks to `.claude/skills/`). These files are tracked in git. Run `codex` in the repo root and type `use hive` to start. See the [Codex CLI section in the README](../README.md#codex-cli) for details.
+
 ---
 
 ## CI Pipeline

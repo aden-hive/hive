@@ -184,8 +184,14 @@ Skills are also available in Cursor. To enable:
 
 ### 2. Build an Agent
 
+**Claude Code:**
 ```
 claude> /hive
+```
+
+**Codex CLI:**
+```
+codex> use hive
 ```
 
 Follow the prompts to:
@@ -532,6 +538,25 @@ Run the quickstart script in the root directory:
 
 ```bash
 ./quickstart.sh
+```
+
+## Codex Setup
+
+[OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+) is supported with project-level config:
+
+- `.codex/config.toml` — MCP server configuration (`agent-builder`)
+- `.agents/skills/` — Symlinks to Hive skills
+
+These files are tracked in git and available on clone. To use Codex with Hive:
+
+1. Run `codex` in the repo root
+2. Type `use hive` to start the agent workflow
+
+Quick verification:
+
+```bash
+test -f .codex/config.toml && echo "OK: Codex config" || echo "MISSING: .codex/config.toml"
+test -d .agents/skills/hive && echo "OK: Skills" || echo "MISSING: .agents/skills/"
 ```
 
 ## Additional Resources
