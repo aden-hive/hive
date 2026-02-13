@@ -56,6 +56,12 @@ class Runtime:
     """
 
     def __init__(self, storage_path: str | Path):
+        # Validate and create storage path if needed
+        path = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        if not path.exists():
+            logger.warning(f"Storage path does not exist, creating: {path}")
+            path.mkdir(parents=True, exist_ok=True)
+
         self.storage = FileStorage(storage_path)
         self._current_run: Run | None = None
         self._current_node: str = "unknown"

@@ -25,6 +25,7 @@ from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
+from .excel_tool import register_tools as register_excel
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -42,11 +43,15 @@ from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
 from .gmail_tool import register_tools as register_gmail
+from .google_maps_tool import register_tools as register_google_maps
 from .hubspot_tool import register_tools as register_hubspot
+from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
+from .telegram_tool import register_tools as register_telegram
+from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
@@ -81,9 +86,13 @@ def register_all_tools(
     # Gmail inbox management (read, trash, modify labels)
     register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    register_news(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_telegram(mcp, credentials=credentials)
+    register_vision(mcp, credentials=credentials)
+    register_google_maps(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -96,6 +105,7 @@ def register_all_tools(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
+    register_excel(mcp)
 
     return [
         "example_tool",
@@ -121,6 +131,13 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "excel_read",
+        "excel_write",
+        "excel_append",
+        "excel_info",
+        "excel_sheet_list",
+        "excel_sql",
+        "excel_search",
         "apollo_enrich_person",
         "apollo_enrich_company",
         "apollo_search_people",
@@ -161,6 +178,10 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        "news_search",
+        "news_headlines",
+        "news_by_company",
+        "news_sentiment",
         "query_runtime_logs",
         "query_runtime_log_details",
         "query_runtime_log_raw",
@@ -228,6 +249,25 @@ def register_all_tools(
         "slack_kick_user_from_channel",
         "slack_delete_file",
         "slack_get_team_stats",
+        # Vision tools
+        "vision_detect_labels",
+        "vision_detect_text",
+        "vision_detect_faces",
+        "vision_localize_objects",
+        "vision_detect_logos",
+        "vision_detect_landmarks",
+        "vision_image_properties",
+        "vision_web_detection",
+        "vision_safe_search",
+        "telegram_send_message",
+        "telegram_send_document",
+        # Google Maps tools
+        "maps_geocode",
+        "maps_reverse_geocode",
+        "maps_directions",
+        "maps_distance_matrix",
+        "maps_place_details",
+        "maps_place_search",
     ]
 
 
