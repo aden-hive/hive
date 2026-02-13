@@ -451,3 +451,14 @@ Hive focuses on generating agents that run real business processes, rather than 
 <p align="center">
   Made with 🔥 Passion in San Francisco
 </p>
+
+## Post-setup verification
+
+After `quickstart.sh` completes, verify Hive is available in your current shell:
+
+```bash
+hive tui
+
+```
+Expected result:
+- The command launches Hive’s interactive interface (or equivalent CLI success output).
