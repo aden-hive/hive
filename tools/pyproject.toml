@@ -45,6 +45,9 @@ ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
 ]
+excel = [
+    "openpyxl>=3.1.0",
+]
 sql = [
     "duckdb>=1.0.0",
 ]
@@ -53,6 +56,7 @@ all = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
     "duckdb>=1.0.0",
+    "openpyxl>=3.1.0",
 ]
 
 [tool.uv.sources]
@@ -95,4 +99,8 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [dependency-groups]
-dev = ["ty>=0.0.13", "ruff>=0.14.14"]
+dev = [
+    "ty>=0.0.13",
+    "ruff>=0.14.14",
+    "duckdb>=1.4.4",
+]

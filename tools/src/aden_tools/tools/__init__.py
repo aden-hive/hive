@@ -25,6 +25,7 @@ from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
+from .excel_tool import register_tools as register_excel
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -101,6 +102,7 @@ def register_all_tools(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
+    register_excel(mcp)
 
     return [
         "example_tool",
@@ -126,6 +128,13 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "excel_read",
+        "excel_write",
+        "excel_append",
+        "excel_info",
+        "excel_sheet_list",
+        "excel_sql",
+        "excel_search",
         "apollo_enrich_person",
         "apollo_enrich_company",
         "apollo_search_people",
