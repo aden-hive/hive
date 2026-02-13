@@ -817,7 +817,6 @@ class ChatRepl(Vertical):
         # Mid-execution input: inject into the active node's conversation
         if self._current_exec_id is not None and self._active_node_id:
             self._write_history(f"[bold green]You:[/bold green] {user_input}")
-            message.input.value = ""
             node_id = self._active_node_id
             try:
                 future = asyncio.run_coroutine_threadsafe(
