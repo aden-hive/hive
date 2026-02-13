@@ -185,7 +185,7 @@ async def _interactive_shell(verbose=False):
     try:
         while True:
             try:
-                user_input = await asyncio.get_event_loop().run_in_executor(
+                user_input = await asyncio.get_running_loop().run_in_executor(
                     None, input, "News> "
                 )
                 if user_input.lower() in ["quit", "exit", "q"]:
