@@ -267,18 +267,39 @@ def register_tools(
             "provider": "finlight",
         }
 
-    def _run_with_fallback(primary: dict, fallback: dict | None) -> dict:
-        """Return primary result or fallback if primary errors."""
+    def _try_provider(fn, **kwargs) -> dict:
+        """Call a provider function, catching network exceptions as error dicts."""
+        try:
+            return fn(**kwargs)
+        except (httpx.TimeoutException, httpx.RequestError) as e:
+            return {"error": f"Network error: {e}"}
+
+    def _search_with_fallback(
+        *,
+        newsdata_key: str | None,
+        finlight_key: str | None,
+        search_kwargs: dict,
+    ) -> dict:
+        """Try primary provider; fall back to secondary only on failure."""
+        primary = (
+            _try_provider(_search_newsdata, api_key=newsdata_key, **search_kwargs)
+            if newsdata_key
+            else {"error": "NewsData credentials not configured"}
+        )
         if "error" not in primary:
             return primary
-        if fallback is None or "error" in fallback:
-            if fallback is None:
-                return primary
-            return {
-                "error": "All providers failed",
-                "providers": {"primary": primary, "fallback": fallback},
-            }
-        return fallback
+
+        if not finlight_key:
+            return primary
+
+        fallback = _try_provider(_search_finlight, api_key=finlight_key, **search_kwargs)
+        if "error" not in fallback:
+            return fallback
+
+        return {
+            "error": "All providers failed",
+            "providers": {"primary": primary, "fallback": fallback},
+        }
 
     @mcp.tool()
     def news_search(
@@ -321,46 +342,22 @@ def register_tools(
 
         limit_value = _normalize_limit(limit)
 
-        try:
-            primary = (
-                _search_newsdata(
-                    query=query,
-                    from_date=from_date,
-                    to_date=to_date,
-                    language=language,
-                    limit=limit_value,
-                    sources=sources,
-                    category=category,
-                    country=country,
-                    api_key=newsdata_key,
-                )
-                if newsdata_key
-                else {"error": "NewsData credentials not configured"}
-            )
-            fallback = (
-                _search_finlight(
-                    query=query,
-                    from_date=from_date,
-                    to_date=to_date,
-                    language=language,
-                    limit=limit_value,
-                    sources=sources,
-                    category=category,
-                    country=country,
-                    api_key=finlight_key,
-                )
-                if finlight_key
-                else None
-            )
-            result = _run_with_fallback(primary, fallback)
-            result["query"] = query
-            return result
-        except httpx.TimeoutException:
-            return {"error": "News search request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
-        except Exception as e:
-            return {"error": f"News search failed: {e}"}
+        result = _search_with_fallback(
+            newsdata_key=newsdata_key,
+            finlight_key=finlight_key,
+            search_kwargs={
+                "query": query,
+                "from_date": from_date,
+                "to_date": to_date,
+                "language": language,
+                "limit": limit_value,
+                "sources": sources,
+                "category": category,
+                "country": country,
+            },
+        )
+        result["query"] = query
+        return result
 
     @mcp.tool()
     def news_headlines(
@@ -395,47 +392,23 @@ def register_tools(
 
         limit_value = _normalize_limit(limit)
 
-        try:
-            primary = (
-                _search_newsdata(
-                    query=None,
-                    from_date=None,
-                    to_date=None,
-                    language=None,
-                    limit=limit_value,
-                    sources=None,
-                    category=category,
-                    country=country,
-                    api_key=newsdata_key,
-                )
-                if newsdata_key
-                else {"error": "NewsData credentials not configured"}
-            )
-            fallback = (
-                _search_finlight(
-                    query=None,
-                    from_date=None,
-                    to_date=None,
-                    language=None,
-                    limit=limit_value,
-                    sources=None,
-                    category=category,
-                    country=country,
-                    api_key=finlight_key,
-                )
-                if finlight_key
-                else None
-            )
-            result = _run_with_fallback(primary, fallback)
-            result["category"] = category
-            result["country"] = country
-            return result
-        except httpx.TimeoutException:
-            return {"error": "News headline request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
-        except Exception as e:
-            return {"error": f"News headlines failed: {e}"}
+        result = _search_with_fallback(
+            newsdata_key=newsdata_key,
+            finlight_key=finlight_key,
+            search_kwargs={
+                "query": None,
+                "from_date": None,
+                "to_date": None,
+                "language": None,
+                "limit": limit_value,
+                "sources": None,
+                "category": category,
+                "country": country,
+            },
+        )
+        result["category"] = category
+        result["country"] = country
+        return result
 
     @mcp.tool()
     def news_by_company(
@@ -475,47 +448,23 @@ def register_tools(
         limit_value = _normalize_limit(limit)
         query = f'"{company_name}"'
 
-        try:
-            primary = (
-                _search_newsdata(
-                    query=query,
-                    from_date=from_date,
-                    to_date=to_date,
-                    language=language,
-                    limit=limit_value,
-                    sources=None,
-                    category=None,
-                    country=None,
-                    api_key=newsdata_key,
-                )
-                if newsdata_key
-                else {"error": "NewsData credentials not configured"}
-            )
-            fallback = (
-                _search_finlight(
-                    query=query,
-                    from_date=from_date,
-                    to_date=to_date,
-                    language=language,
-                    limit=limit_value,
-                    sources=None,
-                    category=None,
-                    country=None,
-                    api_key=finlight_key,
-                )
-                if finlight_key
-                else None
-            )
-            result = _run_with_fallback(primary, fallback)
-            result["company_name"] = company_name
-            result["days_back"] = days_back
-            return result
-        except httpx.TimeoutException:
-            return {"error": "Company news request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
-        except Exception as e:
-            return {"error": f"Company news failed: {e}"}
+        result = _search_with_fallback(
+            newsdata_key=newsdata_key,
+            finlight_key=finlight_key,
+            search_kwargs={
+                "query": query,
+                "from_date": from_date,
+                "to_date": to_date,
+                "language": language,
+                "limit": limit_value,
+                "sources": None,
+                "category": None,
+                "country": None,
+            },
+        )
+        result["company_name"] = company_name
+        result["days_back"] = days_back
+        return result
 
     @mcp.tool()
     def news_sentiment(

@@ -270,6 +270,55 @@ class TestSentimentNormalization:
         assert result["results"][0]["sentiment"] == 1.0
 
 
+class TestFallbackBehavior:
+    """Tests for lazy fallback and exception handling."""
+
+    def test_finlight_not_called_when_newsdata_succeeds(self, news_tools, monkeypatch):
+        """Finlight should NOT be called when NewsData succeeds (lazy fallback)."""
+        monkeypatch.setenv("NEWSDATA_API_KEY", "news-key")
+        monkeypatch.setenv("FINLIGHT_API_KEY", "finlight-key")
+
+        finlight_called = False
+
+        def mock_get(url: str, params=None, timeout=30.0, headers=None):
+            return DummyResponse(200, {"results": [{"title": "OK", "source_id": "s"}]})
+
+        def mock_post(url: str, json=None, timeout=30.0, headers=None):
+            nonlocal finlight_called
+            finlight_called = True
+            return DummyResponse(200, {"articles": []})
+
+        monkeypatch.setattr(httpx, "get", mock_get)
+        monkeypatch.setattr(httpx, "post", mock_post)
+
+        result = news_tools["news_search"].fn(query="test")
+
+        assert result["provider"] == "newsdata"
+        assert not finlight_called, "Finlight should not be called when NewsData succeeds"
+
+    def test_fallback_on_newsdata_timeout(self, news_tools, monkeypatch):
+        """Finlight fallback should work when NewsData raises a timeout exception."""
+        monkeypatch.setenv("NEWSDATA_API_KEY", "news-key")
+        monkeypatch.setenv("FINLIGHT_API_KEY", "finlight-key")
+
+        def mock_get(url: str, params=None, timeout=30.0, headers=None):
+            raise httpx.ReadTimeout("Connection timed out")
+
+        def mock_post(url: str, json=None, timeout=30.0, headers=None):
+            return DummyResponse(
+                200,
+                {"articles": [{"title": "Fallback", "source": "fin"}]},
+            )
+
+        monkeypatch.setattr(httpx, "get", mock_get)
+        monkeypatch.setattr(httpx, "post", mock_post)
+
+        result = news_tools["news_search"].fn(query="test")
+
+        assert "error" not in result, f"Should fallback to Finlight, got: {result}"
+        assert result["provider"] == "finlight"
+
+
 class TestNewsSentiment:
     """Tests for news_sentiment tool."""
 
