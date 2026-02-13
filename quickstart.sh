@@ -923,26 +923,7 @@ if ! prompt_yes_no "  Configure Codex integration files now?" "y"; then
 fi
 
 if [ "$CODEX_SETUP_ENABLED" = true ]; then
-    mkdir -p "$SCRIPT_DIR/.codex"
     mkdir -p "$SCRIPT_DIR/.agents/skills"
-
-    if [ ! -f "$SCRIPT_DIR/.codex/config.toml" ]; then
-        cat > "$SCRIPT_DIR/.codex/config.toml" <<'EOF'
-# Project-level Codex config for Hive.
-
-[mcp_servers.agent-builder]
-command = "uv"
-args = ["run", "--directory", "core", "-m", "framework.mcp.agent_builder_server"]
-cwd = "."
-
-[mcp_servers.tools]
-command = "uv"
-args = ["run", "--directory", "tools", "mcp_server.py", "--stdio"]
-cwd = "."
-EOF
-        echo -e "${GREEN}  ✓ Created .codex/config.toml${NC}"
-        CODEX_CHANGES=$((CODEX_CHANGES + 1))
-    fi
 
     if [ ! -f "$SCRIPT_DIR/AGENTS.md" ]; then
         cat > "$SCRIPT_DIR/AGENTS.md" <<'EOF'
@@ -1049,37 +1030,6 @@ elif [ "$CODEX_SETUP_ENABLED" = false ]; then
 else
     echo -e "${RED}missing${NC}"
     ERRORS=$((ERRORS + 1))
-fi
-
-echo -n "  ⬡ Codex MCP config... "
-if [ -f "$SCRIPT_DIR/.codex/config.toml" ]; then
-    if "$PYTHON_CMD" - <<'PY' "$SCRIPT_DIR/.codex/config.toml" > /dev/null 2>&1
-import pathlib
-import sys
-
-config_path = pathlib.Path(sys.argv[1])
-try:
-    import tomllib
-except ModuleNotFoundError:
-    raise SystemExit(1)
-
-with config_path.open("rb") as f:
-    data = tomllib.load(f)
-
-servers = data.get("mcp_servers", {})
-if "agent-builder" not in servers or "tools" not in servers:
-    raise SystemExit(1)
-PY
-    then
-        echo -e "${GREEN}ok${NC}"
-    else
-        echo -e "${RED}failed${NC}"
-        ERRORS=$((ERRORS + 1))
-    fi
-elif [ "$CODEX_SETUP_ENABLED" = false ]; then
-    echo -e "${YELLOW}-- (skipped)${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
 fi
 
 echo -n "  ⬡ skills... "
