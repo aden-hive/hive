@@ -53,6 +53,7 @@ from .telegram_tool import register_tools as register_telegram
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
+from .zoho_crm_tool import register_tools as register_zoho_crm
 
 
 def register_all_tools(
@@ -90,6 +91,7 @@ def register_all_tools(
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_zoho_crm(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -176,6 +178,12 @@ def register_all_tools(
         "query_runtime_logs",
         "query_runtime_log_details",
         "query_runtime_log_raw",
+        # Zoho CRM tools
+        "zoho_crm_search",
+        "zoho_crm_get_record",
+        "zoho_crm_create_record",
+        "zoho_crm_update_record",
+        "zoho_crm_add_note",
         # SerpAPI tools (Google Scholar & Patents)
         "scholar_search",
         "scholar_get_citations",

@@ -11,6 +11,7 @@ from aden_tools.credentials.health_check import (
     GoogleMapsHealthChecker,
     GoogleSearchHealthChecker,
     ResendHealthChecker,
+    ZohoCRMHealthChecker,
     check_credential_health,
 )
 
@@ -43,10 +44,16 @@ class TestHealthCheckerRegistry:
         assert "google_maps" in HEALTH_CHECKERS
         assert isinstance(HEALTH_CHECKERS["google_maps"], GoogleMapsHealthChecker)
 
+    def test_zoho_registered(self):
+        """ZohoCRMHealthChecker is registered in HEALTH_CHECKERS."""
+        assert "zoho_crm" in HEALTH_CHECKERS
+        assert isinstance(HEALTH_CHECKERS["zoho_crm"], ZohoCRMHealthChecker)
+
     def test_all_expected_checkers_registered(self):
         """All expected health checkers are in the registry."""
         expected = {
             "hubspot",
+            "zoho_crm",
             "brave_search",
             "google_search",
             "google_maps",
@@ -365,6 +372,53 @@ class TestGoogleMapsHealthChecker:
         assert result.valid is False
         assert "connection failed" in result.details["error"]
 
+
+class TestZohoCRMHealthChecker:
+    """Tests for ZohoCRMHealthChecker."""
+
+    def _mock_response(self, status_code):
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = status_code
+        return response
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_valid_token_200(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(200)
+
+        checker = ZohoCRMHealthChecker()
+        result = checker.check("zoho-token")
+
+        assert result.valid is True
+        assert "valid" in result.message.lower()
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_invalid_token_401(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(401)
+
+        checker = ZohoCRMHealthChecker()
+        result = checker.check("zoho-token")
+
+        assert result.valid is False
+        assert result.details["status_code"] == 401
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_rate_limited_429_treated_valid(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(429)
+
+        checker = ZohoCRMHealthChecker()
+        result = checker.check("zoho-token")
+
+        assert result.valid is True
+        assert result.details.get("rate_limited") is True
 
 class TestCheckCredentialHealthDispatcher:
     """Tests for the check_credential_health() top-level dispatcher."""
