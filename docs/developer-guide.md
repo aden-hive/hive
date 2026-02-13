@@ -25,7 +25,8 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 | **framework** | `/core`    | Core runtime, graph executor, protocols   | Python 3.11+ |
 | **tools**     | `/tools`   | MCP tools for agent capabilities          | Python 3.11+ |
 | **exports**   | `/exports` | Agent packages (user-created, gitignored) | Python 3.11+ |
-| **skills**    | `.claude`  | Claude Code skills for building/testing   | Markdown     |
+| **skills**    | `.claude`, `.agents`, `.agent` | Shared skills for Claude/Codex/other coding agents | Markdown     |
+| **codex**     | `.codex`   | Codex CLI project configuration (MCP servers) | TOML         |
 
 ### Key Principles
 
@@ -46,7 +47,8 @@ Ensure you have installed:
 - **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.12 or 3.13 recommended)
 - **uv** - Python package manager ([Install](https://docs.astral.sh/uv/getting-started/installation/))
 - **git** - Version control
-- **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional, for using building skills)
+- **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional)
+- **Codex CLI** - [Install](https://github.com/openai/codex) (optional)
 
 Verify installation:
 
@@ -116,6 +118,23 @@ Skills are also available in Cursor. To enable:
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
 4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
+### Codex CLI Support
+
+Hive supports [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
+
+Configuration files are tracked in git:
+- `.codex/config.toml` — MCP server config (`agent-builder`)
+- `.agents/skills/` — Symlinks to Hive skills
+
+To use Codex with Hive:
+1. Run `codex` in the repo root
+2. Type `use hive` to start the agent workflow
+
+Example:
+```
+codex> use hive
+```
+
 
 ### Opencode Support
 To enable Opencode integration:
@@ -164,6 +183,10 @@ hive/                                    # Repository root
 │       ├── hive-concepts/               # Fundamental concepts
 │       ├── hive-patterns/               # Best practices
 │       └── hive-test/                   # Test and validate agents
+├── .codex/                              # Codex CLI project config
+│   └── config.toml                      # Codex MCP server definitions
+├── .agents/                             # Shared skill mountpoint
+│   └── skills/                          # Symlinks to Hive skills
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
