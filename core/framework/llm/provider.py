@@ -65,6 +65,7 @@ class LLMProvider(ABC):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """
         Generate a completion from the LLM.
@@ -79,6 +80,8 @@ class LLMProvider(ABC):
                 - {"type": "json_schema", "json_schema": {"name": "...", "schema": {...}}}
                   for strict JSON schema enforcement
             json_mode: If True, request structured JSON output from the LLM
+            max_retries: Override retry count for rate-limit/empty-response retries.
+                None uses the provider default.
 
         Returns:
             LLMResponse with content and metadata

@@ -553,6 +553,26 @@ AskUserQuestion(questions=[{
 - condition_expr (Python expression, only if conditional)
 - priority (positive = forward, negative = feedback/loop-back)
 
+**DETERMINE the graph lifecycle.** Not every agent needs a terminal node:
+
+| Pattern | `terminal_nodes` | When to Use |
+|---------|-------------------|-------------|
+| **Linear (finish)** | `["last-node"]` | Agent completes a task and exits (batch processing, one-shot generation) |
+| **Forever-alive (loop)** | `[]` (empty) | Agent stays alive for continuous interaction (research assistant, personal assistant, monitoring) |
+
+**Forever-alive pattern:** The deep_research_agent example uses `terminal_nodes=[]`. Every leaf node has edges that loop back to earlier nodes, creating a perpetual session. The agent only stops when the user explicitly exits. This is the preferred pattern for interactive, multi-turn agents.
+
+**Key design rules for forever-alive graphs:**
+- Every node must have at least one outgoing edge (no dead ends)
+- Client-facing nodes block for user input — these are the natural "pause points"
+- The user controls when to stop, not the graph
+- Sessions accumulate memory across loops — plan for conversation compaction
+- Use `conversation_mode="continuous"` to preserve conversation history across node transitions
+- `max_iterations` should be set high (e.g., 100) since the agent is designed to run indefinitely
+- The agent will NOT enter a "completed" execution state — this is intentional, not a bug
+
+**Ask the user** which lifecycle pattern fits their agent. Default to forever-alive for interactive agents, linear for batch/one-shot tasks.
+
 **RENDER the complete graph as ASCII art.** Make it large and clear — the user needs to see and understand the full workflow at a glance.
 
 **IMPORTANT: Make the ASCII art BIG and READABLE.** Use a box-and-arrow style with generous spacing. Do NOT make it tiny or compressed. Example format:
@@ -912,6 +932,46 @@ result = await executor.execute(graph=graph, goal=goal, input_data=input_data)
 
 ---
 
+## REFERENCE: Graph Lifecycle & Conversation Memory
+
+### Terminal vs Forever-Alive Graphs
+
+Agents have two lifecycle patterns:
+
+**Linear (terminal) graphs** have `terminal_nodes=["last-node"]`. Execution ends when the terminal node completes. The session enters a "completed" state. Use for batch processing, one-shot generation, and fire-and-forget tasks.
+
+**Forever-alive graphs** have `terminal_nodes=[]` (empty). Every node has at least one outgoing edge — the graph loops indefinitely. The session **never enters a "completed" state** — this is intentional. The agent stays alive until the user explicitly exits. Use for interactive assistants, research tools, and any agent where the user drives the conversation.
+
+The deep_research_agent example demonstrates this: `report` loops back to either `research` (dig deeper) or `intake` (new topic). The agent is a persistent, interactive assistant.
+
+### Continuous Conversation Mode
+
+When `conversation_mode="continuous"` is set on the GraphSpec, the framework preserves a **single conversation thread** across all node transitions:
+
+**What the framework does automatically:**
+- **Inherits conversation**: Same message history carries forward to the next node
+- **Composes layered system prompts**: Identity (agent-level) + Narrative (auto-generated state summary) + Focus (per-node instructions)
+- **Inserts transition markers**: At each node boundary, a "State of the World" message showing completed phases, current memory, and available data files
+- **Accumulates tools**: Once a tool becomes available, it stays available in subsequent nodes
+- **Compacts opportunistically**: At phase transitions, old tool results are pruned to stay within token budget
+
+**What this means for agent builders:**
+- Nodes don't need to re-explain context — the conversation carries it forward
+- Output keys from earlier nodes are available in memory for edge conditions and later nodes
+- For forever-alive agents, conversation memory persists across the entire session lifetime
+- Plan for compaction: very long sessions will have older tool results summarized automatically
+
+**When to use continuous mode:**
+- Interactive agents with client-facing nodes (always)
+- Multi-phase workflows where context matters across phases
+- Forever-alive agents that loop indefinitely
+
+**When NOT to use continuous mode:**
+- Embarrassingly parallel fan-out nodes (each branch should be independent)
+- Stateless utility agents that process items independently
+
+---
+
 ## REFERENCE: Framework Capabilities for Qualification
 
 Use this reference during STEP 2 to give accurate, honest assessments.
@@ -944,7 +1004,7 @@ Use this reference during STEP 2 to give accurate, honest assessments.
 
 | Use Case | Why It's Problematic | Alternative |
 |----------|---------------------|-------------|
-| Long-running daemons | Framework is request-response, not persistent | External scheduler + agent |
+| Persistent background daemons (no user) | Forever-alive graphs need a user at client-facing nodes; no autonomous background polling without user | External scheduler triggering agent runs |
 | Sub-second responses | LLM latency is inherent | Traditional code, no LLM |
 | Processing millions of items | Context windows and rate limits | Batch processing + sampling |
 | Real-time streaming data | No built-in pub/sub or streaming input | Custom MCP server + agent |
@@ -979,3 +1039,6 @@ Use this reference during STEP 2 to give accurate, honest assessments.
 11. **Adding framework gating for LLM behavior** - Fix prompts or use judges, not ad-hoc code
 12. **Writing code before user approves the graph** - Always get approval on goal, nodes, and graph BEFORE writing any agent code
 13. **Wrong mcp_servers.json format** - Use flat format (no `"mcpServers"` wrapper), `cwd` must be `"../../tools"`, and `command` must be `"uv"` with args `["run", "python", ...]`
+14. **Assuming all agents need terminal nodes** - Interactive agents often work best with `terminal_nodes=[]` (forever-alive pattern). The agent never enters "completed" state — this is intentional. Only batch/one-shot agents need terminal nodes
+15. **Creating dead-end nodes in forever-alive graphs** - Every node must have at least one outgoing edge. A node with no outgoing edges will cause execution to end unexpectedly, breaking the forever-alive loop
+16. **Not using continuous conversation mode for interactive agents** - Multi-phase interactive agents should use `conversation_mode="continuous"` to preserve context across node transitions. Without it, each node starts with a blank conversation and loses all prior context

@@ -1,0 +1,7 @@
+# Project-level Codex config for Hive.
+# Keep this file minimal: MCP connectivity + skill discovery.
+
+[mcp_servers.agent-builder]
+command = "uv"
+args = ["run", "--directory", "core", "-m", "framework.mcp.agent_builder_server"]
+cwd = "."

@@ -156,8 +156,14 @@ class SessionState(BaseModel):
     @computed_field
     @property
     def is_resumable(self) -> bool:
-        """Can this session be resumed?"""
-        return self.status == SessionStatus.PAUSED and self.progress.resume_from is not None
+        """Can this session be resumed?
+
+        A session is resumable when it stopped mid-execution (paused or
+        failed) and we know which node to resume from.
+        """
+        if self.status not in (SessionStatus.PAUSED, SessionStatus.FAILED):
+            return False
+        return self.progress.resume_from is not None or self.progress.paused_at is not None
 
     @computed_field
     @property

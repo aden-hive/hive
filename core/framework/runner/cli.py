@@ -362,6 +362,7 @@ def _load_resume_state(
         except (json.JSONDecodeError, OSError):
             return None
         return {
+            "resume_session_id": session_id,
             "memory": cp_data.get("shared_memory", {}),
             "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
             "execution_path": cp_data.get("execution_path", []),
@@ -379,6 +380,7 @@ def _load_resume_state(
         progress = state_data.get("progress", {})
         paused_at = progress.get("paused_at") or progress.get("resume_from")
         return {
+            "resume_session_id": session_id,
             "memory": state_data.get("memory", {}),
             "paused_at": paused_at,
             "execution_path": progress.get("path", []),

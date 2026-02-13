@@ -21,12 +21,17 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
+import json
+import logging
+import re
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
 from framework.graph.safe_eval import safe_eval
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_TOKENS = 8192
 
@@ -158,9 +163,6 @@ class EdgeSpec(BaseModel):
         memory: dict[str, Any],
     ) -> bool:
         """Evaluate a conditional expression."""
-        import logging
-
-        logger = logging.getLogger(__name__)
 
         if not self.condition_expr:
             return True
@@ -217,8 +219,6 @@ class EdgeSpec(BaseModel):
         The LLM evaluates whether proceeding to the target node
         is the best next step toward achieving the goal.
         """
-        import json
-
         # Build context for LLM
         prompt = f"""You are evaluating whether to proceed along an edge in an agent workflow.
 
@@ -254,8 +254,6 @@ Respond with ONLY a JSON object:
             )
 
             # Parse response
-            import re
-
             json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
@@ -263,9 +261,6 @@ Respond with ONLY a JSON object:
                 reasoning = data.get("reasoning", "")
 
                 # Log the decision (using basic print for now)
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.info(f"      🤔 LLM routing decision: {'PROCEED' if proceed else 'SKIP'}")
                 logger.info(f"         Reason: {reasoning}")
 
@@ -273,9 +268,6 @@ Respond with ONLY a JSON object:
 
         except Exception as e:
             # Fallback: proceed on success
-            import logging
-
-            logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ LLM routing failed, defaulting to on_success: {e}")
             return source_success
 
@@ -441,6 +433,25 @@ class GraphSpec(BaseModel):
     loop_config: dict[str, Any] = Field(
         default_factory=dict,
         description="EventLoopNode configuration (max_iterations, max_tool_calls_per_turn, etc.)",
+    )
+
+    # Conversation mode
+    conversation_mode: str = Field(
+        default="continuous",
+        description=(
+            "How conversations flow between event_loop nodes. "
+            "'continuous' (default): one conversation threads through all "
+            "event_loop nodes with cumulative tools and layered prompt composition. "
+            "'isolated': each node gets a fresh conversation."
+        ),
+    )
+    identity_prompt: str | None = Field(
+        default=None,
+        description=(
+            "Agent-level identity prompt (Layer 1 of the onion model). "
+            "In continuous mode, this is the static identity that persists "
+            "unchanged across all node transitions. In isolated mode, ignored."
+        ),
     )
 
     # Metadata

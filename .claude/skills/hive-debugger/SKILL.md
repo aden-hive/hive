@@ -26,6 +26,17 @@ Use `/hive-debugger` when:
 
 This skill works alongside agents running in TUI mode and provides supervisor-level insights into execution behavior.
 
+### Forever-Alive Agent Awareness
+
+Some agents use `terminal_nodes=[]` (the "forever-alive" pattern), meaning they loop indefinitely and never enter a "completed" execution state. For these agents:
+- Sessions with status "in_progress" or "paused" are **normal**, not failures
+- High step counts, long durations, and many node visits are expected behavior
+- The agent stops only when the user explicitly exits — there is no graph-driven completion
+- Debug focus should be on **quality of individual node visits and iterations**, not whether the session reached a terminal state
+- Conversation memory accumulates across loops — watch for context overflow and stale data issues
+
+**How to identify forever-alive agents:** Check `agent.py` or `agent.json` for `terminal_nodes=[]` (empty list). If empty, the agent is forever-alive.
+
 ---
 
 ## Prerequisites
@@ -142,6 +153,7 @@ Store the selected mode for the session.
    - Check `attention_summary.categories` for issue types
    - Note the `run_id` of problematic sessions
    - Check `status` field: "degraded", "failure", "in_progress"
+   - **For forever-alive agents:** Sessions with status "in_progress" or "paused" are normal — these agents never reach "completed". Only flag sessions with `needs_attention: true` or actual error indicators (tool failures, retry loops, missing outputs). High step counts alone do not indicate a problem.
 
 3. **Attention flag triggers to understand:**
    From runtime_logger.py, runs are flagged when:
@@ -199,12 +211,19 @@ Which run would you like to investigate?
    | **Tool Errors** | `tool_error_count > 0`, `attention_reasons` contains "tool_failures" | Tool calls failed (API errors, timeouts, auth issues) |
    | **Retry Loops** | `retry_count > 3`, `verdict_counts.RETRY > 5` | Judge repeatedly rejecting outputs |
    | **Guard Failures** | `guard_reject_count > 0` | Output validation failed (wrong types, missing keys) |
-   | **Stalled Execution** | `total_steps > 20`, `verdict_counts.CONTINUE > 10` | EventLoopNode not making progress |
+   | **Stalled Execution** | `total_steps > 20`, `verdict_counts.CONTINUE > 10` | EventLoopNode not making progress. **Caveat:** Forever-alive agents may legitimately have high step counts — check if agent is blocked at a client-facing node (normal) vs genuinely stuck in a loop |
    | **High Latency** | `latency_ms > 60000`, `avg_step_latency > 5000` | Slow tool calls or LLM responses |
    | **Client-Facing Issues** | `client_input_requested` but no `user_input_received` | Premature set_output before user input |
    | **Edge Routing Errors** | `exit_status == "no_valid_edge"`, `attention_reasons` contains "routing_issue" | No edges match current state |
    | **Memory/Context Issues** | `tokens_used > 100000`, `context_overflow_count > 0` | Conversation history too long |
    | **Constraint Violations** | Compare output against goal constraints | Agent violated goal-level rules |
+
+   **Forever-Alive Agent Caveat:** If the agent uses `terminal_nodes=[]`, sessions will never reach "completed" status. This is by design. When debugging these agents, focus on:
+   - Whether individual node visits succeed (not whether the graph "finishes")
+   - Quality of each loop iteration — are outputs improving or degrading across loops?
+   - Whether client-facing nodes are correctly blocking for user input
+   - Memory accumulation issues: stale data from previous loops, context overflow across many iterations
+   - Conversation compaction behavior: is the conversation growing unbounded?
 
 3. **Analyze each flagged node:**
    - Node ID and name
@@ -1015,6 +1034,9 @@ Your agent should now work correctly!"
 3. **Don't ignore edge conditions** - Missing edges cause routing failures
 4. **Don't overlook judge configuration** - Mismatched expectations cause retry loops
 5. **Don't forget nullable_output_keys** - Optional inputs need explicit marking
+6. **Don't diagnose "in_progress" as a failure for forever-alive agents** - Agents with `terminal_nodes=[]` are designed to never enter "completed" state. This is intentional. Focus on quality of individual node visits, not session completion status
+7. **Don't ignore conversation memory issues in long-running sessions** - In continuous conversation mode, history grows across node transitions and loop iterations. Watch for context overflow (tokens_used > 100K), stale data from previous loops affecting edge conditions, and compaction failures that cause the LLM to lose important context
+8. **Don't confuse "waiting for user" with "stalled"** - Client-facing nodes in forever-alive agents block for user input by design. A session paused at a client-facing node is working correctly, not stalled
 
 ---
 

@@ -131,15 +131,15 @@ hive run exports/my_agent --tui
 
 ### CLI Command Reference
 
-| Command | Description |
-|---------|-------------|
-| `hive tui` | Browse agents and launch TUI dashboard |
-| `hive run <path>` | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
-| `hive shell [path]` | Interactive REPL (`--multi`, `--no-approve`) |
-| `hive info <path>` | Show agent details |
-| `hive validate <path>` | Validate agent structure |
-| `hive list [dir]` | List available agents |
-| `hive dispatch [dir]` | Multi-agent orchestration |
+| Command                | Description                                                             |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `hive tui`             | Browse agents and launch TUI dashboard                                  |
+| `hive run <path>`      | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
+| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
+| `hive info <path>`     | Show agent details                                                      |
+| `hive validate <path>` | Validate agent structure                                                |
+| `hive list [dir]`      | List available agents                                                   |
+| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
 
 ### Using Python directly (alternative)
 
@@ -184,8 +184,14 @@ Skills are also available in Cursor. To enable:
 
 ### 2. Build an Agent
 
+**Claude Code:**
 ```
 claude> /hive
+```
+
+**Codex CLI:**
+```
+codex> use hive
 ```
 
 Follow the prompts to:
@@ -521,15 +527,38 @@ export ADEN_CREDENTIALS_PATH="/custom/path"
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
+
 ## Opencode Setup
 
 [Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
 
 ### Automatic Setup
-Run the quickstart script in the root directorys:
+
+Run the quickstart script in the root directory:
+
 ```bash
 ./quickstart.sh
 ```
+
+## Codex Setup
+
+[OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+) is supported with project-level config:
+
+- `.codex/config.toml` — MCP server configuration (`agent-builder`)
+- `.agents/skills/` — Symlinks to Hive skills
+
+These files are tracked in git and available on clone. To use Codex with Hive:
+
+1. Run `codex` in the repo root
+2. Type `use hive` to start the agent workflow
+
+Quick verification:
+
+```bash
+test -f .codex/config.toml && echo "OK: Codex config" || echo "MISSING: .codex/config.toml"
+test -d .agents/skills/hive && echo "OK: Skills" || echo "MISSING: .agents/skills/"
+```
+
 ## Additional Resources
 
 - **Framework Documentation:** [core/README.md](../core/README.md)

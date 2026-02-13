@@ -945,6 +945,24 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ codex CLI... "
+if command -v codex > /dev/null 2>&1; then
+    CODEX_VERSION=$(codex --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
+    # Compare version >= 0.101.0
+    CODEX_MAJOR=$(echo "$CODEX_VERSION" | cut -d. -f1)
+    CODEX_MINOR=$(echo "$CODEX_VERSION" | cut -d. -f2)
+    if [ "$CODEX_MAJOR" -gt 0 ] 2>/dev/null || { [ "$CODEX_MAJOR" -eq 0 ] && [ "$CODEX_MINOR" -ge 101 ]; } 2>/dev/null; then
+        echo -e "${GREEN}${CODEX_VERSION}${NC}"
+        CODEX_AVAILABLE=true
+    else
+        echo -e "${YELLOW}${CODEX_VERSION} (upgrade to 0.101.0+)${NC}"
+        CODEX_AVAILABLE=false
+    fi
+else
+    echo -e "${YELLOW}--${NC}"
+    CODEX_AVAILABLE=false
+fi
+
 echo -n "  ⬡ local settings... "
 if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
     echo -e "${GREEN}ok${NC}"
@@ -1035,7 +1053,7 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
-echo -e "${BOLD}Build a New Agent:${NC}"
+echo -e "${BOLD}Build a New Agent (Claude):${NC}"
 echo ""
 echo -e "  1. Open Claude Code in this directory:"
 echo -e "     ${CYAN}claude${NC}"
@@ -1046,6 +1064,18 @@ echo ""
 echo -e "  3. Test an existing agent:"
 echo -e "     ${CYAN}/hive-test${NC}"
 echo ""
+
+# Show Codex instructions if available
+if [ "$CODEX_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Build a New Agent (Codex):${NC}"
+    echo ""
+    echo -e "  Codex ${GREEN}${CODEX_VERSION}${NC} is available. To use it with Hive:"
+    echo -e "  1. Restart your terminal (or open a new one)"
+    echo -e "  2. Run: ${CYAN}codex${NC}"
+    echo -e "  3. Type: ${CYAN}use hive${NC}"
+    echo ""
+fi
+
 echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
 echo -e "  Launch the interactive dashboard to browse and run agents:"
