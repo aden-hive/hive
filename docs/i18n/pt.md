@@ -82,7 +82,7 @@ cd hive
 Isto instala:
 
 - **framework** - Runtime do agente principal e executor de grafos
-- **aden_tools** - 19 ferramentas MCP para capacidades de agentes
+- **aden_tools** - 106 ferramentas MCP para capacidades de agentes
 - Todas as dependências necessárias
 
 ### Construa Seu Primeiro Agente
@@ -211,7 +211,7 @@ Escolha outros frameworks quando você precisar de:
 ```
 hive/
 ├── core/                   # Framework principal - Runtime de agentes, executor de grafos, protocolos
-├── tools/                  # Pacote de Ferramentas MCP - 19 ferramentas para capacidades de agentes
+├── tools/                  # Pacote de Ferramentas MCP - 106 ferramentas para capacidades de agentes
 ├── exports/                # Pacotes de Agentes - Agentes pré-construídos e exemplos
 ├── docs/                   # Documentação e guias
 ├── scripts/                # Scripts de build e utilitários
@@ -231,7 +231,7 @@ Para construir e executar agentes orientados a objetivos com o framework:
 
 # Isto instala:
 # - pacote framework (runtime principal)
-# - pacote aden_tools (19 ferramentas MCP)
+# - pacote aden_tools (106 ferramentas MCP)
 # - Todas as dependências
 
 # Construir novos agentes usando habilidades Claude Code

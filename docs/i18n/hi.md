@@ -31,7 +31,7 @@
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
   <img src="https://img.shields.io/badge/Anthropic-supported-d4a574?style=flat-square" alt="Anthropic" />
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
-  <img src="https://img.shields.io/badge/MCP-19_Tools-00ADD8?style=flat-square" alt="MCP" />
+  <img src="https://img.shields.io/badge/MCP-106_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
 # अवलोकन (Overview)
@@ -89,7 +89,7 @@ cd hive
 यह इंस्टॉल करता है:
 
 - **framework** - मुख्य एजेंट रनटाइम और ग्राफ़ एक्ज़ीक्यूटर
-- **aden_tools** - एजेंट क्षमताओं के लिए 19 MCP टूल्स
+- **aden_tools** - एजेंट क्षमताओं के लिए 106 MCP टूल्स
 - सभी आवश्यक डिपेंडेंसीज़
 
 ### अपना पहला एजेंट बनाएँ
@@ -218,7 +218,7 @@ Aden तब चुनें जब आपको आवश्यकता हो:
 ```
 hive/
 ├── core/                   # मुख्य फ्रेमवर्क – एजेंट रनटाइम, ग्राफ़ एक्ज़ीक्यूटर, प्रोटोकॉल
-├── tools/                  # MCP टूल्स पैकेज – एजेंट क्षमताओं के लिए 19 टूल
+├── tools/                  # MCP टूल्स पैकेज – एजेंट क्षमताओं के लिए 106 टूल
 ├── exports/                # एजेंट पैकेज – पहले से बने एजेंट और उदाहरण
 ├── docs/                   # दस्तावेज़ और मार्गदर्शिकाएँ
 ├── scripts/                # बिल्ड स्क्रिप्ट्स और यूटिलिटीज़
@@ -238,7 +238,7 @@ hive/
 
 # यह इंस्टॉल करता है:
 # - फ्रेमवर्क पैकेज (मुख्य रनटाइम)
-# - aden_tools पैकेज (19 MCP टूल)
+# - aden_tools पैकेज (106 MCP टूल)
 # - सभी डिपेंडेंसीज़
 
 # Claude Code क्षमताओं का उपयोग करके नए एजेंट बनाएं
