@@ -195,12 +195,27 @@ def _copy_to_clipboard(text: str) -> None:
     try:
         if sys.platform == "darwin":
             subprocess.run(["pbcopy"], input=text.encode(), check=True, timeout=5)
-        elif sys.platform.startswith("linux"):
+        elif sys.platform == "win32":
             subprocess.run(
-                ["xclip", "-selection", "clipboard"],
-                input=text.encode(),
+                ["clip.exe"],
+                input=text.encode("utf-16le"),
                 check=True,
                 timeout=5,
             )
+        elif sys.platform.startswith("linux"):
+            try:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard"],
+                    input=text.encode(),
+                    check=True,
+                    timeout=5,
+                )
+            except (subprocess.SubprocessError, FileNotFoundError):
+                subprocess.run(
+                    ["xsel", "--clipboard", "--input"],
+                    input=text.encode(),
+                    check=True,
+                    timeout=5,
+                )
     except (subprocess.SubprocessError, FileNotFoundError):
         pass
