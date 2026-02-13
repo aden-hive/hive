@@ -13,6 +13,7 @@ intake_node = NodeSpec(
     ),
     node_type="event_loop",
     client_facing=True,
+    max_node_visits=0,
     input_keys=["rules", "max_emails"],
     output_keys=["rules", "max_emails"],
     system_prompt="""\
@@ -44,33 +45,48 @@ Ask the user to confirm: "Does this look right? I'll proceed once you confirm."
     tools=[],
 )
 
-# Node 2: Fetch Emails (event_loop — calls bulk_fetch_emails tool)
-# Fetches emails from Gmail inbox via the bulk_fetch_emails custom script tool.
+# Node 2: Fetch Emails (event_loop — fetches emails with pagination support)
+# Uses bulk_fetch_emails for first fetch, gmail_list_messages + gmail_batch_get_messages
+# for subsequent "next batch" fetches in continuous mode.
 fetch_emails_node = NodeSpec(
     id="fetch-emails",
     name="Fetch Emails",
     description=(
         "Fetch emails from the Gmail inbox up to the configured batch limit. "
-        "Calls bulk_fetch_emails tool, which fetches via Gmail API and writes "
-        "compact JSONL to session data_dir."
+        "Supports pagination for continuous mode — can fetch the next batch "
+        "of emails beyond what was already processed."
     ),
     node_type="event_loop",
     client_facing=False,
+    max_node_visits=0,
     input_keys=["rules", "max_emails"],
     output_keys=["emails"],
     system_prompt="""\
-You are a data pipeline step. Your ONLY job is to fetch emails from Gmail by calling the bulk_fetch_emails tool.
+You are a data pipeline step. Your job is to fetch emails from Gmail and write them to emails.jsonl.
 
-**Execute these exact steps:**
+**FIRST-TIME FETCH (default path):**
+1. Read "max_emails" from input context.
+2. Call bulk_fetch_emails(max_emails=<value>).
+3. The tool returns {"filename": "emails.jsonl"}.
+4. Call set_output("emails", "emails.jsonl").
 
-1. Read the "max_emails" value from the input context.
-2. Call bulk_fetch_emails with max_emails set to that value.
-3. The tool returns a JSON object with a "filename" key (e.g. {"filename": "emails.jsonl"}).
-4. Call set_output("emails", <the filename value from the tool result>).
+**NEXT-BATCH FETCH (when user asks for "the next N" emails):**
+The user wants emails BEYOND what was already fetched. Use pagination:
+1. Call gmail_list_messages(query="label:INBOX", max_results=<previous + new count>) to get message IDs. Use page_token if needed to paginate past already-fetched emails.
+2. Identify message IDs NOT in the previous batch (you remember them from continuous conversation).
+3. Call gmail_batch_get_messages(message_ids=<new_ids>, format="metadata") for full metadata.
+4. For each message in the result, call append_data(filename="emails.jsonl", data=<JSON: {id, subject, from, to, date, snippet, labels}>).
+5. Call set_output("emails", "emails.jsonl").
 
-Do NOT add commentary or explanation. Do NOT call any other tools. Execute the steps above exactly.
+**TOOLS:**
+- bulk_fetch_emails(max_emails) — Bulk fetch from inbox, writes emails.jsonl. Use for first fetch.
+- gmail_list_messages(query, max_results, page_token) — List message IDs with pagination. Returns {messages, next_page_token}.
+- gmail_batch_get_messages(message_ids, format) — Fetch metadata for specific IDs (max 50 per call).
+- append_data(filename, data) — Append a line to a JSONL file.
+
+Do NOT add commentary or explanation. Execute the appropriate path and call set_output when done.
 """,
-    tools=["bulk_fetch_emails"],
+    tools=["bulk_fetch_emails", "gmail_list_messages", "gmail_batch_get_messages", "append_data"],
 )
 
 # Node 3: Classify and Act
@@ -84,6 +100,7 @@ classify_and_act_node = NodeSpec(
     ),
     node_type="event_loop",
     client_facing=False,
+    max_node_visits=0,
     input_keys=["rules", "emails"],
     output_keys=["actions_taken"],
     system_prompt="""\
@@ -142,23 +159,27 @@ After ALL actions are executed, call set_output("actions_taken", "actions.jsonl"
 report_node = NodeSpec(
     id="report",
     name="Report",
-    description="Generate a summary report of all actions taken on the emails.",
+    description="Generate a summary report of all actions taken on the emails and present it to the user.",
     node_type="event_loop",
-    client_facing=False,
+    client_facing=True,
+    max_node_visits=0,
     input_keys=["actions_taken"],
     output_keys=["summary_report"],
     system_prompt="""\
-You are an inbox management assistant. Your job is to generate a clear summary report of the actions taken on the user's emails.
+You are an inbox management assistant. Your job is to generate a clear summary report of the actions taken on the user's emails, present it, and ask if they want to run another batch.
 
-**LOADING ACTIONS:**
+**STEP 1 — Load actions and generate the report (tool calls first):**
+
 The "actions_taken" value from context is a filename (e.g. "actions.jsonl"), NOT raw action data.
-- If it equals "[]", there are no actions — generate a report stating no emails were processed and call set_output.
+- If it equals "[]", there are no actions — skip to STEP 2 with a message that no emails were processed.
 - Otherwise, call load_data(filename=<the actions_taken value>) to read the action records.
 - The file is in JSONL format: each line is one JSON object with: email_id, subject, from, action.
 - If load_data returns has_more=true, call it again with the next offset to get more records.
 - Read ALL records before generating the report.
 
-**GENERATE a summary report:**
+**STEP 2 — Present the report to the user (text only, NO tool calls):**
+
+Present a clean, readable summary:
 
 1. **Overview** — Total emails processed, breakdown by action type.
 
@@ -166,9 +187,9 @@ The "actions_taken" value from context is a filename (e.g. "actions.jsonl"), NOT
 
 3. **No Action Taken** — Any emails that didn't match any rules (if applicable).
 
-Format the report as clean, readable text (not JSON).
+Then ask: "Would you like to run another inbox triage with new rules?"
 
-After generating the report, call:
+**STEP 3 — After the user responds, call set_output:**
 - set_output("summary_report", <the formatted report text>)
 """,
     tools=["load_data"],

@@ -108,13 +108,20 @@ edges = [
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
+    EdgeSpec(
+        id="report-to-intake",
+        source="report",
+        target="intake",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
 ]
 
 # Graph configuration
 entry_node = "intake"
 entry_points = {"start": "intake"}
 pause_nodes = []
-terminal_nodes = ["report"]
+terminal_nodes = []
 loop_config = {
     "max_iterations": 100,
     "max_tool_calls_per_turn": 50,
@@ -124,9 +131,9 @@ loop_config = {
 
 class InboxManagementAgent:
     """
-    Inbox Management Agent — 4-node pipeline for email triage.
+    Inbox Management Agent — continuous 4-node pipeline for email triage.
 
-    Flow: intake -> fetch-emails -> classify-and-act -> report
+    Flow: intake -> fetch-emails -> classify-and-act -> report -> intake (loop)
     """
 
     def __init__(self, config=None):
@@ -158,6 +165,12 @@ class InboxManagementAgent:
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
             loop_config=loop_config,
+            conversation_mode="continuous",
+            identity_prompt=(
+                "You are an inbox management assistant. You help users manage "
+                "their Gmail inbox by applying free-text rules to emails — trash, "
+                "mark as spam, mark important, mark read/unread, star, and more."
+            ),
         )
 
     def _setup(self, mock_mode=False) -> GraphExecutor:

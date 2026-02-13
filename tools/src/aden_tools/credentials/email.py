@@ -44,6 +44,7 @@ EMAIL_CREDENTIALS = {
             "gmail_trash_message",
             "gmail_modify_message",
             "gmail_batch_modify_messages",
+            "gmail_batch_get_messages",
         ],
         node_types=[],
         required=True,
