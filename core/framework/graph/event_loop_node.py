@@ -703,6 +703,17 @@ class EventLoopNode(NodeProtocol):
                 fb_preview,
             )
 
+            # Publish judge verdict event
+            judge_type = "custom" if self._judge is not None else "implicit"
+            await self._publish_judge_verdict(
+                stream_id,
+                node_id,
+                action=verdict.action,
+                feedback=fb_preview,
+                judge_type=judge_type,
+                iteration=iteration,
+            )
+
             if verdict.action == "ACCEPT":
                 # Check for missing output keys
                 missing = self._get_missing_output_keys(
@@ -1058,13 +1069,20 @@ class EventLoopNode(NodeProtocol):
                     user_input_requested,
                 )
 
-            # Execute tool calls — separate real tools from set_output
+            # Execute tool calls — framework tools (set_output, ask_user)
+            # run inline; real MCP tools run in parallel.
             real_tool_results: list[dict] = []
             limit_hit = False
             executed_in_batch = 0
             hard_limit = int(
                 self._config.max_tool_calls_per_turn * (1 + self._config.tool_call_overflow_margin)
             )
+
+            # Phase 1: triage — handle framework tools immediately,
+            # queue real tools for parallel execution.
+            results_by_id: dict[str, ToolResult] = {}
+            pending_real: list[ToolCallEvent] = []
+
             for tc in tool_calls:
                 tool_call_count += 1
                 if tool_call_count > hard_limit:
@@ -1072,11 +1090,9 @@ class EventLoopNode(NodeProtocol):
                     break
                 executed_in_batch += 1
 
-                # Publish tool call started
                 await self._publish_tool_started(
                     stream_id, node_id, tc.tool_use_id, tc.tool_name, tc.tool_input
                 )
-
                 logger.info(
                     "[%s] tool_call: %s(%s)",
                     node_id,
@@ -1107,6 +1123,7 @@ class EventLoopNode(NodeProtocol):
                         key = tc.tool_input.get("key", "")
                         await accumulator.set(key, value)
                         outputs_set_this_turn.append(key)
+                        await self._publish_output_key_set(stream_id, node_id, key)
                     logged_tool_calls.append(
                         {
                             "tool_use_id": tc.tool_use_id,
@@ -1116,6 +1133,8 @@ class EventLoopNode(NodeProtocol):
                             "is_error": result.is_error,
                         }
                     )
+                    results_by_id[tc.tool_use_id] = result
+
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
@@ -1124,10 +1143,10 @@ class EventLoopNode(NodeProtocol):
                         content="Waiting for user input...",
                         is_error=False,
                     )
+                    results_by_id[tc.tool_use_id] = result
+
                 else:
-                    # --- Real tool execution ---
-                    # Guard: detect truncated tool arguments (_raw fallback
-                    # from litellm when json.loads fails on max_tokens hit).
+                    # --- Real tool: check for truncated args, else queue ---
                     if "_raw" in tc.tool_input:
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
@@ -1143,9 +1162,36 @@ class EventLoopNode(NodeProtocol):
                             node_id,
                             tc.tool_name,
                         )
+                        results_by_id[tc.tool_use_id] = result
                     else:
-                        result = await self._execute_tool(tc)
-                    result = self._truncate_tool_result(result, tc.tool_name)
+                        pending_real.append(tc)
+
+            # Phase 2: execute real tools in parallel.
+            if pending_real:
+                raw_results = await asyncio.gather(
+                    *(self._execute_tool(tc) for tc in pending_real),
+                    return_exceptions=True,
+                )
+                for tc, raw in zip(pending_real, raw_results, strict=True):
+                    if isinstance(raw, BaseException):
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=f"Tool '{tc.tool_name}' raised: {raw}",
+                            is_error=True,
+                        )
+                    else:
+                        result = raw
+                    results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
+
+            # Phase 3: record results into conversation in original order,
+            # build logged/real lists, and publish completed events.
+            for tc in tool_calls[:executed_in_batch]:
+                result = results_by_id.get(tc.tool_use_id)
+                if result is None:
+                    continue  # shouldn't happen
+
+                # Build log entries for real tools
+                if tc.tool_name not in ("set_output", "ask_user"):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
@@ -1156,15 +1202,11 @@ class EventLoopNode(NodeProtocol):
                     real_tool_results.append(tool_entry)
                     logged_tool_calls.append(tool_entry)
 
-                # Record tool result in conversation (both real and set_output
-                # go into the conversation for LLM context continuity)
                 await conversation.add_tool_result(
                     tool_use_id=tc.tool_use_id,
                     content=result.content,
                     is_error=result.is_error,
                 )
-
-                # Publish tool call completed
                 await self._publish_tool_completed(
                     stream_id,
                     node_id,
@@ -1617,10 +1659,27 @@ class EventLoopNode(NodeProtocol):
             return result
 
         # load_data is the designated mechanism for reading spilled files.
-        # The LLM controls chunk size via offset/limit — re-spilling its
-        # result would create a circular loop.
+        # Don't re-spill (circular), but DO truncate with a pagination hint.
         if tool_name == "load_data":
-            return result
+            preview_chars = max(limit - 300, limit // 2)
+            preview = result.content[:preview_chars]
+            truncated = (
+                f"[load_data result: {len(result.content)} chars — "
+                f"too large for context. Use offset and limit parameters "
+                f"to read smaller chunks, e.g. "
+                f"load_data(filename=..., offset=0, limit=50).]\n\n"
+                f"Preview:\n{preview}…"
+            )
+            logger.info(
+                "load_data result truncated: %d → %d chars (use offset/limit to paginate)",
+                len(result.content),
+                len(truncated),
+            )
+            return ToolResult(
+                tool_use_id=result.tool_use_id,
+                content=truncated,
+                is_error=False,
+            )
 
         # Determine a preview size — leave room for the metadata wrapper
         preview_chars = max(limit - 300, limit // 2)
@@ -2120,4 +2179,36 @@ class EventLoopNode(NodeProtocol):
                 tool_name=tool_name,
                 result=result,
                 is_error=is_error,
+            )
+
+    async def _publish_judge_verdict(
+        self,
+        stream_id: str,
+        node_id: str,
+        action: str,
+        feedback: str = "",
+        judge_type: str = "implicit",
+        iteration: int = 0,
+    ) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_judge_verdict(
+                stream_id=stream_id,
+                node_id=node_id,
+                action=action,
+                feedback=feedback,
+                judge_type=judge_type,
+                iteration=iteration,
+            )
+
+    async def _publish_output_key_set(
+        self,
+        stream_id: str,
+        node_id: str,
+        key: str,
+    ) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_output_key_set(
+                stream_id=stream_id,
+                node_id=node_id,
+                key=key,
             )
