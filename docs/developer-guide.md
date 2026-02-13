@@ -120,25 +120,19 @@ Skills are also available in Cursor. To enable:
 
 ### Codex CLI Support
 
-Hive also supports [OpenAI Codex CLI](https://github.com/openai/codex).
+Hive supports [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
 
-1. Run `./quickstart.sh` from repo root (it bootstraps Codex files if missing)
-2. Verify `.codex/config.toml` exists and contains `agent-builder` + `tools`
-3. Verify `.agents/skills/` includes `hive`, `hive-create`, `hive-concepts`, `hive-patterns`, `hive-test`, `hive-credentials`
-4. Start Codex from the repo root
+Configuration files are tracked in git:
+- `.codex/config.toml` — MCP server config (`agent-builder`)
+- `.agents/skills/` — Symlinks to Hive skills
 
-Codex instructions are routed through project `AGENTS.md` and shared skill directories.
-Codex does not support slash commands like `/hive`; invoke workflows using natural-language prompts.
+To use Codex with Hive:
+1. Run `codex` in the repo root
+2. Type `use hive` to start the agent workflow
 
-Example Codex prompts:
-
-```text
-Use the hive skill from .agents/skills/hive and guide me to build an agent named support_triage.
-List MCP tools first, then start the workflow.
+Example:
 ```
-
-```text
-Use .agents/skills/hive-test/SKILL.md to test exports/support_triage and report failures.
+codex> use hive
 ```
 
 

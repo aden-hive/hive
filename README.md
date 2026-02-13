@@ -121,25 +121,15 @@ hive run exports/your_agent_name --input '{"key": "value"}'
 ```
 ##  Coding Agent Support
 ### Codex CLI
-Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex).
+Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
 
-1. **Setup:** Run `./quickstart.sh` in the repo root.
-2. **Config:** Ensure `.codex/config.toml` exists with `agent-builder` and `tools` MCP servers.
-3. **Skills:** Hive skills are available through `.agents/skills/` and guided by `AGENTS.md`.
-4. **Launch:** Start Codex CLI from the project root and use Hive skills/workflows.
+1. **Config:** `.codex/config.toml` with `agent-builder` MCP server (tracked in git)
+2. **Skills:** `.agents/skills/` symlinks to Hive skills (tracked in git)
+3. **Launch:** Run `codex` in the repo root, then type `use hive`
 
-Codex uses the same MCP tools as other integrations, so agent-builder and tools behavior stays consistent.
-Codex does not use Claude-style slash commands like `/hive`.
-
-Example Codex prompts:
-
-```text
-Use the hive skill from .agents/skills/hive and help me build a new agent named support_triage.
-First, list connected MCP tools from agent-builder and tools.
+Example:
 ```
-
-```text
-Use .agents/skills/hive-create/SKILL.md to create an agent named support_triage end-to-end.
+codex> use hive
 ```
 
 ### Opencode 

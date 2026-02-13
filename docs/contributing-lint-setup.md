@@ -108,7 +108,7 @@ Antigravity IDE (Google's AI-powered IDE) is supported via `.antigravity/mcp_con
 
 ### Codex CLI
 
-Codex CLI (OpenAI) is supported via `.codex/config.toml` (MCP servers) and `.agents/skills/` (symlinks to `.claude/skills/`). Codex reads project instructions from `AGENTS.md`. See the [Codex CLI section in the README](../README.md#codex-cli) for setup.
+Codex CLI (OpenAI, v0.101.0+) is supported via `.codex/config.toml` (MCP server config) and `.agents/skills/` (symlinks to `.claude/skills/`). These files are tracked in git. Run `codex` in the repo root and type `use hive` to start. See the [Codex CLI section in the README](../README.md#codex-cli) for details.
 
 ---
 
