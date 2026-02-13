@@ -182,47 +182,16 @@ Skills are also available in Cursor. To enable:
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
 4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
-### Codex CLI Support
+### 2. Build an Agent
 
-[OpenAI Codex CLI](https://github.com/openai/codex) is supported with project-level config.
-
-1. Run `./quickstart.sh` from the repo root
-2. Confirm `.codex/config.toml` exists with both MCP servers:
-   - `agent-builder`
-   - `tools`
-3. Confirm `.agents/skills/` contains Hive skills
-4. Start Codex in the repo root and run Hive workflows using the project `AGENTS.md`
-
-Important: Codex does not use slash commands like `/hive`.
-Use natural-language prompts that reference Hive skills.
-
-Example Codex prompts:
-
-```text
-Use the hive skill from .agents/skills/hive and create a new agent named support_triage.
-First list available MCP tools, then proceed step by step.
-```
-
-```text
-Use .agents/skills/hive-concepts/SKILL.md to define goals, constraints, and node strategy for support_triage.
-```
-
-The numbered flow below uses **Claude Code** command examples.  
-For **Codex**, use equivalent natural-language prompts that reference Hive skills.
-
-Codex equivalents:
-
-```text
-Use hive-create to build an agent named support_triage.
-Use hive-concepts to define goals and constraints.
-Use hive-patterns to improve robustness.
-Use hive-test to validate the final agent.
-```
-
-### 2. Build an Agent (Claude Code)
-
+**Claude Code:**
 ```
 claude> /hive
+```
+
+**Codex CLI:**
+```
+codex> use hive
 ```
 
 Follow the prompts to:
@@ -573,19 +542,21 @@ Run the quickstart script in the root directory:
 
 ## Codex Setup
 
-Codex setup is handled by `quickstart.sh` and uses:
+[OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+) is supported with project-level config:
 
-- `.codex/config.toml` for MCP server configuration
-- `.agents/skills/` for shared Hive skills
-- `AGENTS.md` for project instruction routing
+- `.codex/config.toml` — MCP server configuration (`agent-builder`)
+- `.agents/skills/` — Symlinks to Hive skills
+
+These files are tracked in git and available on clone. To use Codex with Hive:
+
+1. Run `codex` in the repo root
+2. Type `use hive` to start the agent workflow
 
 Quick verification:
 
 ```bash
 test -f .codex/config.toml && echo "OK: Codex config" || echo "MISSING: .codex/config.toml"
-for s in hive hive-create hive-concepts hive-patterns hive-test hive-credentials; do
-  test -d ".agents/skills/$s" && echo "OK: $s" || echo "MISSING: $s"
-done
+test -d .agents/skills/hive && echo "OK: Skills" || echo "MISSING: .agents/skills/"
 ```
 
 ## Additional Resources
