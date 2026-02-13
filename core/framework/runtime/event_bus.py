@@ -63,6 +63,9 @@ class EventType(StrEnum):
     NODE_INPUT_BLOCKED = "node_input_blocked"
     NODE_STALLED = "node_stalled"
 
+    # Context management
+    CONTEXT_COMPACTED = "context_compacted"
+
     # Custom events
     CUSTOM = "custom"
 

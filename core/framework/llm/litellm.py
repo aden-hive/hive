@@ -302,7 +302,12 @@ class LiteLLMProvider(LLMProvider):
         # Extract content
         content = response.choices[0].message.content or ""
 
-        # Get usage info
+        # Get usage info.
+        # NOTE: completion_tokens includes reasoning/thinking tokens for models
+        # that use them (o1, gpt-5-mini, etc.). LiteLLM does not reliably expose
+        # usage.completion_tokens_details.reasoning_tokens across all providers.
+        # This means output_tokens may be inflated for reasoning models.
+        # Compaction is unaffected — it uses prompt_tokens (input-side only).
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
