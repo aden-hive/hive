@@ -38,9 +38,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
 ]
-sandbox = [
-    "RestrictedPython>=7.0",
-]
+
 ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
@@ -49,7 +47,6 @@ sql = [
     "duckdb>=1.0.0",
 ]
 all = [
-    "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
     "duckdb>=1.0.0",
@@ -95,4 +92,4 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [dependency-groups]
-dev = ["ty>=0.0.13", "ruff>=0.14.14"]
+dev = ["ty>=0.0.13", "ruff>=0.0.14"]
