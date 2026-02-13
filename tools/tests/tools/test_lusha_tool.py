@@ -114,7 +114,7 @@ class TestLushaClient:
         assert body["filters"]["contacts"]["include"]["searchText"] == "VP Sales vp software"
         assert body["filters"]["contacts"]["include"]["locations"] == [{"country": "New York"}]
         assert body["filters"]["contacts"]["include"]["departments"] == ["sales"]
-        assert body["filters"]["companies"]["include"]["searchText"] == "software"
+        assert "searchText" not in body["filters"]["companies"]["include"]
         assert body["filters"]["companies"]["include"]["names"] == ["Acme"]
         assert mock_request.call_args.args[1] == f"{LUSHA_API_BASE}/prospecting/contact/search"
 
@@ -134,7 +134,8 @@ class TestLushaClient:
         assert result["companies"][0]["id"] == "co1"
         body = mock_request.call_args.kwargs["json"]
         assert body["pages"] == {"size": 25, "page": 0}
-        assert body["filters"]["companies"]["include"]["searchText"] == "software"
+        assert "searchText" not in body["filters"]["companies"]["include"]
+        assert body["filters"]["companies"]["include"]["names"] == ["software"]
         assert body["filters"]["companies"]["include"]["sizes"] == [{"min": 51, "max": 200}]
         assert body["filters"]["companies"]["include"]["locations"] == [
             {"country": "United States"}
