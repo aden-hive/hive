@@ -1,0 +1,213 @@
+{
+  "agent": {
+    "id": "hive_dev_loop",
+    "name": "Hive Dev Loop",
+    "version": "2.0.0",
+    "description": "Enterprise Autonomous TDD Developer. Plans, writes, tests, and debugs code iteratively until success criteria are met."
+  },
+  "graph": {
+    "id": "hive_dev_loop-graph",
+    "goal_id": "autonomous-tdd-loop",
+    "version": "2.0.0",
+    "entry_node": "plan",
+    "entry_points": {
+      "start": "plan"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "report"
+    ],
+    "nodes": [
+      {
+        "id": "plan",
+        "name": "Lead Architect",
+        "description": "Analyze user request and create a technical execution plan.",
+        "node_type": "event_loop",
+        "client_facing": true,
+        "input_keys": [
+          "task"
+        ],
+        "output_keys": [
+          "plan_brief"
+        ],
+        "system_prompt": "You are the Lead Architect for a TDD Software Engine.\n\n**STEP 1 - Analysis:**\nAnalyze the user's request: {{task}}\n\n**STEP 2 - Interaction:**\nIf the request is vague, ask clarifying questions.\nIf the request is clear, outline a 3-step technical plan:\n1. File Structure\n2. Key Classes/Functions\n3. Testing Strategy\n\n**STEP 3 - Handoff:**\nOnce the plan is solid, output the plan to the next node.\n- set_output(\"plan_brief\", \"<detailed_technical_plan>\")",
+        "tools": [],
+        "max_retries": 3
+      },
+      {
+        "id": "write_test",
+        "name": "Test Engineer",
+        "description": "Write a comprehensive pytest suite based on the plan.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "plan_brief"
+        ],
+        "output_keys": [
+          "test_file_path"
+        ],
+        "system_prompt": "You are a Senior QA Engineer.\n\n**Context:**\nPlan: {{plan_brief}}\n\n**Task:**\n1. Create a Python test file (e.g., `test_solution.py`).\n2. Write comprehensive `pytest` cases covering edge cases.\n3. Ensure tests fail initially (Red phase of TDD).\n\n**Action:**\n- write_to_file(path=\"tests/test_solution.py\", content=\"<code_here>\")\n- set_output(\"test_file_path\", \"tests/test_solution.py\")",
+        "tools": [
+          "write_to_file"
+        ],
+        "max_retries": 3
+      },
+      {
+        "id": "write_code",
+        "name": "Senior Developer",
+        "description": "Implement the solution to satisfy the tests.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "plan_brief",
+          "test_file_path"
+        ],
+        "output_keys": [
+          "source_file_path"
+        ],
+        "system_prompt": "You are a Senior Python Developer.\n\n**Context:**\nPlan: {{plan_brief}}\nTests: {{test_file_path}}\n\n**Task:**\n1. Implement the solution code in `solution.py`.\n2. Ensure code structure matches the test expectations.\n3. Write clean, type-hinted, and documented code.\n\n**Action:**\n- write_to_file(path=\"solution.py\", content=\"<code_here>\")\n- set_output(\"source_file_path\", \"solution.py\")",
+        "tools": [
+          "write_to_file",
+          "view_file"
+        ],
+        "max_retries": 3
+      },
+      {
+        "id": "run_pytest",
+        "name": "CI/CD Runner",
+        "description": "Execute the test suite and capture results.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "test_file_path",
+          "source_file_path"
+        ],
+        "output_keys": [
+          "test_status",
+          "test_logs"
+        ],
+        "system_prompt": "You are a CI/CD Runner.\n\n**Task:**\nExecute the tests using `pytest`.\n\n**Action:**\n- execute_command_tool(command=\"pytest {{test_file_path}} -v\")\n- Analyze the output.\n- If passed: set_output(\"test_status\", \"PASS\")\n- If failed: set_output(\"test_status\", \"FAIL\")\n- set_output(\"test_logs\", \"<full_console_output>\")",
+        "tools": [
+          "execute_command_tool"
+        ],
+        "max_retries": 3
+      },
+      {
+        "id": "debugger",
+        "name": "Debugger",
+        "description": "Analyze failures and patch the code.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "test_logs",
+          "source_file_path"
+        ],
+        "output_keys": [],
+        "system_prompt": "You are a Debugging Specialist.\n\n**Context:**\nTests failed.\nLogs: {{test_logs}}\n\n**Task:**\n1. Analyze the failure reason.\n2. Read the source code using `view_file`.\n3. Rewrite the source code using `write_to_file` to fix the bug.\n\n**Action:**\n- write_to_file(path=\"{{source_file_path}}\", content=\"<fixed_code>\")",
+        "tools": [
+          "view_file",
+          "write_to_file"
+        ],
+        "max_retries": 5
+      },
+      {
+        "id": "report",
+        "name": "Project Manager",
+        "description": "Generate final completion report.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "source_file_path",
+          "test_status"
+        ],
+        "output_keys": [
+          "final_report"
+        ],
+        "system_prompt": "You are the Project Manager.\n\n**Task:**\nThe TDD cycle is complete.\n1. Confirm all tests passed.\n2. Provide a summary of the implemented solution.\n3. List the files created.\n\n**Action:**\n- set_output(\"final_report\", \"Project completed successfully.\")",
+        "tools": [],
+        "max_retries": 1
+      }
+    ],
+    "edges": [
+      {
+        "id": "p-t",
+        "source": "plan",
+        "target": "write_test",
+        "condition": "on_success",
+        "priority": 1
+      },
+      {
+        "id": "t-c",
+        "source": "write_test",
+        "target": "write_code",
+        "condition": "on_success",
+        "priority": 1
+      },
+      {
+        "id": "c-r",
+        "source": "write_code",
+        "target": "run_pytest",
+        "condition": "on_success",
+        "priority": 1
+      },
+      {
+        "id": "r-d",
+        "source": "run_pytest",
+        "target": "debugger",
+        "condition": "conditional",
+        "condition_expr": "test_status == 'FAIL'",
+        "priority": 1
+      },
+      {
+        "id": "d-c",
+        "source": "debugger",
+        "target": "write_code",
+        "condition": "on_success",
+        "priority": 1
+      },
+      {
+        "id": "r-rep",
+        "source": "run_pytest",
+        "target": "report",
+        "condition": "conditional",
+        "condition_expr": "test_status == 'PASS'",
+        "priority": 1
+      }
+    ]
+  },
+  "goal": {
+    "id": "autonomous-tdd-loop",
+    "name": "Autonomous TDD Developer",
+    "description": "Execute a full TDD cycle: Plan -> Test -> Code -> Refactor.",
+    "status": "active",
+    "success_criteria": [
+      {
+        "id": "tests-pass",
+        "description": "All tests pass successfully",
+        "metric": "test_status",
+        "target": "PASS",
+        "weight": 1.0,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c-valid-python",
+        "description": "Code must be valid Python syntax",
+        "constraint_type": "hard",
+        "category": "syntax"
+      },
+      {
+        "id": "c-tdd-process",
+        "description": "Tests must be written before implementation",
+        "constraint_type": "soft",
+        "category": "process"
+      }
+    ]
+  },
+  "required_tools": [
+    "write_to_file",
+    "view_file",
+    "execute_command_tool"
+  ],
+  "metadata": {
+    "created_at": "2026-02-13T10:00:00.000000",
+    "node_count": 6,
+    "edge_count": 6
+  }
+}
