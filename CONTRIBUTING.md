@@ -6,6 +6,12 @@ Thank you for your interest in contributing to the Aden Agent Framework! This do
 
 By participating in this project, you agree to abide by our [Code of Conduct](docs/CODE_OF_CONDUCT.md).
 
+## Architecture Decision Records (ADRs)
+
+Key architectural choices are documented as ADRs in
+`docs/architecture/decisions/`. Please read these before making large design
+changes to ensure new work aligns with existing decisions.
+
 ## Issue Assignment Policy
 
 To prevent duplicate work and respect contributors' time, we require issue assignment before submitting PRs.
@@ -99,7 +105,8 @@ docs(readme): update installation instructions
 2. Update documentation if needed
 3. Add tests for new functionality
 4. Ensure `make check` and `make test` pass
-5. Request review from maintainers
+5. Update the CHANGELOG.md if applicable
+6. Request review from maintainers
 
 ### PR Title Format
 
