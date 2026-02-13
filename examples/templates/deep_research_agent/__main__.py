@@ -184,10 +184,12 @@ async def _interactive_shell(verbose=False):
     agent = DeepResearchAgent()
     await agent.start()
 
+    loop = asyncio.get_running_loop()
+
     try:
         while True:
             try:
-                topic = await asyncio.get_event_loop().run_in_executor(
+                topic = await loop.run_in_executor(
                     None, input, "Topic> "
                 )
                 if topic.lower() in ["quit", "exit", "q"]:
