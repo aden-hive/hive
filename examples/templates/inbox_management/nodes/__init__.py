@@ -3,29 +3,34 @@
 from framework.graph import NodeSpec
 
 # Node 1: Intake (client-facing)
-# Receives triage rules and max_emails, confirms understanding with user.
+# Receives user rules and max_emails, confirms understanding with user.
 intake_node = NodeSpec(
     id="intake",
     name="Intake",
     description=(
-        "Receive and validate input parameters: triage rules and max_emails. "
+        "Receive and validate input parameters: rules and max_emails. "
         "Present the interpreted rules back to the user for confirmation."
     ),
     node_type="event_loop",
     client_facing=True,
     input_keys=["rules", "max_emails"],
-    output_keys=["triage_rules", "max_emails"],
+    output_keys=["rules", "max_emails"],
     system_prompt="""\
-You are an inbox management assistant. The user has provided triage rules for managing their unread emails.
+You are an inbox management assistant. The user has provided rules for managing their emails.
 
 **STEP 1 — Respond to the user (text only, NO tool calls):**
 
-Read the user's triage rules from the input context. Present a clear summary of how you will categorize and act on their emails:
+Read the user's rules from the input context. Present a clear summary of what you will do with their emails based on their rules.
 
-- What will be TRASHED (spam, unwanted)
-- What will be ARCHIVED (low-priority, newsletters)
-- What will be marked IMPORTANT (urgent, action-needed)
-- How emails will be CATEGORIZED (Action Needed, FYI, Waiting On)
+The following Gmail actions are available — map the user's rules to whichever apply:
+- **Trash** emails
+- **Mark as spam**
+- **Mark as important** / unmark important
+- **Mark as read** / mark as unread
+- **Star** / unstar emails
+- **Add/remove Gmail labels** (INBOX, UNREAD, IMPORTANT, STARRED, SPAM, CATEGORY_PERSONAL, CATEGORY_SOCIAL, CATEGORY_PROMOTIONS, CATEGORY_UPDATES, CATEGORY_FORUMS)
+
+Present the rules back to the user in plain language. Do NOT refuse rules — if the user asks for any of the above actions, confirm you will do it.
 
 Also confirm the batch size (max_emails). If max_emails is not provided, default to 100.
 
@@ -33,125 +38,140 @@ Ask the user to confirm: "Does this look right? I'll proceed once you confirm."
 
 **STEP 2 — After the user confirms, call set_output:**
 
-- set_output("triage_rules", <the confirmed triage rules as a clear text description>)
+- set_output("rules", <the confirmed rules as a clear text description>)
 - set_output("max_emails", <the confirmed max_emails as a string number, e.g. "100">)
 """,
     tools=[],
 )
 
-# Node 2: Fetch Emails
-# Fetches unread emails from Gmail up to the batch limit.
+# Node 2: Fetch Emails (event_loop — calls bulk_fetch_emails tool)
+# Fetches emails from Gmail inbox via the bulk_fetch_emails custom script tool.
 fetch_emails_node = NodeSpec(
     id="fetch-emails",
     name="Fetch Emails",
     description=(
-        "Fetch unread emails from Gmail up to the configured batch limit. "
-        "Only retrieves emails with the UNREAD label."
+        "Fetch emails from the Gmail inbox up to the configured batch limit. "
+        "Calls bulk_fetch_emails tool, which fetches via Gmail API and writes "
+        "compact JSONL to session data_dir."
     ),
     node_type="event_loop",
     client_facing=False,
-    input_keys=["triage_rules", "max_emails"],
+    input_keys=["rules", "max_emails"],
     output_keys=["emails"],
     system_prompt="""\
-You are an inbox management assistant. Your job is to fetch unread emails from Gmail.
+You are a data pipeline step. Your ONLY job is to fetch emails from Gmail by calling the bulk_fetch_emails tool.
 
-**IMPORTANT CONSTRAINTS:**
-- ONLY fetch emails that are UNREAD. Use the query "is:unread" with gmail_list_messages.
-- Fetch at most the number specified in max_emails (from context).
-- For each email returned by gmail_list_messages, use gmail_get_message to get its full details (subject, from, snippet, body, labels).
+**Execute these exact steps:**
 
-**PROCESS:**
-1. Call gmail_list_messages with query "is:unread" and max_results set to the max_emails value.
-2. For each message in the results, call gmail_get_message to get full details.
-3. Collect all email data into a structured list.
-4. Call set_output("emails", <JSON string of the email list>).
+1. Read the "max_emails" value from the input context.
+2. Call bulk_fetch_emails with max_emails set to that value.
+3. The tool returns a JSON object with a "filename" key (e.g. {"filename": "emails.jsonl"}).
+4. Call set_output("emails", <the filename value from the tool result>).
 
-Each email in the list should include: id, subject, from, date, snippet, body (or body preview), and current labels.
-
-If there are no unread emails, set_output("emails", "[]") — an empty list is valid.
+Do NOT add commentary or explanation. Do NOT call any other tools. Execute the steps above exactly.
 """,
-    tools=["gmail_list_messages", "gmail_get_message"],
+    tools=["bulk_fetch_emails"],
 )
 
 # Node 3: Classify and Act
-# Classifies each email and takes the appropriate Gmail action.
+# Applies user rules to each email and executes the appropriate Gmail actions.
 classify_and_act_node = NodeSpec(
     id="classify-and-act",
     name="Classify and Act",
     description=(
-        "Classify each email against the user's triage rules, then execute "
-        "the appropriate Gmail actions (trash, archive, mark important, add labels)."
+        "Apply the user's rules to each email and execute "
+        "the appropriate Gmail actions."
     ),
     node_type="event_loop",
     client_facing=False,
-    input_keys=["triage_rules", "emails"],
+    input_keys=["rules", "emails"],
     output_keys=["actions_taken"],
     system_prompt="""\
-You are an inbox management assistant. Your job is to classify emails and take action based on the user's triage rules.
+You are an inbox management assistant. Apply the user's rules to their emails and execute Gmail actions.
 
-**TRIAGE RULES** are provided in the context as "triage_rules". Apply these rules to each email.
+**YOUR TOOLS:**
+- load_data(filename, limit, offset) — Read emails from a local file. This is how you access the emails.
+- append_data(filename, data) — Append a line to a file. Use this to record actions taken.
+- gmail_batch_modify_messages(message_ids, add_labels, remove_labels) — Modify Gmail labels in batch. ALWAYS prefer this.
+- gmail_modify_message(message_id, add_labels, remove_labels) — Modify a single message's labels.
+- gmail_trash_message(message_id) — Move a message to trash. No batch version; call per email.
+- set_output(key, value) — Set an output value. Call ONLY after all actions are executed.
 
-**AVAILABLE ACTIONS:**
-1. **TRASH** — For spam, unwanted emails. Use gmail_trash_message(message_id).
-2. **ARCHIVE** — For low-priority, newsletters. Use gmail_modify_message(message_id, remove_labels=["INBOX"]) to remove from inbox but keep in All Mail.
-3. **MARK IMPORTANT** — For urgent, action-needed emails. Use gmail_modify_message(message_id, add_labels=["IMPORTANT"]).
-4. **CATEGORIZE** — Add urgency labels. Use gmail_modify_message(message_id, add_labels=[<category>]) where category is one of: "Action Needed", "FYI", "Waiting On".
+**CONTEXT:**
+- "rules" = the user's rule to apply (e.g. "mark all as unread")
+- "emails" = a filename (e.g. "emails.jsonl") containing the fetched emails as JSONL. Each line has: id, subject, from, to, date, snippet, labels.
 
-**IMPORTANT CONSTRAINTS:**
-- NEVER modify read emails. The emails list from context contains ONLY unread emails, so you are safe to act on all of them.
-- Apply the MOST appropriate action to each email based on the rules.
-- An email can have BOTH an action (trash/archive/mark important) AND a category (Action Needed/FYI/Waiting On) if appropriate — but trashed emails don't need a category.
+**STEP 1 — LOAD EMAILS (your first tool call MUST be load_data):**
+Call load_data(filename=<the "emails" value from context>) to read the email data.
+- If the result is empty, call set_output("actions_taken", "no emails to process") and stop.
+- If has_more=true, load more pages with load_data(filename=..., offset=...) until all emails are loaded.
 
-**PROCESS:**
-1. Read the emails list from context.
-2. For each email, classify it against the triage rules.
-3. Execute the appropriate Gmail action(s) for each email.
-4. Track every action taken: {email_id, subject, from, classification, action, category}.
-5. After processing ALL emails, call set_output("actions_taken", <JSON string of the actions list>).
+**STEP 2 — DETERMINE STRATEGY:**
+- **Blanket rule** (same action for ALL emails, e.g. "mark all as unread"): Collect all message IDs, then execute ONE gmail_batch_modify_messages call.
+- **Classification rule** (different actions for different emails): Classify each email, group by action, execute batch operations per group.
 
-If the emails list is empty, set_output("actions_taken", "[]").
+**STEP 3 — EXECUTE ACTIONS:**
+Call the appropriate Gmail tool(s) with the real message IDs from the loaded emails. Then record each action:
+- append_data(filename="actions.jsonl", data=<JSON of {email_id, subject, from, action}>)
+
+**STEP 4 — FINISH:**
+After ALL actions are executed, call set_output("actions_taken", "actions.jsonl").
+
+**GMAIL LABEL REFERENCE:**
+- MARK AS UNREAD — add_labels=["UNREAD"]
+- MARK AS READ — remove_labels=["UNREAD"]
+- MARK IMPORTANT — add_labels=["IMPORTANT"]
+- REMOVE IMPORTANT — remove_labels=["IMPORTANT"]
+- STAR — add_labels=["STARRED"]
+- UNSTAR — remove_labels=["STARRED"]
+- ARCHIVE — remove_labels=["INBOX"]
+- MARK AS SPAM — add_labels=["SPAM"], remove_labels=["INBOX"]
+- TRASH — use gmail_trash_message(message_id) per email
+
+**CRITICAL RULES:**
+- Your FIRST tool call MUST be load_data. Do NOT skip this.
+- You MUST call Gmail tools to execute real actions. Do NOT just report what should be done.
+- Do NOT call set_output until all Gmail actions are executed.
+- Pass ONLY the filename "actions.jsonl" to set_output, NOT raw data.
 """,
-    tools=["gmail_trash_message", "gmail_modify_message", "gmail_batch_modify_messages"],
+    tools=["gmail_trash_message", "gmail_modify_message", "gmail_batch_modify_messages", "load_data", "append_data"],
 )
 
 # Node 4: Report
-# Generates a summary report of all triage actions taken.
+# Generates a summary report of all actions taken.
 report_node = NodeSpec(
     id="report",
     name="Report",
-    description="Generate a summary report of all triage actions taken, organized by category.",
+    description="Generate a summary report of all actions taken on the emails.",
     node_type="event_loop",
     client_facing=False,
     input_keys=["actions_taken"],
     output_keys=["summary_report"],
     system_prompt="""\
-You are an inbox management assistant. Your job is to generate a clear summary report of the triage actions taken.
+You are an inbox management assistant. Your job is to generate a clear summary report of the actions taken on the user's emails.
 
-**READ the actions_taken list from context.** It contains objects with: email_id, subject, from, classification, action, category.
+**LOADING ACTIONS:**
+The "actions_taken" value from context is a filename (e.g. "actions.jsonl"), NOT raw action data.
+- If it equals "[]", there are no actions — generate a report stating no emails were processed and call set_output.
+- Otherwise, call load_data(filename=<the actions_taken value>) to read the action records.
+- The file is in JSONL format: each line is one JSON object with: email_id, subject, from, action.
+- If load_data returns has_more=true, call it again with the next offset to get more records.
+- Read ALL records before generating the report.
 
-**GENERATE a summary report with these sections:**
+**GENERATE a summary report:**
 
-1. **Overview** — Total emails processed, breakdown by action (trashed, archived, marked important, categorized only).
+1. **Overview** — Total emails processed, breakdown by action type.
 
-2. **Trashed** — List of emails that were trashed, with subject and sender.
+2. **By Action** — Group emails by action taken. For each action group, list the emails with subject and sender.
 
-3. **Archived** — List of emails that were archived, with subject and sender.
-
-4. **Marked Important** — List of emails marked important, with subject and sender.
-
-5. **By Category:**
-   - **Action Needed** — Emails requiring user action
-   - **FYI** — Informational emails
-   - **Waiting On** — Emails waiting for a response from others
-
-6. **No Action Taken** — Any emails that didn't match any rules (if applicable).
+3. **No Action Taken** — Any emails that didn't match any rules (if applicable).
 
 Format the report as clean, readable text (not JSON).
 
 After generating the report, call:
 - set_output("summary_report", <the formatted report text>)
 """,
-    tools=[],
+    tools=["load_data"],
 )
 
 __all__ = [

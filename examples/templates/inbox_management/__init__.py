@@ -1,8 +1,8 @@
 """
-Inbox Management Agent — Automatic email triage using free-text rules.
+Inbox Management Agent — Manage Gmail inbox using free-text rules.
 
-Triage unread Gmail emails by trashing spam, archiving low-priority,
-marking important, and categorizing by urgency (Action Needed, FYI, Waiting On).
+Apply user-defined rules to inbox emails: trash, mark as spam, mark important,
+mark read/unread, star, and more — using only native Gmail actions.
 """
 
 from .agent import InboxManagementAgent, default_agent, goal, nodes, edges, loop_config

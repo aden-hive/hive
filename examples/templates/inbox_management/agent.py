@@ -21,72 +21,44 @@ goal = Goal(
     id="inbox-management",
     name="Inbox Management",
     description=(
-        "Automatically triage unread Gmail emails using user-defined free-text rules. "
-        "Fetch unread emails (configurable batch size, default 100), classify each by "
-        "urgency and type, then take appropriate actions — trash spam, archive low-priority "
-        "messages, mark important emails, and categorize the rest as Action Needed, FYI, "
-        "or Waiting On."
+        "Manage Gmail inbox emails using user-defined free-text rules. "
+        "Fetch inbox emails (configurable batch size, default 100), apply the user's "
+        "rules to each email, and execute the appropriate Gmail actions — trash, "
+        "mark as spam, mark important, mark read/unread, star, and more."
     ),
     success_criteria=[
         SuccessCriterion(
-            id="email-classification-accuracy",
-            description=(
-                "Each unread email is classified according to the user's free-text rules "
-                "with appropriate urgency category (action needed, FYI, waiting on) and "
-                "type (spam, newsletter, important, etc.)"
-            ),
-            metric="classification_match_rate",
-            target=">=90%",
-            weight=0.3,
-        ),
-        SuccessCriterion(
             id="correct-action-execution",
             description=(
-                "Trash, archive, mark-important, and label actions are applied correctly "
-                "to the right emails based on classification"
+                "Gmail actions are applied correctly to the right emails "
+                "based on the user's rules"
             ),
             metric="action_correctness",
             target=">=95%",
-            weight=0.25,
+            weight=0.35,
         ),
         SuccessCriterion(
-            id="unread-only-guarantee",
+            id="action-report",
             description=(
-                "Only unread emails are fetched and processed; read emails are never modified"
-            ),
-            metric="read_email_modifications",
-            target="0",
-            weight=0.2,
-        ),
-        SuccessCriterion(
-            id="classification-report",
-            description=(
-                "Produces a summary report showing what was done: how many trashed, "
-                "archived, marked important, and categorized, with email subjects listed "
-                "per category"
+                "Produces a summary report showing what was done: how many emails "
+                "were affected by each action type, with email subjects listed"
             ),
             metric="report_completeness",
             target="100%",
-            weight=0.15,
+            weight=0.3,
         ),
         SuccessCriterion(
             id="batch-completeness",
             description=(
-                "All fetched emails up to the configured max are classified and acted upon; "
+                "All fetched emails up to the configured max are processed and acted upon; "
                 "none are silently skipped"
             ),
             metric="emails_processed_ratio",
             target="100%",
-            weight=0.1,
+            weight=0.35,
         ),
     ],
     constraints=[
-        Constraint(
-            id="no-read-email-modification",
-            description="Must never modify, trash, or relabel emails that are already read",
-            constraint_type="hard",
-            category="safety",
-        ),
         Constraint(
             id="respect-batch-limit",
             description="Must not process more emails than the configured max_emails parameter",
@@ -145,7 +117,7 @@ pause_nodes = []
 terminal_nodes = ["report"]
 loop_config = {
     "max_iterations": 100,
-    "max_tool_calls_per_turn": 20,
+    "max_tool_calls_per_turn": 50,
     "max_history_tokens": 32000,
 }
 
@@ -201,6 +173,11 @@ class InboxManagementAgent:
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
+
+        # Discover custom script tools (e.g. bulk_fetch_emails)
+        tools_path = Path(__file__).parent / "tools.py"
+        if tools_path.exists():
+            self._tool_registry.discover_from_module(tools_path)
 
         llm = None
         if not mock_mode:
