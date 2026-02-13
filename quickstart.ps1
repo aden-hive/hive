@@ -95,6 +95,178 @@ function Prompt-Choice {
     }
 }
 
+
+# ============================================================
+# Windows Defender Exclusion Functions
+# ============================================================
+
+function Test-IsAdmin {
+    <#
+    .SYNOPSIS
+        Check if current PowerShell session has admin privileges
+    #>
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]$identity
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-DefenderExclusions {
+    <#
+    .SYNOPSIS
+        Check if Windows Defender is enabled and which paths need exclusions
+    .PARAMETER Paths
+        Array of paths to check
+    .OUTPUTS
+        Hashtable with DefenderEnabled, MissingPaths, and optional Error
+    #>
+    param([string[]]$Paths)
+    
+    # Security: Define safe path prefixes (project + user directories only)
+    $safePrefixes = @(
+        $ScriptDir,         # Project directory
+        $env:LOCALAPPDATA,  # User local appdata
+        $env:APPDATA        # User roaming appdata
+    )
+    
+    # Normalize and filter null/empty values
+    $safePrefixes = $safePrefixes | Where-Object { $_ } | ForEach-Object {
+        [System.IO.Path]::GetFullPath($_)
+    }
+    
+    try {
+        # Check if Defender cmdlets are available (may not exist on older Windows)
+        $mpModule = Get-Module -ListAvailable -Name Defender -ErrorAction SilentlyContinue
+        if (-not $mpModule) {
+            return @{ 
+                DefenderEnabled = $false
+                Error = "Windows Defender module not available"
+            }
+        }
+        
+        # Check if Defender is running
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        if (-not $status.RealTimeProtectionEnabled) {
+            return @{ 
+                DefenderEnabled = $false
+                Reason = "Real-time protection is disabled"
+            }
+        }
+        
+        # Get current exclusions
+        $prefs = Get-MpPreference -ErrorAction Stop
+        $existing = $prefs.ExclusionPath
+        if (-not $existing) { $existing = @() }
+        
+        # Normalize existing paths for comparison
+        $existing = $existing | Where-Object { $_ } | ForEach-Object {
+            [System.IO.Path]::GetFullPath($_)
+        }
+        
+        # Normalize paths and find missing exclusions
+        $missing = @()
+        foreach ($path in $Paths) {
+            $normalized = [System.IO.Path]::GetFullPath($path)
+            
+            # Security: Ensure path is within safe boundaries
+            $isSafe = $false
+            foreach ($prefix in $safePrefixes) {
+                if ($normalized -like "$prefix*") {
+                    $isSafe = $true
+                    break
+                }
+            }
+            
+            if (-not $isSafe) {
+                Write-Warn "Security: Refusing to exclude path outside safe boundaries: $normalized"
+                continue
+            }
+            
+            # Info: Warn if path doesn't exist yet (but still process it)
+            if (-not (Test-Path $path -ErrorAction SilentlyContinue)) {
+                Write-Verbose "Path does not exist yet: $path (will be excluded when created)"
+            }
+            
+            # Check if path is already excluded (or is a child of an excluded path)
+            $alreadyExcluded = $false
+            foreach ($excluded in $existing) {
+                if ($normalized -like "$excluded*") {
+                    $alreadyExcluded = $true
+                    break
+                }
+            }
+            
+            if (-not $alreadyExcluded) {
+                $missing += $normalized
+            }
+        }
+        
+        return @{
+            DefenderEnabled = $true
+            MissingPaths = $missing
+            ExistingPaths = $existing
+        }
+    } catch {
+        return @{ 
+            DefenderEnabled = $false
+            Error = $_.Exception.Message
+        }
+    }
+}
+
+function Test-IsDefenderEnabled {
+    <#
+    .SYNOPSIS
+        Quick boolean check if Defender real-time protection is enabled
+    .OUTPUTS
+        Boolean - $true if enabled, $false otherwise
+    #>
+    try {
+        $mpModule = Get-Module -ListAvailable -Name Defender -ErrorAction SilentlyContinue
+        if (-not $mpModule) {
+            return $false
+        }
+        
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        return $status.RealTimeProtectionEnabled
+    } catch {
+        # If we can't check, assume disabled (fail-safe)
+        return $false
+    }
+}
+
+function Add-DefenderExclusions {
+    <#
+    .SYNOPSIS
+        Add Windows Defender exclusions for specified paths
+    .PARAMETER Paths
+        Array of paths to exclude
+    .OUTPUTS
+        Hashtable with Added and Failed arrays
+    #>
+    param([string[]]$Paths)
+    
+    $added = @()
+    $failed = @()
+    
+    foreach ($path in $Paths) {
+        try {
+            $normalized = [System.IO.Path]::GetFullPath($path)
+            Add-MpPreference -ExclusionPath $normalized -ErrorAction Stop
+            $added += $normalized
+        } catch {
+            $failed += @{ 
+                Path = $path
+                Error = $_.Exception.Message
+            }
+        }
+    }
+    
+    return @{ 
+        Added = $added
+        Failed = $failed
+    }
+}
+
 # Get the directory where this script lives
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
@@ -296,6 +468,136 @@ try {
 Write-Host ""
 Write-Ok "All packages installed"
 Write-Host ""
+
+# ============================================================
+# Step 2.5: Windows Defender Exclusions (Optional Performance Boost)
+# ============================================================
+
+Write-Step -Number "2.5" -Text "Step 2.5: Windows Defender exclusions (optional)"
+Write-Color -Text "Excluding project paths from real-time scanning can improve performance:" -Color DarkGray
+Write-Host "  - uv sync: ~40% faster"
+Write-Host "  - Agent startup: ~30% faster"
+Write-Host ""
+
+# Define paths to exclude
+$pathsToExclude = @(
+    $ScriptDir,                                      # Project directory
+    (Join-Path $ScriptDir ".venv"),                  # Virtual environment
+    (Join-Path $env:LOCALAPPDATA "uv")               # uv cache
+)
+
+# Check current state
+$checkResult = Test-DefenderExclusions -Paths $pathsToExclude
+
+if (-not $checkResult.DefenderEnabled) {
+    if ($checkResult.Error) {
+        Write-Warn "Cannot check Defender status: $($checkResult.Error)"
+    } elseif ($checkResult.Reason) {
+        Write-Warn "Skipping: $($checkResult.Reason)"
+    }
+    Write-Host ""
+    # Continue installation without failing
+} elseif ($checkResult.MissingPaths.Count -eq 0) {
+    Write-Ok "All paths already excluded from Defender scanning"
+    Write-Host ""
+} else {
+    # Show what will be excluded
+    Write-Host "Paths to exclude:"
+    foreach ($path in $checkResult.MissingPaths) {
+        Write-Color -Text "  - $path" -Color Cyan
+    }
+    Write-Host ""
+    
+    # Security notice
+    Write-Color -Text "⚠️  Security Trade-off:" -Color Yellow
+    Write-Host "Adding exclusions improves performance but reduces real-time protection."
+    Write-Host "Only proceed if you trust this project and its dependencies."
+    Write-Host ""
+    
+    # Prompt for consent (default = No for security)
+    if (Prompt-YesNo "Add these Defender exclusions?" "n") {
+        Write-Host ""
+        
+        # Check admin privileges
+        if (-not (Test-IsAdmin)) {
+            Write-Warn "Administrator privileges required to modify Defender settings."
+            Write-Host ""
+            Write-Color -Text "To add exclusions manually, run PowerShell as Administrator and paste:" -Color White
+            Write-Host ""
+            
+            foreach ($path in $checkResult.MissingPaths) {
+                $cmd = "Add-MpPreference -ExclusionPath '$path'"
+                Write-Color -Text "  $cmd" -Color Cyan
+            }
+            
+            Write-Host ""
+            Write-Color -Text "Or copy all commands to clipboard? [y/N]" -Color White
+            $copyChoice = Read-Host
+            if ($copyChoice -match "^[Yy]") {
+                $commands = ($checkResult.MissingPaths | ForEach-Object { 
+                    "Add-MpPreference -ExclusionPath '$_'" 
+                }) -join "`r`n"
+                
+                try {
+                    Set-Clipboard -Value $commands
+                    Write-Ok "Commands copied to clipboard"
+                } catch {
+                    Write-Warn "Could not copy to clipboard. Please copy manually."
+                }
+            }
+        } else {
+            # Re-check Defender status before adding (could have changed during prompt)
+            if (-not (Test-IsDefenderEnabled)) {
+                Write-Warn "Defender status changed during setup (now disabled)."
+                Write-Host "Skipping exclusions - they would have no effect."
+                Write-Host ""
+            } else {
+                # Add exclusions
+                Write-Host "  Adding exclusions... " -NoNewline
+                
+                # Re-check paths in case something changed
+                $freshCheck = Test-DefenderExclusions -Paths $pathsToExclude
+                if ($freshCheck.MissingPaths.Count -eq 0) {
+                    Write-Ok "already added"
+                    Write-Host "  (Exclusions were added by another process)"
+                } else {
+                    $result = Add-DefenderExclusions -Paths $freshCheck.MissingPaths
+                    
+                    if ($result.Added.Count -gt 0) {
+                        Write-Ok "done"
+                        foreach ($path in $result.Added) {
+                            Write-Ok "Excluded: $path"
+                        }
+                    }
+                    
+                    if ($result.Failed.Count -gt 0) {
+                        Write-Host ""
+                        
+                        # Calculate and show success rate
+                        $totalPaths = $result.Added.Count + $result.Failed.Count
+                        if ($totalPaths -gt 0) {
+                            $successRate = [math]::Round(($result.Added.Count / $totalPaths) * 100)
+                            Write-Warn "Only $($result.Added.Count)/$totalPaths exclusions added ($successRate%)"
+                            Write-Host "Performance benefit may be reduced."
+                            Write-Host ""
+                        }
+                        
+                        Write-Warn "Failed exclusions:"
+                        foreach ($failure in $result.Failed) {
+                            Write-Warn "  $($failure.Path): $($failure.Error)"
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Write-Host ""
+        Write-Warn "Skipped. You can add exclusions later for better performance."
+        Write-Host "  Run this script again or add them manually via Windows Security."
+    }
+    Write-Host ""
+}
+
 
 # ============================================================
 # Step 3: Verify Python Imports
@@ -807,14 +1109,14 @@ Write-Host ""
 
 if ($SelectedProviderId -or $credKey) {
     Write-Color -Text "Note:" -Color White
-    Write-Host "• uv has been added to your User PATH"
+    Write-Host "- uv has been added to your User PATH"
     if ($SelectedProviderId) {
-        Write-Host "• $SelectedEnvVar is set for LLM access"
+        Write-Host "- $SelectedEnvVar is set for LLM access"
     }
     if ($credKey) {
-        Write-Host "• HIVE_CREDENTIAL_KEY is set for credential encryption"
+        Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
     }
-    Write-Host "• All variables will persist across reboots"
+    Write-Host "- All variables will persist across reboots"
     Write-Host ""
 }
 
