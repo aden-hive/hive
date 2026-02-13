@@ -475,8 +475,8 @@ Write-Host ""
 
 Write-Step -Number "2.5" -Text "Step 2.5: Windows Defender exclusions (optional)"
 Write-Color -Text "Excluding project paths from real-time scanning can improve performance:" -Color DarkGray
-Write-Host "  • uv sync: ~40% faster"
-Write-Host "  • Agent startup: ~30% faster"
+Write-Host "  - uv sync: ~40% faster"
+Write-Host "  - Agent startup: ~30% faster"
 Write-Host ""
 
 # Define paths to exclude
@@ -504,7 +504,7 @@ if (-not $checkResult.DefenderEnabled) {
     # Show what will be excluded
     Write-Host "Paths to exclude:"
     foreach ($path in $checkResult.MissingPaths) {
-        Write-Color -Text "  • $path" -Color Cyan
+        Write-Color -Text "  - $path" -Color Cyan
     }
     Write-Host ""
     
@@ -1109,14 +1109,14 @@ Write-Host ""
 
 if ($SelectedProviderId -or $credKey) {
     Write-Color -Text "Note:" -Color White
-    Write-Host "• uv has been added to your User PATH"
+    Write-Host "- uv has been added to your User PATH"
     if ($SelectedProviderId) {
-        Write-Host "• $SelectedEnvVar is set for LLM access"
+        Write-Host "- $SelectedEnvVar is set for LLM access"
     }
     if ($credKey) {
-        Write-Host "• HIVE_CREDENTIAL_KEY is set for credential encryption"
+        Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
     }
-    Write-Host "• All variables will persist across reboots"
+    Write-Host "- All variables will persist across reboots"
     Write-Host ""
 }
 
