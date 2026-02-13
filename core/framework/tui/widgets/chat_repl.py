@@ -999,3 +999,27 @@ class ChatRepl(Vertical):
         """Clear active node when it finishes."""
         if self._active_node_id == node_id:
             self._active_node_id = None
+
+    def handle_internal_output(self, node_id: str, content: str) -> None:
+        """Show output from non-client-facing nodes."""
+        self._write_history(f"[dim cyan]⟨{node_id}⟩[/dim cyan] {content}")
+
+    def handle_execution_paused(self, node_id: str, reason: str) -> None:
+        """Show that execution has been paused."""
+        msg = f"[bold yellow]⏸ Paused[/bold yellow] at [cyan]{node_id}[/cyan]"
+        if reason:
+            msg += f" [dim]({reason})[/dim]"
+        self._write_history(msg)
+
+    def handle_execution_resumed(self, node_id: str) -> None:
+        """Show that execution has been resumed."""
+        self._write_history(f"[bold green]▶ Resumed[/bold green] from [cyan]{node_id}[/cyan]")
+
+    def handle_goal_achieved(self, data: dict[str, Any]) -> None:
+        """Show goal achievement prominently."""
+        self._write_history("[bold green]★ Goal achieved![/bold green]")
+
+    def handle_constraint_violation(self, data: dict[str, Any]) -> None:
+        """Show constraint violation as a warning."""
+        desc = data.get("description", "Unknown constraint")
+        self._write_history(f"[bold red]⚠ Constraint violation:[/bold red] {desc}")

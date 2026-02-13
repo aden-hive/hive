@@ -462,6 +462,13 @@ class GraphExecutor:
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
 
+            # Emit resume event
+            if self._event_bus:
+                await self._event_bus.emit_execution_resumed(
+                    stream_id=self._stream_id,
+                    node_id=current_node_id,
+                )
+
         # Start run
         _run_id = self.runtime.start_run(
             goal_id=goal.id,
@@ -497,6 +504,14 @@ class GraphExecutor:
                 # Check for pause request
                 if self._pause_requested.is_set():
                     self.logger.info("⏸ Pause detected - stopping at node boundary")
+
+                    # Emit pause event
+                    if self._event_bus:
+                        await self._event_bus.emit_execution_paused(
+                            stream_id=self._stream_id,
+                            node_id=current_node_id,
+                            reason="User requested pause (Ctrl+Z)",
+                        )
 
                     # Create session state for pause
                     saved_memory = memory.read_all()
@@ -782,6 +797,17 @@ class GraphExecutor:
                         self.logger.info(
                             f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
                         )
+
+                        # Emit retry event
+                        if self._event_bus:
+                            await self._event_bus.emit_node_retry(
+                                stream_id=self._stream_id,
+                                node_id=current_node_id,
+                                retry_count=retry_count,
+                                max_retries=max_retries,
+                                error=result.error or "",
+                            )
+
                         _is_retry = True
                         continue
                     else:
@@ -868,6 +894,15 @@ class GraphExecutor:
                 # This must happen BEFORE determining next node, since pause nodes may have no edges
                 if node_spec.id in graph.pause_nodes:
                     self.logger.info("💾 Saving session state after pause node")
+
+                    # Emit pause event
+                    if self._event_bus:
+                        await self._event_bus.emit_execution_paused(
+                            stream_id=self._stream_id,
+                            node_id=node_spec.id,
+                            reason="HITL pause node",
+                        )
+
                     saved_memory = memory.read_all()
                     session_state_out = {
                         "paused_at": node_spec.id,
@@ -923,6 +958,16 @@ class GraphExecutor:
                 if result.next_node:
                     # Router explicitly set next node
                     self.logger.info(f"   → Router directing to: {result.next_node}")
+
+                    # Emit edge traversed event for router-directed edge
+                    if self._event_bus:
+                        await self._event_bus.emit_edge_traversed(
+                            stream_id=self._stream_id,
+                            source_node=current_node_id,
+                            target_node=result.next_node,
+                            edge_condition="router",
+                        )
+
                     current_node_id = result.next_node
                     self._write_progress(current_node_id, path, memory, node_visit_counts)
                 else:
@@ -945,6 +990,18 @@ class GraphExecutor:
                         # Find convergence point (fan-in node)
                         targets = [e.target for e in traversable_edges]
                         fan_in_node = self._find_convergence_node(graph, targets)
+
+                        # Emit edge traversed events for fan-out branches
+                        if self._event_bus:
+                            for edge in traversable_edges:
+                                await self._event_bus.emit_edge_traversed(
+                                    stream_id=self._stream_id,
+                                    source_node=current_node_id,
+                                    target_node=edge.target,
+                                    edge_condition=edge.condition.value
+                                    if hasattr(edge.condition, "value")
+                                    else str(edge.condition),
+                                )
 
                         # Execute branches in parallel
                         (
@@ -988,6 +1045,14 @@ class GraphExecutor:
                             break
                         next_spec = graph.get_node(next_node)
                         self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
+
+                        # Emit edge traversed event
+                        if self._event_bus:
+                            await self._event_bus.emit_edge_traversed(
+                                stream_id=self._stream_id,
+                                source_node=current_node_id,
+                                target_node=next_node,
+                            )
 
                         # CHECKPOINT: node_complete (after determining next node)
                         if (
