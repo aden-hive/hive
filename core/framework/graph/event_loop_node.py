@@ -149,7 +149,7 @@ class EventLoopNode(NodeProtocol):
     1. Try to restore from durable state (crash recovery)
     2. If no prior state, init from NodeSpec.system_prompt + input_keys
     3. Loop: drain injection queue -> stream LLM -> execute tools
-       -> if client_facing + ask_user called: block for user input
+       -> if client_facing: block for user input (see below)
        -> judge evaluates (acceptance criteria)
        (each add_* and set_output writes through to store immediately)
     4. Publish events to EventBus at each stage
@@ -157,11 +157,17 @@ class EventLoopNode(NodeProtocol):
     6. Terminate when judge returns ACCEPT, shutdown signaled, or max iterations
     7. Build output dict from OutputAccumulator
 
-    Client-facing blocking: When ``client_facing=True``, a synthetic
-    ``ask_user`` tool is injected.  The node blocks for user input ONLY
-    when the LLM explicitly calls ``ask_user()``.  Text-only turns
-    without ``ask_user`` flow through without blocking, allowing the LLM
-    to stream progress updates and summaries freely.
+    Client-facing blocking (``client_facing=True``):
+
+    - **Text-only turns** (no real tool calls, no set_output)
+      automatically block for user input.  If the LLM is talking to the
+      user (not calling tools or setting outputs), it should wait for
+      the user's response before the judge runs.
+    - **Work turns** (tool calls or set_output) flow through without
+      blocking — the LLM is making progress, not asking the user.
+    - A synthetic ``ask_user`` tool is also injected for explicit
+      blocking when the LLM wants to be deliberate about requesting
+      input (e.g. mid-tool-call).
 
     Always returns NodeResult with retryable=False semantics. The executor
     must NOT retry event loop nodes -- retry is handled internally by the
@@ -234,23 +240,44 @@ class EventLoopNode(NodeProtocol):
             return NodeResult(success=False, error=error_msg)
 
         # 2. Restore or create new conversation + accumulator
-        conversation, accumulator, start_iteration = await self._restore(ctx)
-        if conversation is None:
-            system_prompt = ctx.node_spec.system_prompt or ""
+        # Track whether we're in continuous mode (conversation threaded across nodes)
+        _is_continuous = getattr(ctx, "continuous_mode", False)
 
-            conversation = NodeConversation(
-                system_prompt=system_prompt,
-                max_history_tokens=self._config.max_history_tokens,
-                output_keys=ctx.node_spec.output_keys or None,
-                store=self._conversation_store,
-            )
+        if _is_continuous and ctx.inherited_conversation is not None:
+            # Continuous mode with inherited conversation from prior node.
+            # This takes priority over store restoration — when the graph loops
+            # back to a previously-visited node, the inherited conversation
+            # carries forward the full thread rather than restoring stale state.
+            # System prompt already updated by executor. Transition marker
+            # already inserted by executor. Fresh accumulator for this phase.
+            # Phase already set by executor via set_current_phase().
+            conversation = ctx.inherited_conversation
+            conversation._output_keys = ctx.node_spec.output_keys or None
             accumulator = OutputAccumulator(store=self._conversation_store)
             start_iteration = 0
+        else:
+            # Try crash-recovery restore from store, then fall back to fresh.
+            conversation, accumulator, start_iteration = await self._restore(ctx)
+            if conversation is None:
+                # Fresh conversation: either isolated mode or first node in continuous mode.
+                system_prompt = ctx.node_spec.system_prompt or ""
 
-            # Add initial user message from input data
-            initial_message = self._build_initial_message(ctx)
-            if initial_message:
-                await conversation.add_user_message(initial_message)
+                conversation = NodeConversation(
+                    system_prompt=system_prompt,
+                    max_history_tokens=self._config.max_history_tokens,
+                    output_keys=ctx.node_spec.output_keys or None,
+                    store=self._conversation_store,
+                )
+                # Stamp phase for first node in continuous mode
+                if _is_continuous:
+                    conversation.set_current_phase(ctx.node_id)
+                accumulator = OutputAccumulator(store=self._conversation_store)
+                start_iteration = 0
+
+                # Add initial user message from input data
+                initial_message = self._build_initial_message(ctx)
+                if initial_message:
+                    await conversation.add_user_message(initial_message)
 
         # 3. Build tool list: node tools + synthetic set_output + ask_user tools
         tools = list(ctx.available_tools)
@@ -274,6 +301,7 @@ class EventLoopNode(NodeProtocol):
 
         # 5. Stall detection state
         recent_responses: list[str] = []
+        user_interaction_count = 0  # tracks how many times this node blocked for user input
 
         # 6. Main loop
         for iteration in range(start_iteration, self._config.max_iterations):
@@ -304,6 +332,7 @@ class EventLoopNode(NodeProtocol):
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
+                    conversation=conversation if _is_continuous else None,
                 )
 
             # 6b. Drain injection queue
@@ -428,6 +457,7 @@ class EventLoopNode(NodeProtocol):
                         output=accumulator.to_dict(),
                         tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
+                        conversation=conversation if _is_continuous else None,
                     )
 
             # 6f. Stall detection
@@ -478,6 +508,7 @@ class EventLoopNode(NodeProtocol):
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
+                    conversation=conversation if _is_continuous else None,
                 )
 
             # 6g. Write cursor checkpoint
@@ -485,14 +516,27 @@ class EventLoopNode(NodeProtocol):
 
             # 6h. Client-facing input blocking
             #
-            # For client_facing nodes, block for user input only when the
-            # LLM explicitly called ask_user().  Text-only turns without
-            # ask_user flow through without blocking, allowing progress
-            # updates and summaries to stream freely.
+            # Two triggers:
+            # (a) Explicit ask_user() — always blocks, then falls through
+            #     to judge evaluation (6i).
+            # (b) Auto-block — a text-only turn (no real tools, no
+            #     set_output) from a client-facing node is addressed to the
+            #     user.  Block for their response, then *skip* judge so the
+            #     next LLM turn can process the reply without confusing
+            #     "missing outputs" feedback.
             #
-            # After user input, always fall through to judge evaluation
-            # (6i).  The judge handles all acceptance decisions.
-            if ctx.node_spec.client_facing and user_input_requested:
+            # Turns that include tool calls or set_output are *work*, not
+            # conversation — they flow through without blocking.
+            _cf_block = False
+            _cf_auto = False
+            if ctx.node_spec.client_facing:
+                if user_input_requested:
+                    _cf_block = True
+                elif assistant_text and not real_tool_results and not outputs_set:
+                    _cf_block = True
+                    _cf_auto = True
+
+            if _cf_block:
                 if self._shutdown:
                     await self._publish_loop_completed(stream_id, node_id, iteration + 1)
                     latency_ms = int((time.time() - start_time) * 1000)
@@ -532,9 +576,15 @@ class EventLoopNode(NodeProtocol):
                         output=accumulator.to_dict(),
                         tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
+                        conversation=conversation if _is_continuous else None,
                     )
 
-                logger.info("[%s] iter=%d: blocking for user input...", node_id, iteration)
+                logger.info(
+                    "[%s] iter=%d: blocking for user input (auto=%s)...",
+                    node_id,
+                    iteration,
+                    _cf_auto,
+                )
                 got_input = await self._await_user_input(ctx)
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
@@ -576,10 +626,34 @@ class EventLoopNode(NodeProtocol):
                         output=accumulator.to_dict(),
                         tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
+                        conversation=conversation if _is_continuous else None,
                     )
 
+                user_interaction_count += 1
                 recent_responses.clear()
-                # Fall through to judge evaluation (6i)
+
+                if _cf_auto:
+                    # Auto-block: skip judge — let the LLM process the
+                    # user's response on the next turn without confusing
+                    # "missing outputs" feedback injected between the
+                    # assistant's question and the user's answer.
+                    _continue_count += 1
+                    if ctx.runtime_logger:
+                        iter_latency_ms = int((time.time() - iter_start) * 1000)
+                        ctx.runtime_logger.log_step(
+                            node_id=node_id,
+                            node_type="event_loop",
+                            step_index=iteration,
+                            verdict="CONTINUE",
+                            verdict_feedback="Auto-blocked for user input (pre-interaction)",
+                            tool_calls=logged_tool_calls,
+                            llm_text=assistant_text,
+                            input_tokens=turn_tokens.get("input", 0),
+                            output_tokens=turn_tokens.get("output", 0),
+                            latency_ms=iter_latency_ms,
+                        )
+                    continue
+                # Explicit ask_user: fall through to judge evaluation (6i)
 
             # 6i. Judge evaluation
             should_judge = (
@@ -702,6 +776,7 @@ class EventLoopNode(NodeProtocol):
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
+                    conversation=conversation if _is_continuous else None,
                 )
 
             elif verdict.action == "ESCALATE":
@@ -746,6 +821,7 @@ class EventLoopNode(NodeProtocol):
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
+                    conversation=conversation if _is_continuous else None,
                 )
 
             elif verdict.action == "RETRY":
@@ -795,6 +871,7 @@ class EventLoopNode(NodeProtocol):
             output=accumulator.to_dict(),
             tokens_used=total_input_tokens + total_output_tokens,
             latency_ms=latency_ms,
+            conversation=conversation if _is_continuous else None,
         )
 
     async def inject_event(self, content: str) -> None:
@@ -819,11 +896,20 @@ class EventLoopNode(NodeProtocol):
     async def _await_user_input(self, ctx: NodeContext) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
-        Called when a client_facing node explicitly calls ask_user() —
-        an intentional conversational turn boundary.
+        Called in two situations:
+        - The LLM explicitly calls ask_user().
+        - Auto-block: any text-only turn (no real tools, no set_output)
+          from a client-facing node — ensures the user sees and responds
+          before the judge runs.
 
         Returns True if input arrived, False if shutdown was signaled.
         """
+        # Clear BEFORE emitting so that synchronous handlers (e.g. the
+        # headless stdin handler) can call inject_event() during the emit
+        # and the signal won't be lost.  TUI handlers return immediately
+        # without injecting, so the wait still blocks until the user types.
+        self._input_ready.clear()
+
         if self._event_bus:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.node_id,
@@ -831,7 +917,6 @@ class EventLoopNode(NodeProtocol):
                 prompt="",
             )
 
-        self._input_ready.clear()
         await self._input_ready.wait()
         return not self._shutdown
 
@@ -888,6 +973,21 @@ class EventLoopNode(NodeProtocol):
                 await self._compact_tiered(ctx, conversation, accumulator)
 
             messages = conversation.to_llm_messages()
+
+            # Defensive guard: ensure messages don't end with an assistant
+            # message.  The Anthropic API rejects "assistant message prefill"
+            # (conversations must end with a user or tool message).  This can
+            # happen after compaction trims messages leaving an assistant tail,
+            # or when a conversation is inherited without a transition marker
+            # (e.g. parallel-branch execution).
+            if messages and messages[-1].get("role") == "assistant":
+                logger.info(
+                    "[%s] Messages end with assistant — injecting continuation prompt",
+                    node_id,
+                )
+                await conversation.add_user_message("[Continue working on your current task.]")
+                messages = conversation.to_llm_messages()
+
             accumulated_text = ""
             tool_calls: list[ToolCallEvent] = []
 
@@ -989,7 +1089,7 @@ class EventLoopNode(NodeProtocol):
                         is_error=result.is_error,
                     )
                     if not result.is_error:
-                        value = tc.tool_input["value"]
+                        value = tc.tool_input.get("value", "")
                         # Parse JSON strings into native types so downstream
                         # consumers get lists/dicts instead of serialised JSON,
                         # and the hallucination validator skips non-string values.
@@ -1000,8 +1100,9 @@ class EventLoopNode(NodeProtocol):
                                     value = parsed
                             except (json.JSONDecodeError, TypeError):
                                 pass
-                        await accumulator.set(tc.tool_input["key"], value)
-                        outputs_set_this_turn.append(tc.tool_input["key"])
+                        key = tc.tool_input.get("key", "")
+                        await accumulator.set(key, value)
+                        outputs_set_this_turn.append(key)
                     logged_tool_calls.append(
                         {
                             "tool_use_id": tc.tool_use_id,
@@ -1021,7 +1122,25 @@ class EventLoopNode(NodeProtocol):
                     )
                 else:
                     # --- Real tool execution ---
-                    result = await self._execute_tool(tc)
+                    # Guard: detect truncated tool arguments (_raw fallback
+                    # from litellm when json.loads fails on max_tokens hit).
+                    if "_raw" in tc.tool_input:
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                f"Tool call to '{tc.tool_name}' failed: your arguments "
+                                "were truncated (hit output token limit). "
+                                "Simplify or shorten your arguments and try again."
+                            ),
+                            is_error=True,
+                        )
+                        logger.warning(
+                            "[%s] Blocked truncated _raw tool call: %s",
+                            node_id,
+                            tc.tool_name,
+                        )
+                    else:
+                        result = await self._execute_tool(tc)
                     result = self._truncate_tool_result(result, tc.tool_name)
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
@@ -1283,6 +1402,44 @@ class EventLoopNode(NodeProtocol):
                 accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
             )
             if not missing:
+                # Safety check: when ALL output keys are nullable and NONE
+                # have been set, the node produced nothing useful.  Retry
+                # instead of accepting an empty result — this prevents
+                # client-facing nodes from terminating before the user
+                # ever interacts, and non-client-facing nodes from
+                # short-circuiting without doing their work.
+                output_keys = ctx.node_spec.output_keys or []
+                nullable_keys = set(ctx.node_spec.nullable_output_keys or [])
+                all_nullable = output_keys and nullable_keys >= set(output_keys)
+                none_set = not any(accumulator.get(k) is not None for k in output_keys)
+                if all_nullable and none_set:
+                    return JudgeVerdict(
+                        action="RETRY",
+                        feedback=(
+                            f"No output keys have been set yet. "
+                            f"Use set_output to set at least one of: {output_keys}"
+                        ),
+                    )
+
+                # Level 2: conversation-aware quality check (if success_criteria set)
+                if ctx.node_spec.success_criteria and ctx.llm:
+                    from framework.graph.conversation_judge import evaluate_phase_completion
+
+                    verdict = await evaluate_phase_completion(
+                        llm=ctx.llm,
+                        conversation=conversation,
+                        phase_name=ctx.node_spec.name,
+                        phase_description=ctx.node_spec.description,
+                        success_criteria=ctx.node_spec.success_criteria,
+                        accumulator_state=accumulator.to_dict(),
+                        max_history_tokens=self._config.max_history_tokens,
+                    )
+                    if verdict.action != "ACCEPT":
+                        return JudgeVerdict(
+                            action=verdict.action,
+                            feedback=verdict.feedback or "Phase criteria not met.",
+                        )
+
                 return JudgeVerdict(action="ACCEPT")
             else:
                 return JudgeVerdict(
@@ -1308,26 +1465,43 @@ class EventLoopNode(NodeProtocol):
 
         Used in compaction summaries to prevent the LLM from re-calling
         tools it already called. Extracts:
-        - Tool call counts (e.g. "github_list_pull_requests (6x)")
+        - Tool call details: name, count, and *inputs* for key tools
+          (search queries, scrape URLs, loaded filenames)
         - Files saved via save_data
         - Outputs set via set_output
         - Errors encountered
         """
-        tool_counts: dict[str, int] = {}
+        # Per-tool: list of input summaries (one per call)
+        tool_calls_detail: dict[str, list[str]] = {}
         files_saved: list[str] = []
         outputs_set: list[str] = []
         errors: list[str] = []
+
+        # Tool-specific input extractors: return a short summary string
+        def _summarize_input(name: str, args: dict) -> str:
+            if name == "web_search":
+                return args.get("query", "")
+            if name == "web_scrape":
+                return args.get("url", "")
+            if name == "load_data":
+                return args.get("filename", "")
+            if name == "save_data":
+                return args.get("filename", "")
+            return ""
 
         for msg in conversation.messages:
             if msg.role == "assistant" and msg.tool_calls:
                 for tc in msg.tool_calls:
                     func = tc.get("function", {})
                     name = func.get("name", "unknown")
-                    tool_counts[name] = tool_counts.get(name, 0) + 1
                     try:
                         args = json.loads(func.get("arguments", "{}"))
                     except (json.JSONDecodeError, TypeError):
                         args = {}
+
+                    summary = _summarize_input(name, args)
+                    tool_calls_detail.setdefault(name, []).append(summary)
+
                     if name == "save_data" and args.get("filename"):
                         files_saved.append(args["filename"])
                     if name == "set_output" and args.get("key"):
@@ -1338,9 +1512,18 @@ class EventLoopNode(NodeProtocol):
                 errors.append(preview)
 
         parts: list[str] = []
-        if tool_counts:
-            lines = [f"  {n} ({c}x)" for n, c in tool_counts.items()]
-            parts.append("TOOLS ALREADY CALLED:\n" + "\n".join(lines[:max_entries]))
+        if tool_calls_detail:
+            lines: list[str] = []
+            for name, inputs in list(tool_calls_detail.items())[:max_entries]:
+                count = len(inputs)
+                # Include input details for tools where inputs matter
+                non_empty = [s for s in inputs if s]
+                if non_empty:
+                    detail_lines = [f"    - {s[:120]}" for s in non_empty[:8]]
+                    lines.append(f"  {name} ({count}x):\n" + "\n".join(detail_lines))
+                else:
+                    lines.append(f"  {name} ({count}x)")
+            parts.append("TOOLS ALREADY CALLED:\n" + "\n".join(lines))
         if files_saved:
             unique = list(dict.fromkeys(files_saved))
             parts.append("FILES SAVED: " + ", ".join(unique))
@@ -1427,6 +1610,12 @@ class EventLoopNode(NodeProtocol):
         """
         limit = self._config.max_tool_result_chars
         if limit <= 0 or result.is_error or len(result.content) <= limit:
+            return result
+
+        # load_data is the designated mechanism for reading spilled files.
+        # The LLM controls chunk size via offset/limit — re-spilling its
+        # result would create a circular loop.
+        if tool_name == "load_data":
             return result
 
         # Determine a preview size — leave room for the metadata wrapper
@@ -1674,12 +1863,28 @@ class EventLoopNode(NodeProtocol):
         if spec.tools:
             parts.append(f"AVAILABLE TOOLS: {', '.join(spec.tools)}")
 
-        # 5. Spillover files hint
+        # 5. Spillover files — list actual files so the LLM can load
+        # them immediately instead of having to call list_data_files first.
         if self._config.spillover_dir:
-            parts.append(
-                "NOTE: Large tool results were saved to files. "
-                "Use load_data(filename='<filename>') to read them."
-            )
+            try:
+                from pathlib import Path
+
+                data_dir = Path(self._config.spillover_dir)
+                if data_dir.is_dir():
+                    files = sorted(f.name for f in data_dir.iterdir() if f.is_file())
+                    if files:
+                        file_list = "\n".join(f"  - {f}" for f in files[:30])
+                        parts.append("DATA FILES (use load_data to read):\n" + file_list)
+                    else:
+                        parts.append(
+                            "NOTE: Large tool results may have been saved to files. "
+                            "Use list_data_files() to check."
+                        )
+            except Exception:
+                parts.append(
+                    "NOTE: Large tool results were saved to files. "
+                    "Use load_data(filename='<filename>') to read them."
+                )
 
         # 6. Tool call history (prevent re-calling tools)
         if conversation is not None:
@@ -1763,7 +1968,19 @@ class EventLoopNode(NodeProtocol):
         conversation: NodeConversation,
         iteration: int,
     ) -> bool:
-        """Check if pause has been requested. Returns True if paused."""
+        """
+        Check if pause has been requested. Returns True if paused.
+
+        Note: This check happens BEFORE starting iteration N, after completing N-1.
+        If paused, the node exits having completed {iteration} iterations (0 to iteration-1).
+        """
+        # Check executor-level pause event (for /pause command, Ctrl+Z)
+        if ctx.pause_event and ctx.pause_event.is_set():
+            completed = iteration  # 0-indexed: iteration=3 means 3 iterations completed (0,1,2)
+            logger.info(f"⏸ Pausing after {completed} iteration(s) completed (executor-level)")
+            return True
+
+        # Check context-level pause flags (legacy/alternative methods)
         pause_requested = ctx.input_data.get("pause_requested", False)
         if not pause_requested:
             try:
@@ -1771,8 +1988,10 @@ class EventLoopNode(NodeProtocol):
             except (PermissionError, KeyError):
                 pause_requested = False
         if pause_requested:
-            logger.info(f"Pause requested at iteration {iteration}")
+            completed = iteration
+            logger.info(f"⏸ Pausing after {completed} iteration(s) completed (context-level)")
             return True
+
         return False
 
     # -------------------------------------------------------------------

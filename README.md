@@ -22,7 +22,6 @@
   <img src="https://img.shields.io/badge/MCP-102_Tools-00ADD8?style=flat-square" alt="MCP" />
 </p>
 
-
 <p align="center">
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
@@ -75,13 +74,14 @@ Use Hive when you need:
 - **[Changelog](https://github.com/adenhq/hive/releases)** - Latest updates and releases
 - **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
 - **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
 
 ### Prerequisites
 
 - Python 3.11+ for agent development
-- Claude Code or Cursor for utilizing agent skills
+- Claude Code, Codex CLI, or Cursor for utilizing agent skills
 
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
@@ -119,8 +119,40 @@ hive tui
 # Or run directly
 hive run exports/your_agent_name --input '{"key": "value"}'
 ```
+##  Coding Agent Support
+### Codex CLI
+Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
+
+1. **Config:** `.codex/config.toml` with `agent-builder` MCP server (tracked in git)
+2. **Skills:** `.agents/skills/` symlinks to Hive skills (tracked in git)
+3. **Launch:** Run `codex` in the repo root, then type `use hive`
+
+Example:
+```
+codex> use hive
+```
+
+### Opencode 
+Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
+
+1. **Setup:** Run the quickstart script 
+2. **Launch:** Open Opencode in the project root.
+3. **Activate:** Type `/hive` in the chat to switch to the Hive Agent.
+4. **Verify:** Ask the agent *"List your tools"* to confirm the connection.
+
+The agent has access to all Hive skills and can scaffold agents, add tools, and debug workflows directly from the chat.
 
 **[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
+
+### Antigravity IDE Support
+
+Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). **Easiest:** open a terminal in the hive repo folder and run (use `./` — the script is inside the repo):
+
+```bash
+./scripts/setup-antigravity-mcp.sh
+```
+
+**Important:** Always restart/refresh Antigravity IDE after running the setup script—MCP servers only load on startup. After restart, **agent-builder** and **tools** MCP servers should connect. Skills are under `.agent/skills/` (symlinks to `.claude/skills/`). See [docs/antigravity-setup.md](docs/antigravity-setup.md) for manual setup and troubleshooting.
 
 ## Features
 
@@ -301,6 +333,7 @@ subgraph Expansion
         j2["Cursor"]
         j3["Opencode"]
         j4["Antigravity"]
+        j5["Codex CLI"]
     end
     subgraph plat["Platform"]
         k1["JavaScript/TypeScript SDK"]

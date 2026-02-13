@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import (
@@ -32,7 +33,10 @@ from framework.graph.node import (
 from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
+from framework.observability import set_trace_context
 from framework.runtime.core import Runtime
+from framework.schemas.checkpoint import Checkpoint
+from framework.storage.checkpoint_store import CheckpointStore
 
 
 @dataclass
@@ -179,6 +183,55 @@ class GraphExecutor:
         self.enable_parallel_execution = enable_parallel_execution
         self._parallel_config = parallel_config or ParallelExecutionConfig()
 
+        # Pause/resume control
+        self._pause_requested = asyncio.Event()
+
+    def _write_progress(
+        self,
+        current_node: str,
+        path: list[str],
+        memory: Any,
+        node_visit_counts: dict[str, int],
+    ) -> None:
+        """Update state.json with live progress at node transitions.
+
+        Reads the existing state.json (written by ExecutionStream at session
+        start) and patches the progress fields in-place.  This keeps
+        state.json as the single source of truth — readers always see
+        current progress, not stale initial values.
+
+        The write is synchronous and best-effort: never blocks execution.
+        """
+        if not self._storage_path:
+            return
+        try:
+            import json as _json
+            from datetime import datetime
+
+            state_path = self._storage_path / "state.json"
+            if state_path.exists():
+                state_data = _json.loads(state_path.read_text(encoding="utf-8"))
+            else:
+                state_data = {}
+
+            # Patch progress fields
+            progress = state_data.setdefault("progress", {})
+            progress["current_node"] = current_node
+            progress["path"] = list(path)
+            progress["node_visit_counts"] = dict(node_visit_counts)
+            progress["steps_executed"] = len(path)
+
+            # Update timestamp
+            timestamps = state_data.setdefault("timestamps", {})
+            timestamps["updated_at"] = datetime.now().isoformat()
+
+            # Memory keys (lightweight — just keys, not values)
+            state_data["memory_keys"] = list(memory.read_all().keys())
+
+            state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
+        except Exception:
+            pass  # Best-effort — never block execution
+
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
         Validate that all tools declared by nodes are available.
@@ -208,6 +261,7 @@ class GraphExecutor:
         goal: Goal,
         input_data: dict[str, Any] | None = None,
         session_state: dict[str, Any] | None = None,
+        checkpoint_config: "CheckpointConfig | None" = None,
     ) -> ExecutionResult:
         """
         Execute a graph for a goal.
@@ -221,6 +275,9 @@ class GraphExecutor:
         Returns:
             ExecutionResult with output and metrics
         """
+        # Add agent_id to trace context for correlation
+        set_trace_context(agent_id=graph.id)
+
         # Validate graph
         errors = graph.validate()
         if errors:
@@ -246,6 +303,18 @@ class GraphExecutor:
         # Initialize execution state
         memory = SharedMemory()
 
+        # Continuous conversation mode state
+        is_continuous = getattr(graph, "conversation_mode", "isolated") == "continuous"
+        continuous_conversation = None  # NodeConversation threaded across nodes
+        cumulative_tools: list = []  # Tools accumulate, never removed
+        cumulative_tool_names: set[str] = set()
+
+        # Initialize checkpoint store if checkpointing is enabled
+        checkpoint_store: CheckpointStore | None = None
+        if checkpoint_config and checkpoint_config.enabled and self._storage_path:
+            checkpoint_store = CheckpointStore(self._storage_path)
+            self.logger.info("✓ Checkpointing enabled")
+
         # Restore session state if provided
         if session_state and "memory" in session_state:
             memory_data = session_state["memory"]
@@ -256,13 +325,20 @@ class GraphExecutor:
                     f"{type(memory_data).__name__}, expected dict"
                 )
             else:
-                # Restore memory from previous session
+                # Restore memory from previous session.
+                # Skip validation — this data was already validated when
+                # originally written, and research text triggers false
+                # positives on the code-indicator heuristic.
                 for key, value in memory_data.items():
-                    memory.write(key, value)
+                    memory.write(key, value, validate=False)
                 self.logger.info(f"📥 Restored session state with {len(memory_data)} memory keys")
 
-        # Write new input data to memory (each key individually)
-        if input_data:
+        # Write new input data to memory (each key individually).
+        # Skip when resuming from a paused session — restored memory already
+        # contains all state including the original input, and re-writing
+        # input_data would overwrite intermediate results with stale values.
+        _is_resuming = bool(session_state and session_state.get("paused_at"))
+        if input_data and not _is_resuming:
             for key, value in input_data.items():
                 memory.write(key, value)
 
@@ -273,8 +349,110 @@ class GraphExecutor:
         node_visit_counts: dict[str, int] = {}  # Track visits for feedback loops
         _is_retry = False  # True when looping back for a retry (not a new visit)
 
+        # Restore node_visit_counts from session state if available
+        if session_state and "node_visit_counts" in session_state:
+            node_visit_counts = dict(session_state["node_visit_counts"])
+            if node_visit_counts:
+                self.logger.info(f"📥 Restored node visit counts: {node_visit_counts}")
+
+                # If resuming at a specific node (paused_at), that node was counted
+                # but never completed, so decrement its count
+                paused_at = session_state.get("paused_at")
+                if (
+                    paused_at
+                    and paused_at in node_visit_counts
+                    and node_visit_counts[paused_at] > 0
+                ):
+                    old_count = node_visit_counts[paused_at]
+                    node_visit_counts[paused_at] -= 1
+                    self.logger.info(
+                        f"📥 Decremented visit count for paused node '{paused_at}': "
+                        f"{old_count} -> {node_visit_counts[paused_at]}"
+                    )
+
         # Determine entry point (may differ if resuming)
-        current_node_id = graph.get_entry_point(session_state)
+        # Check if resuming from checkpoint
+        if session_state and session_state.get("resume_from_checkpoint") and checkpoint_store:
+            checkpoint_id = session_state["resume_from_checkpoint"]
+            try:
+                checkpoint = await checkpoint_store.load_checkpoint(checkpoint_id)
+
+                if checkpoint:
+                    self.logger.info(
+                        f"🔄 Resuming from checkpoint: {checkpoint_id} "
+                        f"(node: {checkpoint.current_node})"
+                    )
+
+                    # Restore memory from checkpoint
+                    for key, value in checkpoint.shared_memory.items():
+                        memory.write(key, value, validate=False)
+
+                    # Start from checkpoint's next node or current node
+                    current_node_id = (
+                        checkpoint.next_node or checkpoint.current_node or graph.entry_node
+                    )
+
+                    # Restore execution path
+                    path.extend(checkpoint.execution_path)
+
+                    self.logger.info(
+                        f"📥 Restored memory with {len(checkpoint.shared_memory)} keys, "
+                        f"resuming at node: {current_node_id}"
+                    )
+                else:
+                    self.logger.warning(
+                        f"Checkpoint {checkpoint_id} not found, resuming from normal entry point"
+                    )
+                    # Check if resuming from paused_at (fallback to session state)
+                    paused_at = session_state.get("paused_at") if session_state else None
+                    if paused_at and graph.get_node(paused_at) is not None:
+                        current_node_id = paused_at
+                        self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
+                    else:
+                        current_node_id = graph.get_entry_point(session_state)
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to load checkpoint {checkpoint_id}: {e}, "
+                    f"resuming from normal entry point"
+                )
+                # Check if resuming from paused_at (fallback to session state)
+                paused_at = session_state.get("paused_at") if session_state else None
+                if paused_at and graph.get_node(paused_at) is not None:
+                    current_node_id = paused_at
+                    self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
+                else:
+                    current_node_id = graph.get_entry_point(session_state)
+        else:
+            # Check if resuming from paused_at (session state resume)
+            paused_at = session_state.get("paused_at") if session_state else None
+            node_ids = [n.id for n in graph.nodes]
+            self.logger.debug(f"paused_at={paused_at}, available node IDs={node_ids}")
+
+            if paused_at and graph.get_node(paused_at) is not None:
+                # Resume from paused_at node directly (works for any node, not just pause_nodes)
+                current_node_id = paused_at
+
+                # Restore execution path from session state if available
+                if session_state:
+                    execution_path = session_state.get("execution_path", [])
+                    if execution_path:
+                        path.extend(execution_path)
+                        self.logger.info(
+                            f"🔄 Resuming from paused node: {paused_at} "
+                            f"(restored path: {execution_path})"
+                        )
+                    else:
+                        self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
+                else:
+                    self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
+            else:
+                # Fall back to normal entry point logic
+                self.logger.warning(
+                    f"⚠ paused_at={paused_at} is not a valid node, falling back to entry point"
+                )
+                current_node_id = graph.get_entry_point(session_state)
+
         steps = 0
 
         if session_state and current_node_id != graph.entry_node:
@@ -289,7 +467,6 @@ class GraphExecutor:
 
         if self.runtime_logger:
             # Extract session_id from storage_path if available (for unified sessions)
-            # storage_path format: base_path/sessions/{session_id}/
             session_id = ""
             if self._storage_path and self._storage_path.name.startswith("session_"):
                 session_id = self._storage_path.name
@@ -312,6 +489,45 @@ class GraphExecutor:
         try:
             while steps < graph.max_steps:
                 steps += 1
+
+                # Check for pause request
+                if self._pause_requested.is_set():
+                    self.logger.info("⏸ Pause detected - stopping at node boundary")
+
+                    # Create session state for pause
+                    saved_memory = memory.read_all()
+                    pause_session_state: dict[str, Any] = {
+                        "memory": saved_memory,  # Include memory for resume
+                        "execution_path": list(path),
+                        "node_visit_counts": dict(node_visit_counts),
+                    }
+
+                    # Create a pause checkpoint
+                    if checkpoint_store:
+                        pause_checkpoint = self._create_checkpoint(
+                            checkpoint_type="pause",
+                            current_node=current_node_id,
+                            execution_path=path,
+                            memory=memory,
+                            next_node=current_node_id,
+                            is_clean=True,
+                        )
+                        await checkpoint_store.save_checkpoint(pause_checkpoint)
+                        pause_session_state["latest_checkpoint_id"] = pause_checkpoint.checkpoint_id
+                        pause_session_state["resume_from_checkpoint"] = (
+                            pause_checkpoint.checkpoint_id
+                        )
+
+                    # Return with paused status
+                    return ExecutionResult(
+                        success=False,
+                        output=saved_memory,
+                        path=path,
+                        paused_at=current_node_id,
+                        error="Execution paused by user request",
+                        session_state=pause_session_state,
+                        node_visit_counts=dict(node_visit_counts),
+                    )
 
                 # Get current node
                 node_spec = graph.get_node(current_node_id)
@@ -348,6 +564,21 @@ class GraphExecutor:
 
                 path.append(current_node_id)
 
+                # Clear stale nullable outputs from previous visits.
+                # When a node is re-visited (e.g. review → process-batch → review),
+                # nullable outputs from the PREVIOUS visit linger in shared memory.
+                # This causes stale edge conditions to fire (e.g. "feedback is not None"
+                # from visit 1 triggers even when visit 2 sets "final_summary" instead).
+                # Clearing them ensures only the CURRENT visit's outputs affect routing.
+                if node_visit_counts.get(current_node_id, 0) > 1:
+                    nullable_keys = getattr(node_spec, "nullable_output_keys", None) or []
+                    for key in nullable_keys:
+                        if memory.read(key) is not None:
+                            memory.write(key, None, validate=False)
+                            self.logger.info(
+                                f"   🧹 Cleared stale nullable output '{key}' from previous visit"
+                            )
+
                 # Check if pause (HITL) before execution
                 if current_node_id in graph.pause_nodes:
                     self.logger.info(f"⏸ Paused at HITL node: {node_spec.name}")
@@ -358,6 +589,13 @@ class GraphExecutor:
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
 
+                # Continuous mode: accumulate tools from this node
+                if is_continuous and node_spec.tools:
+                    for t in self.tools:
+                        if t.name in node_spec.tools and t.name not in cumulative_tool_names:
+                            cumulative_tools.append(t)
+                            cumulative_tool_names.add(t.name)
+
                 # Build context for node
                 ctx = self._build_context(
                     node_spec=node_spec,
@@ -365,6 +603,9 @@ class GraphExecutor:
                     goal=goal,
                     input_data=input_data or {},
                     max_tokens=graph.max_tokens,
+                    continuous_mode=is_continuous,
+                    inherited_conversation=continuous_conversation if is_continuous else None,
+                    override_tools=cumulative_tools if is_continuous else None,
                 )
 
                 # Log actual input data being read
@@ -390,6 +631,27 @@ class GraphExecutor:
                         severity="warning",
                         description=f"Validation errors for {current_node_id}: {validation_errors}",
                     )
+
+                # CHECKPOINT: node_start
+                if (
+                    checkpoint_store
+                    and checkpoint_config
+                    and checkpoint_config.should_checkpoint_node_start()
+                ):
+                    checkpoint = self._create_checkpoint(
+                        checkpoint_type="node_start",
+                        current_node=node_spec.id,
+                        execution_path=list(path),
+                        memory=memory,
+                        is_clean=(sum(node_retry_counts.values()) == 0),
+                    )
+
+                    if checkpoint_config.async_checkpoint:
+                        # Non-blocking checkpoint save
+                        asyncio.create_task(checkpoint_store.save_checkpoint(checkpoint))
+                    else:
+                        # Blocking checkpoint save
+                        await checkpoint_store.save_checkpoint(checkpoint)
 
                 # Emit node-started event (skip event_loop nodes — they emit their own)
                 if self._event_bus and node_spec.node_type != "event_loop":
@@ -464,6 +726,13 @@ class GraphExecutor:
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
                             self.logger.info(f"      {key}: {value_str}")
+
+                    # Write node outputs to memory BEFORE edge evaluation
+                    # This enables direct key access in conditional expressions (e.g., "score > 80")
+                    # Without this, conditional edges can only use output['key'] syntax
+                    if result.output:
+                        for key, value in result.output.items():
+                            memory.write(key, value, validate=False)
                 else:
                     self.logger.error(f"   ✗ Failed: {result.error}")
 
@@ -557,13 +826,22 @@ class GraphExecutor:
                                     execution_quality="failed",
                                 )
 
+                            # Save memory for potential resume
+                            saved_memory = memory.read_all()
+                            failure_session_state = {
+                                "memory": saved_memory,
+                                "execution_path": list(path),
+                                "node_visit_counts": dict(node_visit_counts),
+                                "resume_from": current_node_id,
+                            }
+
                             return ExecutionResult(
                                 success=False,
                                 error=(
                                     f"Node '{node_spec.name}' failed after "
                                     f"{max_retries} attempts: {result.error}"
                                 ),
-                                output=memory.read_all(),
+                                output=saved_memory,
                                 steps_executed=steps,
                                 total_tokens=total_tokens,
                                 total_latency_ms=total_latency,
@@ -574,6 +852,7 @@ class GraphExecutor:
                                 had_partial_failures=len(nodes_failed) > 0,
                                 execution_quality="failed",
                                 node_visit_counts=dict(node_visit_counts),
+                                session_state=failure_session_state,
                             )
 
                 # Check if we just executed a pause node - if so, save state and return
@@ -634,6 +913,7 @@ class GraphExecutor:
                     # Router explicitly set next node
                     self.logger.info(f"   → Router directing to: {result.next_node}")
                     current_node_id = result.next_node
+                    self._write_progress(current_node_id, path, memory, node_visit_counts)
                 else:
                     # Get all traversable edges for fan-out detection
                     traversable_edges = self._get_all_traversable_edges(
@@ -677,6 +957,7 @@ class GraphExecutor:
                         if fan_in_node:
                             self.logger.info(f"   ⑃ Fan-in: converging at {fan_in_node}")
                             current_node_id = fan_in_node
+                            self._write_progress(current_node_id, path, memory, node_visit_counts)
                         else:
                             # No convergence point - branches are terminal
                             self.logger.info("   → Parallel branches completed (no convergence)")
@@ -696,7 +977,102 @@ class GraphExecutor:
                             break
                         next_spec = graph.get_node(next_node)
                         self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
+
+                        # CHECKPOINT: node_complete (after determining next node)
+                        if (
+                            checkpoint_store
+                            and checkpoint_config
+                            and checkpoint_config.should_checkpoint_node_complete()
+                        ):
+                            checkpoint = self._create_checkpoint(
+                                checkpoint_type="node_complete",
+                                current_node=node_spec.id,
+                                execution_path=list(path),
+                                memory=memory,
+                                next_node=next_node,
+                                is_clean=(sum(node_retry_counts.values()) == 0),
+                            )
+
+                            if checkpoint_config.async_checkpoint:
+                                asyncio.create_task(checkpoint_store.save_checkpoint(checkpoint))
+                            else:
+                                await checkpoint_store.save_checkpoint(checkpoint)
+
+                        # Periodic checkpoint pruning
+                        if (
+                            checkpoint_store
+                            and checkpoint_config
+                            and checkpoint_config.should_prune_checkpoints(len(path))
+                        ):
+                            asyncio.create_task(
+                                checkpoint_store.prune_checkpoints(
+                                    max_age_days=checkpoint_config.checkpoint_max_age_days
+                                )
+                            )
+
                         current_node_id = next_node
+
+                # Write progress snapshot at node transition
+                self._write_progress(current_node_id, path, memory, node_visit_counts)
+
+                # Continuous mode: thread conversation forward with transition marker
+                if is_continuous and result.conversation is not None:
+                    continuous_conversation = result.conversation
+
+                    # Look up the next node spec for the transition marker
+                    next_spec = graph.get_node(current_node_id)
+                    if next_spec and next_spec.node_type == "event_loop":
+                        from framework.graph.prompt_composer import (
+                            build_narrative,
+                            build_transition_marker,
+                            compose_system_prompt,
+                        )
+
+                        # Build Layer 2 (narrative) from current state
+                        narrative = build_narrative(memory, path, graph)
+
+                        # Compose new system prompt (Layer 1 + 2 + 3)
+                        new_system = compose_system_prompt(
+                            identity_prompt=getattr(graph, "identity_prompt", None),
+                            focus_prompt=next_spec.system_prompt,
+                            narrative=narrative,
+                        )
+                        continuous_conversation.update_system_prompt(new_system)
+
+                        # Switch conversation store to the next node's directory
+                        # so the transition marker and all subsequent messages are
+                        # persisted there instead of the first node's directory.
+                        if self._storage_path:
+                            from framework.storage.conversation_store import (
+                                FileConversationStore,
+                            )
+
+                            next_store_path = self._storage_path / "conversations" / next_spec.id
+                            next_store = FileConversationStore(base_path=next_store_path)
+                            await continuous_conversation.switch_store(next_store)
+
+                        # Insert transition marker into conversation
+                        data_dir = str(self._storage_path / "data") if self._storage_path else None
+                        marker = build_transition_marker(
+                            previous_node=node_spec,
+                            next_node=next_spec,
+                            memory=memory,
+                            cumulative_tool_names=sorted(cumulative_tool_names),
+                            data_dir=data_dir,
+                        )
+                        await continuous_conversation.add_user_message(
+                            marker,
+                            is_transition_marker=True,
+                        )
+
+                        # Set current phase for phase-aware compaction
+                        continuous_conversation.set_current_phase(next_spec.id)
+
+                        # Opportunistic compaction at transition
+                        if continuous_conversation.usage_ratio() > 0.5:
+                            await continuous_conversation.prune_old_tool_results(
+                                protect_tokens=2000,
+                            )
 
                 # Update input_data for next node
                 input_data = result.output
@@ -753,6 +1129,50 @@ class GraphExecutor:
                 node_visit_counts=dict(node_visit_counts),
             )
 
+        except asyncio.CancelledError:
+            # Handle cancellation (e.g., TUI quit) - save as paused instead of failed
+            self.logger.info("⏸ Execution cancelled - saving state for resume")
+
+            # Save memory and state for resume
+            saved_memory = memory.read_all()
+            session_state_out: dict[str, Any] = {
+                "memory": saved_memory,
+                "execution_path": list(path),
+                "node_visit_counts": dict(node_visit_counts),
+            }
+
+            # Calculate quality metrics
+            total_retries_count = sum(node_retry_counts.values())
+            nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
+            exec_quality = "degraded" if total_retries_count > 0 else "clean"
+
+            if self.runtime_logger:
+                await self.runtime_logger.end_run(
+                    status="paused",
+                    duration_ms=total_latency,
+                    node_path=path,
+                    execution_quality=exec_quality,
+                )
+
+            # Return with paused status
+            return ExecutionResult(
+                success=False,
+                error="Execution paused by user",
+                output=saved_memory,
+                steps_executed=steps,
+                total_tokens=total_tokens,
+                total_latency_ms=total_latency,
+                path=path,
+                paused_at=current_node_id,  # Save where we were
+                session_state=session_state_out,
+                total_retries=total_retries_count,
+                nodes_with_failures=nodes_failed,
+                retry_details=dict(node_retry_counts),
+                had_partial_failures=len(nodes_failed) > 0,
+                execution_quality=exec_quality,
+                node_visit_counts=dict(node_visit_counts),
+            )
+
         except Exception as e:
             import traceback
 
@@ -790,9 +1210,41 @@ class GraphExecutor:
                     execution_quality="failed",
                 )
 
+            # Save memory and state for potential resume
+            saved_memory = memory.read_all()
+            session_state_out: dict[str, Any] = {
+                "memory": saved_memory,
+                "execution_path": list(path),
+                "node_visit_counts": dict(node_visit_counts),
+                "resume_from": current_node_id,
+            }
+
+            # Mark latest checkpoint for resume on failure
+            if checkpoint_store:
+                try:
+                    checkpoints = await checkpoint_store.list_checkpoints()
+                    if checkpoints:
+                        # Find latest clean checkpoint
+                        index = await checkpoint_store.load_index()
+                        if index:
+                            latest_clean = index.get_latest_clean_checkpoint()
+                            if latest_clean:
+                                session_state_out["resume_from_checkpoint"] = (
+                                    latest_clean.checkpoint_id
+                                )
+                                session_state_out["latest_checkpoint_id"] = (
+                                    latest_clean.checkpoint_id
+                                )
+                                self.logger.info(
+                                    f"💾 Marked checkpoint for resume: {latest_clean.checkpoint_id}"
+                                )
+                except Exception as checkpoint_err:
+                    self.logger.warning(f"Failed to mark checkpoint for resume: {checkpoint_err}")
+
             return ExecutionResult(
                 success=False,
                 error=str(e),
+                output=saved_memory,
                 steps_executed=steps,
                 path=path,
                 total_retries=total_retries_count,
@@ -801,6 +1253,7 @@ class GraphExecutor:
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality="failed",
                 node_visit_counts=dict(node_visit_counts),
+                session_state=session_state_out,
             )
 
         finally:
@@ -816,12 +1269,19 @@ class GraphExecutor:
         goal: Goal,
         input_data: dict[str, Any],
         max_tokens: int = 4096,
+        continuous_mode: bool = False,
+        inherited_conversation: Any = None,
+        override_tools: list | None = None,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
-        available_tools = []
-        if node_spec.tools:
-            available_tools = [t for t in self.tools if t.name in node_spec.tools]
+        if override_tools is not None:
+            # Continuous mode: use cumulative tool set
+            available_tools = list(override_tools)
+        else:
+            available_tools = []
+            if node_spec.tools:
+                available_tools = [t for t in self.tools if t.name in node_spec.tools]
 
         # Create scoped memory view
         scoped_memory = memory.with_permissions(
@@ -841,6 +1301,9 @@ class GraphExecutor:
             goal=goal,  # Pass Goal object for LLM-powered routers
             max_tokens=max_tokens,
             runtime_logger=self.runtime_logger,
+            pause_event=self._pause_requested,  # Pass pause event for granular control
+            continuous_mode=continuous_mode,
+            inherited_conversation=inherited_conversation,
         )
 
     # Valid node types - no ambiguous "llm" type allowed
@@ -1353,3 +1816,50 @@ class GraphExecutor:
     def register_function(self, node_id: str, func: Callable) -> None:
         """Register a function as a node."""
         self.node_registry[node_id] = FunctionNode(func)
+
+    def request_pause(self) -> None:
+        """
+        Request graceful pause of the current execution.
+
+        The execution will pause at the next node boundary after the current
+        node completes. A checkpoint will be saved at the pause point, allowing
+        the execution to be resumed later.
+
+        This method is safe to call from any thread.
+        """
+        self._pause_requested.set()
+        self.logger.info("⏸ Pause requested - will pause at next node boundary")
+
+    def _create_checkpoint(
+        self,
+        checkpoint_type: str,
+        current_node: str,
+        execution_path: list[str],
+        memory: SharedMemory,
+        next_node: str | None = None,
+        is_clean: bool = True,
+    ) -> Checkpoint:
+        """
+        Create a checkpoint from current execution state.
+
+        Args:
+            checkpoint_type: Type of checkpoint (node_start, node_complete)
+            current_node: Current node ID
+            execution_path: Nodes executed so far
+            memory: SharedMemory instance
+            next_node: Next node to execute (for node_complete checkpoints)
+            is_clean: Whether execution was clean up to this point
+
+        Returns:
+            New Checkpoint instance
+        """
+
+        return Checkpoint.create(
+            checkpoint_type=checkpoint_type,
+            session_id=self._storage_path.name if self._storage_path else "unknown",
+            current_node=current_node,
+            execution_path=execution_path,
+            shared_memory=memory.read_all(),
+            next_node=next_node,
+            is_clean=is_clean,
+        )

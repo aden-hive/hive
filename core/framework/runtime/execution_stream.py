@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.runtime.shared_state import IsolationLevel, SharedStateManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
@@ -115,6 +116,7 @@ class ExecutionStream:
         result_retention_ttl_seconds: float | None = None,
         runtime_log_store: Any = None,
         session_store: "SessionStore | None" = None,
+        checkpoint_config: CheckpointConfig | None = None,
     ):
         """
         Initialize execution stream.
@@ -133,6 +135,7 @@ class ExecutionStream:
             tool_executor: Function to execute tools
             runtime_log_store: Optional RuntimeLogStore for per-execution logging
             session_store: Optional SessionStore for unified session storage
+            checkpoint_config: Optional checkpoint configuration for resumable sessions
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -148,6 +151,7 @@ class ExecutionStream:
         self._result_retention_max = result_retention_max
         self._result_retention_ttl_seconds = result_retention_ttl_seconds
         self._runtime_log_store = runtime_log_store
+        self._checkpoint_config = checkpoint_config
         self._session_store = session_store
 
         # Create stream-scoped runtime
@@ -289,8 +293,13 @@ class ExecutionStream:
         if not self._running:
             raise RuntimeError(f"ExecutionStream '{self.stream_id}' is not running")
 
-        # Generate execution ID using unified session format
-        if self._session_store:
+        # When resuming, reuse the original session ID so the execution
+        # continues in the same session directory instead of creating a new one.
+        resume_session_id = session_state.get("resume_session_id") if session_state else None
+
+        if resume_session_id:
+            execution_id = resume_session_id
+        elif self._session_store:
             execution_id = self._session_store.generate_session_id()
         else:
             # Fallback to old format if SessionStore not available (shouldn't happen)
@@ -357,6 +366,13 @@ class ExecutionStream:
                 # Create runtime adapter for this execution
                 runtime_adapter = StreamRuntimeAdapter(self._runtime, execution_id)
 
+                # Start run to set trace context (CRITICAL for observability)
+                runtime_adapter.start_run(
+                    goal_id=self.goal.id,
+                    goal_description=self.goal.description,
+                    input_data=ctx.input_data,
+                )
+
                 # Create per-execution runtime logger
                 runtime_logger = None
                 if self._runtime_log_store:
@@ -400,6 +416,7 @@ class ExecutionStream:
                     goal=self.goal,
                     input_data=ctx.input_data,
                     session_state=ctx.session_state,
+                    checkpoint_config=self._checkpoint_config,
                 )
 
                 # Clean up executor reference
@@ -407,6 +424,13 @@ class ExecutionStream:
 
                 # Store result with retention
                 self._record_execution_result(execution_id, result)
+
+                # End run to complete trace (for observability)
+                runtime_adapter.end_run(
+                    success=result.success,
+                    narrative=f"Execution {'succeeded' if result.success else 'failed'}",
+                    output_data=result.output,
+                )
 
                 # Update context
                 ctx.completed_at = datetime.now()
@@ -437,8 +461,42 @@ class ExecutionStream:
                 logger.debug(f"Execution {execution_id} completed: success={result.success}")
 
             except asyncio.CancelledError:
-                ctx.status = "cancelled"
-                raise
+                # Execution was cancelled
+                # The executor catches CancelledError and returns a paused result,
+                # but if cancellation happened before executor started, we won't have a result
+                logger.info(f"Execution {execution_id} cancelled")
+
+                # Check if we have a result (executor completed and returned)
+                try:
+                    _ = result  # Check if result variable exists
+                    has_result = True
+                except NameError:
+                    has_result = False
+                    result = ExecutionResult(
+                        success=False,
+                        error="Execution cancelled",
+                    )
+
+                # Update context status based on result
+                if has_result and result.paused_at:
+                    ctx.status = "paused"
+                    ctx.completed_at = datetime.now()
+                else:
+                    ctx.status = "cancelled"
+
+                # Clean up executor reference
+                self._active_executors.pop(execution_id, None)
+
+                # Store result with retention
+                self._record_execution_result(execution_id, result)
+
+                # Write session state
+                if has_result and result.paused_at:
+                    await self._write_session_state(execution_id, ctx, result=result)
+                else:
+                    await self._write_session_state(execution_id, ctx, error="Execution cancelled")
+
+                # Don't re-raise - we've handled it and saved state
 
             except Exception as e:
                 ctx.status = "failed"
@@ -455,6 +513,16 @@ class ExecutionStream:
 
                 # Write error session state
                 await self._write_session_state(execution_id, ctx, error=str(e))
+
+                # End run with failure (for observability)
+                try:
+                    runtime_adapter.end_run(
+                        success=False,
+                        narrative=f"Execution failed: {str(e)}",
+                        output_data={},
+                    )
+                except Exception:
+                    pass  # Don't let end_run errors mask the original error
 
                 # Emit failure event
                 if self._event_bus:
@@ -511,7 +579,11 @@ class ExecutionStream:
                 else:
                     status = SessionStatus.FAILED
             elif error:
-                status = SessionStatus.FAILED
+                # Check if this is a cancellation
+                if ctx.status == "cancelled" or "cancelled" in error.lower():
+                    status = SessionStatus.CANCELLED
+                else:
+                    status = SessionStatus.FAILED
             else:
                 status = SessionStatus.ACTIVE
 
@@ -530,10 +602,22 @@ class ExecutionStream:
                     entry_point=self.entry_spec.id,
                 )
             else:
-                # Create initial state
-                from framework.schemas.session_state import SessionTimestamps
+                # Create initial state — when resuming, preserve the previous
+                # execution's progress so crashes don't lose track of state.
+                from framework.schemas.session_state import (
+                    SessionProgress,
+                    SessionTimestamps,
+                )
 
                 now = datetime.now().isoformat()
+                ss = ctx.session_state or {}
+                progress = SessionProgress(
+                    current_node=ss.get("paused_at") or ss.get("resume_from"),
+                    paused_at=ss.get("paused_at"),
+                    resume_from=ss.get("paused_at") or ss.get("resume_from"),
+                    path=ss.get("execution_path", []),
+                    node_visit_counts=ss.get("node_visit_counts", {}),
+                )
                 state = SessionState(
                     session_id=execution_id,
                     stream_id=self.stream_id,
@@ -546,6 +630,8 @@ class ExecutionStream:
                         started_at=ctx.started_at.isoformat(),
                         updated_at=now,
                     ),
+                    progress=progress,
+                    memory=ss.get("memory", {}),
                     input_data=ctx.input_data,
                 )
 

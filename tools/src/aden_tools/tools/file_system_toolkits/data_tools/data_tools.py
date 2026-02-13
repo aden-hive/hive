@@ -237,3 +237,115 @@ def register_tools(mcp: FastMCP) -> None:
             return {"files": files}
         except Exception as e:
             return {"error": f"Failed to list data files: {str(e)}"}
+
+    @mcp.tool()
+    def append_data(filename: str, data: str, data_dir: str) -> dict:
+        """
+        Purpose
+            Append data to the end of an existing file, or create it if it
+            doesn't exist yet.
+
+        When to use
+            Build large files incrementally instead of writing everything in
+            one save_data call.  For example, write an HTML skeleton first,
+            then append each section separately to stay within token limits.
+
+        Rules & Constraints
+            filename must be a simple name like 'report.html' — no paths or '..'
+
+        Args:
+            filename: Simple filename to append to. No paths or '..'.
+            data: The string data to append.
+            data_dir: Absolute path to the data directory.
+
+        Returns:
+            Dict with success status, new total size, and bytes appended
+        """
+        if not filename or ".." in filename or "/" in filename or "\\" in filename:
+            return {"error": "Invalid filename. Use simple names like 'report.html'"}
+        if not data_dir:
+            return {"error": "data_dir is required"}
+
+        try:
+            dir_path = Path(data_dir)
+            dir_path.mkdir(parents=True, exist_ok=True)
+            path = dir_path / filename
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(data)
+            appended_bytes = len(data.encode("utf-8"))
+            total_bytes = path.stat().st_size
+            return {
+                "success": True,
+                "filename": filename,
+                "size_bytes": total_bytes,
+                "appended_bytes": appended_bytes,
+            }
+        except Exception as e:
+            return {"error": f"Failed to append data: {str(e)}"}
+
+    @mcp.tool()
+    def edit_data(filename: str, old_text: str, new_text: str, data_dir: str) -> dict:
+        """
+        Purpose
+            Find and replace a specific text segment in an existing file.
+            Works like a surgical diff — only the matched portion changes.
+
+        When to use
+            Update a section of a previously saved file without rewriting
+            the entire content.  For example, replace a placeholder in an
+            HTML report or fix a specific paragraph.
+
+        Rules & Constraints
+            old_text must appear exactly once in the file.  If it appears
+            zero times or more than once, the edit is rejected with an
+            error message.
+
+        Args:
+            filename: The file to edit. Must exist in data_dir.
+            old_text: The exact text to find (must match exactly once).
+            new_text: The replacement text.
+            data_dir: Absolute path to the data directory.
+
+        Returns:
+            Dict with success status and updated file size
+        """
+        if not filename or ".." in filename or "/" in filename or "\\" in filename:
+            return {"error": "Invalid filename. Use simple names like 'report.html'"}
+        if not data_dir:
+            return {"error": "data_dir is required"}
+
+        try:
+            path = Path(data_dir) / filename
+            if not path.exists():
+                return {"error": f"File not found: {filename}"}
+
+            content = path.read_text(encoding="utf-8")
+            count = content.count(old_text)
+
+            if count == 0:
+                return {
+                    "error": (
+                        "old_text not found in the file. "
+                        "Make sure you're matching the exact text, "
+                        "including whitespace and newlines."
+                    )
+                }
+            if count > 1:
+                return {
+                    "error": (
+                        f"old_text found {count} times — it must be unique. "
+                        "Include more surrounding context to match exactly once."
+                    )
+                }
+
+            updated = content.replace(old_text, new_text, 1)
+            path.write_text(updated, encoding="utf-8")
+
+            return {
+                "success": True,
+                "filename": filename,
+                "size_bytes": len(updated.encode("utf-8")),
+                "replacements": 1,
+            }
+        except Exception as e:
+            return {"error": f"Failed to edit data: {str(e)}"}
