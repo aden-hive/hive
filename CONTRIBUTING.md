@@ -149,6 +149,14 @@ cd tools && uv run pytest tests/ -v
 
 # Run tests for a specific agent
 PYTHONPATH=exports uv run python -m agent_name test
+
+# Verify Docker setup
+docker compose run aden --help
+docker compose config --quiet
+
+# Or build manually
+docker build -t aden:local .
+docker build -t aden-tools:local -f tools/Dockerfile .
 ```
 
 > **CI also validates** that all exported agent JSON files (`exports/*/agent.json`) are well-formed JSON. Ensure your agent exports are valid before submitting.

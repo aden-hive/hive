@@ -254,6 +254,20 @@ The TUI scans both `exports/` and `examples/templates/` for available agents.
 > **Using Python directly (alternative):** You can also run agents with `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
 
 See [environment-setup.md](docs/environment-setup.md) for complete setup instructions.
+ 
+### Run with Docker (Recommended for Production)
+
+Hive provides a production-ready Docker setup to run the Aden CLI and its tools without local Python installation.
+
+```bash
+# 1. Start the MCP tools server
+docker compose up tools-server
+
+# 2. Run Aden CLI commands
+docker compose run aden info exports/your_agent
+```
+
+See the [Docker Documentation](docs/docker-setup.md) for more details.
 
 ## Documentation
 
