@@ -70,6 +70,7 @@ from .shell_config import (
 )
 from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
+from .telegram import TELEGRAM_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -83,6 +84,7 @@ CREDENTIAL_SPECS = {
     **HUBSPOT_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
+    **TELEGRAM_CREDENTIALS,
 }
 
 __all__ = [
@@ -117,4 +119,5 @@ __all__ = [
     "SLACK_CREDENTIALS",
     "APOLLO_CREDENTIALS",
     "SERPAPI_CREDENTIALS",
+    "TELEGRAM_CREDENTIALS",
 ]

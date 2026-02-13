@@ -47,6 +47,7 @@ from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
+from .telegram_tool import register_tools as register_telegram
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
@@ -84,6 +85,7 @@ def register_all_tools(
     register_apollo(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
 
     # Register file system toolkits
@@ -237,6 +239,8 @@ def register_all_tools(
         "vision_image_properties",
         "vision_web_detection",
         "vision_safe_search",
+        "telegram_send_message",
+        "telegram_send_document",
     ]
 
 
