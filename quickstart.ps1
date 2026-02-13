@@ -98,7 +98,6 @@ function Prompt-Choice {
 
 # ============================================================
 # Windows Defender Exclusion Functions
-# INSERT AFTER LINE 108 (after Prompt-Choice function)
 # ============================================================
 
 function Test-IsAdmin {
@@ -187,10 +186,10 @@ function Test-DefenderExclusions {
                 Write-Verbose "Path does not exist yet: $path (will be excluded when created)"
             }
             
-            # Check if path or any parent is already excluded
+            # Check if path is already excluded (or is a child of an excluded path)
             $alreadyExcluded = $false
             foreach ($excluded in $existing) {
-                if ($normalized -like "$excluded*" -or $excluded -like "$normalized*") {
+                if ($normalized -like "$excluded*") {
                     $alreadyExcluded = $true
                     break
                 }
@@ -472,7 +471,6 @@ Write-Host ""
 
 # ============================================================
 # Step 2.5: Windows Defender Exclusions (Optional Performance Boost)
-# INSERT AFTER LINE 297 (after "Write-Ok 'All packages installed'")
 # ============================================================
 
 Write-Step -Number "2.5" -Text "Step 2.5: Windows Defender exclusions (optional)"
@@ -485,7 +483,7 @@ Write-Host ""
 $pathsToExclude = @(
     $ScriptDir,                                      # Project directory
     (Join-Path $ScriptDir ".venv"),                  # Virtual environment
-    (Join-Path $env:APPDATA "uv")                    # uv cache
+    (Join-Path $env:LOCALAPPDATA "uv")               # uv cache
 )
 
 # Check current state
@@ -579,7 +577,7 @@ if (-not $checkResult.DefenderEnabled) {
                         $totalPaths = $result.Added.Count + $result.Failed.Count
                         if ($totalPaths -gt 0) {
                             $successRate = [math]::Round(($result.Added.Count / $totalPaths) * 100)
-                            Write-Warn "⚠️  Only $($result.Added.Count)/$totalPaths exclusions added ($successRate%)"
+                            Write-Warn "Only $($result.Added.Count)/$totalPaths exclusions added ($successRate%)"
                             Write-Host "Performance benefit may be reduced."
                             Write-Host ""
                         }
