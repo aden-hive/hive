@@ -59,6 +59,7 @@ from .github import GITHUB_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
+from .news import NEWS_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .serpapi import SERPAPI_CREDENTIALS
 from .shell_config import (
@@ -73,6 +74,7 @@ from .store_adapter import CredentialStoreAdapter
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
     **LLM_CREDENTIALS,
+    **NEWS_CREDENTIALS,
     **SEARCH_CREDENTIALS,
     **EMAIL_CREDENTIALS,
     **GCP_VISION_CREDENTIALS,
@@ -106,6 +108,7 @@ __all__ = [
     "CREDENTIAL_SPECS",
     # Category registries (for direct access if needed)
     "LLM_CREDENTIALS",
+    "NEWS_CREDENTIALS",
     "SEARCH_CREDENTIALS",
     "EMAIL_CREDENTIALS",
     "GCP_VISION_CREDENTIALS",
