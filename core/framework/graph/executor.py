@@ -225,8 +225,11 @@ class GraphExecutor:
             timestamps = state_data.setdefault("timestamps", {})
             timestamps["updated_at"] = datetime.now().isoformat()
 
-            # Memory keys (lightweight — just keys, not values)
-            state_data["memory_keys"] = list(memory.read_all().keys())
+            # Persist full memory so state.json is sufficient for resume
+            # even if the process dies before the final write.
+            memory_snapshot = memory.read_all()
+            state_data["memory"] = memory_snapshot
+            state_data["memory_keys"] = list(memory_snapshot.keys())
 
             state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
         except Exception:
@@ -308,6 +311,7 @@ class GraphExecutor:
         continuous_conversation = None  # NodeConversation threaded across nodes
         cumulative_tools: list = []  # Tools accumulate, never removed
         cumulative_tool_names: set[str] = set()
+        cumulative_output_keys: list[str] = []  # Output keys from all visited nodes
 
         # Initialize checkpoint store if checkpointing is enabled
         checkpoint_store: CheckpointStore | None = None
@@ -589,12 +593,16 @@ class GraphExecutor:
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
 
-                # Continuous mode: accumulate tools from this node
+                # Continuous mode: accumulate tools and output keys from this node
                 if is_continuous and node_spec.tools:
                     for t in self.tools:
                         if t.name in node_spec.tools and t.name not in cumulative_tool_names:
                             cumulative_tools.append(t)
                             cumulative_tool_names.add(t.name)
+                if is_continuous and node_spec.output_keys:
+                    for k in node_spec.output_keys:
+                        if k not in cumulative_output_keys:
+                            cumulative_output_keys.append(k)
 
                 # Build context for node
                 ctx = self._build_context(
@@ -606,6 +614,7 @@ class GraphExecutor:
                     continuous_mode=is_continuous,
                     inherited_conversation=continuous_conversation if is_continuous else None,
                     override_tools=cumulative_tools if is_continuous else None,
+                    cumulative_output_keys=cumulative_output_keys if is_continuous else None,
                 )
 
                 # Log actual input data being read
@@ -864,6 +873,8 @@ class GraphExecutor:
                         "paused_at": node_spec.id,
                         "resume_from": f"{node_spec.id}_resume",  # Resume key
                         "memory": saved_memory,
+                        "execution_path": list(path),
+                        "node_visit_counts": dict(node_visit_counts),
                         "next_node": None,  # Will resume from entry point
                     }
 
@@ -1068,10 +1079,26 @@ class GraphExecutor:
                         # Set current phase for phase-aware compaction
                         continuous_conversation.set_current_phase(next_spec.id)
 
-                        # Opportunistic compaction at transition
+                        # Opportunistic compaction at transition:
+                        # 1. Prune old tool results (free, no LLM call)
+                        # 2. If still over 80%, do a phase-graduated compact
                         if continuous_conversation.usage_ratio() > 0.5:
                             await continuous_conversation.prune_old_tool_results(
                                 protect_tokens=2000,
+                            )
+                        if continuous_conversation.needs_compaction():
+                            self.logger.info(
+                                "   Phase-boundary compaction (%.0f%% usage)",
+                                continuous_conversation.usage_ratio() * 100,
+                            )
+                            summary = (
+                                f"Summary of earlier phases (before {next_spec.name}). "
+                                "See transition markers for phase details."
+                            )
+                            await continuous_conversation.compact(
+                                summary,
+                                keep_recent=4,
+                                phase_graduated=True,
                             )
 
                 # Update input_data for next node
@@ -1127,6 +1154,11 @@ class GraphExecutor:
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality=exec_quality,
                 node_visit_counts=dict(node_visit_counts),
+                session_state={
+                    "memory": output,  # output IS memory.read_all()
+                    "execution_path": list(path),
+                    "node_visit_counts": dict(node_visit_counts),
+                },
             )
 
         except asyncio.CancelledError:
@@ -1272,6 +1304,7 @@ class GraphExecutor:
         continuous_mode: bool = False,
         inherited_conversation: Any = None,
         override_tools: list | None = None,
+        cumulative_output_keys: list[str] | None = None,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1304,6 +1337,7 @@ class GraphExecutor:
             pause_event=self._pause_requested,  # Pass pause event for granular control
             continuous_mode=continuous_mode,
             inherited_conversation=inherited_conversation,
+            cumulative_output_keys=cumulative_output_keys or [],
         )
 
     # Valid node types - no ambiguous "llm" type allowed

@@ -252,7 +252,11 @@ class EventLoopNode(NodeProtocol):
             # already inserted by executor. Fresh accumulator for this phase.
             # Phase already set by executor via set_current_phase().
             conversation = ctx.inherited_conversation
-            conversation._output_keys = ctx.node_spec.output_keys or None
+            # Use cumulative output keys for compaction protection (all phases),
+            # falling back to current node's keys if not in continuous mode.
+            conversation._output_keys = (
+                ctx.cumulative_output_keys or ctx.node_spec.output_keys or None
+            )
             accumulator = OutputAccumulator(store=self._conversation_store)
             start_iteration = 0
         else:
@@ -1706,40 +1710,53 @@ class EventLoopNode(NodeProtocol):
             )
             if not conversation.needs_compaction():
                 # Pruning freed enough — skip full compaction entirely
+                prune_before = round(ratio * 100)
+                prune_after = round(new_ratio * 100)
+                if ctx.runtime_logger:
+                    ctx.runtime_logger.log_step(
+                        node_id=ctx.node_id,
+                        node_type="event_loop",
+                        step_index=-1,
+                        llm_text=f"Context pruned (tool results): "
+                        f"{prune_before}% \u2192 {prune_after}%",
+                        verdict="COMPACTION",
+                        verdict_feedback=f"level=prune_only "
+                        f"before={prune_before}% after={prune_after}%",
+                    )
                 if self._event_bus:
                     from framework.runtime.event_bus import AgentEvent, EventType
 
                     await self._event_bus.publish(
                         AgentEvent(
-                            type=EventType.CUSTOM,
+                            type=EventType.CONTEXT_COMPACTED,
                             stream_id=ctx.node_id,
                             node_id=ctx.node_id,
                             data={
-                                "custom_type": "node_compaction",
-                                "node_id": ctx.node_id,
                                 "level": "prune_only",
-                                "usage_before": round(ratio * 100),
-                                "usage_after": round(new_ratio * 100),
+                                "usage_before": prune_before,
+                                "usage_after": prune_after,
                             },
                         )
                     )
                 return
             ratio = new_ratio
 
+        _phase_grad = getattr(ctx, "continuous_mode", False)
+
         if ratio >= 1.2:
             level = "emergency"
             logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
             summary = self._build_emergency_summary(ctx, accumulator, conversation)
-            await conversation.compact(summary, keep_recent=1)
+            await conversation.compact(summary, keep_recent=1, phase_graduated=_phase_grad)
         elif ratio >= 1.0:
             level = "aggressive"
             logger.info("Aggressive compaction triggered (usage %.0f%%)", ratio * 100)
             summary = await self._generate_compaction_summary(ctx, conversation)
-            await conversation.compact(summary, keep_recent=2)
+            await conversation.compact(summary, keep_recent=2, phase_graduated=_phase_grad)
         else:
             level = "normal"
             summary = await self._generate_compaction_summary(ctx, conversation)
-            await conversation.compact(summary, keep_recent=4)
+            await conversation.compact(summary, keep_recent=4, phase_graduated=_phase_grad)
 
         new_ratio = conversation.usage_ratio()
         logger.info(
@@ -1748,17 +1765,29 @@ class EventLoopNode(NodeProtocol):
             ratio * 100,
             new_ratio * 100,
         )
+
+        # Log compaction to session logs (tool_logs.jsonl)
+        before_pct = round(ratio * 100)
+        after_pct = round(new_ratio * 100)
+        if ctx.runtime_logger:
+            ctx.runtime_logger.log_step(
+                node_id=ctx.node_id,
+                node_type="event_loop",
+                step_index=-1,  # Not a regular LLM step
+                llm_text=f"Context compacted ({level}): {before_pct}% \u2192 {after_pct}%",
+                verdict="COMPACTION",
+                verdict_feedback=f"level={level} before={before_pct}% after={after_pct}%",
+            )
+
         if self._event_bus:
             from framework.runtime.event_bus import AgentEvent, EventType
 
             await self._event_bus.publish(
                 AgentEvent(
-                    type=EventType.CUSTOM,
+                    type=EventType.CONTEXT_COMPACTED,
                     stream_id=ctx.node_id,
                     node_id=ctx.node_id,
                     data={
-                        "custom_type": "node_compaction",
-                        "node_id": ctx.node_id,
                         "level": level,
                         "usage_before": round(ratio * 100),
                         "usage_after": round(new_ratio * 100),
@@ -1789,13 +1818,16 @@ class EventLoopNode(NodeProtocol):
                 f"{tool_history}"
             )
 
+        # Dynamic budget: reasoning models (o1, gpt-5-mini) spend max_tokens on
+        # internal thinking. 500 leaves nothing for the actual summary.
+        summary_budget = max(1024, self._config.max_history_tokens // 10)
         try:
             response = ctx.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
                     "Summarize conversations concisely. Always preserve the tool history section."
                 ),
-                max_tokens=500,
+                max_tokens=summary_budget,
             )
             summary = response.content
             # Ensure tool history is present even if LLM dropped it

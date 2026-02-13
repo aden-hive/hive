@@ -350,6 +350,7 @@ class AdenTUI(App):
         EventType.CONSTRAINT_VIOLATION,
         EventType.STATE_CHANGED,
         EventType.NODE_INPUT_BLOCKED,
+        EventType.CONTEXT_COMPACTED,
     ]
 
     _LOG_PANE_EVENTS = frozenset(_EVENT_TYPES) - {
@@ -464,6 +465,10 @@ class AdenTUI(App):
                 self.status_bar.set_node_detail("thinking...")
             elif et == EventType.NODE_STALLED:
                 self.status_bar.set_node_detail(f"stalled: {event.data.get('reason', '')}")
+            elif et == EventType.CONTEXT_COMPACTED:
+                before = event.data.get("usage_before", "?")
+                after = event.data.get("usage_after", "?")
+                self.status_bar.set_node_detail(f"compacted: {before}% \u2192 {after}%")
 
             # --- Log pane events ---
             if et in self._LOG_PANE_EVENTS:
