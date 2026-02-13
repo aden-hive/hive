@@ -99,4 +99,8 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [dependency-groups]
-dev = ["ty>=0.0.13", "ruff>=0.14.14"]
+dev = [
+    "ty>=0.0.13",
+    "ruff>=0.14.14",
+    "duckdb>=1.4.4",
+]

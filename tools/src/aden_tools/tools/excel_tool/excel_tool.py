@@ -37,6 +37,9 @@ def register_tools(mcp: FastMCP) -> None:
         Returns:
             dict with success status, data, and metadata
         """
+        if offset < 0 or (limit is not None and limit < 0):
+            return {"error": "offset and limit must be non-negative"}
+
         try:
             from openpyxl import load_workbook
         except ImportError:
@@ -272,52 +275,56 @@ def register_tools(mcp: FastMCP) -> None:
             # Load existing workbook
             wb = load_workbook(secure_path)
 
-            # Get the specified sheet or active sheet
-            if sheet:
-                if sheet not in wb.sheetnames:
-                    return {
-                        "error": f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}"
-                    }
-                ws = wb[sheet]
-            else:
-                ws = wb.active
+            try:
+                # Get the specified sheet or active sheet
+                if sheet:
+                    if sheet not in wb.sheetnames:
+                        return {
+                            "error": (
+                                f"Sheet '{sheet}' not found. Available sheets: {wb.sheetnames}"
+                            )
+                        }
+                    ws = wb[sheet]
+                else:
+                    ws = wb.active
 
-            if ws is None:
-                return {"error": "Workbook has no active sheet"}
+                if ws is None:
+                    return {"error": "Workbook has no active sheet"}
 
-            # Get existing columns from first row
-            columns = []
-            for cell in ws[1]:
-                columns.append(str(cell.value) if cell.value is not None else "")
+                # Get existing columns from first row
+                columns = []
+                for cell in ws[1]:
+                    columns.append(str(cell.value) if cell.value is not None else "")
 
-            if not columns or all(c == "" for c in columns):
+                if not columns or all(c == "" for c in columns):
+                    return {"error": "Excel file has no headers in the first row"}
+
+                # Find the next empty row
+                next_row = ws.max_row + 1
+
+                # Append rows
+                for row_data in rows:
+                    for col_idx, col_name in enumerate(columns, start=1):
+                        value = row_data.get(col_name, "")
+                        ws.cell(row=next_row, column=col_idx, value=value)
+                    next_row += 1
+
+                # Save workbook
+                wb.save(secure_path)
+
+                # Get new total row count (excluding header)
+                total_rows = next_row - 2  # -1 for header, -1 because next_row was incremented
+
+                return {
+                    "success": True,
+                    "path": path,
+                    "sheet_name": ws.title,
+                    "rows_appended": len(rows),
+                    "total_rows": total_rows,
+                }
+
+            finally:
                 wb.close()
-                return {"error": "Excel file has no headers in the first row"}
-
-            # Find the next empty row
-            next_row = ws.max_row + 1
-
-            # Append rows
-            for row_data in rows:
-                for col_idx, col_name in enumerate(columns, start=1):
-                    value = row_data.get(col_name, "")
-                    ws.cell(row=next_row, column=col_idx, value=value)
-                next_row += 1
-
-            # Save workbook
-            wb.save(secure_path)
-            wb.close()
-
-            # Get new total row count (excluding header)
-            total_rows = next_row - 2  # -1 for header, -1 because next_row was incremented
-
-            return {
-                "success": True,
-                "path": path,
-                "sheet_name": ws.title,
-                "rows_appended": len(rows),
-                "total_rows": total_rows,
-            }
 
         except Exception as e:
             return {"error": f"Failed to append to Excel file: {str(e)}"}
@@ -560,13 +567,14 @@ def register_tools(mcp: FastMCP) -> None:
                 # Determine target sheet for 'data' alias
                 if sheet:
                     if sheet not in wb.sheetnames:
-                        wb.close()
-                        return {"error": f"Sheet '{sheet}' not found. Available: {wb.sheetnames}"}
+                        return {"error": (f"Sheet '{sheet}' not found. Available: {wb.sheetnames}")}
                     target_sheet = sheet
                 else:
                     target_sheet = wb.sheetnames[0]
 
                 # Load all sheets into DuckDB
+                import pandas as pd
+
                 con = duckdb.connect(":memory:")
 
                 for sheet_name in wb.sheetnames:
@@ -594,8 +602,6 @@ def register_tools(mcp: FastMCP) -> None:
                     # Create table (sanitize name: spaces -> underscores)
                     table_name = sheet_name.replace(" ", "_").replace("-", "_")
                     if records:
-                        import pandas as pd
-
                         df = pd.DataFrame(records)
                         con.register(f"temp_{table_name}", df)
                         con.execute(
@@ -610,32 +616,33 @@ def register_tools(mcp: FastMCP) -> None:
                     if sheet_name == target_sheet:
                         con.execute(f'CREATE VIEW data AS SELECT * FROM "{table_name}"')
 
+                all_sheet_names = list(wb.sheetnames)
+
+            finally:
                 wb.close()
 
-                # Execute query
+            # Execute query (workbook already closed, only DuckDB needed)
+            try:
                 result = con.execute(query)
                 columns = [desc[0] for desc in result.description]
                 rows = result.fetchall()
+            finally:
                 con.close()
 
-                # Convert to dicts
-                rows_as_dicts = [dict(zip(columns, row, strict=False)) for row in rows]
+            # Convert to dicts
+            rows_as_dicts = [dict(zip(columns, row, strict=False)) for row in rows]
 
-                return {
-                    "success": True,
-                    "path": path,
-                    "target_sheet": target_sheet,
-                    "available_sheets": wb.sheetnames if hasattr(wb, "sheetnames") else [],
-                    "query": query,
-                    "columns": columns,
-                    "column_count": len(columns),
-                    "rows": rows_as_dicts,
-                    "row_count": len(rows_as_dicts),
-                }
-
-            except Exception as e:
-                wb.close()
-                raise e
+            return {
+                "success": True,
+                "path": path,
+                "target_sheet": target_sheet,
+                "available_sheets": all_sheet_names,
+                "query": query,
+                "columns": columns,
+                "column_count": len(columns),
+                "rows": rows_as_dicts,
+                "row_count": len(rows_as_dicts),
+            }
 
         except Exception as e:
             error_msg = str(e)
@@ -725,8 +732,10 @@ def register_tools(mcp: FastMCP) -> None:
                             for i, c in enumerate(first_row)
                         ]
 
-                    # Search all cells
-                    for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+                    # Search data rows only (skip header row)
+                    for row_idx, row in enumerate(
+                        ws.iter_rows(min_row=2, values_only=True), start=2
+                    ):
                         for col_idx, cell_value in enumerate(row):
                             if cell_value is None:
                                 continue

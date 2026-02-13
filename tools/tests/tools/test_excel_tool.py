@@ -371,6 +371,34 @@ class TestExcelRead:
 
         assert "error" in result
 
+    def test_negative_limit(self, excel_read_fn, basic_xlsx, tmp_path):
+        """Return error for negative limit."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_read_fn(
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                limit=-1,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
+    def test_negative_offset(self, excel_read_fn, basic_xlsx, tmp_path):
+        """Return error for negative offset."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_read_fn(
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                offset=-1,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
     def test_offset_beyond_rows(self, excel_read_fn, basic_xlsx, tmp_path):
         """Offset beyond available rows returns empty result."""
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
@@ -904,6 +932,32 @@ class TestExcelSql:
         assert "error" in result
         assert "SELECT" in result["error"]
 
+    def test_sql_drop_blocked(self, excel_tools, basic_xlsx, tmp_path):
+        """Block DROP statements."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="DROP TABLE data",
+            )
+
+        assert "error" in result
+
+    def test_sql_insert_blocked(self, excel_tools, basic_xlsx, tmp_path):
+        """Block INSERT statements."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_sql"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="INSERT INTO data VALUES ('x', 1, 'y')",
+            )
+
+        assert "error" in result
+
     def test_sql_file_not_found(self, excel_tools, session_dir, tmp_path):
         """Return error when file doesn't exist."""
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
@@ -1031,6 +1085,21 @@ class TestExcelSearch:
         assert result["success"] is True
         assert result["sheets_searched"] == ["Products"]
         assert result["match_count"] >= 1
+
+    def test_search_skips_header_row(self, excel_tools, basic_xlsx, tmp_path):
+        """Search should not match column header names."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = excel_tools["excel_search"](
+                path="basic.xlsx",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                search_term="name",
+                match_type="exact",
+            )
+
+        assert result["success"] is True
+        assert result["match_count"] == 0
 
     def test_search_no_matches(self, excel_tools, basic_xlsx, tmp_path):
         """Search returns empty when no matches."""
