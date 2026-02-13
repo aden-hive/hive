@@ -34,7 +34,7 @@ Done. For details, prerequisites, and troubleshooting, read on.
 - [Antigravity IDE](https://antigravity.google/) installed.
 - **Python 3.11+** and project dependencies. If you haven’t set up the repo yet, from repo root run:
   ```bash
-  ./scripts/setup-python.sh
+  ./quickstart.sh
   ```
 - **MCP server dependencies** (one-time). From repo root:
   ```bash
@@ -112,7 +112,7 @@ The **setup script** writes your **user** config (`~/.gemini/antigravity/mcp_con
 **MCP servers don’t connect**
 
 - Run the setup script again from the hive repo root: `./scripts/setup-antigravity-mcp.sh`, then restart Antigravity.
-- Make sure Python and deps are installed: from repo root run `./scripts/setup-python.sh`.
+- Make sure Python and deps are installed: from repo root run `./quickstart.sh`.
 - Check that the servers can start: from repo root run
   `cd core && uv run -m framework.mcp.agent_builder_server` (Ctrl+C to stop), and in another terminal
   `cd tools && uv run mcp_server.py --stdio` (Ctrl+C to stop).
