@@ -6,6 +6,7 @@ Supports:
 - Reading message details (headers, snippet, body)
 - Trashing messages
 - Modifying labels (star, mark read/unread, etc.)
+- Batch message fetching
 - Batch label modifications
 
 Requires: GOOGLE_ACCESS_TOKEN (via Aden OAuth2)
@@ -378,3 +379,81 @@ def register_tools(
             return error
 
         return {"success": True, "count": len(message_ids)}
+
+    @mcp.tool()
+    def gmail_batch_get_messages(
+        message_ids: list[str],
+        format: Literal["full", "metadata", "minimal"] = "metadata",
+    ) -> dict:
+        """
+        Fetch multiple Gmail messages by ID in a single call.
+
+        More efficient than calling gmail_get_message repeatedly. Fetches
+        each message internally and returns all results at once.
+
+        Args:
+            message_ids: List of Gmail message IDs to fetch (max 50).
+            format: Response detail level for all messages.
+                "metadata" (default) - headers + snippet, no body.
+                "full" - includes decoded body text.
+                "minimal" - IDs and labels only.
+
+        Returns:
+            Dict with "messages" list, "count", and "errors" list,
+            or error dict.
+        """
+        if not message_ids:
+            return {"error": "message_ids list is required and must not be empty"}
+        if len(message_ids) > 50:
+            return {"error": "Maximum 50 message IDs per call"}
+
+        token = _require_token()
+        if isinstance(token, dict):
+            return token
+
+        messages = []
+        errors = []
+        for mid in message_ids:
+            try:
+                mid = _sanitize_path_param(mid, "message_id")
+            except ValueError as e:
+                errors.append({"message_id": mid, "error": str(e)})
+                continue
+
+            try:
+                response = _gmail_request(
+                    "GET",
+                    f"messages/{mid}",
+                    token,
+                    params={"format": format},
+                )
+            except httpx.HTTPError as e:
+                errors.append({"message_id": mid, "error": f"Request failed: {e}"})
+                continue
+
+            error = _handle_error(response)
+            if error:
+                errors.append({"message_id": mid, **error})
+                continue
+
+            data = response.json()
+            result: dict = {
+                "id": data.get("id"),
+                "threadId": data.get("threadId"),
+                "labels": data.get("labelIds", []),
+                "snippet": data.get("snippet", ""),
+            }
+
+            payload = data.get("payload", {})
+            headers = payload.get("headers", [])
+            if headers:
+                result.update(_parse_headers(headers))
+
+            if format == "full":
+                body_text = _extract_body(payload)
+                if body_text:
+                    result["body"] = body_text
+
+            messages.append(result)
+
+        return {"messages": messages, "count": len(messages), "errors": errors}

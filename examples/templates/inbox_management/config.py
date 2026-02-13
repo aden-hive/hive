@@ -12,14 +12,14 @@ class AgentMetadata:
     name: str = "Inbox Management Agent"
     version: str = "1.0.0"
     description: str = (
-        "Automatically triage unread Gmail emails using free-text rules. "
-        "Trash spam, archive low-priority, mark important, and categorize "
-        "by urgency (Action Needed, FYI, Waiting On)."
+        "Automatically manage Gmail inbox emails using free-text rules. "
+        "Trash junk, mark spam, mark important, mark read/unread, star, "
+        "and more — using only native Gmail actions."
     )
     intro_message: str = (
-        "Hi! I'm your inbox management assistant. Tell me your triage rules "
-        "(what to trash, archive, mark important) and I'll sort through your "
-        "unread emails. How would you like me to manage your inbox?"
+        "Hi! I'm your inbox management assistant. Tell me your rules "
+        "(what to trash, mark as spam, mark important, etc.) and I'll sort "
+        "through your emails. How would you like me to manage your inbox?"
     )
 
 

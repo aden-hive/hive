@@ -97,6 +97,11 @@ def tui(mock, verbose, debug):
         if mcp_config_path.exists():
             agent._tool_registry.load_mcp_config(mcp_config_path)
 
+        # Discover custom script tools (e.g. bulk_fetch_emails)
+        tools_path = Path(__file__).parent / "tools.py"
+        if tools_path.exists():
+            agent._tool_registry.discover_from_module(tools_path)
+
         llm = None
         if not mock:
             llm = LiteLLMProvider(
