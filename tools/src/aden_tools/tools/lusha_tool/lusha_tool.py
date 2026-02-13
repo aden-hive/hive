@@ -131,8 +131,6 @@ class _LushaClient:
         company_include: dict[str, Any] = {}
         if company_name:
             company_include["names"] = [company_name]
-        if industry:
-            company_include["searchText"] = industry
 
         filters: dict[str, Any] = {"contacts": {"include": contact_include}}
         if company_include:
@@ -156,15 +154,19 @@ class _LushaClient:
         if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
             size_range = [{"min": int(parts[0]), "max": int(parts[1])}]
 
+        company_include: dict[str, Any] = {
+            "locations": [{"country": location}],
+        }
+        if size_range:
+            company_include["sizes"] = size_range
+        if industry:
+            company_include["names"] = [industry]
+
         body: dict[str, Any] = {
             "pages": {"size": 25, "page": 0},
             "filters": {
                 "companies": {
-                    "include": {
-                        "searchText": industry,
-                        "sizes": size_range,
-                        "locations": [{"country": location}],
-                    }
+                    "include": company_include,
                 }
             },
         }
