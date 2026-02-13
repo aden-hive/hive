@@ -54,6 +54,7 @@ from .gmail_tool import register_tools as register_gmail
 from .google_maps_tool import register_tools as register_google_maps
 from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
+from .lusha_tool import register_tools as register_lusha
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
 from .port_scanner import register_tools as register_port_scanner
@@ -105,6 +106,7 @@ def register_all_tools(
     register_hubspot(mcp, credentials=credentials)
     register_news(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
+    register_lusha(mcp, credentials=credentials)
     register_exa_search(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
@@ -184,6 +186,12 @@ def register_all_tools(
         "calcom_list_schedules",
         "calcom_list_event_types",
         "calcom_get_event_type",
+        "lusha_enrich_person",
+        "lusha_enrich_company",
+        "lusha_search_people",
+        "lusha_search_companies",
+        "lusha_get_signals",
+        "lusha_get_account_usage",
         "discord_list_guilds",
         "discord_list_channels",
         "discord_send_message",
