@@ -42,6 +42,7 @@ from .file_system_toolkits.replace_file_content import (
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
+from .gmail_tool import register_tools as register_gmail
 from .google_maps_tool import register_tools as register_google_maps
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
@@ -80,8 +81,10 @@ def register_all_tools(
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
     register_github(mcp, credentials=credentials)
-    # email supports multiple providers (Resend) with auto-detection
+    # email supports multiple providers (Gmail, Resend)
     register_email(mcp, credentials=credentials)
+    # Gmail inbox management (read, trash, modify labels)
+    register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_news(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
@@ -156,7 +159,13 @@ def register_all_tools(
         "github_get_user_profile",
         "github_get_user_emails",
         "send_email",
-        "send_budget_alert_email",
+        "gmail_reply_email",
+        "gmail_list_messages",
+        "gmail_get_message",
+        "gmail_trash_message",
+        "gmail_modify_message",
+        "gmail_batch_modify_messages",
+        "gmail_batch_get_messages",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",
