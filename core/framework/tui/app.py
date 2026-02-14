@@ -5,14 +5,13 @@ import time
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.widgets import Footer, Label
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.tui.widgets.chat_repl import ChatRepl
 from framework.tui.widgets.graph_view import GraphOverview
-from framework.tui.widgets.log_pane import LogPane
 from framework.tui.widgets.selectable_rich_log import SelectableRichLog
 
 
@@ -136,28 +135,15 @@ class AdenTUI(App):
         background: $surface;
     }
 
-    #left-pane {
-        width: 60%;
-        height: 100%;
-        layout: vertical;
-        background: $surface;
-    }
-
     GraphOverview {
-        height: 40%;
+        width: 40%;
+        height: 100%;
         background: $panel;
         padding: 0;
     }
 
-    LogPane {
-        height: 60%;
-        background: $surface;
-        padding: 0;
-        margin-bottom: 1;
-    }
-
     ChatRepl {
-        width: 40%;
+        width: 60%;
         height: 100%;
         background: $panel;
         border-left: tall $primary;
@@ -208,6 +194,7 @@ class AdenTUI(App):
         Binding("ctrl+c", "ctrl_c", "Interrupt", show=False, priority=True),
         Binding("super+c", "ctrl_c", "Copy", show=False, priority=True),
         Binding("ctrl+s", "screenshot", "Screenshot (SVG)", show=True, priority=True),
+        Binding("ctrl+l", "toggle_logs", "Toggle Logs", show=True, priority=True),
         Binding("ctrl+z", "pause_execution", "Pause", show=True, priority=True),
         Binding("ctrl+r", "show_sessions", "Sessions", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
@@ -223,7 +210,6 @@ class AdenTUI(App):
         super().__init__()
 
         self.runtime = runtime
-        self.log_pane = LogPane()
         self.graph_view = GraphOverview(runtime)
         self.chat_repl = ChatRepl(runtime, resume_session, resume_checkpoint)
         self.status_bar = StatusBar(graph_id=runtime.graph.id)
@@ -253,11 +239,7 @@ class AdenTUI(App):
         yield self.status_bar
 
         yield Horizontal(
-            Vertical(
-                self.log_pane,
-                self.graph_view,
-                id="left-pane",
-            ),
+            self.graph_view,
             self.chat_repl,
         )
 
@@ -328,7 +310,7 @@ class AdenTUI(App):
                 if record.name.startswith(("textual", "LiteLLM", "litellm")):
                     continue
 
-                self.log_pane.write_python_log(record)
+                self.chat_repl.write_python_log(record)
         except Exception:
             pass
 
@@ -371,12 +353,22 @@ class AdenTUI(App):
         """Called from the agent thread — bridge to Textual's main thread."""
         try:
             self.call_from_thread(self._route_event, event)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger("tui.events").error(
+                "call_from_thread failed for %s (node=%s): %s",
+                event.type.value,
+                event.node_id or "?",
+                e,
+            )
 
     def _route_event(self, event: AgentEvent) -> None:
         """Route incoming events to widgets. Runs on Textual's main thread."""
         if not self.is_ready:
+            logging.getLogger("tui.events").warning(
+                "Event dropped (not ready): %s node=%s",
+                event.type.value,
+                event.node_id or "?",
+            )
             return
 
         try:
@@ -407,6 +399,10 @@ class AdenTUI(App):
                 self.chat_repl.handle_input_requested(
                     event.node_id or event.data.get("node_id", ""),
                 )
+            elif et == EventType.NODE_LOOP_STARTED:
+                self.chat_repl.handle_node_started(event.node_id or "")
+            elif et == EventType.NODE_LOOP_ITERATION:
+                self.chat_repl.handle_loop_iteration(event.data.get("iteration", 0))
 
             # --- Graph view events ---
             if et in (
@@ -465,11 +461,17 @@ class AdenTUI(App):
             elif et == EventType.NODE_STALLED:
                 self.status_bar.set_node_detail(f"stalled: {event.data.get('reason', '')}")
 
-            # --- Log pane events ---
+            # --- Log events (inline in chat) ---
             if et in self._LOG_PANE_EVENTS:
-                self.log_pane.write_event(event)
-        except Exception:
-            pass
+                self.chat_repl.write_log_event(event)
+        except Exception as e:
+            logging.getLogger("tui.events").error(
+                "Route failed for %s (node=%s): %s",
+                event.type.value,
+                event.node_id or "?",
+                e,
+                exc_info=True,
+            )
 
     def save_screenshot(self, filename: str | None = None) -> str:
         """Save a screenshot of the current screen as SVG (viewable in browsers).
@@ -534,6 +536,12 @@ class AdenTUI(App):
             )
         except Exception as e:
             self.notify(f"Screenshot failed: {e}", severity="error", timeout=5)
+
+    def action_toggle_logs(self) -> None:
+        """Toggle inline log display in chat (bound to Ctrl+L)."""
+        self.chat_repl.toggle_logs()
+        mode = "ON" if self.chat_repl._show_logs else "OFF"
+        self.notify(f"Logs {mode}", severity="information", timeout=2)
 
     def action_pause_execution(self) -> None:
         """Immediately pause execution by cancelling task (bound to Ctrl+Z)."""

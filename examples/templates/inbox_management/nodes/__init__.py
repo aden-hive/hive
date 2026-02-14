@@ -86,7 +86,12 @@ The user wants emails BEYOND what was already fetched. Use pagination:
 
 Do NOT add commentary or explanation. Execute the appropriate path and call set_output when done.
 """,
-    tools=["bulk_fetch_emails", "gmail_list_messages", "gmail_batch_get_messages", "append_data"],
+    tools=[
+        "bulk_fetch_emails",
+        "gmail_list_messages",
+        "gmail_batch_get_messages",
+        "append_data",
+    ],
 )
 
 # Node 3: Classify and Act
@@ -151,7 +156,13 @@ After ALL actions are executed, call set_output("actions_taken", "actions.jsonl"
 - Do NOT call set_output until all Gmail actions are executed.
 - Pass ONLY the filename "actions.jsonl" to set_output, NOT raw data.
 """,
-    tools=["gmail_trash_message", "gmail_modify_message", "gmail_batch_modify_messages", "load_data", "append_data"],
+    tools=[
+        "gmail_trash_message",
+        "gmail_modify_message",
+        "gmail_batch_modify_messages",
+        "load_data",
+        "append_data",
+    ],
 )
 
 # Node 4: Report

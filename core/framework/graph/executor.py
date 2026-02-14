@@ -978,6 +978,18 @@ class GraphExecutor:
                         next_spec = graph.get_node(next_node)
                         self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
 
+                        # Early TUI notification: emit NODE_LOOP_STARTED for
+                        # event_loop nodes NOW so the graph view updates before
+                        # the heavy transition work (prompt composition, file I/O,
+                        # compaction) that follows.  EventLoopNode.execute() will
+                        # emit its own NODE_LOOP_STARTED later — the duplicate is
+                        # harmless since graph_view handlers are idempotent.
+                        if self._event_bus and next_spec and next_spec.node_type == "event_loop":
+                            await self._event_bus.emit_node_loop_started(
+                                stream_id=self._stream_id,
+                                node_id=next_node,
+                            )
+
                         # CHECKPOINT: node_complete (after determining next node)
                         if (
                             checkpoint_store

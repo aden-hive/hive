@@ -34,7 +34,13 @@ def cli():
 
 @cli.command()
 @click.option("--rules", "-r", type=str, required=True, help="Free-text triage rules")
-@click.option("--max-emails", "-m", type=int, default=100, help="Max emails to process, supports any count via pagination (default: 100)")
+@click.option(
+    "--max-emails",
+    "-m",
+    type=int,
+    default=100,
+    help="Max emails to process, supports any count via pagination (default: 100)",
+)
 @click.option("--mock", is_flag=True, help="Run in mock mode")
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
