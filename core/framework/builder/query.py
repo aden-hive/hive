@@ -446,7 +446,7 @@ class BuilderQuery:
                 type_counts[decision.decision_type.value] += 1
 
                 # Track which options are chosen for similar intents
-                intent_key = decision.intent[:50]  # Truncate for grouping
+                intent_key = (decision.intent or "")[:50]  # Truncate for grouping
                 if decision.chosen_option:
                     option_counts[intent_key][decision.chosen_option.description] += 1
 
