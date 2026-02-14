@@ -1,4 +1,4 @@
-"""Agent graph construction for Deep Research Agent."""
+"""Agent graph construction for Job Hunter Agent."""
 
 from pathlib import Path
 
@@ -14,67 +14,81 @@ from framework.runtime.execution_stream import EntryPointSpec
 from .config import default_config, metadata
 from .nodes import (
     intake_node,
-    research_node,
-    review_node,
-    report_node,
+    job_search_node,
+    job_review_node,
+    customize_node,
 )
 
 # Goal definition
 goal = Goal(
-    id="rigorous-interactive-research",
-    name="Rigorous Interactive Research",
+    id="job-hunter",
+    name="Job Hunter",
     description=(
-        "Research any topic by searching diverse sources, analyzing findings, "
-        "and producing a cited report — with user checkpoints to guide direction."
+        "Analyze a user's resume to identify their strongest role fits, find 10 "
+        "matching job opportunities, let the user select which to pursue, then "
+        "generate a resume customization list and cold outreach email for each selected job."
     ),
     success_criteria=[
         SuccessCriterion(
-            id="source-diversity",
-            description="Use multiple diverse, authoritative sources",
-            metric="source_count",
-            target=">=5",
+            id="role-identification",
+            description="Identifies 2-3 role types that genuinely match the user's experience",
+            metric="role_match_accuracy",
+            target=">=0.8",
+            weight=0.2,
+        ),
+        SuccessCriterion(
+            id="job-relevance",
+            description="Found jobs align with identified roles and user's background",
+            metric="job_relevance_score",
+            target=">=0.8",
+            weight=0.2,
+        ),
+        SuccessCriterion(
+            id="customization-quality",
+            description="Resume changes are specific, actionable, and tailored to each job posting",
+            metric="customization_specificity",
+            target=">=0.85",
             weight=0.25,
         ),
         SuccessCriterion(
-            id="citation-coverage",
-            description="Every factual claim in the report cites its source",
-            metric="citation_coverage",
-            target="100%",
-            weight=0.25,
+            id="email-effectiveness",
+            description="Cold emails are personalized, professional, and reference specific company/role details",
+            metric="email_personalization_score",
+            target=">=0.85",
+            weight=0.2,
         ),
         SuccessCriterion(
             id="user-satisfaction",
-            description="User reviews findings before report generation",
-            metric="user_approval",
-            target="true",
-            weight=0.25,
-        ),
-        SuccessCriterion(
-            id="report-completeness",
-            description="Final report answers the original research questions",
-            metric="question_coverage",
-            target="90%",
-            weight=0.25,
+            description="User approves outputs without major revisions needed",
+            metric="approval_rate",
+            target=">=0.9",
+            weight=0.15,
         ),
     ],
     constraints=[
         Constraint(
-            id="no-hallucination",
-            description="Only include information found in fetched sources",
+            id="realistic-roles",
+            description="Only suggest roles the user is realistically qualified for - no aspirational stretch roles",
             constraint_type="quality",
             category="accuracy",
         ),
         Constraint(
-            id="source-attribution",
-            description="Every claim must cite its source with a numbered reference",
-            constraint_type="quality",
-            category="accuracy",
+            id="truthful-customizations",
+            description="Resume customizations must be truthful - enhance presentation, never fabricate experience",
+            constraint_type="ethical",
+            category="integrity",
         ),
         Constraint(
-            id="user-checkpoint",
-            description="Present findings to the user before writing the final report",
-            constraint_type="functional",
-            category="interaction",
+            id="professional-emails",
+            description="Cold emails must be professional and not spammy",
+            constraint_type="quality",
+            category="tone",
+        ),
+        Constraint(
+            id="respect-selection",
+            description="Only customize for jobs the user explicitly selects",
+            constraint_type="behavioral",
+            category="user_control",
         ),
     ],
 )
@@ -82,63 +96,35 @@ goal = Goal(
 # Node list
 nodes = [
     intake_node,
-    research_node,
-    review_node,
-    report_node,
+    job_search_node,
+    job_review_node,
+    customize_node,
 ]
 
 # Edge definitions
 edges = [
-    # intake -> research
+    # intake -> job-search
     EdgeSpec(
-        id="intake-to-research",
+        id="intake-to-job-search",
         source="intake",
-        target="research",
+        target="job-search",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # research -> review
+    # job-search -> job-review
     EdgeSpec(
-        id="research-to-review",
-        source="research",
-        target="review",
+        id="job-search-to-job-review",
+        source="job-search",
+        target="job-review",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # review -> research (feedback loop)
+    # job-review -> customize
     EdgeSpec(
-        id="review-to-research-feedback",
-        source="review",
-        target="research",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == True",
-        priority=1,
-    ),
-    # review -> report (user satisfied)
-    EdgeSpec(
-        id="review-to-report",
-        source="review",
-        target="report",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == False",
-        priority=2,
-    ),
-    # report -> research (user wants deeper research on current topic)
-    EdgeSpec(
-        id="report-to-research",
-        source="report",
-        target="research",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="str(next_action).lower() == 'more_research'",
-        priority=2,
-    ),
-    # report -> intake (user wants a new topic — default when not more_research)
-    EdgeSpec(
-        id="report-to-intake",
-        source="report",
-        target="intake",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="str(next_action).lower() != 'more_research'",
+        id="job-review-to-customize",
+        source="job-review",
+        target="customize",
+        condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
 ]
@@ -147,16 +133,14 @@ edges = [
 entry_node = "intake"
 entry_points = {"start": "intake"}
 pause_nodes = []
-terminal_nodes = []
+terminal_nodes = ["customize"]
 
 
-class DeepResearchAgent:
+class JobHunterAgent:
     """
-    Deep Research Agent — 4-node pipeline with user checkpoints.
+    Job Hunter Agent — 4-node pipeline for job search and application materials.
 
-    Flow: intake -> research -> review -> report
-                      ^           |
-                      +-- feedback loop (if user wants more)
+    Flow: intake -> job-search -> job-review -> customize
 
     Uses AgentRuntime for proper session management:
     - Session-scoped storage (sessions/{session_id}/)
@@ -182,7 +166,7 @@ class DeepResearchAgent:
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
         return GraphSpec(
-            id="deep-research-agent-graph",
+            id="job-hunter-graph",
             goal_id=self.goal.id,
             version="1.0.0",
             entry_node=self.entry_node,
@@ -198,14 +182,20 @@ class DeepResearchAgent:
                 "max_tool_calls_per_turn": 20,
                 "max_history_tokens": 32000,
             },
+            conversation_mode="continuous",
+            identity_prompt=(
+                "You are a job hunting assistant. You analyze resumes to identify "
+                "the strongest role fits, search for matching job opportunities, "
+                "and help create personalized application materials. You only "
+                "suggest roles the user is realistically qualified for, and you "
+                "never fabricate experience — only enhance presentation truthfully."
+            ),
         )
 
-    def _setup(self) -> GraphExecutor:
-        """Set up the executor with all components."""
-        from pathlib import Path
-
-        storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
-        storage_path.mkdir(parents=True, exist_ok=True)
+    def _setup(self, mock_mode=False) -> None:
+        """Set up the agent runtime with sessions, checkpoints, and logging."""
+        self._storage_path = Path.home() / ".hive" / "agents" / "job_hunter"
+        self._storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
 
@@ -350,4 +340,4 @@ class DeepResearchAgent:
 
 
 # Create default instance
-default_agent = DeepResearchAgent()
+default_agent = JobHunterAgent()

@@ -1,80 +1,78 @@
-"""Agent graph construction for Deep Research Agent."""
-
-from pathlib import Path
+"""Agent graph construction for Inbox Management Agent."""
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
-from framework.graph.checkpoint_config import CheckpointConfig
+from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.runtime.event_bus import EventBus
+from framework.runtime.core import Runtime
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
     intake_node,
-    research_node,
-    review_node,
+    fetch_emails_node,
+    classify_and_act_node,
     report_node,
 )
 
 # Goal definition
 goal = Goal(
-    id="rigorous-interactive-research",
-    name="Rigorous Interactive Research",
+    id="inbox-management",
+    name="Inbox Management",
     description=(
-        "Research any topic by searching diverse sources, analyzing findings, "
-        "and producing a cited report — with user checkpoints to guide direction."
+        "Manage Gmail inbox emails using user-defined free-text rules. "
+        "Fetch inbox emails (configurable batch size, default 100), apply the user's "
+        "rules to each email, and execute the appropriate Gmail actions — trash, "
+        "mark as spam, mark important, mark read/unread, star, and more."
     ),
     success_criteria=[
         SuccessCriterion(
-            id="source-diversity",
-            description="Use multiple diverse, authoritative sources",
-            metric="source_count",
-            target=">=5",
-            weight=0.25,
+            id="correct-action-execution",
+            description=(
+                "Gmail actions are applied correctly to the right emails "
+                "based on the user's rules"
+            ),
+            metric="action_correctness",
+            target=">=95%",
+            weight=0.35,
         ),
         SuccessCriterion(
-            id="citation-coverage",
-            description="Every factual claim in the report cites its source",
-            metric="citation_coverage",
+            id="action-report",
+            description=(
+                "Produces a summary report showing what was done: how many emails "
+                "were affected by each action type, with email subjects listed"
+            ),
+            metric="report_completeness",
             target="100%",
-            weight=0.25,
+            weight=0.3,
         ),
         SuccessCriterion(
-            id="user-satisfaction",
-            description="User reviews findings before report generation",
-            metric="user_approval",
-            target="true",
-            weight=0.25,
-        ),
-        SuccessCriterion(
-            id="report-completeness",
-            description="Final report answers the original research questions",
-            metric="question_coverage",
-            target="90%",
-            weight=0.25,
+            id="batch-completeness",
+            description=(
+                "All fetched emails up to the configured max are processed and acted upon; "
+                "none are silently skipped"
+            ),
+            metric="emails_processed_ratio",
+            target="100%",
+            weight=0.35,
         ),
     ],
     constraints=[
         Constraint(
-            id="no-hallucination",
-            description="Only include information found in fetched sources",
-            constraint_type="quality",
-            category="accuracy",
+            id="respect-batch-limit",
+            description="Must not process more emails than the configured max_emails parameter",
+            constraint_type="hard",
+            category="operational",
         ),
         Constraint(
-            id="source-attribution",
-            description="Every claim must cite its source with a numbered reference",
-            constraint_type="quality",
-            category="accuracy",
-        ),
-        Constraint(
-            id="user-checkpoint",
-            description="Present findings to the user before writing the final report",
-            constraint_type="functional",
-            category="interaction",
+            id="non-destructive-default",
+            description=(
+                "Archiving removes from inbox but preserves the email; only explicit "
+                "trash rules move emails to trash"
+            ),
+            constraint_type="hard",
+            category="safety",
         ),
     ],
 )
@@ -82,63 +80,39 @@ goal = Goal(
 # Node list
 nodes = [
     intake_node,
-    research_node,
-    review_node,
+    fetch_emails_node,
+    classify_and_act_node,
     report_node,
 ]
 
 # Edge definitions
 edges = [
-    # intake -> research
     EdgeSpec(
-        id="intake-to-research",
+        id="intake-to-fetch-emails",
         source="intake",
-        target="research",
+        target="fetch-emails",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # research -> review
     EdgeSpec(
-        id="research-to-review",
-        source="research",
-        target="review",
+        id="fetch-emails-to-classify",
+        source="fetch-emails",
+        target="classify-and-act",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # review -> research (feedback loop)
     EdgeSpec(
-        id="review-to-research-feedback",
-        source="review",
-        target="research",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == True",
-        priority=1,
-    ),
-    # review -> report (user satisfied)
-    EdgeSpec(
-        id="review-to-report",
-        source="review",
+        id="classify-to-report",
+        source="classify-and-act",
         target="report",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == False",
-        priority=2,
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
     ),
-    # report -> research (user wants deeper research on current topic)
-    EdgeSpec(
-        id="report-to-research",
-        source="report",
-        target="research",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="str(next_action).lower() == 'more_research'",
-        priority=2,
-    ),
-    # report -> intake (user wants a new topic — default when not more_research)
     EdgeSpec(
         id="report-to-intake",
         source="report",
         target="intake",
-        condition=EdgeCondition.CONDITIONAL,
-        condition_expr="str(next_action).lower() != 'more_research'",
+        condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
 ]
@@ -148,21 +122,18 @@ entry_node = "intake"
 entry_points = {"start": "intake"}
 pause_nodes = []
 terminal_nodes = []
+loop_config = {
+    "max_iterations": 100,
+    "max_tool_calls_per_turn": 50,
+    "max_history_tokens": 32000,
+}
 
 
-class DeepResearchAgent:
+class InboxManagementAgent:
     """
-    Deep Research Agent — 4-node pipeline with user checkpoints.
+    Inbox Management Agent — continuous 4-node pipeline for email triage.
 
-    Flow: intake -> research -> review -> report
-                      ^           |
-                      +-- feedback loop (if user wants more)
-
-    Uses AgentRuntime for proper session management:
-    - Session-scoped storage (sessions/{session_id}/)
-    - Checkpointing for resume capability
-    - Runtime logging
-    - Data folder for save_data/load_data
+    Flow: intake -> fetch-emails -> classify-and-act -> report -> intake (loop)
     """
 
     def __init__(self, config=None):
@@ -174,15 +145,15 @@ class DeepResearchAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
+        self._executor: GraphExecutor | None = None
         self._graph: GraphSpec | None = None
-        self._agent_runtime: AgentRuntime | None = None
+        self._event_bus: EventBus | None = None
         self._tool_registry: ToolRegistry | None = None
-        self._storage_path: Path | None = None
 
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
         return GraphSpec(
-            id="deep-research-agent-graph",
+            id="inbox-management-graph",
             goal_id=self.goal.id,
             version="1.0.0",
             entry_node=self.entry_node,
@@ -193,25 +164,33 @@ class DeepResearchAgent:
             edges=self.edges,
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
-            loop_config={
-                "max_iterations": 100,
-                "max_tool_calls_per_turn": 20,
-                "max_history_tokens": 32000,
-            },
+            loop_config=loop_config,
+            conversation_mode="continuous",
+            identity_prompt=(
+                "You are an inbox management assistant. You help users manage "
+                "their Gmail inbox by applying free-text rules to emails — trash, "
+                "mark as spam, mark important, mark read/unread, star, and more."
+            ),
         )
 
-    def _setup(self) -> GraphExecutor:
+    def _setup(self, mock_mode=False) -> GraphExecutor:
         """Set up the executor with all components."""
         from pathlib import Path
 
-        storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
+        storage_path = Path.home() / ".hive" / "agents" / "inbox_management"
         storage_path.mkdir(parents=True, exist_ok=True)
 
+        self._event_bus = EventBus()
         self._tool_registry = ToolRegistry()
 
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
+
+        # Discover custom script tools (e.g. bulk_fetch_emails)
+        tools_path = Path(__file__).parent / "tools.py"
+        if tools_path.exists():
+            self._tool_registry.discover_from_module(tools_path)
 
         llm = None
         if not mock_mode:
@@ -225,63 +204,47 @@ class DeepResearchAgent:
         tools = list(self._tool_registry.get_tools().values())
 
         self._graph = self._build_graph()
+        runtime = Runtime(storage_path)
 
-        checkpoint_config = CheckpointConfig(
-            enabled=True,
-            checkpoint_on_node_start=False,
-            checkpoint_on_node_complete=True,
-            checkpoint_max_age_days=7,
-            async_checkpoint=True,
-        )
-
-        entry_point_specs = [
-            EntryPointSpec(
-                id="default",
-                name="Default",
-                entry_node=self.entry_node,
-                trigger_type="manual",
-                isolation_level="shared",
-            )
-        ]
-
-        self._agent_runtime = create_agent_runtime(
-            graph=self._graph,
-            goal=self.goal,
-            storage_path=self._storage_path,
-            entry_points=entry_point_specs,
+        self._executor = GraphExecutor(
+            runtime=runtime,
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            checkpoint_config=checkpoint_config,
+            event_bus=self._event_bus,
+            storage_path=storage_path,
+            loop_config=self._graph.loop_config,
         )
 
+        return self._executor
+
     async def start(self, mock_mode=False) -> None:
-        """Set up and start the agent runtime."""
-        if self._agent_runtime is None:
+        """Set up the agent (initialize executor and tools)."""
+        if self._executor is None:
             self._setup(mock_mode=mock_mode)
-        if not self._agent_runtime.is_running:
-            await self._agent_runtime.start()
 
     async def stop(self) -> None:
-        """Stop the agent runtime and clean up."""
-        if self._agent_runtime and self._agent_runtime.is_running:
-            await self._agent_runtime.stop()
-        self._agent_runtime = None
+        """Clean up resources."""
+        self._executor = None
+        self._event_bus = None
 
     async def trigger_and_wait(
         self,
-        entry_point: str = "default",
-        input_data: dict | None = None,
+        entry_point: str,
+        input_data: dict,
         timeout: float | None = None,
         session_state: dict | None = None,
     ) -> ExecutionResult | None:
         """Execute the graph and wait for completion."""
-        if self._agent_runtime is None:
+        if self._executor is None:
             raise RuntimeError("Agent not started. Call start() first.")
+        if self._graph is None:
+            raise RuntimeError("Graph not built. Call start() first.")
 
-        return await self._agent_runtime.trigger_and_wait(
-            entry_point_id=entry_point,
-            input_data=input_data or {},
+        return await self._executor.execute(
+            graph=self._graph,
+            goal=self.goal,
+            input_data=input_data,
             session_state=session_state,
         )
 
@@ -292,7 +255,7 @@ class DeepResearchAgent:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
+                "start", context, session_state=session_state
             )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
@@ -350,4 +313,4 @@ class DeepResearchAgent:
 
 
 # Create default instance
-default_agent = DeepResearchAgent()
+default_agent = InboxManagementAgent()

@@ -1,0 +1,269 @@
+{
+  "agent": {
+    "id": "job_hunter",
+    "name": "Job Hunter",
+    "version": "1.0.0",
+    "description": "Analyze a user's resume to identify their strongest role fits, find 10 matching job opportunities, let the user select which to pursue, then generate a resume customization list and cold outreach email for each selected job."
+  },
+  "graph": {
+    "id": "job_hunter-graph",
+    "goal_id": "job-hunter",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [
+      "customize"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Collect resume from user, analyze skills and experience, identify 3-5 specific role types",
+        "node_type": "event_loop",
+        "input_keys": [],
+        "output_keys": [
+          "resume_text",
+          "role_analysis"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a career analyst helping a job seeker find their best opportunities.\n\n**STEP 1 \u2014 Greet and collect resume (text only, NO tool calls):**\n\nAsk the user to paste their resume. Be friendly and concise:\n\"Please paste your resume below. I'll analyze your experience and identify the roles where you have the strongest chance of success.\"\n\n**STEP 2 \u2014 After the user provides their resume:**\n\nAnalyze the resume thoroughly:\n1. Identify key skills (technical and soft skills)\n2. Summarize years and types of experience\n3. Identify 3-5 SPECIFIC, GRANULAR role types where they're competitive\n\n**IMPORTANT — Role Specificity:**\nRespect the job seeker by providing granular options, not generic buckets.\n- BAD: \"Software Engineer\" (too broad)\n- GOOD: \"Backend Engineer (Python/Django)\", \"Platform Engineer\", \"API Developer\", \"Data Pipeline Engineer\"\n\nEach role should be distinct and searchable. The more specific, the better the job matches will be\n\nPresent your analysis to the user and ask if they agree with the role types identified. DO NOT ask follow-up questions. DO NOT ask which roles to focus on.\n\n**STEP 3 \u2014 After user confirms roles, call set_output:**\n\nUse set_output to store:\n- set_output(\"resume_text\", \"<the full resume text>\")\n- set_output(\"role_analysis\", \"<JSON with: skills, experience_summary, target_roles (3-5 specific role titles)>\")\n\nIMPORTANT: When the user says \"yes\", \"sure\", \"go ahead\", \"find jobs\" or similar, call set_output IMMEDIATELY. NEVER ask the user to pick between roles.",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      },
+      {
+        "id": "job-review",
+        "name": "Job Review",
+        "description": "Present all 10 jobs to the user, let them select which to pursue",
+        "node_type": "event_loop",
+        "input_keys": [
+          "job_listings",
+          "resume_text"
+        ],
+        "output_keys": [
+          "selected_jobs"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are helping a job seeker choose which positions to apply to.\n\n**STEP 1 \u2014 Present the jobs (text only, NO tool calls):**\n\nDisplay all 10 jobs in a clear, numbered format:\n\n```\n**Job Opportunities Found:**\n\n1. **[Job Title]** at [Company]\n   Location: [Location]\n   [Brief description - 2-3 lines]\n   URL: [link]\n\n2. **[Job Title]** at [Company]\n   ...\n```\n\nAfter listing all jobs, ask:\n\"Which jobs would you like me to create application materials for? Please list the numbers (e.g., '1, 3, 5') or say 'all' for all of them.\"\n\n**STEP 2 \u2014 After the user responds:**\n\nConfirm their selection and call set_output:\n- set_output(\"selected_jobs\", \"<JSON array of the selected job objects>\")\n\nOnly include the jobs the user explicitly selected.",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      },
+      {
+        "id": "customize",
+        "name": "Customize",
+        "description": "For each selected job, generate resume customization list and cold outreach email",
+        "node_type": "event_loop",
+        "input_keys": [
+          "selected_jobs",
+          "resume_text"
+        ],
+        "output_keys": [
+          "application_materials"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a career coach creating personalized application materials.\n\n**INPUT:** You have the user's resume and their selected jobs.\n\n**For EACH selected job, generate:**\n\n1. **Resume Customization List** — Specific, actionable changes:\n   - Which bullet points to move to the top\n   - Keywords from the job posting to incorporate\n   - Which experiences to emphasize vs. de-emphasize\n   - Suggested rewording for specific bullet points\n   - Skills to highlight in the summary\n   IMPORTANT: Only suggest truthful changes — enhance presentation, never fabricate.\n\n2. **Cold Outreach Email** — Professional email to HR/hiring manager:\n   - Subject line\n   - Personalized opening referencing the company/role\n   - 2-3 sentences on why you're a strong fit (specific to this role)\n   - Clear call to action\n   - Professional sign-off\n   Keep it concise (under 150 words) and not spammy.\n\n**PRESENT each job's materials to the user as you complete them.**\n\n**OUTPUT FORMAT: HTML**\nGenerate a polished HTML report with:\n- Clean, professional styling (use inline CSS)\n- Clear sections for each job with headers\n- Resume customizations as bulleted lists\n- Cold emails in styled blockquotes or cards\n- A table of contents at the top linking to each job section\n\nUse this structure:\n```html\n<!DOCTYPE html>\n<html>\n<head>\n  <title>Job Application Materials</title>\n  <style>\n    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 40px; }\n    h1 { color: #1a1a1a; border-bottom: 2px solid #0066cc; padding-bottom: 10px; }\n    h2 { color: #0066cc; margin-top: 40px; }\n    .email-card { background: #f8f9fa; border-left: 4px solid #0066cc; padding: 20px; margin: 20px 0; }\n    .customization-list { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; }\n    ul { line-height: 1.8; }\n  </style>\n</head>\n<body>...</body>\n</html>\n```\n\n**After generating all materials:**\n1. Use save_data to save the HTML to 'application_materials.html'\n2. Use serve_file_to_user to open it in the browser (set open_in_browser=true)\n3. **CRITICAL: Print the file_path from the serve_file_to_user result in your response** so the user can click it later:\n   \"Your materials are ready! File saved to: [file_path]\"\n4. Call set_output(\"application_materials\", \"Created application_materials.html for N jobs\")",
+        "tools": [
+          "save_data",
+          "serve_file_to_user"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      },
+      {
+        "id": "job-search",
+        "name": "Job Search",
+        "description": "Search for 10 jobs matching identified roles and scrape job posting details",
+        "node_type": "event_loop",
+        "input_keys": [
+          "role_analysis"
+        ],
+        "output_keys": [
+          "job_listings"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a job search specialist. Your task is to find 10 relevant job openings.\n\n**INPUT:** You have access to role_analysis containing target roles and skills.\n\n**PROCESS:**\n1. Use web_search to find job postings for each target role (search queries like \"[role title] jobs hiring now\")\n2. Use web_scrape to get details from promising job posting URLs\n3. Gather 10 quality job listings total across the target roles\n\n**For each job, extract:**\n- Job title\n- Company name\n- Location (or \"Remote\" if applicable)\n- Brief job description/requirements summary\n- URL to the job posting\n- Any info about the hiring manager or company contact if visible\n\n**OUTPUT:** Once you have 10 jobs, call:\nset_output(\"job_listings\", \"<JSON array of 10 job objects with title, company, location, description, url, contact_info>\")\n\nFocus on finding REAL, current job postings. Skip aggregator sites when possible \u2014 go to company career pages or specific job boards.",
+        "tools": [
+          "web_search",
+          "web_scrape"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 1,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false,
+        "success_criteria": null
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-job-search",
+        "source": "intake",
+        "target": "job-search",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "job-search-to-job-review",
+        "source": "job-search",
+        "target": "job-review",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "job-review-to-customize",
+        "source": "job-review",
+        "target": "customize",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Analyze a user's resume to identify their strongest role fits, find 10 matching job opportunities, let the user select which to pursue, then generate a resume customization list and cold outreach email for each selected job.",
+    "created_at": "2026-02-13T18:41:10.324397"
+  },
+  "goal": {
+    "id": "job-hunter",
+    "name": "Job Hunter",
+    "description": "Analyze a user's resume to identify their strongest role fits, find 10 matching job opportunities, let the user select which to pursue, then generate a resume customization list and cold outreach email for each selected job.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "role-identification",
+        "description": "Identifies 3-5 role types that genuinely match the user's experience",
+        "metric": "role_match_accuracy",
+        "target": ">=0.8",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "job-relevance",
+        "description": "Found jobs align with identified roles and user's background",
+        "metric": "job_relevance_score",
+        "target": ">=0.8",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "customization-quality",
+        "description": "Resume changes are specific, actionable, and tailored to each job posting",
+        "metric": "customization_specificity",
+        "target": ">=0.85",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "email-effectiveness",
+        "description": "Cold emails are personalized, professional, and reference specific company/role details",
+        "metric": "email_personalization_score",
+        "target": ">=0.85",
+        "weight": 0.2,
+        "met": false
+      },
+      {
+        "id": "user-satisfaction",
+        "description": "User approves outputs without major revisions needed",
+        "metric": "approval_rate",
+        "target": ">=0.9",
+        "weight": 0.15,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "realistic-roles",
+        "description": "Only suggest roles the user is realistically qualified for - no aspirational stretch roles",
+        "constraint_type": "quality",
+        "category": "accuracy",
+        "check": ""
+      },
+      {
+        "id": "truthful-customizations",
+        "description": "Resume customizations must be truthful - enhance presentation, never fabricate experience",
+        "constraint_type": "ethical",
+        "category": "integrity",
+        "check": ""
+      },
+      {
+        "id": "professional-emails",
+        "description": "Cold emails must be professional and not spammy",
+        "constraint_type": "quality",
+        "category": "tone",
+        "check": ""
+      },
+      {
+        "id": "respect-selection",
+        "description": "Only customize for jobs the user explicitly selects",
+        "constraint_type": "behavioral",
+        "category": "user_control",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null,
+    "created_at": "2026-02-13 18:23:18.911161",
+    "updated_at": "2026-02-13 18:23:18.911164"
+  },
+  "required_tools": [
+    "save_data",
+    "serve_file_to_user",
+    "web_scrape",
+    "web_search"
+  ],
+  "metadata": {
+    "created_at": "2026-02-13T18:41:10.324531",
+    "node_count": 4,
+    "edge_count": 3
+  }
+}

@@ -1046,7 +1046,7 @@ class GraphExecutor:
                         next_spec = graph.get_node(next_node)
                         self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
 
-                        # Emit edge traversed event
+                        # Emit edge traversed event for sequential edge
                         if self._event_bus:
                             await self._event_bus.emit_edge_traversed(
                                 stream_id=self._stream_id,

@@ -77,7 +77,14 @@ Include themes, contradictions, and confidence levels.")
 - set_output("sources", [{"url": "...", "title": "...", "summary": "..."}])
 - set_output("gaps", "What aspects of the research brief are NOT well-covered yet, if any.")
 """,
-    tools=["web_search", "web_scrape", "load_data", "save_data", "append_data", "list_data_files"],
+    tools=[
+        "web_search",
+        "web_scrape",
+        "load_data",
+        "save_data",
+        "append_data",
+        "list_data_files",
+    ],
 )
 
 # Node 3: Review (client-facing)
@@ -180,8 +187,12 @@ of what the report covers. Ask if they have questions or want to continue.
   - set_output("next_action", "more_research")   — if they want deeper research
 """,
     tools=[
-        "save_data", "append_data", "edit_data",
-        "serve_file_to_user", "load_data", "list_data_files",
+        "save_data",
+        "append_data",
+        "edit_data",
+        "serve_file_to_user",
+        "load_data",
+        "list_data_files",
     ],
 )
 
