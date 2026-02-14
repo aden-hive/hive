@@ -29,103 +29,140 @@ Note:
 import argparse
 import logging
 import os
+import signal
 import sys
+from typing import Optional
 
-logger = logging.getLogger(__name__)
+from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 
+from aden_tools.credentials import CredentialError, CredentialStoreAdapter
+from aden_tools.tools import register_all_tools
 
-def setup_logger():
-    """Configure logger for MCP server."""
-    if not logger.handlers:
-        # For STDIO mode, log to stderr; for HTTP mode, log to stdout
-        stream = sys.stderr if "--stdio" in sys.argv else sys.stdout
-        handler = logging.StreamHandler(stream)
-        formatter = logging.Formatter("[MCP] %(message)s")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
+# --------------------------------------
+# Constants
+# --------------------------------------
 
+SERVER_NAME = "tools"
+DEFAULT_PORT = 4001
+DEFAULT_HOST = "0.0.0.0"
 
-setup_logger()
-
-# Suppress FastMCP banner in STDIO mode
-if "--stdio" in sys.argv:
-    # Monkey-patch rich Console to redirect to stderr
-    import rich.console
-
-    _original_console_init = rich.console.Console.__init__
-
-    def _patched_console_init(self, *args, **kwargs):
-        kwargs["file"] = sys.stderr  # Force all rich output to stderr
-        _original_console_init(self, *args, **kwargs)
-
-    rich.console.Console.__init__ = _patched_console_init
-
-from fastmcp import FastMCP  # noqa: E402
-from starlette.requests import Request  # noqa: E402
-from starlette.responses import PlainTextResponse  # noqa: E402
-
-from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
-from aden_tools.tools import register_all_tools  # noqa: E402
-
-credentials = CredentialStoreAdapter.default()
-
-# Tier 1: Validate startup-required credentials (if any)
-try:
-    credentials.validate_startup()
-    logger.info("Startup credentials validated")
-except CredentialError as e:
-    # Non-fatal - tools will validate their own credentials when called
-    logger.warning(str(e))
-
-mcp = FastMCP("tools")
-
-# Register all tools with the MCP server, passing credential store
-tools = register_all_tools(mcp, credentials=credentials)
-# Only print to stdout in HTTP mode (STDIO mode requires clean stdout for JSON-RPC)
-if "--stdio" not in sys.argv:
-    logger.info(f"Registered {len(tools)} tools: {tools}")
+logger = logging.getLogger("mcp_server")
 
 
-@mcp.custom_route("/health", methods=["GET"])
-async def health_check(request: Request) -> PlainTextResponse:
-    """Health check endpoint for container orchestration."""
-    return PlainTextResponse("OK")
+# --------------------------------------
+# Logging Setup
+# --------------------------------------
+
+def setup_logger(use_stdio: bool) -> None:
+    """Configure structured logging."""
+    if logger.handlers:
+        return
+
+    stream = sys.stderr if use_stdio else sys.stdout
+
+    handler = logging.StreamHandler(stream)
+    formatter = logging.Formatter(
+        "[%(asctime)s] [%(levelname)s] [MCP] %(message)s",
+        "%Y-%m-%d %H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+
+    logger.addHandler(handler)
+
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logger.setLevel(log_level)
 
 
-@mcp.custom_route("/", methods=["GET"])
-async def index(request: Request) -> PlainTextResponse:
-    """Landing page for browser visits."""
-    return PlainTextResponse("Welcome to the Hive MCP Server")
+# --------------------------------------
+# App Factory
+# --------------------------------------
 
+def create_app() -> FastMCP:
+    """Create and configure MCP application."""
+    credentials = CredentialStoreAdapter.default()
+
+    try:
+        credentials.validate_startup()
+        logger.info("Startup credentials validated")
+    except CredentialError as exc:
+        logger.warning("Startup credential validation failed: %s", exc)
+
+    mcp = FastMCP(SERVER_NAME)
+
+    tools = register_all_tools(mcp, credentials=credentials)
+    logger.info("Registered %d tools", len(tools))
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health_check(request: Request) -> PlainTextResponse:
+        return PlainTextResponse("OK", status_code=200)
+
+    @mcp.custom_route("/", methods=["GET"])
+    async def index(request: Request) -> PlainTextResponse:
+        return PlainTextResponse("Welcome to the Hive MCP Server")
+
+    return mcp
+
+
+# --------------------------------------
+# Graceful Shutdown
+# --------------------------------------
+
+def register_shutdown_handlers() -> None:
+    """Handle termination signals gracefully."""
+
+    def shutdown_handler(signum, frame):
+        logger.info("Received signal %s. Shutting down gracefully...", signum)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
+
+
+# --------------------------------------
+# Main Entry
+# --------------------------------------
 
 def main() -> None:
-    """Entry point for the MCP server."""
     parser = argparse.ArgumentParser(description="Aden Tools MCP Server")
+
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("MCP_PORT", "4001")),
-        help="HTTP server port (default: 4001)",
+        default=int(os.getenv("MCP_PORT", DEFAULT_PORT)),
+        help="HTTP server port",
     )
+
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
-        help="HTTP server host (default: 0.0.0.0)",
+        default=DEFAULT_HOST,
+        help="HTTP server host",
     )
+
     parser.add_argument(
         "--stdio",
         action="store_true",
         help="Use STDIO transport instead of HTTP",
     )
+
     args = parser.parse_args()
 
+    setup_logger(use_stdio=args.stdio)
+    register_shutdown_handlers()
+
+    mcp = create_app()
+
     if args.stdio:
-        # STDIO mode: only JSON-RPC messages go to stdout
+        logger.info("Starting MCP in STDIO mode")
         mcp.run(transport="stdio")
     else:
-        logger.info(f"Starting HTTP server on {args.host}:{args.port}")
-        mcp.run(transport="http", host=args.host, port=args.port)
+        logger.info("Starting HTTP server on %s:%d", args.host, args.port)
+        mcp.run(
+            transport="http",
+            host=args.host,
+            port=args.port,
+        )
 
 
 if __name__ == "__main__":
