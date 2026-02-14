@@ -670,6 +670,7 @@ class ExecutionStream:
             max_tokens=self.graph.max_tokens,
             max_steps=self.graph.max_steps,
             cleanup_llm_model=self.graph.cleanup_llm_model,
+            loop_config=self.graph.loop_config,
         )
 
     async def wait_for_completion(
