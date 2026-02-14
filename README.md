@@ -96,6 +96,8 @@ cd hive
 ./quickstart.sh
 ```
 
+> **Monorepo note:** The Python agent framework lives in `core/`. If you are developing or installing Python packages manually (outside of `quickstart.sh`), run your install commands from within the `core/` directory. Windows users should use [WSL](docs/environment-setup.md) for the best experience.
+
 This sets up:
 
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
