@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
+from .attio_tool import register_tools as register_attio
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
@@ -90,6 +91,8 @@ def register_all_tools(
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    # Attio CRM integration
+    register_attio(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -259,6 +262,22 @@ def register_all_tools(
         "maps_distance_matrix",
         "maps_place_details",
         "maps_place_search",
+        # Attio CRM tools
+        "attio_record_list",
+        "attio_record_get",
+        "attio_record_create",
+        "attio_record_update",
+        "attio_record_assert",
+        "attio_list_lists",
+        "attio_list_entries_get",
+        "attio_list_entry_create",
+        "attio_list_entry_delete",
+        "attio_task_create",
+        "attio_task_list",
+        "attio_task_get",
+        "attio_task_delete",
+        "attio_members_list",
+        "attio_member_get",
     ]
 
 
