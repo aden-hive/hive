@@ -78,47 +78,36 @@ Use Hive when you need:
 
 ## Quick Start
 
+Hive is designed to be used with an AI coding assistant.
+
 ### Prerequisites
 
-- Python 3.11+ for agent development
-- Claude Code, Codex CLI, or Cursor for utilizing agent skills
+1.  **[Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)** OR **[Cursor](https://www.cursor.com/)** (Install one)
+2.  Python 3.11+
+3.  Anthropic API Key
 
-> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
+### Start Guide
 
-### Installation
+**Do everything inside Claude Code or Cursor.**
 
-```bash
-# Clone the repository
-git clone https://github.com/adenhq/hive.git
-cd hive
+1.  **Open Terminal** within your tool (View → Terminal or `Ctrl+``).
+2.  **Clone & Setup**:
+    ```bash
+    git clone https://github.com/adenhq/hive.git
+    cd hive
+    ./quickstart.sh
+    ```
+    > **Windows Users:** Use WSL (Windows Subsystem for Linux) or Git Bash.
+3.  **Run**:
+    ```bash
+    # If using Claude Code:
+    claude> /hive
 
-# Run quickstart setup
-./quickstart.sh
-```
+    # If using Cursor (Agent Mode):
+    cursor> /hive
+    ```
 
-This sets up:
-
-- **framework** - Core agent runtime and graph executor (in `core/.venv`)
-- **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
-- **credential store** - Encrypted API key storage (`~/.hive/credentials`)
-- **LLM provider** - Interactive default model configuration
-- All required Python dependencies with `uv`
-
-### Build Your First Agent
-
-```bash
-# Build an agent using Claude Code
-claude> /hive
-
-# Test your agent
-claude> /hive-debugger
-
-# (at separate terminal) Launch the interactive dashboard
-hive tui
-
-# Or run directly
-hive run exports/your_agent_name --input '{"key": "value"}'
-```
+    That's it! You are now running a Hive agent.
 ##  Coding Agent Support
 ### Codex CLI
 Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
@@ -129,6 +118,7 @@ Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/co
 
 Example:
 ```
+# Using Codex CLI
 codex> use hive
 ```
 
