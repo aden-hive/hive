@@ -87,6 +87,8 @@ Use Hive when you need:
 
 ### Installation
 
+> **Note for Windows Users:** Run these commands in a Unix-compatible terminal (like **Git Bash**, **WSL**, or **MSYS2**) to ensure the shell scripts execute correctly.
+
 ```bash
 # Clone the repository
 git clone https://github.com/adenhq/hive.git
