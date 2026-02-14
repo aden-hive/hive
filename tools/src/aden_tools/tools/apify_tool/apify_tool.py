@@ -59,10 +59,7 @@ class _ApifyClient:
             if response.status_code == 401:
                 return {
                     "error": "Invalid Apify API token",
-                    "help": (
-                        "Check your token at "
-                        "https://console.apify.com/account/integrations"
-                    ),
+                    "help": ("Check your token at https://console.apify.com/account/integrations"),
                 }
             if response.status_code == 404:
                 return {"error": f"Resource not found: {endpoint}"}
@@ -195,10 +192,7 @@ def register_tools(
         """
         if not actor_id or not isinstance(actor_id, str):
             return {
-                "error": (
-                    "actor_id is required and must be a string "
-                    "(e.g., 'apify/web-scraper')"
-                )
+                "error": ("actor_id is required and must be a string (e.g., 'apify/web-scraper')")
             }
 
         if input is None:
@@ -410,18 +404,13 @@ def register_tools(
                     {
                         "name": item.get("name"),  # Full actor ID like "apify/instagram-scraper"
                         "title": item.get("title"),
-                        "description": item.get("description", "")[
-                            :200
-                        ],  # Truncate
+                        "description": item.get("description", "")[:200],  # Truncate
                         "username": item.get("username"),
                         "stats": {
                             "runs": item.get("stats", {}).get("totalRuns", 0),
                             "users": item.get("stats", {}).get("totalUsers", 0),
                         },
-                        "url": (
-                            f"https://apify.com/{item.get('username')}/"
-                            f"{item.get('name')}"
-                        ),
+                        "url": (f"https://apify.com/{item.get('username')}/{item.get('name')}"),
                     }
                 )
 
