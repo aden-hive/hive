@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
+from .browser_use_tool import register_tools as register_browser_use
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
@@ -79,6 +80,7 @@ def register_all_tools(
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
+    register_browser_use(mcp, credentials=credentials)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -115,6 +117,7 @@ def register_all_tools(
         "example_tool",
         "web_search",
         "web_scrape",
+        "browser_use_task",
         "pdf_read",
         "get_current_time",
         "view_file",
