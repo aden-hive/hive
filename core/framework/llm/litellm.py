@@ -153,7 +153,12 @@ class LiteLLMProvider(LLMProvider):
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
     ) -> Any:
-        """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
+        """Call litellm.completion with retry on 429 rate limit errors and empty responses.
+
+        NOTE: sync only — if you're in an async context use the async
+        version below.  This one calls time.sleep() which will block
+        the whole event loop (found that out the hard way).
+        """
         model = kwargs.get("model", self.model)
         retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
         for attempt in range(retries + 1):
@@ -248,6 +253,100 @@ class LiteLLMProvider(LLMProvider):
         # unreachable, but satisfies type checker
         raise RuntimeError("Exhausted rate limit retries")
 
+    async def _acompletion_with_rate_limit_retry(
+        self, max_retries: int | None = None, **kwargs: Any
+    ) -> Any:
+        """Same retry logic as the sync version but uses acompletion + asyncio.sleep.
+
+        The sync path was blocking the event loop during backoff which starved
+        other coroutines.  This version keeps things responsive.
+        """
+        model = kwargs.get("model", self.model)
+        retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
+        for attempt in range(retries + 1):
+            try:
+                response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
+
+                content = response.choices[0].message.content if response.choices else None
+                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                if not content and not has_tool_calls:
+                    messages = kwargs.get("messages", [])
+                    last_role = next(
+                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
+                        None,
+                    )
+                    if last_role == "assistant":
+                        logger.debug(
+                            "[retry] Empty response after assistant message — "
+                            "expected, not retrying."
+                        )
+                        return response
+
+                    finish_reason = (
+                        response.choices[0].finish_reason if response.choices else "unknown"
+                    )
+                    token_count, token_method = _estimate_tokens(model, messages)
+                    dump_path = _dump_failed_request(
+                        model=model,
+                        kwargs=kwargs,
+                        error_type="empty_response",
+                        attempt=attempt,
+                    )
+                    logger.warning(
+                        f"[retry] Empty response - {len(messages)} messages, "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+
+                    if attempt == retries:
+                        logger.error(
+                            f"[retry] GAVE UP on {model} after {retries + 1} "
+                            f"attempts — empty response "
+                            f"(finish_reason={finish_reason}, "
+                            f"choices={len(response.choices) if response.choices else 0})"
+                        )
+                        return response
+                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    logger.warning(
+                        f"[retry] {model} returned empty response "
+                        f"(finish_reason={finish_reason}, "
+                        f"choices={len(response.choices) if response.choices else 0}) — "
+                        f"likely rate limited or quota exceeded. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{retries})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                return response
+            except RateLimitError as e:
+                messages = kwargs.get("messages", [])
+                token_count, token_method = _estimate_tokens(model, messages)
+                dump_path = _dump_failed_request(
+                    model=model,
+                    kwargs=kwargs,
+                    error_type="rate_limit",
+                    attempt=attempt,
+                )
+                if attempt == retries:
+                    logger.error(
+                        f"[retry] GAVE UP on {model} after {retries + 1} "
+                        f"attempts — rate limit error: {e!s}. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+                    raise
+                wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                logger.warning(
+                    f"[retry] {model} rate limited (429): {e!s}. "
+                    f"~{token_count} tokens ({token_method}). "
+                    f"Full request dumped to: {dump_path}. "
+                    f"Retrying in {wait}s "
+                    f"(attempt {attempt + 1}/{retries})"
+                )
+                await asyncio.sleep(wait)
+        raise RuntimeError("Exhausted rate limit retries")
+
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -308,6 +407,69 @@ class LiteLLMProvider(LLMProvider):
         # usage.completion_tokens_details.reasoning_tokens across all providers.
         # This means output_tokens may be inflated for reasoning models.
         # Compaction is unaffected — it uses prompt_tokens (input-side only).
+        usage = response.usage
+        input_tokens = usage.prompt_tokens if usage else 0
+        output_tokens = usage.completion_tokens if usage else 0
+
+        return LLMResponse(
+            content=content,
+            model=response.model or self.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=response.choices[0].finish_reason or "",
+            raw_response=response,
+        )
+
+    async def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
+    ) -> LLMResponse:
+        """Async version of ``complete`` that avoids blocking the event loop.
+
+        Uses ``litellm.acompletion`` for non-blocking HTTP and
+        ``asyncio.sleep`` for backoff so the event loop stays responsive
+        during rate-limit retries.  Prefer this over ``complete()`` when
+        calling from async node execution or any coroutine context.
+        """
+        full_messages: list[dict[str, Any]] = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        if json_mode:
+            json_instruction = "\n\nPlease respond with a valid JSON object."
+            if full_messages and full_messages[0]["role"] == "system":
+                full_messages[0]["content"] += json_instruction
+            else:
+                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": full_messages,
+            "max_tokens": max_tokens,
+            **self.extra_kwargs,
+        }
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+
+        if tools:
+            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
+
+        content = response.choices[0].message.content or ""
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
