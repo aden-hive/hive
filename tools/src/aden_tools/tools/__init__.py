@@ -54,6 +54,15 @@ from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
+# Security scanning tools
+from .dns_security_scanner import register_tools as register_dns_security_scanner
+from .http_headers_scanner import register_tools as register_http_headers_scanner
+from .port_scanner import register_tools as register_port_scanner
+from .risk_scorer import register_tools as register_risk_scorer
+from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .subdomain_enumerator import register_tools as register_subdomain_enumerator
+from .tech_stack_detector import register_tools as register_tech_stack_detector
+
 
 def register_all_tools(
     mcp: FastMCP,
@@ -103,6 +112,15 @@ def register_all_tools(
     register_data_tools(mcp)
     register_csv(mcp)
     register_excel(mcp)
+
+    # Security scanning tools (no credentials needed)
+    register_ssl_tls_scanner(mcp)
+    register_http_headers_scanner(mcp)
+    register_dns_security_scanner(mcp)
+    register_port_scanner(mcp)
+    register_tech_stack_detector(mcp)
+    register_subdomain_enumerator(mcp)
+    register_risk_scorer(mcp)
 
     return [
         "example_tool",
@@ -259,6 +277,14 @@ def register_all_tools(
         "maps_distance_matrix",
         "maps_place_details",
         "maps_place_search",
+        # Security scanning tools
+        "ssl_tls_scan",
+        "http_headers_scan",
+        "dns_security_scan",
+        "port_scan",
+        "tech_stack_detect",
+        "subdomain_enumerate",
+        "risk_score",
     ]
 
 

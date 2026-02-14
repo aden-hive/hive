@@ -3124,6 +3124,7 @@ source = { editable = "tools" }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "diff-match-patch" },
+    { name = "dnspython" },
     { name = "fastmcp" },
     { name = "framework" },
     { name = "httpx" },
@@ -3175,6 +3176,7 @@ dev = [
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "diff-match-patch", specifier = ">=20230430" },
+    { name = "dnspython", specifier = ">=2.4.0" },
     { name = "duckdb", marker = "extra == 'all'", specifier = ">=1.0.0" },
     { name = "duckdb", marker = "extra == 'sql'", specifier = ">=1.0.0" },
     { name = "fastmcp", specifier = ">=2.0.0" },
