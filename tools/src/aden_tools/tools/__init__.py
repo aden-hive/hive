@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
+from .bigquery_tool import register_tools as register_bigquery
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
@@ -93,6 +94,7 @@ def register_all_tools(
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_bigquery(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -185,7 +187,6 @@ def register_all_tools(
         "query_runtime_logs",
         "query_runtime_log_details",
         "query_runtime_log_raw",
-        # SerpAPI tools (Google Scholar & Patents)
         "scholar_search",
         "scholar_get_citations",
         "scholar_get_author",
@@ -206,7 +207,6 @@ def register_all_tools(
         "slack_remove_reaction",
         "slack_list_users",
         "slack_upload_file",
-        # Advanced Slack tools
         "slack_search_messages",
         "slack_get_thread_replies",
         "slack_pin_message",
@@ -218,38 +218,28 @@ def register_all_tools(
         "slack_send_dm",
         "slack_get_permalink",
         "slack_send_ephemeral",
-        # Block Kit & Views
         "slack_post_blocks",
         "slack_open_modal",
         "slack_update_home_tab",
-        # Phase 2: User Status & Presence
         "slack_set_status",
         "slack_set_presence",
         "slack_get_presence",
-        # Phase 2: Reminders
         "slack_create_reminder",
         "slack_list_reminders",
         "slack_delete_reminder",
-        # Phase 2: User Groups
         "slack_create_usergroup",
         "slack_update_usergroup_members",
         "slack_list_usergroups",
-        # Phase 2: Emoji
         "slack_list_emoji",
-        # Phase 2: Canvas
         "slack_create_canvas",
         "slack_edit_canvas",
-        # Phase 2: Analytics (AI-Driven)
         "slack_get_messages_for_analysis",
-        # Phase 2: Workflow
         "slack_trigger_workflow",
-        # Phase 3: Critical Power Tools
         "slack_get_conversation_context",
         "slack_find_user_by_email",
         "slack_kick_user_from_channel",
         "slack_delete_file",
         "slack_get_team_stats",
-        # Vision tools
         "vision_detect_labels",
         "vision_detect_text",
         "vision_detect_faces",
@@ -261,13 +251,14 @@ def register_all_tools(
         "vision_safe_search",
         "telegram_send_message",
         "telegram_send_document",
-        # Google Maps tools
         "maps_geocode",
         "maps_reverse_geocode",
         "maps_directions",
         "maps_distance_matrix",
         "maps_place_details",
         "maps_place_search",
+        "run_bigquery_query",
+        "describe_dataset",
     ]
 
 
