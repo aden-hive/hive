@@ -140,7 +140,10 @@ class TestHTTPErrors:
     def test_401_returns_auth_error(self, run_actor_fn, monkeypatch):
         """HTTP 401 returns invalid token error."""
         monkeypatch.setenv("APIFY_API_TOKEN", "bad-token")
-        with patch("httpx.request", return_value=_mock_response(401, {"error": {"message": "Invalid token"}})):
+        with patch(
+            "httpx.request",
+            return_value=_mock_response(401, {"error": {"message": "Invalid token"}}),
+        ):
             result = run_actor_fn(actor_id="apify/test", input={}, wait=True)
         assert "error" in result
         assert "Invalid Apify API token" in result["error"]
