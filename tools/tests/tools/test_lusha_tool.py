@@ -126,7 +126,7 @@ class TestLushaClient:
         mock_request.return_value = mock_response
 
         result = self.client.search_companies(
-            industry="software",
+            industry_ids=[4, 5],
             employee_size="51-200",
             location="United States",
         )
@@ -134,13 +134,29 @@ class TestLushaClient:
         assert result["companies"][0]["id"] == "co1"
         body = mock_request.call_args.kwargs["json"]
         assert body["pages"] == {"size": 25, "page": 0}
-        assert "searchText" not in body["filters"]["companies"]["include"]
-        assert body["filters"]["companies"]["include"]["names"] == ["software"]
+        assert "names" not in body["filters"]["companies"]["include"]
+        assert body["filters"]["companies"]["include"]["mainIndustriesIds"] == [4, 5]
         assert body["filters"]["companies"]["include"]["sizes"] == [{"min": 51, "max": 200}]
         assert body["filters"]["companies"]["include"]["locations"] == [
             {"country": "United States"}
         ]
         assert mock_request.call_args.args[1] == f"{LUSHA_API_BASE}/prospecting/company/search"
+
+    @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
+    def test_search_companies_no_industry(self, mock_request):
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"companies": []}
+        mock_request.return_value = mock_response
+
+        self.client.search_companies(
+            industry_ids=None,
+            employee_size="51-200",
+            location="United States",
+        )
+
+        body = mock_request.call_args.kwargs["json"]
+        assert "mainIndustriesIds" not in body["filters"]["companies"]["include"]
 
     @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
     def test_get_signals_contact(self, mock_request):
@@ -218,6 +234,24 @@ class TestToolFunctions:
 
         assert "error" in result
         assert "ids" in result["error"]
+        mock_request.assert_not_called()
+
+    @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
+    def test_non_string_credential_returns_error(self, mock_request):
+        """Non-string credential returns error dict instead of raising."""
+        from fastmcp import FastMCP
+
+        creds = MagicMock()
+        creds.get.return_value = 12345  # non-string
+
+        mcp = FastMCP("test")
+        register_tools(mcp, credentials=creds)
+
+        fn = mcp._tool_manager._tools["lusha_enrich_person"].fn
+        result = fn(email="a@b.com")
+
+        assert "error" in result
+        assert "credentials" in result["error"].lower()
         mock_request.assert_not_called()
 
     def test_registers_all_tools(self):

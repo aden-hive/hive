@@ -144,7 +144,7 @@ class _LushaClient:
 
     def search_companies(
         self,
-        industry: str,
+        industry_ids: list[int] | None,
         employee_size: str,
         location: str,
     ) -> dict[str, Any]:
@@ -159,8 +159,8 @@ class _LushaClient:
         }
         if size_range:
             company_include["sizes"] = size_range
-        if industry:
-            company_include["names"] = [industry]
+        if industry_ids:
+            company_include["mainIndustriesIds"] = industry_ids
 
         body: dict[str, Any] = {
             "pages": {"size": 25, "page": 0},
@@ -215,9 +215,7 @@ def register_tools(
         if credentials is not None:
             api_key = credentials.get("lusha")
             if api_key is not None and not isinstance(api_key, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('lusha'), got {type(api_key).__name__}"
-                )
+                return None
             return api_key
         return os.getenv("LUSHA_API_KEY")
 
@@ -328,17 +326,18 @@ def register_tools(
 
     @mcp.tool()
     def lusha_search_companies(
-        industry: str,
         employee_size: str,
         location: str,
+        industry_ids: list[int] | None = None,
     ) -> dict:
         """
         Search companies using firmographic filters.
 
         Args:
-            industry: Industry filter
-            employee_size: Employee size range
-            location: Company location filter
+            employee_size: Employee size range (e.g. "51-200")
+            location: Company location filter (country name)
+            industry_ids: Lusha mainIndustriesIds (numeric). Refer to Lusha API
+                docs for the ID-to-industry mapping.
 
         Returns:
             Matching company list payload or error dict.
@@ -349,7 +348,7 @@ def register_tools(
 
         try:
             return client.search_companies(
-                industry=industry,
+                industry_ids=industry_ids,
                 employee_size=employee_size,
                 location=location,
             )
