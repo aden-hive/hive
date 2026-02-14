@@ -27,6 +27,8 @@ This will:
 
 Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run agents.
 
+For a detailed guide on choosing a distribution (e.g., Ubuntu, Kali, Alpine), see [WSL Distributions Guide](wsl-distributions.md).
+
 1. [Install WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install) if you haven't already:
    ```powershell
    wsl --install
