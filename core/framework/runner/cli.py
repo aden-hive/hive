@@ -22,6 +22,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Path to agent folder (containing agent.json)",
     )
     run_parser.add_argument(
+        "--storage-path",
+        type=str,
+        default=None,
+        help="Override agent storage directory (default: ~/.hive/agents/{agent_name})",
+    )
+    run_parser.add_argument(
         "--input",
         "-i",
         type=str,
@@ -231,6 +237,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Path to agent folder",
     )
     sessions_list_parser.add_argument(
+        "--storage-path",
+        type=str,
+        default=None,
+        help="Override agent storage directory (default: ~/.hive/agents/{agent_name})",
+    )
+    sessions_list_parser.add_argument(
         "--status",
         choices=["all", "active", "failed", "completed", "paused"],
         default="all",
@@ -240,6 +252,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "--has-checkpoints",
         action="store_true",
         help="Show only sessions with checkpoints",
+    )
+    sessions_list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of sessions to list (default: 50)",
     )
     sessions_list_parser.set_defaults(func=cmd_sessions_list)
 
@@ -253,6 +271,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "agent_path",
         type=str,
         help="Path to agent folder",
+    )
+    sessions_show_parser.add_argument(
+        "--storage-path",
+        type=str,
+        default=None,
+        help="Override agent storage directory (default: ~/.hive/agents/{agent_name})",
     )
     sessions_show_parser.add_argument(
         "session_id",
@@ -276,6 +300,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "agent_path",
         type=str,
         help="Path to agent folder",
+    )
+    sessions_checkpoints_parser.add_argument(
+        "--storage-path",
+        type=str,
+        default=None,
+        help="Override agent storage directory (default: ~/.hive/agents/{agent_name})",
     )
     sessions_checkpoints_parser.add_argument(
         "session_id",
@@ -314,6 +344,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Path to agent folder",
     )
     resume_parser.add_argument(
+        "--storage-path",
+        type=str,
+        default=None,
+        help="Override agent storage directory (default: ~/.hive/agents/{agent_name})",
+    )
+    resume_parser.add_argument(
         "session_id",
         type=str,
         help="Session ID to resume",
@@ -329,11 +365,51 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Resume in TUI dashboard mode",
     )
+    resume_parser.add_argument(
+        "--input",
+        "-i",
+        type=str,
+        help="Input context as JSON string (optional override)",
+    )
+    resume_parser.add_argument(
+        "--input-file",
+        "-f",
+        type=str,
+        help="Input context from JSON file (optional override)",
+    )
+    resume_parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        help="Write results to file instead of stdout",
+    )
+    resume_parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Only output the final result JSON",
+    )
+    resume_parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show detailed execution logs (steps, LLM calls, etc.)",
+    )
+    resume_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model to use (any LiteLLM-compatible name)",
+    )
     resume_parser.set_defaults(func=cmd_resume)
 
 
 def _load_resume_state(
-    agent_path: str, session_id: str, checkpoint_id: str | None = None
+    agent_path: str,
+    session_id: str,
+    checkpoint_id: str | None = None,
+    storage_path: str | None = None,
 ) -> dict | None:
     """Load session or checkpoint state for headless resume.
 
@@ -345,8 +421,7 @@ def _load_resume_state(
     Returns:
         session_state dict for executor, or None if not found
     """
-    agent_name = Path(agent_path).name
-    agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
+    agent_work_dir = _resolve_agent_work_dir(agent_path, storage_path=storage_path)
     session_dir = agent_work_dir / "sessions" / session_id
 
     if not session_dir.exists():
@@ -386,6 +461,14 @@ def _load_resume_state(
             "execution_path": progress.get("path", []),
             "node_visit_counts": progress.get("node_visit_counts", {}),
         }
+
+
+def _resolve_agent_work_dir(agent_path: str, storage_path: str | None = None) -> Path:
+    """Resolve the on-disk storage directory for an agent."""
+    if storage_path:
+        return Path(storage_path).expanduser()
+    agent_name = Path(agent_path).name
+    return Path.home() / ".hive" / "agents" / agent_name
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -431,6 +514,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                     runner = AgentRunner.load(
                         args.agent_path,
                         model=args.model,
+                        storage_path=Path(args.storage_path).expanduser()
+                        if args.storage_path
+                        else None,
                     )
                 except CredentialError as e:
                     print(f"\n{e}", file=sys.stderr)
@@ -474,6 +560,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             runner = AgentRunner.load(
                 args.agent_path,
                 model=args.model,
+                storage_path=Path(args.storage_path).expanduser() if args.storage_path else None,
             )
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
@@ -487,7 +574,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         resume_session = getattr(args, "resume_session", None)
         checkpoint = getattr(args, "checkpoint", None)
         if resume_session:
-            session_state = _load_resume_state(args.agent_path, resume_session, checkpoint)
+            session_state = _load_resume_state(
+                args.agent_path,
+                resume_session,
+                checkpoint,
+                storage_path=args.storage_path,
+            )
             if session_state is None:
                 print(
                     f"Error: Could not load session state for {resume_session}",
@@ -1672,30 +1764,97 @@ def _interactive_multi(agents_dir: Path) -> int:
 
 def cmd_sessions_list(args: argparse.Namespace) -> int:
     """List agent sessions."""
-    print("⚠ Sessions list command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Status filter: {args.status}")
-    print(f"Has checkpoints: {args.has_checkpoints}")
-    return 1
+    from framework.storage.session_store import SessionStore
+
+    agent_work_dir = _resolve_agent_work_dir(args.agent_path, storage_path=args.storage_path)
+    store = SessionStore(agent_work_dir)
+
+    status_filter = None if args.status == "all" else args.status
+    sessions = asyncio.run(store.list_sessions(status=status_filter, limit=args.limit))
+
+    if args.has_checkpoints:
+        sessions = [s for s in sessions if s.is_resumable_from_checkpoint]
+
+    print(f"Agent: {Path(args.agent_path).name}")
+    print(f"Storage: {agent_work_dir}")
+    if not sessions:
+        print("No sessions found.")
+        return 0
+
+    for s in sessions:
+        paused_at = s.progress.paused_at or ""
+        updated = s.timestamps.updated_at
+        print(
+            f"- {s.session_id}  status={s.status.value}  updated={updated}"
+            + (f"  paused_at={paused_at}" if paused_at else "")
+        )
+
+    return 0
 
 
 def cmd_sessions_show(args: argparse.Namespace) -> int:
     """Show detailed session information."""
-    print("⚠ Session show command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    return 1
+    from framework.storage.session_store import SessionStore
+
+    agent_work_dir = _resolve_agent_work_dir(args.agent_path, storage_path=args.storage_path)
+    store = SessionStore(agent_work_dir)
+    state = asyncio.run(store.read_state(args.session_id))
+    if state is None:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(state.model_dump_json(indent=2))
+        return 0
+
+    print(f"Agent: {Path(args.agent_path).name}")
+    print(f"Storage: {agent_work_dir}")
+    print(f"Session: {state.session_id}")
+    print(f"Status: {state.status.value}")
+    print(f"Goal: {state.goal_id}")
+    print(f"Entry point: {state.entry_point}")
+    print(f"Started: {state.timestamps.started_at}")
+    print(f"Updated: {state.timestamps.updated_at}")
+    if state.timestamps.completed_at:
+        print(f"Completed: {state.timestamps.completed_at}")
+    if state.progress.paused_at:
+        print(f"Paused at: {state.progress.paused_at}")
+    if state.result.error:
+        print(f"Error: {state.result.error}")
+    print(f"Steps: {state.progress.steps_executed}")
+    print(f"Tokens: {state.progress.total_tokens}")
+    print(f"Latency ms: {state.progress.total_latency_ms}")
+    print(f"Decisions: {len(state.decisions)}")
+    print(f"Problems: {len(state.problems)}")
+    print(f"Has checkpoints: {state.is_resumable_from_checkpoint}")
+    return 0
 
 
 def cmd_sessions_checkpoints(args: argparse.Namespace) -> int:
     """List checkpoints for a session."""
-    print("⚠ Session checkpoints command not yet implemented")
-    print("This will be available once checkpoint infrastructure is complete.")
-    print(f"\nAgent: {args.agent_path}")
+    from framework.storage.checkpoint_store import CheckpointStore
+
+    agent_work_dir = _resolve_agent_work_dir(args.agent_path, storage_path=args.storage_path)
+    session_dir = agent_work_dir / "sessions" / args.session_id
+    store = CheckpointStore(session_dir)
+
+    checkpoints = asyncio.run(store.list_checkpoints())
+
+    print(f"Agent: {Path(args.agent_path).name}")
+    print(f"Storage: {agent_work_dir}")
     print(f"Session: {args.session_id}")
-    return 1
+    if not checkpoints:
+        print("No checkpoints found.")
+        return 0
+
+    for cp in checkpoints:
+        node = cp.current_node or ""
+        print(
+            f"- {cp.checkpoint_id}  type={cp.checkpoint_type}  created_at={cp.created_at}"
+            + (f"  node={node}" if node else "")
+            + ("  clean" if cp.is_clean else "  dirty")
+        )
+    return 0
 
 
 def cmd_pause(args: argparse.Namespace) -> int:
@@ -1709,12 +1868,7 @@ def cmd_pause(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     """Resume a session from checkpoint."""
-    print("⚠ Resume command not yet implemented")
-    print("This will be available once checkpoint resume integration is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    if args.checkpoint:
-        print(f"Checkpoint: {args.checkpoint}")
-    if args.tui:
-        print("Mode: TUI")
-    return 1
+    # Resume is implemented as a thin wrapper over `hive run --resume-session`.
+    # This keeps the execution path unified and avoids duplicating runtime logic.
+    args.resume_session = args.session_id
+    return cmd_run(args)
