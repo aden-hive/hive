@@ -1,5 +1,5 @@
 """
-Apify Tool - Universal Web Scraping & Automation via Apify Marketplace.
+Apify Tool - Universal web scraping & automation via Apify marketplace.
 
 Supports:
 - Direct API token (APIFY_API_TOKEN)
@@ -8,16 +8,15 @@ Supports:
 API Reference: https://docs.apify.com/api/v2
 
 Tools:
-- apify_run_actor: Run an actor synchronously or asynchronously
+- apify_run_actor: Run an Apify Actor with sync/async execution
 - apify_get_dataset: Retrieve dataset items from a completed run
-- apify_get_run: Check status of an actor run
-- apify_search_actors: Search the Apify marketplace (optional)
+- apify_get_run: Check status and details of an actor run
+- apify_search_actors: Search the Apify marketplace for actors
 """
 
 from __future__ import annotations
 
 import os
-import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -26,11 +25,11 @@ from fastmcp import FastMCP
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
-APIFY_API_BASE = "https://api.apify.com/v2"
+APIFY_BASE = "https://api.apify.com/v2"
 
 
 class _ApifyClient:
-    """Internal client wrapping Apify API HTTP calls."""
+    """Internal client wrapping Apify HTTP API calls."""
 
     def __init__(self, api_token: str):
         self._api_token = api_token
@@ -45,7 +44,7 @@ class _ApifyClient:
         timeout: float = 30.0,
     ) -> dict[str, Any]:
         """Make an HTTP request to Apify API."""
-        url = f"{APIFY_API_BASE}/{endpoint}"
+        url = f"{APIFY_BASE}/{endpoint.lstrip('/')}"
 
         try:
             response = httpx.request(
@@ -60,13 +59,13 @@ class _ApifyClient:
             if response.status_code == 401:
                 return {
                     "error": "Invalid Apify API token",
-                    "help": "Check your token at https://console.apify.com/account/integrations",
+                    "help": (
+                        "Check your token at "
+                        "https://console.apify.com/account/integrations"
+                    ),
                 }
             if response.status_code == 404:
-                return {
-                    "error": "Resource not found (actor, run, or dataset does not exist)",
-                    "help": "Verify the ID is correct",
-                }
+                return {"error": f"Resource not found: {endpoint}"}
             if response.status_code == 429:
                 return {"error": "Apify rate limit exceeded. Try again later."}
             if response.status_code >= 400:
@@ -76,146 +75,57 @@ class _ApifyClient:
                     detail = response.text
                 return {"error": f"Apify API error (HTTP {response.status_code}): {detail}"}
 
-            data = response.json()
-            if "error" in data:
-                return {"error": f"Apify error: {data['error']}"}
-            return data
+            return response.json()
 
         except httpx.TimeoutException:
-            return {"error": "Request timed out"}
+            return {"error": f"Request timed out after {timeout}s"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
-        except Exception as e:
-            return {"error": f"Unexpected error: {e}"}
 
-    def run_actor(
-        self, actor_id: str, input_data: dict[str, Any], wait: bool = True, timeout: float = 120.0
+    def run_actor_sync(
+        self,
+        actor_id: str,
+        input_data: dict[str, Any],
+        timeout: int = 300,
     ) -> dict[str, Any]:
-        """
-        Run an Apify Actor.
+        """Run an actor synchronously and return dataset items."""
+        endpoint = f"acts/{actor_id}/run-sync-get-dataset-items"
+        params = {"timeout": timeout}
+        result = self._request(
+            "POST", endpoint, params=params, json_data=input_data, timeout=timeout + 5
+        )
+        return result
 
-        Args:
-            actor_id: Actor identifier (e.g., "apify/instagram-scraper")
-            input_data: JSON input for the actor
-            wait: If True, wait for completion and return results. If False, return run_id
-            timeout: Request timeout in seconds
+    def run_actor_async(
+        self,
+        actor_id: str,
+        input_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Start an actor run asynchronously and return run info."""
+        endpoint = f"acts/{actor_id}/runs"
+        return self._request("POST", endpoint, json_data=input_data)
 
-        Returns:
-            Dict with results (if wait=True) or run info (if wait=False)
-        """
-        if wait:
-            # Synchronous execution: run and get dataset items in one request
-            endpoint = f"acts/{actor_id}/run-sync-get-dataset-items"
-            result = self._request("POST", endpoint, json_data=input_data, timeout=timeout)
-
-            if "error" in result:
-                return result
-
-            # The sync endpoint returns dataset items directly
-            return {
-                "items": result,
-                "count": len(result) if isinstance(result, list) else 0,
-                "status": "SUCCEEDED",
-            }
-        else:
-            # Asynchronous execution: start run and return run_id
-            endpoint = f"acts/{actor_id}/runs"
-            result = self._request("POST", endpoint, json_data=input_data, timeout=timeout)
-
-            if "error" in result:
-                return result
-
-            run_data = result.get("data", {})
-            return {
-                "run_id": run_data.get("id", ""),
-                "status": run_data.get("status", ""),
-                "started_at": run_data.get("startedAt", ""),
-                "default_dataset_id": run_data.get("defaultDatasetId", ""),
-            }
-
-    def get_dataset(self, dataset_id: str, limit: int = 1000) -> dict[str, Any]:
-        """
-        Retrieve items from an Apify dataset.
-
-        Args:
-            dataset_id: Dataset identifier
-            limit: Maximum number of items to retrieve
-
-        Returns:
-            Dict with dataset items
-        """
+    def get_dataset(
+        self,
+        dataset_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Retrieve dataset items."""
         endpoint = f"datasets/{dataset_id}/items"
-        params = {"limit": limit}
-        result = self._request("GET", endpoint, params=params)
-
-        if "error" in result:
-            return result
-
-        # API returns items array directly
-        items = result if isinstance(result, list) else []
-        return {"items": items, "count": len(items)}
+        params = {"limit": limit, "offset": offset, "format": "json"}
+        return self._request("GET", endpoint, params=params)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
-        """
-        Get status and details of an actor run.
-
-        Args:
-            run_id: Run identifier
-
-        Returns:
-            Dict with run details
-        """
+        """Get actor run details."""
         endpoint = f"actor-runs/{run_id}"
-        result = self._request("GET", endpoint)
-
-        if "error" in result:
-            return result
-
-        run_data = result.get("data", {})
-        return {
-            "run_id": run_data.get("id", ""),
-            "status": run_data.get("status", ""),
-            "started_at": run_data.get("startedAt", ""),
-            "finished_at": run_data.get("finishedAt", ""),
-            "default_dataset_id": run_data.get("defaultDatasetId", ""),
-            "stats": run_data.get("stats", {}),
-        }
+        return self._request("GET", endpoint)
 
     def search_actors(self, query: str, limit: int = 10) -> dict[str, Any]:
-        """
-        Search the Apify actor marketplace.
-
-        Args:
-            query: Search keywords
-            limit: Maximum results to return
-
-        Returns:
-            Dict with search results
-        """
+        """Search for actors in the Apify store."""
         endpoint = "store"
         params = {"search": query, "limit": limit}
-        result = self._request("GET", endpoint, params=params)
-
-        if "error" in result:
-            return result
-
-        data = result.get("data", {})
-        items = data.get("items", [])
-
-        actors = []
-        for item in items:
-            actors.append(
-                {
-                    "id": item.get("id", ""),
-                    "name": item.get("name", ""),
-                    "username": item.get("username", ""),
-                    "title": item.get("title", ""),
-                    "description": item.get("description", ""),
-                    "stats": item.get("stats", {}),
-                }
-            )
-
-        return {"items": actors, "total": data.get("total", 0), "count": len(actors)}
+        return self._request("GET", endpoint, params=params)
 
 
 def register_tools(
@@ -238,127 +148,195 @@ def register_tools(
                 "error": "Apify credentials not configured",
                 "help": (
                     "Set APIFY_API_TOKEN environment variable or configure "
-                    "via credential store. Get a token at https://console.apify.com/account/integrations"
+                    "via credential store. Get a token at "
+                    "https://console.apify.com/account/integrations"
                 ),
             }
         return _ApifyClient(api_token)
-
-    def _validate_actor_id(actor_id: str) -> bool:
-        """Validate actor ID format (owner/name, ~user/name, or ID)."""
-        if not actor_id:
-            return False
-        # Match patterns: username/actor-name, ~username/actor-name, or actor IDs
-        pattern = r"^(~?[\w-]+/[\w-]+|[\w]+)$"
-        return bool(re.match(pattern, actor_id))
 
     @mcp.tool()
     def apify_run_actor(
         actor_id: str,
         input: dict | None = None,
         wait: bool = True,
+        timeout: int = 300,
     ) -> dict:
         """
-        Run an Apify Actor to scrape or automate websites.
+        Run an Apify Actor to scrape websites or automate tasks.
 
-        Apify Actors are pre-built scrapers and automation tools. This tool
-        can run them either synchronously (wait for results) or asynchronously
-        (start job and check status later).
+        Apify provides thousands of ready-made scrapers (Actors) for specific sites
+        like Instagram, Google Maps, Amazon, LinkedIn, etc. This tool lets you run
+        any public Actor without writing scraping code.
 
         Args:
-            actor_id: Actor identifier (e.g., "apify/instagram-scraper")
-            input: JSON input specific to the actor (default: {})
-            wait: If True, waits for completion and returns results immediately.
-                  If False, returns run_id for async status checks (default: True)
+            actor_id: Full actor name (
+                e.g., "apify/instagram-scraper", "apify/google-maps-scraper"
+            )
+            input: JSON input specific to the Actor (
+                see Actor documentation for required fields
+            )
+            wait: If True, waits for completion and returns results (default).
+                If False, returns run_id immediately.
+            timeout: Maximum seconds to wait for completion when wait=True (
+                default 300, max 300
+            )
 
         Returns:
-            Dict with results (items, status) or error dict
+            Dict with results array (if wait=True) or run info with run_id
+            (if wait=False), or error dict
 
         Examples:
-            # Synchronous (recommended for most use cases)
-            result = apify_run_actor(
-                actor_id="apify/instagram-profile-scraper",
-                input={"usernames": ["instagram"]},
-                wait=True
-            )
-
-            # Asynchronous (for long-running jobs)
-            result = apify_run_actor(
-                actor_id="apify/web-scraper",
-                input={"startUrls": [{"url": "https://example.com"}]},
-                wait=False
-            )
+            - Web scraper: actor_id="apify/web-scraper",
+                input={"startUrls": [{"url": "https://example.com"}]}
+            - Instagram: actor_id="apify/instagram-scraper",
+                input={"username": "example"}
+            - Google Maps: actor_id="apify/google-maps-scraper",
+                input={"searchStringsArray": ["restaurants in NYC"]}
         """
+        if not actor_id or not isinstance(actor_id, str):
+            return {
+                "error": (
+                    "actor_id is required and must be a string "
+                    "(e.g., 'apify/web-scraper')"
+                )
+            }
+
         if input is None:
             input = {}
+        if not isinstance(input, dict):
+            return {"error": "input must be a dictionary/object"}
 
-        if not _validate_actor_id(actor_id):
-            return {
-                "error": "Invalid actor_id format",
-                "help": 'Use format "owner/actor-name" (e.g., "apify/instagram-scraper")',
-            }
+        if timeout < 1 or timeout > 300:
+            timeout = min(max(timeout, 1), 300)
 
         client = _get_client()
         if isinstance(client, dict):
             return client
 
         try:
-            return client.run_actor(actor_id=actor_id, input_data=input, wait=wait)
+            if wait:
+                # Synchronous execution with results
+                data = client.run_actor_sync(actor_id, input, timeout)
+                if "error" in data:
+                    return data
+
+                # Response is an array of dataset items
+                if isinstance(data, list):
+                    return {
+                        "actor_id": actor_id,
+                        "status": "SUCCEEDED",
+                        "results": data,
+                        "count": len(data),
+                    }
+                # Fallback if API returns different structure
+                return {
+                    "actor_id": actor_id,
+                    "status": "SUCCEEDED",
+                    "results": data.get("items", [data]),
+                    "count": len(data.get("items", [data])),
+                }
+            else:
+                # Asynchronous execution - return run info
+                data = client.run_actor_async(actor_id, input)
+                if "error" in data:
+                    return data
+
+                run_data = data.get("data", {})
+                return {
+                    "actor_id": actor_id,
+                    "run_id": run_data.get("id"),
+                    "status": run_data.get("status"),
+                    "started_at": run_data.get("startedAt"),
+                    "default_dataset_id": run_data.get("defaultDatasetId"),
+                    "message": (
+                        "Run started. Use apify_get_run to check status and "
+                        "apify_get_dataset to fetch results."
+                    ),
+                }
+
         except Exception as e:
             return {"error": f"Failed to run actor: {e}"}
 
     @mcp.tool()
-    def apify_get_dataset(dataset_id: str, limit: int = 1000) -> dict:
+    def apify_get_dataset(
+        dataset_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
         """
-        Retrieve results from a completed Apify actor run.
+        Retrieve results from an Apify dataset.
 
-        Essential for asynchronous workflows where the agent starts a long job
-        and checks back later for results.
+        Essential for async workflows where you start a run with wait=False
+        and check back later to fetch the results.
 
         Args:
-            dataset_id: Dataset identifier (from run status or run result)
-            limit: Maximum number of items to return (default: 1000, max: 10000)
+            dataset_id: Dataset ID (from defaultDatasetId in run info)
+            limit: Maximum number of items to return (1-1000, default 100)
+            offset: Skip this many items for pagination (default 0)
 
         Returns:
             Dict with items array and count, or error dict
-
-        Example:
-            # Get dataset from async run
-            run = apify_run_actor(actor_id="...", wait=False)
-            # ... wait for completion ...
-            dataset = apify_get_dataset(dataset_id=run["default_dataset_id"])
         """
         if not dataset_id:
             return {"error": "dataset_id is required"}
 
-        if limit < 1 or limit > 10000:
-            return {"error": "limit must be between 1 and 10000"}
+        if limit < 1 or limit > 1000:
+            limit = min(max(limit, 1), 1000)
+
+        if offset < 0:
+            offset = 0
 
         client = _get_client()
         if isinstance(client, dict):
             return client
 
         try:
-            return client.get_dataset(dataset_id=dataset_id, limit=limit)
+            data = client.get_dataset(dataset_id, limit, offset)
+            if "error" in data:
+                return data
+
+            # The response is typically an array of items
+            if isinstance(data, list):
+                return {
+                    "dataset_id": dataset_id,
+                    "items": data,
+                    "count": len(data),
+                    "offset": offset,
+                }
+
+            # Fallback for different response structure
+            items = data.get("items", [])
+            return {
+                "dataset_id": dataset_id,
+                "items": items,
+                "count": len(items),
+                "offset": offset,
+                "total": data.get("total", len(items)),
+            }
+
         except Exception as e:
-            return {"error": f"Failed to retrieve dataset: {e}"}
+            return {"error": f"Failed to fetch dataset: {e}"}
 
     @mcp.tool()
     def apify_get_run(run_id: str) -> dict:
         """
-        Check the status of a specific Apify actor run.
+        Check the status and details of an Apify actor run.
 
-        Use this to poll the status of an asynchronous run until it completes.
+        Use this to monitor async runs started with wait=False.
 
         Args:
-            run_id: Run identifier (returned from apify_run_actor with wait=False)
+            run_id: Run ID returned from apify_run_actor with wait=False
 
         Returns:
-            Dict with status, timestamps, and dataset_id, or error dict
+            Dict with run status, timestamps, stats, and dataset ID, or error dict
 
-        Example:
-            run = apify_run_actor(actor_id="...", wait=False)
-            status = apify_get_run(run_id=run["run_id"])
-            print(f"Status: {status['status']}")  # RUNNING, SUCCEEDED, FAILED, etc.
+        Status values:
+            - READY: Run is initializing
+            - RUNNING: Actor is currently running
+            - SUCCEEDED: Run completed successfully
+            - FAILED: Run failed with error
+            - ABORTED: Run was manually stopped
+            - TIMED-OUT: Run exceeded time limit
         """
         if not run_id:
             return {"error": "run_id is required"}
@@ -368,40 +346,90 @@ def register_tools(
             return client
 
         try:
-            return client.get_run(run_id=run_id)
+            response = client.get_run(run_id)
+            if "error" in response:
+                return response
+
+            run_data = response.get("data", {})
+            return {
+                "run_id": run_id,
+                "status": run_data.get("status"),
+                "started_at": run_data.get("startedAt"),
+                "finished_at": run_data.get("finishedAt"),
+                "default_dataset_id": run_data.get("defaultDatasetId"),
+                "stats": run_data.get("stats", {}),
+                "meta": {
+                    "origin": run_data.get("meta", {}).get("origin"),
+                    "client_ip": run_data.get("meta", {}).get("clientIp"),
+                },
+                "exit_code": run_data.get("exitCode"),
+            }
+
         except Exception as e:
             return {"error": f"Failed to get run status: {e}"}
 
     @mcp.tool()
-    def apify_search_actors(query: str, limit: int = 10) -> dict:
+    def apify_search_actors(
+        query: str,
+        limit: int = 10,
+    ) -> dict:
         """
         Search the Apify marketplace for actors.
 
-        Helps agents discover available scrapers and automation tools.
+        Discover actors for specific tasks like scraping Instagram,
+        monitoring prices, extracting emails, etc.
 
         Args:
-            query: Search keywords (e.g., "instagram", "amazon", "linkedin")
-            limit: Maximum results to return (default: 10, max: 100)
+            query: Search keywords (e.g., "instagram", "google maps", "email scraper")
+            limit: Maximum number of results (1-50, default 10)
 
         Returns:
-            Dict with actor search results, or error dict
-
-        Example:
-            actors = apify_search_actors(query="instagram", limit=5)
-            for actor in actors["items"]:
-                print(f"{actor['username']}/{actor['name']}: {actor['title']}")
+            Dict with actors array containing name, title, description,
+            and stats, or error dict
         """
-        if not query:
-            return {"error": "query is required"}
+        if not query or len(query) > 200:
+            return {"error": "Query must be 1-200 characters"}
 
-        if limit < 1 or limit > 100:
-            return {"error": "limit must be between 1 and 100"}
+        if limit < 1 or limit > 50:
+            limit = min(max(limit, 1), 50)
 
         client = _get_client()
         if isinstance(client, dict):
             return client
 
         try:
-            return client.search_actors(query=query, limit=limit)
+            response = client.search_actors(query, limit)
+            if "error" in response:
+                return response
+
+            # Extract relevant actor information
+            items = response.get("data", {}).get("items", [])
+            actors = []
+            for item in items[:limit]:
+                actors.append(
+                    {
+                        "name": item.get("name"),  # Full actor ID like "apify/instagram-scraper"
+                        "title": item.get("title"),
+                        "description": item.get("description", "")[
+                            :200
+                        ],  # Truncate
+                        "username": item.get("username"),
+                        "stats": {
+                            "runs": item.get("stats", {}).get("totalRuns", 0),
+                            "users": item.get("stats", {}).get("totalUsers", 0),
+                        },
+                        "url": (
+                            f"https://apify.com/{item.get('username')}/"
+                            f"{item.get('name')}"
+                        ),
+                    }
+                )
+
+            return {
+                "query": query,
+                "actors": actors,
+                "count": len(actors),
+            }
+
         except Exception as e:
             return {"error": f"Failed to search actors: {e}"}
