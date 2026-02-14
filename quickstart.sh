@@ -11,11 +11,11 @@
 
 set -e
 
-# Detect Bash version for compatibility
+# Detect Bash version for compatibility (minimum Bash 4 required for associative arrays)
 BASH_MAJOR_VERSION="${BASH_VERSINFO[0]}"
-USE_ASSOC_ARRAYS=false
-if [ "$BASH_MAJOR_VERSION" -ge 4 ]; then
-    USE_ASSOC_ARRAYS=true
+if [ "$BASH_MAJOR_VERSION" -lt 4 ]; then
+    echo -e "${RED}Error: Bash 4+ is required for this script. Found: ${BASH_VERSION}${NC}"
+    exit 1
 fi
 echo "[debug] Bash version: ${BASH_VERSION}"
 
@@ -275,256 +275,138 @@ echo ""
 echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
 echo ""
 
-# Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
-if [ "$USE_ASSOC_ARRAYS" = true ]; then
-    # Bash 4+ - use associative arrays (cleaner and more efficient)
-    declare -A PROVIDER_NAMES=(
-        ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
-        ["OPENAI_API_KEY"]="OpenAI (GPT)"
-        ["GEMINI_API_KEY"]="Google Gemini"
-        ["GOOGLE_API_KEY"]="Google AI"
-        ["GROQ_API_KEY"]="Groq"
-        ["CEREBRAS_API_KEY"]="Cerebras"
-        ["MISTRAL_API_KEY"]="Mistral"
-        ["TOGETHER_API_KEY"]="Together AI"
-        ["DEEPSEEK_API_KEY"]="DeepSeek"
-    )
+# ============================================================
+# Centralized Provider Configuration
+# ============================================================
+# To add a new provider, add an entry to PROVIDER_CONFIG and optionally to MODEL_CHOICES_CONFIG.
+# All other arrays are derived from these central configurations.
 
-    declare -A PROVIDER_IDS=(
-        ["ANTHROPIC_API_KEY"]="anthropic"
-        ["OPENAI_API_KEY"]="openai"
-        ["GEMINI_API_KEY"]="gemini"
-        ["GOOGLE_API_KEY"]="google"
-        ["GROQ_API_KEY"]="groq"
-        ["CEREBRAS_API_KEY"]="cerebras"
-        ["MISTRAL_API_KEY"]="mistral"
-        ["TOGETHER_API_KEY"]="together"
-        ["DEEPSEEK_API_KEY"]="deepseek"
-    )
+# Provider config: env_var|provider_id|display_name|signup_url
+# Format: ENV_VAR|PROVIDER_ID|DISPLAY_NAME|SIGNUP_URL
+declare -a PROVIDER_CONFIG=(
+    "ANTHROPIC_API_KEY|anthropic|Anthropic (Claude)|https://console.anthropic.com/settings/keys"
+    "OPENAI_API_KEY|openai|OpenAI (GPT)|https://platform.openai.com/api-keys"
+    "GEMINI_API_KEY|gemini|Google Gemini|https://aistudio.google.com/apikey"
+    "GOOGLE_API_KEY|google|Google AI|https://aistudio.google.com/apikey"
+    "GROQ_API_KEY|groq|Groq|https://console.groq.com/keys"
+    "CEREBRAS_API_KEY|cerebras|Cerebras|https://cloud.cerebras.ai/"
+    "MISTRAL_API_KEY|mistral|Mistral|https://console.mistral.ai/"
+    "TOGETHER_API_KEY|together|Together AI|https://docs.together.ai/"
+    "DEEPSEEK_API_KEY|deepseek|DeepSeek|https://platform.deepseek.com/"
+)
 
-    declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-haiku-4-5"
-        ["openai"]="gpt-5-mini"
-        ["gemini"]="gemini-3-flash-preview"
-        ["groq"]="moonshotai/kimi-k2-instruct-0905"
-        ["cerebras"]="zai-glm-4.7"
-        ["mistral"]="mistral-large-latest"
-        ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
-        ["deepseek"]="deepseek-chat"
-    )
+# Default models by provider_id
+declare -A PROVIDER_DEFAULT_MODEL=(
+    ["anthropic"]="claude-haiku-4-5"
+    ["openai"]="gpt-5-mini"
+    ["gemini"]="gemini-3-flash-preview"
+    ["groq"]="moonshotai/kimi-k2-instruct-0905"
+    ["cerebras"]="zai-glm-4.7"
+    ["mistral"]="mistral-large-latest"
+    ["together"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    ["deepseek"]="deepseek-chat"
+)
 
-    # Model choices per provider: composite-key associative arrays
-    # Keys: "provider:index" -> value
-    declare -A MODEL_CHOICES_ID=(
-        ["anthropic:0"]="claude-opus-4-6"
-        ["anthropic:1"]="claude-sonnet-4-5-20250929"
-        ["anthropic:2"]="claude-sonnet-4-20250514"
-        ["anthropic:3"]="claude-haiku-4-5-20251001"
-        ["openai:0"]="gpt-5.2"
-        ["openai:1"]="gpt-5-mini"
-        ["openai:2"]="gpt-5-nano"
-        ["gemini:0"]="gemini-3-flash-preview"
-        ["gemini:1"]="gemini-3-pro-preview"
-        ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
-        ["groq:1"]="openai/gpt-oss-120b"
-        ["cerebras:0"]="zai-glm-4.7"
-        ["cerebras:1"]="qwen3-235b-a22b-instruct-2507"
-    )
+# Model choices: provider_id|model_id|model_label|max_tokens
+# NOTE: 8192 should match DEFAULT_MAX_TOKENS in core/framework/graph/edge.py
+declare -a MODEL_CHOICES_CONFIG=(
+    "anthropic|claude-opus-4-6|Opus 4.6 - Most capable (recommended)|8192"
+    "anthropic|claude-sonnet-4-5-20250929|Sonnet 4.5 - Best balance|8192"
+    "anthropic|claude-sonnet-4-20250514|Sonnet 4 - Fast + capable|8192"
+    "anthropic|claude-haiku-4-5-20251001|Haiku 4.5 - Fast + cheap|8192"
+    "openai|gpt-5.2|GPT-5.2 - Most capable (recommended)|16384"
+    "openai|gpt-5-mini|GPT-5 Mini - Fast + cheap|16384"
+    "openai|gpt-5-nano|GPT-5 Nano - Fastest|16384"
+    "gemini|gemini-3-flash-preview|Gemini 3 Flash - Fast (recommended)|8192"
+    "gemini|gemini-3-pro-preview|Gemini 3 Pro - Best quality|8192"
+    "groq|moonshotai/kimi-k2-instruct-0905|Kimi K2 - Best quality (recommended)|8192"
+    "groq|openai/gpt-oss-120b|GPT-OSS 120B - Fast reasoning|8192"
+    "cerebras|zai-glm-4.7|ZAI-GLM 4.7 - Best quality (recommended)|8192"
+    "cerebras|qwen3-235b-a22b-instruct-2507|Qwen3 235B - Frontier reasoning|8192"
+)
 
-    declare -A MODEL_CHOICES_LABEL=(
-        ["anthropic:0"]="Opus 4.6 - Most capable (recommended)"
-        ["anthropic:1"]="Sonnet 4.5 - Best balance"
-        ["anthropic:2"]="Sonnet 4 - Fast + capable"
-        ["anthropic:3"]="Haiku 4.5 - Fast + cheap"
-        ["openai:0"]="GPT-5.2 - Most capable (recommended)"
-        ["openai:1"]="GPT-5 Mini - Fast + cheap"
-        ["openai:2"]="GPT-5 Nano - Fastest"
-        ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
-        ["gemini:1"]="Gemini 3 Pro - Best quality"
-        ["groq:0"]="Kimi K2 - Best quality (recommended)"
-        ["groq:1"]="GPT-OSS 120B - Fast reasoning"
-        ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
-        ["cerebras:1"]="Qwen3 235B - Frontier reasoning"
-    )
+# ============================================================
+# Derived Configuration Arrays (populated from central config)
+# ============================================================
 
-    # NOTE: 8192 should match DEFAULT_MAX_TOKENS in core/framework/graph/edge.py
-    declare -A MODEL_CHOICES_MAXTOKENS=(
-        ["anthropic:0"]=8192
-        ["anthropic:1"]=8192
-        ["anthropic:2"]=8192
-        ["anthropic:3"]=8192
-        ["openai:0"]=16384
-        ["openai:1"]=16384
-        ["openai:2"]=16384
-        ["gemini:0"]=8192
-        ["gemini:1"]=8192
-        ["groq:0"]=8192
-        ["groq:1"]=8192
-        ["cerebras:0"]=8192
-        ["cerebras:1"]=8192
-    )
+# Build associative arrays from central config
+declare -A PROVIDER_NAMES
+declare -A PROVIDER_IDS
+declare -A PROVIDER_SIGNUP_URLS
 
-    declare -A MODEL_CHOICES_COUNT=(
-        ["anthropic"]=4
-        ["openai"]=3
-        ["gemini"]=2
-        ["groq"]=2
-        ["cerebras"]=2
-    )
+for entry in "${PROVIDER_CONFIG[@]}"; do
+    IFS='|' read -r env_var provider_id display_name signup_url <<< "$entry"
+    PROVIDER_NAMES["$env_var"]="$display_name"
+    PROVIDER_IDS["$env_var"]="$provider_id"
+    PROVIDER_SIGNUP_URLS["$provider_id"]="$signup_url"
+done
 
-    # Helper functions for Bash 4+
-    get_provider_name() {
-        echo "${PROVIDER_NAMES[$1]}"
-    }
+# Build model choice arrays
+declare -A MODEL_CHOICES_ID
+declare -A MODEL_CHOICES_LABEL
+declare -A MODEL_CHOICES_MAXTOKENS
+declare -A MODEL_CHOICES_COUNT
 
-    get_provider_id() {
-        echo "${PROVIDER_IDS[$1]}"
-    }
+for entry in "${MODEL_CHOICES_CONFIG[@]}"; do
+    IFS='|' read -r provider_id model_id model_label max_tokens <<< "$entry"
+    count="${MODEL_CHOICES_COUNT[$provider_id]:-0}"
+    MODEL_CHOICES_ID["${provider_id}:${count}"]="$model_id"
+    MODEL_CHOICES_LABEL["${provider_id}:${count}"]="$model_label"
+    MODEL_CHOICES_MAXTOKENS["${provider_id}:${count}"]="$max_tokens"
+    MODEL_CHOICES_COUNT["$provider_id"]=$((count + 1))
+done
 
-    get_default_model() {
-        echo "${DEFAULT_MODELS[$1]}"
-    }
+# ============================================================
+# Helper Functions
+# ============================================================
 
-    get_model_choice_count() {
-        echo "${MODEL_CHOICES_COUNT[$1]:-0}"
-    }
+get_provider_name() {
+    local env_var="$1"
+    echo "${PROVIDER_NAMES[$env_var]:-}"
+}
 
-    get_model_choice_id() {
-        echo "${MODEL_CHOICES_ID[$1:$2]}"
-    }
+get_provider_id() {
+    local env_var="$1"
+    echo "${PROVIDER_IDS[$env_var]:-}"
+}
 
-    get_model_choice_label() {
-        echo "${MODEL_CHOICES_LABEL[$1:$2]}"
-    }
+get_provider_signup_url() {
+    local provider_id="$1"
+    echo "${PROVIDER_SIGNUP_URLS[$provider_id]:-}"
+}
 
-    get_model_choice_maxtokens() {
-        echo "${MODEL_CHOICES_MAXTOKENS[$1:$2]}"
-    }
-else
-    # Bash 3.2 - use parallel indexed arrays
-    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
-    PROVIDER_ID_LIST=(anthropic openai gemini google groq cerebras mistral together deepseek)
+get_default_model() {
+    local provider_id="$1"
+    echo "${PROVIDER_DEFAULT_MODEL[$provider_id]:-}"
+}
 
-    # Default models by provider id (parallel arrays)
-    MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-opus-4-6" "gpt-5.2" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+get_model_choice_count() {
+    local provider_id="$1"
+    echo "${MODEL_CHOICES_COUNT[$provider_id]:-0}"
+}
 
-    # Helper: get provider display name for an env var
-    get_provider_name() {
-        local env_var="$1"
-        local i=0
-        while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
-            if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
-                echo "${PROVIDER_DISPLAY_NAMES[$i]}"
-                return
-            fi
-            i=$((i + 1))
-        done
-    }
+get_model_choice_id() {
+    local provider_id="$1"
+    local idx="$2"
+    echo "${MODEL_CHOICES_ID[${provider_id}:${idx}]:-}"
+}
 
-    # Helper: get provider id for an env var
-    get_provider_id() {
-        local env_var="$1"
-        local i=0
-        while [ $i -lt ${#PROVIDER_ENV_VARS[@]} ]; do
-            if [ "${PROVIDER_ENV_VARS[$i]}" = "$env_var" ]; then
-                echo "${PROVIDER_ID_LIST[$i]}"
-                return
-            fi
-            i=$((i + 1))
-        done
-    }
+get_model_choice_label() {
+    local provider_id="$1"
+    local idx="$2"
+    echo "${MODEL_CHOICES_LABEL[${provider_id}:${idx}]:-}"
+}
 
-    # Helper: get default model for a provider id
-    get_default_model() {
-        local provider_id="$1"
-        local i=0
-        while [ $i -lt ${#MODEL_PROVIDER_IDS[@]} ]; do
-            if [ "${MODEL_PROVIDER_IDS[$i]}" = "$provider_id" ]; then
-                echo "${MODEL_DEFAULTS[$i]}"
-                return
-            fi
-            i=$((i + 1))
-        done
-    }
+get_model_choice_maxtokens() {
+    local provider_id="$1"
+    local idx="$2"
+    echo "${MODEL_CHOICES_MAXTOKENS[${provider_id}:${idx}]:-8192}"
+}
 
-    # Model choices per provider - flat parallel arrays with provider offsets
-    # Provider order: anthropic(4), openai(3), gemini(2), groq(2), cerebras(2)
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gpt-5-nano" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    # NOTE: 8192 should match DEFAULT_MAX_TOKENS in core/framework/graph/edge.py
-    MC_MAXTOKENS=(8192 8192 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192)
-
-    # Helper: get number of model choices for a provider
-    get_model_choice_count() {
-        local provider_id="$1"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-        echo "$count"
-    }
-
-    # Helper: get model choice id by provider and index (0-based within provider)
-    get_model_choice_id() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_IDS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-
-    # Helper: get model choice label by provider and index
-    get_model_choice_label() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_LABELS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-
-    # Helper: get model choice max_tokens by provider and index
-    get_model_choice_maxtokens() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_MAXTOKENS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-fi
+get_all_providers() {
+    local keys=("${!PROVIDER_NAMES[@]}")
+    printf '%s\n' "${keys[@]}" | sort
+}
 
 # Configuration directory
 HIVE_CONFIG_DIR="$HOME/.hive"
@@ -665,25 +547,14 @@ SELECTED_ENV_VAR=""     # Will hold the chosen env var
 SELECTED_MODEL=""       # Will hold the chosen model ID
 SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens
 
-if [ "$USE_ASSOC_ARRAYS" = true ]; then
-    # Bash 4+ - iterate over associative array keys
-    for env_var in "${!PROVIDER_NAMES[@]}"; do
-        value="${!env_var}"
-        if [ -n "$value" ]; then
-            FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
-            FOUND_ENV_VARS+=("$env_var")
-        fi
-    done
-else
-    # Bash 3.2 - iterate over indexed array
-    for env_var in "${PROVIDER_ENV_VARS[@]}"; do
-        value="${!env_var}"
-        if [ -n "$value" ]; then
-            FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
-            FOUND_ENV_VARS+=("$env_var")
-        fi
-    done
-fi
+# Detect available API keys from environment
+for env_var in "${!PROVIDER_NAMES[@]}"; do
+    value="${!env_var}"
+    if [ -n "$value" ]; then
+        FOUND_PROVIDERS+=("$(get_provider_name "$env_var")")
+        FOUND_ENV_VARS+=("$env_var")
+    fi
+done
 
 if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
     echo "Found API keys:"
@@ -743,57 +614,47 @@ fi
 
 if [ -z "$SELECTED_PROVIDER_ID" ]; then
     echo ""
-    prompt_choice "Select your LLM provider:" \
-        "Anthropic (Claude) - Recommended" \
-        "OpenAI (GPT)" \
-        "Google Gemini - Free tier available" \
-        "Groq - Fast, free tier" \
-        "Cerebras - Fast, free tier" \
-        "Skip for now"
-     choice=$PROMPT_CHOICE
 
-    case $choice in
-        0)
-            SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
-            SELECTED_PROVIDER_ID="anthropic"
-            PROVIDER_NAME="Anthropic"
-            SIGNUP_URL="https://console.anthropic.com/settings/keys"
-            ;;
-        1)
-            SELECTED_ENV_VAR="OPENAI_API_KEY"
-            SELECTED_PROVIDER_ID="openai"
-            PROVIDER_NAME="OpenAI"
-            SIGNUP_URL="https://platform.openai.com/api-keys"
-            ;;
-        2)
-            SELECTED_ENV_VAR="GEMINI_API_KEY"
-            SELECTED_PROVIDER_ID="gemini"
-            PROVIDER_NAME="Google Gemini"
-            SIGNUP_URL="https://aistudio.google.com/apikey"
-            ;;
-        3)
-            SELECTED_ENV_VAR="GROQ_API_KEY"
-            SELECTED_PROVIDER_ID="groq"
-            PROVIDER_NAME="Groq"
-            SIGNUP_URL="https://console.groq.com/keys"
-            ;;
-        4)
-            SELECTED_ENV_VAR="CEREBRAS_API_KEY"
-            SELECTED_PROVIDER_ID="cerebras"
-            PROVIDER_NAME="Cerebras"
-            SIGNUP_URL="https://cloud.cerebras.ai/"
-            ;;
-        5)
-            echo ""
-            echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
-            echo -e "Add your API key later by running:"
-            echo ""
-            echo -e "  ${CYAN}echo 'export ANTHROPIC_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
-            echo ""
-            SELECTED_ENV_VAR=""
-            SELECTED_PROVIDER_ID=""
-            ;;
-    esac
+    # Build provider menu from central config
+    PROVIDER_MENU=()
+    PROVIDER_MENU_ENV_VARS=()
+    PROVIDER_MENU_IDS=()
+    PROVIDER_MENU_NAMES=()
+
+    for entry in "${PROVIDER_CONFIG[@]}"; do
+        IFS='|' read -r env_var provider_id display_name _ <<< "$entry"
+        PROVIDER_MENU_ENV_VARS+=("$env_var")
+        PROVIDER_MENU_IDS+=("$provider_id")
+        PROVIDER_MENU_NAMES+=("$display_name")
+    done
+
+    # Build menu options array for prompt_choice
+    MENU_OPTIONS=()
+    for name in "${PROVIDER_MENU_NAMES[@]}"; do
+        MENU_OPTIONS+=("$name")
+    done
+    MENU_OPTIONS+=("Skip for now")
+
+    # Call prompt_choice with dynamic options
+    prompt_choice "Select your LLM provider:" "${MENU_OPTIONS[@]}"
+    choice=$PROMPT_CHOICE
+
+    # Check if user chose to skip
+    if [ "$choice" -eq ${#PROVIDER_MENU_NAMES[@]} ]; then
+        echo ""
+        echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
+        echo -e "Add your API key later by running:"
+        echo ""
+        echo -e "  ${CYAN}echo 'export ANTHROPIC_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
+        echo ""
+        SELECTED_ENV_VAR=""
+        SELECTED_PROVIDER_ID=""
+    else
+        SELECTED_ENV_VAR="${PROVIDER_MENU_ENV_VARS[$choice]}"
+        SELECTED_PROVIDER_ID="${PROVIDER_MENU_IDS[$choice]}"
+        PROVIDER_NAME="${PROVIDER_MENU_NAMES[$choice]}"
+        SIGNUP_URL="$(get_provider_signup_url "$SELECTED_PROVIDER_ID")"
+    fi
 
     if [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTED_ENV_VAR}" ]; then
         echo ""
