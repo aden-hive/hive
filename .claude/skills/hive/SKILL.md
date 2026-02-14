@@ -1,0 +1,526 @@
+---
+name: hive
+description: Complete workflow for building, implementing, and testing goal-driven agents. Orchestrates hive-* skills. Use when starting a new agent project, unsure which skill to use, or need end-to-end guidance.
+license: Apache-2.0
+metadata:
+  author: hive
+  version: "2.0"
+  type: workflow-orchestrator
+  orchestrates:
+    - hive-concepts
+    - hive-create
+    - hive-patterns
+    - hive-test
+    - hive-credentials
+    - hive-debugger
+---
+
+# Agent Development Workflow
+
+**THIS IS AN EXECUTABLE WORKFLOW. DO NOT explore the codebase or read source files. ROUTE to the correct skill IMMEDIATELY.**
+
+When this skill is loaded, **ALWAYS use the AskUserQuestion tool** to present options:
+
+```
+Use AskUserQuestion with these options:
+- "Build a new agent" → Then invoke /hive-create
+- "Test an existing agent" → Then invoke /hive-test
+- "Learn agent concepts" → Then invoke /hive-concepts
+- "Optimize agent design" → Then invoke /hive-patterns
+- "Set up credentials" → Then invoke /hive-credentials
+- "Debug a failing agent" → Then invoke /hive-debugger
+- "Other" (please describe what you want to achieve)
+```
+
+**DO NOT:** Read source files, explore the codebase, search for code, or do any investigation before routing. The sub-skills handle all of that.
+
+---
+
+Complete Standard Operating Procedure (SOP) for building production-ready goal-driven agents.
+
+## Overview
+
+This workflow orchestrates specialized skills to take you from initial concept to production-ready agent:
+
+1. **Understand Concepts** → `/hive-concepts` (optional)
+2. **Build Structure** → `/hive-create`
+3. **Optimize Design** → `/hive-patterns` (optional)
+4. **Setup Credentials** → `/hive-credentials` (if agent uses tools requiring API keys)
+5. **Test & Validate** → `/hive-test`
+6. **Debug Issues** → `/hive-debugger` (if agent fails at runtime)
+
+## When to Use This Workflow
+
+Use this meta-skill when:
+- Starting a new agent from scratch
+- Unclear which skill to use first
+- Need end-to-end guidance for agent development
+- Want consistent, repeatable agent builds
+
+**Skip this workflow** if:
+- You only need to test an existing agent → use `/hive-test` directly
+- You know exactly which phase you're in → use specific skill directly
+
+## Quick Decision Tree
+
+```
+"Need to understand agent concepts" → hive-concepts
+"Build a new agent" → hive-create
+"Optimize my agent design" → hive-patterns
+"Need client-facing nodes or feedback loops" → hive-patterns
+"Set up API keys for my agent" → hive-credentials
+"Test my agent" → hive-test
+"My agent is failing/stuck/has errors" → hive-debugger
+"Not sure what I need" → Read phases below, then decide
+"Agent has structure but needs implementation" → See agent directory STATUS.md
+```
+
+## Phase 0: Understand Concepts (Optional)
+
+**Skill**: `/hive-concepts`
+**Input**: Questions about agent architecture
+
+### When to Use
+
+- First time building an agent
+- Need to understand node types, edges, goals
+- Want to validate tool availability
+- Learning about event loop architecture and client-facing nodes
+
+### What This Phase Provides
+
+- Architecture overview (Python packages, not JSON)
+- Core concepts (Goal, Node, Edge, Event Loop, Judges)
+- Tool discovery and validation procedures
+- Workflow overview
+
+**Skip this phase** if you already understand agent fundamentals.
+
+## Phase 1: Build Agent Structure
+
+**Skill**: `/hive-create`
+**Input**: User requirements ("Build an agent that...") or a template to start from
+
+### What This Phase Does
+
+Creates the complete agent architecture:
+- Package structure (`exports/agent_name/`)
+- Goal with success criteria and constraints
+- Workflow graph (nodes and edges)
+- Node specifications
+- CLI interface
+- Documentation
+
+### Process
+
+1. **Create package** - Directory structure with skeleton files
+2. **Define goal** - Success criteria and constraints written to agent.py
+3. **Design nodes** - Each node approved and written incrementally
+4. **Connect edges** - Workflow graph with conditional routing
+5. **Finalize** - Agent class, exports, and documentation
+
+### Outputs
+
+- ✅ `exports/agent_name/` package created
+- ✅ Goal defined in agent.py
+- ✅ 3-5 success criteria defined
+- ✅ 1-5 constraints defined
+- ✅ 5-10 nodes specified in nodes/__init__.py
+- ✅ 8-15 edges connecting workflow
+- ✅ Validated structure (passes `uv run python -m agent_name validate`)
+- ✅ README.md with usage instructions
+- ✅ CLI commands (info, validate, run, shell)
+
+### Success Criteria
+
+You're ready for Phase 2 when:
+- Agent structure validates without errors
+- All nodes and edges are defined
+- CLI commands work (info, validate)
+- You see: "Agent complete: exports/agent_name/"
+
+### Common Outputs
+
+The hive-create skill produces:
+```
+exports/agent_name/
+├── __init__.py          (package exports)
+├── __main__.py          (CLI interface)
+├── agent.py             (goal, graph, agent class)
+├── nodes/__init__.py    (node specifications)
+├── config.py            (configuration)
+├── implementations.py   (may be created for Python functions)
+└── README.md            (documentation)
+```
+
+### Next Steps
+
+**If structure complete and validated:**
+→ Check `exports/agent_name/STATUS.md` or `IMPLEMENTATION_GUIDE.md`
+→ These files explain implementation options
+→ You may need to add Python functions or MCP tools (not covered by current skills)
+
+**If want to optimize design:**
+→ Proceed to Phase 1.5 (hive-patterns)
+
+**If ready to test:**
+→ Proceed to Phase 2
+
+## Phase 1.5: Optimize Design (Optional)
+
+**Skill**: `/hive-patterns`
+**Input**: Completed agent structure
+
+### When to Use
+
+- Want to add client-facing blocking or feedback edges
+- Need judge patterns for output validation
+- Want fan-out/fan-in (parallel execution)
+- Need error handling patterns
+- Want best practices guidance
+
+### What This Phase Provides
+
+- Client-facing interaction patterns
+- Feedback edge routing with nullable output keys
+- Judge patterns (implicit, SchemaJudge)
+- Fan-out/fan-in parallel execution
+- Context management and spillover patterns
+- Anti-patterns to avoid
+
+**Skip this phase** if your agent design is straightforward.
+
+## Phase 2: Test & Validate
+
+**Skill**: `/hive-test`
+**Input**: Working agent from Phase 1
+
+### What This Phase Does
+
+Guides the creation and execution of a comprehensive test suite:
+- Constraint tests
+- Success criteria tests
+- Edge case tests
+- Integration tests
+
+### Process
+
+1. **Analyze agent** - Read goal, constraints, success criteria
+2. **Generate tests** - The calling agent writes pytest files in `exports/agent_name/tests/` using hive-test guidelines and templates
+3. **User approval** - Review and approve each test
+4. **Run evaluation** - Execute tests and collect results
+5. **Debug failures** - Identify and fix issues
+6. **Iterate** - Repeat until all tests pass
+
+### Outputs
+
+- ✅ Test files in `exports/agent_name/tests/`
+- ✅ Test report with pass/fail metrics
+- ✅ Coverage of all success criteria
+- ✅ Coverage of all constraints
+- ✅ Edge case handling verified
+
+### Success Criteria
+
+You're done when:
+- All tests pass
+- All success criteria validated
+- All constraints verified
+- Agent handles edge cases
+- Test coverage is comprehensive
+
+### Next Steps
+
+**Agent ready for:**
+- Production deployment
+- Integration into larger systems
+- Documentation and handoff
+- Continuous monitoring
+
+## Phase Transitions
+
+### From Phase 1 to Phase 2
+
+**Trigger signals:**
+- "Agent complete: exports/..."
+- Structure validation passes
+- README indicates implementation complete
+
+**Before proceeding:**
+- Verify agent can be imported: `from exports.agent_name import default_agent`
+- Check if implementation is needed (see STATUS.md or IMPLEMENTATION_GUIDE.md)
+- Confirm agent executes without import errors
+
+### Skipping Phases
+
+**When to skip Phase 1:**
+- Agent structure already exists
+- Only need to add tests
+- Modifying existing agent
+
+**When to skip Phase 2:**
+- Prototyping or exploring
+- Agent not production-bound
+- Manual testing sufficient
+
+## Common Patterns
+
+### Pattern 1: Complete New Build (Simple)
+
+```
+User: "Build an agent that monitors files"
+→ Use /hive-create
+→ Agent structure created
+→ Use /hive-test
+→ Tests created and passing
+→ Done: Production-ready agent
+```
+
+### Pattern 1b: Complete New Build (With Learning)
+
+```
+User: "Build an agent (first time)"
+→ Use /hive-concepts (understand concepts)
+→ Use /hive-create (build structure)
+→ Use /hive-patterns (optimize design)
+→ Use /hive-test (validate)
+→ Done: Production-ready agent
+```
+
+### Pattern 1c: Build from Template
+
+```
+User: "Build an agent based on the deep research template"
+→ Use /hive-create
+→ Select "From a template" path
+→ Pick template, name new agent
+→ Review/modify goal, nodes, graph
+→ Agent exported with customizations
+→ Use /hive-test
+→ Done: Customized agent
+```
+
+### Pattern 2: Test Existing Agent
+
+```
+User: "Test my agent at exports/my_agent"
+→ Skip Phase 1
+→ Use /hive-test directly
+→ Tests created
+→ Done: Validated agent
+```
+
+### Pattern 3: Iterative Development
+
+```
+User: "Build an agent"
+→ Use /hive-create (Phase 1)
+→ Implementation needed (see STATUS.md)
+→ [User implements functions]
+→ Use /hive-test (Phase 2)
+→ Tests reveal bugs
+→ [Fix bugs manually]
+→ Re-run tests
+→ Done: Working agent
+```
+
+### Pattern 4: Agent with Review Loops and HITL Checkpoints
+
+```
+User: "Build an agent with human review and feedback loops"
+→ Use /hive-concepts (learn event loop, client-facing nodes)
+→ Use /hive-create (build structure with feedback edges)
+→ Use /hive-patterns (implement client-facing + feedback patterns)
+→ Use /hive-test (validate review flows and edge routing)
+→ Done: Agent with HITL checkpoints and review loops
+```
+
+## Skill Dependencies
+
+```
+hive (meta-skill)
+    │
+    ├── hive-concepts (foundational)
+    │   ├── Architecture concepts (event loop, judges)
+    │   ├── Node types (event_loop, function)
+    │   ├── Edge routing and priority
+    │   ├── Tool discovery procedures
+    │   └── Workflow overview
+    │
+    ├── hive-create (procedural)
+    │   ├── Creates package structure
+    │   ├── Defines goal
+    │   ├── Adds nodes (event_loop, function)
+    │   ├── Connects edges with priority routing
+    │   ├── Finalizes agent class
+    │   └── Requires: hive-concepts
+    │
+    ├── hive-patterns (reference)
+    │   ├── Client-facing interaction patterns
+    │   ├── Feedback edges and review loops
+    │   ├── Judge patterns (implicit, SchemaJudge)
+    │   ├── Fan-out/fan-in parallel execution
+    │   └── Context management and anti-patterns
+    │
+    ├── hive-credentials (utility)
+    │   ├── Detects missing credentials
+    │   ├── Offers auth method choices (Aden OAuth, direct API key)
+    │   ├── Stores securely in ~/.hive/credentials
+    │   └── Validates with health checks
+    │
+    ├── hive-test (validation)
+    │   ├── Reads agent goal
+    │   ├── Generates tests
+    │   ├── Runs evaluation
+    │   └── Reports results
+    │
+    └── hive-debugger (troubleshooting)
+        ├── Monitors runtime logs (L1/L2/L3)
+        ├── Identifies retry loops, tool failures
+        ├── Categorizes issues (10 categories)
+        └── Provides fix recommendations
+```
+
+## Troubleshooting
+
+### "Agent structure won't validate"
+
+- Check node IDs match between nodes/__init__.py and agent.py
+- Verify all edges reference valid node IDs
+- Ensure entry_node exists in nodes list
+- Run: `PYTHONPATH=exports uv run python -m agent_name validate`
+
+### "Agent has structure but won't run"
+
+- Check for STATUS.md or IMPLEMENTATION_GUIDE.md in agent directory
+- Implementation may be needed (Python functions or MCP tools)
+- This is expected - hive-create creates structure, not implementation
+- See implementation guide for completion options
+
+### "Tests are failing"
+
+- Review test output for specific failures
+- Check agent goal and success criteria
+- Verify constraints are met
+- Use `/hive-test` to debug and iterate
+- Fix agent code and re-run tests
+
+### "Agent is failing at runtime"
+
+- Use `/hive-debugger` to analyze runtime logs
+- The debugger identifies retry loops, tool failures, and stalled execution
+- Get actionable fix recommendations with code changes
+- Monitor the agent in real-time during TUI sessions
+
+### "Not sure which phase I'm in"
+
+Run these checks:
+
+```bash
+# Check if agent structure exists
+ls exports/my_agent/agent.py
+
+# Check if it validates
+PYTHONPATH=exports uv run python -m my_agent validate
+
+# Check if tests exist
+ls exports/my_agent/tests/
+
+# If structure exists and validates → Phase 2 (testing)
+# If structure doesn't exist → Phase 1 (building)
+# If tests exist but failing → Debug phase
+```
+
+## Best Practices
+
+### For Phase 1 (Building)
+
+1. **Start with clear requirements** - Know what the agent should do
+2. **Define success criteria early** - Measurable goals drive design
+3. **Keep nodes focused** - One responsibility per node
+4. **Use descriptive names** - Node IDs should explain purpose
+5. **Validate incrementally** - Check structure after each major addition
+
+### For Phase 2 (Testing)
+
+1. **Test constraints first** - Hard requirements must pass
+2. **Mock external dependencies** - Use mock mode for LLMs/APIs
+3. **Cover edge cases** - Test failures, not just success paths
+4. **Iterate quickly** - Fix one test at a time
+5. **Document test patterns** - Future tests follow same structure
+
+### General Workflow
+
+1. **Use version control** - Git commit after each phase
+2. **Document decisions** - Update README with changes
+3. **Keep iterations small** - Build → Test → Fix → Repeat
+4. **Preserve working states** - Tag successful iterations
+5. **Learn from failures** - Failed tests reveal design issues
+
+## Exit Criteria
+
+You're done with the workflow when:
+
+✅ Agent structure validates
+✅ All tests pass
+✅ Success criteria met
+✅ Constraints verified
+✅ Documentation complete
+✅ Agent ready for deployment
+
+## Additional Resources
+
+- **hive-concepts**: See `.claude/skills/hive-concepts/SKILL.md`
+- **hive-create**: See `.claude/skills/hive-create/SKILL.md`
+- **hive-patterns**: See `.claude/skills/hive-patterns/SKILL.md`
+- **hive-test**: See `.claude/skills/hive-test/SKILL.md`
+- **Agent framework docs**: See `core/README.md`
+- **Example agents**: See `exports/` directory
+
+## Summary
+
+This workflow provides a proven path from concept to production-ready agent:
+
+1. **Learn** with `/hive-concepts` → Understand fundamentals (optional)
+2. **Build** with `/hive-create` → Get validated structure
+3. **Optimize** with `/hive-patterns` → Apply best practices (optional)
+4. **Configure** with `/hive-credentials` → Set up API keys (if needed)
+5. **Test** with `/hive-test` → Get verified functionality
+6. **Debug** with `/hive-debugger` → Fix runtime issues (if needed)
+
+The workflow is **flexible** - skip phases as needed, iterate freely, and adapt to your specific requirements. The goal is **production-ready agents** built with **consistent, repeatable processes**.
+
+## Skill Selection Guide
+
+**Choose hive-concepts when:**
+- First time building agents
+- Need to understand event loop architecture
+- Validating tool availability
+- Learning about node types, edges, and judges
+
+**Choose hive-create when:**
+- Actually building an agent
+- Have clear requirements
+- Ready to write code
+- Want step-by-step guidance
+- Want to start from an existing template and customize it
+
+**Choose hive-patterns when:**
+- Agent structure complete
+- Need client-facing nodes or feedback edges
+- Implementing review loops or fan-out/fan-in
+- Want judge patterns or context management
+- Want best practices
+
+**Choose hive-test when:**
+- Agent structure complete
+- Ready to validate functionality
+- Need comprehensive test coverage
+- Testing feedback loops, output keys, or fan-out
+
+**Choose hive-debugger when:**
+- Agent is failing or stuck at runtime
+- Seeing retry loops or escalations
+- Tool calls are failing
+- Need to understand why a node isn't completing
+- Want real-time monitoring of agent execution

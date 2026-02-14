@@ -8,6 +8,7 @@ from aden_tools.credentials.health_check import (
     HEALTH_CHECKERS,
     AnthropicHealthChecker,
     GitHubHealthChecker,
+    GoogleMapsHealthChecker,
     GoogleSearchHealthChecker,
     ResendHealthChecker,
     check_credential_health,
@@ -37,12 +38,18 @@ class TestHealthCheckerRegistry:
         assert "resend" in HEALTH_CHECKERS
         assert isinstance(HEALTH_CHECKERS["resend"], ResendHealthChecker)
 
+    def test_google_maps_registered(self):
+        """GoogleMapsHealthChecker is registered in HEALTH_CHECKERS."""
+        assert "google_maps" in HEALTH_CHECKERS
+        assert isinstance(HEALTH_CHECKERS["google_maps"], GoogleMapsHealthChecker)
+
     def test_all_expected_checkers_registered(self):
         """All expected health checkers are in the registry."""
         expected = {
             "hubspot",
             "brave_search",
             "google_search",
+            "google_maps",
             "anthropic",
             "github",
             "resend",
@@ -264,6 +271,99 @@ class TestResendHealthChecker:
 
         assert result.valid is False
         assert result.details["error"] == "timeout"
+
+
+class TestGoogleMapsHealthChecker:
+    """Tests for GoogleMapsHealthChecker."""
+
+    def _mock_response(self, status_code, json_data=None):
+        response = MagicMock(spec=httpx.Response)
+        response.status_code = status_code
+        if json_data:
+            response.json.return_value = json_data
+        return response
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_valid_key_ok_status(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(200, {"status": "OK", "results": []})
+
+        checker = GoogleMapsHealthChecker()
+        result = checker.check("test-api-key")
+
+        assert result.valid is True
+        assert "valid" in result.message.lower()
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_invalid_key_request_denied(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(
+            200, {"status": "REQUEST_DENIED", "results": []}
+        )
+
+        checker = GoogleMapsHealthChecker()
+        result = checker.check("invalid-key")
+
+        assert result.valid is False
+        assert result.details["status"] == "REQUEST_DENIED"
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_quota_exceeded_still_valid(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(
+            200, {"status": "OVER_QUERY_LIMIT", "results": []}
+        )
+
+        checker = GoogleMapsHealthChecker()
+        result = checker.check("test-api-key")
+
+        assert result.valid is True
+        assert result.details.get("rate_limited") is True
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_http_error(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.return_value = self._mock_response(500)
+
+        checker = GoogleMapsHealthChecker()
+        result = checker.check("test-api-key")
+
+        assert result.valid is False
+        assert result.details["status_code"] == 500
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_timeout(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.side_effect = httpx.TimeoutException("timed out")
+
+        checker = GoogleMapsHealthChecker()
+        result = checker.check("test-api-key")
+
+        assert result.valid is False
+        assert result.details["error"] == "timeout"
+
+    @patch("aden_tools.credentials.health_check.httpx.Client")
+    def test_request_error(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.side_effect = httpx.RequestError("connection failed")
+
+        checker = GoogleMapsHealthChecker()
+        result = checker.check("test-api-key")
+
+        assert result.valid is False
+        assert "connection failed" in result.details["error"]
 
 
 class TestCheckCredentialHealthDispatcher:

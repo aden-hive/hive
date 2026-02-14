@@ -9,9 +9,9 @@ from .base import CredentialSpec
 EMAIL_CREDENTIALS = {
     "resend": CredentialSpec(
         env_var="RESEND_API_KEY",
-        tools=["send_email", "send_budget_alert_email"],
+        tools=["send_email"],
         node_types=[],
-        required=True,
+        required=False,
         startup_required=False,
         help_url="https://resend.com/api-keys",
         description="API key for Resend email service",
@@ -32,5 +32,32 @@ EMAIL_CREDENTIALS = {
         # Credential store mapping
         credential_id="resend",
         credential_key="api_key",
+    ),
+    "google": CredentialSpec(
+        env_var="GOOGLE_ACCESS_TOKEN",
+        tools=[
+            # send_email is excluded: it's a multi-provider tool that checks
+            # credentials at runtime based on the provider parameter.
+            "gmail_reply_email",
+            "gmail_list_messages",
+            "gmail_get_message",
+            "gmail_trash_message",
+            "gmail_modify_message",
+            "gmail_batch_modify_messages",
+            "gmail_batch_get_messages",
+        ],
+        node_types=[],
+        required=True,
+        startup_required=False,
+        help_url="https://hive.adenhq.com",
+        description="Google OAuth2 access token (via Aden) - used for Gmail",
+        aden_supported=True,
+        aden_provider_name="google",
+        direct_api_key_supported=False,
+        api_key_instructions="Google OAuth requires OAuth2. Connect via hive.adenhq.com",
+        health_check_endpoint="https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        health_check_method="GET",
+        credential_id="google",
+        credential_key="access_token",
     ),
 }

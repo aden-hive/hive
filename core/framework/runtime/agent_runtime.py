@@ -8,16 +8,18 @@ while preserving the goal-driven approach.
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult
 from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
+from framework.storage.session_store import SessionStore
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -37,6 +39,11 @@ class AgentRuntimeConfig:
     max_history: int = 1000
     execution_result_max: int = 1000
     execution_result_ttl_seconds: float | None = None
+    # Webhook server config (only starts if webhook_routes is non-empty)
+    webhook_host: str = "127.0.0.1"
+    webhook_port: int = 8080
+    webhook_routes: list[dict] = field(default_factory=list)
+    # Each dict: {"source_id": str, "path": str, "methods": ["POST"], "secret": str|None}
 
 
 class AgentRuntime:
@@ -100,6 +107,8 @@ class AgentRuntime:
         tools: list["Tool"] | None = None,
         tool_executor: Callable | None = None,
         config: AgentRuntimeConfig | None = None,
+        runtime_log_store: Any = None,
+        checkpoint_config: CheckpointConfig | None = None,
     ):
         """
         Initialize agent runtime.
@@ -112,17 +121,25 @@ class AgentRuntime:
             tools: Available tools
             tool_executor: Function to execute tools
             config: Optional runtime configuration
+            runtime_log_store: Optional RuntimeLogStore for per-execution logging
+            checkpoint_config: Optional checkpoint configuration for resumable sessions
         """
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
+        self._runtime_log_store = runtime_log_store
+        self._checkpoint_config = checkpoint_config
 
         # Initialize storage
+        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
         self._storage = ConcurrentStorage(
-            base_path=storage_path,
+            base_path=storage_path_obj,
             cache_ttl=self._config.cache_ttl,
             batch_interval=self._config.batch_interval,
         )
+
+        # Initialize SessionStore for unified sessions (always enabled)
+        self._session_store = SessionStore(storage_path_obj)
 
         # Initialize shared components
         self._state_manager = SharedStateManager()
@@ -138,9 +155,17 @@ class AgentRuntime:
         self._entry_points: dict[str, EntryPointSpec] = {}
         self._streams: dict[str, ExecutionStream] = {}
 
+        # Webhook server (created on start if webhook_routes configured)
+        self._webhook_server: Any = None
+        # Event-driven entry point subscriptions
+        self._event_subscriptions: list[str] = []
+
         # State
         self._running = False
         self._lock = asyncio.Lock()
+
+        # Optional greeting shown to user on TUI load (set by AgentRunner)
+        self.intro_message: str = ""
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
@@ -212,9 +237,69 @@ class AgentRuntime:
                     tool_executor=self._tool_executor,
                     result_retention_max=self._config.execution_result_max,
                     result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
+                    runtime_log_store=self._runtime_log_store,
+                    session_store=self._session_store,
+                    checkpoint_config=self._checkpoint_config,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
+
+            # Start webhook server if routes are configured
+            if self._config.webhook_routes:
+                from framework.runtime.webhook_server import (
+                    WebhookRoute,
+                    WebhookServer,
+                    WebhookServerConfig,
+                )
+
+                wh_config = WebhookServerConfig(
+                    host=self._config.webhook_host,
+                    port=self._config.webhook_port,
+                )
+                self._webhook_server = WebhookServer(self._event_bus, wh_config)
+
+                for rc in self._config.webhook_routes:
+                    route = WebhookRoute(
+                        source_id=rc["source_id"],
+                        path=rc["path"],
+                        methods=rc.get("methods", ["POST"]),
+                        secret=rc.get("secret"),
+                    )
+                    self._webhook_server.add_route(route)
+
+                await self._webhook_server.start()
+
+            # Subscribe event-driven entry points to EventBus
+            from framework.runtime.event_bus import EventType as _ET
+
+            for ep_id, spec in self._entry_points.items():
+                if spec.trigger_type != "event":
+                    continue
+
+                tc = spec.trigger_config
+                event_types = [_ET(et) for et in tc.get("event_types", [])]
+                if not event_types:
+                    logger.warning(
+                        f"Entry point '{ep_id}' has trigger_type='event' "
+                        "but no event_types in trigger_config"
+                    )
+                    continue
+
+                # Capture ep_id in closure
+                def _make_handler(entry_point_id: str):
+                    async def _on_event(event):
+                        if self._running and entry_point_id in self._streams:
+                            await self.trigger(entry_point_id, {"event": event.to_dict()})
+
+                    return _on_event
+
+                sub_id = self._event_bus.subscribe(
+                    event_types=event_types,
+                    handler=_make_handler(ep_id),
+                    filter_stream=tc.get("filter_stream"),
+                    filter_node=tc.get("filter_node"),
+                )
+                self._event_subscriptions.append(sub_id)
 
             self._running = True
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")
@@ -225,6 +310,16 @@ class AgentRuntime:
             return
 
         async with self._lock:
+            # Unsubscribe event-driven entry points
+            for sub_id in self._event_subscriptions:
+                self._event_bus.unsubscribe(sub_id)
+            self._event_subscriptions.clear()
+
+            # Stop webhook server
+            if self._webhook_server:
+                await self._webhook_server.stop()
+                self._webhook_server = None
+
             # Stop all streams
             for stream in self._streams.values():
                 await stream.stop()
@@ -431,6 +526,11 @@ class AgentRuntime:
         return self._outcome_aggregator
 
     @property
+    def webhook_server(self) -> Any:
+        """Access the webhook server (None if no webhook entry points)."""
+        return self._webhook_server
+
+    @property
     def is_running(self) -> bool:
         """Check if runtime is running."""
         return self._running
@@ -448,11 +548,15 @@ def create_agent_runtime(
     tools: list["Tool"] | None = None,
     tool_executor: Callable | None = None,
     config: AgentRuntimeConfig | None = None,
+    runtime_log_store: Any = None,
+    enable_logging: bool = True,
+    checkpoint_config: CheckpointConfig | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
 
     Convenience factory that creates runtime and registers entry points.
+    Runtime logging is enabled by default for observability.
 
     Args:
         graph: Graph specification
@@ -463,10 +567,23 @@ def create_agent_runtime(
         tools: Available tools
         tool_executor: Tool executor function
         config: Runtime configuration
+        runtime_log_store: Optional RuntimeLogStore for per-execution logging.
+            If None and enable_logging=True, creates one automatically.
+        enable_logging: Whether to enable runtime logging (default: True).
+            Set to False to disable logging entirely.
+        checkpoint_config: Optional checkpoint configuration for resumable sessions.
+            If None, uses default checkpointing behavior.
 
     Returns:
         Configured AgentRuntime (not yet started)
     """
+    # Auto-create runtime log store if logging is enabled and not provided
+    if enable_logging and runtime_log_store is None:
+        from framework.runtime.runtime_log_store import RuntimeLogStore
+
+        storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        runtime_log_store = RuntimeLogStore(storage_path_obj / "runtime_logs")
+
     runtime = AgentRuntime(
         graph=graph,
         goal=goal,
@@ -475,6 +592,8 @@ def create_agent_runtime(
         tools=tools,
         tool_executor=tool_executor,
         config=config,
+        runtime_log_store=runtime_log_store,
+        checkpoint_config=checkpoint_config,
     )
 
     for spec in entry_points:

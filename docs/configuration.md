@@ -5,11 +5,30 @@ Aden Hive is a Python-based agent framework. Configuration is handled through en
 ## Configuration Overview
 
 ```
-Environment variables     (API keys, runtime flags)
-Agent config.py           (per-agent settings: model, tools, storage)
-pyproject.toml            (package metadata and dependencies)
-.mcp.json                 (MCP server connections)
+~/.hive/configuration.json  (global defaults: provider, model, max_tokens)
+Environment variables        (API keys, runtime flags)
+Agent config.py              (per-agent settings: model, tools, storage)
+pyproject.toml               (package metadata and dependencies)
+.mcp.json                    (MCP server connections)
 ```
+
+## Global Configuration (~/.hive/configuration.json)
+
+The `quickstart.sh` script creates this file during setup. It stores the default LLM provider, model, and max_tokens used by all agents unless overridden in an agent's own `config.py`.
+
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 8192,
+    "api_key_env_var": "ANTHROPIC_API_KEY"
+  },
+  "created_at": "2026-01-15T12:00:00+00:00"
+}
+```
+
+The default `max_tokens` value (8192) is defined as `DEFAULT_MAX_TOKENS` in `framework.graph.edge` and re-exported from `framework.graph`. Each agent's `RuntimeConfig` reads from this file at startup. To change defaults, either re-run `quickstart.sh` or edit the file directly.
 
 ## Environment Variables
 
@@ -61,13 +80,15 @@ Each agent package in `exports/` contains its own `config.py`:
 ```python
 # exports/my_agent/config.py
 CONFIG = {
-    "model": "claude-haiku-4-5-20251001",  # Default LLM model
-    "max_tokens": 4096,
+    "model": "anthropic/claude-sonnet-4-5-20250929",  # Default LLM model
+    "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.graph
     "temperature": 0.7,
     "tools": ["web_search", "pdf_read"],   # MCP tools to enable
     "storage_path": "/tmp/my_agent",       # Runtime data location
 }
 ```
+
+If `model` or `max_tokens` are omitted, the agent loads defaults from `~/.hive/configuration.json`.
 
 ### Agent Graph Specification
 
@@ -96,14 +117,14 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 {
   "mcpServers": {
     "agent-builder": {
-      "command": "core/.venv/bin/python",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "."
+      "command": "uv",
+      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
+      "cwd": "core"
     },
     "tools": {
-      "command": "tools/.venv/bin/python",
-      "args": ["-m", "aden_tools.mcp_server", "--stdio"],
-      "cwd": "."
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools"
     }
   }
 }
@@ -152,7 +173,7 @@ Add to `.vscode/settings.json`:
 
 1. **Never commit API keys** - Use environment variables or `.env` files
 2. **`.env` is git-ignored** - Copy `.env.example` to `.env` at the project root and fill in your values
-3. **Mock mode for testing** - Set `MOCK_MODE=1` to avoid LLM calls during development
+3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 
 ## Troubleshooting
@@ -187,4 +208,4 @@ Run from the project root with PYTHONPATH:
 PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
-See [Environment Setup](../ENVIRONMENT_SETUP.md) for detailed installation instructions.
+See [Environment Setup](./environment-setup.md) for detailed installation instructions.

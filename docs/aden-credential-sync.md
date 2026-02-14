@@ -13,26 +13,26 @@ The Aden server handles OAuth2 authorization code flows (user login, consent, to
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Local Agent Environment                       │
-│                                                                  │
+│                    Local Agent Environment                      │
+│                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │                   CredentialStore                         │   │
+│  │                   CredentialStore                        │   │
 │  │  ┌────────────────────┐  ┌────────────────────────────┐  │   │
 │  │  │EncryptedFileStorage│  │    AdenSyncProvider        │  │   │
 │  │  │  (local cache)     │  │  - Fetches from Aden       │  │   │
-│  │  │  ~/.hive/creds     │  │  - Delegates refresh       │  │   │
+│  │  │ ~/.hive/credentials│  │  - Delegates refresh       │  │   │
 │  │  └────────────────────┘  │  - Reports usage           │  │   │
 │  │                          └─────────────┬──────────────┘  │   │
 │  └────────────────────────────────────────┼─────────────────┘   │
-│                                           │                      │
-└───────────────────────────────────────────┼──────────────────────┘
+│                                           │                     │
+└───────────────────────────────────────────┼─────────────────────┘
                                             │ HTTPS
                                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                       Aden Server                                │
-│                                                                  │
+│                       Aden Server                               │
+│                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │              Integration Management                       │   │
+│  │              Integration Management                      │   │
 │  │  - HubSpot, GitHub, Slack, etc.                          │   │
 │  │  - Handles OAuth2 auth code flow                         │   │
 │  │  - Stores refresh tokens securely                        │   │

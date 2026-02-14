@@ -8,21 +8,41 @@ Usage:
 """
 
 import json
+import logging
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from mcp.server import FastMCP
+# Project root resolution.  This file lives at core/framework/mcp/agent_builder_server.py,
+# so the project root (where exports/ lives) is four parents up.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-from framework.graph import Constraint, EdgeCondition, EdgeSpec, Goal, NodeSpec, SuccessCriterion
-from framework.graph.plan import Plan
+# Ensure exports/ is on sys.path so AgentRunner can import agent modules.
+_exports_dir = _PROJECT_ROOT / "exports"
+if _exports_dir.is_dir() and str(_exports_dir) not in sys.path:
+    sys.path.insert(0, str(_exports_dir))
+del _exports_dir
+
+from mcp.server import FastMCP  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
+
+from framework.graph import (  # noqa: E402
+    Constraint,
+    EdgeCondition,
+    EdgeSpec,
+    Goal,
+    NodeSpec,
+    SuccessCriterion,
+)
+from framework.graph.plan import Plan  # noqa: E402
 
 # Testing framework imports
-from framework.testing.prompts import (
+from framework.testing.prompts import (  # noqa: E402
     PYTEST_TEST_FILE_HEADER,
 )
-from framework.utils.io import atomic_write
+from framework.utils.io import atomic_write  # noqa: E402
 
 # Initialize MCP server
 mcp = FastMCP("agent-builder")
@@ -159,8 +179,8 @@ def _load_active_session() -> BuildSession | None:
 
         if session_id:
             return _load_session(session_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning("Failed to load active session: %s", e)
 
     return None
 
@@ -525,6 +545,9 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
     """
     Validate and normalize agent_path.
 
+    Resolves relative paths against _PROJECT_ROOT since the MCP server's
+    cwd (core/) differs from the user's cwd (project root).
+
     Returns:
         (Path, None) if valid
         (None, error_json) if invalid
@@ -538,6 +561,12 @@ def _validate_agent_path(agent_path: str) -> tuple[Path | None, str | None]:
         )
 
     path = Path(agent_path)
+
+    # Resolve relative paths against project root (not MCP server's cwd)
+    if not path.is_absolute() and not path.exists():
+        resolved = _PROJECT_ROOT / path
+        if resolved.exists():
+            path = resolved
 
     if not path.exists():
         return None, json.dumps(
@@ -569,7 +598,11 @@ def add_node(
         str, "JSON object mapping conditions to target node IDs for router nodes"
     ] = "{}",
     client_facing: Annotated[
-        bool, "If True, node streams output to user and blocks for input between turns"
+        bool,
+        "If True, an ask_user() tool is injected so the LLM can explicitly request user input. "
+        "The node blocks ONLY when ask_user() is called — text-only turns stream freely. "
+        "Set True for nodes that interact with users (intake, review, approval). "
+        "Nodes that do autonomous work (research, data processing, API calls) MUST be False.",
     ] = False,
     nullable_output_keys: Annotated[
         str, "JSON array of output keys that may remain unset (for mutually exclusive outputs)"
@@ -648,6 +681,14 @@ def add_node(
         warnings.append(
             f"Node type '{node_type}' is deprecated. Use 'event_loop' instead. "
             "EventLoopNode supports tool use, streaming, and judge-based evaluation."
+        )
+
+    # Warn about client_facing on nodes with tools (likely autonomous work)
+    if node_type == "event_loop" and client_facing and tools_list:
+        warnings.append(
+            f"Node '{node_id}' is client_facing=True but has tools {tools_list}. "
+            "Nodes with tools typically do autonomous work and should be "
+            "client_facing=False. Only set True if this node needs user approval."
         )
 
     # nullable_output_keys must be a subset of output_keys
@@ -1360,6 +1401,17 @@ def validate_graph() -> str:
             f"Node '{dn['node_id']}' uses deprecated type '{dn['type']}'. Use 'event_loop' instead."
         )
 
+    # Warn if all event_loop nodes are client_facing (common misconfiguration)
+    el_nodes = [n for n in session.nodes if n.node_type == "event_loop"]
+    cf_el_nodes = [n for n in el_nodes if n.client_facing]
+    if len(el_nodes) > 1 and len(cf_el_nodes) == len(el_nodes):
+        warnings.append(
+            f"ALL {len(el_nodes)} event_loop nodes are client_facing=True. "
+            "This injects ask_user() on every node. Only nodes that need user "
+            "interaction (intake, review, approval) should be client_facing. Set "
+            "client_facing=False on autonomous processing nodes."
+        )
+
     # Collect summary info
     event_loop_nodes = [n.id for n in session.nodes if n.node_type == "event_loop"]
     client_facing_nodes = [n.id for n in session.nodes if n.client_facing]
@@ -1818,6 +1870,85 @@ def export_graph() -> str:
 
 
 @mcp.tool()
+def import_from_export(
+    agent_json_path: Annotated[str, "Path to the agent.json file to import"],
+) -> str:
+    """
+    Import an agent definition from an exported agent.json file into the current build session.
+
+    Reads the agent.json, parses goal/nodes/edges, and populates the current session.
+    This is the reverse of export_graph().
+
+    Args:
+        agent_json_path: Path to the agent.json file to import
+
+    Returns:
+        JSON summary of what was imported (goal name, node count, edge count)
+    """
+    session = get_session()
+
+    path = Path(agent_json_path)
+    if not path.exists():
+        return json.dumps({"success": False, "error": f"File not found: {agent_json_path}"})
+
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
+
+    try:
+        # Parse goal (same pattern as BuildSession.from_dict lines 88-99)
+        goal_data = data.get("goal")
+        if goal_data:
+            session.goal = Goal(
+                id=goal_data["id"],
+                name=goal_data["name"],
+                description=goal_data["description"],
+                success_criteria=[
+                    SuccessCriterion(**sc) for sc in goal_data.get("success_criteria", [])
+                ],
+                constraints=[Constraint(**c) for c in goal_data.get("constraints", [])],
+            )
+
+        # Parse nodes (same pattern as BuildSession.from_dict line 102)
+        graph_data = data.get("graph", {})
+        nodes_data = graph_data.get("nodes", [])
+        session.nodes = [NodeSpec(**n) for n in nodes_data]
+
+        # Parse edges (same pattern as BuildSession.from_dict lines 105-118)
+        edges_data = graph_data.get("edges", [])
+        session.edges = []
+        for e in edges_data:
+            condition_str = e.get("condition")
+            if isinstance(condition_str, str):
+                condition_map = {
+                    "always": EdgeCondition.ALWAYS,
+                    "on_success": EdgeCondition.ON_SUCCESS,
+                    "on_failure": EdgeCondition.ON_FAILURE,
+                    "conditional": EdgeCondition.CONDITIONAL,
+                    "llm_decide": EdgeCondition.LLM_DECIDE,
+                }
+                e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
+            session.edges.append(EdgeSpec(**e))
+    except (KeyError, TypeError, ValueError, ValidationError) as e:
+        return json.dumps({"success": False, "error": f"Malformed agent.json: {e}"})
+
+    # Persist updated session
+    _save_session(session)
+
+    return json.dumps(
+        {
+            "success": True,
+            "goal": session.goal.name if session.goal else None,
+            "nodes_count": len(session.nodes),
+            "edges_count": len(session.edges),
+            "node_ids": [n.id for n in session.nodes],
+            "edge_ids": [e.id for e in session.edges],
+        }
+    )
+
+
+@mcp.tool()
 def get_session_status() -> str:
     """Get the current status of the build session."""
     session = get_session()
@@ -1853,12 +1984,19 @@ def configure_loop(
     max_history_tokens: Annotated[
         int, "Maximum conversation history tokens before compaction (default 32000)"
     ] = 32000,
+    tool_call_overflow_margin: Annotated[
+        float,
+        "Overflow margin for max_tool_calls_per_turn. "
+        "Tool calls are only discarded when count exceeds "
+        "max_tool_calls_per_turn * (1 + margin). Default 0.5 (50% wiggle room)",
+    ] = 0.5,
 ) -> str:
     """Configure event loop parameters for EventLoopNode execution.
 
     These settings control how EventLoopNodes behave at runtime:
     - max_iterations: prevents infinite loops
     - max_tool_calls_per_turn: limits tool calls per LLM response
+    - tool_call_overflow_margin: wiggle room before tool calls are discarded (default 50%)
     - stall_detection_threshold: detects when LLM repeats itself
     - max_history_tokens: triggers conversation compaction
     """
@@ -1867,6 +2005,7 @@ def configure_loop(
     session.loop_config = {
         "max_iterations": max_iterations,
         "max_tool_calls_per_turn": max_tool_calls_per_turn,
+        "tool_call_overflow_margin": tool_call_overflow_margin,
         "stall_detection_threshold": stall_detection_threshold,
         "max_history_tokens": max_history_tokens,
     }
@@ -2189,7 +2328,7 @@ def test_node(
             )
         else:
             cf_note = (
-                "Node is client-facing: will block for user input between turns. "
+                "Node is client-facing: has ask_user() tool, blocks when LLM calls it. "
                 if node_spec.client_facing
                 else ""
             )
@@ -2892,18 +3031,15 @@ def _format_success_criteria(criteria: list[SuccessCriterion]) -> str:
 
 # Test template for Claude to use when writing tests
 CONSTRAINT_TEST_TEMPLATE = '''@pytest.mark.asyncio
-async def test_constraint_{constraint_id}_{scenario}(mock_mode):
+async def test_constraint_{constraint_id}_{scenario}(runner, auto_responder, mock_mode):
     """Test: {description}"""
-    result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
-
-    # IMPORTANT: result is an ExecutionResult object with these attributes:
-    # - result.success: bool - whether the agent succeeded
-    # - result.output: dict - the agent's output data (access data here!)
-    # - result.error: str or None - error message if failed
+    await auto_responder.start()
+    try:
+        result = await runner.run({{"key": "value"}})
+    finally:
+        await auto_responder.stop()
 
     assert result.success, f"Agent failed: {{result.error}}"
-
-    # Access output data via result.output
     output_data = result.output or {{}}
 
     # Add constraint-specific assertions here
@@ -2911,18 +3047,15 @@ async def test_constraint_{constraint_id}_{scenario}(mock_mode):
 '''
 
 SUCCESS_TEST_TEMPLATE = '''@pytest.mark.asyncio
-async def test_success_{criteria_id}_{scenario}(mock_mode):
+async def test_success_{criteria_id}_{scenario}(runner, auto_responder, mock_mode):
     """Test: {description}"""
-    result = await default_agent.run({{"key": "value"}}, mock_mode=mock_mode)
-
-    # IMPORTANT: result is an ExecutionResult object with these attributes:
-    # - result.success: bool - whether the agent succeeded
-    # - result.output: dict - the agent's output data (access data here!)
-    # - result.error: str or None - error message if failed
+    await auto_responder.start()
+    try:
+        result = await runner.run({{"key": "value"}})
+    finally:
+        await auto_responder.stop()
 
     assert result.success, f"Agent failed: {{result.error}}"
-
-    # Access output data via result.output
     output_data = result.output or {{}}
 
     # Add success criteria-specific assertions here
@@ -2978,7 +3111,6 @@ def generate_constraint_tests(
         test_type="Constraint",
         agent_name=agent_module,
         description=f"Tests for constraints defined in goal: {goal.name}",
-        agent_module=agent_module,
     )
 
     # Return guidelines + data for Claude to write tests directly
@@ -2994,14 +3126,22 @@ def generate_constraint_tests(
                 "max_tests": 5,
                 "naming_convention": "test_constraint_<constraint_id>_<scenario>",
                 "required_decorator": "@pytest.mark.asyncio",
-                "required_fixture": "mock_mode",
-                "agent_call_pattern": "await default_agent.run(input_dict, mock_mode=mock_mode)",
+                "required_fixtures": "runner, auto_responder, mock_mode",
+                "agent_call_pattern": "await runner.run(input_dict)",
+                "auto_responder_pattern": (
+                    "await auto_responder.start()\n"
+                    "try:\n"
+                    "    result = await runner.run(input_dict)\n"
+                    "finally:\n"
+                    "    await auto_responder.stop()"
+                ),
                 "result_type": "ExecutionResult with .success, .output (dict), .error",
                 "critical_rules": [
                     "Every test function MUST be async with @pytest.mark.asyncio",
-                    "Every test MUST accept mock_mode as a parameter",
-                    "Use await default_agent.run(input, mock_mode=mock_mode)",
-                    "default_agent is already imported - do NOT add imports",
+                    "Every test MUST accept runner, auto_responder, and mock_mode fixtures",
+                    "Use await runner.run(input) -- NOT default_agent.run()",
+                    "Start auto_responder before running, stop in finally block",
+                    "runner and auto_responder are from conftest.py -- do NOT import them",
                     "NEVER call result.get() - use result.output.get() instead",
                     "Always check result.success before accessing result.output",
                 ],
@@ -3065,7 +3205,6 @@ def generate_success_tests(
         test_type="Success criteria",
         agent_name=agent_module,
         description=f"Tests for success criteria defined in goal: {goal.name}",
-        agent_module=agent_module,
     )
 
     # Return guidelines + data for Claude to write tests directly
@@ -3087,14 +3226,22 @@ def generate_success_tests(
                 "max_tests": 12,
                 "naming_convention": "test_success_<criteria_id>_<scenario>",
                 "required_decorator": "@pytest.mark.asyncio",
-                "required_fixture": "mock_mode",
-                "agent_call_pattern": "await default_agent.run(input_dict, mock_mode=mock_mode)",
+                "required_fixtures": "runner, auto_responder, mock_mode",
+                "agent_call_pattern": "await runner.run(input_dict)",
+                "auto_responder_pattern": (
+                    "await auto_responder.start()\n"
+                    "try:\n"
+                    "    result = await runner.run(input_dict)\n"
+                    "finally:\n"
+                    "    await auto_responder.stop()"
+                ),
                 "result_type": "ExecutionResult with .success, .output (dict), .error",
                 "critical_rules": [
                     "Every test function MUST be async with @pytest.mark.asyncio",
-                    "Every test MUST accept mock_mode as a parameter",
-                    "Use await default_agent.run(input, mock_mode=mock_mode)",
-                    "default_agent is already imported - do NOT add imports",
+                    "Every test MUST accept runner, auto_responder, and mock_mode fixtures",
+                    "Use await runner.run(input) -- NOT default_agent.run()",
+                    "Start auto_responder before running, stop in finally block",
+                    "runner and auto_responder are from conftest.py -- do NOT import them",
                     "NEVER call result.get() - use result.output.get() instead",
                     "Always check result.success before accessing result.output",
                 ],
@@ -3191,11 +3338,13 @@ def run_tests(
     # Add short traceback and quiet summary
     cmd.append("--tb=short")
 
-    # Set PYTHONPATH to project root so agents can import from core.framework
+    # Set PYTHONPATH so framework and agent packages are importable
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
-    env["PYTHONPATH"] = f"{project_root}:{pythonpath}"
+    core_path = project_root / "core"
+    exports_path = project_root / "exports"
+    env["PYTHONPATH"] = f"{core_path}:{exports_path}:{project_root}:{pythonpath}"
 
     # Run pytest
     try:
@@ -3665,7 +3814,11 @@ def check_missing_credentials(
 
         from framework.runner import AgentRunner
 
-        runner = AgentRunner.load(agent_path)
+        path, err = _validate_agent_path(agent_path)
+        if err:
+            return err
+
+        runner = AgentRunner.load(str(path))
         runner.validate()
 
         store = _get_credential_store()
@@ -3865,7 +4018,11 @@ def verify_credentials(
     try:
         from framework.runner import AgentRunner
 
-        runner = AgentRunner.load(agent_path)
+        path, err = _validate_agent_path(agent_path)
+        if err:
+            return err
+
+        runner = AgentRunner.load(str(path))
         validation = runner.validate()
 
         return json.dumps(
@@ -3880,6 +4037,382 @@ def verify_credentials(
         )
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+# =============================================================================
+# SESSION & CHECKPOINT TOOLS (read-only, no build session required)
+# =============================================================================
+
+_MAX_DIFF_VALUE_LEN = 500
+
+
+def _read_session_json(path: Path) -> dict | None:
+    """Read a JSON file, returning None on failure."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _scan_agent_sessions(agent_work_dir: Path) -> list[tuple[str, Path]]:
+    """Find session directories with state.json, sorted most-recent-first."""
+    sessions: list[tuple[str, Path]] = []
+    sessions_dir = agent_work_dir / "sessions"
+    if not sessions_dir.exists():
+        return sessions
+    for session_dir in sessions_dir.iterdir():
+        if session_dir.is_dir() and session_dir.name.startswith("session_"):
+            state_path = session_dir / "state.json"
+            if state_path.exists():
+                sessions.append((session_dir.name, state_path))
+    sessions.sort(key=lambda t: t[0], reverse=True)
+    return sessions
+
+
+def _truncate_value(value: object, max_len: int = _MAX_DIFF_VALUE_LEN) -> object:
+    """Truncate a value's JSON representation if too long."""
+    s = json.dumps(value, default=str)
+    if len(s) <= max_len:
+        return value
+    return {"_truncated": True, "_preview": s[:max_len] + "...", "_length": len(s)}
+
+
+@mcp.tool()
+def list_agent_sessions(
+    agent_work_dir: Annotated[
+        str,
+        "Path to the agent's working directory (e.g., ~/.hive/agents/my_agent)",
+    ],
+    status: Annotated[
+        str,
+        "Filter by status: 'active', 'paused', 'completed', 'failed', 'cancelled'. Empty for all.",
+    ] = "",
+    limit: Annotated[int, "Maximum number of results (default 20)"] = 20,
+    offset: Annotated[int, "Number of sessions to skip for pagination"] = 0,
+) -> str:
+    """
+    List sessions for an agent with optional status filter.
+
+    Use this to discover which sessions exist, find resumable sessions,
+    or identify failed sessions for debugging. Combines well with
+    query_runtime_logs for correlating session state with log data.
+    """
+    work_dir = Path(agent_work_dir)
+    all_sessions = _scan_agent_sessions(work_dir)
+
+    if not all_sessions:
+        return json.dumps({"sessions": [], "total": 0, "offset": offset, "limit": limit})
+
+    summaries = []
+    for session_id, state_path in all_sessions:
+        data = _read_session_json(state_path)
+        if data is None:
+            continue
+
+        session_status = data.get("status", "")
+        if status and session_status != status:
+            continue
+
+        timestamps = data.get("timestamps", {})
+        progress = data.get("progress", {})
+        checkpoint_dir = state_path.parent / "checkpoints"
+
+        summaries.append(
+            {
+                "session_id": session_id,
+                "status": session_status,
+                "goal_id": data.get("goal_id", ""),
+                "started_at": timestamps.get("started_at", ""),
+                "updated_at": timestamps.get("updated_at", ""),
+                "completed_at": timestamps.get("completed_at"),
+                "is_resumable": data.get("is_resumable", False),
+                "is_resumable_from_checkpoint": data.get("is_resumable_from_checkpoint", False),
+                "current_node": progress.get("current_node"),
+                "paused_at": progress.get("paused_at"),
+                "steps_executed": progress.get("steps_executed", 0),
+                "execution_quality": progress.get("execution_quality", ""),
+                "has_checkpoints": checkpoint_dir.exists()
+                and any(checkpoint_dir.glob("cp_*.json")),
+            }
+        )
+
+    total = len(summaries)
+    page = summaries[offset : offset + limit]
+    return json.dumps(
+        {"sessions": page, "total": total, "offset": offset, "limit": limit}, indent=2
+    )
+
+
+@mcp.tool()
+def get_agent_session_state(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID (e.g., 'session_20260208_143022_abc12345')"],
+) -> str:
+    """
+    Load full session state for a specific session.
+
+    Returns complete session data including status, progress, result,
+    metrics, and checkpoint info. Memory values are excluded to prevent
+    context bloat -- use get_agent_session_memory to retrieve memory contents.
+    """
+    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
+    data = _read_session_json(state_path)
+    if data is None:
+        return json.dumps({"error": f"Session not found: {session_id}"})
+
+    memory = data.get("memory", {})
+    data["memory_keys"] = list(memory.keys()) if isinstance(memory, dict) else []
+    data["memory_size"] = len(memory) if isinstance(memory, dict) else 0
+    data.pop("memory", None)
+
+    return json.dumps(data, indent=2, default=str)
+
+
+@mcp.tool()
+def get_agent_session_memory(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID"],
+    key: Annotated[str, "Specific memory key to retrieve. Empty for all."] = "",
+) -> str:
+    """
+    Get memory contents from a session.
+
+    Memory stores intermediate results passed between nodes. Use this
+    to inspect what data was produced during execution.
+
+    If key is provided, returns only that memory key's value.
+    If key is empty, returns all memory keys and their values.
+    """
+    state_path = Path(agent_work_dir) / "sessions" / session_id / "state.json"
+    data = _read_session_json(state_path)
+    if data is None:
+        return json.dumps({"error": f"Session not found: {session_id}"})
+
+    memory = data.get("memory", {})
+    if not isinstance(memory, dict):
+        memory = {}
+
+    if key:
+        if key not in memory:
+            return json.dumps(
+                {
+                    "error": f"Memory key not found: '{key}'",
+                    "available_keys": list(memory.keys()),
+                }
+            )
+        value = memory[key]
+        return json.dumps(
+            {
+                "session_id": session_id,
+                "key": key,
+                "value": value,
+                "value_type": type(value).__name__,
+            },
+            indent=2,
+            default=str,
+        )
+
+    return json.dumps(
+        {"session_id": session_id, "memory": memory, "total_keys": len(memory)},
+        indent=2,
+        default=str,
+    )
+
+
+@mcp.tool()
+def list_agent_checkpoints(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID to list checkpoints for"],
+    checkpoint_type: Annotated[
+        str,
+        "Filter by type: 'node_start', 'node_complete', 'loop_iteration'. Empty for all.",
+    ] = "",
+    is_clean: Annotated[str, "Filter by clean status: 'true', 'false', or empty for all."] = "",
+) -> str:
+    """
+    List checkpoints for a specific session.
+
+    Checkpoints capture execution state at node boundaries for
+    crash recovery and resume. Use with get_agent_checkpoint for
+    detailed checkpoint inspection.
+    """
+    session_dir = Path(agent_work_dir) / "sessions" / session_id
+    checkpoint_dir = session_dir / "checkpoints"
+
+    if not session_dir.exists():
+        return json.dumps({"error": f"Session not found: {session_id}"})
+
+    if not checkpoint_dir.exists():
+        return json.dumps(
+            {
+                "session_id": session_id,
+                "checkpoints": [],
+                "total": 0,
+                "latest_checkpoint_id": None,
+            }
+        )
+
+    # Try index.json first
+    index_data = _read_session_json(checkpoint_dir / "index.json")
+    if index_data and "checkpoints" in index_data:
+        checkpoints = index_data["checkpoints"]
+    else:
+        # Fallback: scan individual checkpoint files
+        checkpoints = []
+        for cp_file in sorted(checkpoint_dir.glob("cp_*.json")):
+            cp_data = _read_session_json(cp_file)
+            if cp_data:
+                checkpoints.append(
+                    {
+                        "checkpoint_id": cp_data.get("checkpoint_id", cp_file.stem),
+                        "checkpoint_type": cp_data.get("checkpoint_type", ""),
+                        "created_at": cp_data.get("created_at", ""),
+                        "current_node": cp_data.get("current_node"),
+                        "next_node": cp_data.get("next_node"),
+                        "is_clean": cp_data.get("is_clean", True),
+                        "description": cp_data.get("description", ""),
+                    }
+                )
+
+    # Apply filters
+    if checkpoint_type:
+        checkpoints = [c for c in checkpoints if c.get("checkpoint_type") == checkpoint_type]
+    if is_clean:
+        clean_val = is_clean.lower() == "true"
+        checkpoints = [c for c in checkpoints if c.get("is_clean") == clean_val]
+
+    latest_id = None
+    if index_data:
+        latest_id = index_data.get("latest_checkpoint_id")
+    elif checkpoints:
+        latest_id = checkpoints[-1].get("checkpoint_id")
+
+    return json.dumps(
+        {
+            "session_id": session_id,
+            "checkpoints": checkpoints,
+            "total": len(checkpoints),
+            "latest_checkpoint_id": latest_id,
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def get_agent_checkpoint(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID"],
+    checkpoint_id: Annotated[str, "Specific checkpoint ID, or empty for latest"] = "",
+) -> str:
+    """
+    Load a specific checkpoint with full state data.
+
+    Returns the complete checkpoint including shared memory snapshot,
+    execution path, accumulated outputs, and metrics. If checkpoint_id
+    is empty, loads the latest checkpoint.
+    """
+    session_dir = Path(agent_work_dir) / "sessions" / session_id
+    checkpoint_dir = session_dir / "checkpoints"
+
+    if not checkpoint_dir.exists():
+        return json.dumps({"error": f"No checkpoints found for session: {session_id}"})
+
+    if not checkpoint_id:
+        index_data = _read_session_json(checkpoint_dir / "index.json")
+        if index_data and index_data.get("latest_checkpoint_id"):
+            checkpoint_id = index_data["latest_checkpoint_id"]
+        else:
+            cp_files = sorted(checkpoint_dir.glob("cp_*.json"))
+            if not cp_files:
+                return json.dumps({"error": f"No checkpoints found for session: {session_id}"})
+            checkpoint_id = cp_files[-1].stem
+
+    cp_path = checkpoint_dir / f"{checkpoint_id}.json"
+    data = _read_session_json(cp_path)
+    if data is None:
+        return json.dumps({"error": f"Checkpoint not found: {checkpoint_id}"})
+
+    return json.dumps(data, indent=2, default=str)
+
+
+@mcp.tool()
+def compare_agent_checkpoints(
+    agent_work_dir: Annotated[str, "Path to the agent's working directory"],
+    session_id: Annotated[str, "The session ID"],
+    checkpoint_id_before: Annotated[str, "The earlier checkpoint ID"],
+    checkpoint_id_after: Annotated[str, "The later checkpoint ID"],
+) -> str:
+    """
+    Compare memory state between two checkpoints.
+
+    Shows what memory keys were added, removed, or changed between
+    two points in execution. Useful for understanding how data flows
+    through the agent graph.
+    """
+    checkpoint_dir = Path(agent_work_dir) / "sessions" / session_id / "checkpoints"
+
+    before = _read_session_json(checkpoint_dir / f"{checkpoint_id_before}.json")
+    if before is None:
+        return json.dumps({"error": f"Checkpoint not found: {checkpoint_id_before}"})
+
+    after = _read_session_json(checkpoint_dir / f"{checkpoint_id_after}.json")
+    if after is None:
+        return json.dumps({"error": f"Checkpoint not found: {checkpoint_id_after}"})
+
+    mem_before = before.get("shared_memory", {})
+    mem_after = after.get("shared_memory", {})
+
+    keys_before = set(mem_before.keys())
+    keys_after = set(mem_after.keys())
+
+    added = {k: _truncate_value(mem_after[k]) for k in keys_after - keys_before}
+    removed = list(keys_before - keys_after)
+    unchanged = []
+    changed = {}
+
+    for k in keys_before & keys_after:
+        if mem_before[k] == mem_after[k]:
+            unchanged.append(k)
+        else:
+            changed[k] = {
+                "before": _truncate_value(mem_before[k]),
+                "after": _truncate_value(mem_after[k]),
+            }
+
+    path_before = before.get("execution_path", [])
+    path_after = after.get("execution_path", [])
+    new_nodes = path_after[len(path_before) :]
+
+    return json.dumps(
+        {
+            "session_id": session_id,
+            "before": {
+                "checkpoint_id": checkpoint_id_before,
+                "current_node": before.get("current_node"),
+                "created_at": before.get("created_at", ""),
+            },
+            "after": {
+                "checkpoint_id": checkpoint_id_after,
+                "current_node": after.get("current_node"),
+                "created_at": after.get("created_at", ""),
+            },
+            "memory_diff": {
+                "added": added,
+                "removed": removed,
+                "changed": changed,
+                "unchanged": unchanged,
+            },
+            "execution_path_diff": {
+                "new_nodes": new_nodes,
+                "path_before": path_before,
+                "path_after": path_after,
+            },
+        },
+        indent=2,
+        default=str,
+    )
 
 
 # =============================================================================

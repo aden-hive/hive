@@ -21,12 +21,19 @@ allowing the LLM to evaluate whether proceeding along an edge makes sense
 given the current goal, context, and execution state.
 """
 
+import json
+import logging
+import re
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from framework.graph.safe_eval import safe_eval
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_MAX_TOKENS = 8192
 
 
 class EdgeCondition(StrEnum):
@@ -156,6 +163,7 @@ class EdgeSpec(BaseModel):
         memory: dict[str, Any],
     ) -> bool:
         """Evaluate a conditional expression."""
+
         if not self.condition_expr:
             return True
 
@@ -172,12 +180,24 @@ class EdgeSpec(BaseModel):
 
         try:
             # Safe evaluation using AST-based whitelist
-            return bool(safe_eval(self.condition_expr, context))
+            result = bool(safe_eval(self.condition_expr, context))
+            # Log the evaluation for visibility
+            # Extract the variable names used in the expression for debugging
+            expr_vars = {
+                k: repr(context[k])
+                for k in context
+                if k not in ("output", "memory", "result", "true", "false")
+                and k in self.condition_expr
+            }
+            logger.info(
+                "  Edge %s: condition '%s' → %s  (vars: %s)",
+                self.id,
+                self.condition_expr,
+                result,
+                expr_vars or "none matched",
+            )
+            return result
         except Exception as e:
-            # Log the error for debugging
-            import logging
-
-            logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ Condition evaluation failed: {self.condition_expr}")
             logger.warning(f"         Error: {e}")
             logger.warning(f"         Available context keys: {list(context.keys())}")
@@ -199,8 +219,6 @@ class EdgeSpec(BaseModel):
         The LLM evaluates whether proceeding to the target node
         is the best next step toward achieving the goal.
         """
-        import json
-
         # Build context for LLM
         prompt = f"""You are evaluating whether to proceed along an edge in an agent workflow.
 
@@ -236,8 +254,6 @@ Respond with ONLY a JSON object:
             )
 
             # Parse response
-            import re
-
             json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
@@ -245,9 +261,6 @@ Respond with ONLY a JSON object:
                 reasoning = data.get("reasoning", "")
 
                 # Log the decision (using basic print for now)
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.info(f"      🤔 LLM routing decision: {'PROCEED' if proceed else 'SKIP'}")
                 logger.info(f"         Reason: {reasoning}")
 
@@ -255,9 +268,6 @@ Respond with ONLY a JSON object:
 
         except Exception as e:
             # Fallback: proceed on success
-            import logging
-
-            logger = logging.getLogger(__name__)
             logger.warning(f"      ⚠ LLM routing failed, defaulting to on_success: {e}")
             return source_success
 
@@ -408,7 +418,7 @@ class GraphSpec(BaseModel):
 
     # Default LLM settings
     default_model: str = "claude-haiku-4-5-20251001"
-    max_tokens: int = 1024
+    max_tokens: int = Field(default=None)  # resolved by _resolve_max_tokens validator
 
     # Cleanup LLM for JSON extraction fallback (fast/cheap model preferred)
     # If not set, uses CEREBRAS_API_KEY -> cerebras/llama-3.3-70b or
@@ -419,11 +429,46 @@ class GraphSpec(BaseModel):
     max_steps: int = Field(default=100, description="Maximum node executions before timeout")
     max_retries_per_node: int = 3
 
+    # EventLoopNode configuration (from configure_loop)
+    loop_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="EventLoopNode configuration (max_iterations, max_tool_calls_per_turn, etc.)",
+    )
+
+    # Conversation mode
+    conversation_mode: str = Field(
+        default="continuous",
+        description=(
+            "How conversations flow between event_loop nodes. "
+            "'continuous' (default): one conversation threads through all "
+            "event_loop nodes with cumulative tools and layered prompt composition. "
+            "'isolated': each node gets a fresh conversation."
+        ),
+    )
+    identity_prompt: str | None = Field(
+        default=None,
+        description=(
+            "Agent-level identity prompt (Layer 1 of the onion model). "
+            "In continuous mode, this is the static identity that persists "
+            "unchanged across all node transitions. In isolated mode, ignored."
+        ),
+    )
+
     # Metadata
     description: str = ""
     created_by: str = ""  # "human" or "builder_agent"
 
     model_config = {"extra": "allow"}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_max_tokens(cls, values: Any) -> Any:
+        """Resolve max_tokens from the global config store when not explicitly set."""
+        if isinstance(values, dict) and values.get("max_tokens") is None:
+            from framework.config import get_max_tokens
+
+            values["max_tokens"] = get_max_tokens()
+        return values
 
     def get_node(self, node_id: str) -> Any | None:
         """Get a node by ID."""

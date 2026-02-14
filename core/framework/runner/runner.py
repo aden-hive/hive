@@ -8,17 +8,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from framework.config import get_hive_config, get_preferred_model
+from framework.credentials.validation import (
+    ensure_credential_key_env as _ensure_credential_key_env,
+    validate_agent_credentials,
+)
 from framework.graph import Goal
-from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
-from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.graph.edge import (
+    DEFAULT_MAX_TOKENS,
+    AsyncEntryPointSpec,
+    EdgeCondition,
+    EdgeSpec,
+    GraphSpec,
+)
+from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
-
-# Multi-entry-point runtime imports
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
-from framework.runtime.core import Runtime
 from framework.runtime.execution_stream import EntryPointSpec
+from framework.runtime.runtime_log_store import RuntimeLogStore
 
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
@@ -26,47 +35,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Configuration paths
-HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
-
-
-def _ensure_credential_key_env() -> None:
-    """Load HIVE_CREDENTIAL_KEY from shell config if not already in environment.
-
-    The setup-credentials skill writes the encryption key to ~/.zshrc or ~/.bashrc.
-    If the user hasn't sourced their config in the current shell, this reads it
-    directly so the runner (and any MCP subprocesses it spawns) can unlock the
-    encrypted credential store.
-
-    Only HIVE_CREDENTIAL_KEY is loaded this way — all other secrets (API keys, etc.)
-    come from the credential store itself.
-    """
-    if os.environ.get("HIVE_CREDENTIAL_KEY"):
-        return
-
-    try:
-        from aden_tools.credentials.shell_config import check_env_var_in_shell_config
-
-        found, value = check_env_var_in_shell_config("HIVE_CREDENTIAL_KEY")
-        if found and value:
-            os.environ["HIVE_CREDENTIAL_KEY"] = value
-            logger.debug("Loaded HIVE_CREDENTIAL_KEY from shell config")
-    except ImportError:
-        pass
-
-
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
-
-
-def get_hive_config() -> dict[str, Any]:
-    """Load hive configuration from ~/.hive/configuration.json."""
-    if not HIVE_CONFIG_FILE.exists():
-        return {}
-    try:
-        with open(HIVE_CONFIG_FILE) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
 
 
 def get_claude_code_token() -> str | None:
@@ -266,11 +235,7 @@ class AgentRunner:
     @staticmethod
     def _resolve_default_model() -> str:
         """Resolve the default model from ~/.hive/configuration.json."""
-        config = get_hive_config()
-        llm = config.get("llm", {})
-        if llm.get("provider") and llm.get("model"):
-            return f"{llm['provider']}/{llm['model']}"
-        return "anthropic/claude-sonnet-4-20250514"
+        return get_preferred_model()
 
     def __init__(
         self,
@@ -280,7 +245,7 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str | None = None,
-        enable_tui: bool = False,
+        intro_message: str = "",
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -292,23 +257,23 @@ class AgentRunner:
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to temp)
             model: Model to use (reads from agent config or ~/.hive/configuration.json if None)
-            enable_tui: If True, forces use of AgentRuntime with EventBus
+            intro_message: Optional greeting shown to user on TUI load
         """
         self.agent_path = agent_path
         self.graph = graph
         self.goal = goal
         self.mock_mode = mock_mode
         self.model = model or self._resolve_default_model()
-        self.enable_tui = enable_tui
+        self.intro_message = intro_message
 
         # Set up storage
         if storage_path:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            # Use persistent storage in ~/.hive by default
+            # Use persistent storage in ~/.hive/agents/{agent_name}/ per RUNTIME_LOGGING.md spec
             home = Path.home()
-            default_storage = home / ".hive" / "storage" / agent_path.name
+            default_storage = home / ".hive" / "agents" / agent_path.name
             default_storage.mkdir(parents=True, exist_ok=True)
             self._storage_path = default_storage
             self._temp_dir = None
@@ -319,14 +284,16 @@ class AgentRunner:
 
         # Initialize components
         self._tool_registry = ToolRegistry()
-        self._runtime: Runtime | None = None
         self._llm: LLMProvider | None = None
-        self._executor: GraphExecutor | None = None
         self._approval_callback: Callable | None = None
 
-        # Multi-entry-point support (AgentRuntime)
+        # AgentRuntime — unified execution path for all agents
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
+
+        # Validate credentials before spawning MCP servers.
+        # Fails fast with actionable guidance — no MCP noise on screen.
+        self._validate_credentials()
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
@@ -337,6 +304,13 @@ class AgentRunner:
         mcp_config_path = agent_path / "mcp_servers.json"
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
+
+    def _validate_credentials(self) -> None:
+        """Check that required credentials are available before spawning MCP servers.
+
+        Raises CredentialError with actionable guidance if any are missing.
+        """
+        validate_agent_credentials(self.graph.nodes)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -381,7 +355,6 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str | None = None,
-        enable_tui: bool = False,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -393,9 +366,8 @@ class AgentRunner:
         Args:
             agent_path: Path to agent folder
             mock_mode: If True, use mock LLM responses
-            storage_path: Path for runtime storage (defaults to ~/.hive/storage/{name})
+            storage_path: Path for runtime storage (defaults to ~/.hive/agents/{name})
             model: LLM model to use (reads from agent's default_config if None)
-            enable_tui: If True, forces use of AgentRuntime with EventBus
 
         Returns:
             AgentRunner instance ready to run
@@ -423,7 +395,17 @@ class AgentRunner:
                 if agent_config and hasattr(agent_config, "model"):
                     model = agent_config.model
 
-            max_tokens = getattr(agent_config, "max_tokens", 1024) if agent_config else 1024
+            if agent_config and hasattr(agent_config, "max_tokens"):
+                max_tokens = agent_config.max_tokens
+            else:
+                hive_config = get_hive_config()
+                max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+
+            # Read intro_message from agent metadata (shown on TUI load)
+            agent_metadata = getattr(agent_module, "metadata", None)
+            intro_message = ""
+            if agent_metadata and hasattr(agent_metadata, "intro_message"):
+                intro_message = agent_metadata.intro_message
 
             # Build GraphSpec from module-level variables
             graph = GraphSpec(
@@ -437,6 +419,7 @@ class AgentRunner:
                 nodes=nodes,
                 edges=edges,
                 max_tokens=max_tokens,
+                loop_config=getattr(agent_module, "loop_config", {}),
             )
 
             return cls(
@@ -446,7 +429,7 @@ class AgentRunner:
                 mock_mode=mock_mode,
                 storage_path=storage_path,
                 model=model,
-                enable_tui=enable_tui,
+                intro_message=intro_message,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
@@ -464,7 +447,6 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
-            enable_tui=enable_tui,
         )
 
     def register_tool(
@@ -554,12 +536,14 @@ class AgentRunner:
             callback: Function to call for approval (receives node info, returns bool)
         """
         self._approval_callback = callback
-        # If executor already exists, update it
-        if self._executor is not None:
-            self._executor.approval_callback = callback
 
     def _setup(self) -> None:
         """Set up runtime, LLM, and executor."""
+        # Configure structured logging (auto-detects JSON vs human-readable)
+        from framework.observability import configure_logging
+
+        configure_logging(level="INFO", format="auto")
+
         # Set up session context for tools (workspace_id, agent_id, session_id)
         workspace_id = "default"  # Could be derived from storage path
         agent_id = self.graph.id or "unknown"
@@ -600,7 +584,10 @@ class AgentRunner:
                 self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
             else:
                 # Fall back to environment variable
-                api_key_env = self._get_api_key_env_var(self.model)
+                # First check api_key_env_var from config (set by quickstart)
+                api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
+                    self.model
+                )
                 if api_key_env and os.environ.get(api_key_env):
                     self._llm = LiteLLMProvider(model=self.model)
                 else:
@@ -616,16 +603,11 @@ class AgentRunner:
                         print(f"Warning: {api_key_env} not set. LLM calls will fail.")
                         print(f"Set it with: export {api_key_env}=your-api-key")
 
-        # Get tools for executor/runtime
+        # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
-        if self._uses_async_entry_points or self.enable_tui:
-            # Multi-entry-point mode or TUI mode: use AgentRuntime
-            self._setup_agent_runtime(tools, tool_executor)
-        else:
-            # Single-entry-point mode: use legacy GraphExecutor
-            self._setup_legacy_executor(tools, tool_executor)
+        self._setup_agent_runtime(tools, tool_executor)
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -640,7 +622,7 @@ class AgentRunner:
         elif model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
             return "ANTHROPIC_API_KEY"
         elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
-            return "GOOGLE_API_KEY"
+            return "GEMINI_API_KEY"
         elif model_lower.startswith("mistral/"):
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
@@ -686,20 +668,6 @@ class AgentRunner:
         except Exception:
             return None
 
-    def _setup_legacy_executor(self, tools: list, tool_executor: Callable | None) -> None:
-        """Set up legacy single-entry-point execution using GraphExecutor."""
-        # Create runtime
-        self._runtime = Runtime(storage_path=self._storage_path)
-
-        # Create executor
-        self._executor = GraphExecutor(
-            runtime=self._runtime,
-            llm=self._llm,
-            tools=tools,
-            tool_executor=tool_executor,
-            approval_callback=self._approval_callback,
-        )
-
     def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
@@ -717,9 +685,9 @@ class AgentRunner:
             )
             entry_points.append(ep)
 
-        # If TUI enabled but no entry points (single-entry agent), create default
-        if not entry_points and self.enable_tui and self.graph.entry_node:
-            logger.info("Creating default entry point for TUI")
+        # Single-entry agent with no async entry points: create a default entry point
+        if not entry_points and self.graph.entry_node:
+            logger.info("Creating default entry point for single-entry agent")
             entry_points.append(
                 EntryPointSpec(
                     id="default",
@@ -731,6 +699,19 @@ class AgentRunner:
             )
 
         # Create AgentRuntime with all entry points
+        log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
+
+        # Enable checkpointing by default for resumable sessions
+        from framework.graph.checkpoint_config import CheckpointConfig
+
+        checkpoint_config = CheckpointConfig(
+            enabled=True,
+            checkpoint_on_node_start=False,  # Only checkpoint after nodes complete
+            checkpoint_on_node_complete=True,
+            checkpoint_max_age_days=7,
+            async_checkpoint=True,  # Non-blocking
+        )
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -739,7 +720,12 @@ class AgentRunner:
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
+            runtime_log_store=log_store,
+            checkpoint_config=checkpoint_config,
         )
+
+        # Pass intro_message through for TUI display
+        self._agent_runtime.intro_message = self.intro_message
 
     async def run(
         self,
@@ -780,32 +766,9 @@ class AgentRunner:
                 error=error_msg,
             )
 
-        if self._uses_async_entry_points or self.enable_tui:
-            # Multi-entry-point mode: use AgentRuntime
-            return await self._run_with_agent_runtime(
-                input_data=input_data or {},
-                entry_point_id=entry_point_id,
-            )
-        else:
-            # Legacy single-entry-point mode
-            return await self._run_with_executor(
-                input_data=input_data or {},
-                session_state=session_state,
-            )
-
-    async def _run_with_executor(
-        self,
-        input_data: dict,
-        session_state: dict | None = None,
-    ) -> ExecutionResult:
-        """Run using legacy GraphExecutor (single entry point)."""
-        if self._executor is None:
-            self._setup()
-
-        return await self._executor.execute(
-            graph=self.graph,
-            goal=self.goal,
-            input_data=input_data,
+        return await self._run_with_agent_runtime(
+            input_data=input_data or {},
+            entry_point_id=entry_point_id,
             session_state=session_state,
         )
 
@@ -813,14 +776,63 @@ class AgentRunner:
         self,
         input_data: dict,
         entry_point_id: str | None = None,
+        session_state: dict | None = None,
     ) -> ExecutionResult:
-        """Run using AgentRuntime (multi-entry-point)."""
+        """Run using AgentRuntime."""
+        import sys
+
         if self._agent_runtime is None:
             self._setup()
 
         # Start runtime if not running
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
+
+        # Set up stdin-based I/O for client-facing nodes in headless mode.
+        # When a client_facing EventLoopNode calls ask_user(), it emits
+        # CLIENT_INPUT_REQUESTED on the event bus and blocks.  We subscribe
+        # a handler that prints the prompt and reads from stdin, then injects
+        # the user's response back into the node to unblock it.
+        has_client_facing = any(n.client_facing for n in self.graph.nodes)
+        sub_ids: list[str] = []
+
+        if has_client_facing and sys.stdin.isatty():
+            from framework.runtime.event_bus import EventType
+
+            runtime = self._agent_runtime
+
+            async def _handle_client_output(event):
+                """Print agent output to stdout as it streams."""
+                content = event.data.get("content", "")
+                if content:
+                    print(content, end="", flush=True)
+
+            async def _handle_input_requested(event):
+                """Read user input from stdin and inject it into the node."""
+                import asyncio
+
+                node_id = event.node_id
+                try:
+                    loop = asyncio.get_event_loop()
+                    user_input = await loop.run_in_executor(None, input, "\n>>> ")
+                except EOFError:
+                    user_input = ""
+
+                # Inject into the waiting EventLoopNode via runtime
+                await runtime.inject_input(node_id, user_input)
+
+            sub_ids.append(
+                runtime.subscribe_to_events(
+                    event_types=[EventType.CLIENT_OUTPUT_DELTA],
+                    handler=_handle_client_output,
+                )
+            )
+            sub_ids.append(
+                runtime.subscribe_to_events(
+                    event_types=[EventType.CLIENT_INPUT_REQUESTED],
+                    handler=_handle_input_requested,
+                )
+            )
 
         # Determine entry point
         if entry_point_id is None:
@@ -831,44 +843,38 @@ class AgentRunner:
             else:
                 entry_point_id = "default"
 
-        # Trigger and wait for result
-        result = await self._agent_runtime.trigger_and_wait(
-            entry_point_id=entry_point_id,
-            input_data=input_data,
-        )
-
-        # Return result or create error result
-        if result is not None:
-            return result
-        else:
-            return ExecutionResult(
-                success=False,
-                error="Execution timed out or failed to complete",
+        try:
+            # Trigger and wait for result
+            result = await self._agent_runtime.trigger_and_wait(
+                entry_point_id=entry_point_id,
+                input_data=input_data,
+                session_state=session_state,
             )
 
-    # === Multi-Entry-Point API (for agents with async_entry_points) ===
+            # Return result or create error result
+            if result is not None:
+                return result
+            else:
+                return ExecutionResult(
+                    success=False,
+                    error="Execution timed out or failed to complete",
+                )
+        finally:
+            # Clean up subscriptions
+            for sub_id in sub_ids:
+                self._agent_runtime.unsubscribe_from_events(sub_id)
+
+    # === Runtime API ===
 
     async def start(self) -> None:
-        """
-        Start the agent runtime (for multi-entry-point agents).
-
-        This starts all registered entry points and allows concurrent execution.
-        For single-entry-point agents, this is a no-op.
-        """
-        if not self._uses_async_entry_points:
-            return
-
+        """Start the agent runtime."""
         if self._agent_runtime is None:
             self._setup()
 
         await self._agent_runtime.start()
 
     async def stop(self) -> None:
-        """
-        Stop the agent runtime (for multi-entry-point agents).
-
-        For single-entry-point agents, this is a no-op.
-        """
+        """Stop the agent runtime."""
         if self._agent_runtime is not None:
             await self._agent_runtime.stop()
 
@@ -881,7 +887,7 @@ class AgentRunner:
         """
         Trigger execution at a specific entry point (non-blocking).
 
-        For multi-entry-point agents only. Returns execution ID for tracking.
+        Returns execution ID for tracking.
 
         Args:
             entry_point_id: Which entry point to trigger
@@ -890,16 +896,7 @@ class AgentRunner:
 
         Returns:
             Execution ID for tracking
-
-        Raises:
-            RuntimeError: If agent doesn't use async entry points
         """
-        if not self._uses_async_entry_points:
-            raise RuntimeError(
-                "trigger() is only available for multi-entry-point agents. "
-                "Use run() for single-entry-point agents."
-            )
-
         if self._agent_runtime is None:
             self._setup()
 
@@ -916,19 +913,9 @@ class AgentRunner:
         """
         Get goal progress across all execution streams.
 
-        For multi-entry-point agents only.
-
         Returns:
             Dict with overall_progress, criteria_status, constraint_violations, etc.
-
-        Raises:
-            RuntimeError: If agent doesn't use async entry points
         """
-        if not self._uses_async_entry_points:
-            raise RuntimeError(
-                "get_goal_progress() is only available for multi-entry-point agents."
-            )
-
         if self._agent_runtime is None:
             self._setup()
 
@@ -936,14 +923,11 @@ class AgentRunner:
 
     def get_entry_points(self) -> list[EntryPointSpec]:
         """
-        Get all registered entry points (for multi-entry-point agents).
+        Get all registered entry points.
 
         Returns:
             List of EntryPointSpec objects
         """
-        if not self._uses_async_entry_points:
-            return []
-
         if self._agent_runtime is None:
             self._setup()
 
@@ -1367,7 +1351,7 @@ Respond with JSON only:
             self._temp_dir = None
 
     async def cleanup_async(self) -> None:
-        """Clean up resources (asynchronous - for multi-entry-point agents)."""
+        """Clean up resources (asynchronous)."""
         # Stop agent runtime if running
         if self._agent_runtime is not None and self._agent_runtime.is_running:
             await self._agent_runtime.stop()
@@ -1378,8 +1362,7 @@ Respond with JSON only:
     async def __aenter__(self) -> "AgentRunner":
         """Context manager entry."""
         self._setup()
-        # Start runtime for multi-entry-point agents
-        if self._uses_async_entry_points and self._agent_runtime is not None:
+        if self._agent_runtime is not None:
             await self._agent_runtime.start()
         return self
 

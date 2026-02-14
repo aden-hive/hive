@@ -66,7 +66,7 @@ prompt_choice() {
 
     local choice
     while true; do
-        read -r -p "Enter choice (1-${#options[@]}): " choice
+        read -r -p "Enter choice (1-${#options[@]}): " choice || true
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
             PROMPT_CHOICE=$((choice - 1))
             return 0
@@ -303,14 +303,73 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-sonnet-4-5-20250929"
-        ["openai"]="gpt-4o"
-        ["gemini"]="gemini-3.0-flash-preview"
+        ["anthropic"]="claude-haiku-4-5"
+        ["openai"]="gpt-5-mini"
+        ["gemini"]="gemini-3-flash-preview"
         ["groq"]="moonshotai/kimi-k2-instruct-0905"
         ["cerebras"]="zai-glm-4.7"
         ["mistral"]="mistral-large-latest"
         ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
         ["deepseek"]="deepseek-chat"
+    )
+
+    # Model choices per provider: composite-key associative arrays
+    # Keys: "provider:index" -> value
+    declare -A MODEL_CHOICES_ID=(
+        ["anthropic:0"]="claude-opus-4-6"
+        ["anthropic:1"]="claude-sonnet-4-5-20250929"
+        ["anthropic:2"]="claude-sonnet-4-20250514"
+        ["anthropic:3"]="claude-haiku-4-5-20251001"
+        ["openai:0"]="gpt-5.2"
+        ["openai:1"]="gpt-5-mini"
+        ["openai:2"]="gpt-5-nano"
+        ["gemini:0"]="gemini-3-flash-preview"
+        ["gemini:1"]="gemini-3-pro-preview"
+        ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
+        ["groq:1"]="openai/gpt-oss-120b"
+        ["cerebras:0"]="zai-glm-4.7"
+        ["cerebras:1"]="qwen3-235b-a22b-instruct-2507"
+    )
+
+    declare -A MODEL_CHOICES_LABEL=(
+        ["anthropic:0"]="Opus 4.6 - Most capable (recommended)"
+        ["anthropic:1"]="Sonnet 4.5 - Best balance"
+        ["anthropic:2"]="Sonnet 4 - Fast + capable"
+        ["anthropic:3"]="Haiku 4.5 - Fast + cheap"
+        ["openai:0"]="GPT-5.2 - Most capable (recommended)"
+        ["openai:1"]="GPT-5 Mini - Fast + cheap"
+        ["openai:2"]="GPT-5 Nano - Fastest"
+        ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
+        ["gemini:1"]="Gemini 3 Pro - Best quality"
+        ["groq:0"]="Kimi K2 - Best quality (recommended)"
+        ["groq:1"]="GPT-OSS 120B - Fast reasoning"
+        ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
+        ["cerebras:1"]="Qwen3 235B - Frontier reasoning"
+    )
+
+    # NOTE: 8192 should match DEFAULT_MAX_TOKENS in core/framework/graph/edge.py
+    declare -A MODEL_CHOICES_MAXTOKENS=(
+        ["anthropic:0"]=8192
+        ["anthropic:1"]=8192
+        ["anthropic:2"]=8192
+        ["anthropic:3"]=8192
+        ["openai:0"]=16384
+        ["openai:1"]=16384
+        ["openai:2"]=16384
+        ["gemini:0"]=8192
+        ["gemini:1"]=8192
+        ["groq:0"]=8192
+        ["groq:1"]=8192
+        ["cerebras:0"]=8192
+        ["cerebras:1"]=8192
+    )
+
+    declare -A MODEL_CHOICES_COUNT=(
+        ["anthropic"]=4
+        ["openai"]=3
+        ["gemini"]=2
+        ["groq"]=2
+        ["cerebras"]=2
     )
 
     # Helper functions for Bash 4+
@@ -325,6 +384,22 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     get_default_model() {
         echo "${DEFAULT_MODELS[$1]}"
     }
+
+    get_model_choice_count() {
+        echo "${MODEL_CHOICES_COUNT[$1]:-0}"
+    }
+
+    get_model_choice_id() {
+        echo "${MODEL_CHOICES_ID[$1:$2]}"
+    }
+
+    get_model_choice_label() {
+        echo "${MODEL_CHOICES_LABEL[$1:$2]}"
+    }
+
+    get_model_choice_maxtokens() {
+        echo "${MODEL_CHOICES_MAXTOKENS[$1:$2]}"
+    }
 else
     # Bash 3.2 - use parallel indexed arrays
     PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
@@ -333,7 +408,7 @@ else
 
     # Default models by provider id (parallel arrays)
     MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-sonnet-4-5-20250929" "gpt-4o" "gemini-3.0-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    MODEL_DEFAULTS=("claude-opus-4-6" "gpt-5.2" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -373,18 +448,187 @@ else
             i=$((i + 1))
         done
     }
+
+    # Model choices per provider - flat parallel arrays with provider offsets
+    # Provider order: anthropic(4), openai(3), gemini(2), groq(2), cerebras(2)
+    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai openai gemini gemini groq groq cerebras cerebras)
+    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gpt-5-nano" "gemini-3-flash-preview" "gemini-3-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    # NOTE: 8192 should match DEFAULT_MAX_TOKENS in core/framework/graph/edge.py
+    MC_MAXTOKENS=(8192 8192 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192)
+
+    # Helper: get number of model choices for a provider
+    get_model_choice_count() {
+        local provider_id="$1"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+        echo "$count"
+    }
+
+    # Helper: get model choice id by provider and index (0-based within provider)
+    get_model_choice_id() {
+        local provider_id="$1"
+        local idx="$2"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                if [ $count -eq "$idx" ]; then
+                    echo "${MC_IDS[$i]}"
+                    return
+                fi
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+    }
+
+    # Helper: get model choice label by provider and index
+    get_model_choice_label() {
+        local provider_id="$1"
+        local idx="$2"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                if [ $count -eq "$idx" ]; then
+                    echo "${MC_LABELS[$i]}"
+                    return
+                fi
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+    }
+
+    # Helper: get model choice max_tokens by provider and index
+    get_model_choice_maxtokens() {
+        local provider_id="$1"
+        local idx="$2"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                if [ $count -eq "$idx" ]; then
+                    echo "${MC_MAXTOKENS[$i]}"
+                    return
+                fi
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+    }
 fi
 
 # Configuration directory
 HIVE_CONFIG_DIR="$HOME/.hive"
 HIVE_CONFIG_FILE="$HIVE_CONFIG_DIR/configuration.json"
 
+# Detect user's shell rc file
+detect_shell_rc() {
+    local shell_name
+    shell_name=$(basename "$SHELL")
+
+    case "$shell_name" in
+        zsh)
+            if [ -f "$HOME/.zshrc" ]; then
+                echo "$HOME/.zshrc"
+            else
+                echo "$HOME/.zshenv"
+            fi
+            ;;
+        bash)
+            if [ -f "$HOME/.bashrc" ]; then
+                echo "$HOME/.bashrc"
+            elif [ -f "$HOME/.bash_profile" ]; then
+                echo "$HOME/.bash_profile"
+            else
+                echo "$HOME/.profile"
+            fi
+            ;;
+        *)
+            # Fallback to .profile for other shells
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
+
+SHELL_RC_FILE=$(detect_shell_rc)
+SHELL_NAME=$(basename "$SHELL")
+
+# Prompt the user to choose a model for their selected provider.
+# Sets SELECTED_MODEL and SELECTED_MAX_TOKENS.
+prompt_model_selection() {
+    local provider_id="$1"
+    local count
+    count="$(get_model_choice_count "$provider_id")"
+
+    if [ "$count" -eq 0 ]; then
+        # No curated choices for this provider (e.g. Mistral, DeepSeek)
+        SELECTED_MODEL="$(get_default_model "$provider_id")"
+        SELECTED_MAX_TOKENS=8192
+        return
+    fi
+
+    if [ "$count" -eq 1 ]; then
+        # Only one choice — auto-select
+        SELECTED_MODEL="$(get_model_choice_id "$provider_id" 0)"
+        SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" 0)"
+        return
+    fi
+
+    # Multiple choices — show menu
+    echo ""
+    echo -e "${BOLD}Select a model:${NC}"
+    echo ""
+
+    local i=0
+    while [ $i -lt "$count" ]; do
+        local label
+        label="$(get_model_choice_label "$provider_id" "$i")"
+        local mid
+        mid="$(get_model_choice_id "$provider_id" "$i")"
+        local num=$((i + 1))
+        echo -e "  ${CYAN}$num)${NC} $label  ${DIM}($mid)${NC}"
+        i=$((i + 1))
+    done
+    echo ""
+
+    local choice
+    while true; do
+        read -r -p "Enter choice (1-$count): " choice || true
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+            local idx=$((choice - 1))
+            SELECTED_MODEL="$(get_model_choice_id "$provider_id" "$idx")"
+            SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" "$idx")"
+            echo ""
+            echo -e "${GREEN}⬢${NC} Model: ${DIM}$SELECTED_MODEL${NC}"
+            return
+        fi
+        echo -e "${RED}Invalid choice. Please enter 1-$count${NC}"
+    done
+}
+
 # Function to save configuration
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
-    local model
-    model="$(get_default_model "$provider_id")"
+    local model="$3"
+    local max_tokens="$4"
+
+    # Fallbacks if not provided
+    if [ -z "$model" ]; then
+        model="$(get_default_model "$provider_id")"
+    fi
+    if [ -z "$max_tokens" ]; then
+        max_tokens=8192
+    fi
 
     mkdir -p "$HIVE_CONFIG_DIR"
 
@@ -394,6 +638,7 @@ config = {
     'llm': {
         'provider': '$provider_id',
         'model': '$model',
+        'max_tokens': $max_tokens,
         'api_key_env_var': '$env_var'
     },
     'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
@@ -404,18 +649,11 @@ print(json.dumps(config, indent=2))
 " 2>/dev/null
 }
 
-# Check for .env files (temporarily disable set -e for robustness on Bash 3.2)
+# Source shell rc file to pick up existing env vars (temporarily disable set -e)
 set +e
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    set -a
-    source "$SCRIPT_DIR/.env" 2>/dev/null
-    set +a
-fi
-
-if [ -f "$HOME/.env" ]; then
-    set -a
-    source "$HOME/.env" 2>/dev/null
-    set +a
+if [ -f "$SHELL_RC_FILE" ]; then
+    # Extract only export statements to avoid running shell config commands
+    eval "$(grep -E '^export [A-Z_]+=' "$SHELL_RC_FILE" 2>/dev/null)"
 fi
 set -e
 
@@ -424,6 +662,8 @@ FOUND_PROVIDERS=()      # Display names for UI
 FOUND_ENV_VARS=()       # Corresponding env var names
 SELECTED_PROVIDER_ID="" # Will hold the chosen provider ID
 SELECTED_ENV_VAR=""     # Will hold the chosen env var
+SELECTED_MODEL=""       # Will hold the chosen model ID
+SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens
 
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     # Bash 4+ - iterate over associative array keys
@@ -461,6 +701,8 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
 
             echo ""
             echo -e "${GREEN}⬢${NC} Using ${FOUND_PROVIDERS[0]}"
+
+            prompt_model_selection "$SELECTED_PROVIDER_ID"
         fi
     else
         # Multiple providers found, let user pick one
@@ -473,28 +715,34 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
             echo -e "  ${CYAN}$i)${NC} $provider"
             i=$((i + 1))
         done
+        echo -e "  ${CYAN}$i)${NC} Other"
+        max_choice=$i
         echo ""
 
         while true; do
-            read -r -p "Enter choice (1-${#FOUND_PROVIDERS[@]}): " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#FOUND_PROVIDERS[@]}" ]; then
+            read -r -p "Enter choice (1-$max_choice): " choice || true
+            if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$max_choice" ]; then
+                if [ "$choice" -eq "$max_choice" ]; then
+                    # Fall through to the manual provider selection below
+                    break
+                fi
                 idx=$((choice - 1))
                 SELECTED_ENV_VAR="${FOUND_ENV_VARS[$idx]}"
                 SELECTED_PROVIDER_ID="$(get_provider_id "$SELECTED_ENV_VAR")"
 
                 echo ""
                 echo -e "${GREEN}⬢${NC} Selected: ${FOUND_PROVIDERS[$idx]}"
+
+                prompt_model_selection "$SELECTED_PROVIDER_ID"
                 break
             fi
-            echo -e "${RED}Invalid choice. Please enter 1-${#FOUND_PROVIDERS[@]}${NC}"
+            echo -e "${RED}Invalid choice. Please enter 1-$max_choice${NC}"
         done
     fi
 fi
 
 if [ -z "$SELECTED_PROVIDER_ID" ]; then
-    echo "No API keys found. Let's configure one."
     echo ""
-
     prompt_choice "Select your LLM provider:" \
         "Anthropic (Claude) - Recommended" \
         "OpenAI (GPT)" \
@@ -540,7 +788,7 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
             echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
             echo -e "Add your API key later by running:"
             echo ""
-            echo -e "  ${CYAN}echo 'ANTHROPIC_API_KEY=your-key' >> .env${NC}"
+            echo -e "  ${CYAN}echo 'export ANTHROPIC_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
             echo ""
             SELECTED_ENV_VAR=""
             SELECTED_PROVIDER_ID=""
@@ -554,26 +802,32 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
         read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
 
         if [ -n "$API_KEY" ]; then
-            # Save to .env
-            echo "" >> "$SCRIPT_DIR/.env"
-            echo "$SELECTED_ENV_VAR=$API_KEY" >> "$SCRIPT_DIR/.env"
+            # Save to shell rc file
+            echo "" >> "$SHELL_RC_FILE"
+            echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
+            echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
             export "$SELECTED_ENV_VAR=$API_KEY"
             echo ""
-            echo -e "${GREEN}⬢${NC} API key saved to .env"
+            echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
         else
             echo ""
-            echo -e "${YELLOW}Skipped.${NC} Add your API key to .env when ready."
+            echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
             SELECTED_ENV_VAR=""
             SELECTED_PROVIDER_ID=""
         fi
     fi
 fi
 
+# Prompt for model if not already selected (manual provider path)
+if [ -n "$SELECTED_PROVIDER_ID" ] && [ -z "$SELECTED_MODEL" ]; then
+    prompt_model_selection "$SELECTED_PROVIDER_ID"
+fi
+
 # Save configuration if a provider was selected
 if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo ""
     echo -n "  Saving configuration... "
-    save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" > /dev/null
+    save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" > /dev/null
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"
 fi
@@ -591,7 +845,7 @@ echo ""
 
 HIVE_CRED_DIR="$HOME/.hive/credentials"
 
-# Check if HIVE_CREDENTIAL_KEY already exists (from env or .env)
+# Check if HIVE_CREDENTIAL_KEY already exists (from env or shell rc)
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${GREEN}  ✓ HIVE_CREDENTIAL_KEY already set${NC}"
 else
@@ -606,16 +860,13 @@ else
     else
         echo -e "${GREEN}ok${NC}"
 
-        # Save to .env file
-        if [ ! -f "$SCRIPT_DIR/.env" ]; then
-            touch "$SCRIPT_DIR/.env"
-        fi
-        echo "" >> "$SCRIPT_DIR/.env"
-        echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SCRIPT_DIR/.env"
-        echo "HIVE_CREDENTIAL_KEY=$GENERATED_KEY" >> "$SCRIPT_DIR/.env"
+        # Save to shell rc file
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Encryption key for Hive credential store (~/.hive/credentials)" >> "$SHELL_RC_FILE"
+        echo "export HIVE_CREDENTIAL_KEY=\"$GENERATED_KEY\"" >> "$SHELL_RC_FILE"
         export HIVE_CREDENTIAL_KEY="$GENERATED_KEY"
 
-        echo -e "${GREEN}  ✓ Encryption key saved to .env${NC}"
+        echo -e "${GREEN}  ✓ Encryption key saved to $SHELL_RC_FILE${NC}"
     fi
 fi
 
@@ -626,7 +877,7 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
 
     # Initialize the metadata index
     if [ ! -f "$HIVE_CRED_DIR/metadata/index.json" ]; then
-        echo '{}' > "$HIVE_CRED_DIR/metadata/index.json"
+        echo '{"credentials": {}, "version": "1.0"}' > "$HIVE_CRED_DIR/metadata/index.json"
     fi
 
     echo -e "${GREEN}  ✓ Credential store initialized at ~/.hive/credentials/${NC}"
@@ -694,6 +945,34 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ codex CLI... "
+if command -v codex > /dev/null 2>&1; then
+    CODEX_VERSION=$(codex --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
+    # Compare version >= 0.101.0
+    CODEX_MAJOR=$(echo "$CODEX_VERSION" | cut -d. -f1)
+    CODEX_MINOR=$(echo "$CODEX_VERSION" | cut -d. -f2)
+    if [ "$CODEX_MAJOR" -gt 0 ] 2>/dev/null || { [ "$CODEX_MAJOR" -eq 0 ] && [ "$CODEX_MINOR" -ge 101 ]; } 2>/dev/null; then
+        echo -e "${GREEN}${CODEX_VERSION}${NC}"
+        CODEX_AVAILABLE=true
+    else
+        echo -e "${YELLOW}${CODEX_VERSION} (upgrade to 0.101.0+)${NC}"
+        CODEX_AVAILABLE=false
+    fi
+else
+    echo -e "${YELLOW}--${NC}"
+    CODEX_AVAILABLE=false
+fi
+
+echo -n "  ⬡ local settings... "
+if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -f "$SCRIPT_DIR/.claude/settings.local.json.example" ]; then
+    cp "$SCRIPT_DIR/.claude/settings.local.json.example" "$SCRIPT_DIR/.claude/settings.local.json"
+    echo -e "${GREEN}copied from example${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
 echo -n "  ⬡ credential store... "
 if [ -n "$HIVE_CREDENTIAL_KEY" ] && [ -d "$HOME/.hive/credentials/credentials" ]; then
     echo -e "${GREEN}ok${NC}"
@@ -708,6 +987,38 @@ if [ $ERRORS -gt 0 ]; then
     echo "Please check the errors above and try again."
     exit 1
 fi
+
+# ============================================================
+# Step 7: Install hive CLI globally
+# ============================================================
+
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Installing hive CLI...${NC}"
+echo ""
+
+# Ensure ~/.local/bin exists and is in PATH
+mkdir -p "$HOME/.local/bin"
+
+# Create/update symlink
+HIVE_SCRIPT="$SCRIPT_DIR/hive"
+HIVE_LINK="$HOME/.local/bin/hive"
+
+if [ -L "$HIVE_LINK" ] || [ -e "$HIVE_LINK" ]; then
+    rm -f "$HIVE_LINK"
+fi
+
+ln -s "$HIVE_SCRIPT" "$HIVE_LINK"
+echo -e "${GREEN}  ✓ hive CLI installed to ~/.local/bin/hive${NC}"
+
+# Check if ~/.local/bin is in PATH
+if echo "$PATH" | grep -q "$HOME/.local/bin"; then
+    echo -e "${GREEN}  ✓ ~/.local/bin is in PATH${NC}"
+else
+    echo -e "${YELLOW}  ⚠ Add ~/.local/bin to your PATH:${NC}"
+    echo -e "     ${DIM}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc${NC}"
+    echo -e "     ${DIM}source ~/.bashrc${NC}"
+fi
+
+echo ""
 
 # ============================================================
 # Success!
@@ -726,7 +1037,9 @@ echo ""
 
 # Show configured provider
 if [ -n "$SELECTED_PROVIDER_ID" ]; then
-    SELECTED_MODEL="$(get_default_model "$SELECTED_PROVIDER_ID")"
+    if [ -z "$SELECTED_MODEL" ]; then
+        SELECTED_MODEL="$(get_default_model "$SELECTED_PROVIDER_ID")"
+    fi
     echo -e "${BOLD}Default LLM:${NC}"
     echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     echo ""
@@ -740,26 +1053,41 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
-echo -e "${BOLD}Quick Start:${NC}"
+echo -e "${BOLD}Build a New Agent (Claude):${NC}"
 echo ""
 echo -e "  1. Open Claude Code in this directory:"
 echo -e "     ${CYAN}claude${NC}"
 echo ""
 echo -e "  2. Build a new agent:"
-echo -e "     ${CYAN}/agent-workflow${NC}"
+echo -e "     ${CYAN}/hive${NC}"
 echo ""
 echo -e "  3. Test an existing agent:"
-echo -e "     ${CYAN}/testing-agent${NC}"
+echo -e "     ${CYAN}/hive-test${NC}"
 echo ""
-echo -e "${BOLD}Skills:${NC}"
-if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    for skill_dir in "$SCRIPT_DIR/.claude/skills"/*/; do
-        skill_name=$(basename "$skill_dir")
-        echo -e "  ⬡ ${CYAN}/$skill_name${NC}"
-    done
+
+# Show Codex instructions if available
+if [ "$CODEX_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Build a New Agent (Codex):${NC}"
+    echo ""
+    echo -e "  Codex ${GREEN}${CODEX_VERSION}${NC} is available. To use it with Hive:"
+    echo -e "  1. Restart your terminal (or open a new one)"
+    echo -e "  2. Run: ${CYAN}codex${NC}"
+    echo -e "  3. Type: ${CYAN}use hive${NC}"
+    echo ""
 fi
+
+echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
-echo -e "${BOLD}Examples:${NC} ${CYAN}exports/${NC}"
+echo -e "  Launch the interactive dashboard to browse and run agents:"
+echo -e "  You can start a example agent or an agent built by yourself:"
+echo -e "     ${CYAN}hive tui${NC}"
 echo ""
+# Show shell sourcing reminder if we added environment variables
+if [ -n "$SELECTED_PROVIDER_ID" ] || [ -n "$HIVE_CREDENTIAL_KEY" ]; then
+    echo -e "${BOLD}Note:${NC} To use the new environment variables in this shell, run:"
+    echo -e "  ${CYAN}source $SHELL_RC_FILE${NC}"
+    echo ""
+fi
+
 echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
 echo ""

@@ -16,10 +16,10 @@ uv pip install -e "tools[dev]"
 
 ## Environment Setup
 
-Some tools require API keys to function. Copy the example file and add your credentials:
+Some tools require API keys to function. Credentials are managed through the encrypted credential store at `~/.hive/credentials`, which is configured automatically during initial setup:
 
 ```bash
-cp .env.example .env
+./quickstart.sh
 ```
 
 | Variable               | Required For                  | Get Key                                                 |
@@ -32,7 +32,7 @@ cp .env.example .env
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
-Alternatively, export as environment variables:
+Alternatively, export credentials as environment variables:
 
 ```bash
 export ANTHROPIC_API_KEY=your-key-here
@@ -40,7 +40,7 @@ export BRAVE_SEARCH_API_KEY=your-key-here
 export LINEAR_API_KEY=your-key-here
 ```
 
-See [.env.example](.env.example) for details.
+See the [credentials module](src/aden_tools/credentials/) for details on how credentials are resolved.
 
 ## Quick Start
 
@@ -79,6 +79,7 @@ python mcp_server.py
 | `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
+| `get_current_time`     | Get current date/time with timezone support    |
 
 ### Linear Integration
 
@@ -126,7 +127,8 @@ tools/
 │       ├── linear_tool/     # Linear project management
 │       ├── web_search_tool/
 │       ├── web_scrape_tool/
-│       └── pdf_read_tool/
+│       ├── pdf_read_tool/
+│       └── time_tool/
 ├── tests/                   # Test suite
 ├── mcp_server.py            # MCP server entry point
 ├── README.md

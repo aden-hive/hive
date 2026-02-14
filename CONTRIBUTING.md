@@ -1,10 +1,10 @@
 # Contributing to Aden Agent Framework
 
-Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors. We’re especially looking for help building tools, integrations([check #2805](https://github.com/adenhq/hive/issues/2805)), and example agents for the framework. If you’re interested in extending its functionality, this is the perfect place to start. 
+Thank you for your interest in contributing to the Aden Agent Framework! This document provides guidelines and information for contributors. We’re especially looking for help building tools, integrations ([check #2805](https://github.com/adenhq/hive/issues/2805)), and example agents for the framework. If you’re interested in extending its functionality, this is the perfect place to start. 
 
 ## Code of Conduct
 
-By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
+By participating in this project, you agree to abide by our [Code of Conduct](docs/CODE_OF_CONDUCT.md).
 
 ## Issue Assignment Policy
 
@@ -35,15 +35,22 @@ You may submit PRs without prior assignment for:
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/hive.git`
-3. Create a feature branch: `git checkout -b feature/your-feature-name`
-4. Make your changes
-5. Run checks and tests:
+3. Add the upstream repository: `git remote add upstream https://github.com/adenhq/hive.git`
+4. Sync with upstream to ensure you're starting from the latest code:
+   ```bash
+   git fetch upstream
+   git checkout main
+   git merge upstream/main
+   ```
+5. Create a feature branch: `git checkout -b feature/your-feature-name`
+6. Make your changes
+7. Run checks and tests:
    ```bash
    make check    # Lint and format checks (ruff check + ruff format --check on core/ and tools/)
    make test     # Core tests (cd core && pytest tests/ -v)
    ```
-6. Commit your changes following our commit conventions
-7. Push to your fork and submit a Pull Request
+8. Commit your changes following our commit conventions
+9. Push to your fork and submit a Pull Request
 
 ## Development Setup
 
@@ -92,8 +99,7 @@ docs(readme): update installation instructions
 2. Update documentation if needed
 3. Add tests for new functionality
 4. Ensure `make check` and `make test` pass
-5. Update the CHANGELOG.md if applicable
-6. Request review from maintainers
+5. Request review from maintainers
 
 ### PR Title Format
 
@@ -137,6 +143,9 @@ make test
 
 # Or run tests directly
 cd core && pytest tests/ -v
+
+# Run tools package tests (when contributing to tools/)
+cd tools && uv run pytest tests/ -v
 
 # Run tests for a specific agent
 PYTHONPATH=exports uv run python -m agent_name test

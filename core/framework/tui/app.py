@@ -1,16 +1,18 @@
 import logging
+import platform
+import subprocess
 import time
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.widgets import Footer, Label
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.tui.widgets.chat_repl import ChatRepl
 from framework.tui.widgets.graph_view import GraphOverview
-from framework.tui.widgets.log_pane import LogPane
+from framework.tui.widgets.selectable_rich_log import SelectableRichLog
 
 
 class StatusBar(Container):
@@ -133,28 +135,15 @@ class AdenTUI(App):
         background: $surface;
     }
 
-    #left-pane {
-        width: 60%;
-        height: 100%;
-        layout: vertical;
-        background: $surface;
-    }
-
     GraphOverview {
-        height: 40%;
+        width: 40%;
+        height: 100%;
         background: $panel;
         padding: 0;
     }
 
-    LogPane {
-        height: 60%;
-        background: $surface;
-        padding: 0;
-        margin-bottom: 1;
-    }
-
     ChatRepl {
-        width: 40%;
+        width: 60%;
         height: 100%;
         background: $panel;
         border-left: tall $primary;
@@ -177,13 +166,13 @@ class AdenTUI(App):
         scrollbar-color: $primary;
     }
 
-    Input {
+    ChatTextArea {
         background: $surface;
         border: tall $primary;
         margin-top: 1;
     }
 
-    Input:focus {
+    ChatTextArea:focus {
         border: tall $accent;
     }
 
@@ -202,30 +191,55 @@ class AdenTUI(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("ctrl+c", "ctrl_c", "Interrupt", show=False, priority=True),
+        Binding("super+c", "ctrl_c", "Copy", show=False, priority=True),
         Binding("ctrl+s", "screenshot", "Screenshot (SVG)", show=True, priority=True),
+        Binding("ctrl+l", "toggle_logs", "Toggle Logs", show=True, priority=True),
+        Binding("ctrl+z", "pause_execution", "Pause", show=True, priority=True),
+        Binding("ctrl+r", "show_sessions", "Sessions", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
     ]
 
-    def __init__(self, runtime: AgentRuntime):
+    def __init__(
+        self,
+        runtime: AgentRuntime,
+        resume_session: str | None = None,
+        resume_checkpoint: str | None = None,
+    ):
         super().__init__()
 
         self.runtime = runtime
-        self.log_pane = LogPane()
         self.graph_view = GraphOverview(runtime)
-        self.chat_repl = ChatRepl(runtime)
+        self.chat_repl = ChatRepl(runtime, resume_session, resume_checkpoint)
         self.status_bar = StatusBar(graph_id=runtime.graph.id)
         self.is_ready = False
+
+    def open_url(self, url: str, *, new_tab: bool = True) -> None:
+        """Override to use native `open` for file:// URLs on macOS."""
+        if url.startswith("file://") and platform.system() == "Darwin":
+            path = url.removeprefix("file://")
+            subprocess.Popen(["open", path])
+        else:
+            super().open_url(url, new_tab=new_tab)
+
+    def action_ctrl_c(self) -> None:
+        # Check if any SelectableRichLog has an active selection to copy
+        for widget in self.query(SelectableRichLog):
+            if widget.selection is not None:
+                text = widget.copy_selection()
+                if text:
+                    widget.clear_selection()
+                    self.notify("Copied to clipboard", severity="information", timeout=2)
+                    return
+
+        self.notify("Press [b]q[/b] to quit", severity="warning", timeout=3)
 
     def compose(self) -> ComposeResult:
         yield self.status_bar
 
         yield Horizontal(
-            Vertical(
-                self.log_pane,
-                self.graph_view,
-                id="left-pane",
-            ),
+            self.graph_view,
             self.chat_repl,
         )
 
@@ -296,7 +310,7 @@ class AdenTUI(App):
                 if record.name.startswith(("textual", "LiteLLM", "litellm")):
                     continue
 
-                self.log_pane.write_python_log(record)
+                self.chat_repl.write_python_log(record)
         except Exception:
             pass
 
@@ -318,6 +332,14 @@ class AdenTUI(App):
         EventType.CONSTRAINT_VIOLATION,
         EventType.STATE_CHANGED,
         EventType.NODE_INPUT_BLOCKED,
+        EventType.CONTEXT_COMPACTED,
+        EventType.NODE_INTERNAL_OUTPUT,
+        EventType.JUDGE_VERDICT,
+        EventType.OUTPUT_KEY_SET,
+        EventType.NODE_RETRY,
+        EventType.EDGE_TRAVERSED,
+        EventType.EXECUTION_PAUSED,
+        EventType.EXECUTION_RESUMED,
     ]
 
     _LOG_PANE_EVENTS = frozenset(_EVENT_TYPES) - {
@@ -339,12 +361,22 @@ class AdenTUI(App):
         """Called from the agent thread — bridge to Textual's main thread."""
         try:
             self.call_from_thread(self._route_event, event)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.getLogger("tui.events").error(
+                "call_from_thread failed for %s (node=%s): %s",
+                event.type.value,
+                event.node_id or "?",
+                e,
+            )
 
     def _route_event(self, event: AgentEvent) -> None:
         """Route incoming events to widgets. Runs on Textual's main thread."""
         if not self.is_ready:
+            logging.getLogger("tui.events").warning(
+                "Event dropped (not ready): %s node=%s",
+                event.type.value,
+                event.node_id or "?",
+            )
             return
 
         try:
@@ -375,6 +407,35 @@ class AdenTUI(App):
                 self.chat_repl.handle_input_requested(
                     event.node_id or event.data.get("node_id", ""),
                 )
+            elif et == EventType.NODE_LOOP_STARTED:
+                self.chat_repl.handle_node_started(event.node_id or "")
+            elif et == EventType.NODE_LOOP_ITERATION:
+                self.chat_repl.handle_loop_iteration(event.data.get("iteration", 0))
+
+            # Track active node in chat_repl for mid-execution input
+            if et == EventType.NODE_LOOP_STARTED:
+                self.chat_repl.handle_node_started(event.node_id or "")
+            elif et == EventType.NODE_LOOP_COMPLETED:
+                self.chat_repl.handle_node_completed(event.node_id or "")
+
+            # Non-client-facing node output → chat repl
+            if et == EventType.NODE_INTERNAL_OUTPUT:
+                content = event.data.get("content", "")
+                if content.strip():
+                    self.chat_repl.handle_internal_output(event.node_id or "", content)
+
+            # Execution paused/resumed → chat repl
+            if et == EventType.EXECUTION_PAUSED:
+                reason = event.data.get("reason", "")
+                self.chat_repl.handle_execution_paused(event.node_id or "", reason)
+            elif et == EventType.EXECUTION_RESUMED:
+                self.chat_repl.handle_execution_resumed(event.node_id or "")
+
+            # Goal achieved / constraint violation → chat repl
+            if et == EventType.GOAL_ACHIEVED:
+                self.chat_repl.handle_goal_achieved(event.data)
+            elif et == EventType.CONSTRAINT_VIOLATION:
+                self.chat_repl.handle_constraint_violation(event.data)
 
             # --- Graph view events ---
             if et in (
@@ -412,6 +473,13 @@ class AdenTUI(App):
                     started=False,
                 )
 
+            # Edge traversal → graph view
+            if et == EventType.EDGE_TRAVERSED:
+                self.graph_view.handle_edge_traversed(
+                    event.data.get("source_node", ""),
+                    event.data.get("target_node", ""),
+                )
+
             # --- Status bar events ---
             if et == EventType.EXECUTION_STARTED:
                 entry_node = event.data.get("entry_node") or (
@@ -432,12 +500,36 @@ class AdenTUI(App):
                 self.status_bar.set_node_detail("thinking...")
             elif et == EventType.NODE_STALLED:
                 self.status_bar.set_node_detail(f"stalled: {event.data.get('reason', '')}")
+            elif et == EventType.CONTEXT_COMPACTED:
+                before = event.data.get("usage_before", "?")
+                after = event.data.get("usage_after", "?")
+                self.status_bar.set_node_detail(f"compacted: {before}% \u2192 {after}%")
+            elif et == EventType.JUDGE_VERDICT:
+                action = event.data.get("action", "?")
+                self.status_bar.set_node_detail(f"judge: {action}")
+            elif et == EventType.OUTPUT_KEY_SET:
+                key = event.data.get("key", "?")
+                self.status_bar.set_node_detail(f"set: {key}")
+            elif et == EventType.NODE_RETRY:
+                retry = event.data.get("retry_count", "?")
+                max_r = event.data.get("max_retries", "?")
+                self.status_bar.set_node_detail(f"retry {retry}/{max_r}")
+            elif et == EventType.EXECUTION_PAUSED:
+                self.status_bar.set_node_detail("paused")
+            elif et == EventType.EXECUTION_RESUMED:
+                self.status_bar.set_node_detail("resumed")
 
-            # --- Log pane events ---
+            # --- Log events (inline in chat) ---
             if et in self._LOG_PANE_EVENTS:
-                self.log_pane.write_event(event)
-        except Exception:
-            pass
+                self.chat_repl.write_log_event(event)
+        except Exception as e:
+            logging.getLogger("tui.events").error(
+                "Route failed for %s (node=%s): %s",
+                event.type.value,
+                event.node_id or "?",
+                e,
+                exc_info=True,
+            )
 
     def save_screenshot(self, filename: str | None = None) -> str:
         """Save a screenshot of the current screen as SVG (viewable in browsers).
@@ -472,8 +564,8 @@ class AdenTUI(App):
         original_chat_border = chat_widget.styles.border_left
         chat_widget.styles.border_left = ("none", "transparent")
 
-        # Hide all Input widget borders
-        input_widgets = self.query("Input")
+        # Hide all TextArea widget borders
+        input_widgets = self.query("ChatTextArea")
         original_input_borders = []
         for input_widget in input_widgets:
             original_input_borders.append(input_widget.styles.border)
@@ -503,9 +595,98 @@ class AdenTUI(App):
         except Exception as e:
             self.notify(f"Screenshot failed: {e}", severity="error", timeout=5)
 
+    def action_toggle_logs(self) -> None:
+        """Toggle inline log display in chat (bound to Ctrl+L)."""
+        self.chat_repl.toggle_logs()
+        mode = "ON" if self.chat_repl._show_logs else "OFF"
+        self.notify(f"Logs {mode}", severity="information", timeout=2)
+
+    def action_pause_execution(self) -> None:
+        """Immediately pause execution by cancelling task (bound to Ctrl+Z)."""
+        try:
+            chat_repl = self.query_one(ChatRepl)
+            if not chat_repl._current_exec_id:
+                self.notify(
+                    "No active execution to pause",
+                    severity="information",
+                    timeout=3,
+                )
+                return
+
+            # Find and cancel the execution task - executor will catch and save state
+            task_cancelled = False
+            for stream in self.runtime._streams.values():
+                exec_id = chat_repl._current_exec_id
+                task = stream._execution_tasks.get(exec_id)
+                if task and not task.done():
+                    task.cancel()
+                    task_cancelled = True
+                    self.notify(
+                        "⏸ Execution paused - state saved",
+                        severity="information",
+                        timeout=3,
+                    )
+                    break
+
+            if not task_cancelled:
+                self.notify(
+                    "Execution already completed",
+                    severity="information",
+                    timeout=2,
+                )
+        except Exception as e:
+            self.notify(
+                f"Error pausing execution: {e}",
+                severity="error",
+                timeout=5,
+            )
+
+    async def action_show_sessions(self) -> None:
+        """Show sessions list (bound to Ctrl+R)."""
+        # Send /sessions command to chat input
+        try:
+            chat_repl = self.query_one(ChatRepl)
+            await chat_repl._submit_input("/sessions")
+        except Exception:
+            self.notify(
+                "Use /sessions command to see all sessions",
+                severity="information",
+                timeout=3,
+            )
+
     async def on_unmount(self) -> None:
-        """Cleanup on app shutdown."""
+        """Cleanup on app shutdown - cancel execution which will save state."""
         self.is_ready = False
+
+        # Cancel any active execution - the executor will catch CancelledError
+        # and save current state as paused (no waiting needed!)
+        try:
+            import asyncio
+
+            chat_repl = self.query_one(ChatRepl)
+            if chat_repl._current_exec_id:
+                # Find the stream with this execution
+                for stream in self.runtime._streams.values():
+                    exec_id = chat_repl._current_exec_id
+                    task = stream._execution_tasks.get(exec_id)
+                    if task and not task.done():
+                        # Cancel the task - executor will catch and save state
+                        task.cancel()
+                        try:
+                            # Wait for executor to save state (may take a few seconds)
+                            # Longer timeout for quit to ensure state is properly saved
+                            await asyncio.wait_for(task, timeout=5.0)
+                        except (TimeoutError, asyncio.CancelledError):
+                            # Expected - task was cancelled
+                            # If timeout, state may not be fully saved
+                            pass
+                        except Exception:
+                            # Ignore other exceptions during cleanup
+                            pass
+                        break
+        except Exception:
+            pass
+
         try:
             if hasattr(self, "_subscription_id"):
                 self.runtime.unsubscribe_from_events(self._subscription_id)
