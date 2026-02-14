@@ -144,7 +144,7 @@ def register_tools(mcp: FastMCP) -> None:
             # Get the subdomain prefix (everything before the base domain)
             prefix = sub.replace(f".{domain}", "").lower()
             for keyword, info in INTERESTING_KEYWORDS.items():
-                if re.search(rf'\b{keyword}\b', prefix) or prefix == keyword:
+                if re.search(rf"\b{keyword}\b", prefix) or prefix == keyword:
                     interesting.append({
                         "subdomain": sub,
                         "reason": info["reason"],

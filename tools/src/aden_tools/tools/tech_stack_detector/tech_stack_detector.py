@@ -16,42 +16,42 @@ from fastmcp import FastMCP
 # Patterns to detect JS frameworks/libraries in HTML source
 JS_PATTERNS = {
     "React": [
-        re.compile(r'react(?:\.min)?\.js', re.I),
-        re.compile(r'data-reactroot', re.I),
-        re.compile(r'__NEXT_DATA__', re.I),
+        re.compile(r"react(?:\.min)?\.js", re.I),
+        re.compile(r"data-reactroot", re.I),
+        re.compile(r"__NEXT_DATA__", re.I),
     ],
     "Angular": [
-        re.compile(r'angular(?:\.min)?\.js', re.I),
-        re.compile(r'ng-app', re.I),
-        re.compile(r'ng-version', re.I),
+        re.compile(r"angular(?:\.min)?\.js", re.I),
+        re.compile(r"ng-app", re.I),
+        re.compile(r"ng-version", re.I),
     ],
     "Vue.js": [
-        re.compile(r'vue(?:\.min)?\.js', re.I),
-        re.compile(r'data-v-[a-f0-9]', re.I),
-        re.compile(r'__vue__', re.I),
+        re.compile(r"vue(?:\.min)?\.js", re.I),
+        re.compile(r"data-v-[a-f0-9]", re.I),
+        re.compile(r"__vue__", re.I),
     ],
     "jQuery": [
-        re.compile(r'jquery[.-](\d+\.\d+(?:\.\d+)?)', re.I),
-        re.compile(r'jquery(?:\.min)?\.js', re.I),
+        re.compile(r"jquery[.-](\d+\.\d+(?:\.\d+)?)", re.I),
+        re.compile(r"jquery(?:\.min)?\.js", re.I),
     ],
     "Bootstrap": [
-        re.compile(r'bootstrap[.-](\d+\.\d+(?:\.\d+)?)', re.I),
-        re.compile(r'bootstrap(?:\.min)?\.(?:js|css)', re.I),
+        re.compile(r"bootstrap[.-](\d+\.\d+(?:\.\d+)?)", re.I),
+        re.compile(r"bootstrap(?:\.min)?\.(?:js|css)", re.I),
     ],
     "Tailwind CSS": [
-        re.compile(r'tailwind', re.I),
+        re.compile(r"tailwind", re.I),
     ],
     "Svelte": [
-        re.compile(r'svelte', re.I),
-        re.compile(r'__svelte', re.I),
+        re.compile(r"svelte", re.I),
+        re.compile(r"__svelte", re.I),
     ],
     "Next.js": [
-        re.compile(r'_next/static', re.I),
-        re.compile(r'__NEXT_DATA__', re.I),
+        re.compile(r"_next/static", re.I),
+        re.compile(r"__NEXT_DATA__", re.I),
     ],
     "Nuxt.js": [
-        re.compile(r'__nuxt', re.I),
-        re.compile(r'_nuxt/', re.I),
+        re.compile(r"__nuxt", re.I),
+        re.compile(r"_nuxt/", re.I),
     ],
 }
 
@@ -70,14 +70,14 @@ COOKIE_TECH_MAP = {
 # Analytics and tracking patterns
 ANALYTICS_PATTERNS = {
     "Google Analytics": [
-        re.compile(r'google-analytics\.com/analytics\.js', re.I),
-        re.compile(r'googletagmanager\.com', re.I),
-        re.compile(r'gtag\(', re.I),
+        re.compile(r"google-analytics\.com/analytics\.js", re.I),
+        re.compile(r"googletagmanager\.com", re.I),
+        re.compile(r"gtag\(", re.I),
     ],
-    "Facebook Pixel": [re.compile(r'connect\.facebook\.net', re.I)],
-    "Hotjar": [re.compile(r'static\.hotjar\.com', re.I)],
-    "Mixpanel": [re.compile(r'cdn\.mxpnl\.com', re.I)],
-    "Segment": [re.compile(r'cdn\.segment\.com', re.I)],
+    "Facebook Pixel": [re.compile(r"connect\.facebook\.net", re.I)],
+    "Hotjar": [re.compile(r"static\.hotjar\.com", re.I)],
+    "Mixpanel": [re.compile(r"cdn\.mxpnl\.com", re.I)],
+    "Segment": [re.compile(r"cdn\.segment\.com", re.I)],
 }
 
 # CDN detection via response headers
@@ -250,7 +250,7 @@ def _detect_server(headers: httpx.Headers) -> dict | None:
         return None
 
     # Try to parse name and version
-    match = re.match(r'^([\w.-]+)(?:/(\S+))?', server_header)
+    match = re.match(r"^([\w.-]+)(?:/(\S+))?", server_header)
     if match:
         return {"name": match.group(1), "version": match.group(2), "raw": server_header}
     return {"name": server_header, "version": None, "raw": server_header}
@@ -289,13 +289,13 @@ def _detect_framework_from_headers(headers: httpx.Headers) -> str | None:
 def _detect_framework_from_html(html: str) -> str | None:
     """Detect framework from HTML content."""
     # Django
-    if 'csrfmiddlewaretoken' in html:
+    if "csrfmiddlewaretoken" in html:
         return "Django"
     # Rails
-    if 'csrf-token' in html and 'data-turbo' in html:
+    if "csrf-token" in html and "data-turbo" in html:
         return "Ruby on Rails"
     # Laravel
-    if 'laravel' in html.lower():
+    if "laravel" in html.lower():
         return "Laravel"
     return None
 
@@ -354,25 +354,25 @@ def _detect_analytics(html: str) -> list[str]:
 def _detect_cms_from_html(html: str) -> str | None:
     """Detect CMS from HTML meta tags and content."""
     # WordPress
-    if 'wp-content' in html or 'wp-includes' in html:
+    if "wp-content" in html or "wp-includes" in html:
         return "WordPress"
     # Drupal
-    if 'Drupal' in html or 'drupal.js' in html:
+    if "Drupal" in html or "drupal.js" in html:
         return "Drupal"
     # Joomla
-    if '/media/jui/' in html or 'Joomla' in html:
+    if "/media/jui/" in html or "Joomla" in html:
         return "Joomla"
     # Shopify
-    if 'cdn.shopify.com' in html:
+    if "cdn.shopify.com" in html:
         return "Shopify"
     # Squarespace
-    if 'squarespace' in html.lower():
+    if "squarespace" in html.lower():
         return "Squarespace"
     # Wix
-    if 'wix.com' in html:
+    if "wix.com" in html:
         return "Wix"
     # Ghost
-    if 'ghost-' in html or 'ghost/' in html:
+    if "ghost-" in html or "ghost/" in html:
         return "Ghost"
 
     # Check meta generator tag
@@ -402,4 +402,4 @@ def _analyze_cookies(cookies: httpx.Cookies) -> list[dict]:
 
 def _has_version(value: str) -> bool:
     """Check if a string contains a version number."""
-    return bool(re.search(r'\d+\.\d+', value))
+    return bool(re.search(r"\d+\.\d+", value))

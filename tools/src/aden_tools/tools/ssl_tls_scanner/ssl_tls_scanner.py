@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import socket
 import ssl
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastmcp import FastMCP
 
@@ -97,7 +97,7 @@ def register_tools(mcp: FastMCP) -> None:
             cert_dict = conn.getpeercert()
             conn.close()
 
-        except socket.timeout:
+        except TimeoutError:
             return {"error": f"Connection to {hostname}:{port} timed out"}
         except ConnectionRefusedError:
             return {"error": f"Connection to {hostname}:{port} refused. Port may be closed."}
@@ -113,7 +113,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         not_before = _parse_cert_date(not_before_str)
         not_after = _parse_cert_date(not_after_str)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         days_until_expiry = (not_after - now).days if not_after else None
 
@@ -236,7 +236,7 @@ def _parse_cert_date(date_str: str) -> datetime | None:
     # OpenSSL format: "Jan  1 00:00:00 2025 GMT"
     for fmt in ("%b %d %H:%M:%S %Y %Z", "%b  %d %H:%M:%S %Y %Z"):
         try:
-            return datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(date_str, fmt).replace(tzinfo=UTC)
         except ValueError:
             continue
     return None

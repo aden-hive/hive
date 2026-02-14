@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
 from .csv_tool import register_tools as register_csv
+
+# Security scanning tools
+from .dns_security_scanner import register_tools as register_dns_security_scanner
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
@@ -43,25 +46,22 @@ from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
 from .google_maps_tool import register_tools as register_google_maps
+from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
+from .port_scanner import register_tools as register_port_scanner
+from .risk_scorer import register_tools as register_risk_scorer
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
+from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .subdomain_enumerator import register_tools as register_subdomain_enumerator
+from .tech_stack_detector import register_tools as register_tech_stack_detector
 from .telegram_tool import register_tools as register_telegram
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
-
-# Security scanning tools
-from .dns_security_scanner import register_tools as register_dns_security_scanner
-from .http_headers_scanner import register_tools as register_http_headers_scanner
-from .port_scanner import register_tools as register_port_scanner
-from .risk_scorer import register_tools as register_risk_scorer
-from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
-from .subdomain_enumerator import register_tools as register_subdomain_enumerator
-from .tech_stack_detector import register_tools as register_tech_stack_detector
 
 
 def register_all_tools(
