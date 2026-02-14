@@ -470,6 +470,17 @@ class TestGrepSearchTool:
         assert result["total_matches"] == 0
         assert result["matches"] == []
 
+    def test_grep_search_nonexistent_path(
+        self, grep_search_fn, mock_workspace, mock_secure_path
+    ):
+        """Searching a nonexistent path returns error."""
+        result = grep_search_fn(
+            path="missing_dir", pattern="pattern", recursive=True, **mock_workspace
+        )
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()
+
     def test_grep_search_directory_non_recursive(
         self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
     ):

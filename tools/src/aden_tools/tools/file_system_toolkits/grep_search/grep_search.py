@@ -49,6 +49,9 @@ def register_tools(mcp: FastMCP) -> None:
 
             matches = []
 
+            if not os.path.exists(secure_path):
+                raise FileNotFoundError
+
             if os.path.isfile(secure_path):
                 files = [secure_path]
             elif recursive:
