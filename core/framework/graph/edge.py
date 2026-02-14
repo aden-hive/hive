@@ -470,12 +470,27 @@ class GraphSpec(BaseModel):
             values["max_tokens"] = get_max_tokens()
         return values
 
+    def model_post_init(self, __context: Any) -> None:
+        """Build node lookup dict after init."""
+        self._rebuild_node_index()
+
+    def _rebuild_node_index(self) -> None:
+        """Rebuild the id->node dict.  Call again if you mutate self.nodes."""
+        # object.__setattr__ because pydantic gets upset otherwise
+        object.__setattr__(
+            self,
+            "_node_index",
+            {node.id: node for node in self.nodes},
+        )
+
     def get_node(self, node_id: str) -> Any | None:
-        """Get a node by ID."""
-        for node in self.nodes:
-            if node.id == node_id:
-                return node
-        return None
+        """O(1) node lookup. Was O(n) before which got slow on big graphs."""
+        try:
+            return self._node_index.get(node_id)
+        except AttributeError:
+            # edge case: object wasn't built through normal init
+            self._rebuild_node_index()
+            return self._node_index.get(node_id)
 
     def has_async_entry_points(self) -> bool:
         """Check if this graph uses async entry points (multi-stream execution)."""
