@@ -52,6 +52,7 @@ To add a new credential:
 """
 
 from .apollo import APOLLO_CREDENTIALS
+from .apify import APIFY_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .email import EMAIL_CREDENTIALS
@@ -82,6 +83,7 @@ CREDENTIAL_SPECS = {
     **EMAIL_CREDENTIALS,
     **GCP_VISION_CREDENTIALS,
     **APOLLO_CREDENTIALS,
+    **APIFY_CREDENTIALS,
     **GITHUB_CREDENTIALS,
     **GOOGLE_MAPS_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
@@ -122,6 +124,7 @@ __all__ = [
     "HUBSPOT_CREDENTIALS",
     "SLACK_CREDENTIALS",
     "APOLLO_CREDENTIALS",
+    "APIFY_CREDENTIALS",
     "SERPAPI_CREDENTIALS",
     "TELEGRAM_CREDENTIALS",
 ]

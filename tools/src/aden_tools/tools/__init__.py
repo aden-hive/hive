@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
+from .apify_tool import register_tools as register_apify
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
@@ -88,6 +89,7 @@ def register_all_tools(
     register_hubspot(mcp, credentials=credentials)
     register_news(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
+    register_apify(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
@@ -142,6 +144,10 @@ def register_all_tools(
         "apollo_enrich_company",
         "apollo_search_people",
         "apollo_search_companies",
+        "apify_run_actor",
+        "apify_get_dataset",
+        "apify_get_run",
+        "apify_search_actors",
         "github_list_repos",
         "github_get_repo",
         "github_search_repos",
