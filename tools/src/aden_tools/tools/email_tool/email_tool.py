@@ -12,7 +12,11 @@ import os
 from typing import TYPE_CHECKING, Literal
 
 import httpx
-import resend
+try:
+    import resend
+except ImportError:
+    resend = None
+
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
