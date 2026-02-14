@@ -10,10 +10,11 @@ For live tests (requires API keys):
 """
 
 import os
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from framework.llm.anthropic import AnthropicProvider
-from framework.llm.litellm import LiteLLMProvider
+from framework.llm.litellm import LiteLLMProvider, _compute_retry_delay
 from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
 
 
@@ -532,3 +533,118 @@ class TestJsonMode:
         messages = call_kwargs["messages"]
         assert messages[0]["role"] == "system"
         assert "Please respond with a valid JSON object" in messages[0]["content"]
+
+
+class TestComputeRetryDelay:
+    """Test _compute_retry_delay() header parsing and fallback logic."""
+
+    def test_fallback_exponential_backoff(self):
+        """No exception -> exponential backoff."""
+        assert _compute_retry_delay(0) == 2  # 2 * 2^0
+        assert _compute_retry_delay(1) == 4  # 2 * 2^1
+        assert _compute_retry_delay(2) == 8  # 2 * 2^2
+        assert _compute_retry_delay(3) == 16  # 2 * 2^3
+
+    def test_max_delay_cap(self):
+        """Backoff should be capped at RATE_LIMIT_MAX_DELAY."""
+        # 2 * 2^10 = 2048, should be capped at 120
+        assert _compute_retry_delay(10) == 120
+
+    def test_custom_max_delay(self):
+        """Custom max_delay should be respected."""
+        assert _compute_retry_delay(5, max_delay=10) == 10
+
+    def test_retry_after_ms_header(self):
+        """retry-after-ms header should be parsed as milliseconds."""
+        exc = _make_exception_with_headers({"retry-after-ms": "5000"})
+        assert _compute_retry_delay(0, exception=exc) == 5.0
+
+    def test_retry_after_ms_fractional(self):
+        """retry-after-ms should handle fractional values."""
+        exc = _make_exception_with_headers({"retry-after-ms": "1500"})
+        assert _compute_retry_delay(0, exception=exc) == 1.5
+
+    def test_retry_after_seconds_header(self):
+        """retry-after header as seconds should be parsed."""
+        exc = _make_exception_with_headers({"retry-after": "3"})
+        assert _compute_retry_delay(0, exception=exc) == 3.0
+
+    def test_retry_after_seconds_fractional(self):
+        """retry-after header should handle fractional seconds."""
+        exc = _make_exception_with_headers({"retry-after": "2.5"})
+        assert _compute_retry_delay(0, exception=exc) == 2.5
+
+    def test_retry_after_ms_takes_priority(self):
+        """retry-after-ms should take priority over retry-after."""
+        exc = _make_exception_with_headers(
+            {
+                "retry-after-ms": "2000",
+                "retry-after": "10",
+            }
+        )
+        assert _compute_retry_delay(0, exception=exc) == 2.0
+
+    def test_retry_after_http_date(self):
+        """retry-after as HTTP-date should be parsed."""
+        from email.utils import format_datetime
+
+        future = datetime.now(UTC) + timedelta(seconds=5)
+        date_str = format_datetime(future, usegmt=True)
+        exc = _make_exception_with_headers({"retry-after": date_str})
+        delay = _compute_retry_delay(0, exception=exc)
+        assert 3.0 <= delay <= 6.0  # within tolerance
+
+    def test_exception_without_response(self):
+        """Exception with response=None should fall back to exponential."""
+        exc = Exception("test")
+        exc.response = None  # type: ignore[attr-defined]
+        assert _compute_retry_delay(0, exception=exc) == 2  # exponential fallback
+
+    def test_exception_without_response_attr(self):
+        """Exception without .response attr should fall back to exponential."""
+        exc = ValueError("no response attr")
+        assert _compute_retry_delay(0, exception=exc) == 2
+
+    def test_negative_retry_after_clamped_to_zero(self):
+        """Negative retry-after should be clamped to 0."""
+        exc = _make_exception_with_headers({"retry-after": "-5"})
+        assert _compute_retry_delay(0, exception=exc) == 0
+
+    def test_negative_retry_after_ms_clamped_to_zero(self):
+        """Negative retry-after-ms should be clamped to 0."""
+        exc = _make_exception_with_headers({"retry-after-ms": "-1000"})
+        assert _compute_retry_delay(0, exception=exc) == 0
+
+    def test_invalid_retry_after_falls_back(self):
+        """Non-numeric, non-date retry-after should fall back to exponential."""
+        exc = _make_exception_with_headers({"retry-after": "not-a-number-or-date"})
+        assert _compute_retry_delay(0, exception=exc) == 2  # exponential fallback
+
+    def test_invalid_retry_after_ms_falls_back_to_retry_after(self):
+        """Invalid retry-after-ms should fall through to retry-after."""
+        exc = _make_exception_with_headers(
+            {
+                "retry-after-ms": "garbage",
+                "retry-after": "7",
+            }
+        )
+        assert _compute_retry_delay(0, exception=exc) == 7.0
+
+    def test_retry_after_capped_at_max_delay(self):
+        """Server-provided delay should be capped at max_delay."""
+        exc = _make_exception_with_headers({"retry-after": "3600"})
+        assert _compute_retry_delay(0, exception=exc) == 120  # capped
+
+    def test_retry_after_ms_capped_at_max_delay(self):
+        """Server-provided ms delay should be capped at max_delay."""
+        exc = _make_exception_with_headers({"retry-after-ms": "300000"})  # 300s
+        assert _compute_retry_delay(0, exception=exc) == 120  # capped
+
+
+def _make_exception_with_headers(headers: dict[str, str]) -> BaseException:
+    """Create a mock exception with response headers for testing."""
+    exc = Exception("rate limited")
+    response = MagicMock()
+    response.headers = headers
+    exc.response = response  # type: ignore[attr-defined]
+    return exc
