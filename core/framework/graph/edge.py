@@ -46,6 +46,26 @@ class EdgeCondition(StrEnum):
     LLM_DECIDE = "llm_decide"  # Let LLM decide based on goal and context
 
 
+class LLMFailureMode(StrEnum):
+    """How to handle LLM routing failures.
+    
+    When an LLM_DECIDE edge encounters an error (LLM unavailable, API failure,
+    JSON parse errors, etc.), this determines the fallback behavior.
+    
+    Values:
+        PROCEED: Fail-open - proceed based on source_success (backward compatible)
+                 Use for non-critical routing where availability is prioritized
+        SKIP: Fail-closed - do not traverse the edge
+              Use for security-critical routing (authorization, sensitive data gates)
+        RAISE: Escalate - raise exception to halt execution
+               Use when LLM routing failure should stop the entire workflow
+    """
+
+    PROCEED = "proceed"  # Fail-open: proceed based on source_success
+    SKIP = "skip"  # Fail-closed: do not traverse edge
+    RAISE = "raise"  # Escalate: raise exception to executor
+
+
 class EdgeSpec(BaseModel):
     """
     Specification for an edge between nodes.
@@ -77,6 +97,16 @@ class EdgeSpec(BaseModel):
             condition=EdgeCondition.LLM_DECIDE,
             description="Only filter if results need refinement to meet goal",
         )
+
+        # Security-critical routing (fail-closed)
+        EdgeSpec(
+            id="auth-check",
+            source="validate_token",
+            target="protected_resource",
+            condition=EdgeCondition.LLM_DECIDE,
+            on_llm_failure="skip",  # Don't proceed if LLM fails
+            description="Only proceed if token validation succeeded AND LLM confirms authorization",
+        )
     """
 
     id: str
@@ -88,6 +118,17 @@ class EdgeSpec(BaseModel):
     condition_expr: str | None = Field(
         default=None,
         description="Expression for CONDITIONAL edges, e.g., 'output.confidence > 0.8'",
+    )
+
+    # LLM routing failure handling
+    on_llm_failure: LLMFailureMode = Field(
+        default=LLMFailureMode.PROCEED,
+        description=(
+            "How to handle LLM routing failures for LLM_DECIDE edges. "
+            "PROCEED (default): fail-open, proceed based on source_success. "
+            "SKIP: fail-closed, do not traverse edge. "
+            "RAISE: escalate exception to executor."
+        ),
     )
 
     # Data flow
@@ -143,17 +184,37 @@ class EdgeSpec(BaseModel):
 
         if self.condition == EdgeCondition.LLM_DECIDE:
             if llm is None or goal is None:
-                # Fallback to ON_SUCCESS if LLM not available
-                return source_success
-            return self._llm_decide(
-                llm=llm,
-                goal=goal,
-                source_success=source_success,
-                source_output=source_output,
-                memory=memory,
-                source_node_name=source_node_name,
-                target_node_name=target_node_name,
-            )
+                # LLM or goal unavailable - handle based on on_llm_failure mode
+                return self._handle_llm_failure(
+                    error_msg=(
+                        f"LLM {'not available' if llm is None else 'available'}, "
+                        f"goal {'not available' if goal is None else 'available'}"
+                    ),
+                    source_success=source_success,
+                    exception=None,
+                )
+            
+            try:
+                return self._llm_decide(
+                    llm=llm,
+                    goal=goal,
+                    source_success=source_success,
+                    source_output=source_output,
+                    memory=memory,
+                    source_node_name=source_node_name,
+                    target_node_name=target_node_name,
+                )
+            except RuntimeError:
+                # Re-raise RuntimeError from RAISE mode (intentional escalation)
+                raise
+            except Exception as e:
+                # Unexpected exception - log and handle based on on_llm_failure
+                logger.error(f"      ✗ Unexpected error in LLM routing for edge '{self.id}': {e}")
+                return self._handle_llm_failure(
+                    error_msg=f"Unexpected error: {e}",
+                    source_success=source_success,
+                    exception=e,
+                )
 
         return False
 
@@ -218,6 +279,9 @@ class EdgeSpec(BaseModel):
 
         The LLM evaluates whether proceeding to the target node
         is the best next step toward achieving the goal.
+        
+        Raises:
+            RuntimeError: If on_llm_failure is RAISE and LLM routing fails
         """
         # Build context for LLM
         prompt = f"""You are evaluating whether to proceed along an edge in an agent workflow.
@@ -265,13 +329,72 @@ Respond with ONLY a JSON object:
                 logger.info(f"         Reason: {reasoning}")
 
                 return proceed
+            else:
+                # JSON parsing failed - handle based on on_llm_failure mode
+                return self._handle_llm_failure(
+                    error_msg="Failed to parse JSON from LLM response",
+                    source_success=source_success,
+                    exception=None,
+                )
 
         except Exception as e:
-            # Fallback: proceed on success
-            logger.warning(f"      ⚠ LLM routing failed, defaulting to on_success: {e}")
+            # LLM call failed - handle based on on_llm_failure mode
+            return self._handle_llm_failure(
+                error_msg=f"LLM routing call failed: {e}",
+                source_success=source_success,
+                exception=e,
+            )
+
+    def _handle_llm_failure(
+        self,
+        error_msg: str,
+        source_success: bool,
+        exception: Exception | None,
+    ) -> bool:
+        """
+        Handle LLM routing failures based on on_llm_failure mode.
+        
+        Args:
+            error_msg: Description of the failure
+            source_success: Whether source node succeeded
+            exception: The exception that occurred, if any
+            
+        Returns:
+            bool: Whether to traverse the edge (only for PROCEED/SKIP modes)
+            
+        Raises:
+            RuntimeError: If on_llm_failure is RAISE
+        """
+        if self.on_llm_failure == LLMFailureMode.PROCEED:
+            # Fail-open: proceed based on source_success (backward compatible)
+            logger.warning(
+                f"      ⚠ Edge '{self.id}': {error_msg}, "
+                f"proceeding based on source_success={source_success} (mode=PROCEED)"
+            )
             return source_success
 
-        return source_success
+        elif self.on_llm_failure == LLMFailureMode.SKIP:
+            # Fail-closed: do not traverse edge
+            logger.error(
+                f"      ✗ Edge '{self.id}': {error_msg}, "
+                f"skipping edge traversal (mode=SKIP)"
+            )
+            return False
+
+        elif self.on_llm_failure == LLMFailureMode.RAISE:
+            # Escalate: raise exception to halt execution
+            logger.error(
+                f"      ✗ Edge '{self.id}': {error_msg}, "
+                f"raising exception (mode=RAISE)"
+            )
+            raise RuntimeError(
+                f"LLM routing failed for edge '{self.id}' "
+                f"(source={self.source} -> target={self.target}): {error_msg}"
+            ) from exception
+
+        # Should never reach here, but fail-safe to skip
+        logger.error(f"      ✗ Edge '{self.id}': Unknown on_llm_failure mode, defaulting to skip")
+        return False
 
     def map_inputs(
         self,
