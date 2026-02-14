@@ -1,5 +1,5 @@
 """
-Telegram Bot Tool - Send messages and documents via Telegram Bot API.
+Telegram Bot Tool - Manage messages, media, and chats via Telegram Bot API.
 
 Supports Bot API tokens for authentication.
 """
