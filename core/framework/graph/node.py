@@ -496,6 +496,7 @@ class NodeContext:
     # Continuous conversation mode
     continuous_mode: bool = False  # True when graph has conversation_mode="continuous"
     inherited_conversation: Any = None  # NodeConversation | None (from prior node)
+    cumulative_output_keys: list[str] = field(default_factory=list)  # All output keys from path
 
 
 @dataclass

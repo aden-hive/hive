@@ -783,6 +783,9 @@ dependencies = [
 tui = [
     { name = "textual" },
 ]
+webhook = [
+    { name = "aiohttp" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -792,6 +795,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", marker = "extra == 'webhook'", specifier = ">=3.9.0" },
     { name = "anthropic", specifier = ">=0.40.0" },
     { name = "fastmcp", specifier = ">=2.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
@@ -805,7 +809,7 @@ requires-dist = [
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.75.0" },
     { name = "tools", editable = "tools" },
 ]
-provides-extras = ["tui"]
+provides-extras = ["tui", "webhook"]
 
 [package.metadata.requires-dev]
 dev = [

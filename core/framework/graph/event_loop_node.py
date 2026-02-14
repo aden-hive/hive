@@ -252,7 +252,11 @@ class EventLoopNode(NodeProtocol):
             # already inserted by executor. Fresh accumulator for this phase.
             # Phase already set by executor via set_current_phase().
             conversation = ctx.inherited_conversation
-            conversation._output_keys = ctx.node_spec.output_keys or None
+            # Use cumulative output keys for compaction protection (all phases),
+            # falling back to current node's keys if not in continuous mode.
+            conversation._output_keys = (
+                ctx.cumulative_output_keys or ctx.node_spec.output_keys or None
+            )
             accumulator = OutputAccumulator(store=self._conversation_store)
             start_iteration = 0
         else:
@@ -699,6 +703,17 @@ class EventLoopNode(NodeProtocol):
                 fb_preview,
             )
 
+            # Publish judge verdict event
+            judge_type = "custom" if self._judge is not None else "implicit"
+            await self._publish_judge_verdict(
+                stream_id,
+                node_id,
+                action=verdict.action,
+                feedback=fb_preview,
+                judge_type=judge_type,
+                iteration=iteration,
+            )
+
             if verdict.action == "ACCEPT":
                 # Check for missing output keys
                 missing = self._get_missing_output_keys(
@@ -1054,13 +1069,20 @@ class EventLoopNode(NodeProtocol):
                     user_input_requested,
                 )
 
-            # Execute tool calls — separate real tools from set_output
+            # Execute tool calls — framework tools (set_output, ask_user)
+            # run inline; real MCP tools run in parallel.
             real_tool_results: list[dict] = []
             limit_hit = False
             executed_in_batch = 0
             hard_limit = int(
                 self._config.max_tool_calls_per_turn * (1 + self._config.tool_call_overflow_margin)
             )
+
+            # Phase 1: triage — handle framework tools immediately,
+            # queue real tools for parallel execution.
+            results_by_id: dict[str, ToolResult] = {}
+            pending_real: list[ToolCallEvent] = []
+
             for tc in tool_calls:
                 tool_call_count += 1
                 if tool_call_count > hard_limit:
@@ -1068,11 +1090,9 @@ class EventLoopNode(NodeProtocol):
                     break
                 executed_in_batch += 1
 
-                # Publish tool call started
                 await self._publish_tool_started(
                     stream_id, node_id, tc.tool_use_id, tc.tool_name, tc.tool_input
                 )
-
                 logger.info(
                     "[%s] tool_call: %s(%s)",
                     node_id,
@@ -1103,6 +1123,7 @@ class EventLoopNode(NodeProtocol):
                         key = tc.tool_input.get("key", "")
                         await accumulator.set(key, value)
                         outputs_set_this_turn.append(key)
+                        await self._publish_output_key_set(stream_id, node_id, key)
                     logged_tool_calls.append(
                         {
                             "tool_use_id": tc.tool_use_id,
@@ -1112,6 +1133,8 @@ class EventLoopNode(NodeProtocol):
                             "is_error": result.is_error,
                         }
                     )
+                    results_by_id[tc.tool_use_id] = result
+
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
                     user_input_requested = True
@@ -1120,10 +1143,10 @@ class EventLoopNode(NodeProtocol):
                         content="Waiting for user input...",
                         is_error=False,
                     )
+                    results_by_id[tc.tool_use_id] = result
+
                 else:
-                    # --- Real tool execution ---
-                    # Guard: detect truncated tool arguments (_raw fallback
-                    # from litellm when json.loads fails on max_tokens hit).
+                    # --- Real tool: check for truncated args, else queue ---
                     if "_raw" in tc.tool_input:
                         result = ToolResult(
                             tool_use_id=tc.tool_use_id,
@@ -1139,9 +1162,36 @@ class EventLoopNode(NodeProtocol):
                             node_id,
                             tc.tool_name,
                         )
+                        results_by_id[tc.tool_use_id] = result
                     else:
-                        result = await self._execute_tool(tc)
-                    result = self._truncate_tool_result(result, tc.tool_name)
+                        pending_real.append(tc)
+
+            # Phase 2: execute real tools in parallel.
+            if pending_real:
+                raw_results = await asyncio.gather(
+                    *(self._execute_tool(tc) for tc in pending_real),
+                    return_exceptions=True,
+                )
+                for tc, raw in zip(pending_real, raw_results, strict=True):
+                    if isinstance(raw, BaseException):
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=f"Tool '{tc.tool_name}' raised: {raw}",
+                            is_error=True,
+                        )
+                    else:
+                        result = raw
+                    results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
+
+            # Phase 3: record results into conversation in original order,
+            # build logged/real lists, and publish completed events.
+            for tc in tool_calls[:executed_in_batch]:
+                result = results_by_id.get(tc.tool_use_id)
+                if result is None:
+                    continue  # shouldn't happen
+
+                # Build log entries for real tools
+                if tc.tool_name not in ("set_output", "ask_user"):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
@@ -1152,15 +1202,11 @@ class EventLoopNode(NodeProtocol):
                     real_tool_results.append(tool_entry)
                     logged_tool_calls.append(tool_entry)
 
-                # Record tool result in conversation (both real and set_output
-                # go into the conversation for LLM context continuity)
                 await conversation.add_tool_result(
                     tool_use_id=tc.tool_use_id,
                     content=result.content,
                     is_error=result.is_error,
                 )
-
-                # Publish tool call completed
                 await self._publish_tool_completed(
                     stream_id,
                     node_id,
@@ -1613,10 +1659,27 @@ class EventLoopNode(NodeProtocol):
             return result
 
         # load_data is the designated mechanism for reading spilled files.
-        # The LLM controls chunk size via offset/limit — re-spilling its
-        # result would create a circular loop.
+        # Don't re-spill (circular), but DO truncate with a pagination hint.
         if tool_name == "load_data":
-            return result
+            preview_chars = max(limit - 300, limit // 2)
+            preview = result.content[:preview_chars]
+            truncated = (
+                f"[load_data result: {len(result.content)} chars — "
+                f"too large for context. Use offset and limit parameters "
+                f"to read smaller chunks, e.g. "
+                f"load_data(filename=..., offset=0, limit=50).]\n\n"
+                f"Preview:\n{preview}…"
+            )
+            logger.info(
+                "load_data result truncated: %d → %d chars (use offset/limit to paginate)",
+                len(result.content),
+                len(truncated),
+            )
+            return ToolResult(
+                tool_use_id=result.tool_use_id,
+                content=truncated,
+                is_error=False,
+            )
 
         # Determine a preview size — leave room for the metadata wrapper
         preview_chars = max(limit - 300, limit // 2)
@@ -1706,40 +1769,53 @@ class EventLoopNode(NodeProtocol):
             )
             if not conversation.needs_compaction():
                 # Pruning freed enough — skip full compaction entirely
+                prune_before = round(ratio * 100)
+                prune_after = round(new_ratio * 100)
+                if ctx.runtime_logger:
+                    ctx.runtime_logger.log_step(
+                        node_id=ctx.node_id,
+                        node_type="event_loop",
+                        step_index=-1,
+                        llm_text=f"Context pruned (tool results): "
+                        f"{prune_before}% \u2192 {prune_after}%",
+                        verdict="COMPACTION",
+                        verdict_feedback=f"level=prune_only "
+                        f"before={prune_before}% after={prune_after}%",
+                    )
                 if self._event_bus:
                     from framework.runtime.event_bus import AgentEvent, EventType
 
                     await self._event_bus.publish(
                         AgentEvent(
-                            type=EventType.CUSTOM,
+                            type=EventType.CONTEXT_COMPACTED,
                             stream_id=ctx.node_id,
                             node_id=ctx.node_id,
                             data={
-                                "custom_type": "node_compaction",
-                                "node_id": ctx.node_id,
                                 "level": "prune_only",
-                                "usage_before": round(ratio * 100),
-                                "usage_after": round(new_ratio * 100),
+                                "usage_before": prune_before,
+                                "usage_after": prune_after,
                             },
                         )
                     )
                 return
             ratio = new_ratio
 
+        _phase_grad = getattr(ctx, "continuous_mode", False)
+
         if ratio >= 1.2:
             level = "emergency"
             logger.warning("Emergency compaction triggered (usage %.0f%%)", ratio * 100)
             summary = self._build_emergency_summary(ctx, accumulator, conversation)
-            await conversation.compact(summary, keep_recent=1)
+            await conversation.compact(summary, keep_recent=1, phase_graduated=_phase_grad)
         elif ratio >= 1.0:
             level = "aggressive"
             logger.info("Aggressive compaction triggered (usage %.0f%%)", ratio * 100)
             summary = await self._generate_compaction_summary(ctx, conversation)
-            await conversation.compact(summary, keep_recent=2)
+            await conversation.compact(summary, keep_recent=2, phase_graduated=_phase_grad)
         else:
             level = "normal"
             summary = await self._generate_compaction_summary(ctx, conversation)
-            await conversation.compact(summary, keep_recent=4)
+            await conversation.compact(summary, keep_recent=4, phase_graduated=_phase_grad)
 
         new_ratio = conversation.usage_ratio()
         logger.info(
@@ -1748,17 +1824,29 @@ class EventLoopNode(NodeProtocol):
             ratio * 100,
             new_ratio * 100,
         )
+
+        # Log compaction to session logs (tool_logs.jsonl)
+        before_pct = round(ratio * 100)
+        after_pct = round(new_ratio * 100)
+        if ctx.runtime_logger:
+            ctx.runtime_logger.log_step(
+                node_id=ctx.node_id,
+                node_type="event_loop",
+                step_index=-1,  # Not a regular LLM step
+                llm_text=f"Context compacted ({level}): {before_pct}% \u2192 {after_pct}%",
+                verdict="COMPACTION",
+                verdict_feedback=f"level={level} before={before_pct}% after={after_pct}%",
+            )
+
         if self._event_bus:
             from framework.runtime.event_bus import AgentEvent, EventType
 
             await self._event_bus.publish(
                 AgentEvent(
-                    type=EventType.CUSTOM,
+                    type=EventType.CONTEXT_COMPACTED,
                     stream_id=ctx.node_id,
                     node_id=ctx.node_id,
                     data={
-                        "custom_type": "node_compaction",
-                        "node_id": ctx.node_id,
                         "level": level,
                         "usage_before": round(ratio * 100),
                         "usage_after": round(new_ratio * 100),
@@ -1789,13 +1877,16 @@ class EventLoopNode(NodeProtocol):
                 f"{tool_history}"
             )
 
+        # Dynamic budget: reasoning models (o1, gpt-5-mini) spend max_tokens on
+        # internal thinking. 500 leaves nothing for the actual summary.
+        summary_budget = max(1024, self._config.max_history_tokens // 10)
         try:
             response = ctx.llm.complete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
                     "Summarize conversations concisely. Always preserve the tool history section."
                 ),
-                max_tokens=500,
+                max_tokens=summary_budget,
             )
             summary = response.content
             # Ensure tool history is present even if LLM dropped it
@@ -2088,4 +2179,36 @@ class EventLoopNode(NodeProtocol):
                 tool_name=tool_name,
                 result=result,
                 is_error=is_error,
+            )
+
+    async def _publish_judge_verdict(
+        self,
+        stream_id: str,
+        node_id: str,
+        action: str,
+        feedback: str = "",
+        judge_type: str = "implicit",
+        iteration: int = 0,
+    ) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_judge_verdict(
+                stream_id=stream_id,
+                node_id=node_id,
+                action=action,
+                feedback=feedback,
+                judge_type=judge_type,
+                iteration=iteration,
+            )
+
+    async def _publish_output_key_set(
+        self,
+        stream_id: str,
+        node_id: str,
+        key: str,
+    ) -> None:
+        if self._event_bus:
+            await self._event_bus.emit_output_key_set(
+                stream_id=stream_id,
+                node_id=node_id,
+                key=key,
             )

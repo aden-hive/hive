@@ -192,3 +192,8 @@ class GraphOverview(Vertical):
         """Highlight a stalled node."""
         self._node_status[node_id] = f"[red]stalled: {reason}[/red]"
         self._display_graph()
+
+    def handle_edge_traversed(self, source_node: str, target_node: str) -> None:
+        """Highlight an edge being traversed."""
+        self._node_status[source_node] = f"[dim]→ {target_node}[/dim]"
+        self._display_graph()
