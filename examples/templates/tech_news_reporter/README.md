@@ -164,6 +164,25 @@ The agent's entry node `intake` requires:
 
 Terminal nodes: `compile-report`
 
+## Minimal Run Example
+
+You can execute this template directly using the module entry point:
+
+```bash
+uv run python -m examples.templates.tech_news_reporter \
+  --topics "AI, Python" \
+  --output-format html
+
+What Happens
+
+The agent initializes using agent.json and config.py
+
+News sources are fetched and filtered by topic
+
+A structured report is generated
+
+Output is returned in the specified format (e.g., HTML)
+
 ## Version History
 
 - **1.0.0** (2026-02-06): Initial release
