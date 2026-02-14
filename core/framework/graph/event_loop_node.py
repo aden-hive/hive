@@ -1665,13 +1665,14 @@ class EventLoopNode(NodeProtocol):
             preview = result.content[:preview_chars]
             truncated = (
                 f"[load_data result: {len(result.content)} chars — "
-                f"too large for context. Use offset and limit parameters "
+                f"too large for context. Use offset_bytes and limit_bytes parameters "
                 f"to read smaller chunks, e.g. "
-                f"load_data(filename=..., offset=0, limit=50).]\n\n"
+                f"load_data(filename=..., offset_bytes=0, limit_bytes=5000).]\n\n"
                 f"Preview:\n{preview}…"
             )
             logger.info(
-                "load_data result truncated: %d → %d chars (use offset/limit to paginate)",
+                "load_data result truncated: %d → %d chars "
+                "(use offset_bytes/limit_bytes to paginate)",
                 len(result.content),
                 len(truncated),
             )

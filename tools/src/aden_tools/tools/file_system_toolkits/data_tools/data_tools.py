@@ -10,7 +10,6 @@ with load_data().
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -69,12 +68,14 @@ def register_tools(mcp: FastMCP) -> None:
     def load_data(
         filename: str,
         data_dir: str,
-        offset: int = 0,
-        limit: int = 50,
+        offset_bytes: int = 0,
+        limit_bytes: int = 10000,
     ) -> dict:
         """
         Purpose
-            Load data from a previously saved file with pagination.
+            Load data from a previously saved file with byte-based pagination.
+            Efficient for files of any size (1 byte to 1 TB).
+            Automatically detects safe UTF-8 boundaries to prevent character splitting.
 
         When to use
             Retrieve large tool results that were spilled to disk.
@@ -83,21 +84,23 @@ def register_tools(mcp: FastMCP) -> None:
 
         Rules & Constraints
             filename must match a file in data_dir
-            Returns a page of lines with metadata about the full file
+            Uses byte offsets for O(1) seeking (works with huge files)
+            Automatically trims to valid UTF-8 character boundaries
+            Returns exactly limit_bytes or less (rounded to safe boundary)
 
         Args:
             filename: The filename to load (as shown in spillover messages or save_data results).
             data_dir: Absolute path to the data directory.
-            offset: 0-based line number to start reading from. Default 0.
-            limit: Max number of lines to return. Default 50.
+            offset_bytes: Byte offset to start reading from. Default 0.
+            limit_bytes: Max number of bytes to return. Default 10000 (10KB).
 
         Returns:
             Dict with content, pagination info, and metadata
 
         Examples:
-            load_data('users.json', '/path/to/data')                      # first 50 lines
-            load_data('users.json', '/path/to/data', offset=50, limit=50) # next 50
-            load_data('users.json', '/path/to/data', limit=200)           # first 200 lines
+            load_data('emails.jsonl', '/data')                           # first 10KB
+            load_data('emails.jsonl', '/data', offset_bytes=10000)       # next 10KB
+            load_data('large.txt', '/data', limit_bytes=50000)           # first 50KB
         """
         if not filename or ".." in filename or "/" in filename or "\\" in filename:
             return {"error": "Invalid filename"}
@@ -105,41 +108,64 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": "data_dir is required"}
 
         try:
-            offset = int(offset)
-            limit = int(limit)
+            offset_bytes = int(offset_bytes)
+            limit_bytes = int(limit_bytes)
             path = Path(data_dir) / filename
             if not path.exists():
                 return {"error": f"File not found: {filename}"}
 
-            content = path.read_text(encoding="utf-8")
-            size_bytes = len(content.encode("utf-8"))
+            file_size = path.stat().st_size
 
-            # If content is a single long line, try to pretty-print JSON so
-            # line-based pagination actually works.
-            all_lines = content.split("\n")
-            if len(all_lines) <= 2 and size_bytes > 500:
-                try:
-                    parsed = json.loads(content)
-                    content = json.dumps(parsed, indent=2, ensure_ascii=False)
-                    all_lines = content.split("\n")
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    pass
+            # Handle edge case: offset beyond file size
+            if offset_bytes >= file_size:
+                return {
+                    "success": True,
+                    "filename": filename,
+                    "content": "",
+                    "offset_bytes": offset_bytes,
+                    "bytes_read": 0,
+                    "next_offset_bytes": file_size,
+                    "file_size_bytes": file_size,
+                    "has_more": False,
+                }
 
-            total = len(all_lines)
-            start = min(offset, total)
-            end = min(start + limit, total)
-            sliced = all_lines[start:end]
+            with open(path, "rb") as f:
+                # O(1) seek to byte offset
+                f.seek(offset_bytes)
 
-            return {
-                "success": True,
-                "filename": filename,
-                "content": "\n".join(sliced),
-                "total_lines": total,
-                "size_bytes": size_bytes,
-                "offset": start,
-                "lines_returned": len(sliced),
-                "has_more": end < total,
-            }
+                # Read exactly limit_bytes
+                raw_bytes = f.read(limit_bytes)
+
+                # Trim to valid UTF-8 boundary
+                # Scan backwards max 4 bytes to find valid UTF-8 start
+                chunk = raw_bytes
+                text = None
+                for i in range(min(4, len(raw_bytes)) + 1):
+                    try:
+                        slice_end = len(raw_bytes) - i if i > 0 else len(raw_bytes)
+                        text = raw_bytes[:slice_end].decode("utf-8")
+                        chunk = raw_bytes[:slice_end]
+                        break
+                    except UnicodeDecodeError:
+                        continue
+
+                # If we couldn't decode at all, return error
+                if text is None:
+                    return {"error": "Could not decode file as UTF-8"}
+
+                # UTF-8 boundary is already handled above
+                next_offset = offset_bytes + len(chunk)
+
+                return {
+                    "success": True,
+                    "filename": filename,
+                    "content": text,
+                    "offset_bytes": offset_bytes,
+                    "bytes_read": len(chunk),
+                    "next_offset_bytes": next_offset,
+                    "file_size_bytes": file_size,
+                    "has_more": next_offset < file_size,
+                }
         except Exception as e:
             return {"error": f"Failed to load data: {str(e)}"}
 
