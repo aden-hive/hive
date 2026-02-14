@@ -296,6 +296,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Path to agent folder",
     )
     pause_parser.add_argument(
+        "--storage-path",
+        type=str,
+        default=None,
+        help="Override agent storage directory (default: ~/.hive/agents/{agent_name})",
+    )
+    pause_parser.add_argument(
         "session_id",
         type=str,
         help="Session ID to pause",
@@ -1700,11 +1706,31 @@ def cmd_sessions_checkpoints(args: argparse.Namespace) -> int:
 
 def cmd_pause(args: argparse.Namespace) -> int:
     """Pause a running session."""
-    print("⚠ Pause command not yet implemented")
-    print("This will be available once executor pause integration is complete.")
-    print(f"\nAgent: {args.agent_path}")
-    print(f"Session: {args.session_id}")
-    return 1
+    agent_name = Path(args.agent_path).name
+    agent_work_dir = (
+        Path(args.storage_path).expanduser()
+        if getattr(args, "storage_path", None)
+        else (Path.home() / ".hive" / "agents" / agent_name)
+    )
+    session_dir = agent_work_dir / "sessions" / args.session_id
+
+    if not session_dir.exists():
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        print(f"Looked in: {session_dir}", file=sys.stderr)
+        return 1
+
+    # Write a session-scoped pause request flag. The GraphExecutor checks for this
+    # file at node boundaries and pauses gracefully when it sees it.
+    pause_flag = session_dir / "pause.request"
+    try:
+        pause_flag.write_text("pause\n", encoding="utf-8")
+    except OSError as e:
+        print(f"Failed to write pause request: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Pause requested for session: {args.session_id}")
+    print("The agent will pause at the next node boundary.")
+    return 0
 
 
 def cmd_resume(args: argparse.Namespace) -> int:

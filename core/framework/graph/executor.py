@@ -501,6 +501,11 @@ class GraphExecutor:
             while steps < graph.max_steps:
                 steps += 1
 
+                # Support cross-process pause requests (CLI -> filesystem flag).
+                # If a pause.request file exists in the session directory, consume it and
+                # trigger the normal pause flow at the next node boundary.
+                self._consume_pause_request_file()
+
                 # Check for pause request
                 if self._pause_requested.is_set():
                     self.logger.info("⏸ Pause detected - stopping at node boundary")
@@ -1358,6 +1363,29 @@ class GraphExecutor:
                 from framework.runner.tool_registry import ToolRegistry
 
                 ToolRegistry.reset_execution_context(_ctx_token)
+
+    def _consume_pause_request_file(self) -> None:
+        """Consume a session-scoped pause request flag if present.
+
+        This enables external controllers (e.g. `hive pause`) to request a
+        graceful pause without sharing process memory with the runtime.
+        """
+        if not self._storage_path:
+            return
+
+        try:
+            pause_path = self._storage_path / "pause.request"
+            if not pause_path.exists():
+                return
+            try:
+                pause_path.unlink()
+            except OSError:
+                # Best-effort: even if unlink fails, still honor the request.
+                pass
+            self._pause_requested.set()
+        except Exception:
+            # Never let pause polling break execution.
+            return
 
     def _build_context(
         self,
