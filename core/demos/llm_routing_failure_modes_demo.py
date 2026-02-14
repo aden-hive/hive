@@ -5,31 +5,32 @@ This demonstrates the fix for the fail-open vulnerability in LLM routing.
 """
 
 from unittest.mock import Mock
-from framework.graph.edge import EdgeSpec, EdgeCondition, LLMFailureMode
+
+from framework.graph.edge import EdgeCondition, EdgeSpec, LLMFailureMode
 
 
 def demo_failure_modes():
     """Demonstrate all three failure modes with simulated LLM failures."""
-    
+
     # Setup
     mock_goal = Mock()
     mock_goal.name = "Demo Goal"
     mock_goal.description = "Demonstrating LLM routing failure modes"
-    
+
     source_output = {"result": "success"}
     memory = {"context": "demo"}
-    
+
     print("=" * 80)
     print("LLM ROUTING FAILURE MODES DEMO")
     print("=" * 80)
     print()
-    
+
     # -------------------------------------------------------------------
     # Mode 1: PROCEED (Fail-open, backward compatible)
     # -------------------------------------------------------------------
     print("📝 MODE 1: PROCEED (Fail-Open)")
     print("-" * 80)
-    
+
     edge_proceed = EdgeSpec(
         id="proceed-edge",
         source="source",
@@ -38,7 +39,7 @@ def demo_failure_modes():
         on_llm_failure=LLMFailureMode.PROCEED,  # Default
         description="Non-critical routing with high availability requirement",
     )
-    
+
     # Test with missing LLM
     result = edge_proceed.should_traverse(
         source_success=True,
@@ -47,17 +48,17 @@ def demo_failure_modes():
         llm=None,  # LLM unavailable
         goal=mock_goal,
     )
-    
+
     print(f"✓ Result when LLM unavailable (source succeeded): {result}")
-    print(f"  Behavior: Proceeds because source_success=True (fail-open)")
+    print("  Behavior: Proceeds because source_success=True (fail-open)")
     print()
-    
+
     # -------------------------------------------------------------------
     # Mode 2: SKIP (Fail-closed, security-critical)
     # -------------------------------------------------------------------
     print("📝 MODE 2: SKIP (Fail-Closed)")
     print("-" * 80)
-    
+
     edge_skip = EdgeSpec(
         id="auth-check",
         source="validate_token",
@@ -66,7 +67,7 @@ def demo_failure_modes():
         on_llm_failure=LLMFailureMode.SKIP,  # Fail-closed
         description="Authorization check - must not proceed on failures",
     )
-    
+
     # Test with missing LLM (simulates LLM service outage)
     result = edge_skip.should_traverse(
         source_success=True,
@@ -75,18 +76,18 @@ def demo_failure_modes():
         llm=None,  # LLM unavailable
         goal=mock_goal,
     )
-    
+
     print(f"✓ Result when LLM unavailable (source succeeded): {result}")
-    print(f"  Behavior: Does NOT proceed even though source succeeded (fail-closed)")
-    print(f"  Use case: Security gates, authorization checks, sensitive data access")
+    print("  Behavior: Does NOT proceed even though source succeeded (fail-closed)")
+    print("  Use case: Security gates, authorization checks, sensitive data access")
     print()
-    
+
     # -------------------------------------------------------------------
     # Mode 3: RAISE (Escalate to executor)
     # -------------------------------------------------------------------
     print("📝 MODE 3: RAISE (Escalate)")
     print("-" * 80)
-    
+
     edge_raise = EdgeSpec(
         id="critical-decision",
         source="analysis",
@@ -95,7 +96,7 @@ def demo_failure_modes():
         on_llm_failure=LLMFailureMode.RAISE,  # Escalate
         description="Critical decision that requires LLM - halt if unavailable",
     )
-    
+
     # Test with missing LLM
     try:
         result = edge_raise.should_traverse(
@@ -107,11 +108,11 @@ def demo_failure_modes():
         )
         print(f"✗ Should have raised exception but got: {result}")
     except RuntimeError as e:
-        print(f"✓ Raised RuntimeError as expected:")
+        print("✓ Raised RuntimeError as expected:")
         print(f"  {e}")
-        print(f"  Use case: Critical workflows where LLM decision is mandatory")
+        print("  Use case: Critical workflows where LLM decision is mandatory")
     print()
-    
+
     # -------------------------------------------------------------------
     # Summary
     # -------------------------------------------------------------------

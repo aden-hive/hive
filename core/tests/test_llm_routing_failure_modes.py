@@ -8,10 +8,11 @@ Tests the three failure handling strategies:
 """
 
 import json
-import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 
-from framework.graph.edge import EdgeSpec, EdgeCondition, LLMFailureMode
+import pytest
+
+from framework.graph.edge import EdgeCondition, EdgeSpec, LLMFailureMode
 
 
 class TestLLMRoutingFailureModes:
@@ -22,7 +23,7 @@ class TestLLMRoutingFailureModes:
         self.mock_goal = Mock()
         self.mock_goal.name = "Test Goal"
         self.mock_goal.description = "Test goal description"
-        
+
         self.source_output = {"result": "success"}
         self.memory = {"key": "value"}
 
@@ -50,7 +51,7 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_proceed_on_missing_llm(self):
         """Test PROCEED mode when LLM is not available - should return source_success."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.PROCEED)
-        
+
         # LLM unavailable, source succeeded
         result = edge.should_traverse(
             source_success=True,
@@ -60,7 +61,7 @@ class TestLLMRoutingFailureModes:
             goal=self.mock_goal,
         )
         assert result is True  # Proceeds because source succeeded
-        
+
         # LLM unavailable, source failed
         result = edge.should_traverse(
             source_success=False,
@@ -74,11 +75,11 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_proceed_on_exception(self):
         """Test PROCEED mode when LLM throws exception - should return source_success."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.PROCEED)
-        
+
         # Mock LLM that raises exception
         mock_llm = Mock()
         mock_llm.complete.side_effect = Exception("LLM API error")
-        
+
         # Source succeeded, LLM fails
         result = edge.should_traverse(
             source_success=True,
@@ -92,13 +93,13 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_proceed_on_parse_error(self):
         """Test PROCEED mode when JSON parsing fails - should return source_success."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.PROCEED)
-        
+
         # Mock LLM that returns non-JSON response
         mock_llm = Mock()
         mock_response = Mock()
         mock_response.content = "This is not JSON, just plain text"
         mock_llm.complete.return_value = mock_response
-        
+
         result = edge.should_traverse(
             source_success=True,
             source_output=self.source_output,
@@ -111,7 +112,7 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_skip_on_missing_llm(self):
         """Test SKIP mode when LLM is not available - should return False."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.SKIP)
-        
+
         result = edge.should_traverse(
             source_success=True,  # Even though source succeeded
             source_output=self.source_output,
@@ -124,10 +125,10 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_skip_on_exception(self):
         """Test SKIP mode when LLM throws exception - should return False."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.SKIP)
-        
+
         mock_llm = Mock()
         mock_llm.complete.side_effect = Exception("LLM API error")
-        
+
         result = edge.should_traverse(
             source_success=True,
             source_output=self.source_output,
@@ -140,12 +141,12 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_skip_on_parse_error(self):
         """Test SKIP mode when JSON parsing fails - should return False."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.SKIP)
-        
+
         mock_llm = Mock()
         mock_response = Mock()
         mock_response.content = "Invalid JSON response"
         mock_llm.complete.return_value = mock_response
-        
+
         result = edge.should_traverse(
             source_success=True,
             source_output=self.source_output,
@@ -158,7 +159,7 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_raise_on_missing_llm(self):
         """Test RAISE mode when LLM is not available - should raise RuntimeError."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.RAISE)
-        
+
         with pytest.raises(RuntimeError, match="LLM routing failed for edge 'test-edge'"):
             edge.should_traverse(
                 source_success=True,
@@ -171,10 +172,10 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_raise_on_exception(self):
         """Test RAISE mode when LLM throws exception - should raise RuntimeError."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.RAISE)
-        
+
         mock_llm = Mock()
         mock_llm.complete.side_effect = Exception("LLM API error")
-        
+
         with pytest.raises(RuntimeError, match="LLM routing failed for edge 'test-edge'"):
             edge.should_traverse(
                 source_success=True,
@@ -187,11 +188,8 @@ class TestLLMRoutingFailureModes:
     def test_llm_failure_mode_raise_includes_context(self):
         """Test that RAISE mode includes edge context in exception message."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.RAISE)
-        
-        with pytest.raises(
-            RuntimeError,
-            match=r"source=source_node -> target=target_node"
-        ):
+
+        with pytest.raises(RuntimeError, match=r"source=source_node -> target=target_node"):
             edge.should_traverse(
                 source_success=True,
                 source_output=self.source_output,
@@ -205,13 +203,13 @@ class TestLLMRoutingFailureModes:
         # Test all three modes with successful LLM routing
         for mode in [LLMFailureMode.PROCEED, LLMFailureMode.SKIP, LLMFailureMode.RAISE]:
             edge = self.create_edge(on_llm_failure=mode)
-            
+
             # Mock successful LLM response
             mock_llm = Mock()
             mock_response = Mock()
             mock_response.content = json.dumps({"proceed": True, "reasoning": "Test reason"})
             mock_llm.complete.return_value = mock_response
-            
+
             result = edge.should_traverse(
                 source_success=True,
                 source_output=self.source_output,
@@ -224,13 +222,13 @@ class TestLLMRoutingFailureModes:
     def test_llm_routing_success_can_skip(self):
         """Test that successful LLM routing can choose to skip."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.PROCEED)
-        
+
         # Mock LLM that decides not to proceed
         mock_llm = Mock()
         mock_response = Mock()
         mock_response.content = json.dumps({"proceed": False, "reasoning": "Not ready"})
         mock_llm.complete.return_value = mock_response
-        
+
         result = edge.should_traverse(
             source_success=True,
             source_output=self.source_output,
@@ -243,7 +241,7 @@ class TestLLMRoutingFailureModes:
     def test_security_critical_edge_fail_closed(self):
         """
         Integration test: Security-critical edge with fail-closed behavior.
-        
+
         Simulates authorization check where LLM failure must not allow access.
         """
         auth_edge = EdgeSpec(
@@ -254,7 +252,7 @@ class TestLLMRoutingFailureModes:
             on_llm_failure=LLMFailureMode.SKIP,  # Fail-closed for security
             description="Authorization check",
         )
-        
+
         # Simulate LLM service outage
         result = auth_edge.should_traverse(
             source_success=True,  # Token validated successfully
@@ -263,16 +261,16 @@ class TestLLMRoutingFailureModes:
             llm=None,  # LLM unavailable
             goal=self.mock_goal,
         )
-        
+
         # Must NOT proceed to protected resource when LLM fails
         assert result is False, "Security critical edge should not proceed on LLM failure"
 
     def test_missing_goal_handled_correctly(self):
         """Test that missing goal is handled the same as missing LLM."""
         edge = self.create_edge(on_llm_failure=LLMFailureMode.SKIP)
-        
+
         mock_llm = Mock()
-        
+
         result = edge.should_traverse(
             source_success=True,
             source_output=self.source_output,
@@ -295,7 +293,7 @@ class TestLLMRoutingErrorMessages:
             condition=EdgeCondition.LLM_DECIDE,
             on_llm_failure=LLMFailureMode.SKIP,
         )
-        
+
         edge.should_traverse(
             source_success=True,
             source_output={},
@@ -303,7 +301,7 @@ class TestLLMRoutingErrorMessages:
             llm=None,
             goal=Mock(name="TestGoal", description="Test"),
         )
-        
+
         # Check that edge ID appears in logs (implementation may vary)
         # This is a basic check - actual log format depends on logger configuration
 
@@ -316,11 +314,11 @@ class TestLLMRoutingErrorMessages:
             condition=EdgeCondition.LLM_DECIDE,
             on_llm_failure=LLMFailureMode.RAISE,
         )
-        
+
         mock_llm = Mock()
         original_error = ValueError("Original LLM error")
         mock_llm.complete.side_effect = original_error
-        
+
         with pytest.raises(RuntimeError) as exc_info:
             edge.should_traverse(
                 source_success=True,
@@ -329,6 +327,6 @@ class TestLLMRoutingErrorMessages:
                 llm=mock_llm,
                 goal=Mock(name="Test", description="Test"),
             )
-        
+
         # Check that original exception is chained
         assert exc_info.value.__cause__ == original_error

@@ -38,7 +38,7 @@ If LLM says {"proceed": false}, all modes return False.
 """)
 
 # ============================================================================
-# PART 2: WHEN LLM FAILS ❌ 
+# PART 2: WHEN LLM FAILS ❌
 # ============================================================================
 print("=" * 80)
 print("  PART 2: WHEN LLM FAILS (This is where the bug fix matters!)")

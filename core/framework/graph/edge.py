@@ -48,10 +48,10 @@ class EdgeCondition(StrEnum):
 
 class LLMFailureMode(StrEnum):
     """How to handle LLM routing failures.
-    
+
     When an LLM_DECIDE edge encounters an error (LLM unavailable, API failure,
     JSON parse errors, etc.), this determines the fallback behavior.
-    
+
     Values:
         PROCEED: Fail-open - proceed based on source_success (backward compatible)
                  Use for non-critical routing where availability is prioritized
@@ -193,7 +193,7 @@ class EdgeSpec(BaseModel):
                     source_success=source_success,
                     exception=None,
                 )
-            
+
             try:
                 return self._llm_decide(
                     llm=llm,
@@ -279,7 +279,7 @@ class EdgeSpec(BaseModel):
 
         The LLM evaluates whether proceeding to the target node
         is the best next step toward achieving the goal.
-        
+
         Raises:
             RuntimeError: If on_llm_failure is RAISE and LLM routing fails
         """
@@ -353,15 +353,15 @@ Respond with ONLY a JSON object:
     ) -> bool:
         """
         Handle LLM routing failures based on on_llm_failure mode.
-        
+
         Args:
             error_msg: Description of the failure
             source_success: Whether source node succeeded
             exception: The exception that occurred, if any
-            
+
         Returns:
             bool: Whether to traverse the edge (only for PROCEED/SKIP modes)
-            
+
         Raises:
             RuntimeError: If on_llm_failure is RAISE
         """
@@ -376,17 +376,13 @@ Respond with ONLY a JSON object:
         elif self.on_llm_failure == LLMFailureMode.SKIP:
             # Fail-closed: do not traverse edge
             logger.error(
-                f"      ✗ Edge '{self.id}': {error_msg}, "
-                f"skipping edge traversal (mode=SKIP)"
+                f"      ✗ Edge '{self.id}': {error_msg}, skipping edge traversal (mode=SKIP)"
             )
             return False
 
         elif self.on_llm_failure == LLMFailureMode.RAISE:
             # Escalate: raise exception to halt execution
-            logger.error(
-                f"      ✗ Edge '{self.id}': {error_msg}, "
-                f"raising exception (mode=RAISE)"
-            )
+            logger.error(f"      ✗ Edge '{self.id}': {error_msg}, raising exception (mode=RAISE)")
             raise RuntimeError(
                 f"LLM routing failed for edge '{self.id}' "
                 f"(source={self.source} -> target={self.target}): {error_msg}"
