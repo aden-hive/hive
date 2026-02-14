@@ -225,8 +225,11 @@ class GraphExecutor:
             timestamps = state_data.setdefault("timestamps", {})
             timestamps["updated_at"] = datetime.now().isoformat()
 
-            # Memory keys (lightweight — just keys, not values)
-            state_data["memory_keys"] = list(memory.read_all().keys())
+            # Persist full memory so state.json is sufficient for resume
+            # even if the process dies before the final write.
+            memory_snapshot = memory.read_all()
+            state_data["memory"] = memory_snapshot
+            state_data["memory_keys"] = list(memory_snapshot.keys())
 
             state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
         except Exception:
@@ -308,6 +311,7 @@ class GraphExecutor:
         continuous_conversation = None  # NodeConversation threaded across nodes
         cumulative_tools: list = []  # Tools accumulate, never removed
         cumulative_tool_names: set[str] = set()
+        cumulative_output_keys: list[str] = []  # Output keys from all visited nodes
 
         # Initialize checkpoint store if checkpointing is enabled
         checkpoint_store: CheckpointStore | None = None
@@ -458,6 +462,13 @@ class GraphExecutor:
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
 
+            # Emit resume event
+            if self._event_bus:
+                await self._event_bus.emit_execution_resumed(
+                    stream_id=self._stream_id,
+                    node_id=current_node_id,
+                )
+
         # Start run
         _run_id = self.runtime.start_run(
             goal_id=goal.id,
@@ -493,6 +504,14 @@ class GraphExecutor:
                 # Check for pause request
                 if self._pause_requested.is_set():
                     self.logger.info("⏸ Pause detected - stopping at node boundary")
+
+                    # Emit pause event
+                    if self._event_bus:
+                        await self._event_bus.emit_execution_paused(
+                            stream_id=self._stream_id,
+                            node_id=current_node_id,
+                            reason="User requested pause (Ctrl+Z)",
+                        )
 
                     # Create session state for pause
                     saved_memory = memory.read_all()
@@ -589,12 +608,16 @@ class GraphExecutor:
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
 
-                # Continuous mode: accumulate tools from this node
+                # Continuous mode: accumulate tools and output keys from this node
                 if is_continuous and node_spec.tools:
                     for t in self.tools:
                         if t.name in node_spec.tools and t.name not in cumulative_tool_names:
                             cumulative_tools.append(t)
                             cumulative_tool_names.add(t.name)
+                if is_continuous and node_spec.output_keys:
+                    for k in node_spec.output_keys:
+                        if k not in cumulative_output_keys:
+                            cumulative_output_keys.append(k)
 
                 # Build context for node
                 ctx = self._build_context(
@@ -606,6 +629,7 @@ class GraphExecutor:
                     continuous_mode=is_continuous,
                     inherited_conversation=continuous_conversation if is_continuous else None,
                     override_tools=cumulative_tools if is_continuous else None,
+                    cumulative_output_keys=cumulative_output_keys if is_continuous else None,
                 )
 
                 # Log actual input data being read
@@ -773,6 +797,17 @@ class GraphExecutor:
                         self.logger.info(
                             f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
                         )
+
+                        # Emit retry event
+                        if self._event_bus:
+                            await self._event_bus.emit_node_retry(
+                                stream_id=self._stream_id,
+                                node_id=current_node_id,
+                                retry_count=retry_count,
+                                max_retries=max_retries,
+                                error=result.error or "",
+                            )
+
                         _is_retry = True
                         continue
                     else:
@@ -859,11 +894,22 @@ class GraphExecutor:
                 # This must happen BEFORE determining next node, since pause nodes may have no edges
                 if node_spec.id in graph.pause_nodes:
                     self.logger.info("💾 Saving session state after pause node")
+
+                    # Emit pause event
+                    if self._event_bus:
+                        await self._event_bus.emit_execution_paused(
+                            stream_id=self._stream_id,
+                            node_id=node_spec.id,
+                            reason="HITL pause node",
+                        )
+
                     saved_memory = memory.read_all()
                     session_state_out = {
                         "paused_at": node_spec.id,
                         "resume_from": f"{node_spec.id}_resume",  # Resume key
                         "memory": saved_memory,
+                        "execution_path": list(path),
+                        "node_visit_counts": dict(node_visit_counts),
                         "next_node": None,  # Will resume from entry point
                     }
 
@@ -912,6 +958,16 @@ class GraphExecutor:
                 if result.next_node:
                     # Router explicitly set next node
                     self.logger.info(f"   → Router directing to: {result.next_node}")
+
+                    # Emit edge traversed event for router-directed edge
+                    if self._event_bus:
+                        await self._event_bus.emit_edge_traversed(
+                            stream_id=self._stream_id,
+                            source_node=current_node_id,
+                            target_node=result.next_node,
+                            edge_condition="router",
+                        )
+
                     current_node_id = result.next_node
                     self._write_progress(current_node_id, path, memory, node_visit_counts)
                 else:
@@ -934,6 +990,18 @@ class GraphExecutor:
                         # Find convergence point (fan-in node)
                         targets = [e.target for e in traversable_edges]
                         fan_in_node = self._find_convergence_node(graph, targets)
+
+                        # Emit edge traversed events for fan-out branches
+                        if self._event_bus:
+                            for edge in traversable_edges:
+                                await self._event_bus.emit_edge_traversed(
+                                    stream_id=self._stream_id,
+                                    source_node=current_node_id,
+                                    target_node=edge.target,
+                                    edge_condition=edge.condition.value
+                                    if hasattr(edge.condition, "value")
+                                    else str(edge.condition),
+                                )
 
                         # Execute branches in parallel
                         (
@@ -977,18 +1045,6 @@ class GraphExecutor:
                             break
                         next_spec = graph.get_node(next_node)
                         self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
-
-                        # Early TUI notification: emit NODE_LOOP_STARTED for
-                        # event_loop nodes NOW so the graph view updates before
-                        # the heavy transition work (prompt composition, file I/O,
-                        # compaction) that follows.  EventLoopNode.execute() will
-                        # emit its own NODE_LOOP_STARTED later — the duplicate is
-                        # harmless since graph_view handlers are idempotent.
-                        if self._event_bus and next_spec and next_spec.node_type == "event_loop":
-                            await self._event_bus.emit_node_loop_started(
-                                stream_id=self._stream_id,
-                                node_id=next_node,
-                            )
 
                         # CHECKPOINT: node_complete (after determining next node)
                         if (
@@ -1080,10 +1136,26 @@ class GraphExecutor:
                         # Set current phase for phase-aware compaction
                         continuous_conversation.set_current_phase(next_spec.id)
 
-                        # Opportunistic compaction at transition
+                        # Opportunistic compaction at transition:
+                        # 1. Prune old tool results (free, no LLM call)
+                        # 2. If still over 80%, do a phase-graduated compact
                         if continuous_conversation.usage_ratio() > 0.5:
                             await continuous_conversation.prune_old_tool_results(
                                 protect_tokens=2000,
+                            )
+                        if continuous_conversation.needs_compaction():
+                            self.logger.info(
+                                "   Phase-boundary compaction (%.0f%% usage)",
+                                continuous_conversation.usage_ratio() * 100,
+                            )
+                            summary = (
+                                f"Summary of earlier phases (before {next_spec.name}). "
+                                "See transition markers for phase details."
+                            )
+                            await continuous_conversation.compact(
+                                summary,
+                                keep_recent=4,
+                                phase_graduated=True,
                             )
 
                 # Update input_data for next node
@@ -1139,6 +1211,11 @@ class GraphExecutor:
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality=exec_quality,
                 node_visit_counts=dict(node_visit_counts),
+                session_state={
+                    "memory": output,  # output IS memory.read_all()
+                    "execution_path": list(path),
+                    "node_visit_counts": dict(node_visit_counts),
+                },
             )
 
         except asyncio.CancelledError:
@@ -1284,6 +1361,7 @@ class GraphExecutor:
         continuous_mode: bool = False,
         inherited_conversation: Any = None,
         override_tools: list | None = None,
+        cumulative_output_keys: list[str] | None = None,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1316,6 +1394,7 @@ class GraphExecutor:
             pause_event=self._pause_requested,  # Pass pause event for granular control
             continuous_mode=continuous_mode,
             inherited_conversation=inherited_conversation,
+            cumulative_output_keys=cumulative_output_keys or [],
         )
 
     # Valid node types - no ambiguous "llm" type allowed

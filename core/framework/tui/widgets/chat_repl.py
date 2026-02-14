@@ -113,6 +113,7 @@ class ChatRepl(Vertical):
         self._waiting_for_input: bool = False
         self._input_node_id: str | None = None
         self._pending_ask_question: str = ""
+        self._active_node_id: str | None = None  # Currently executing node
         self._resume_session = resume_session
         self._resume_checkpoint = resume_checkpoint
         self._session_index: list[str] = []  # IDs from last listing
@@ -843,7 +844,21 @@ class ChatRepl(Vertical):
                 self._write_history(f"[bold red]Error delivering input:[/bold red] {e}")
             return
 
-        # Double-submit guard: reject input while an execution is in-flight
+        # Mid-execution input: inject into the active node's conversation
+        if self._current_exec_id is not None and self._active_node_id:
+            self._write_history(f"[bold green]You:[/bold green] {user_input}")
+            node_id = self._active_node_id
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.runtime.inject_input(node_id, user_input),
+                    self._agent_loop,
+                )
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self._write_history(f"[bold red]Error delivering input:[/bold red] {e}")
+            return
+
+        # Double-submit guard: no active node to inject into
         if self._current_exec_id is not None:
             self._write_history("[dim]Agent is still running — please wait.[/dim]")
             return
@@ -905,12 +920,13 @@ class ChatRepl(Vertical):
     # -- Event handlers called by app.py _handle_event --
 
     def handle_node_started(self, node_id: str) -> None:
-        """Reset streaming state when a new node begins execution.
+        """Reset streaming state and track active node when a new node begins.
 
         Flushes any stale ``_streaming_snapshot`` left over from the
         previous node and resets the processing indicator so the user
         sees a clean transition between graph nodes.
         """
+        self._active_node_id = node_id
         if self._streaming_snapshot:
             self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
             self._streaming_snapshot = ""
@@ -996,6 +1012,7 @@ class ChatRepl(Vertical):
         self._streaming_snapshot = ""
         self._waiting_for_input = False
         self._input_node_id = None
+        self._active_node_id = None
         self._pending_ask_question = ""
         self._log_buffer.clear()
 
@@ -1018,6 +1035,7 @@ class ChatRepl(Vertical):
         self._waiting_for_input = False
         self._pending_ask_question = ""
         self._input_node_id = None
+        self._active_node_id = None
         self._log_buffer.clear()
 
         # Re-enable input
@@ -1056,3 +1074,32 @@ class ChatRepl(Vertical):
         chat_input.disabled = False
         chat_input.placeholder = "Type your response..."
         chat_input.focus()
+
+    def handle_node_completed(self, node_id: str) -> None:
+        """Clear active node when it finishes."""
+        if self._active_node_id == node_id:
+            self._active_node_id = None
+
+    def handle_internal_output(self, node_id: str, content: str) -> None:
+        """Show output from non-client-facing nodes."""
+        self._write_history(f"[dim cyan]⟨{node_id}⟩[/dim cyan] {content}")
+
+    def handle_execution_paused(self, node_id: str, reason: str) -> None:
+        """Show that execution has been paused."""
+        msg = f"[bold yellow]⏸ Paused[/bold yellow] at [cyan]{node_id}[/cyan]"
+        if reason:
+            msg += f" [dim]({reason})[/dim]"
+        self._write_history(msg)
+
+    def handle_execution_resumed(self, node_id: str) -> None:
+        """Show that execution has been resumed."""
+        self._write_history(f"[bold green]▶ Resumed[/bold green] from [cyan]{node_id}[/cyan]")
+
+    def handle_goal_achieved(self, data: dict[str, Any]) -> None:
+        """Show goal achievement prominently."""
+        self._write_history("[bold green]★ Goal achieved![/bold green]")
+
+    def handle_constraint_violation(self, data: dict[str, Any]) -> None:
+        """Show constraint violation as a warning."""
+        desc = data.get("description", "Unknown constraint")
+        self._write_history(f"[bold red]⚠ Constraint violation:[/bold red] {desc}")

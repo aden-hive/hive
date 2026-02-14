@@ -332,6 +332,14 @@ class AdenTUI(App):
         EventType.CONSTRAINT_VIOLATION,
         EventType.STATE_CHANGED,
         EventType.NODE_INPUT_BLOCKED,
+        EventType.CONTEXT_COMPACTED,
+        EventType.NODE_INTERNAL_OUTPUT,
+        EventType.JUDGE_VERDICT,
+        EventType.OUTPUT_KEY_SET,
+        EventType.NODE_RETRY,
+        EventType.EDGE_TRAVERSED,
+        EventType.EXECUTION_PAUSED,
+        EventType.EXECUTION_RESUMED,
     ]
 
     _LOG_PANE_EVENTS = frozenset(_EVENT_TYPES) - {
@@ -404,6 +412,31 @@ class AdenTUI(App):
             elif et == EventType.NODE_LOOP_ITERATION:
                 self.chat_repl.handle_loop_iteration(event.data.get("iteration", 0))
 
+            # Track active node in chat_repl for mid-execution input
+            if et == EventType.NODE_LOOP_STARTED:
+                self.chat_repl.handle_node_started(event.node_id or "")
+            elif et == EventType.NODE_LOOP_COMPLETED:
+                self.chat_repl.handle_node_completed(event.node_id or "")
+
+            # Non-client-facing node output → chat repl
+            if et == EventType.NODE_INTERNAL_OUTPUT:
+                content = event.data.get("content", "")
+                if content.strip():
+                    self.chat_repl.handle_internal_output(event.node_id or "", content)
+
+            # Execution paused/resumed → chat repl
+            if et == EventType.EXECUTION_PAUSED:
+                reason = event.data.get("reason", "")
+                self.chat_repl.handle_execution_paused(event.node_id or "", reason)
+            elif et == EventType.EXECUTION_RESUMED:
+                self.chat_repl.handle_execution_resumed(event.node_id or "")
+
+            # Goal achieved / constraint violation → chat repl
+            if et == EventType.GOAL_ACHIEVED:
+                self.chat_repl.handle_goal_achieved(event.data)
+            elif et == EventType.CONSTRAINT_VIOLATION:
+                self.chat_repl.handle_constraint_violation(event.data)
+
             # --- Graph view events ---
             if et in (
                 EventType.EXECUTION_STARTED,
@@ -440,6 +473,13 @@ class AdenTUI(App):
                     started=False,
                 )
 
+            # Edge traversal → graph view
+            if et == EventType.EDGE_TRAVERSED:
+                self.graph_view.handle_edge_traversed(
+                    event.data.get("source_node", ""),
+                    event.data.get("target_node", ""),
+                )
+
             # --- Status bar events ---
             if et == EventType.EXECUTION_STARTED:
                 entry_node = event.data.get("entry_node") or (
@@ -460,6 +500,24 @@ class AdenTUI(App):
                 self.status_bar.set_node_detail("thinking...")
             elif et == EventType.NODE_STALLED:
                 self.status_bar.set_node_detail(f"stalled: {event.data.get('reason', '')}")
+            elif et == EventType.CONTEXT_COMPACTED:
+                before = event.data.get("usage_before", "?")
+                after = event.data.get("usage_after", "?")
+                self.status_bar.set_node_detail(f"compacted: {before}% \u2192 {after}%")
+            elif et == EventType.JUDGE_VERDICT:
+                action = event.data.get("action", "?")
+                self.status_bar.set_node_detail(f"judge: {action}")
+            elif et == EventType.OUTPUT_KEY_SET:
+                key = event.data.get("key", "?")
+                self.status_bar.set_node_detail(f"set: {key}")
+            elif et == EventType.NODE_RETRY:
+                retry = event.data.get("retry_count", "?")
+                max_r = event.data.get("max_retries", "?")
+                self.status_bar.set_node_detail(f"retry {retry}/{max_r}")
+            elif et == EventType.EXECUTION_PAUSED:
+                self.status_bar.set_node_detail("paused")
+            elif et == EventType.EXECUTION_RESUMED:
+                self.status_bar.set_node_detail("resumed")
 
             # --- Log events (inline in chat) ---
             if et in self._LOG_PANE_EVENTS:

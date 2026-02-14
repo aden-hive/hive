@@ -143,6 +143,18 @@ class FakeEventBus:
     async def emit_node_loop_completed(self, **kwargs):
         self.events.append(("completed", kwargs))
 
+    async def emit_edge_traversed(self, **kwargs):
+        self.events.append(("edge_traversed", kwargs))
+
+    async def emit_execution_paused(self, **kwargs):
+        self.events.append(("execution_paused", kwargs))
+
+    async def emit_execution_resumed(self, **kwargs):
+        self.events.append(("execution_resumed", kwargs))
+
+    async def emit_node_retry(self, **kwargs):
+        self.events.append(("node_retry", kwargs))
+
 
 @pytest.mark.asyncio
 async def test_executor_emits_node_events():
@@ -201,15 +213,19 @@ async def test_executor_emits_node_events():
     assert result.success is True
     assert result.path == ["n1", "n2"]
 
-    # Should have 4 events: started/completed for n1, then started/completed for n2
-    assert len(event_bus.events) == 4
+    # Should have 5 events: started/completed for n1, edge_traversed, then started/completed for n2
+    assert len(event_bus.events) == 5
     assert event_bus.events[0] == ("started", {"stream_id": "test-stream", "node_id": "n1"})
     assert event_bus.events[1] == (
         "completed",
         {"stream_id": "test-stream", "node_id": "n1", "iterations": 1},
     )
-    assert event_bus.events[2] == ("started", {"stream_id": "test-stream", "node_id": "n2"})
-    assert event_bus.events[3] == (
+    assert event_bus.events[2] == (
+        "edge_traversed",
+        {"stream_id": "test-stream", "source_node": "n1", "target_node": "n2"},
+    )
+    assert event_bus.events[3] == ("started", {"stream_id": "test-stream", "node_id": "n2"})
+    assert event_bus.events[4] == (
         "completed",
         {"stream_id": "test-stream", "node_id": "n2", "iterations": 1},
     )
