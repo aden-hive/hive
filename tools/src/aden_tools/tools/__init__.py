@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
+from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
@@ -92,6 +93,7 @@ def register_all_tools(
     register_news(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
+    register_calendar(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
@@ -195,6 +197,14 @@ def register_all_tools(
         "scholar_get_author",
         "patents_search",
         "patents_get_details",
+        "calendar_list_events",
+        "calendar_get_event",
+        "calendar_create_event",
+        "calendar_update_event",
+        "calendar_delete_event",
+        "calendar_list_calendars",
+        "calendar_get_calendar",
+        "calendar_check_availability",
         "slack_send_message",
         "slack_list_channels",
         "slack_get_channel_history",
