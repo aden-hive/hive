@@ -25,34 +25,8 @@ jobs:
             // Allow micro-fix and documentation PRs without a linked issue
             const isMicroFix = prLabels.includes('micro-fix') || /micro-fix/i.test(prTitle);
             const isDocumentation = prLabels.includes('documentation') || /\bdocs?\b/i.test(prTitle);
-            
-            // Check if changes are only documentation files
-            let isDocFilesOnly = false;
-            try {
-              const files = await github.paginate(github.rest.pulls.listFiles, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                per_page: 100,
-              });
-              
-              if (files.length > 0) {
-                isDocFilesOnly = files.every(f => 
-                  f.filename.endsWith('.md') || 
-                  f.filename.endsWith('.txt') || 
-                  f.filename.startsWith('docs/') || 
-                  f.filename.startsWith('.github/')
-                );
-              }
-              if (isDocFilesOnly) {
-                console.log('All changed files are documentation or config: skipping strict issue assignment check.');
-              }
-            } catch (e) {
-              console.log('Error checking file list: ' + e.message);
-            }
-
-            if (isMicroFix || isDocumentation || isDocFilesOnly) {
-              const reason = isMicroFix ? 'micro-fix' : (isDocumentation ? 'documentation label/title' : 'documentation files only');
+            if (isMicroFix || isDocumentation) {
+              const reason = isMicroFix ? 'micro-fix' : 'documentation';
               console.log(`PR #${prNumber} is a ${reason}, skipping issue requirement.`);
               return;
             }
