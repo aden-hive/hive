@@ -74,7 +74,7 @@ def register_all_tools(
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
     register_github(mcp, credentials=credentials)
-    # email supports multiple providers (Resend) with auto-detection
+    # email supports multiple providers (Gmail, Resend)
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
@@ -107,6 +107,8 @@ def register_all_tools(
         "execute_command_tool",
         "load_data",
         "save_data",
+        "append_data",
+        "edit_data",
         "list_data_files",
         "serve_file_to_user",
         "csv_read",
@@ -131,7 +133,6 @@ def register_all_tools(
         "github_get_user_profile",
         "github_get_user_emails",
         "send_email",
-        "send_budget_alert_email",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",
@@ -162,7 +163,6 @@ def register_all_tools(
         "slack_remove_reaction",
         "slack_list_users",
         "slack_upload_file",
-        # Advanced Slack tools
         "slack_search_messages",
         "slack_get_thread_replies",
         "slack_pin_message",
@@ -174,32 +174,23 @@ def register_all_tools(
         "slack_send_dm",
         "slack_get_permalink",
         "slack_send_ephemeral",
-        # Block Kit & Views
         "slack_post_blocks",
         "slack_open_modal",
         "slack_update_home_tab",
-        # Phase 2: User Status & Presence
         "slack_set_status",
         "slack_set_presence",
         "slack_get_presence",
-        # Phase 2: Reminders
         "slack_create_reminder",
         "slack_list_reminders",
         "slack_delete_reminder",
-        # Phase 2: User Groups
         "slack_create_usergroup",
         "slack_update_usergroup_members",
         "slack_list_usergroups",
-        # Phase 2: Emoji
         "slack_list_emoji",
-        # Phase 2: Canvas
         "slack_create_canvas",
         "slack_edit_canvas",
-        # Phase 2: Analytics (AI-Driven)
         "slack_get_messages_for_analysis",
-        # Phase 2: Workflow
         "slack_trigger_workflow",
-        # Phase 3: Critical Power Tools
         "slack_get_conversation_context",
         "slack_find_user_by_email",
         "slack_kick_user_from_channel",
