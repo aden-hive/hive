@@ -191,13 +191,13 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         "description": graph_data.get("description", ""),
     }
 
-# Backward/forward compatibility for exports
-if "default_model" in graph_data:
-    graph_kwargs["default_model"] = graph_data["default_model"]
-elif "defaultModel" in graph_data:
-    graph_kwargs["default_model"] = graph_data["defaultModel"]
-
-graph = GraphSpec(**graph_kwargs)
+    # Backward/forward compatibility for exports
+    if "default_model" in graph_data:
+        graph_kwargs["default_model"] = graph_data["default_model"]
+    elif "defaultModel" in graph_data:
+        graph_kwargs["default_model"] = graph_data["defaultModel"]
+    
+    graph = GraphSpec(**graph_kwargs)
 
 
     # Build Goal
