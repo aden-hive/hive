@@ -52,6 +52,7 @@ To add a new credential:
 """
 
 from .apollo import APOLLO_CREDENTIALS
+from .attio import ATTIO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .bigquery import BIGQUERY_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
@@ -92,6 +93,7 @@ CREDENTIAL_SPECS = {
     **SERPAPI_CREDENTIALS,
     **TELEGRAM_CREDENTIALS,
     **BIGQUERY_CREDENTIALS,
+    **ATTIO_CREDENTIALS,
 }
 
 __all__ = [
@@ -130,4 +132,5 @@ __all__ = [
     "SERPAPI_CREDENTIALS",
     "TELEGRAM_CREDENTIALS",
     "BIGQUERY_CREDENTIALS",
+    "ATTIO_CREDENTIALS",
 ]
