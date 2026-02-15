@@ -4,7 +4,7 @@ from pathlib import Path
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
+from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
@@ -200,7 +200,7 @@ class DeepResearchAgent:
             },
         )
 
-    def _setup(self) -> GraphExecutor:
+    def _setup(self, mock_mode: bool = False) -> GraphExecutor:
         """Set up the executor with all components."""
         from pathlib import Path
 

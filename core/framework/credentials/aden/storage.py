@@ -6,9 +6,9 @@ Provides offline resilience by caching credentials locally while
 keeping them synchronized with the Aden server.
 
 Usage:
-    from core.framework.credentials import CredentialStore
-    from core.framework.credentials.storage import EncryptedFileStorage
-    from core.framework.credentials.aden import (
+    from framework.credentials import CredentialStore
+    from framework.credentials.storage import EncryptedFileStorage
+    from framework.credentials.aden import (
         AdenCredentialClient,
         AdenClientConfig,
         AdenSyncProvider,

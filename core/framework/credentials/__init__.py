@@ -9,7 +9,7 @@ This module provides secure credential storage with:
 - Multiple backends: Encrypted files, env vars, HashiCorp Vault
 
 Quick Start:
-    from core.framework.credentials import CredentialStore, CredentialObject
+    from framework.credentials import CredentialStore, CredentialObject
 
     # Create store with encrypted storage
     store = CredentialStore.with_encrypted_storage()  # defaults to ~/.hive/credentials
@@ -29,17 +29,17 @@ Quick Start:
     ))
 
 For OAuth2 support:
-    from core.framework.credentials.oauth2 import BaseOAuth2Provider, OAuth2Config
+    from framework.credentials.oauth2 import BaseOAuth2Provider, OAuth2Config
 
 For Aden server sync:
-    from core.framework.credentials.aden import (
+    from framework.credentials.aden import (
         AdenCredentialClient,
         AdenClientConfig,
         AdenSyncProvider,
     )
 
 For Vault integration:
-    from core.framework.credentials.vault import HashiCorpVaultStorage
+    from framework.credentials.vault import HashiCorpVaultStorage
 """
 
 from .models import (
@@ -71,8 +71,8 @@ from .template import TemplateResolver
 from .validation import ensure_credential_key_env, validate_agent_credentials
 
 # Aden sync components (lazy import to avoid httpx dependency when not needed)
-# Usage: from core.framework.credentials.aden import AdenSyncProvider
-# Or: from core.framework.credentials import AdenSyncProvider
+# Usage: from framework.credentials.aden import AdenSyncProvider
+# Or: from framework.credentials import AdenSyncProvider
 try:
     from .aden import (
         AdenCachedStorage,

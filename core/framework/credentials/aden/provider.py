@@ -6,9 +6,9 @@ The Aden server is the authoritative source for OAuth2 tokens - this provider
 fetches and caches tokens locally while delegating refresh operations to Aden.
 
 Usage:
-    from core.framework.credentials import CredentialStore
-    from core.framework.credentials.storage import EncryptedFileStorage
-    from core.framework.credentials.aden import (
+    from framework.credentials import CredentialStore
+    from framework.credentials.storage import EncryptedFileStorage
+    from framework.credentials.aden import (
         AdenCredentialClient,
         AdenClientConfig,
         AdenSyncProvider,

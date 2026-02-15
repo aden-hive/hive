@@ -32,6 +32,7 @@ jobs:
         run: |
           uv run --project core ruff check core/
           uv run --project core ruff check tools/
+          uv run --project core ruff check examples/templates/
 
       - name: Ruff format
         run: |

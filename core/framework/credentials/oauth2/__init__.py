@@ -7,8 +7,8 @@ This module provides OAuth2 credential management with:
 - Token lifecycle management (TokenLifecycleManager)
 
 Quick Start:
-    from core.framework.credentials import CredentialStore
-    from core.framework.credentials.oauth2 import BaseOAuth2Provider, OAuth2Config
+    from framework.credentials import CredentialStore
+    from framework.credentials.oauth2 import BaseOAuth2Provider, OAuth2Config
 
     # Configure OAuth2 provider
     provider = BaseOAuth2Provider(OAuth2Config(
@@ -27,7 +27,7 @@ Quick Start:
     token = provider.client_credentials_grant()
 
     # Save to store
-    from core.framework.credentials import CredentialObject, CredentialKey, CredentialType
+    from framework.credentials import CredentialObject, CredentialKey, CredentialType
     from pydantic import SecretStr
 
     store.save_credential(CredentialObject(
@@ -49,7 +49,7 @@ Quick Start:
     ))
 
 For advanced lifecycle management:
-    from core.framework.credentials.oauth2 import TokenLifecycleManager
+    from framework.credentials.oauth2 import TokenLifecycleManager
 
     manager = TokenLifecycleManager(
         provider=provider,

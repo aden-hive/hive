@@ -13,9 +13,9 @@ Components:
 - AdenCachedStorage: Storage with local cache + Aden fallback
 
 Quick Start:
-    from core.framework.credentials import CredentialStore
-    from core.framework.credentials.storage import EncryptedFileStorage
-    from core.framework.credentials.aden import (
+    from framework.credentials import CredentialStore
+    from framework.credentials.storage import EncryptedFileStorage
+    from framework.credentials.aden import (
         AdenCredentialClient,
         AdenClientConfig,
         AdenSyncProvider,

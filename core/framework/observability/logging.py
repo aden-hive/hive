@@ -32,10 +32,27 @@ trace_context: ContextVar[dict[str, Any] | None] = ContextVar("trace_context", d
 # ANSI escape code pattern (matches \033[...m or \x1b[...m)
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m|\033\[[0-9;]*m")
 
+# Redaction patterns
+REDACTION_PATTERNS = [
+    # OpenAI API Keys (sk-...)
+    (re.compile(r"(sk-[a-zA-Z0-9]{48})"), "sk-[REDACTED]"),
+    # GitHub Tokens (ghp_...)
+    (re.compile(r"(ghp_[a-zA-Z0-9]{36})"), "ghp_[REDACTED]"),
+    # Generic Bearer Tokens
+    (re.compile(r"(Bearer\s+[a-zA-Z0-9\-\._~+/]+=*)"), "Bearer [REDACTED]"),
+]
+
 
 def strip_ansi_codes(text: str) -> str:
     """Remove ANSI escape codes from text for clean JSON logging."""
     return ANSI_ESCAPE_PATTERN.sub("", text)
+
+
+def redact_sensitive_data(text: str) -> str:
+    """Redact sensitive data like API keys from text."""
+    for pattern, replacement in REDACTION_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 class StructuredFormatter(logging.Formatter):
@@ -55,6 +72,8 @@ class StructuredFormatter(logging.Formatter):
 
         # Strip ANSI codes from message for clean JSON output
         message = strip_ansi_codes(record.getMessage())
+        # Redact sensitive data
+        message = redact_sensitive_data(message)
 
         # Build base log entry
         log_entry = {
@@ -71,7 +90,8 @@ class StructuredFormatter(logging.Formatter):
         event = getattr(record, "event", None)
         if event is not None:
             if isinstance(event, str):
-                log_entry["event"] = strip_ansi_codes(str(event))
+                event_str = strip_ansi_codes(str(event))
+                log_entry["event"] = redact_sensitive_data(event_str)
             else:
                 log_entry["event"] = event
 
@@ -94,7 +114,8 @@ class StructuredFormatter(logging.Formatter):
         # Add exception info if present (strip ANSI codes from exception text too)
         if record.exc_info:
             exception_text = self.formatException(record.exc_info)
-            log_entry["exception"] = strip_ansi_codes(exception_text)
+            exception_text = strip_ansi_codes(exception_text)
+            log_entry["exception"] = redact_sensitive_data(exception_text)
 
         return json.dumps(log_entry)
 
@@ -149,7 +170,9 @@ class HumanReadableFormatter(logging.Formatter):
             event = f" [{record_event}]"
 
         # Format message: [LEVEL] [trace context] message
-        return f"{color}[{level}]{reset} {context_prefix}{record.getMessage()}{event}"
+        message = record.getMessage()
+        message = redact_sensitive_data(message)
+        return f"{color}[{level}]{reset} {context_prefix}{message}{event}"
 
 
 def configure_logging(

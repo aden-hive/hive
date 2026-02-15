@@ -5,8 +5,8 @@ This module provides enterprise-grade secret management through
 HashiCorp Vault integration.
 
 Quick Start:
-    from core.framework.credentials import CredentialStore
-    from core.framework.credentials.vault import HashiCorpVaultStorage
+    from framework.credentials import CredentialStore
+    from framework.credentials.vault import HashiCorpVaultStorage
 
     # Configure Vault storage
     storage = HashiCorpVaultStorage(
