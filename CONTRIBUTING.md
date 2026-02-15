@@ -52,7 +52,40 @@ You may submit PRs without prior assignment for:
 8. Commit your changes following our commit conventions
 9. Push to your fork and submit a Pull Request
 
-## Development Setup
+## Development Setup (Recommended)
+
+> ⚠️ **Important (Ubuntu 23.10+ / WSL / Linux)**  
+> This project must be installed inside a **Python virtual environment** due to PEP 668 restrictions.
+
+### 1️⃣ System Requirements
+
+- Python **3.11+** (3.12 supported)
+- Linux / macOS / **Windows via WSL2 (Ubuntu recommended)**
+
+Install required system packages:
+```bash
+sudo apt update
+sudo apt install -y python3-full python3-venv
+```
+
+---
+
+### 2️⃣ Create & Activate Virtual Environment
+
+From the project root:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+You should now see:
+```
+(.venv) user@machine:~/hive
+```
+
+---
+
+### 3️⃣ Install Python Dependencies
 
 ```bash
 # Install Python packages and verify setup
