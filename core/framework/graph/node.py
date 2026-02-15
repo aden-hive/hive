@@ -576,12 +576,12 @@ class NodeResult:
                 "understand. Focus on the key information produced."
             )
 
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            with anthropic.Anthropic(api_key=api_key) as client:
+                message = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=200,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
             summary = message.content[0].text.strip()
             return f"✓ {summary}"
@@ -1616,12 +1616,12 @@ Do NOT fabricate data or return empty objects."""
         try:
             import anthropic
 
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            with anthropic.Anthropic(api_key=api_key) as client:
+                message = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=1000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
             # Parse Haiku's response
             response_text = message.content[0].text.strip()
