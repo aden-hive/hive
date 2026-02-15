@@ -52,6 +52,7 @@ To add a new credential:
 3. If new category, import and merge it in this __init__.py
 """
 
+from .apify import APIFY_CREDENTIALS
 from .apollo import APOLLO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .bigquery import BIGQUERY_CREDENTIALS
@@ -85,6 +86,7 @@ CREDENTIAL_SPECS = {
     **SEARCH_CREDENTIALS,
     **EMAIL_CREDENTIALS,
     **GCP_VISION_CREDENTIALS,
+    **APIFY_CREDENTIALS,
     **APOLLO_CREDENTIALS,
     **GITHUB_CREDENTIALS,
     **GOOGLE_MAPS_CREDENTIALS,
@@ -124,6 +126,7 @@ __all__ = [
     "SEARCH_CREDENTIALS",
     "EMAIL_CREDENTIALS",
     "GCP_VISION_CREDENTIALS",
+    "APIFY_CREDENTIALS",
     "GITHUB_CREDENTIALS",
     "GOOGLE_MAPS_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .apify_tool import register_tools as register_apify
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
 from .calcom_tool import register_tools as register_calcom
@@ -85,6 +86,7 @@ def register_all_tools(
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
+    register_apify(mcp, credentials=credentials)
     register_github(mcp, credentials=credentials)
     # email supports multiple providers (Gmail, Resend)
     register_email(mcp, credentials=credentials)
@@ -203,6 +205,12 @@ def register_all_tools(
         "query_runtime_logs",
         "query_runtime_log_details",
         "query_runtime_log_raw",
+        # Apify tools (Universal web scraping & automation)
+        "apify_run_actor",
+        "apify_get_dataset",
+        "apify_get_run",
+        "apify_search_actors",
+        # SerpAPI tools (Google Scholar & Patents)
         "scholar_search",
         "scholar_get_citations",
         "scholar_get_author",
