@@ -20,7 +20,7 @@ Usage:
     # Fetch a credential
     response = client.get_credential("hubspot")
     if response:
-        print(f"Token expires at: {response.expires_at}")
+        logger.debug(f"Token expires at: {response.expires_at}")
 
     # Request a refresh
     refreshed = client.request_refresh("hubspot")
@@ -227,7 +227,7 @@ class AdenCredentialClient:
         # List all integrations
         integrations = client.list_integrations()
         for info in integrations:
-            print(f"{info.integration_id}: {info.status}")
+            logger.info(f"{info.integration_id}: {info.status}")
 
         # Clean up
         client.close()

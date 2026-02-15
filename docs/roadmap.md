@@ -153,8 +153,8 @@ classDef done fill:#9e9e9e,color:#fff,stroke:#757575
             - [x] Github
             - [ ] Instagram
         - [ ] SAAS
-            - [ ] Hubspot
-            - [ ] Slack
+            - [x] Hubspot
+            - [x] Slack
             - [ ] Teams
             - [ ] Zoom
             - [ ] Stripe
@@ -174,7 +174,7 @@ classDef done fill:#9e9e9e,color:#fff,stroke:#757575
     - [x] Web Scraper
     - [x] CSV tools
     - [x] PDF tools
-    - [ ] Excel tools
+    - [x] Excel tools
     - [ ] Email Tools
     - [ ] Recipe for "Add your own tools"
 
