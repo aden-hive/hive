@@ -120,6 +120,7 @@ class MockLLMProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """
         Generate a mock completion without calling a real LLM.

@@ -68,6 +68,7 @@ subgraph Expansion
         j2["Cursor"]
         j3["Opencode"]
         j4["Antigravity"]
+        j5["Codex CLI"]
     end
     subgraph plat["Platform"]
         k1["JavaScript/TypeScript SDK"]
@@ -254,6 +255,7 @@ classDef done fill:#9e9e9e,color:#fff,stroke:#757575
 - [ ] Cursor
 - [ ] Opencode
 - [ ] Antigravity
+- [ ] Codex CLI (in progress)
 
 ### File System Enhancement
 - [ ] Semantic Search integration
