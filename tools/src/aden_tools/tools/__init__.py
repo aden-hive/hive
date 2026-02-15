@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 # Import register_tools from each tool module
 from .csv_tool import register_tools as register_csv
+from .asana_tool import register_tools as register_asana
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
@@ -77,6 +78,7 @@ def register_all_tools(
     register_email(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
+    register_asana(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -203,6 +205,32 @@ def register_all_tools(
         "slack_kick_user_from_channel",
         "slack_delete_file",
         "slack_get_team_stats",
+        # Asana tools
+        "asana_create_task",
+        "asana_update_task",
+        "asana_get_task",
+        "asana_search_tasks",
+        "asana_delete_task",
+        "asana_add_task_comment",
+        "asana_complete_task",
+        "asana_add_subtask",
+        "asana_create_project",
+        "asana_update_project",
+        "asana_get_project",
+        "asana_list_projects",
+        "asana_get_project_tasks",
+        "asana_add_task_to_project",
+        "asana_get_workspace",
+        "asana_list_workspaces",
+        "asana_get_user",
+        "asana_list_team_members",
+        "asana_create_section",
+        "asana_list_sections",
+        "asana_move_task_to_section",
+        "asana_create_tag",
+        "asana_add_tag_to_task",
+        "asana_list_tags",
+        "asana_update_custom_field",
     ]
 
 

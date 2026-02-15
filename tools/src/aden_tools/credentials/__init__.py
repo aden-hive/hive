@@ -64,6 +64,7 @@ from .shell_config import (
     get_shell_source_command,
 )
 from .slack import SLACK_CREDENTIALS
+from .asana import ASANA_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 
 # Merged registry of all credentials
@@ -74,6 +75,7 @@ CREDENTIAL_SPECS = {
     **GITHUB_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
     **SLACK_CREDENTIALS,
+    **ASANA_CREDENTIALS,
 }
 
 __all__ = [
@@ -104,4 +106,5 @@ __all__ = [
     "GITHUB_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
     "SLACK_CREDENTIALS",
+    "ASANA_CREDENTIALS",
 ]
