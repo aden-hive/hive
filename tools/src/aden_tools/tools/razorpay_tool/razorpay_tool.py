@@ -17,6 +17,7 @@ API Reference: https://razorpay.com/docs/api/
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -77,9 +78,9 @@ class _RazorpayClient:
             "count": min(count, 100),
             "skip": skip,
         }
-        if from_timestamp:
+        if from_timestamp is not None:
             params["from"] = from_timestamp
-        if to_timestamp:
+        if to_timestamp is not None:
             params["to"] = to_timestamp
 
         response = httpx.get(
@@ -265,7 +266,7 @@ class _RazorpayClient:
     ) -> dict[str, Any]:
         """Create a full or partial refund."""
         body: dict[str, Any] = {}
-        if amount:
+        if amount is not None:
             body["amount"] = amount
         if notes:
             body["notes"] = notes
@@ -302,12 +303,16 @@ def register_tools(
         """Get Razorpay credentials from credential manager or environment."""
         if credentials is not None:
             api_key = credentials.get("razorpay")
-            api_secret = os.getenv("RAZORPAY_API_SECRET")
+            api_secret = credentials.get("razorpay_secret")
 
             if api_key and api_secret:
                 if not isinstance(api_key, str):
                     msg = "Expected string from credentials.get('razorpay'), "
                     msg += f"got {type(api_key).__name__}"
+                    raise TypeError(msg)
+                if not isinstance(api_secret, str):
+                    msg = "Expected string from credentials.get('razorpay_secret'), "
+                    msg += f"got {type(api_secret).__name__}"
                     raise TypeError(msg)
                 return api_key, api_secret
         else:
@@ -388,8 +393,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
 
-        if not payment_id or not payment_id.startswith("pay_"):
-            return {"error": "Invalid payment_id. Must start with 'pay_'"}
+        if not payment_id or not re.match(r"^pay_[A-Za-z0-9]+$", payment_id):
+            return {"error": "Invalid payment_id. Must match pattern: pay_[A-Za-z0-9]+"}
 
         try:
             return client.get_payment(payment_id)
@@ -501,8 +506,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
 
-        if not invoice_id or not invoice_id.startswith("inv_"):
-            return {"error": "Invalid invoice_id. Must start with 'inv_'"}
+        if not invoice_id or not re.match(r"^inv_[A-Za-z0-9]+$", invoice_id):
+            return {"error": "Invalid invoice_id. Must match pattern: inv_[A-Za-z0-9]+"}
 
         try:
             return client.get_invoice(invoice_id)
@@ -536,8 +541,8 @@ def register_tools(
         if isinstance(client, dict):
             return client
 
-        if not payment_id or not payment_id.startswith("pay_"):
-            return {"error": "Invalid payment_id. Must start with 'pay_'"}
+        if not payment_id or not re.match(r"^pay_[A-Za-z0-9]+$", payment_id):
+            return {"error": "Invalid payment_id. Must match pattern: pay_[A-Za-z0-9]+"}
         if amount is not None and amount <= 0:
             return {"error": "Refund amount must be positive"}
 

@@ -418,22 +418,26 @@ class TestToolRegistration:
         mcp.tool.return_value = lambda fn: registered_fns.append(fn) or fn
 
         cred_manager = MagicMock()
-        cred_manager.get.return_value = "rzp_test_key123"
+        cred_manager.get.side_effect = lambda key: {
+            "razorpay": "rzp_test_key123",
+            "razorpay_secret": "secret456",
+        }.get(key)
 
-        with patch.dict("os.environ", {"RAZORPAY_API_SECRET": "secret456"}):
-            register_tools(mcp, credentials=cred_manager)
+        register_tools(mcp, credentials=cred_manager)
 
-            list_fn = next(fn for fn in registered_fns if fn.__name__ == "razorpay_list_payments")
+        list_fn = next(fn for fn in registered_fns if fn.__name__ == "razorpay_list_payments")
 
-            with patch("aden_tools.tools.razorpay_tool.razorpay_tool.httpx.get") as mock_get:
-                mock_response = MagicMock()
-                mock_response.status_code = 200
-                mock_response.json.return_value = {"count": 0, "items": []}
-                mock_get.return_value = mock_response
+        with patch("aden_tools.tools.razorpay_tool.razorpay_tool.httpx.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"count": 0, "items": []}
+            mock_get.return_value = mock_response
 
-                result = list_fn()
+            result = list_fn()
 
-        cred_manager.get.assert_called_with("razorpay")
+        assert cred_manager.get.call_count == 2
+        cred_manager.get.assert_any_call("razorpay")
+        cred_manager.get.assert_any_call("razorpay_secret")
         assert "count" in result
 
     def test_credentials_from_env_vars(self):
@@ -565,7 +569,7 @@ class TestGetPaymentTool:
     def test_get_payment_invalid_id(self):
         result = self._fn("razorpay_get_payment")(payment_id="invalid_id")
         assert "error" in result
-        assert "Must start with 'pay_'" in result["error"]
+        assert "Must match pattern" in result["error"]
 
 
 class TestCreatePaymentLinkTool:
@@ -709,7 +713,7 @@ class TestGetInvoiceTool:
     def test_get_invoice_invalid_id(self):
         result = self._fn("razorpay_get_invoice")(invoice_id="invalid_id")
         assert "error" in result
-        assert "Must start with 'inv_'" in result["error"]
+        assert "Must match pattern" in result["error"]
 
 
 class TestCreateRefundTool:
@@ -750,7 +754,7 @@ class TestCreateRefundTool:
         # Invalid payment ID
         result = self._fn("razorpay_create_refund")(payment_id="invalid")
         assert "error" in result
-        assert "Must start with 'pay_'" in result["error"]
+        assert "Must match pattern: pay_[A-Za-z0-9]+" in result["error"]
 
         # Negative amount
         result = self._fn("razorpay_create_refund")(payment_id="pay_123", amount=-100)
@@ -810,3 +814,26 @@ class TestCredentialSpec:
         assert spec.aden_supported is False
         assert spec.direct_api_key_supported is True
         assert "dashboard.razorpay.com" in spec.api_key_instructions
+
+    def test_razorpay_secret_credential_spec_exists(self):
+        from aden_tools.credentials import CREDENTIAL_SPECS
+
+        assert "razorpay_secret" in CREDENTIAL_SPECS
+        spec = CREDENTIAL_SPECS["razorpay_secret"]
+        assert spec.env_var == "RAZORPAY_API_SECRET"
+        assert spec.credential_group == "razorpay"
+        assert spec.credential_id == "razorpay_secret"
+        assert spec.credential_key == "api_secret"
+
+    def test_razorpay_credentials_share_group(self):
+        from aden_tools.credentials import CREDENTIAL_SPECS
+
+        razorpay_spec = CREDENTIAL_SPECS["razorpay"]
+        razorpay_secret_spec = CREDENTIAL_SPECS["razorpay_secret"]
+
+        # Both should be in the same credential group
+        assert razorpay_spec.credential_group == "razorpay"
+        assert razorpay_secret_spec.credential_group == "razorpay"
+
+        # Both should have the same tools list
+        assert razorpay_spec.tools == razorpay_secret_spec.tools
