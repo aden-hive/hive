@@ -63,6 +63,22 @@ class EventType(StrEnum):
     NODE_INPUT_BLOCKED = "node_input_blocked"
     NODE_STALLED = "node_stalled"
 
+    # Judge decisions
+    JUDGE_VERDICT = "judge_verdict"
+
+    # Output tracking
+    OUTPUT_KEY_SET = "output_key_set"
+
+    # Retry / edge tracking
+    NODE_RETRY = "node_retry"
+    EDGE_TRAVERSED = "edge_traversed"
+
+    # Context management
+    CONTEXT_COMPACTED = "context_compacted"
+
+    # External triggers
+    WEBHOOK_RECEIVED = "webhook_received"
+
     # Custom events
     CUSTOM = "custom"
 
@@ -630,6 +646,158 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"prompt": prompt},
+            )
+        )
+
+    # === JUDGE / OUTPUT / RETRY / EDGE PUBLISHERS ===
+
+    async def emit_judge_verdict(
+        self,
+        stream_id: str,
+        node_id: str,
+        action: str,
+        feedback: str = "",
+        judge_type: str = "implicit",
+        iteration: int = 0,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit judge verdict event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.JUDGE_VERDICT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "action": action,
+                    "feedback": feedback,
+                    "judge_type": judge_type,
+                    "iteration": iteration,
+                },
+            )
+        )
+
+    async def emit_output_key_set(
+        self,
+        stream_id: str,
+        node_id: str,
+        key: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit output key set event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.OUTPUT_KEY_SET,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"key": key},
+            )
+        )
+
+    async def emit_node_retry(
+        self,
+        stream_id: str,
+        node_id: str,
+        retry_count: int,
+        max_retries: int,
+        error: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node retry event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_RETRY,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "retry_count": retry_count,
+                    "max_retries": max_retries,
+                    "error": error,
+                },
+            )
+        )
+
+    async def emit_edge_traversed(
+        self,
+        stream_id: str,
+        source_node: str,
+        target_node: str,
+        edge_condition: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit edge traversed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.EDGE_TRAVERSED,
+                stream_id=stream_id,
+                node_id=source_node,
+                execution_id=execution_id,
+                data={
+                    "source_node": source_node,
+                    "target_node": target_node,
+                    "edge_condition": edge_condition,
+                },
+            )
+        )
+
+    async def emit_execution_paused(
+        self,
+        stream_id: str,
+        node_id: str,
+        reason: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit execution paused event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_PAUSED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"reason": reason},
+            )
+        )
+
+    async def emit_execution_resumed(
+        self,
+        stream_id: str,
+        node_id: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit execution resumed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_RESUMED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={},
+            )
+        )
+
+    async def emit_webhook_received(
+        self,
+        source_id: str,
+        path: str,
+        method: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        query_params: dict[str, str] | None = None,
+    ) -> None:
+        """Emit webhook received event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.WEBHOOK_RECEIVED,
+                stream_id=source_id,
+                data={
+                    "path": path,
+                    "method": method,
+                    "headers": headers,
+                    "payload": payload,
+                    "query_params": query_params or {},
+                },
             )
         )
 

@@ -26,6 +26,17 @@ Use `/hive-debugger` when:
 
 This skill works alongside agents running in TUI mode and provides supervisor-level insights into execution behavior.
 
+### Forever-Alive Agent Awareness
+
+Some agents use `terminal_nodes=[]` (the "forever-alive" pattern), meaning they loop indefinitely and never enter a "completed" execution state. For these agents:
+- Sessions with status "in_progress" or "paused" are **normal**, not failures
+- High step counts, long durations, and many node visits are expected behavior
+- The agent stops only when the user explicitly exits — there is no graph-driven completion
+- Debug focus should be on **quality of individual node visits and iterations**, not whether the session reached a terminal state
+- Conversation memory accumulates across loops — watch for context overflow and stale data issues
+
+**How to identify forever-alive agents:** Check `agent.py` or `agent.json` for `terminal_nodes=[]` (empty list). If empty, the agent is forever-alive.
+
 ---
 
 ## Prerequisites
@@ -47,7 +58,7 @@ Before using this skill, ensure:
 **What to do:**
 
 1. **Ask the developer which agent needs debugging:**
-   - Get agent name (e.g., "twitter_outreach", "deep_research_agent")
+   - Get agent name (e.g., "deep_research_agent", "deep_research_agent")
    - Confirm the agent exists in `exports/{agent_name}/`
 
 2. **Determine agent working directory:**
@@ -66,7 +77,7 @@ Before using this skill, ensure:
 
 4. **Store context for the debugging session:**
    - agent_name
-   - agent_work_dir (e.g., `/home/user/.hive/twitter_outreach`)
+   - agent_work_dir (e.g., `/home/user/.hive/deep_research_agent`)
    - goal_id
    - success_criteria
    - constraints
@@ -74,19 +85,19 @@ Before using this skill, ensure:
 
 **Example:**
 ```
-Developer: "My twitter_outreach agent keeps failing"
+Developer: "My deep_research_agent agent keeps failing"
 
-You: "I'll help debug the twitter_outreach agent. Let me gather context..."
+You: "I'll help debug the deep_research_agent agent. Let me gather context..."
 
-[Read exports/twitter_outreach/agent.json]
+[Read exports/deep_research_agent/agent.json]
 
 Context gathered:
-- Agent: twitter_outreach
-- Goal: twitter-outreach-multi-loop
-- Working Directory: /home/user/.hive/twitter_outreach
-- Success Criteria: ["Successfully send 5 personalized outreach messages"]
-- Constraints: ["Must verify handle exists", "Must personalize message"]
-- Nodes: ["intake-collector", "profile-analyzer", "message-composer", "outreach-sender"]
+- Agent: deep_research_agent
+- Goal: deep-research
+- Working Directory: /home/user/.hive/deep_research_agent
+- Success Criteria: ["Produce a comprehensive research report with cited sources"]
+- Constraints: ["Must cite all sources", "Must cover multiple perspectives"]
+- Nodes: ["intake", "research", "analysis", "report-writer"]
 ```
 
 ---
@@ -142,6 +153,7 @@ Store the selected mode for the session.
    - Check `attention_summary.categories` for issue types
    - Note the `run_id` of problematic sessions
    - Check `status` field: "degraded", "failure", "in_progress"
+   - **For forever-alive agents:** Sessions with status "in_progress" or "paused" are normal — these agents never reach "completed". Only flag sessions with `needs_attention: true` or actual error indicators (tool failures, retry loops, missing outputs). High step counts alone do not indicate a problem.
 
 3. **Attention flag triggers to understand:**
    From runtime_logger.py, runs are flagged when:
@@ -199,12 +211,19 @@ Which run would you like to investigate?
    | **Tool Errors** | `tool_error_count > 0`, `attention_reasons` contains "tool_failures" | Tool calls failed (API errors, timeouts, auth issues) |
    | **Retry Loops** | `retry_count > 3`, `verdict_counts.RETRY > 5` | Judge repeatedly rejecting outputs |
    | **Guard Failures** | `guard_reject_count > 0` | Output validation failed (wrong types, missing keys) |
-   | **Stalled Execution** | `total_steps > 20`, `verdict_counts.CONTINUE > 10` | EventLoopNode not making progress |
+   | **Stalled Execution** | `total_steps > 20`, `verdict_counts.CONTINUE > 10` | EventLoopNode not making progress. **Caveat:** Forever-alive agents may legitimately have high step counts — check if agent is blocked at a client-facing node (normal) vs genuinely stuck in a loop |
    | **High Latency** | `latency_ms > 60000`, `avg_step_latency > 5000` | Slow tool calls or LLM responses |
    | **Client-Facing Issues** | `client_input_requested` but no `user_input_received` | Premature set_output before user input |
    | **Edge Routing Errors** | `exit_status == "no_valid_edge"`, `attention_reasons` contains "routing_issue" | No edges match current state |
    | **Memory/Context Issues** | `tokens_used > 100000`, `context_overflow_count > 0` | Conversation history too long |
    | **Constraint Violations** | Compare output against goal constraints | Agent violated goal-level rules |
+
+   **Forever-Alive Agent Caveat:** If the agent uses `terminal_nodes=[]`, sessions will never reach "completed" status. This is by design. When debugging these agents, focus on:
+   - Whether individual node visits succeed (not whether the graph "finishes")
+   - Quality of each loop iteration — are outputs improving or degrading across loops?
+   - Whether client-facing nodes are correctly blocking for user input
+   - Memory accumulation issues: stale data from previous loops, context overflow across many iterations
+   - Conversation compaction behavior: is the conversation growing unbounded?
 
 3. **Analyze each flagged node:**
    - Node ID and name
@@ -224,7 +243,7 @@ Which run would you like to investigate?
 ```
 Diagnosis for session_20260206_115718_e22339c5:
 
-Problem Node: intake-collector
+Problem Node: research
 ├─ Exit Status: escalate
 ├─ Retry Count: 5 (HIGH)
 ├─ Verdict Counts: {RETRY: 5, ESCALATE: 1}
@@ -232,7 +251,7 @@ Problem Node: intake-collector
 ├─ Total Steps: 8
 └─ Categories: Missing Outputs + Retry Loops
 
-Root Issue: The intake-collector node is stuck in a retry loop because it's not setting required outputs.
+Root Issue: The research node is stuck in a retry loop because it's not setting required outputs.
 ```
 
 ---
@@ -293,25 +312,25 @@ Root Issue: The intake-collector node is stuck in a retry loop because it's not 
 
 **Example Output:**
 ```
-Root Cause Analysis for intake-collector:
+Root Cause Analysis for research:
 
 Step-by-step breakdown:
 
 Step 3:
-- Tool Call: web_search(query="@RomuloNevesOf")
-- Result: Found Twitter profile information
+- Tool Call: web_search(query="latest AI regulations 2026")
+- Result: Found relevant articles and sources
 - Verdict: RETRY
-- Feedback: "Missing required output 'twitter_handles'. You found the handle but didn't call set_output."
+- Feedback: "Missing required output 'research_findings'. You found sources but didn't call set_output."
 
 Step 4:
-- Tool Call: web_search(query="@RomuloNevesOf twitter")
-- Result: Found additional Twitter information
+- Tool Call: web_search(query="AI regulation policy 2026")
+- Result: Found additional policy information
 - Verdict: RETRY
-- Feedback: "Still missing 'twitter_handles'. Use set_output to save your findings."
+- Feedback: "Still missing 'research_findings'. Use set_output to save your findings."
 
 Steps 5-7: Similar pattern continues...
 
-ROOT CAUSE: The node is successfully finding Twitter handles via web_search, but the LLM is not calling set_output to save the results. It keeps searching for more information instead of completing the task.
+ROOT CAUSE: The node is successfully finding research sources via web_search, but the LLM is not calling set_output to save the results. It keeps searching for more information instead of completing the task.
 ```
 
 ---
@@ -495,11 +514,114 @@ max_node_visits=3  # Prevent getting stuck
 - Confirm it calls set_output eventually
 ```
 
+#### Template 6: Checkpoint Recovery (Post-Fix Resume)
+
+```markdown
+## Recovery Strategy: Resume from Last Clean Checkpoint
+
+**Situation:** You've fixed the issue, but the failed session is stuck mid-execution
+
+**Solution:** Resume execution from a checkpoint before the failure
+
+### Option A: Auto-Resume from Latest Checkpoint (Recommended)
+
+Use CLI arguments to auto-resume when launching TUI:
+
+```bash
+PYTHONPATH=core:exports python -m {agent_name} --tui \
+    --resume-session {session_id}
+```
+
+This will:
+- Load session state from `state.json`
+- Continue from where it paused/failed
+- Apply your fixes immediately
+
+### Option B: Resume from Specific Checkpoint (Time-Travel)
+
+If you need to go back to an earlier point:
+
+```bash
+PYTHONPATH=core:exports python -m {agent_name} --tui \
+    --resume-session {session_id} \
+    --checkpoint {checkpoint_id}
+```
+
+Example:
+```bash
+PYTHONPATH=core:exports python -m deep_research_agent --tui \
+    --resume-session session_20260208_143022_abc12345 \
+    --checkpoint cp_node_complete_intake_143030
+```
+
+### Option C: Use TUI Commands
+
+Alternatively, launch TUI normally and use commands:
+
+```bash
+# Launch TUI
+PYTHONPATH=core:exports python -m {agent_name} --tui
+
+# In TUI, use commands:
+/resume {session_id}                    # Resume from session state
+/recover {session_id} {checkpoint_id}   # Recover from specific checkpoint
+```
+
+### When to Use Each Option:
+
+**Use `/resume` (or --resume-session) when:**
+- You fixed credentials and want to retry
+- Agent paused and you want to continue
+- Agent failed and you want to retry from last state
+
+**Use `/recover` (or --resume-session + --checkpoint) when:**
+- You need to go back to an earlier checkpoint
+- You want to try a different path from a specific point
+- Debugging requires time-travel to earlier state
+
+### Find Available Checkpoints:
+
+Use MCP tools to programmatically find and inspect checkpoints:
+
+```
+# List all sessions to find the failed one
+list_agent_sessions(agent_work_dir="~/.hive/agents/{agent_name}", status="failed")
+
+# Inspect session state
+get_agent_session_state(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}")
+
+# Find clean checkpoints to resume from
+list_agent_checkpoints(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}", is_clean="true")
+
+# Compare checkpoints to understand what changed
+compare_agent_checkpoints(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    session_id="{session_id}",
+    checkpoint_id_before="cp_node_complete_intake_143030",
+    checkpoint_id_after="cp_node_complete_research_143115"
+)
+
+# Inspect memory at a specific checkpoint
+get_agent_checkpoint(agent_work_dir="~/.hive/agents/{agent_name}", session_id="{session_id}", checkpoint_id="cp_node_complete_intake_143030")
+```
+
+Or in TUI:
+```bash
+/sessions {session_id}
+```
+
+**Verification:**
+- Use `--resume-session` to test your fix immediately
+- No need to re-run from the beginning
+- Session continues with your code changes applied
+```
+
 **Selecting the right template:**
 - Match the issue category from Stage 4
 - Customize with specific details from Stage 5
 - Include actual error messages and code snippets
 - Provide file paths and line numbers when possible
+- **Always include recovery commands** (Template 6) after providing fix recommendations
 
 ---
 
@@ -568,7 +690,7 @@ max_node_visits=3  # Prevent getting stuck
 
 **Example interaction:**
 ```
-Developer: "I applied the fix to intake-collector. How do I verify it works?"
+Developer: "I applied the fix to research. How do I verify it works?"
 
 You: "Great! Let's verify the fix with these steps:
 
@@ -580,11 +702,11 @@ You: "Great! Let's verify the fix with these steps:
    [Use query_runtime_logs to check for attention flags]
 
 3. Verify the specific node:
-   [Use query_runtime_log_details for intake-collector]
+   [Use query_runtime_log_details for research]
 
 Expected results:
 - No 'needs_attention' flags
-- intake-collector shows exit_status='success'
+- research shows exit_status='success'
 - retry_count should be 0
 
 Let me know when you've run it and I'll help check the logs!"
@@ -602,7 +724,7 @@ Let me know when you've run it and I'll help check the logs!"
 - **Example:**
   ```
   query_runtime_logs(
-      agent_work_dir="/home/user/.hive/twitter_outreach",
+      agent_work_dir="/home/user/.hive/deep_research_agent",
       status="needs_attention",
       limit=20
   )
@@ -614,7 +736,7 @@ Let me know when you've run it and I'll help check the logs!"
 - **Example:**
   ```
   query_runtime_log_details(
-      agent_work_dir="/home/user/.hive/twitter_outreach",
+      agent_work_dir="/home/user/.hive/deep_research_agent",
       run_id="session_20260206_115718_e22339c5",
       needs_attention_only=True
   )
@@ -626,9 +748,83 @@ Let me know when you've run it and I'll help check the logs!"
 - **Example:**
   ```
   query_runtime_log_raw(
-      agent_work_dir="/home/user/.hive/twitter_outreach",
+      agent_work_dir="/home/user/.hive/deep_research_agent",
       run_id="session_20260206_115718_e22339c5",
-      node_id="intake-collector"
+      node_id="research"
+  )
+  ```
+
+### Session & Checkpoint Tools
+
+**list_agent_sessions** - Browse sessions with filtering
+- **When to use:** Finding resumable sessions, identifying failed sessions, Stage 3 triage
+- **Returns:** Session list with status, timestamps, is_resumable, current_node, quality
+- **Example:**
+  ```
+  list_agent_sessions(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      status="failed",
+      limit=10
+  )
+  ```
+
+**get_agent_session_state** - Load full session state (excludes memory values)
+- **When to use:** Inspecting session progress, checking is_resumable, examining path
+- **Returns:** Full state with memory_keys/memory_size instead of memory values
+- **Example:**
+  ```
+  get_agent_session_state(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345"
+  )
+  ```
+
+**get_agent_session_memory** - Get memory contents from a session
+- **When to use:** Stage 5 root cause analysis, inspecting produced data
+- **Returns:** All memory keys+values, or a single key's value
+- **Example:**
+  ```
+  get_agent_session_memory(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      key="twitter_handles"
+  )
+  ```
+
+**list_agent_checkpoints** - List checkpoints for a session
+- **When to use:** Stage 6 recovery, finding clean checkpoints to resume from
+- **Returns:** Checkpoint summaries with type, node, clean status
+- **Example:**
+  ```
+  list_agent_checkpoints(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      is_clean="true"
+  )
+  ```
+
+**get_agent_checkpoint** - Load a specific checkpoint with full state
+- **When to use:** Inspecting exact state at a checkpoint, comparing to current state
+- **Returns:** Full checkpoint: memory snapshot, execution path, metrics
+- **Example:**
+  ```
+  get_agent_checkpoint(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      checkpoint_id="cp_node_complete_intake_143030"
+  )
+  ```
+
+**compare_agent_checkpoints** - Diff memory between two checkpoints
+- **When to use:** Understanding data flow, finding where state diverged
+- **Returns:** Memory diff (added/removed/changed keys) + execution path diff
+- **Example:**
+  ```
+  compare_agent_checkpoints(
+      agent_work_dir="/home/user/.hive/agents/twitter_outreach",
+      session_id="session_20260208_143022_abc12345",
+      checkpoint_id_before="cp_node_complete_intake_143030",
+      checkpoint_id_after="cp_node_complete_research_143115"
   )
   ```
 
@@ -654,27 +850,37 @@ Loop every 10 seconds:
   2. If found: Alert and drill into L2
 ```
 
+**Pattern 4: Session State + Checkpoint Recovery**
+```
+1. list_agent_sessions: Find failed/paused sessions
+2. get_agent_session_state: Check is_resumable, see execution path
+3. get_agent_session_memory: Inspect what data was produced
+4. list_agent_checkpoints: Find clean checkpoints before failure
+5. compare_agent_checkpoints: Understand what changed between checkpoints
+6. Recommend resume command with specific checkpoint
+```
+
 ---
 
 ## Complete Example Walkthrough
 
-### Scenario: twitter_outreach Agent Failing
+### Scenario: deep_research_agent Agent Failing
 
-**Developer says:** "My twitter_outreach agent keeps failing. It's not finding Twitter handles correctly."
+**Developer says:** "My deep_research_agent keeps failing. It's not saving research findings correctly."
 
 #### Stage 1: Setup
 ```
-You: "I'll help debug the twitter_outreach agent. Let me gather context..."
+You: "I'll help debug the deep_research_agent agent. Let me gather context..."
 
-[Read exports/twitter_outreach/agent.json]
+[Read exports/deep_research_agent/agent.json]
 
 Context:
-- Agent: twitter_outreach
-- Goal: twitter-outreach-multi-loop
-- Working Dir: ~/.hive/agents/twitter_outreach
+- Agent: deep_research_agent
+- Goal: deep-research
+- Working Dir: ~/.hive/agents/deep_research_agent
 - Success Criteria: ["Successfully send 5 personalized outreach messages"]
 - Constraints: ["Must verify handle exists", "Must personalize message"]
-- Nodes: intake-collector, profile-analyzer, message-composer, outreach-sender
+- Nodes: research, profile-analyzer, message-composer, outreach-sender
 ```
 
 #### Stage 2: Mode Selection
@@ -706,31 +912,31 @@ You: "Analyzing node-level details..."
 [Call query_runtime_log_details for the session]
 
 Results:
-- Problem Node: intake-collector
+- Problem Node: research
 - Exit Status: escalate
 - Retry Count: 5
 - Verdict Counts: {RETRY: 5, ESCALATE: 1}
 - Attention Reasons: ["high_retry_count", "missing_outputs"]
 - Total Steps: 8
 
-Diagnosis: intake-collector has retry loop + missing outputs issue
+Diagnosis: research has retry loop + missing outputs issue
 Category: Missing Outputs + Retry Loops
 ```
 
 #### Stage 5: Root Cause (L3)
 ```
-You: "Drilling into detailed logs for intake-collector..."
+You: "Drilling into detailed logs for research..."
 
-[Call query_runtime_log_raw for node intake-collector]
+[Call query_runtime_log_raw for node research]
 
 Evidence:
-Step 3: web_search("@RomuloNevesOf") → Found profile
+Step 3: web_search("latest AI regulations 2026") → Found articles
   Verdict: RETRY
-  Feedback: "Missing required output 'twitter_handles'. You found the handle but didn't call set_output."
+  Feedback: "Missing required output 'research_findings'. You found sources but didn't call set_output."
 
-Step 4: web_search("@RomuloNevesOf twitter") → Found more info
+Step 4: web_search("AI regulation policy 2026") → Found more info
   Verdict: RETRY
-  Feedback: "Still missing 'twitter_handles'. Use set_output to save your findings."
+  Feedback: "Still missing 'research_findings'. Use set_output to save your findings."
 
 Steps 5-7: Same pattern repeats...
 
@@ -741,37 +947,37 @@ ROOT CAUSE: Node successfully finds handles but LLM doesn't call set_output. It 
 ```
 You: "Here's the fix for this issue:
 
-## Issue: intake-collector Not Setting Outputs
+## Issue: research Node Not Setting Outputs
 
-**Root Cause:** Node successfully finds Twitter handles but doesn't call set_output
+**Root Cause:** Node successfully finds research sources but doesn't call set_output
 
 **Category:** Missing Outputs
 
-**File to edit:** exports/twitter_outreach/nodes/intake_collector.py
+**File to edit:** exports/deep_research_agent/nodes/research.py
 
 **Changes:**
 Update the system_prompt to emphasize the output requirement:
 
 ```python
 system_prompt = """
-You are the Intake Collector for the Twitter outreach agent.
+You are the Research node for the deep research agent.
 
 Your task:
-1. Extract Twitter handle from user input (URL or @mention)
-2. Verify it's a valid Twitter handle format
-3. **CRITICAL: Call set_output(twitter_handles=[handle]) immediately after finding valid handle**
+1. Search for relevant sources on the research topic
+2. Extract key findings from each source
+3. **CRITICAL: Call set_output(research_findings=[...]) immediately after gathering sufficient findings**
 
-IMPORTANT: You MUST call set_output even if you found the handle on the first try.
-Do not continue searching once you have a valid handle - set output and finish.
+IMPORTANT: You MUST call set_output even if you found findings on the first search.
+Do not continue searching indefinitely - set output and finish once you have enough data.
 
 Output format:
 {
-  "twitter_handles": ["@handle1", "@handle2", ...]
+  "research_findings": [{"source": "...", "summary": "...", "url": "..."}, ...]
 }
 """
 ```
 
-**Why this works:** The explicit instruction to call set_output immediately prevents the LLM from continuing to search after finding the handle.
+**Why this works:** The explicit instruction to call set_output immediately prevents the LLM from continuing to search after finding sufficient sources.
 ```
 
 #### Stage 7: Verification
@@ -795,13 +1001,13 @@ You: "Checking now..."
 [Call query_runtime_log_details for the new run]
 
 Results:
-- Node: intake-collector
+- Node: research
 - Exit Status: success ✓
 - Retry Count: 0 ✓
 - Total Steps: 2 ✓
 - No attention flags ✓
 
-"Perfect! The fix worked. The intake-collector now:
+"Perfect! The fix worked. The research now:
 - Completes successfully on first try
 - No retries needed
 - Calls set_output properly
@@ -828,6 +1034,9 @@ Your agent should now work correctly!"
 3. **Don't ignore edge conditions** - Missing edges cause routing failures
 4. **Don't overlook judge configuration** - Mismatched expectations cause retry loops
 5. **Don't forget nullable_output_keys** - Optional inputs need explicit marking
+6. **Don't diagnose "in_progress" as a failure for forever-alive agents** - Agents with `terminal_nodes=[]` are designed to never enter "completed" state. This is intentional. Focus on quality of individual node visits, not session completion status
+7. **Don't ignore conversation memory issues in long-running sessions** - In continuous conversation mode, history grows across node transitions and loop iterations. Watch for context overflow (tokens_used > 100K), stale data from previous loops affecting edge conditions, and compaction failures that cause the LLM to lose important context
+8. **Don't confuse "waiting for user" with "stalled"** - Client-facing nodes in forever-alive agents block for user input by design. A session paused at a client-facing node is working correctly, not stalled
 
 ---
 

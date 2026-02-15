@@ -25,7 +25,8 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 | **framework** | `/core`    | Core runtime, graph executor, protocols   | Python 3.11+ |
 | **tools**     | `/tools`   | MCP tools for agent capabilities          | Python 3.11+ |
 | **exports**   | `/exports` | Agent packages (user-created, gitignored) | Python 3.11+ |
-| **skills**    | `.claude`  | Claude Code skills for building/testing   | Markdown     |
+| **skills**    | `.claude`, `.agents`, `.agent` | Shared skills for Claude/Codex/other coding agents | Markdown     |
+| **codex**     | `.codex`   | Codex CLI project configuration (MCP servers) | TOML         |
 
 ### Key Principles
 
@@ -46,7 +47,8 @@ Ensure you have installed:
 - **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.12 or 3.13 recommended)
 - **uv** - Python package manager ([Install](https://docs.astral.sh/uv/getting-started/installation/))
 - **git** - Version control
-- **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional, for using building skills)
+- **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional)
+- **Codex CLI** - [Install](https://github.com/openai/codex) (optional)
 
 Verify installation:
 
@@ -116,6 +118,33 @@ Skills are also available in Cursor. To enable:
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
 4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
 
+### Codex CLI Support
+
+Hive supports [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
+
+Configuration files are tracked in git:
+- `.codex/config.toml` — MCP server config (`agent-builder`)
+- `.agents/skills/` — Symlinks to Hive skills
+
+To use Codex with Hive:
+1. Run `codex` in the repo root
+2. Type `use hive` to start the agent workflow
+
+Example:
+```
+codex> use hive
+```
+
+
+### Opencode Support
+To enable Opencode integration:
+
+1. Create/Ensure `.opencode/` directory exists
+2. Configure MCP servers in `.opencode/mcp.json`
+3. Restart Opencode to load the MCP servers
+4. Switch to the Hive agent
+* **Tools:** Accesses `agent-builder` and standard `tools` via standard MCP protocols over stdio.
+
 ### Verify Setup
 
 ```bash
@@ -154,6 +183,10 @@ hive/                                    # Repository root
 │       ├── hive-concepts/               # Fundamental concepts
 │       ├── hive-patterns/               # Best practices
 │       └── hive-test/                   # Test and validate agents
+├── .codex/                              # Codex CLI project config
+│   └── config.toml                      # Codex MCP server definitions
+├── .agents/                             # Shared skill mountpoint
+│   └── skills/                          # Symlinks to Hive skills
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
@@ -163,6 +196,7 @@ hive/                                    # Repository root
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
 │   │   ├── mcp/                         # MCP server integration
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
+|   |   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
 │   │   ├── runtime/                     # Runtime environment
 │   │   ├── schemas/                     # Data schemas
 │   │   ├── storage/                     # File-based persistence
@@ -204,10 +238,10 @@ hive/                                    # Repository root
 ├── scripts/                             # Utility scripts
 │   └── auto-close-duplicates.ts         # GitHub duplicate issue closer
 │
+├── .agent/                        # Antigravity IDE: mcp_config.json + skills (symlinks)
 ├── quickstart.sh                        # Interactive setup wizard
 ├── README.md                            # Project overview
 ├── CONTRIBUTING.md                      # Contribution guidelines
-├── CHANGELOG.md                         # Version history
 ├── LICENSE                              # Apache 2.0 License
 ├── docs/CODE_OF_CONDUCT.md              # Community guidelines
 └── SECURITY.md                          # Security policy
@@ -645,7 +679,6 @@ lsof -i :4000
 # Kill process
 kill -9 <PID>
 
-# Or change ports in config.yaml and regenerate
 ```
 
 ### Environment Variables Not Loading

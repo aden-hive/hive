@@ -150,10 +150,13 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
-    def _completion_with_rate_limit_retry(self, **kwargs: Any) -> Any:
+    def _completion_with_rate_limit_retry(
+        self, max_retries: int | None = None, **kwargs: Any
+    ) -> Any:
         """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
         model = kwargs.get("model", self.model)
-        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+        retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
+        for attempt in range(retries + 1):
             try:
                 response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
@@ -194,9 +197,9 @@ class LiteLLMProvider(LLMProvider):
                         f"Full request dumped to: {dump_path}"
                     )
 
-                    if attempt == RATE_LIMIT_MAX_RETRIES:
+                    if attempt == retries:
                         logger.error(
-                            f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                            f"[retry] GAVE UP on {model} after {retries + 1} "
                             f"attempts — empty response "
                             f"(finish_reason={finish_reason}, "
                             f"choices={len(response.choices) if response.choices else 0})"
@@ -209,7 +212,7 @@ class LiteLLMProvider(LLMProvider):
                         f"choices={len(response.choices) if response.choices else 0}) — "
                         f"likely rate limited or quota exceeded. "
                         f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        f"(attempt {attempt + 1}/{retries})"
                     )
                     time.sleep(wait)
                     continue
@@ -225,9 +228,9 @@ class LiteLLMProvider(LLMProvider):
                     error_type="rate_limit",
                     attempt=attempt,
                 )
-                if attempt == RATE_LIMIT_MAX_RETRIES:
+                if attempt == retries:
                     logger.error(
-                        f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                        f"[retry] GAVE UP on {model} after {retries + 1} "
                         f"attempts — rate limit error: {e!s}. "
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
@@ -239,7 +242,7 @@ class LiteLLMProvider(LLMProvider):
                     f"~{token_count} tokens ({token_method}). "
                     f"Full request dumped to: {dump_path}. "
                     f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    f"(attempt {attempt + 1}/{retries})"
                 )
                 time.sleep(wait)
         # unreachable, but satisfies type checker
@@ -253,6 +256,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
         # Prepare messages with system prompt
@@ -293,12 +297,17 @@ class LiteLLMProvider(LLMProvider):
             kwargs["response_format"] = response_format
 
         # Make the call
-        response = self._completion_with_rate_limit_retry(**kwargs)
+        response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
 
         # Extract content
         content = response.choices[0].message.content or ""
 
-        # Get usage info
+        # Get usage info.
+        # NOTE: completion_tokens includes reasoning/thinking tokens for models
+        # that use them (o1, gpt-5-mini, etc.). LiteLLM does not reliably expose
+        # usage.completion_tokens_details.reasoning_tokens across all providers.
+        # This means output_tokens may be inflated for reasoning models.
+        # Compaction is unaffected — it uses prompt_tokens (input-side only).
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0

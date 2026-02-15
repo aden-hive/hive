@@ -63,6 +63,18 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
     )
+    run_parser.add_argument(
+        "--resume-session",
+        type=str,
+        default=None,
+        help="Resume from a specific session ID",
+    )
+    run_parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Resume from a specific checkpoint (requires --resume-session)",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -196,11 +208,191 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     tui_parser.set_defaults(func=cmd_tui)
 
+    # sessions command group (checkpoint/resume management)
+    sessions_parser = subparsers.add_parser(
+        "sessions",
+        help="Manage agent sessions",
+        description="List, inspect, and manage agent execution sessions.",
+    )
+    sessions_subparsers = sessions_parser.add_subparsers(
+        dest="sessions_cmd",
+        help="Session management commands",
+    )
+
+    # sessions list
+    sessions_list_parser = sessions_subparsers.add_parser(
+        "list",
+        help="List agent sessions",
+        description="List all sessions for an agent.",
+    )
+    sessions_list_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder",
+    )
+    sessions_list_parser.add_argument(
+        "--status",
+        choices=["all", "active", "failed", "completed", "paused"],
+        default="all",
+        help="Filter by session status (default: all)",
+    )
+    sessions_list_parser.add_argument(
+        "--has-checkpoints",
+        action="store_true",
+        help="Show only sessions with checkpoints",
+    )
+    sessions_list_parser.set_defaults(func=cmd_sessions_list)
+
+    # sessions show
+    sessions_show_parser = sessions_subparsers.add_parser(
+        "show",
+        help="Show session details",
+        description="Display detailed information about a specific session.",
+    )
+    sessions_show_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder",
+    )
+    sessions_show_parser.add_argument(
+        "session_id",
+        type=str,
+        help="Session ID to inspect",
+    )
+    sessions_show_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON",
+    )
+    sessions_show_parser.set_defaults(func=cmd_sessions_show)
+
+    # sessions checkpoints
+    sessions_checkpoints_parser = sessions_subparsers.add_parser(
+        "checkpoints",
+        help="List session checkpoints",
+        description="List all checkpoints for a session.",
+    )
+    sessions_checkpoints_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder",
+    )
+    sessions_checkpoints_parser.add_argument(
+        "session_id",
+        type=str,
+        help="Session ID",
+    )
+    sessions_checkpoints_parser.set_defaults(func=cmd_sessions_checkpoints)
+
+    # pause command
+    pause_parser = subparsers.add_parser(
+        "pause",
+        help="Pause running session",
+        description="Request graceful pause of a running agent session.",
+    )
+    pause_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder",
+    )
+    pause_parser.add_argument(
+        "session_id",
+        type=str,
+        help="Session ID to pause",
+    )
+    pause_parser.set_defaults(func=cmd_pause)
+
+    # resume command
+    resume_parser = subparsers.add_parser(
+        "resume",
+        help="Resume session from checkpoint",
+        description="Resume a paused or failed session from a checkpoint.",
+    )
+    resume_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder",
+    )
+    resume_parser.add_argument(
+        "session_id",
+        type=str,
+        help="Session ID to resume",
+    )
+    resume_parser.add_argument(
+        "--checkpoint",
+        "-c",
+        type=str,
+        help="Specific checkpoint ID to resume from (default: latest)",
+    )
+    resume_parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Resume in TUI dashboard mode",
+    )
+    resume_parser.set_defaults(func=cmd_resume)
+
+
+def _load_resume_state(
+    agent_path: str, session_id: str, checkpoint_id: str | None = None
+) -> dict | None:
+    """Load session or checkpoint state for headless resume.
+
+    Args:
+        agent_path: Path to the agent folder (e.g., exports/my_agent)
+        session_id: Session ID to resume from
+        checkpoint_id: Optional checkpoint ID within the session
+
+    Returns:
+        session_state dict for executor, or None if not found
+    """
+    agent_name = Path(agent_path).name
+    agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
+    session_dir = agent_work_dir / "sessions" / session_id
+
+    if not session_dir.exists():
+        return None
+
+    if checkpoint_id:
+        # Checkpoint-based resume: load checkpoint and extract state
+        cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
+        if not cp_path.exists():
+            return None
+        try:
+            cp_data = json.loads(cp_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+        return {
+            "resume_session_id": session_id,
+            "memory": cp_data.get("shared_memory", {}),
+            "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
+            "execution_path": cp_data.get("execution_path", []),
+            "node_visit_counts": {},
+        }
+    else:
+        # Session state resume: load state.json
+        state_path = session_dir / "state.json"
+        if not state_path.exists():
+            return None
+        try:
+            state_data = json.loads(state_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+        progress = state_data.get("progress", {})
+        paused_at = progress.get("paused_at") or progress.get("resume_from")
+        return {
+            "resume_session_id": session_id,
+            "memory": state_data.get("memory", {}),
+            "paused_at": paused_at,
+            "execution_path": progress.get("path", []),
+            "node_visit_counts": progress.get("node_visit_counts", {}),
+        }
+
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     # Set logging level (quiet by default for cleaner output)
@@ -239,8 +431,10 @@ def cmd_run(args: argparse.Namespace) -> int:
                     runner = AgentRunner.load(
                         args.agent_path,
                         model=args.model,
-                        enable_tui=True,
                     )
+                except CredentialError as e:
+                    print(f"\n{e}", file=sys.stderr)
+                    return
                 except Exception as e:
                     print(f"Error loading agent: {e}")
                     return
@@ -253,7 +447,11 @@ def cmd_run(args: argparse.Namespace) -> int:
                 if runner._agent_runtime and not runner._agent_runtime.is_running:
                     await runner._agent_runtime.start()
 
-                app = AdenTUI(runner._agent_runtime)
+                app = AdenTUI(
+                    runner._agent_runtime,
+                    resume_session=getattr(args, "resume_session", None),
+                    resume_checkpoint=getattr(args, "checkpoint", None),
+                )
 
                 # TUI handles execution via ChatRepl — user submits input,
                 # ChatRepl calls runtime.trigger_and_wait(). No auto-launch.
@@ -276,11 +474,34 @@ def cmd_run(args: argparse.Namespace) -> int:
             runner = AgentRunner.load(
                 args.agent_path,
                 model=args.model,
-                enable_tui=False,
             )
+        except CredentialError as e:
+            print(f"\n{e}", file=sys.stderr)
+            return 1
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
+
+        # Load session/checkpoint state for resume (headless mode)
+        session_state = None
+        resume_session = getattr(args, "resume_session", None)
+        checkpoint = getattr(args, "checkpoint", None)
+        if resume_session:
+            session_state = _load_resume_state(args.agent_path, resume_session, checkpoint)
+            if session_state is None:
+                print(
+                    f"Error: Could not load session state for {resume_session}",
+                    file=sys.stderr,
+                )
+                return 1
+            if not args.quiet:
+                resume_node = session_state.get("paused_at", "unknown")
+                if checkpoint:
+                    print(f"Resuming from checkpoint: {checkpoint}")
+                else:
+                    print(f"Resuming session: {resume_session}")
+                print(f"Resume point: {resume_node}")
+                print()
 
         # Auto-inject user_id if the agent expects it but it's not provided
         entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
@@ -301,7 +522,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             print("=" * 60)
             print()
 
-        result = asyncio.run(runner.run(context))
+        result = asyncio.run(runner.run(context, session_state=session_state))
 
     # Format output
     output = {
@@ -381,10 +602,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_info(args: argparse.Namespace) -> int:
     """Show agent information."""
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     try:
         runner = AgentRunner.load(args.agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -444,10 +669,14 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate an exported agent."""
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     try:
         runner = AgentRunner.load(args.agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -764,6 +993,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     # Configure logging to show runtime visibility
@@ -788,6 +1018,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
     try:
         runner = AgentRunner.load(agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -997,6 +1230,7 @@ def cmd_tui(args: argparse.Namespace) -> int:
     """Browse agents and launch the interactive TUI dashboard."""
     import logging
 
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
     from framework.tui.app import AdenTUI
 
@@ -1046,8 +1280,10 @@ def cmd_tui(args: argparse.Namespace) -> int:
             runner = AgentRunner.load(
                 agent_path,
                 model=args.model,
-                enable_tui=True,
             )
+        except CredentialError as e:
+            print(f"\n{e}", file=sys.stderr)
+            return
         except Exception as e:
             print(f"Error loading agent: {e}")
             return
@@ -1432,3 +1668,53 @@ def _interactive_multi(agents_dir: Path) -> int:
 
     orchestrator.cleanup()
     return 0
+
+
+def cmd_sessions_list(args: argparse.Namespace) -> int:
+    """List agent sessions."""
+    print("⚠ Sessions list command not yet implemented")
+    print("This will be available once checkpoint infrastructure is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Status filter: {args.status}")
+    print(f"Has checkpoints: {args.has_checkpoints}")
+    return 1
+
+
+def cmd_sessions_show(args: argparse.Namespace) -> int:
+    """Show detailed session information."""
+    print("⚠ Session show command not yet implemented")
+    print("This will be available once checkpoint infrastructure is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Session: {args.session_id}")
+    return 1
+
+
+def cmd_sessions_checkpoints(args: argparse.Namespace) -> int:
+    """List checkpoints for a session."""
+    print("⚠ Session checkpoints command not yet implemented")
+    print("This will be available once checkpoint infrastructure is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Session: {args.session_id}")
+    return 1
+
+
+def cmd_pause(args: argparse.Namespace) -> int:
+    """Pause a running session."""
+    print("⚠ Pause command not yet implemented")
+    print("This will be available once executor pause integration is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Session: {args.session_id}")
+    return 1
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Resume a session from checkpoint."""
+    print("⚠ Resume command not yet implemented")
+    print("This will be available once checkpoint resume integration is complete.")
+    print(f"\nAgent: {args.agent_path}")
+    print(f"Session: {args.session_id}")
+    if args.checkpoint:
+        print(f"Checkpoint: {args.checkpoint}")
+    if args.tui:
+        print("Mode: TUI")
+    return 1

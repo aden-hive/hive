@@ -1,123 +1,396 @@
 ---
 name: hive-test
-description: Run goal-based evaluation tests for agents. Use when you need to verify an agent meets its goals, debug failing tests, or iterate on agent improvements based on test results.
+description: Iterative agent testing with session recovery. Execute, analyze, fix, resume from checkpoints. Use when testing an agent, debugging test failures, or verifying fixes without re-running from scratch.
 ---
 
-# Testing Workflow
+# Agent Testing
 
-This skill provides tools for testing agents built with the hive-create skill.
+Test agents iteratively: execute, analyze failures, fix, resume from checkpoint, repeat.
 
-## Workflow Overview
+## When to Use
 
-1. `mcp__agent-builder__list_tests` - Check what tests exist
-2. `mcp__agent-builder__generate_constraint_tests` or `mcp__agent-builder__generate_success_tests` - Get test guidelines
-3. **Write tests directly** using the Write tool with the guidelines provided
-4. `mcp__agent-builder__run_tests` - Execute tests
-5. `mcp__agent-builder__debug_test` - Debug failures
+- Testing a newly built agent against its goal
+- Debugging a failing agent iteratively
+- Verifying fixes without re-running expensive early nodes
+- Running final regression tests before deployment
 
-## How Test Generation Works
+## Prerequisites
 
-The `generate_*_tests` MCP tools return **guidelines and templates** - they do NOT generate test code via LLM.
-You (Claude) write the tests directly using the Write tool based on the guidelines.
+1. Agent package at `exports/{agent_name}/` (built with `/hive-create`)
+2. Credentials configured (`/hive-credentials`)
+3. `ANTHROPIC_API_KEY` set (or appropriate LLM provider key)
 
-### Example Workflow
+**Path distinction** (critical — don't confuse these):
+- `exports/{agent_name}/` — agent source code (edit here)
+- `~/.hive/agents/{agent_name}/` — runtime data: sessions, checkpoints, logs (read here)
+
+---
+
+## The Iterative Test Loop
+
+This is the core workflow. Don't re-run the entire agent when a late node fails — analyze, fix, and resume from the last clean checkpoint.
+
+```
+┌──────────────────────────────────────┐
+│ PHASE 1: Generate Test Scenarios     │
+│ Goal → synthetic test inputs + tests │
+└──────────────┬───────────────────────┘
+               ↓
+┌──────────────────────────────────────┐
+│ PHASE 2: Execute                     │◄────────────────┐
+│ Run agent (CLI or pytest)            │                 │
+└──────────────┬───────────────────────┘                 │
+               ↓                                         │
+          Pass? ──yes──► PHASE 6: Final Verification     │
+               │                                         │
+               no                                        │
+               ↓                                         │
+┌──────────────────────────────────────┐                 │
+│ PHASE 3: Analyze                     │                 │
+│ Session + runtime logs + checkpoints │                 │
+└──────────────┬───────────────────────┘                 │
+               ↓                                         │
+┌──────────────────────────────────────┐                 │
+│ PHASE 4: Fix                         │                 │
+│ Prompt / code / graph / goal         │                 │
+└──────────────┬───────────────────────┘                 │
+               ↓                                         │
+┌──────────────────────────────────────┐                 │
+│ PHASE 5: Recover & Resume            │─────────────────┘
+│ Checkpoint resume OR fresh re-run    │
+└──────────────────────────────────────┘
+```
+
+---
+
+### Phase 1: Generate Test Scenarios
+
+Create synthetic tests from the agent's goal, constraints, and success criteria.
+
+#### Step 1a: Read the goal
 
 ```python
-# Step 1: Get test guidelines
-result = mcp__agent-builder__generate_constraint_tests(
-    goal_id="my-goal",
+# Read goal from agent.py
+Read(file_path="exports/{agent_name}/agent.py")
+# Extract the Goal definition and convert to JSON string
+```
+
+#### Step 1b: Get test guidelines
+
+```python
+# Get constraint test guidelines
+generate_constraint_tests(
+    goal_id="your-goal-id",
     goal_json='{"id": "...", "constraints": [...]}',
-    agent_path="exports/my_agent"
+    agent_path="exports/{agent_name}"
 )
 
-# Step 2: The result contains:
-# - output_file: where to write tests
-# - file_header: imports and fixtures to use
-# - test_template: format for test functions
-# - constraints_formatted: the constraints to test
-# - test_guidelines: rules for writing tests
+# Get success criteria test guidelines
+generate_success_tests(
+    goal_id="your-goal-id",
+    goal_json='{"id": "...", "success_criteria": [...]}',
+    node_names="intake,research,review,report",
+    tool_names="web_search,web_scrape",
+    agent_path="exports/{agent_name}"
+)
+```
 
-# Step 3: Write tests directly using the Write tool
+These return `file_header`, `test_template`, `constraints_formatted`/`success_criteria_formatted`, and `test_guidelines`. They do NOT generate test code — you write the tests.
+
+#### Step 1c: Write tests
+
+```python
 Write(
     file_path=result["output_file"],
-    content=result["file_header"] + test_code_you_write
+    content=result["file_header"] + "\n\n" + your_test_code
 )
+```
 
-# Step 4: Run tests via MCP tool
-mcp__agent-builder__run_tests(
-    goal_id="my-goal",
-    agent_path="exports/my_agent"
-)
+#### Test writing rules
 
-# Step 5: Debug failures via MCP tool
-mcp__agent-builder__debug_test(
-    goal_id="my-goal",
-    test_name="test_constraint_foo",
-    agent_path="exports/my_agent"
+- Every test MUST be `async` with `@pytest.mark.asyncio`
+- Every test MUST accept `runner, auto_responder, mock_mode` fixtures
+- Use `await auto_responder.start()` before running, `await auto_responder.stop()` in `finally`
+- Use `await runner.run(input_dict)` — this goes through AgentRunner → AgentRuntime → ExecutionStream
+- Access output via `result.output.get("key")` — NEVER `result.output["key"]`
+- `result.success=True` means no exception, NOT goal achieved — always check output
+- Write 8-15 tests total, not 30+
+- Each real test costs ~3 seconds + LLM tokens
+- NEVER use `default_agent.run()` — it bypasses the runtime (no sessions, no logs, client-facing nodes hang)
+
+#### Step 1d: Check existing tests
+
+Before generating, check if tests already exist:
+
+```python
+list_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/{agent_name}"
 )
 ```
 
 ---
 
-# Testing Agents with MCP Tools
+### Phase 2: Execute
 
-Run goal-based evaluation tests for agents built with the hive-create skill.
+Two execution paths, use the right one for your situation.
 
-**Key Principle: MCP tools provide guidelines, Claude writes tests directly**
-- ✅ Get guidelines: `generate_constraint_tests`, `generate_success_tests` → returns templates and guidelines
-- ✅ Write tests: Use the Write tool with the provided file_header and test_template
-- ✅ Run tests: `run_tests` (runs pytest via subprocess)
-- ✅ Debug failures: `debug_test` (re-runs single test with verbose output)
-- ✅ List tests: `list_tests` (scans Python test files)
-- ✅ Tests stored in `exports/{agent}/tests/test_*.py`
+#### Iterative debugging (for complex agents)
 
-## Architecture: Python Test Files
+Run the agent via CLI. This creates sessions with checkpoints at `~/.hive/agents/{agent_name}/sessions/`:
 
-```
-exports/my_agent/
-├── __init__.py
-├── agent.py              ← Agent to test
-├── nodes/__init__.py
-├── config.py
-├── __main__.py
-└── tests/                ← Test files written by MCP tools
-    ├── conftest.py       # Shared fixtures (auto-created)
-    ├── test_constraints.py
-    ├── test_success_criteria.py
-    └── test_edge_cases.py
+```bash
+uv run hive run exports/{agent_name} --input '{"query": "test topic"}'
 ```
 
-**Tests import the agent directly:**
+Sessions and checkpoints are saved automatically.
+
+**Client-facing nodes**: Agents with `client_facing=True` nodes (interactive conversation) work in headless mode when run from a real terminal — the agent streams output to stdout and reads user input from stdin via a `>>> ` prompt. In non-interactive shells (like Claude Code's Bash tool), client-facing nodes will hang because there is no stdin. For testing interactive agents from Claude Code, use `run_tests` with mock mode or have the user run the agent manually in their terminal.
+
+#### Automated regression (for CI or final verification)
+
+Use the `run_tests` MCP tool to run all pytest tests:
+
 ```python
-import pytest
-from exports.my_agent import default_agent
-
-
-@pytest.mark.asyncio
-async def test_happy_path(mock_mode):
-    result = await default_agent.run({"query": "test"}, mock_mode=mock_mode)
-    assert result.success
-    assert len(result.output) > 0
+run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/{agent_name}"
+)
 ```
 
-## Why This Approach
+Returns structured results:
+```json
+{
+  "overall_passed": false,
+  "summary": {"total": 12, "passed": 10, "failed": 2, "pass_rate": "83.3%"},
+  "test_results": [{"test_name": "test_success_source_diversity", "status": "failed"}],
+  "failures": [{"test_name": "test_success_source_diversity", "details": "..."}]
+}
+```
 
-- MCP tools provide consistent test guidelines with proper imports, fixtures, and API key enforcement
-- Claude writes tests directly, eliminating circular LLM dependencies in the MCP server
-- `run_tests` parses pytest output into structured results for iteration
-- `debug_test` provides formatted output with actionable debugging info
-- File headers include conftest.py setup with proper fixtures
+**Options:**
+```python
+# Run only constraint tests
+run_tests(goal_id, agent_path, test_types='["constraint"]')
 
-## Quick Start
+# Stop on first failure
+run_tests(goal_id, agent_path, fail_fast=True)
 
-1. **Check existing tests** - `list_tests(goal_id, agent_path)`
-2. **Get test guidelines** - `generate_constraint_tests` or `generate_success_tests`
-3. **Write tests** - Use the Write tool with the provided file_header and guidelines
-4. **Run tests** - `run_tests(goal_id, agent_path)`
-5. **Debug failures** - `debug_test(goal_id, test_name, agent_path)`
-6. **Iterate** - Repeat steps 4-5 until all pass
+# Parallel execution
+run_tests(goal_id, agent_path, parallel=4)
+```
 
-## ⚠️ Credential Requirements for Testing
+**Note:** `run_tests` uses `AgentRunner` with `tmp_path` storage, so sessions are isolated per test run. For checkpoint-based recovery with persistent sessions, use CLI execution. Use `run_tests` for quick regression checks and final verification.
+
+---
+
+### Phase 3: Analyze Failures
+
+When a test fails, drill down systematically. Don't guess — use the tools.
+
+#### Step 3a: Get error category
+
+```python
+debug_test(
+    goal_id="your-goal-id",
+    test_name="test_success_source_diversity",
+    agent_path="exports/{agent_name}"
+)
+```
+
+Returns error category (`IMPLEMENTATION_ERROR`, `ASSERTION_FAILURE`, `TIMEOUT`, `IMPORT_ERROR`, `API_ERROR`) plus full traceback and suggestions.
+
+#### Step 3b: Find the failed session
+
+```python
+list_agent_sessions(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    status="failed",
+    limit=5
+)
+```
+
+Returns session list with IDs, timestamps, current_node (where it failed), execution_quality.
+
+#### Step 3c: Inspect session state
+
+```python
+get_agent_session_state(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    session_id="session_20260209_143022_abc12345"
+)
+```
+
+Returns execution path, which node was current, step count, timestamps — but excludes memory values (to avoid context bloat). Shows `memory_keys` and `memory_size` instead.
+
+#### Step 3d: Examine runtime logs (L2/L3)
+
+```python
+# L2: Per-node success/failure, retry counts
+query_runtime_log_details(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    run_id="session_20260209_143022_abc12345",
+    needs_attention_only=True
+)
+
+# L3: Exact LLM responses, tool call inputs/outputs
+query_runtime_log_raw(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    run_id="session_20260209_143022_abc12345",
+    node_id="research"
+)
+```
+
+#### Step 3e: Inspect memory data
+
+```python
+# See what data a node actually produced
+get_agent_session_memory(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    session_id="session_20260209_143022_abc12345",
+    key="research_results"
+)
+```
+
+#### Step 3f: Find recovery points
+
+```python
+list_agent_checkpoints(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    session_id="session_20260209_143022_abc12345",
+    is_clean="true"
+)
+```
+
+Returns checkpoint summaries with IDs, types (`node_start`, `node_complete`), which node, and `is_clean` flag. Clean checkpoints are safe resume points.
+
+#### Step 3g: Compare checkpoints (optional)
+
+To understand what changed between two points in execution:
+
+```python
+compare_agent_checkpoints(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    session_id="session_20260209_143022_abc12345",
+    checkpoint_id_before="cp_node_complete_research_143030",
+    checkpoint_id_after="cp_node_complete_review_143115"
+)
+```
+
+Returns memory diff (added/removed/changed keys) and execution path diff.
+
+---
+
+### Phase 4: Fix Based on Root Cause
+
+Use the analysis from Phase 3 to determine what to fix and where.
+
+| Root Cause | What to Fix | Where to Edit |
+|------------|------------|---------------|
+| **Prompt issue** — LLM produces wrong output format, misses instructions | Node `system_prompt` | `exports/{agent}/nodes/__init__.py` |
+| **Code bug** — TypeError, KeyError, logic error in Python | Agent code | `exports/{agent}/agent.py`, `nodes/__init__.py` |
+| **Graph issue** — wrong routing, missing edge, bad condition_expr | Edges, node config | `exports/{agent}/agent.py` |
+| **Tool issue** — MCP tool fails, wrong config, missing credential | Tool config | `exports/{agent}/mcp_servers.json`, `/hive-credentials` |
+| **Goal issue** — success criteria too strict/vague, wrong constraints | Goal definition | `exports/{agent}/agent.py` (goal section) |
+| **Test issue** — test expectations don't match actual agent behavior | Test code | `exports/{agent}/tests/test_*.py` |
+
+#### Fix strategies by error category
+
+**IMPLEMENTATION_ERROR** (TypeError, AttributeError, KeyError):
+```python
+# Read the failing code
+Read(file_path="exports/{agent_name}/nodes/__init__.py")
+
+# Fix the bug
+Edit(
+    file_path="exports/{agent_name}/nodes/__init__.py",
+    old_string="results.get('videos')",
+    new_string="(results or {}).get('videos', [])"
+)
+```
+
+**ASSERTION_FAILURE** (test assertions fail but agent ran successfully):
+- Check if the agent's output is actually wrong → fix the prompt
+- Check if the test's expectations are unrealistic → fix the test
+- Use `get_agent_session_memory` to see what the agent actually produced
+
+**TIMEOUT / STALL** (agent runs too long):
+- Check `node_visit_counts` for feedback loops hitting max_node_visits
+- Check L3 logs for tool calls that hang
+- Reduce `max_iterations` in loop_config or fix the prompt to converge faster
+
+**API_ERROR** (connection, rate limit, auth):
+- Verify credentials with `/hive-credentials`
+- Check MCP server configuration
+
+---
+
+### Phase 5: Recover & Resume
+
+After fixing the agent, decide whether to resume or re-run.
+
+#### When to resume from checkpoint
+
+Resume when ALL of these are true:
+- The fix is to a node that comes AFTER existing clean checkpoints
+- Clean checkpoints exist (from a CLI execution with checkpointing)
+- The early nodes are expensive (web scraping, API calls, long LLM chains)
+
+```bash
+# Resume from the last clean checkpoint before the failing node
+uv run hive run exports/{agent_name} \
+  --resume-session session_20260209_143022_abc12345 \
+  --checkpoint cp_node_complete_research_143030
+```
+
+This skips all nodes before the checkpoint and only re-runs the fixed node onward.
+
+#### When to re-run from scratch
+
+Re-run when ANY of these are true:
+- The fix is to the entry node or an early node
+- No checkpoints exist (e.g., agent was run via `run_tests`)
+- The agent is fast (2-3 nodes, completes in seconds)
+- You changed the graph structure (added/removed nodes/edges)
+
+```bash
+uv run hive run exports/{agent_name} --input '{"query": "test topic"}'
+```
+
+#### Inspecting a checkpoint before resuming
+
+```python
+get_agent_checkpoint(
+    agent_work_dir="~/.hive/agents/{agent_name}",
+    session_id="session_20260209_143022_abc12345",
+    checkpoint_id="cp_node_complete_research_143030"
+)
+```
+
+Returns the full checkpoint: shared_memory snapshot, execution_path, current_node, next_node, is_clean.
+
+#### Loop back to Phase 2
+
+After resuming or re-running, check if the fix worked. If not, go back to Phase 3.
+
+---
+
+### Phase 6: Final Verification
+
+Once the iterative fix loop converges (the agent produces correct output), run the full automated test suite:
+
+```python
+run_tests(
+    goal_id="your-goal-id",
+    agent_path="exports/{agent_name}"
+)
+```
+
+All tests should pass. If not, repeat the loop for remaining failures.
+
+---
+
+## Credential Requirements
 
 **CRITICAL: Testing requires ALL credentials the agent depends on.** This includes both the LLM API key AND any tool-specific credentials (HubSpot, Brave Search, etc.).
 
@@ -157,35 +430,31 @@ Common tool credentials:
 - Tests need to execute the agent's LLM nodes to validate behavior
 - Tools with missing credentials will return error dicts instead of real data
 - Mock mode bypasses everything, providing no confidence in real-world performance
-- The `AgentRunner.run()` method validates credentials at startup and will fail fast if any are missing
 
 ### Mock Mode Limitations
 
-Mock mode (`--mock` flag or `mock_mode=True`) is **ONLY for structure validation**:
+Mock mode (`--mock` flag or `MOCK_MODE=1`) is **ONLY for structure validation**:
 
-✓ Validates graph structure (nodes, edges, connections)
-✓ Tests that code doesn't crash on execution
-✗ Does NOT test LLM message generation
-✗ Does NOT test reasoning or decision-making quality
-✗ Does NOT test constraint validation (length limits, format rules)
-✗ Does NOT test real API integrations or tool use
-✗ Does NOT test personalization or content quality
+- Validates graph structure (nodes, edges, connections)
+- Validates that `AgentRunner.load()` succeeds and the agent is importable
+- Does NOT execute event_loop agents — MockLLMProvider never calls `set_output`, so event_loop nodes loop forever
+- Does NOT test LLM reasoning, content quality, or constraint validation
+- Does NOT test real API integrations or tool use
 
-**Bottom line:** If you're testing whether an agent achieves its goal, you MUST use real credentials for ALL services.
+**Bottom line:** If you're testing whether an agent achieves its goal, you MUST use real credentials.
 
 ### Enforcing Credentials in Tests
 
-When generating tests, **ALWAYS include credential checks for ALL required services**:
+When writing tests, **ALWAYS include credential checks**:
 
 ```python
 import os
 import pytest
 from aden_tools.credentials import CredentialManager
 
-# At the top of every test file
 pytestmark = pytest.mark.skipif(
     not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
-    reason="API key required for real testing. Set ANTHROPIC_API_KEY or use MOCK_MODE=1 for structure validation only."
+    reason="API key required for real testing. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
 )
 
 
@@ -195,628 +464,62 @@ def check_credentials():
     creds = CredentialManager()
     mock_mode = os.environ.get("MOCK_MODE")
 
-    # Always check LLM key
     if not creds.is_available("anthropic"):
         if mock_mode:
-            print("\n⚠️  Running in MOCK MODE - structure validation only")
-            print("   This does NOT test LLM behavior or agent quality")
-            print("   Set ANTHROPIC_API_KEY for real testing\n")
+            print("\nRunning in MOCK MODE - structure validation only")
         else:
             pytest.fail(
-                "\n❌ ANTHROPIC_API_KEY not set!\n\n"
-                "Real testing requires an API key. Choose one:\n"
-                "1. Set API key (RECOMMENDED):\n"
-                "   export ANTHROPIC_API_KEY='your-key-here'\n"
-                "2. Run structure validation only:\n"
-                "   MOCK_MODE=1 pytest exports/{agent}/tests/\n\n"
-                "Note: Mock mode does NOT validate agent behavior or quality."
+                "\nANTHROPIC_API_KEY not set!\n"
+                "Set API key: export ANTHROPIC_API_KEY='your-key-here'\n"
+                "Or run structure validation: MOCK_MODE=1 pytest exports/{agent}/tests/"
             )
 
-    # Check tool-specific credentials (skip in mock mode)
     if not mock_mode:
-        # List the tools this agent uses - update per agent
-        agent_tools = []  # e.g., ["hubspot_search_contacts", "hubspot_get_contact"]
+        agent_tools = []  # Update per agent
         missing = creds.get_missing_for_tools(agent_tools)
         if missing:
-            lines = ["\n❌ Missing tool credentials!\n"]
+            lines = ["\nMissing tool credentials!"]
             for name in missing:
                 spec = creds.specs.get(name)
                 if spec:
                     lines.append(f"  {spec.env_var} - {spec.description}")
-                    if spec.help_url:
-                        lines.append(f"    Setup: {spec.help_url}")
-            lines.append("\nSet the required environment variables and re-run.")
             pytest.fail("\n".join(lines))
 ```
 
 ### User Communication
 
-When the user asks to test an agent, **ALWAYS check for ALL credentials first** — not just the LLM key:
+When the user asks to test an agent, **ALWAYS check for ALL credentials first**:
 
-1. **Identify the agent's tools** from `agent.json` or `mcp_servers.json`
+1. **Identify the agent's tools** from `mcp_servers.json`
 2. **Check ALL required credentials** using `CredentialManager`
 3. **Ask the user to provide any missing credentials** before proceeding
+4. Collect ALL missing credentials in a single prompt — not one at a time
+
+---
+
+## Safe Test Patterns
+
+### OutputCleaner
+
+The framework automatically validates and cleans node outputs using a fast LLM at edge traversal time. Tests should still use safe patterns because OutputCleaner may not catch all issues.
+
+### Safe Access (REQUIRED)
 
 ```python
-from aden_tools.credentials import CredentialManager, CREDENTIAL_SPECS
-
-creds = CredentialManager()
-
-# 1. Check LLM key
-missing_creds = []
-if not creds.is_available("anthropic"):
-    missing_creds.append(("ANTHROPIC_API_KEY", "Anthropic API key for LLM calls"))
-
-# 2. Check tool-specific credentials
-agent_tools = [...]  # Determined from agent config
-missing_tools = creds.get_missing_for_tools(agent_tools)
-for name in missing_tools:
-    spec = CREDENTIAL_SPECS.get(name)
-    if spec:
-        missing_creds.append((spec.env_var, spec.description))
-
-# 3. Present ALL missing credentials to the user at once
-if missing_creds:
-    print("⚠️  Missing credentials required by this agent:\n")
-    for env_var, description in missing_creds:
-        print(f"  • {env_var} — {description}")
-    print()
-    print("Please set the missing environment variables:")
-    for env_var, _ in missing_creds:
-        print(f"  export {env_var}='your-value-here'")
-    print()
-    print("Or run in mock mode (structure validation only):")
-    print("  MOCK_MODE=1 pytest exports/{agent}/tests/")
-
-    # Ask user to provide credentials or choose mock mode
-    AskUserQuestion(...)
-```
-
-**IMPORTANT:** Do NOT skip credential collection. If an agent uses HubSpot tools, the user MUST provide `HUBSPOT_ACCESS_TOKEN`. If it uses web search, the user MUST provide the appropriate search API key. Collect ALL missing credentials in a single prompt rather than discovering them one at a time during test failures.
-
-## The Three-Stage Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           GOAL STAGE                                     │
-│  (hive-create skill)                                                 │
-│                                                                          │
-│  1. User defines goal with success_criteria and constraints             │
-│  2. Goal written to agent.py immediately                                │
-│  3. Generate CONSTRAINT TESTS → Write to tests/ → USER APPROVAL         │
-│     Files created: exports/{agent}/tests/test_constraints.py            │
-└─────────────────────────────────────────────────────────────────────────┘
-                                   ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          AGENT STAGE                                     │
-│  (hive-create skill)                                                 │
-│                                                                          │
-│  Build nodes + edges, written immediately to files                      │
-│  Constraint tests can run during development:                           │
-│    run_tests(goal_id, agent_path, test_types='["constraint"]')          │
-└─────────────────────────────────────────────────────────────────────────┘
-                                   ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           EVAL STAGE (this skill)                        │
-│                                                                          │
-│  1. Generate SUCCESS_CRITERIA TESTS → Write to tests/ → USER APPROVAL   │
-│     Files created: exports/{agent}/tests/test_success_criteria.py       │
-│  2. Run all tests: run_tests(goal_id, agent_path)                       │
-│  3. On failure → debug_test(goal_id, test_name, agent_path)             │
-│  4. Iterate: Edit agent code → Re-run run_tests (instant feedback)      │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-## Step-by-Step: Testing an Agent
-
-### Step 1: Check Existing Tests
-
-**ALWAYS check first** before generating new tests:
-
-```python
-mcp__agent-builder__list_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent"
-)
-```
-
-This shows what test files already exist. If tests exist:
-- Review the list to see what's covered
-- Ask user if they want to add more or run existing tests
-
-### Step 2: Get Constraint Test Guidelines (Goal Stage)
-
-After goal is defined, get test guidelines using the MCP tool:
-
-```python
-# First, read the goal from agent.py to get the goal JSON
-goal_code = Read(file_path="exports/your_agent/agent.py")
-# Extract the goal definition and convert to JSON
-
-# Get constraint test guidelines via MCP tool
-result = mcp__agent-builder__generate_constraint_tests(
-    goal_id="your-goal-id",
-    goal_json='{"id": "goal-id", "name": "...", "constraints": [...]}',
-    agent_path="exports/your_agent"
-)
-```
-
-**Response includes:**
-- `output_file`: Where to write tests (e.g., `exports/your_agent/tests/test_constraints.py`)
-- `file_header`: Imports, fixtures, and pytest setup to use at the top of the file
-- `test_template`: Format for test functions
-- `constraints_formatted`: The constraints to test
-- `test_guidelines`: Rules and best practices for writing tests
-- `instruction`: How to proceed
-
-**Write tests directly** using the provided guidelines:
-
-```python
-# Write tests using the Write tool
-Write(
-    file_path=result["output_file"],
-    content=result["file_header"] + "\n\n" + your_test_code
-)
-```
-
-### Step 3: Get Success Criteria Test Guidelines (Eval Stage)
-
-After agent is fully built, get success criteria test guidelines:
-
-```python
-# Get success criteria test guidelines via MCP tool
-result = mcp__agent-builder__generate_success_tests(
-    goal_id="your-goal-id",
-    goal_json='{"id": "goal-id", "name": "...", "success_criteria": [...]}',
-    node_names="analyze_request,search_web,format_results",
-    tool_names="web_search,web_scrape",
-    agent_path="exports/your_agent"
-)
-```
-
-**Write tests directly** using the provided guidelines:
-
-```python
-# Write tests using the Write tool
-Write(
-    file_path=result["output_file"],
-    content=result["file_header"] + "\n\n" + your_test_code
-)
-```
-
-### Step 4: Test Fixtures (conftest.py)
-
-The `file_header` returned by the MCP tools includes proper imports and fixtures.
-You should also create a conftest.py file in the tests directory with shared fixtures:
-
-```python
-# Create conftest.py with the conftest template
-Write(
-    file_path="exports/your_agent/tests/conftest.py",
-    content=conftest_content  # Use PYTEST_CONFTEST_TEMPLATE format
-)
-```
-
-### Step 5: Run Tests
-
-**Use the MCP tool to run tests** (not pytest directly):
-
-```python
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent"
-)
-
-**Response includes structured results:**
-```json
-{
-  "goal_id": "your-goal-id",
-  "overall_passed": false,
-  "summary": {
-    "total": 12,
-    "passed": 10,
-    "failed": 2,
-    "skipped": 0,
-    "errors": 0,
-    "pass_rate": "83.3%"
-  },
-  "test_results": [
-    {"file": "test_constraints.py", "test_name": "test_constraint_api_rate_limits", "status": "passed"},
-    {"file": "test_success_criteria.py", "test_name": "test_success_find_relevant_results", "status": "failed"}
-  ],
-  "failures": [
-    {"test_name": "test_success_find_relevant_results", "details": "AssertionError: Expected 3-5 results..."}
-  ]
-}
-```
-
-**Options for `run_tests`:**
-```python
-# Run only constraint tests
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent",
-    test_types='["constraint"]'
-)
-
-# Run with parallel workers
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent",
-    parallel=4
-)
-
-# Stop on first failure
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent",
-    fail_fast=True
-)
-```
-
-### Step 6: Debug Failed Tests
-
-**Use the MCP tool to debug** (not Bash/pytest directly):
-
-```python
-mcp__agent-builder__debug_test(
-    goal_id="your-goal-id",
-    test_name="test_success_find_relevant_results",
-    agent_path="exports/your_agent"
-)
-```
-
-**Response includes:**
-- Full verbose output from the test
-- Stack trace with exact line numbers
-- Captured logs and prints
-- Suggestions for fixing the issue
-
-### Step 7: Categorize Errors
-
-When a test fails, categorize the error to guide iteration:
-
-```python
-def categorize_test_failure(test_output, agent_code):
-    """Categorize test failure to guide iteration."""
-
-    # Read test output and agent code
-    failure_info = {
-        "test_name": "...",
-        "error_message": "...",
-        "stack_trace": "...",
-    }
-
-    # Pattern-based categorization
-    if any(pattern in failure_info["error_message"].lower() for pattern in [
-        "typeerror", "attributeerror", "keyerror", "valueerror",
-        "null", "none", "undefined", "tool call failed"
-    ]):
-        category = "IMPLEMENTATION_ERROR"
-        guidance = {
-            "stage": "Agent",
-            "action": "Fix the bug in agent code",
-            "files_to_edit": ["agent.py", "nodes/__init__.py"],
-            "restart_required": False,
-            "description": "Code bug - fix and re-run tests"
-        }
-
-    elif any(pattern in failure_info["error_message"].lower() for pattern in [
-        "assertion", "expected", "got", "should be", "success criteria"
-    ]):
-        category = "LOGIC_ERROR"
-        guidance = {
-            "stage": "Goal",
-            "action": "Update goal definition",
-            "files_to_edit": ["agent.py (goal section)"],
-            "restart_required": True,
-            "description": "Goal definition is wrong - update and rebuild"
-        }
-
-    elif any(pattern in failure_info["error_message"].lower() for pattern in [
-        "timeout", "rate limit", "empty", "boundary", "edge case"
-    ]):
-        category = "EDGE_CASE"
-        guidance = {
-            "stage": "Eval",
-            "action": "Add edge case test and fix handling",
-            "files_to_edit": ["agent.py", "tests/test_edge_cases.py"],
-            "restart_required": False,
-            "description": "New scenario - add test and handle it"
-        }
-
-    else:
-        category = "UNKNOWN"
-        guidance = {
-            "stage": "Unknown",
-            "action": "Manual investigation required",
-            "restart_required": False
-        }
-
-    return {
-        "category": category,
-        "guidance": guidance,
-        "failure_info": failure_info
-    }
-```
-
-**Show categorization to user:**
-
-```python
-AskUserQuestion(
-    questions=[{
-        "question": f"Test failed with {category}. How would you like to proceed?",
-        "header": "Test Failure",
-        "options": [
-            {
-                "label": "Fix code directly (Recommended)" if category == "IMPLEMENTATION_ERROR" else "Update goal",
-                "description": guidance["description"]
-            },
-            {
-                "label": "Show detailed error info",
-                "description": "View full stack trace and logs"
-            },
-            {
-                "label": "Skip for now",
-                "description": "Continue with other tests"
-            }
-        ],
-        "multiSelect": false
-    }]
-)
-```
-
-### Step 8: Iterate Based on Error Category
-
-#### IMPLEMENTATION_ERROR → Fix Agent Code
-
-```python
-# 1. Show user the exact file and line that failed
-print(f"Error in: exports/{agent_name}/nodes/__init__.py:42")
-print(f"Issue: 'NoneType' object has no attribute 'get'")
-
-# 2. Read the problematic code
-code = Read(file_path=f"exports/{agent_name}/nodes/__init__.py")
-
-# 3. User can fix directly, or you suggest a fix:
-Edit(
-    file_path=f"exports/{agent_name}/nodes/__init__.py",
-    old_string="if results.get('videos'):",
-    new_string="if results and results.get('videos'):"
-)
-
-# 4. Re-run tests immediately (instant feedback!)
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path=f"exports/{agent_name}"
-)
-```
-
-#### LOGIC_ERROR → Update Goal
-
-```python
-# 1. Show user the goal definition
-goal_code = Read(file_path=f"exports/{agent_name}/agent.py")
-
-# 2. Discuss what needs to change in success_criteria or constraints
-
-# 3. Edit the goal
-Edit(
-    file_path=f"exports/{agent_name}/agent.py",
-    old_string='target="3-5 videos"',
-    new_string='target="1-5 videos"'  # More realistic
-)
-
-# 4. May need to regenerate agent nodes if goal changed significantly
-# This requires going back to hive-create skill
-```
-
-#### EDGE_CASE → Add Test and Fix
-
-```python
-# 1. Create new edge case test with API key enforcement
-edge_case_test = '''
-@pytest.mark.asyncio
-async def test_edge_case_empty_results(mock_mode):
-    """Test: Agent handles no results gracefully"""
-    result = await default_agent.run({{"query": "xyzabc123nonsense"}}, mock_mode=mock_mode)
-
-    # Should succeed with empty results, not crash
-    assert result.success or result.error is not None
-    if result.success:
-        assert result.output.get("message") == "No results found"
-'''
-
-# 2. Add to test file
-Edit(
-    file_path=f"exports/{agent_name}/tests/test_edge_cases.py",
-    old_string="# Add edge case tests here",
-    new_string=edge_case_test
-)
-
-# 3. Fix agent to handle edge case
-# Edit agent code to handle empty results
-
-# 4. Re-run tests
-```
-
-## Test File Templates (Reference Only)
-
-**⚠️ Do NOT copy-paste these templates directly.** Use `generate_constraint_tests` and `generate_success_tests` MCP tools to create properly structured tests with correct imports and fixtures.
-
-These templates show the structure of generated tests for reference only.
-
-### Constraint Test Template
-
-```python
-"""Constraint tests for {agent_name}.
-
-These tests validate that the agent respects its defined constraints.
-Requires ANTHROPIC_API_KEY for real testing.
-"""
-
-import os
-import pytest
-from exports.{agent_name} import default_agent
-from aden_tools.credentials import CredentialManager
-
-
-# Enforce API key for real testing
-pytestmark = pytest.mark.skipif(
-    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
-    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
-)
-
-
-@pytest.mark.asyncio
-async def test_constraint_{constraint_id}():
-    """Test: {constraint_description}"""
-    # Test implementation based on constraint type
-    mock_mode = bool(os.environ.get("MOCK_MODE"))
-    result = await default_agent.run({{"test": "input"}}, mock_mode=mock_mode)
-
-    # Assert constraint is respected
-    assert True  # Replace with actual check
-```
-
-### Success Criteria Test Template
-
-```python
-"""Success criteria tests for {agent_name}.
-
-These tests validate that the agent achieves its defined success criteria.
-Requires ANTHROPIC_API_KEY for real testing - mock mode cannot validate success criteria.
-"""
-
-import os
-import pytest
-from exports.{agent_name} import default_agent
-from aden_tools.credentials import CredentialManager
-
-
-# Enforce API key for real testing
-pytestmark = pytest.mark.skipif(
-    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
-    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
-)
-
-
-@pytest.mark.asyncio
-async def test_success_{criteria_id}():
-    """Test: {criteria_description}"""
-    mock_mode = bool(os.environ.get("MOCK_MODE"))
-    result = await default_agent.run({{"test": "input"}}, mock_mode=mock_mode)
-
-    assert result.success, f"Agent failed: {{result.error}}"
-
-    # Verify success criterion met
-    # e.g., assert metric meets target
-    assert True  # Replace with actual check
-```
-
-### Edge Case Test Template
-
-```python
-"""Edge case tests for {agent_name}.
-
-These tests validate agent behavior in unusual or boundary conditions.
-Requires ANTHROPIC_API_KEY for real testing.
-"""
-
-import os
-import pytest
-from exports.{agent_name} import default_agent
-from aden_tools.credentials import CredentialManager
-
-
-# Enforce API key for real testing
-pytestmark = pytest.mark.skipif(
-    not CredentialManager().is_available("anthropic") and not os.environ.get("MOCK_MODE"),
-    reason="API key required. Set ANTHROPIC_API_KEY or use MOCK_MODE=1."
-)
-
-
-@pytest.mark.asyncio
-async def test_edge_case_{scenario_name}():
-    """Test: Agent handles {scenario_description}"""
-    mock_mode = bool(os.environ.get("MOCK_MODE"))
-    result = await default_agent.run({{"edge": "case_input"}}, mock_mode=mock_mode)
-
-    # Verify graceful handling
-    assert result.success or result.error is not None
-```
-
-## Interactive Build + Test Loop
-
-During agent construction (Agent stage), you can run constraint tests incrementally:
-
-```python
-# After adding first node
-print("Added search_node. Running relevant constraint tests...")
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path=f"exports/{agent_name}",
-    test_types='["constraint"]'
-)
-
-# After adding second node
-print("Added filter_node. Running all constraint tests...")
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path=f"exports/{agent_name}",
-    test_types='["constraint"]'
-)
-```
-
-This provides **immediate feedback** during development, catching issues early.
-
-## Common Test Patterns
-
-**Note:** All test patterns should include API key enforcement via conftest.py.
-
-### ⚠️ CRITICAL: Framework Features You Must Know
-
-#### OutputCleaner - Automatic I/O Cleaning (NEW!)
-
-**The framework now automatically validates and cleans node outputs** using a fast LLM (Cerebras llama-3.3-70b) at edge traversal time. This prevents cascading failures from malformed output.
-
-**What OutputCleaner does**:
-- ✅ Validates output matches next node's input schema
-- ✅ Detects JSON parsing trap (entire response in one key)
-- ✅ Cleans malformed output automatically (~200-500ms, ~$0.001 per cleaning)
-- ✅ Boosts success rates by 1.8-2.2x
-
-**Impact on tests**: Tests should still use safe patterns because OutputCleaner may not catch all issues in test mode.
-
-#### Safe Test Patterns (REQUIRED)
-
-**❌ UNSAFE** (will cause test failures):
-```python
-# Direct key access - can crash!
-approval_decision = result.output["approval_decision"]
-assert approval_decision == "APPROVED"
-
-# Nested access without checks
+# UNSAFE - will crash on missing keys
+approval = result.output["approval_decision"]
 category = result.output["analysis"]["category"]
 
-# Assuming parsed JSON structure
-for issue in result.output["compliance_issues"]:
-    ...
-```
-
-**✅ SAFE** (correct patterns):
-```python
-# 1. Safe dict access with .get()
+# SAFE - use .get() with defaults
 output = result.output or {}
-approval_decision = output.get("approval_decision", "UNKNOWN")
-assert "APPROVED" in approval_decision or approval_decision == "APPROVED"
+approval = output.get("approval_decision", "UNKNOWN")
 
-# 2. Type checking before operations
+# SAFE - type check before operations
 analysis = output.get("analysis", {})
 if isinstance(analysis, dict):
     category = analysis.get("category", "unknown")
 
-# 3. Parse JSON from strings (the JSON parsing trap!)
+# SAFE - handle JSON parsing trap (LLM response as string)
 import json
 recommendation = output.get("recommendation", "{}")
 if isinstance(recommendation, str):
@@ -829,16 +532,15 @@ if isinstance(recommendation, str):
 elif isinstance(recommendation, dict):
     approval = recommendation.get("approval_decision", "UNKNOWN")
 
-# 4. Safe iteration with type check
-compliance_issues = output.get("compliance_issues", [])
-if isinstance(compliance_issues, list):
-    for issue in compliance_issues:
+# SAFE - type check before iteration
+items = output.get("items", [])
+if isinstance(items, list):
+    for item in items:
         ...
 ```
 
-#### Helper Functions for Safe Access
+### Helper Functions for conftest.py
 
-**Add to conftest.py**:
 ```python
 import json
 import re
@@ -846,9 +548,7 @@ import re
 def _parse_json_from_output(result, key):
     """Parse JSON from agent output (framework may store full LLM response as string)."""
     response_text = result.output.get(key, "")
-    # Remove markdown code blocks if present
     json_text = re.sub(r'```json\s*|\s*```', '', response_text).strip()
-
     try:
         return json.loads(json_text)
     except (json.JSONDecodeError, AttributeError, TypeError):
@@ -858,7 +558,6 @@ def safe_get_nested(result, key_path, default=None):
     """Safely get nested value from result.output."""
     output = result.output or {}
     current = output
-
     for key in key_path:
         if isinstance(current, dict):
             current = current.get(key)
@@ -874,7 +573,6 @@ def safe_get_nested(result, key_path, default=None):
                 return default
         else:
             return default
-
     return current if current is not None else default
 
 # Make available in tests
@@ -882,313 +580,361 @@ pytest.parse_json_from_output = _parse_json_from_output
 pytest.safe_get_nested = safe_get_nested
 ```
 
-**Usage in tests**:
-```python
-# Use helper to parse JSON safely
-parsed = pytest.parse_json_from_output(result, "recommendation")
-if isinstance(parsed, dict):
-    approval = parsed.get("approval_decision", "UNKNOWN")
-
-# Safe nested access
-risk_score = pytest.safe_get_nested(result, ["analysis", "risk_score"], default=0.0)
-```
-
-#### Test Count Guidance
-
-**Generate 8-15 tests total, NOT 30+**
-
-- ✅ 2-3 tests per success criterion
-- ✅ 1 happy path test
-- ✅ 1 boundary/edge case test
-- ✅ 1 error handling test (optional)
-
-**Why fewer tests?**:
-- Each test requires real LLM call (~3 seconds, costs money)
-- 30 tests = 90 seconds, $0.30+ in costs
-- 12 tests = 36 seconds, $0.12 in costs
-- Focus on quality over quantity
-
-#### ExecutionResult Fields (Important!)
+### ExecutionResult Fields
 
 **`result.success=True` means NO exception, NOT goal achieved**
 
 ```python
-# ❌ WRONG - assumes goal achieved
+# WRONG
 assert result.success
 
-# ✅ RIGHT - check success AND output
+# RIGHT
 assert result.success, f"Agent failed: {result.error}"
 output = result.output or {}
 approval = output.get("approval_decision")
 assert approval == "APPROVED", f"Expected APPROVED, got {approval}"
 ```
 
-**All ExecutionResult fields**:
-- `success: bool` - Execution completed without exception (NOT goal achieved!)
-- `output: dict` - Complete memory snapshot (may contain raw strings)
-- `error: str | None` - Error message if failed
-- `steps_executed: int` - Number of nodes executed
-- `total_tokens: int` - Cumulative token usage
-- `total_latency_ms: int` - Total execution time
-- `path: list[str]` - Node IDs traversed (may contain repeated IDs from feedback loops)
-- `paused_at: str | None` - Node ID if HITL pause occurred
-- `session_state: dict` - State for resuming
-- `node_visit_counts: dict[str, int]` - How many times each node executed (useful for feedback loop testing)
+All fields:
+- `success: bool` — Completed without exception (NOT goal achieved!)
+- `output: dict` — Complete memory snapshot (may contain raw strings)
+- `error: str | None` — Error message if failed
+- `steps_executed: int` — Number of nodes executed
+- `total_tokens: int` — Cumulative token usage
+- `total_latency_ms: int` — Total execution time
+- `path: list[str]` — Node IDs traversed (may repeat in feedback loops)
+- `paused_at: str | None` — Node ID if paused
+- `session_state: dict` — State for resuming
+- `node_visit_counts: dict[str, int]` — Visit counts per node (feedback loop testing)
+- `execution_quality: str` — "clean", "degraded", or "failed"
 
-### Happy Path Test
+### Test Count Guidance
+
+**Write 8-15 tests, not 30+**
+
+- 2-3 tests per success criterion
+- 1 happy path test
+- 1 boundary/edge case test
+- 1 error handling test (optional)
+
+Each real test costs ~3 seconds + LLM tokens. 12 tests = ~36 seconds, $0.12.
+
+---
+
+## Test Patterns
+
+### Happy Path
 ```python
 @pytest.mark.asyncio
-async def test_happy_path(mock_mode):
-    """Test normal successful execution"""
-    result = await default_agent.run({{"query": "python tutorials"}}, mock_mode=mock_mode)
-    assert result.success
-    assert len(result.output) > 0
+async def test_happy_path(runner, auto_responder, mock_mode):
+    """Test normal successful execution."""
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "python tutorials"})
+    finally:
+        await auto_responder.stop()
+    assert result.success, f"Agent failed: {result.error}"
+    output = result.output or {}
+    assert output.get("report"), "No report produced"
 ```
 
-### Boundary Condition Test
+### Boundary Condition
 ```python
 @pytest.mark.asyncio
-async def test_boundary_minimum(mock_mode):
-    """Test at minimum threshold"""
-    result = await default_agent.run({{"query": "very specific niche topic"}}, mock_mode=mock_mode)
-    assert result.success
-    assert len(result.output.get("results", [])) >= 1
+async def test_minimum_sources(runner, auto_responder, mock_mode):
+    """Test at minimum source threshold."""
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "niche topic"})
+    finally:
+        await auto_responder.stop()
+    assert result.success, f"Agent failed: {result.error}"
+    output = result.output or {}
+    sources = output.get("sources", [])
+    if isinstance(sources, list):
+        assert len(sources) >= 3, f"Expected >= 3 sources, got {len(sources)}"
 ```
 
-### Error Handling Test
+### Error Handling
 ```python
 @pytest.mark.asyncio
-async def test_error_handling(mock_mode):
-    """Test graceful error handling"""
-    result = await default_agent.run({{"query": ""}}, mock_mode=mock_mode)  # Invalid input
-    assert not result.success or result.output.get("error") is not None
+async def test_empty_input(runner, auto_responder, mock_mode):
+    """Test graceful handling of empty input."""
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": ""})
+    finally:
+        await auto_responder.stop()
+    # Agent should either fail gracefully or produce an error message
+    output = result.output or {}
+    assert not result.success or output.get("error"), "Should handle empty input"
 ```
 
-### Performance Test
+### Feedback Loop
 ```python
 @pytest.mark.asyncio
-async def test_performance_latency(mock_mode):
-    """Test response time is acceptable"""
-    import time
-    start = time.time()
-    result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
-    duration = time.time() - start
-    assert duration < 5.0, f"Took {{duration}}s, expected <5s"
-```
-
-### Testing Event Loop Nodes
-
-Event loop nodes run multi-turn loops internally. Tests should verify:
-
-**Output Keys Test** — All required keys are set via `set_output`:
-```python
-@pytest.mark.asyncio
-async def test_all_output_keys_set(mock_mode):
-    """Test that event_loop nodes set all required output keys."""
-    result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
-    assert result.success, f"Agent failed: {{result.error}}"
-    output = result.output or {{}}
-    for key in ["expected_key_1", "expected_key_2"]:
-        assert key in output, f"Output key '{{key}}' not set by event_loop node"
-```
-
-**Feedback Loop Test** — Verify feedback loops terminate:
-```python
-@pytest.mark.asyncio
-async def test_feedback_loop_respects_max_visits(mock_mode):
-    """Test that feedback loops terminate at max_node_visits."""
-    result = await default_agent.run({{"input": "trigger_rejection"}}, mock_mode=mock_mode)
-    assert result.success or result.error is not None
-    visits = getattr(result, "node_visit_counts", {{}}) or {{}}
+async def test_feedback_loop_terminates(runner, auto_responder, mock_mode):
+    """Test that feedback loops don't run forever."""
+    await auto_responder.start()
+    try:
+        result = await runner.run({"query": "test"})
+    finally:
+        await auto_responder.stop()
+    visits = result.node_visit_counts or {}
     for node_id, count in visits.items():
-        assert count <= 5, f"Node {{node_id}} visited {{count}} times"
-```
-
-**Fan-Out Test** — Verify parallel branches both complete:
-```python
-@pytest.mark.asyncio
-async def test_parallel_branches_complete(mock_mode):
-    """Test that fan-out branches all complete and produce outputs."""
-    result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
-    assert result.success
-    output = result.output or {{}}
-    # Check outputs from both parallel branches
-    assert "branch_a_output" in output, "Branch A output missing"
-    assert "branch_b_output" in output, "Branch B output missing"
-```
-
-**Client-Facing Node Test** — In mock mode, client-facing nodes may not block:
-```python
-@pytest.mark.asyncio
-async def test_client_facing_node(mock_mode):
-    """Test that client-facing nodes produce output."""
-    result = await default_agent.run({{"query": "test"}}, mock_mode=mock_mode)
-    # In mock mode, client-facing blocking is typically bypassed
-    assert result.success or result.paused_at is not None
-```
-
-## Integration with hive-create
-
-### Handoff Points
-
-| Scenario | From | To | Action |
-|----------|------|-----|--------|
-| Agent built, ready to test | hive-create | hive-test | Generate success tests |
-| LOGIC_ERROR found | hive-test | hive-create | Update goal, rebuild |
-| IMPLEMENTATION_ERROR found | hive-test | Direct fix | Edit agent files, re-run tests |
-| EDGE_CASE found | hive-test | hive-test | Add edge case test |
-| All tests pass | hive-test | Done | Agent validated ✅ |
-
-### Iteration Speed Comparison
-
-| Scenario | Old Approach | New Approach |
-|----------|--------------|--------------|
-| **Bug Fix** | Rebuild via MCP tools (14 min) | Edit Python file, pytest (2 min) |
-| **Add Test** | Generate via MCP, export (5 min) | Write test file directly (1 min) |
-| **Debug** | Read subprocess logs | pdb, breakpoints, prints |
-| **Inspect** | Limited visibility | Full Python introspection |
-
-## Anti-Patterns
-
-### Testing Best Practices
-
-| Don't | Do Instead |
-|-------|------------|
-| ❌ Write tests without getting guidelines first | ✅ Use `generate_*_tests` to get proper file_header and guidelines |
-| ❌ Run pytest via Bash | ✅ Use `run_tests` MCP tool for structured results |
-| ❌ Debug tests with Bash pytest -vvs | ✅ Use `debug_test` MCP tool for formatted output |
-| ❌ Check for tests with Glob | ✅ Use `list_tests` MCP tool |
-| ❌ Skip the file_header from guidelines | ✅ Always include the file_header for proper imports and fixtures |
-
-### General Testing
-
-| Don't | Do Instead |
-|-------|------------|
-| ❌ Treat all failures the same | ✅ Use debug_test to categorize and iterate appropriately |
-| ❌ Rebuild entire agent for small bugs | ✅ Edit code directly, re-run tests |
-| ❌ Run tests without API key | ✅ Always set ANTHROPIC_API_KEY first |
-| ❌ Write tests without understanding the constraints/criteria | ✅ Read the formatted constraints/criteria from guidelines |
-
-## Workflow Summary
-
-```
-1. Check existing tests: list_tests(goal_id, agent_path)
-   → Scans exports/{agent}/tests/test_*.py
-   ↓
-2. Get test guidelines: generate_constraint_tests, generate_success_tests
-   → Returns file_header, test_template, constraints/criteria, guidelines
-   ↓
-3. Write tests: Use Write tool with the provided guidelines
-   → Write tests to exports/{agent}/tests/test_*.py
-   ↓
-4. Run tests: run_tests(goal_id, agent_path)
-   → Executes: pytest exports/{agent}/tests/ -v
-   ↓
-5. Debug failures: debug_test(goal_id, test_name, agent_path)
-   → Re-runs single test with verbose output
-   ↓
-6. Fix based on category:
-   - IMPLEMENTATION_ERROR → Edit agent code directly
-   - ASSERTION_FAILURE → Fix agent logic or update test
-   - IMPORT_ERROR → Check package structure
-   - API_ERROR → Check API keys and connectivity
-   ↓
-7. Re-run tests: run_tests(goal_id, agent_path)
-   ↓
-8. Repeat until all pass ✅
-```
-
-## MCP Tools Reference
-
-```python
-# Check existing tests (scans Python test files)
-mcp__agent-builder__list_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent"
-)
-
-# Get constraint test guidelines (returns templates and guidelines, NOT generated tests)
-mcp__agent-builder__generate_constraint_tests(
-    goal_id="your-goal-id",
-    goal_json='{"id": "...", "constraints": [...]}',
-    agent_path="exports/your_agent"
-)
-# Returns: output_file, file_header, test_template, constraints_formatted, test_guidelines
-
-# Get success criteria test guidelines
-mcp__agent-builder__generate_success_tests(
-    goal_id="your-goal-id",
-    goal_json='{"id": "...", "success_criteria": [...]}',
-    node_names="node1,node2",
-    tool_names="tool1,tool2",
-    agent_path="exports/your_agent"
-)
-# Returns: output_file, file_header, test_template, success_criteria_formatted, test_guidelines
-
-# Run tests via pytest subprocess
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent"
-)
-
-# Debug a failed test (re-runs with verbose output)
-mcp__agent-builder__debug_test(
-    goal_id="your-goal-id",
-    test_name="test_constraint_foo",
-    agent_path="exports/your_agent"
-)
-```
-
-## run_tests Options
-
-```python
-# Run only constraint tests
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent",
-    test_types='["constraint"]'
-)
-
-# Run only success criteria tests
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent",
-    test_types='["success"]'
-)
-
-# Run with pytest-xdist parallelism (requires pytest-xdist)
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent",
-    parallel=4
-)
-
-# Stop on first failure
-mcp__agent-builder__run_tests(
-    goal_id="your-goal-id",
-    agent_path="exports/your_agent",
-    fail_fast=True
-)
-```
-
-## Direct pytest Commands
-
-You can also run tests directly with pytest (the MCP tools use pytest internally):
-
-```bash
-# Run all tests
-pytest exports/your_agent/tests/ -v
-
-# Run specific test file
-pytest exports/your_agent/tests/test_constraints.py -v
-
-# Run specific test
-pytest exports/your_agent/tests/test_constraints.py::test_constraint_foo -vvs
-
-# Run in mock mode (structure validation only)
-MOCK_MODE=1 pytest exports/your_agent/tests/ -v
+        assert count <= 5, f"Node {node_id} visited {count} times — possible infinite loop"
 ```
 
 ---
 
-**MCP tools generate tests, write them to Python files, and run them via pytest.**
+## MCP Tool Reference
+
+### Phase 1: Test Generation
+
+```python
+# Check existing tests
+list_tests(goal_id, agent_path)
+
+# Get constraint test guidelines (returns templates, NOT generated tests)
+generate_constraint_tests(goal_id, goal_json, agent_path)
+# Returns: output_file, file_header, test_template, constraints_formatted, test_guidelines
+
+# Get success criteria test guidelines
+generate_success_tests(goal_id, goal_json, node_names, tool_names, agent_path)
+# Returns: output_file, file_header, test_template, success_criteria_formatted, test_guidelines
+```
+
+### Phase 2: Execution
+
+```python
+# Automated regression (no checkpoints, fresh runs)
+run_tests(goal_id, agent_path, test_types='["all"]', parallel=-1, fail_fast=False)
+
+# Run only specific test types
+run_tests(goal_id, agent_path, test_types='["constraint"]')
+run_tests(goal_id, agent_path, test_types='["success"]')
+```
+
+```bash
+# Iterative debugging with checkpoints (via CLI)
+uv run hive run exports/{agent_name} --input '{"query": "test"}'
+```
+
+### Phase 3: Analysis
+
+```python
+# Debug a specific failed test
+debug_test(goal_id, test_name, agent_path)
+
+# Find failed sessions
+list_agent_sessions(agent_work_dir, status="failed", limit=5)
+
+# Inspect session state (excludes memory values)
+get_agent_session_state(agent_work_dir, session_id)
+
+# Inspect memory data
+get_agent_session_memory(agent_work_dir, session_id, key="research_results")
+
+# Runtime logs: L1 summaries
+query_runtime_logs(agent_work_dir, status="needs_attention")
+
+# Runtime logs: L2 per-node details
+query_runtime_log_details(agent_work_dir, run_id, needs_attention_only=True)
+
+# Runtime logs: L3 tool/LLM raw data
+query_runtime_log_raw(agent_work_dir, run_id, node_id="research")
+
+# Find clean checkpoints
+list_agent_checkpoints(agent_work_dir, session_id, is_clean="true")
+
+# Compare checkpoints (memory diff)
+compare_agent_checkpoints(agent_work_dir, session_id, cp_before, cp_after)
+```
+
+### Phase 5: Recovery
+
+```python
+# Inspect checkpoint before resuming
+get_agent_checkpoint(agent_work_dir, session_id, checkpoint_id)
+# Empty checkpoint_id = latest checkpoint
+```
+
+```bash
+# Resume from checkpoint via CLI (headless)
+uv run hive run exports/{agent_name} \
+  --resume-session {session_id} --checkpoint {checkpoint_id}
+```
+
+---
+
+## Anti-Patterns
+
+| Don't | Do Instead |
+|-------|-----------|
+| Use `default_agent.run()` in tests | Use `runner.run()` with `auto_responder` fixtures (goes through AgentRuntime) |
+| Re-run entire agent when a late node fails | Resume from last clean checkpoint |
+| Treat `result.success` as goal achieved | Check `result.output` for actual criteria |
+| Access `result.output["key"]` directly | Use `result.output.get("key")` |
+| Fix random things hoping tests pass | Analyze L2/L3 logs to find root cause first |
+| Write 30+ tests | Write 8-15 focused tests |
+| Skip credential check | Use `/hive-credentials` before testing |
+| Confuse `exports/` with `~/.hive/agents/` | Code in `exports/`, runtime data in `~/.hive/` |
+| Use `run_tests` for iterative debugging | Use headless CLI with checkpoints for iterative debugging |
+| Use headless CLI for final regression | Use `run_tests` for automated regression |
+| Use `--tui` from Claude Code | Use headless `run` command — TUI hangs in non-interactive shells |
+| Test client-facing nodes from Claude Code | Use mock mode, or have the user run the agent in their terminal |
+| Run tests without reading goal first | Always understand the goal before writing tests |
+| Skip Phase 3 analysis and guess | Use session + log tools to identify root cause |
+
+---
+
+## Example Walkthrough: Deep Research Agent
+
+A complete iteration showing the test loop for an agent with nodes: `intake → research → review → report`.
+
+### Phase 1: Generate tests
+
+```python
+# Read the goal
+Read(file_path="exports/deep_research_agent/agent.py")
+
+# Get success criteria test guidelines
+result = generate_success_tests(
+    goal_id="rigorous-interactive-research",
+    goal_json='{"id": "rigorous-interactive-research", "success_criteria": [{"id": "source-diversity", "target": ">=5"}, {"id": "citation-coverage", "target": "100%"}, {"id": "report-completeness", "target": "90%"}]}',
+    node_names="intake,research,review,report",
+    tool_names="web_search,web_scrape",
+    agent_path="exports/deep_research_agent"
+)
+
+# Write tests
+Write(
+    file_path=result["output_file"],
+    content=result["file_header"] + "\n\n" + test_code
+)
+```
+
+### Phase 2: First execution
+
+```python
+run_tests(
+    goal_id="rigorous-interactive-research",
+    agent_path="exports/deep_research_agent",
+    fail_fast=True
+)
+```
+
+Result: `test_success_source_diversity` fails — agent only found 2 sources instead of 5.
+
+### Phase 3: Analyze
+
+```python
+# Debug the failing test
+debug_test(
+    goal_id="rigorous-interactive-research",
+    test_name="test_success_source_diversity",
+    agent_path="exports/deep_research_agent"
+)
+# → ASSERTION_FAILURE: Expected >= 5 sources, got 2
+
+# Find the session
+list_agent_sessions(
+    agent_work_dir="~/.hive/agents/deep_research_agent",
+    status="completed",
+    limit=1
+)
+# → session_20260209_150000_abc12345
+
+# See what the research node produced
+get_agent_session_memory(
+    agent_work_dir="~/.hive/agents/deep_research_agent",
+    session_id="session_20260209_150000_abc12345",
+    key="research_results"
+)
+# → Only 2 web_search calls made, each returned 1 source
+
+# Check the LLM's behavior in the research node
+query_runtime_log_raw(
+    agent_work_dir="~/.hive/agents/deep_research_agent",
+    run_id="session_20260209_150000_abc12345",
+    node_id="research"
+)
+# → LLM called web_search only twice, then called set_output
+```
+
+Root cause: The research node's prompt doesn't tell the LLM to search for at least 5 diverse sources. It stops after the first couple of searches.
+
+### Phase 4: Fix the prompt
+
+```python
+Read(file_path="exports/deep_research_agent/nodes/__init__.py")
+
+Edit(
+    file_path="exports/deep_research_agent/nodes/__init__.py",
+    old_string='system_prompt="Search for information on the user\'s topic."',
+    new_string='system_prompt="Search for information on the user\'s topic. You MUST find at least 5 diverse, authoritative sources. Use multiple different search queries to ensure source diversity. Do not stop searching until you have at least 5 distinct sources."'
+)
+```
+
+### Phase 5: Resume from checkpoint
+
+For this example, the fix is to the `research` node. If we had run via CLI with checkpointing, we could resume from the checkpoint after `intake` to skip re-running intake:
+
+```bash
+# Check if clean checkpoint exists after intake
+list_agent_checkpoints(
+    agent_work_dir="~/.hive/agents/deep_research_agent",
+    session_id="session_20260209_150000_abc12345",
+    is_clean="true"
+)
+# → cp_node_complete_intake_150005
+
+# Resume from after intake, re-run research with fixed prompt
+uv run hive run exports/deep_research_agent \
+  --resume-session session_20260209_150000_abc12345 \
+  --checkpoint cp_node_complete_intake_150005
+```
+
+Or for this simple case (intake is fast), just re-run:
+
+```bash
+uv run hive run exports/deep_research_agent --input '{"topic": "test"}'
+```
+
+### Phase 6: Final verification
+
+```python
+run_tests(
+    goal_id="rigorous-interactive-research",
+    agent_path="exports/deep_research_agent"
+)
+# → All 12 tests pass
+```
+
+---
+
+## Test File Structure
+
+```
+exports/{agent_name}/
+├── agent.py              ← Agent to test (goal, nodes, edges)
+├── nodes/__init__.py     ← Node implementations (prompts, config)
+├── config.py             ← Agent configuration
+├── mcp_servers.json      ← Tool server config
+└── tests/
+    ├── conftest.py           ← Shared fixtures + safe access helpers
+    ├── test_constraints.py   ← Constraint tests
+    ├── test_success_criteria.py  ← Success criteria tests
+    └── test_edge_cases.py    ← Edge case tests
+```
+
+## Integration with Other Skills
+
+| Scenario | From | To | Action |
+|----------|------|----|--------|
+| Agent built, ready to test | `/hive-create` | `/hive-test` | Generate tests, start loop |
+| Prompt fix needed | `/hive-test` Phase 4 | Direct edit | Edit `nodes/__init__.py`, resume |
+| Goal definition wrong | `/hive-test` Phase 4 | `/hive-create` | Update goal, may need rebuild |
+| Missing credentials | `/hive-test` Phase 3 | `/hive-credentials` | Set up credentials |
+| Complex runtime failure | `/hive-test` Phase 3 | `/hive-debugger` | Deep L1/L2/L3 analysis |
+| All tests pass | `/hive-test` Phase 6 | Done | Agent validated |

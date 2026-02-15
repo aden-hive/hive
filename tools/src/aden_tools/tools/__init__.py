@@ -21,10 +21,14 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .apollo_tool import register_tools as register_apollo
+from .bigquery_tool import register_tools as register_bigquery
+from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
 from .asana_tool import register_tools as register_asana
 from .email_tool import register_tools as register_email
 from .example_tool import register_tools as register_example
+from .excel_tool import register_tools as register_excel
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -41,10 +45,17 @@ from .file_system_toolkits.replace_file_content import (
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
+from .gmail_tool import register_tools as register_gmail
+from .google_maps_tool import register_tools as register_google_maps
 from .hubspot_tool import register_tools as register_hubspot
+from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
+from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
+from .telegram_tool import register_tools as register_telegram
+from .time_tool import register_tools as register_time
+from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
@@ -68,6 +79,7 @@ def register_all_tools(
     register_example(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
+    register_time(mcp)
     register_runtime_logs(mcp)
 
     # Tools that need credentials (pass credentials if provided)
@@ -76,9 +88,19 @@ def register_all_tools(
     register_github(mcp, credentials=credentials)
     # email supports multiple providers (Gmail, Resend)
     register_email(mcp, credentials=credentials)
+    # Gmail inbox management (read, trash, modify labels)
+    register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    register_news(mcp, credentials=credentials)
+    register_apollo(mcp, credentials=credentials)
+    register_serpapi(mcp, credentials=credentials)
+    register_calendar(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
     register_asana(mcp, credentials=credentials)
+    register_telegram(mcp, credentials=credentials)
+    register_vision(mcp, credentials=credentials)
+    register_google_maps(mcp, credentials=credentials)
+    register_bigquery(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -91,12 +113,14 @@ def register_all_tools(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
+    register_excel(mcp)
 
     return [
         "example_tool",
         "web_search",
         "web_scrape",
         "pdf_read",
+        "get_current_time",
         "view_file",
         "write_to_file",
         "list_dir",
@@ -116,6 +140,17 @@ def register_all_tools(
         "csv_append",
         "csv_info",
         "csv_sql",
+        "excel_read",
+        "excel_write",
+        "excel_append",
+        "excel_info",
+        "excel_sheet_list",
+        "excel_sql",
+        "excel_search",
+        "apollo_enrich_person",
+        "apollo_enrich_company",
+        "apollo_search_people",
+        "apollo_search_companies",
         "github_list_repos",
         "github_get_repo",
         "github_search_repos",
@@ -133,6 +168,13 @@ def register_all_tools(
         "github_get_user_profile",
         "github_get_user_emails",
         "send_email",
+        "gmail_reply_email",
+        "gmail_list_messages",
+        "gmail_get_message",
+        "gmail_trash_message",
+        "gmail_modify_message",
+        "gmail_batch_modify_messages",
+        "gmail_batch_get_messages",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",
@@ -145,9 +187,26 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
+        "news_search",
+        "news_headlines",
+        "news_by_company",
+        "news_sentiment",
         "query_runtime_logs",
         "query_runtime_log_details",
         "query_runtime_log_raw",
+        "scholar_search",
+        "scholar_get_citations",
+        "scholar_get_author",
+        "patents_search",
+        "patents_get_details",
+        "calendar_list_events",
+        "calendar_get_event",
+        "calendar_create_event",
+        "calendar_update_event",
+        "calendar_delete_event",
+        "calendar_list_calendars",
+        "calendar_get_calendar",
+        "calendar_check_availability",
         "slack_send_message",
         "slack_list_channels",
         "slack_get_channel_history",
@@ -222,6 +281,25 @@ def register_all_tools(
         "asana_add_tag_to_task",
         "asana_list_tags",
         "asana_update_custom_field",
+        "vision_detect_labels",
+        "vision_detect_text",
+        "vision_detect_faces",
+        "vision_localize_objects",
+        "vision_detect_logos",
+        "vision_detect_landmarks",
+        "vision_image_properties",
+        "vision_web_detection",
+        "vision_safe_search",
+        "telegram_send_message",
+        "telegram_send_document",
+        "maps_geocode",
+        "maps_reverse_geocode",
+        "maps_directions",
+        "maps_distance_matrix",
+        "maps_place_details",
+        "maps_place_search",
+        "run_bigquery_query",
+        "describe_dataset",
     ]
 
 
