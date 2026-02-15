@@ -53,6 +53,8 @@ from .pdf_read_tool import register_tools as register_pdf_read
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
+from .sns_tool import register_tools as register_sns
+from .sqs_tool import register_tools as register_sqs
 from .telegram_tool import register_tools as register_telegram
 from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
@@ -100,6 +102,8 @@ def register_all_tools(
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_sns(mcp, credentials=credentials)
+    register_sqs(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
 
     # Register file system toolkits
@@ -283,6 +287,20 @@ def register_all_tools(
         "maps_place_search",
         "run_bigquery_query",
         "describe_dataset",
+        "sns_create_topic",
+        "sns_list_topics",
+        "sns_delete_topic",
+        "sns_publish_message",
+        "sns_list_subscriptions_by_topic",
+        "sns_subscribe_endpoint",
+        "sns_unsubscribe",
+        "sqs_create_queue",
+        "sqs_list_queues",
+        "sqs_get_queue_attributes",
+        "sqs_send_message",
+        "sqs_receive_messages",
+        "sqs_delete_message",
+        "sqs_purge_queue",
     ]
 
 

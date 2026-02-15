@@ -84,6 +84,8 @@ python mcp_server.py
 | `calendar_delete_event`| Delete a calendar event                        |
 | `calendar_get_calendar`| Get calendar metadata                          |
 | `calendar_check_availability` | Check free/busy status for attendees    |
+| `sns_publish_message`   | Send notifications via AWS SNS                 |
+| `sqs_send_message`      | Send messages to AWS SQS queues                |
 
 ## Project Structure
 

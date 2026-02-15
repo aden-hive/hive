@@ -53,6 +53,7 @@ To add a new credential:
 """
 
 from .apollo import APOLLO_CREDENTIALS
+from .aws import AWS_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .bigquery import BIGQUERY_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
@@ -95,6 +96,7 @@ CREDENTIAL_SPECS = {
     **TELEGRAM_CREDENTIALS,
     **BIGQUERY_CREDENTIALS,
     **CALCOM_CREDENTIALS,
+    **AWS_CREDENTIALS,
 }
 
 __all__ = [
@@ -134,4 +136,5 @@ __all__ = [
     "TELEGRAM_CREDENTIALS",
     "BIGQUERY_CREDENTIALS",
     "CALCOM_CREDENTIALS",
+    "AWS_CREDENTIALS",
 ]
