@@ -198,19 +198,14 @@ class DeepResearchAgent:
                 "max_tool_calls_per_turn": 20,
                 "max_history_tokens": 32000,
             },
-            conversation_mode="continuous",
-            identity_prompt=(
-                "You are a rigorous research agent. You search for information "
-                "from diverse, authoritative sources, analyze findings critically, "
-                "and produce well-cited reports. You never fabricate information — "
-                "every claim must trace back to a source you actually retrieved."
-            ),
         )
 
-    def _setup(self, mock_mode=False) -> None:
-        """Set up the agent runtime with sessions, checkpoints, and logging."""
-        self._storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
-        self._storage_path.mkdir(parents=True, exist_ok=True)
+    def _setup(self) -> GraphExecutor:
+        """Set up the executor with all components."""
+        from pathlib import Path
+
+        storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
+        storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
 

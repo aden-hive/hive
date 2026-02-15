@@ -75,6 +75,15 @@ python mcp_server.py
 | `web_search`           | Search the web (Google or Brave, auto-detected) |
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
+| `get_current_time`     | Get current date/time with timezone support    |
+| `calendar_list_calendars` | List all accessible calendars               |
+| `calendar_list_events` | List events from a calendar                    |
+| `calendar_get_event`   | Get details of a specific event                |
+| `calendar_create_event`| Create a new calendar event                    |
+| `calendar_update_event`| Update an existing calendar event              |
+| `calendar_delete_event`| Delete a calendar event                        |
+| `calendar_get_calendar`| Get calendar metadata                          |
+| `calendar_check_availability` | Check free/busy status for attendees    |
 
 ## Project Structure
 
@@ -96,7 +105,9 @@ tools/
 │       │   └── execute_command_tool.py
 │       ├── web_search_tool/
 │       ├── web_scrape_tool/
-│       └── pdf_read_tool/
+│       ├── pdf_read_tool/
+│       ├── time_tool/
+│       └── calendar_tool/
 ├── tests/                   # Test suite
 ├── mcp_server.py            # MCP server entry point
 ├── README.md

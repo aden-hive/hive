@@ -41,6 +41,7 @@ Credential categories:
 - hubspot.py: HubSpot CRM credentials
 - slack.py: Slack workspace credentials
 - google_maps.py: Google Maps Platform credentials
+- calcom.py: Cal.com scheduling API credentials
 
 Note: Tools that don't need credentials simply omit the 'credentials' parameter
 from their register_tools() function. This convention is enforced by CI tests.
@@ -53,10 +54,13 @@ To add a new credential:
 
 from .apollo import APOLLO_CREDENTIALS
 from .base import CredentialError, CredentialSpec
+from .bigquery import BIGQUERY_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
+from .calcom import CALCOM_CREDENTIALS
 from .email import EMAIL_CREDENTIALS
 from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
+from .google_calendar import GOOGLE_CALENDAR_CREDENTIALS
 from .google_maps import GOOGLE_MAPS_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
@@ -86,10 +90,13 @@ CREDENTIAL_SPECS = {
     **GITHUB_CREDENTIALS,
     **GOOGLE_MAPS_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
+    **GOOGLE_CALENDAR_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
     **TELEGRAM_CREDENTIALS,
     **ZOHO_CREDENTIALS,
+    **BIGQUERY_CREDENTIALS,
+    **CALCOM_CREDENTIALS,
 }
 
 __all__ = [
@@ -122,9 +129,12 @@ __all__ = [
     "GITHUB_CREDENTIALS",
     "GOOGLE_MAPS_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
+    "GOOGLE_CALENDAR_CREDENTIALS",
     "SLACK_CREDENTIALS",
     "APOLLO_CREDENTIALS",
     "SERPAPI_CREDENTIALS",
     "TELEGRAM_CREDENTIALS",
     "ZOHO_CREDENTIALS",
+    "BIGQUERY_CREDENTIALS",
+    "CALCOM_CREDENTIALS",
 ]

@@ -1,0 +1,258 @@
+{
+  "agent": {
+    "id": "inbox_management",
+    "name": "Inbox Management",
+    "version": "1.0.0",
+    "description": "Manage Gmail inbox emails using user-defined free-text rules. Fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more."
+  },
+  "graph": {
+    "id": "inbox-management-graph",
+    "goal_id": "inbox-management",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [],
+    "conversation_mode": "continuous",
+    "identity_prompt": "You are an inbox management assistant. You help users manage their Gmail inbox by applying free-text rules to emails \u2014 trash, mark as spam, mark important, mark read/unread, star, and more.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Receive and validate input parameters: rules and max_emails. Present the interpreted rules back to the user for confirmation.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "rules",
+          "max_emails"
+        ],
+        "output_keys": [
+          "rules",
+          "max_emails"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an inbox management assistant. The user has provided rules for managing their emails.\n\n**STEP 1 \u2014 Respond to the user (text only, NO tool calls):**\n\nRead the user's rules from the input context. Present a clear summary of what you will do with their emails based on their rules.\n\nThe following Gmail actions are available \u2014 map the user's rules to whichever apply:\n- **Trash** emails\n- **Mark as spam**\n- **Mark as important** / unmark important\n- **Mark as read** / mark as unread\n- **Star** / unstar emails\n- **Add/remove Gmail labels** (INBOX, UNREAD, IMPORTANT, STARRED, SPAM, CATEGORY_PERSONAL, CATEGORY_SOCIAL, CATEGORY_PROMOTIONS, CATEGORY_UPDATES, CATEGORY_FORUMS)\n\nPresent the rules back to the user in plain language. Do NOT refuse rules \u2014 if the user asks for any of the above actions, confirm you will do it.\n\nAlso confirm the batch size (max_emails). If max_emails is not provided, default to 100.\n\nAsk the user to confirm: \"Does this look right? I'll proceed once you confirm.\"\n\n**STEP 2 \u2014 After the user confirms, call set_output:**\n\n- set_output(\"rules\", <the confirmed rules as a clear text description>)\n- set_output(\"max_emails\", <the confirmed max_emails as a string number, e.g. \"100\">)",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      },
+      {
+        "id": "fetch-emails",
+        "name": "Fetch Emails",
+        "description": "Fetch emails from the Gmail inbox up to the configured batch limit. Supports pagination for continuous mode \u2014 can fetch the next batch of emails beyond what was already processed.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "rules",
+          "max_emails"
+        ],
+        "output_keys": [
+          "emails"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a data pipeline step. Your job is to fetch emails from Gmail and write them to emails.jsonl.\n\n**FIRST-TIME FETCH (default path):**\n1. Read \"max_emails\" from input context.\n2. Call bulk_fetch_emails(max_emails=<value>).\n3. The tool returns {\"filename\": \"emails.jsonl\"}.\n4. Call set_output(\"emails\", \"emails.jsonl\").\n\n**NEXT-BATCH FETCH (when user asks for \"the next N\" emails):**\nThe user wants emails BEYOND what was already fetched. Use pagination:\n1. Call gmail_list_messages(query=\"label:INBOX\", max_results=<previous + new count>) to get message IDs. Use page_token if needed to paginate past already-fetched emails.\n2. Identify message IDs NOT in the previous batch (you remember them from continuous conversation).\n3. Call gmail_batch_get_messages(message_ids=<new_ids>, format=\"metadata\") for full metadata.\n4. For each message in the result, call append_data(filename=\"emails.jsonl\", data=<JSON: {id, subject, from, to, date, snippet, labels}>).\n5. Call set_output(\"emails\", \"emails.jsonl\").\n\n**TOOLS:**\n- bulk_fetch_emails(max_emails) \u2014 Bulk fetch from inbox, writes emails.jsonl. Use for first fetch.\n- gmail_list_messages(query, max_results, page_token) \u2014 List message IDs with pagination. Returns {messages, next_page_token}.\n- gmail_batch_get_messages(message_ids, format) \u2014 Fetch metadata for specific IDs (max 50 per call).\n- append_data(filename, data) \u2014 Append a line to a JSONL file.\n\nDo NOT add commentary or explanation. Execute the appropriate path and call set_output when done.",
+        "tools": [
+          "bulk_fetch_emails",
+          "gmail_list_messages",
+          "gmail_batch_get_messages",
+          "append_data"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false,
+        "success_criteria": null
+      },
+      {
+        "id": "classify-and-act",
+        "name": "Classify and Act",
+        "description": "Apply the user's rules to each email and execute the appropriate Gmail actions.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "rules",
+          "emails"
+        ],
+        "output_keys": [
+          "actions_taken"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an inbox management assistant. Apply the user's rules to their emails and execute Gmail actions.\n\n**YOUR TOOLS:**\n- load_data(filename, offset_bytes, limit_bytes) \u2014 Read emails from a local file using byte-based pagination. This is how you access the emails.\n- append_data(filename, data) \u2014 Append a line to a file. Use this to record actions taken.\n- gmail_batch_modify_messages(message_ids, add_labels, remove_labels) \u2014 Modify Gmail labels in batch. ALWAYS prefer this.\n- gmail_modify_message(message_id, add_labels, remove_labels) \u2014 Modify a single message's labels.\n- gmail_trash_message(message_id) \u2014 Move a message to trash. No batch version; call per email.\n- set_output(key, value) \u2014 Set an output value. Call ONLY after all actions are executed.\n\n**CONTEXT:**\n- \"rules\" = the user's rule to apply (e.g. \"mark all as unread\")\n- \"emails\" = a filename (e.g. \"emails.jsonl\") containing the fetched emails as JSONL. Each line has: id, subject, from, to, date, snippet, labels.\n\n**STEP 1 \u2014 LOAD EMAILS (your first tool call MUST be load_data):**\nCall load_data(filename=<the \"emails\" value from context>, limit_bytes=10000) to read the email data.\n- Each call reads ~10KB of data (automatically rounded to safe UTF-8 boundaries).\n- Parse the content as JSONL: split by \\n, then JSON.parse each line to get email objects.\n- If has_more=true, load more pages with load_data(filename=..., offset_bytes=<next_offset_bytes>) until all emails are loaded.\n- The result includes next_offset_bytes \u2014 use this for the next call's offset_bytes parameter.\n\n**STEP 2 \u2014 DETERMINE STRATEGY:**\n- **Blanket rule** (same action for ALL emails, e.g. \"mark all as unread\"): Collect all message IDs, then execute ONE gmail_batch_modify_messages call.\n- **Classification rule** (different actions for different emails): Classify each email, group by action, execute batch operations per group.\n\n**STEP 3 \u2014 EXECUTE ACTIONS:**\nCall the appropriate Gmail tool(s) with the real message IDs from the loaded emails. Then record each action:\n- append_data(filename=\"actions.jsonl\", data=<JSON of {email_id, subject, from, action}>)\n\n**STEP 4 \u2014 FINISH:**\nAfter ALL actions are executed, call set_output(\"actions_taken\", \"actions.jsonl\").\n\n**GMAIL LABEL REFERENCE:**\n- MARK AS UNREAD \u2014 add_labels=[\"UNREAD\"]\n- MARK AS READ \u2014 remove_labels=[\"UNREAD\"]\n- MARK IMPORTANT \u2014 add_labels=[\"IMPORTANT\"]\n- REMOVE IMPORTANT \u2014 remove_labels=[\"IMPORTANT\"]\n- STAR \u2014 add_labels=[\"STARRED\"]\n- UNSTAR \u2014 remove_labels=[\"STARRED\"]\n- ARCHIVE \u2014 remove_labels=[\"INBOX\"]\n- MARK AS SPAM \u2014 add_labels=[\"SPAM\"], remove_labels=[\"INBOX\"]\n- TRASH \u2014 use gmail_trash_message(message_id) per email\n\n**CRITICAL RULES:**\n- Your FIRST tool call MUST be load_data. Do NOT skip this.\n- You MUST call Gmail tools to execute real actions. Do NOT just report what should be done.\n- Do NOT call set_output until all Gmail actions are executed.\n- Pass ONLY the filename \"actions.jsonl\" to set_output, NOT raw data.",
+        "tools": [
+          "gmail_trash_message",
+          "gmail_modify_message",
+          "gmail_batch_modify_messages",
+          "load_data",
+          "append_data"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false,
+        "success_criteria": null
+      },
+      {
+        "id": "report",
+        "name": "Report",
+        "description": "Generate a summary report of all actions taken on the emails and present it to the user.",
+        "node_type": "event_loop",
+        "input_keys": [
+          "actions_taken"
+        ],
+        "output_keys": [
+          "summary_report"
+        ],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an inbox management assistant. Your job is to generate a clear summary report of the actions taken on the user's emails, present it, and ask if they want to run another batch.\n\n**STEP 1 \u2014 Load actions and generate the report (tool calls first):**\n\nThe \"actions_taken\" value from context is a filename (e.g. \"actions.jsonl\"), NOT raw action data.\n- If it equals \"[]\", there are no actions \u2014 skip to STEP 2 with a message that no emails were processed.\n- Otherwise, call load_data(filename=<the actions_taken value>, limit_bytes=10000) to read the action records.\n- The file is in JSONL format: each line is one JSON object with: email_id, subject, from, action.\n- If load_data returns has_more=true, call it again with offset_bytes=<next_offset_bytes> to get more records.\n- Read ALL records before generating the report.\n\n**STEP 2 \u2014 Present the report to the user (text only, NO tool calls):**\n\nPresent a clean, readable summary:\n\n1. **Overview** \u2014 Total emails processed, breakdown by action type.\n2. **By Action** \u2014 Group emails by action taken. For each action group, list the emails with subject and sender.\n3. **No Action Taken** \u2014 Any emails that didn't match any rules (if applicable).\n\nThen ask: \"Would you like to run another inbox triage with new rules?\"\n\n**STEP 3 \u2014 After the user responds, call set_output:**\n- set_output(\"summary_report\", <the formatted report text>)",
+        "tools": [
+          "load_data"
+        ],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": null
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-fetch-emails",
+        "source": "intake",
+        "target": "fetch-emails",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "fetch-emails-to-classify",
+        "source": "fetch-emails",
+        "target": "classify-and-act",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "classify-to-report",
+        "source": "classify-and-act",
+        "target": "report",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "report-to-intake",
+        "source": "report",
+        "target": "intake",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 100,
+    "max_retries_per_node": 3,
+    "description": "Manage Gmail inbox emails using user-defined free-text rules. Fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more."
+  },
+  "goal": {
+    "id": "inbox-management",
+    "name": "Inbox Management",
+    "description": "Manage Gmail inbox emails using user-defined free-text rules. Fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "correct-action-execution",
+        "description": "Gmail actions are applied correctly to the right emails based on the user's rules",
+        "metric": "action_correctness",
+        "target": ">=95%",
+        "weight": 0.35,
+        "met": false
+      },
+      {
+        "id": "action-report",
+        "description": "Produces a summary report showing what was done: how many emails were affected by each action type, with email subjects listed",
+        "metric": "report_completeness",
+        "target": "100%",
+        "weight": 0.3,
+        "met": false
+      },
+      {
+        "id": "batch-completeness",
+        "description": "All fetched emails up to the configured max are processed and acted upon; none are silently skipped",
+        "metric": "emails_processed_ratio",
+        "target": "100%",
+        "weight": 0.35,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "respect-batch-limit",
+        "description": "Must not process more emails than the configured max_emails parameter",
+        "constraint_type": "hard",
+        "category": "operational",
+        "check": ""
+      },
+      {
+        "id": "non-destructive-default",
+        "description": "Archiving removes from inbox but preserves the email; only explicit trash rules move emails to trash",
+        "constraint_type": "hard",
+        "category": "safety",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null
+  },
+  "required_tools": [
+    "bulk_fetch_emails",
+    "gmail_list_messages",
+    "gmail_batch_get_messages",
+    "gmail_trash_message",
+    "gmail_modify_message",
+    "gmail_batch_modify_messages",
+    "load_data",
+    "append_data"
+  ],
+  "metadata": {
+    "node_count": 4,
+    "edge_count": 4
+  }
+}

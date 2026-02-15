@@ -15,6 +15,7 @@ Client-facing input:
 """
 
 import asyncio
+import logging
 import re
 import threading
 from pathlib import Path
@@ -26,6 +27,8 @@ from textual.message import Message
 from textual.widgets import Label, TextArea
 
 from framework.runtime.agent_runtime import AgentRuntime
+from framework.runtime.event_bus import AgentEvent
+from framework.tui.widgets.log_pane import format_event, format_python_log
 from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichLog
 
 
@@ -110,9 +113,12 @@ class ChatRepl(Vertical):
         self._waiting_for_input: bool = False
         self._input_node_id: str | None = None
         self._pending_ask_question: str = ""
+        self._active_node_id: str | None = None  # Currently executing node
         self._resume_session = resume_session
         self._resume_checkpoint = resume_checkpoint
         self._session_index: list[str] = []  # IDs from last listing
+        self._show_logs: bool = False  # Clean mode by default
+        self._log_buffer: list[str] = []  # Buffered log lines for backfill on toggle ON
 
         # Dedicated event loop for agent execution.
         # Keeps blocking runtime code (LLM calls, MCP tools) off
@@ -157,6 +163,31 @@ class ChatRepl(Vertical):
         history.write(self._linkify(content))
         if was_at_bottom:
             history.scroll_end(animate=False)
+
+    def toggle_logs(self) -> None:
+        """Toggle inline log display on/off. Backfills buffered logs on toggle ON."""
+        self._show_logs = not self._show_logs
+        if self._show_logs and self._log_buffer:
+            self._write_history("[dim]--- Backfilling logs ---[/dim]")
+            for line in self._log_buffer:
+                self._write_history(line)
+            self._write_history("[dim]--- Live logs ---[/dim]")
+        mode = "ON (dirty)" if self._show_logs else "OFF (clean)"
+        self._write_history(f"[dim]Logs {mode}[/dim]")
+
+    def write_log_event(self, event: AgentEvent) -> None:
+        """Buffer a formatted agent event. Display inline if logs are ON."""
+        formatted = format_event(event)
+        self._log_buffer.append(formatted)
+        if self._show_logs:
+            self._write_history(formatted)
+
+    def write_python_log(self, record: logging.LogRecord) -> None:
+        """Buffer a formatted Python log record. Display inline if logs are ON."""
+        formatted = format_python_log(record)
+        self._log_buffer.append(formatted)
+        if self._show_logs:
+            self._write_history(formatted)
 
     async def _handle_command(self, command: str) -> None:
         """Handle slash commands for session and checkpoint operations."""
@@ -813,7 +844,21 @@ class ChatRepl(Vertical):
                 self._write_history(f"[bold red]Error delivering input:[/bold red] {e}")
             return
 
-        # Double-submit guard: reject input while an execution is in-flight
+        # Mid-execution input: inject into the active node's conversation
+        if self._current_exec_id is not None and self._active_node_id:
+            self._write_history(f"[bold green]You:[/bold green] {user_input}")
+            node_id = self._active_node_id
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self.runtime.inject_input(node_id, user_input),
+                    self._agent_loop,
+                )
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self._write_history(f"[bold red]Error delivering input:[/bold red] {e}")
+            return
+
+        # Double-submit guard: no active node to inject into
         if self._current_exec_id is not None:
             self._write_history("[dim]Agent is still running — please wait.[/dim]")
             return
@@ -874,6 +919,26 @@ class ChatRepl(Vertical):
 
     # -- Event handlers called by app.py _handle_event --
 
+    def handle_node_started(self, node_id: str) -> None:
+        """Reset streaming state and track active node when a new node begins.
+
+        Flushes any stale ``_streaming_snapshot`` left over from the
+        previous node and resets the processing indicator so the user
+        sees a clean transition between graph nodes.
+        """
+        self._active_node_id = node_id
+        if self._streaming_snapshot:
+            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
+            self._streaming_snapshot = ""
+        indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("Thinking...")
+
+    def handle_loop_iteration(self, iteration: int) -> None:
+        """Flush accumulated streaming text when a new loop iteration starts."""
+        if self._streaming_snapshot:
+            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
+            self._streaming_snapshot = ""
+
     def handle_text_delta(self, content: str, snapshot: str) -> None:
         """Handle a streaming text token from the LLM."""
         self._streaming_snapshot = snapshot
@@ -901,8 +966,11 @@ class ChatRepl(Vertical):
         # Update indicator to show tool activity
         indicator.update(f"Using tool: {tool_name}...")
 
-        # Write a discrete status line to history
-        self._write_history(f"[dim]Tool: {tool_name}[/dim]")
+        # Buffer and conditionally display tool status line
+        line = f"[dim]Tool: {tool_name}[/dim]"
+        self._log_buffer.append(line)
+        if self._show_logs:
+            self._write_history(line)
 
     def handle_tool_completed(self, tool_name: str, result: str, is_error: bool) -> None:
         """Handle a tool call completing."""
@@ -916,9 +984,12 @@ class ChatRepl(Vertical):
         preview = preview.replace("\n", " ")
 
         if is_error:
-            self._write_history(f"[dim red]Tool {tool_name} error: {preview}[/dim red]")
+            line = f"[dim red]Tool {tool_name} error: {preview}[/dim red]"
         else:
-            self._write_history(f"[dim]Tool {tool_name} result: {preview}[/dim]")
+            line = f"[dim]Tool {tool_name} result: {preview}[/dim]"
+        self._log_buffer.append(line)
+        if self._show_logs:
+            self._write_history(line)
 
         # Restore thinking indicator
         indicator = self.query_one("#processing-indicator", Label)
@@ -941,7 +1012,9 @@ class ChatRepl(Vertical):
         self._streaming_snapshot = ""
         self._waiting_for_input = False
         self._input_node_id = None
+        self._active_node_id = None
         self._pending_ask_question = ""
+        self._log_buffer.clear()
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", ChatTextArea)
@@ -962,6 +1035,8 @@ class ChatRepl(Vertical):
         self._waiting_for_input = False
         self._pending_ask_question = ""
         self._input_node_id = None
+        self._active_node_id = None
+        self._log_buffer.clear()
 
         # Re-enable input
         chat_input = self.query_one("#chat-input", ChatTextArea)
@@ -999,3 +1074,32 @@ class ChatRepl(Vertical):
         chat_input.disabled = False
         chat_input.placeholder = "Type your response..."
         chat_input.focus()
+
+    def handle_node_completed(self, node_id: str) -> None:
+        """Clear active node when it finishes."""
+        if self._active_node_id == node_id:
+            self._active_node_id = None
+
+    def handle_internal_output(self, node_id: str, content: str) -> None:
+        """Show output from non-client-facing nodes."""
+        self._write_history(f"[dim cyan]⟨{node_id}⟩[/dim cyan] {content}")
+
+    def handle_execution_paused(self, node_id: str, reason: str) -> None:
+        """Show that execution has been paused."""
+        msg = f"[bold yellow]⏸ Paused[/bold yellow] at [cyan]{node_id}[/cyan]"
+        if reason:
+            msg += f" [dim]({reason})[/dim]"
+        self._write_history(msg)
+
+    def handle_execution_resumed(self, node_id: str) -> None:
+        """Show that execution has been resumed."""
+        self._write_history(f"[bold green]▶ Resumed[/bold green] from [cyan]{node_id}[/cyan]")
+
+    def handle_goal_achieved(self, data: dict[str, Any]) -> None:
+        """Show goal achievement prominently."""
+        self._write_history("[bold green]★ Goal achieved![/bold green]")
+
+    def handle_constraint_violation(self, data: dict[str, Any]) -> None:
+        """Show constraint violation as a warning."""
+        desc = data.get("description", "Unknown constraint")
+        self._write_history(f"[bold red]⚠ Constraint violation:[/bold red] {desc}")
