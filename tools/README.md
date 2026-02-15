@@ -76,6 +76,9 @@ python mcp_server.py
 | `web_scrape`           | Scrape and extract content from webpages       |
 | `pdf_read`             | Read and extract text from PDF files           |
 | `get_current_time`     | Get current date/time with timezone support    |
+| `gsc_search_analytics` | Query search performance from Search Console   |
+| `gsc_get_top_queries`  | Get top search keywords by clicks             |
+| `gsc_list_sites`       | List accessible Search Console properties      |
 
 ## Project Structure
 

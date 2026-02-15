@@ -74,6 +74,7 @@ from .shell_config import (
 from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 from .telegram import TELEGRAM_CREDENTIALS
+from .google_search_console import GOOGLE_SEARCH_CONSOLE_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -90,6 +91,7 @@ CREDENTIAL_SPECS = {
     **SERPAPI_CREDENTIALS,
     **TELEGRAM_CREDENTIALS,
     **BIGQUERY_CREDENTIALS,
+    **GOOGLE_SEARCH_CONSOLE_CREDENTIALS,
 }
 
 __all__ = [
@@ -127,4 +129,5 @@ __all__ = [
     "SERPAPI_CREDENTIALS",
     "TELEGRAM_CREDENTIALS",
     "BIGQUERY_CREDENTIALS",
+    "GOOGLE_SEARCH_CONSOLE_CREDENTIALS",
 ]

@@ -45,6 +45,7 @@ from .file_system_toolkits.write_to_file import register_tools as register_write
 from .github_tool import register_tools as register_github
 from .gmail_tool import register_tools as register_gmail
 from .google_maps_tool import register_tools as register_google_maps
+from .google_search_console_tool import register_tools as register_gsc
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
@@ -97,6 +98,7 @@ def register_all_tools(
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
+    register_gsc(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -262,6 +264,10 @@ def register_all_tools(
         "maps_place_search",
         "run_bigquery_query",
         "describe_dataset",
+        "gsc_search_analytics",
+        "gsc_get_top_queries",
+        "gsc_get_top_pages",
+        "gsc_list_sites",
     ]
 
 
