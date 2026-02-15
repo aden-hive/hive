@@ -98,7 +98,7 @@
         "max_node_visits": 1,
         "output_model": null,
         "max_validation_retries": 2,
-        "client_facing": false
+        "client_facing": true
       }
     ],
     "edges": [

@@ -432,6 +432,15 @@ class ExecutionStream:
                     output_data=result.output,
                 )
 
+                # Snapshot the completed Run (with narrative) for unified session persistence.
+                # StreamRuntime may asynchronously clean up after end_run(), so read immediately.
+                run_snapshot = None
+                try:
+                    if runtime_adapter.current_run is not None:
+                        run_snapshot = runtime_adapter.current_run.model_copy(deep=True)
+                except Exception:
+                    run_snapshot = None
+
                 # Update context
                 ctx.completed_at = datetime.now()
                 ctx.status = "completed" if result.success else "failed"
@@ -439,7 +448,7 @@ class ExecutionStream:
                     ctx.status = "paused"
 
                 # Write final session state
-                await self._write_session_state(execution_id, ctx, result=result)
+                await self._write_session_state(execution_id, ctx, result=result, run=run_snapshot)
 
                 # Emit completion/failure event
                 if self._event_bus:
@@ -553,6 +562,7 @@ class ExecutionStream:
         ctx: ExecutionContext,
         result: ExecutionResult | None = None,
         error: str | None = None,
+        run: Any | None = None,
     ) -> None:
         """
         Write state.json for a session.
@@ -562,6 +572,7 @@ class ExecutionStream:
             ctx: Execution context
             result: Optional execution result (if completed)
             error: Optional error message (if failed)
+            run: Optional legacy Run object (for decisions/problems/metrics)
         """
         # Only write if session_store is available
         if not self._session_store:
@@ -638,6 +649,16 @@ class ExecutionStream:
             # Handle error case
             if error:
                 state.result.error = error
+
+            # Attach decision/problem detail if available.
+            # This enables BuilderQuery to analyze unified sessions without relying on deprecated
+            # runs/ storage.
+            if run is not None:
+                try:
+                    state.attach_run(run)
+                except Exception:
+                    # Best-effort: state.json is primarily for resumability; never fail execution.
+                    pass
 
             # Write state.json
             await self._session_store.write_state(execution_id, state)

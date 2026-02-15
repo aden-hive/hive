@@ -162,7 +162,7 @@ In headless mode, `AgentRunner` subscribes to `CLIENT_OUTPUT_DELTA` and `CLIENT_
 ~/.hive/agents/{agent_name}/
   sessions/
     session_YYYYMMDD_HHMMSS_{uuid}/
-      state.json              # Session state (status, memory, progress)
+      state.json              # Session state (status, memory, progress, decisions, problems)
       checkpoints/            # Node-boundary snapshots
       logs/
         summary.json          # Execution summary

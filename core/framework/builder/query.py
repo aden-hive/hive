@@ -9,11 +9,13 @@ This is designed around the questions I need to answer:
 """
 
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from framework.schemas.decision import Decision
-from framework.schemas.run import Run, RunStatus, RunSummary
+from framework.schemas.run import Problem, Run, RunMetrics, RunStatus, RunSummary
+from framework.schemas.session_state import SessionState, SessionStatus
 from framework.storage.backend import FileStorage
 
 
@@ -134,36 +136,206 @@ class BuilderQuery:
     """
 
     def __init__(self, storage_path: str | Path):
-        self.storage = FileStorage(storage_path)
+        self._base_path = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        self._sessions_dir = self._base_path / "sessions"
+        self.storage = FileStorage(self._base_path)
+
+    # === UNIFIED SESSION SUPPORT ===
+
+    def _load_session_state(self, session_id: str) -> SessionState | None:
+        """Load sessions/{session_id}/state.json (unified session storage)."""
+        state_path = self._sessions_dir / session_id / "state.json"
+        if not state_path.exists():
+            return None
+        try:
+            return SessionState.model_validate_json(state_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _iter_session_states(self) -> list[SessionState]:
+        """Best-effort scan of all sessions/*/state.json (most recent first)."""
+        if not self._sessions_dir.exists():
+            return []
+
+        states: list[SessionState] = []
+        for session_dir in self._sessions_dir.iterdir():
+            if not session_dir.is_dir():
+                continue
+            state_path = session_dir / "state.json"
+            if not state_path.exists():
+                continue
+            try:
+                states.append(
+                    SessionState.model_validate_json(state_path.read_text(encoding="utf-8"))
+                )
+            except Exception:
+                continue
+
+        states.sort(key=lambda s: s.timestamps.updated_at, reverse=True)
+        return states
+
+    def _run_from_session_state(self, state: SessionState) -> Run:
+        """Convert unified SessionState into legacy Run for analysis APIs."""
+        status_map = {
+            SessionStatus.ACTIVE: RunStatus.RUNNING,
+            SessionStatus.PAUSED: RunStatus.RUNNING,
+            SessionStatus.COMPLETED: RunStatus.COMPLETED,
+            SessionStatus.FAILED: RunStatus.FAILED,
+            SessionStatus.CANCELLED: RunStatus.CANCELLED,
+        }
+
+        started_at = datetime.fromisoformat(state.timestamps.started_at)
+        completed_at = (
+            datetime.fromisoformat(state.timestamps.completed_at)
+            if state.timestamps.completed_at
+            else None
+        )
+
+        decisions: list[Decision] = []
+        for d in state.decisions:
+            if isinstance(d, Decision):
+                decisions.append(d)
+                continue
+            if isinstance(d, dict):
+                try:
+                    decisions.append(Decision.model_validate(d))
+                except Exception:
+                    continue
+
+        problems: list[Problem] = []
+        for p in state.problems:
+            if isinstance(p, Problem):
+                problems.append(p)
+                continue
+            if isinstance(p, dict):
+                try:
+                    problems.append(Problem.model_validate(p))
+                except Exception:
+                    continue
+
+        # Compute metrics from decisions when possible (more accurate than session roll-ups).
+        total_decisions = len(decisions)
+        successful = 0
+        failed = 0
+        total_tokens = 0
+        total_latency_ms = 0
+        nodes_executed: list[str] = []
+
+        for d in decisions:
+            if d.was_successful:
+                successful += 1
+            else:
+                failed += 1
+            if d.outcome:
+                total_tokens += d.outcome.tokens_used
+                total_latency_ms += d.outcome.latency_ms
+            if d.node_id and d.node_id not in nodes_executed:
+                nodes_executed.append(d.node_id)
+
+        metrics = RunMetrics(
+            total_decisions=total_decisions or state.metrics.decision_count,
+            successful_decisions=successful,
+            failed_decisions=failed,
+            total_tokens=total_tokens
+            or (state.metrics.total_input_tokens + state.metrics.total_output_tokens),
+            total_latency_ms=total_latency_ms or state.progress.total_latency_ms,
+            nodes_executed=state.metrics.nodes_executed or nodes_executed,
+            edges_traversed=state.metrics.edges_traversed,
+        )
+
+        if state.status == SessionStatus.PAUSED and state.progress.paused_at:
+            narrative = f"Session paused at node '{state.progress.paused_at}'."
+        elif state.status == SessionStatus.COMPLETED:
+            narrative = "Session completed successfully."
+        elif state.status == SessionStatus.CANCELLED:
+            narrative = "Session was cancelled."
+        elif state.status == SessionStatus.FAILED:
+            narrative = state.result.error or "Session failed."
+        else:
+            narrative = "Session in progress."
+
+        return Run(
+            id=state.session_id,
+            goal_id=state.goal_id,
+            started_at=started_at,
+            status=status_map.get(state.status, RunStatus.FAILED),
+            completed_at=completed_at,
+            decisions=decisions,
+            problems=problems,
+            metrics=metrics,
+            narrative=narrative,
+            input_data=state.input_data,
+            output_data=state.result.output,
+        )
+
+    def _load_run_any(self, run_id: str) -> Run | None:
+        """Load a run from unified sessions first, then legacy runs/."""
+        state = self._load_session_state(run_id)
+        if state is not None:
+            return self._run_from_session_state(state)
+        return self.storage.load_run(run_id)
 
     # === WHAT HAPPENED? ===
 
     def get_run_summary(self, run_id: str) -> RunSummary | None:
         """Get a quick summary of a run."""
+        state = self._load_session_state(run_id)
+        if state is not None:
+            return RunSummary.from_run(self._run_from_session_state(state))
         return self.storage.load_summary(run_id)
 
     def get_full_run(self, run_id: str) -> Run | None:
         """Get the complete run with all decisions."""
-        return self.storage.load_run(run_id)
+        return self._load_run_any(run_id)
 
     def list_runs_for_goal(self, goal_id: str) -> list[RunSummary]:
         """Get summaries of all runs for a goal."""
-        run_ids = self.storage.get_runs_by_goal(goal_id)
-        summaries = []
-        for run_id in run_ids:
+        summaries: list[RunSummary] = []
+
+        # Legacy runs via deprecated indexes (best-effort).
+        for run_id in self.storage.get_runs_by_goal(goal_id):
             summary = self.storage.load_summary(run_id)
             if summary:
                 summaries.append(summary)
-        return summaries
+
+        # Unified sessions (scan sessions/*/state.json).
+        for state in self._iter_session_states():
+            if state.goal_id != goal_id:
+                continue
+            try:
+                summaries.append(RunSummary.from_run(self._run_from_session_state(state)))
+            except Exception:
+                continue
+
+        # De-duplicate by run_id (session_id == run_id in unified conversion)
+        dedup: dict[str, RunSummary] = {}
+        for s in summaries:
+            dedup[s.run_id] = s
+        return list(dedup.values())
 
     def get_recent_failures(self, limit: int = 10) -> list[RunSummary]:
         """Get recent failed runs."""
-        run_ids = self.storage.get_runs_by_status(RunStatus.FAILED)
-        summaries = []
-        for run_id in run_ids[:limit]:
+        summaries: list[RunSummary] = []
+
+        # Unified failures first (most recent).
+        for state in self._iter_session_states():
+            if state.status != SessionStatus.FAILED:
+                continue
+            try:
+                summaries.append(RunSummary.from_run(self._run_from_session_state(state)))
+            except Exception:
+                continue
+            if len(summaries) >= limit:
+                return summaries
+
+        # Legacy failures via deprecated indexes.
+        for run_id in self.storage.get_runs_by_status(RunStatus.FAILED)[:limit]:
             summary = self.storage.load_summary(run_id)
             if summary:
                 summaries.append(summary)
+            if len(summaries) >= limit:
+                break
+
         return summaries
 
     # === WHY DID IT FAIL? ===
@@ -174,7 +346,7 @@ class BuilderQuery:
 
         This is my primary tool for understanding what went wrong.
         """
-        run = self.storage.load_run(run_id)
+        run = self._load_run_any(run_id)
         if run is None or run.status != RunStatus.FAILED:
             return None
 
@@ -212,7 +384,7 @@ class BuilderQuery:
 
     def get_decision_trace(self, run_id: str) -> list[str]:
         """Get a readable trace of all decisions in a run."""
-        run = self.storage.load_run(run_id)
+        run = self._load_run_any(run_id)
         if run is None:
             return []
         return [d.summary_for_builder() for d in run.decisions]
@@ -225,15 +397,22 @@ class BuilderQuery:
 
         This helps me understand systemic issues vs one-off failures.
         """
-        run_ids = self.storage.get_runs_by_goal(goal_id)
-        if not run_ids:
-            return None
+        runs: list[Run] = []
 
-        runs = []
-        for run_id in run_ids:
+        # Legacy runs via deprecated indexes.
+        for run_id in self.storage.get_runs_by_goal(goal_id):
             run = self.storage.load_run(run_id)
             if run:
                 runs.append(run)
+
+        # Unified sessions (scan and convert).
+        for state in self._iter_session_states():
+            if state.goal_id != goal_id:
+                continue
+            try:
+                runs.append(self._run_from_session_state(state))
+            except Exception:
+                continue
 
         if not runs:
             return None
@@ -283,8 +462,8 @@ class BuilderQuery:
 
     def compare_runs(self, run_id_1: str, run_id_2: str) -> dict[str, Any]:
         """Compare two runs to understand what differed."""
-        run1 = self.storage.load_run(run_id_1)
-        run2 = self.storage.load_run(run_id_2)
+        run1 = self._load_run_any(run_id_1)
+        run2 = self._load_run_any(run_id_2)
 
         if run1 is None or run2 is None:
             return {"error": "One or both runs not found"}
@@ -365,26 +544,45 @@ class BuilderQuery:
 
     def get_node_performance(self, node_id: str) -> dict[str, Any]:
         """Get performance metrics for a specific node across all runs."""
-        run_ids = self.storage.get_runs_by_node(node_id)
-
         total_decisions = 0
         successful_decisions = 0
         total_latency = 0
         total_tokens = 0
         decision_types: dict[str, int] = defaultdict(int)
 
-        for run_id in run_ids:
+        # Unified sessions: scan and compute.
+        for state in self._iter_session_states():
+            run = None
+            try:
+                run = self._run_from_session_state(state)
+            except Exception:
+                run = None
+            if not run:
+                continue
+            for decision in run.decisions:
+                if decision.node_id == node_id:
+                    total_decisions += 1
+                    if decision.was_successful:
+                        successful_decisions += 1
+                    if decision.outcome:
+                        total_latency += decision.outcome.latency_ms
+                        total_tokens += decision.outcome.tokens_used
+                    decision_types[decision.decision_type.value] += 1
+
+        # Legacy runs via deprecated indexes.
+        for run_id in self.storage.get_runs_by_node(node_id):
             run = self.storage.load_run(run_id)
-            if run:
-                for decision in run.decisions:
-                    if decision.node_id == node_id:
-                        total_decisions += 1
-                        if decision.was_successful:
-                            successful_decisions += 1
-                        if decision.outcome:
-                            total_latency += decision.outcome.latency_ms
-                            total_tokens += decision.outcome.tokens_used
-                        decision_types[decision.decision_type.value] += 1
+            if not run:
+                continue
+            for decision in run.decisions:
+                if decision.node_id == node_id:
+                    total_decisions += 1
+                    if decision.was_successful:
+                        successful_decisions += 1
+                    if decision.outcome:
+                        total_latency += decision.outcome.latency_ms
+                        total_tokens += decision.outcome.tokens_used
+                    decision_types[decision.decision_type.value] += 1
 
         return {
             "node_id": node_id,

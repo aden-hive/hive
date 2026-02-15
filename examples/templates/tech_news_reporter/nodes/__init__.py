@@ -119,13 +119,13 @@ Use set_output("articles_data", <JSON string>) with this structure:
 
 # Node 3: Compile Report
 # Turns research into a polished HTML report and delivers it.
-# Not client-facing: it does autonomous work (no user interaction needed).
+# Client-facing: presents text summary and serves report link to the user.
 compile_report_node = NodeSpec(
     id="compile-report",
     name="Compile Report",
     description="Organize the researched articles into a structured HTML report, save it, and deliver a clickable link to the user.",
     node_type="event_loop",
-    client_facing=False,
+    client_facing=True,
     input_keys=["articles_data"],
     output_keys=["report_file"],
     system_prompt="""\

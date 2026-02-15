@@ -282,6 +282,27 @@ class SessionState(BaseModel):
             input_data=run.input_data,
         )
 
+    def attach_run(self, run: "Run") -> None:
+        """Attach legacy Run detail (decisions/problems/metrics) to this session state.
+
+        Unified sessions are the preferred persistence layer (`sessions/*/state.json`), but
+        many analysis utilities still operate over Run/RunSummary semantics. Storing the
+        decision/problem detail here enables BuilderQuery to analyze unified sessions
+        without relying on deprecated `runs/` storage.
+        """
+        self.metrics.decision_count = run.metrics.total_decisions
+        self.metrics.problem_count = len(run.problems)
+        self.metrics.nodes_executed = list(run.metrics.nodes_executed)
+        self.metrics.edges_traversed = list(run.metrics.edges_traversed)
+
+        # Run only tracks a single total token counter, so store it in output_tokens as an
+        # approximate roll-up to avoid losing the metric.
+        self.metrics.total_input_tokens = 0
+        self.metrics.total_output_tokens = run.metrics.total_tokens
+
+        self.decisions = [d.model_dump() for d in run.decisions]
+        self.problems = [p.model_dump() for p in run.problems]
+
     def to_session_state_dict(self) -> dict[str, Any]:
         """Convert to session_state format for GraphExecutor.execute()."""
         # Derive resume target: explicit > last node in path > entry point
