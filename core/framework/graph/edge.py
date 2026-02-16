@@ -52,11 +52,19 @@ class LLMFailureMode(StrEnum):
     When an LLM_DECIDE edge encounters an error (LLM unavailable, API failure,
     JSON parse errors, etc.), this determines the fallback behavior.
 
+    SECURITY WARNING:
+        The default (PROCEED) is fail-open for backward compatibility.
+        For authorization checks, access control, or sensitive data routing,
+        you MUST explicitly set on_llm_failure=LLMFailureMode.SKIP to ensure
+        fail-closed behavior. Otherwise, LLM failures may grant unauthorized access.
+
     Values:
         PROCEED: Fail-open - proceed based on source_success (backward compatible)
                  Use for non-critical routing where availability is prioritized
+                 WARNING: NOT suitable for authorization or security gates
         SKIP: Fail-closed - do not traverse the edge
-              Use for security-critical routing (authorization, sensitive data gates)
+              REQUIRED for security-critical routing (authorization, sensitive data gates)
+              Recommended for any edge that controls access to protected resources
         RAISE: Escalate - raise exception to halt execution
                Use when LLM routing failure should stop the entire workflow
     """
@@ -127,7 +135,9 @@ class EdgeSpec(BaseModel):
             "How to handle LLM routing failures for LLM_DECIDE edges. "
             "PROCEED (default): fail-open, proceed based on source_success. "
             "SKIP: fail-closed, do not traverse edge. "
-            "RAISE: escalate exception to executor."
+            "RAISE: escalate exception to executor. "
+            "SECURITY: For authorization, access control, or sensitive data routing, "
+            "explicitly set to SKIP to prevent unauthorized access on LLM failures."
         ),
     )
 
