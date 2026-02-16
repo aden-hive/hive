@@ -28,7 +28,8 @@ Each recipe is a markdown file (or folder with a markdown file) containing:
 | [social_media_management](social_media_management/) | Schedule posts, reply to comments, monitor trends |
 | [newsletter_production](newsletter_production/) | Transform voice memos and ideas into polished emails |
 | [news_jacking](news_jacking/) | Personalized outreach triggered by real-time company news |
-| [crm_hygiene](crm_hygiene/) | Ensure every lead has follow-up dates and status |
+| [ad_campaign_monitoring](ad_campaign_monitoring/) | Monitor and analyze advertising campaign performance |
+| [crm_update](crm_update/) | Ensure every lead has follow-up dates and status |
 
 ### Customer Success
 | Recipe | Description |
@@ -49,5 +50,5 @@ Each recipe is a markdown file (or folder with a markdown file) containing:
 |--------|-------------|
 | [quality_assurance](quality_assurance/) | Test features and links before they go live |
 | [documentation](documentation/) | Turn messy processes into clean SOPs |
-| [basic_troubleshooting](basic_troubleshooting/) | Handle Level 1 tech support |
+| [support_troubleshooting](support_troubleshooting/) | Handle Level 1 tech support |
 | [issue_triaging](issue_triaging/) | Categorize and route bug reports by severity |

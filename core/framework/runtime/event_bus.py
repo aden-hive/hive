@@ -62,6 +62,7 @@ class EventType(StrEnum):
     NODE_INTERNAL_OUTPUT = "node_internal_output"
     NODE_INPUT_BLOCKED = "node_input_blocked"
     NODE_STALLED = "node_stalled"
+    NODE_TOOL_DOOM_LOOP = "node_tool_doom_loop"
 
     # Judge decisions
     JUDGE_VERDICT = "judge_verdict"
@@ -628,6 +629,24 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"reason": reason},
+            )
+        )
+
+    async def emit_tool_doom_loop(
+        self,
+        stream_id: str,
+        node_id: str,
+        description: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit tool doom loop detection event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_TOOL_DOOM_LOOP,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"description": description},
             )
         )
 

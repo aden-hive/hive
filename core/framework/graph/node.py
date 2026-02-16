@@ -931,7 +931,7 @@ Keep the same JSON structure but with shorter content values.
                     )
                     return result
 
-                response = ctx.llm.complete_with_tools(
+                response = await ctx.llm.acomplete_with_tools(
                     messages=messages,
                     system=system,
                     tools=ctx.available_tools,
@@ -951,7 +951,7 @@ Keep the same JSON structure but with shorter content values.
                         f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}"
                     )
 
-                response = ctx.llm.complete(
+                response = await ctx.llm.acomplete(
                     messages=messages,
                     system=system,
                     json_mode=use_json_mode,
@@ -985,7 +985,7 @@ Keep the same JSON structure but with shorter content values.
 
                 # Retry the call with compaction instruction
                 if ctx.available_tools and self.tool_executor:
-                    response = ctx.llm.complete_with_tools(
+                    response = await ctx.llm.acomplete_with_tools(
                         messages=compaction_messages,
                         system=system,
                         tools=ctx.available_tools,
@@ -993,7 +993,7 @@ Keep the same JSON structure but with shorter content values.
                         max_tokens=ctx.max_tokens,
                     )
                 else:
-                    response = ctx.llm.complete(
+                    response = await ctx.llm.acomplete(
                         messages=compaction_messages,
                         system=system,
                         json_mode=use_json_mode,
@@ -1074,7 +1074,7 @@ Keep the same JSON structure but with shorter content values.
 
                                 # Re-call LLM with feedback
                                 if ctx.available_tools and self.tool_executor:
-                                    response = ctx.llm.complete_with_tools(
+                                    response = await ctx.llm.acomplete_with_tools(
                                         messages=current_messages,
                                         system=system,
                                         tools=ctx.available_tools,
@@ -1082,7 +1082,7 @@ Keep the same JSON structure but with shorter content values.
                                         max_tokens=ctx.max_tokens,
                                     )
                                 else:
-                                    response = ctx.llm.complete(
+                                    response = await ctx.llm.acomplete(
                                         messages=current_messages,
                                         system=system,
                                         json_mode=use_json_mode,
@@ -1822,7 +1822,7 @@ Respond with ONLY a JSON object:
         logger.info("      🤔 Router using LLM to choose path...")
 
         try:
-            response = ctx.llm.complete(
+            response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system=ctx.node_spec.system_prompt
                 or "You are a routing agent. Respond with JSON only.",

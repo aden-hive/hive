@@ -1,6 +1,7 @@
 import logging
 import platform
 import subprocess
+import threading
 import time
 
 from textual.app import App, ComposeResult
@@ -358,9 +359,20 @@ class AdenTUI(App):
             pass
 
     async def _handle_event(self, event: AgentEvent) -> None:
-        """Called from the agent thread — bridge to Textual's main thread."""
+        """Bridge events to Textual's main thread for UI updates.
+
+        Events may arrive from the agent-execution thread (normal LLM/tool
+        work) or from the Textual thread itself (e.g. webhook server events).
+        ``call_from_thread`` requires a *different* thread, so we detect
+        which thread we're on and act accordingly.
+        """
         try:
-            self.call_from_thread(self._route_event, event)
+            if threading.get_ident() == self._thread_id:
+                # Already on Textual's thread — call directly.
+                self._route_event(event)
+            else:
+                # On a different thread — bridge via call_from_thread.
+                self.call_from_thread(self._route_event, event)
         except Exception as e:
             logging.getLogger("tui.events").error(
                 "call_from_thread failed for %s (node=%s): %s",
