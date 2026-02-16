@@ -7,6 +7,7 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -159,6 +160,10 @@ class AgentRuntime:
         self._webhook_server: Any = None
         # Event-driven entry point subscriptions
         self._event_subscriptions: list[str] = []
+        # Timer tasks for scheduled entry points
+        self._timer_tasks: list[asyncio.Task] = []
+        # Next fire time for each timer entry point (ep_id -> datetime)
+        self._timer_next_fire: dict[str, float] = {}
 
         # State
         self._running = False
@@ -311,6 +316,64 @@ class AgentRuntime:
                 )
                 self._event_subscriptions.append(sub_id)
 
+            # Start timer-driven entry points
+            for ep_id, spec in self._entry_points.items():
+                if spec.trigger_type != "timer":
+                    continue
+
+                tc = spec.trigger_config
+                interval = tc.get("interval_minutes")
+                if not interval or interval <= 0:
+                    logger.warning(
+                        f"Entry point '{ep_id}' has trigger_type='timer' "
+                        "but no valid interval_minutes in trigger_config"
+                    )
+                    continue
+
+                run_immediately = tc.get("run_immediately", False)
+
+                def _make_timer(entry_point_id: str, mins: float, immediate: bool):
+                    async def _timer_loop():
+                        interval_secs = mins * 60
+                        if not immediate:
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
+                            await asyncio.sleep(interval_secs)
+                        while self._running:
+                            self._timer_next_fire.pop(entry_point_id, None)
+                            try:
+                                session_state = self._get_primary_session_state(
+                                    exclude_entry_point=entry_point_id
+                                )
+                                await self.trigger(
+                                    entry_point_id,
+                                    {"event": {"source": "timer", "reason": "scheduled"}},
+                                    session_state=session_state,
+                                )
+                                logger.info(
+                                    "Timer fired for entry point '%s' (next in %s min)",
+                                    entry_point_id,
+                                    mins,
+                                )
+                            except Exception:
+                                logger.error(
+                                    "Timer trigger failed for '%s'",
+                                    entry_point_id,
+                                    exc_info=True,
+                                )
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
+                            await asyncio.sleep(interval_secs)
+
+                    return _timer_loop
+
+                task = asyncio.create_task(_make_timer(ep_id, interval, run_immediately)())
+                self._timer_tasks.append(task)
+                logger.info(
+                    "Started timer for entry point '%s' every %s min%s",
+                    ep_id,
+                    interval,
+                    " (immediate first run)" if run_immediately else "",
+                )
+
             self._running = True
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")
 
@@ -320,6 +383,11 @@ class AgentRuntime:
             return
 
         async with self._lock:
+            # Cancel timer tasks
+            for task in self._timer_tasks:
+                task.cancel()
+            self._timer_tasks.clear()
+
             # Unsubscribe event-driven entry points
             for sub_id in self._event_subscriptions:
                 self._event_bus.unsubscribe(sub_id)
