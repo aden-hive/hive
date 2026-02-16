@@ -663,10 +663,10 @@ if ($importErrors -gt 0) {
 Write-Host ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 4: Verify Agent Skills
 # ============================================================
 
-Write-Step -Number "4" -Text "Step 4: Verifying Claude Code skills..."
+Write-Step -Number "4" -Text "Step 4: Verifying agent skills..."
 
 # (skills check is informational only, shown in final verification)
 
@@ -1043,11 +1043,59 @@ if ($LASTEXITCODE -eq 0) { Write-Ok "ok" } else { Write-Warn "skipped" }
 Write-Host "  $([char]0x2B21) MCP config... " -NoNewline
 if (Test-Path (Join-Path $ScriptDir ".mcp.json")) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
-Write-Host "  $([char]0x2B21) skills... " -NoNewline
-$skillsDir = Join-Path (Join-Path $ScriptDir ".claude") "skills"
-if (Test-Path $skillsDir) {
+Write-Host "  - skills... " -NoNewline
+$skillCandidates = @(
+    (Join-Path (Join-Path $ScriptDir ".agents") "skills"),
+    (Join-Path (Join-Path $ScriptDir ".agent") "skills"),
+    (Join-Path (Join-Path $ScriptDir ".cursor") "skills"),
+    (Join-Path (Join-Path $ScriptDir ".claude") "skills")
+)
+$skillsDir = $null
+foreach ($candidate in $skillCandidates) {
+    if (Test-Path $candidate) {
+        $skillsDir = $candidate
+        break
+    }
+}
+if ($skillsDir) {
     $skillCount = (Get-ChildItem -Directory $skillsDir -ErrorAction SilentlyContinue).Count
-    Write-Ok "$skillCount found"
+    $skillsSource = (Split-Path -Leaf (Split-Path -Parent $skillsDir)) + "/skills"
+    Write-Ok "$skillCount found ($skillsSource)"
+} else {
+    Write-Warn "skipped"
+}
+
+$CodexAvailable = $false
+$CodexVersion = "0.0.0"
+Write-Host "  - codex CLI... " -NoNewline
+$codexCmd = Get-Command codex -ErrorAction SilentlyContinue
+if ($codexCmd) {
+    $codexRaw = (& codex --version 2>$null | Select-Object -First 1)
+    $match = [regex]::Match($codexRaw, '\d+\.\d+\.\d+')
+    if ($match.Success) {
+        $CodexVersion = $match.Value
+    }
+
+    $parts = $CodexVersion.Split('.')
+    $major = [int]$parts[0]
+    $minor = [int]$parts[1]
+
+    if ($major -gt 0 -or ($major -eq 0 -and $minor -ge 101)) {
+        Write-Ok $CodexVersion
+        $CodexAvailable = $true
+    } else {
+        Write-Warn "$CodexVersion (upgrade to 0.101.0+)"
+    }
+} else {
+    Write-Warn "skipped"
+}
+
+$ClaudeAvailable = $false
+Write-Host "  - claude CLI... " -NoNewline
+$claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+if ($claudeCmd) {
+    Write-Ok "available"
+    $ClaudeAvailable = $true
 } else {
     Write-Warn "skipped"
 }
@@ -1121,21 +1169,43 @@ if ($SelectedProviderId) {
 if ($credKey) {
     Write-Color -Text "Credential Store:" -Color White
     Write-Ok "~/.hive/credentials/  (encrypted)"
-    Write-Color -Text "  Set up agent credentials with: /setup-credentials" -Color DarkGray
+    Write-Color -Text "  Set up agent credentials with: /hive-credentials" -Color DarkGray
     Write-Host ""
 }
 
 Write-Color -Text "Build a New Agent:" -Color White
 Write-Host ""
-Write-Host "  1. Open Claude Code in this directory:"
-Write-Color -Text "     claude" -Color Cyan
-Write-Host ""
-Write-Host "  2. Build a new agent:"
+Write-Host "  If your coding client supports Hive skills, run:"
 Write-Color -Text "     /hive" -Color Cyan
-Write-Host ""
-Write-Host "  3. Test an existing agent:"
 Write-Color -Text "     /hive-test" -Color Cyan
+Write-Color -Text "     /hive-credentials" -Color Cyan
 Write-Host ""
+
+if ($ClaudeAvailable) {
+    Write-Color -Text "Claude Code:" -Color White
+    Write-Host "  1. Run: " -NoNewline
+    Write-Color -Text "claude" -Color Cyan
+    Write-Host "  2. Then run: " -NoNewline
+    Write-Color -Text "/hive" -Color Cyan
+    Write-Host ""
+}
+
+if ($CodexAvailable) {
+    Write-Color -Text "Codex:" -Color White
+    Write-Host "  1. Run: " -NoNewline
+    Write-Color -Text "codex" -Color Cyan
+    Write-Host "  2. Type: " -NoNewline
+    Write-Color -Text "use hive" -Color Cyan
+    Write-Host ""
+}
+
+$cursorSkillsDir = Join-Path (Join-Path $ScriptDir ".cursor") "skills"
+if (Test-Path $cursorSkillsDir) {
+    Write-Color -Text "Cursor:" -Color White
+    Write-Host "  Open this repo in Cursor and use Hive skills from " -NoNewline
+    Write-Color -Text ".cursor/skills" -Color Cyan
+    Write-Host ""
+}
 Write-Color -Text "Run an Agent:" -Color White
 Write-Host ""
 Write-Host "  Launch the interactive dashboard to browse and run agents:"

@@ -285,10 +285,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
+# Step 4: Verify Agent Skills
 # ============================================================
 
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
+echo -e "${BLUE}Step 4: Verifying agent skills...${NC}"
 echo ""
 
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
@@ -1050,10 +1050,19 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ skills... "
-if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
-    echo -e "${GREEN}${SKILL_COUNT} found${NC}"
+echo -n "  - skills... "
+SKILLS_DIR=""
+for candidate in "$SCRIPT_DIR/.agents/skills" "$SCRIPT_DIR/.agent/skills" "$SCRIPT_DIR/.cursor/skills" "$SCRIPT_DIR/.claude/skills"; do
+    if [ -d "$candidate" ]; then
+        SKILLS_DIR="$candidate"
+        break
+    fi
+done
+
+if [ -n "$SKILLS_DIR" ]; then
+    SKILL_COUNT=$(ls -1d "$SKILLS_DIR"/*/ 2>/dev/null | wc -l)
+    SKILLS_SOURCE="$(basename "$(dirname "$SKILLS_DIR")")/skills"
+    echo -e "${GREEN}${SKILL_COUNT} found${NC} ${DIM}(${SKILLS_SOURCE})${NC}"
 else
     echo -e "${YELLOW}--${NC}"
 fi
@@ -1074,6 +1083,15 @@ if command -v codex > /dev/null 2>&1; then
 else
     echo -e "${YELLOW}--${NC}"
     CODEX_AVAILABLE=false
+fi
+
+echo -n "  - claude CLI... "
+if command -v claude > /dev/null 2>&1; then
+    echo -e "${GREEN}available${NC}"
+    CLAUDE_AVAILABLE=true
+else
+    echo -e "${YELLOW}--${NC}"
+    CLAUDE_AVAILABLE=false
 fi
 
 echo -n "  ⬡ local settings... "
@@ -1170,30 +1188,35 @@ fi
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${BOLD}Credential Store:${NC}"
     echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted)"
-    echo -e "  ${DIM}Set up agent credentials with:${NC} ${CYAN}/setup-credentials${NC}"
+    echo -e "  ${DIM}Set up agent credentials with:${NC} ${CYAN}/hive-credentials${NC}"
     echo ""
 fi
 
-echo -e "${BOLD}Build a New Agent (Claude):${NC}"
+echo -e "${BOLD}Build a New Agent:${NC}"
 echo ""
-echo -e "  1. Open Claude Code in this directory:"
-echo -e "     ${CYAN}claude${NC}"
-echo ""
-echo -e "  2. Build a new agent:"
+echo -e "  If your coding client supports Hive skills, run:"
 echo -e "     ${CYAN}/hive${NC}"
-echo ""
-echo -e "  3. Test an existing agent:"
 echo -e "     ${CYAN}/hive-test${NC}"
+echo -e "     ${CYAN}/hive-credentials${NC}"
 echo ""
 
-# Show Codex instructions if available
-if [ "$CODEX_AVAILABLE" = true ]; then
-    echo -e "${BOLD}Build a New Agent (Codex):${NC}"
+if [ "$CLAUDE_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Claude Code:${NC}"
+    echo -e "  1. Run: ${CYAN}claude${NC}"
+    echo -e "  2. Then run: ${CYAN}/hive${NC}"
     echo ""
-    echo -e "  Codex ${GREEN}${CODEX_VERSION}${NC} is available. To use it with Hive:"
-    echo -e "  1. Restart your terminal (or open a new one)"
-    echo -e "  2. Run: ${CYAN}codex${NC}"
-    echo -e "  3. Type: ${CYAN}use hive${NC}"
+fi
+
+if [ "$CODEX_AVAILABLE" = true ]; then
+    echo -e "${BOLD}Codex:${NC}"
+    echo -e "  1. Run: ${CYAN}codex${NC}"
+    echo -e "  2. Type: ${CYAN}use hive${NC}"
+    echo ""
+fi
+
+if [ -d "$SCRIPT_DIR/.cursor/skills" ]; then
+    echo -e "${BOLD}Cursor:${NC}"
+    echo -e "  Open this repo in Cursor and use Hive skills from ${CYAN}.cursor/skills${NC}"
     echo ""
 fi
 
