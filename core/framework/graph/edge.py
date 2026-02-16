@@ -205,7 +205,7 @@ class EdgeSpec(BaseModel):
                 )
 
             try:
-                return self._llm_decide(
+                return await self._llm_decide(
                     llm=llm,
                     goal=goal,
                     source_success=source_success,
