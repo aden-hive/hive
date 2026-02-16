@@ -289,7 +289,17 @@ class AgentRuntime:
                 def _make_handler(entry_point_id: str):
                     async def _on_event(event):
                         if self._running and entry_point_id in self._streams:
-                            await self.trigger(entry_point_id, {"event": event.to_dict()})
+                            # Run in the same session as the primary entry
+                            # point so memory (e.g. user-defined rules) is
+                            # shared and logs land in one session directory.
+                            session_state = self._get_primary_session_state(
+                                exclude_entry_point=entry_point_id
+                            )
+                            await self.trigger(
+                                entry_point_id,
+                                {"event": event.to_dict()},
+                                session_state=session_state,
+                            )
 
                     return _on_event
 
@@ -390,6 +400,66 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
+
+    def _get_primary_session_state(self, exclude_entry_point: str) -> dict[str, Any] | None:
+        """Build session_state so an async entry point runs in the primary session.
+
+        Looks for an active execution from another stream (the "primary"
+        session, e.g. the user-facing intake loop) and returns a
+        ``session_state`` dict containing:
+
+        - ``resume_session_id``: reuse the same session directory
+        - ``memory``: only the keys that the async entry node declares
+          as inputs (e.g. ``rules``, ``max_emails``).  Stale outputs
+          from previous runs (``emails``, ``actions_taken``, …) are
+          excluded so each trigger starts fresh.
+
+        The memory is read from the primary session's ``state.json``
+        which is kept up-to-date by ``GraphExecutor._write_progress()``
+        at every node transition.
+
+        Returns ``None`` if no primary session is active (the webhook
+        execution will just create its own session).
+        """
+        import json as _json
+
+        # Determine which memory keys the async entry node needs.
+        allowed_keys: set[str] | None = None
+        ep_spec = self._entry_points.get(exclude_entry_point)
+        if ep_spec:
+            entry_node = self.graph.get_node(ep_spec.entry_node)
+            if entry_node and entry_node.input_keys:
+                allowed_keys = set(entry_node.input_keys)
+
+        for ep_id, stream in self._streams.items():
+            if ep_id == exclude_entry_point:
+                continue
+            for exec_id in stream.active_execution_ids:
+                state_path = self._storage.base_path / "sessions" / exec_id / "state.json"
+                try:
+                    if state_path.exists():
+                        data = _json.loads(state_path.read_text(encoding="utf-8"))
+                        full_memory = data.get("memory", {})
+                        if not full_memory:
+                            continue
+                        # Filter to only input keys so stale outputs
+                        # from previous triggers don't leak through.
+                        if allowed_keys is not None:
+                            memory = {k: v for k, v in full_memory.items() if k in allowed_keys}
+                        else:
+                            memory = full_memory
+                        if memory:
+                            return {
+                                "resume_session_id": exec_id,
+                                "memory": memory,
+                            }
+                except Exception:
+                    logger.debug(
+                        "Could not read state.json for %s: skipping",
+                        exec_id,
+                        exc_info=True,
+                    )
+        return None
 
     async def inject_input(self, node_id: str, content: str) -> bool:
         """Inject user input into a running client-facing node.
