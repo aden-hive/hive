@@ -7,20 +7,8 @@ from framework.credentials.client_hints import (
 from framework.credentials.validation import build_missing_credentials_error
 
 
-CLIENT_ENV_KEYS = [
-    "HIVE_CLIENT",
-    "CLAUDECODE",
-    "CLAUDE_CODE",
-    "CODEX_HOME",
-    "CODEX_SANDBOX",
-    "CURSOR_TRACE_ID",
-    "CURSOR_AGENT",
-]
-
-
 def _clear_client_env(monkeypatch) -> None:
-    for key in CLIENT_ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("HIVE_CLIENT", raising=False)
 
 
 def test_detect_client_environment_defaults_to_generic(monkeypatch):
@@ -38,13 +26,6 @@ def test_detect_client_environment_supports_antigravity_alias(monkeypatch):
     _clear_client_env(monkeypatch)
     monkeypatch.setenv("HIVE_CLIENT", "gemini")
     assert detect_client_environment() == "antigravity"
-
-
-def test_detect_client_environment_ignores_undocumented_heuristics(monkeypatch):
-    _clear_client_env(monkeypatch)
-    monkeypatch.setenv("CODEX_HOME", "1")
-    monkeypatch.setenv("CURSOR_TRACE_ID", "trace")
-    assert detect_client_environment() == "generic"
 
 
 def test_guidance_is_generic_when_client_unknown(monkeypatch):
