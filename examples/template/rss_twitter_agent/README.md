@@ -112,6 +112,39 @@ To use a different model, create `~/.hive/configuration.json`:
 }
 ```
 
+## Twitter Posting Modes
+
+The agent supports two modes for Twitter/X output:
+
+| Mode | Description |
+|------|-------------|
+| **Draft (default)** | Generated threads are shown for review only. No posts are made to Twitter/X. |
+| **Live** | Threads are actually posted to Twitter/X using your API credentials (OAuth 1.0a via tweepy). |
+
+Set the mode with the `TWITTER_POST_MODE` environment variable:
+
+```bash
+export TWITTER_POST_MODE=draft   # default
+export TWITTER_POST_MODE=live    # post to Twitter/X
+```
+
+### Optional: Twitter API credentials (for live mode)
+
+To post in **live** mode, set these environment variables (get keys from the [Twitter / X Developer Portal](https://developer.twitter.com)):
+
+| Variable | Description |
+|----------|-------------|
+| `TWITTER_POST_MODE` | `draft` or `live` (default: `draft`) |
+| `TWITTER_BEARER_TOKEN` | Optional; OAuth 2.0 Bearer Token |
+| `TWITTER_API_KEY` | OAuth 1.0a Consumer Key (API Key) |
+| `TWITTER_API_SECRET` | OAuth 1.0a Consumer Secret |
+| `TWITTER_ACCESS_TOKEN` | OAuth 1.0a Access Token |
+| `TWITTER_ACCESS_SECRET` | OAuth 1.0a Access Token Secret |
+
+Create an app at [developer.twitter.com](https://developer.twitter.com), enable **Read and Write** (or **Read and Write and Direct Messages**) for the app, then generate the Access Token and Secret. The agent uses OAuth 1.0a (API Key + Secret + Access Token + Access Secret) for posting.
+
+**Fallback:** If `TWITTER_POST_MODE=live` but any required credential is missing, the agent falls back to draft behavior and notifies you (via the tool result) that credentials were not set. No post is made.
+
 ## Target Users
 
 - Content marketers
@@ -122,6 +155,6 @@ To use a different model, create `~/.hive/configuration.json`:
 ## Notes
 
 - Any RSS feed URL works — blog posts, news sites, product updates
-- The agent operates in draft mode by default (no auto-posting)
+- The agent operates in **draft** mode by default (no auto-posting); set `TWITTER_POST_MODE=live` and API credentials to post. See [Twitter Posting Modes](#twitter-posting-modes) above.
 - Requires Playwright for full web scraping: `pip install playwright && python -m playwright install chromium`
 - Works with 100+ LLM providers via LiteLLM (Anthropic, Groq, OpenAI, Ollama, etc.)

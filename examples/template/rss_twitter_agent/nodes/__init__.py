@@ -15,6 +15,12 @@ fetch_node = NodeSpec(
     system_prompt="""\
 You are an RSS feed fetcher. Your job is to retrieve and parse articles from RSS feeds.
 
+**At the very start of every run, before calling any tools:** Output a short introduction (plain text) that:
+1. Explains what this agent does: it repurposes content from RSS feeds into Twitter/X threads.
+2. Lists the RSS feeds you are currently monitoring, with their URLs (see the list below).
+
+Then proceed to fetch and parse those feeds.
+
 Fetch articles from these RSS feeds:
 1. https://news.ycombinator.com/rss
 2. https://techcrunch.com/feed/
@@ -98,12 +104,13 @@ Ask: "Would you like any changes to these threads, or shall I finalize them?"
 
 If the user requests changes, revise and present again.
 
-**STEP 2 — After user approves, call set_output:**
+**STEP 2 — After user approves, call set_output then post_to_twitter:**
 - set_output("threads_json", <JSON string of threads array>)
+- Call post_to_twitter(threads_json=<the same JSON string>). In live mode the tool posts to Twitter/X; in draft mode it simply confirms. The tool handles missing credentials by falling back to draft and notifying the user.
 
 Each thread object should have: "article_title", "source", "thread" (array of tweet strings), "tweet_count".
 """,
-    tools=[],
+    tools=["post_to_twitter"],
 )
 
 __all__ = [

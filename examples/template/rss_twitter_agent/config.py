@@ -1,8 +1,17 @@
 """Runtime configuration."""
 
+from __future__ import annotations
+
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def _twitter_post_mode() -> str:
+    """Load TWITTER_POST_MODE from env; must be 'draft' or 'live'."""
+    raw = os.environ.get("TWITTER_POST_MODE", "draft").strip().lower()
+    return raw if raw in ("draft", "live") else "draft"
 
 
 def _load_preferred_model() -> str:
@@ -27,6 +36,23 @@ class RuntimeConfig:
     max_tokens: int = 8000
     api_key: str | None = None
     api_base: str | None = None
+    # Twitter posting: draft (default) or live
+    twitter_post_mode: str = field(default_factory=_twitter_post_mode)
+    twitter_bearer_token: str | None = field(
+        default_factory=lambda: os.environ.get("TWITTER_BEARER_TOKEN") or None
+    )
+    twitter_api_key: str | None = field(
+        default_factory=lambda: os.environ.get("TWITTER_API_KEY") or None
+    )
+    twitter_api_secret: str | None = field(
+        default_factory=lambda: os.environ.get("TWITTER_API_SECRET") or None
+    )
+    twitter_access_token: str | None = field(
+        default_factory=lambda: os.environ.get("TWITTER_ACCESS_TOKEN") or None
+    )
+    twitter_access_secret: str | None = field(
+        default_factory=lambda: os.environ.get("TWITTER_ACCESS_SECRET") or None
+    )
 
 
 default_config = RuntimeConfig()

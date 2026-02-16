@@ -170,6 +170,10 @@ class RSSTwitterAgent:
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
 
+        from .twitter import register_twitter_tool
+
+        register_twitter_tool(self._tool_registry, self.config)
+
         llm = LiteLLMProvider(
             model=self.config.model,
             api_key=self.config.api_key,

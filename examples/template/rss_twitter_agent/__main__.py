@@ -91,6 +91,10 @@ def tui(verbose, debug):
         if mcp_config_path.exists():
             agent._tool_registry.load_mcp_config(mcp_config_path)
 
+        from .twitter import register_twitter_tool
+
+        register_twitter_tool(agent._tool_registry, agent.config)
+
         llm = LiteLLMProvider(
             model=agent.config.model,
             api_key=agent.config.api_key,
