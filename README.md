@@ -363,6 +363,17 @@ We welcome contributions from the community! We’re especially looking for help
 
 **Important:** Please get assigned to an issue before submitting a PR. Comment on an issue to claim it, and a maintainer will assign you. Issues with reproducible steps and proposals are prioritized. This helps prevent duplicate work.
 
+### Running Tests Locally
+
+From the repository root, run:
+
+```bash
+source .venv/bin/activate
+pytest -q
+```
+
+The test layout is set up so root-level `pytest` collection works cleanly across both `core/` and `tools/`.
+
 1. Find or create an issue and get assigned
 2. Fork the repository
 3. Create your feature branch (`git checkout -b feature/amazing-feature`)
