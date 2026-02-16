@@ -12,6 +12,7 @@ HUBSPOT_CREDENTIALS = {
         tools=[
             "hubspot_search_contacts",
             "hubspot_get_contact",
+            "hubspot_get_contact_by_email",
             "hubspot_create_contact",
             "hubspot_update_contact",
             "hubspot_search_companies",

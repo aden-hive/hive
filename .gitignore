@@ -71,6 +71,7 @@ exports/*
 .claude/settings.local.json
 
 .venv
+venv/
 
 docs/github-issues/*
 core/tests/*dumps/*

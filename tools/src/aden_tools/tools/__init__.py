@@ -155,6 +155,7 @@ def register_all_tools(
         "hubspot_update_contact",
         "hubspot_search_companies",
         "hubspot_get_company",
+        "hubspot_get_contact_by_email",
         "hubspot_create_company",
         "hubspot_update_company",
         "hubspot_search_deals",
