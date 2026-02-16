@@ -86,6 +86,7 @@ class ScriptableMockLLMProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         return LLMResponse(
             content="Conversation summary for compaction.",

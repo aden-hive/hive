@@ -400,9 +400,13 @@ class GraphBuilder:
         if not terminal_candidates and self.session.nodes:
             warnings.append("No terminal nodes found (all nodes have outgoing edges)")
 
-        # Check reachability
+        # Check reachability from ALL entry candidates (not just the first one).
+        # Agents with async entry points have multiple nodes with no incoming
+        # edges (e.g., a primary entry node and an event-driven entry node).
         if entry_candidates and self.session.nodes:
-            reachable = self._compute_reachable(entry_candidates[0])
+            reachable = set()
+            for candidate in entry_candidates:
+                reachable |= self._compute_reachable(candidate)
             unreachable = [n.id for n in self.session.nodes if n.id not in reachable]
             if unreachable:
                 errors.append(f"Unreachable nodes: {unreachable}")

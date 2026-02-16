@@ -162,6 +162,69 @@ class BraveSearchHealthChecker:
             )
 
 
+class GoogleCalendarHealthChecker:
+    """Health checker for Google Calendar OAuth tokens."""
+
+    ENDPOINT = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+    TIMEOUT = 10.0
+
+    def check(self, access_token: str) -> HealthCheckResult:
+        """
+        Validate Google Calendar token by making lightweight API call.
+
+        Makes a GET request for 1 calendar to verify the token works.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/json",
+                    },
+                    params={"maxResults": "1"},
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Google Calendar credentials valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Google Calendar token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Google Calendar token lacks required scopes",
+                        details={"status_code": 403, "required": "calendar"},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Google Calendar API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Google Calendar API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            error_msg = str(e)
+            if "Bearer" in error_msg or "Authorization" in error_msg:
+                error_msg = "Request failed (details redacted for security)"
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Google Calendar: {error_msg}",
+                details={"error": error_msg},
+            )
+
+
 class GoogleSearchHealthChecker:
     """Health checker for Google Custom Search API."""
 
@@ -563,6 +626,7 @@ class GoogleMapsHealthChecker:
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
+    "google_calendar_oauth": GoogleCalendarHealthChecker(),
     "slack": SlackHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
     "google_maps": GoogleMapsHealthChecker(),
