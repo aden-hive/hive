@@ -35,7 +35,7 @@ tools/
 ├── src/
 │   └── aden_tools/
 │       ├── credentials/
-│       │   ├── __init__.py                      # Registry of all credentialss
+│       │   ├── __init__.py                      # Registry of all credentials
 │       │   └── stripe.py                        # Stripe API key specifications
 │       │
 │       └── tools/

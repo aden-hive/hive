@@ -14,4 +14,4 @@ __all__ = [
     "StripeToolConfig",
     "register_tools",
 ]
-# Note: Stripe credentials are handled separately in aden_tools.credentials.stripe
+

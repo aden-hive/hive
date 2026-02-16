@@ -104,7 +104,7 @@ def register_all_tools(
     register_bigquery(mcp, credentials=credentials)
 
     # Register Stripe tools
-    register_stripe(mcp)  # Note: Stripe tool handles credentials
+    register_stripe(mcp)  # Note: Stripe tool handles credential
 
     # Register file system toolkits
     register_view_file(mcp)

@@ -14,4 +14,4 @@ STRIPE_CREDENTIALS = {
 }
 
 __all__ = ["STRIPE_CREDENTIALS"]
-# Note: Stripe credentials are currently read from environment variables directly by the tool,
+

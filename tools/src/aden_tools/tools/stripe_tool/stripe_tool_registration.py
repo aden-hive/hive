@@ -25,7 +25,7 @@ def register_tools(mcp: FastMCP, credentials=None) -> None:
         # Initialize Stripe tool
         stripe_tool = StripeTool()
 
-        # Register all Stripe methods as FastMCP toolss
+        # Register all Stripe methods as FastMCP tools
         # Customer Management
         mcp.tool(name="stripe_create_customer")(stripe_tool.create_customer)
         mcp.tool(name="stripe_get_customer_by_email")(stripe_tool.get_customer_by_email)
