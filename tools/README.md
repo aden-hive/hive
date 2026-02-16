@@ -84,6 +84,10 @@ python mcp_server.py
 | `calendar_delete_event`| Delete a calendar event                        |
 | `calendar_get_calendar`| Get calendar metadata                          |
 | `calendar_check_availability` | Check free/busy status for attendees    |
+| `cloudwatch_put_metric` | Publish custom metrics to AWS CloudWatch |
+| `cloudwatch_put_log_event` | Send log events to AWS CloudWatch Logs |
+| `cloudwatch_create_alarm` | Create or update CloudWatch Alarms |
+| `cloudwatch_get_metric_stats` | Retrieve metric statistics from CloudWatch |
 
 ## Project Structure
 
@@ -107,7 +111,8 @@ tools/
 │       ├── web_scrape_tool/
 │       ├── pdf_read_tool/
 │       ├── time_tool/
-│       └── calendar_tool/
+│       ├── calendar_tool/
+│       └── cloudwatch_tool/
 ├── tests/                   # Test suite
 ├── mcp_server.py            # MCP server entry point
 ├── README.md

@@ -26,6 +26,7 @@ from .bigquery_tool import register_tools as register_bigquery
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
+from .cloudwatch_tool import register_tools as register_cloudwatch
 
 # Security scanning tools
 from .dns_security_scanner import register_tools as register_dns_security_scanner
@@ -114,6 +115,7 @@ def register_all_tools(
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
+    register_cloudwatch(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -311,6 +313,10 @@ def register_all_tools(
         "maps_place_search",
         "run_bigquery_query",
         "describe_dataset",
+        "cloudwatch_put_metric",
+        "cloudwatch_put_log_event",
+        "cloudwatch_create_alarm",
+        "cloudwatch_get_metric_stats",
         # Security scanning tools
         "ssl_tls_scan",
         "http_headers_scan",
