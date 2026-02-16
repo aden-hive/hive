@@ -53,6 +53,7 @@ To add a new credential:
 """
 
 from .apollo import APOLLO_CREDENTIALS
+from .arxiv import ARXIV_CREDENTIALS
 from .base import CredentialError, CredentialSpec
 from .bigquery import BIGQUERY_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
@@ -87,6 +88,7 @@ CREDENTIAL_SPECS = {
     **EMAIL_CREDENTIALS,
     **GCP_VISION_CREDENTIALS,
     **APOLLO_CREDENTIALS,
+    **ARXIV_CREDENTIALS,
     **GITHUB_CREDENTIALS,
     **GOOGLE_MAPS_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
@@ -126,6 +128,7 @@ __all__ = [
     "SEARCH_CREDENTIALS",
     "EMAIL_CREDENTIALS",
     "GCP_VISION_CREDENTIALS",
+    "ARXIV_CREDENTIALS",
     "GITHUB_CREDENTIALS",
     "GOOGLE_MAPS_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",

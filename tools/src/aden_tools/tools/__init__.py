@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
+from .arxiv_tool import register_tools as register_arxiv
 from .bigquery_tool import register_tools as register_bigquery
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
@@ -91,6 +92,7 @@ def register_all_tools(
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
+    register_arxiv(mcp, credentials=credentials)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -289,6 +291,8 @@ def register_all_tools(
         "slack_find_user_by_email",
         "slack_kick_user_from_channel",
         "slack_delete_file",
+        "arxiv_search_papers",
+        "arxiv_download_paper",
         "slack_get_team_stats",
         "vision_detect_labels",
         "vision_detect_text",
