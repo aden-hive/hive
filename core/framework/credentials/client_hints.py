@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-ClientType = Literal["claude", "codex", "cursor", "generic"]
+ClientType = Literal["claude", "codex", "cursor", "antigravity", "generic"]
 
 _CLIENT_ALIASES = {
     "claude": "claude",
@@ -17,23 +17,18 @@ _CLIENT_ALIASES = {
     "claude-code": "claude",
     "codex": "codex",
     "cursor": "cursor",
+    "antigravity": "antigravity",
+    "antigravity-ide": "antigravity",
+    "gemini": "antigravity",
     "generic": "generic",
 }
 
 
 def detect_client_environment() -> ClientType:
-    """Detect the active coding client, defaulting to generic."""
+    """Detect the active coding client from HIVE_CLIENT, defaulting to generic."""
     override = os.environ.get("HIVE_CLIENT", "").strip().lower()
     if override in _CLIENT_ALIASES:
         return _CLIENT_ALIASES[override]
-
-    # Explicit client env markers take precedence over heuristics.
-    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE"):
-        return "claude"
-    if os.environ.get("CODEX_HOME") or os.environ.get("CODEX_SANDBOX"):
-        return "codex"
-    if os.environ.get("CURSOR_TRACE_ID") or os.environ.get("CURSOR_AGENT"):
-        return "cursor"
 
     return "generic"
 
@@ -48,7 +43,7 @@ def get_credential_fix_guidance_lines() -> list[str]:
         )
     ]
 
-    if client in {"claude", "codex", "cursor"}:
+    if client in {"claude", "codex", "cursor", "antigravity"}:
         lines.append(
             "If your coding client supports Hive skills, run: /hive-credentials."
         )
@@ -57,4 +52,3 @@ def get_credential_fix_guidance_lines() -> list[str]:
         "If you've already set up credentials, restart your terminal or reload your shell profile."
     )
     return lines
-

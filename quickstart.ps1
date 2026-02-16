@@ -775,6 +775,7 @@ $SelectedProviderId = ""
 $SelectedEnvVar     = ""
 $SelectedModel      = ""
 $SelectedMaxTokens  = 8192
+$SelectedClientHint = ""
 
 # Scan for existing API keys in the current environment
 $FoundProviders = @()
@@ -934,6 +935,45 @@ if ($SelectedProviderId) {
     Write-Ok "done"
     Write-Color -Text "  ~/.hive/configuration.json" -Color DarkGray
 }
+Write-Host ""
+
+# Client hint setup: persist HIVE_CLIENT for client-aware runtime guidance
+Write-Color -Text ([char]0x2B22) -Color Yellow -NoNewline
+Write-Host " " -NoNewline
+Write-Color -Text "Client hint setup..." -Color Cyan
+Write-Host ""
+
+$existingClientHint = [System.Environment]::GetEnvironmentVariable("HIVE_CLIENT", "Process")
+if (-not $existingClientHint) {
+    $existingClientHint = [System.Environment]::GetEnvironmentVariable("HIVE_CLIENT", "User")
+}
+
+if ($existingClientHint) {
+    $SelectedClientHint = $existingClientHint.Trim().ToLowerInvariant()
+} else {
+    $clientOptions = @(
+        "Generic terminal / not sure",
+        "Claude Code",
+        "Codex",
+        "Cursor",
+        "Antigravity"
+    )
+    $clientValues = @("generic", "claude", "codex", "cursor", "antigravity")
+    $clientChoice = Prompt-Choice "Select your coding client (used for tailored Hive hints):" $clientOptions
+    $SelectedClientHint = $clientValues[$clientChoice]
+}
+
+switch ($SelectedClientHint) {
+    { $_ -in @("claude", "claude_code", "claude-code") } { $SelectedClientHint = "claude"; break }
+    "codex" { $SelectedClientHint = "codex"; break }
+    "cursor" { $SelectedClientHint = "cursor"; break }
+    { $_ -in @("antigravity", "antigravity-ide", "gemini") } { $SelectedClientHint = "antigravity"; break }
+    default { $SelectedClientHint = "generic"; break }
+}
+
+[System.Environment]::SetEnvironmentVariable("HIVE_CLIENT", $SelectedClientHint, "User")
+$env:HIVE_CLIENT = $SelectedClientHint
+Write-Ok "HIVE_CLIENT=$SelectedClientHint saved as User environment variable"
 Write-Host ""
 
 # ============================================================
@@ -1205,6 +1245,15 @@ if (Test-Path $cursorSkillsDir) {
     Write-Color -Text ".cursor/skills" -Color Cyan
     Write-Host ""
 }
+
+$antigravityConfig = Join-Path (Join-Path (Join-Path $env:USERPROFILE ".gemini") "antigravity") "mcp_config.json"
+if ($SelectedClientHint -eq "antigravity" -or (Test-Path $antigravityConfig)) {
+    Write-Color -Text "Antigravity:" -Color White
+    Write-Host "  Run: " -NoNewline
+    Write-Color -Text ".\scripts\setup-antigravity-mcp.sh" -Color Cyan
+    Write-Host "  Then restart Antigravity IDE."
+    Write-Host ""
+}
 Write-Color -Text "Run an Agent:" -Color White
 Write-Host ""
 Write-Host "  Launch the interactive dashboard to browse and run agents:"
@@ -1225,7 +1274,7 @@ Write-Host "After restarting, test with:" -ForegroundColor Cyan
 Write-Color -Text "  .\hive.ps1 tui" -Color Cyan
 Write-Host ""
 
-if ($SelectedProviderId -or $credKey) {
+if ($SelectedProviderId -or $credKey -or $SelectedClientHint) {
     Write-Color -Text "Note:" -Color White
     Write-Host "- uv has been added to your User PATH"
     if ($SelectedProviderId) {
@@ -1233,6 +1282,9 @@ if ($SelectedProviderId -or $credKey) {
     }
     if ($credKey) {
         Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
+    }
+    if ($SelectedClientHint) {
+        Write-Host "- HIVE_CLIENT=$SelectedClientHint is set for client-aware hints"
     }
     Write-Host "- All variables will persist across reboots"
     Write-Host ""

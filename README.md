@@ -107,7 +107,27 @@ This sets up:
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
 - **LLM provider** - Interactive default model configuration
+- **client hint** - `HIVE_CLIENT` is configured for client-aware guidance
 - All required Python dependencies with `uv`
+
+### Client Hint (`HIVE_CLIENT`)
+
+Hive uses `HIVE_CLIENT` to tailor optional, client-specific hints (for example, when suggesting `/hive-credentials`).
+
+- Canonical values: `generic`, `claude`, `codex`, `cursor`, `antigravity`
+- Default behavior when unset: `generic`
+- `quickstart.sh` and `quickstart.ps1` now prompt for this value and persist it automatically
+
+Manual override examples:
+
+```bash
+export HIVE_CLIENT=codex
+```
+
+```powershell
+$env:HIVE_CLIENT = "cursor"
+[System.Environment]::SetEnvironmentVariable("HIVE_CLIENT", "cursor", "User")
+```
 
 ### Build Your First Agent
 
