@@ -1041,7 +1041,7 @@ class AgentRunner:
                 api_key = get_claude_code_token()
                 if not api_key:
                     print("Warning: Claude Code subscription configured but no token found.")
-                    print("Run 'claude' to authenticate, then try again.")
+                    print("Authenticate your Claude Code subscription in your coding client, or disable use_claude_code_subscription in ~/.hive/configuration.json.")
             elif use_codex:
                 # Get OAuth token from Codex subscription
                 api_key = get_codex_token()
@@ -1971,3 +1971,4 @@ Respond with JSON only:
     def __del__(self) -> None:
         """Destructor - cleanup temp dir."""
         self.cleanup()
+
