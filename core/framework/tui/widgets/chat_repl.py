@@ -33,7 +33,7 @@ from framework.tui.widgets.selectable_rich_log import SelectableRichLog as RichL
 
 
 class ChatTextArea(TextArea):
-    """TextArea that submits on Enter and inserts newlines on Shift+Enter."""
+    """TextArea that submits on Enter and inserts newlines on Shift+Enter (or Ctrl+J)."""
 
     class Submitted(Message):
         """Posted when the user presses Enter."""
@@ -50,7 +50,7 @@ class ChatTextArea(TextArea):
                 self.post_message(self.Submitted(text))
             event.stop()
             event.prevent_default()
-        elif event.key == "shift+enter":
+        elif event.key in ("shift+enter", "ctrl+j"):
             event.key = "enter"
             await super()._on_key(event)
         else:
