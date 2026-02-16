@@ -15,6 +15,7 @@ dependencies = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "pytest-xdist>=3.0",
+  "psutil>=5.9.0",
   "tools",
 ]
 

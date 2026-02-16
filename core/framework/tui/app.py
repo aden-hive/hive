@@ -14,6 +14,7 @@ from framework.tui.widgets.chat_repl import ChatRepl
 from framework.tui.widgets.graph_view import GraphOverview
 from framework.tui.widgets.log_pane import LogPane
 from framework.tui.widgets.selectable_rich_log import SelectableRichLog
+from framework.tui.widgets.performance import PerformanceWidget
 
 
 class StatusBar(Container):
@@ -150,7 +151,7 @@ class AdenTUI(App):
     }
 
     LogPane {
-        height: 60%;
+        height: 50%;
         background: $surface;
         padding: 0;
         margin-bottom: 1;
@@ -218,6 +219,7 @@ class AdenTUI(App):
         self.runtime = runtime
         self.log_pane = LogPane()
         self.graph_view = GraphOverview(runtime)
+        self.performance_widget = PerformanceWidget()
         self.chat_repl = ChatRepl(runtime)
         self.status_bar = StatusBar(graph_id=runtime.graph.id)
         self.is_ready = False
@@ -249,6 +251,7 @@ class AdenTUI(App):
             Vertical(
                 self.log_pane,
                 self.graph_view,
+                self.performance_widget,
                 id="left-pane",
             ),
             self.chat_repl,

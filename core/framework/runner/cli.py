@@ -1002,8 +1002,14 @@ def cmd_tui(args: argparse.Namespace) -> int:
 
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
-    exports_dir = Path("exports")
-    examples_dir = Path("examples/templates")
+    # Try to find exports and examples in CWD or parent directory (if running from core/)
+    cwd_exports = Path("exports")
+    parent_exports = Path("../exports")
+    exports_dir = parent_exports if parent_exports.exists() and not cwd_exports.exists() else cwd_exports
+
+    cwd_examples = Path("examples/templates")
+    parent_examples = Path("../examples/templates")
+    examples_dir = parent_examples if parent_examples.exists() and not cwd_examples.exists() else cwd_examples
 
     has_exports = _has_agents(exports_dir)
     has_examples = _has_agents(examples_dir)
