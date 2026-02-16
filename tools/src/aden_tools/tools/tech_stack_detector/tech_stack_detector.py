@@ -164,8 +164,8 @@ def register_tools(mcp: FastMCP) -> None:
                 # Detect CMS from HTML meta tags
                 cms = _detect_cms_from_html(html)
 
-                # Analyze cookies
-                cookies = _analyze_cookies(response.cookies)
+                # Analyze cookies from raw Set-Cookie headers
+                cookies = _analyze_cookies(response.headers)
 
                 # If we detected language from cookies, update
                 for cookie_name in response.cookies:
@@ -385,19 +385,28 @@ def _detect_cms_from_html(html: str) -> str | None:
     return None
 
 
-def _analyze_cookies(cookies: httpx.Cookies) -> list[dict]:
-    """Analyze cookies for security flags."""
+def _analyze_cookies(headers: httpx.Headers) -> list[dict]:
+    """Analyze cookies for security flags by parsing raw Set-Cookie headers."""
     result = []
-    for name in cookies:
-        cookie = cookies.jar._cookies  # noqa: SLF001 — accessing internal for flag details
-        # httpx doesn't expose flags directly, so we capture what we can
+    for raw in headers.get_list("set-cookie"):
+        name = raw.split("=", 1)[0].strip()
+        parts = [p.strip().lower() for p in raw.split(";")]
         result.append({
             "name": name,
-            "secure": False,  # httpx doesn't expose these directly on the cookie jar
-            "httponly": False,
-            "samesite": None,
+            "secure": "secure" in parts,
+            "httponly": "httponly" in parts,
+            "samesite": _extract_samesite(raw.lower()),
         })
     return result
+
+
+def _extract_samesite(raw_lower: str) -> str | None:
+    """Extract SameSite value from a lowercased Set-Cookie string."""
+    for part in raw_lower.split(";"):
+        part = part.strip()
+        if part.startswith("samesite="):
+            return part.split("=", 1)[1].strip().capitalize()
+    return None
 
 
 def _has_version(value: str) -> bool:

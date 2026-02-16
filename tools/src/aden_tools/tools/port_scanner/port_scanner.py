@@ -205,19 +205,15 @@ def register_tools(mcp: FastMCP) -> None:
 async def _check_port(ip: str, port: int, timeout: float) -> dict:
     """Check if a single port is open and try to grab a banner."""
     try:
-        _, writer = await asyncio.wait_for(
+        reader, writer = await asyncio.wait_for(
             asyncio.open_connection(ip, port),
             timeout=timeout,
         )
-        # Try banner grab
+        # Try banner grab from the same connection
         banner = ""
         try:
-            reader_future = asyncio.open_connection(ip, port)
-            reader, banner_writer = await asyncio.wait_for(reader_future, timeout=timeout)
             data = await asyncio.wait_for(reader.read(256), timeout=2.0)
             banner = data.decode("utf-8", errors="ignore").strip()
-            banner_writer.close()
-            await banner_writer.wait_closed()
         except Exception:
             pass
 
