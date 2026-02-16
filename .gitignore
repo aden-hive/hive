@@ -75,3 +75,5 @@ exports/*
 docs/github-issues/*
 core/tests/*dumps/*
 screenshots/*
+demo_output.txt
+demo_mock.py
