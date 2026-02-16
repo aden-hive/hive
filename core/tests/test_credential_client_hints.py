@@ -34,6 +34,19 @@ def test_detect_client_environment_honors_override(monkeypatch):
     assert detect_client_environment() == "codex"
 
 
+def test_detect_client_environment_supports_antigravity_alias(monkeypatch):
+    _clear_client_env(monkeypatch)
+    monkeypatch.setenv("HIVE_CLIENT", "gemini")
+    assert detect_client_environment() == "antigravity"
+
+
+def test_detect_client_environment_ignores_undocumented_heuristics(monkeypatch):
+    _clear_client_env(monkeypatch)
+    monkeypatch.setenv("CODEX_HOME", "1")
+    monkeypatch.setenv("CURSOR_TRACE_ID", "trace")
+    assert detect_client_environment() == "generic"
+
+
 def test_guidance_is_generic_when_client_unknown(monkeypatch):
     _clear_client_env(monkeypatch)
 
@@ -66,4 +79,3 @@ def test_build_missing_credentials_error_can_include_skill_hint(monkeypatch):
 
     message = build_missing_credentials_error(["  ANTHROPIC_API_KEY for llm_generate nodes"])
     assert "/hive-credentials" in message
-

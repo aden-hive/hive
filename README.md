@@ -110,6 +110,24 @@ This sets up:
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
+### Client Hint (`HIVE_CLIENT`)
+
+Hive uses `HIVE_CLIENT` to tailor optional, client-specific hints (for example, when suggesting `/hive-credentials`).
+
+- Canonical values: `generic`, `claude`, `codex`, `cursor`, `antigravity`
+- Default behavior when unset: `generic`
+- `quickstart.sh` and `quickstart.ps1` now prompt for this value and persist it automatically
+
+Manual override examples:
+
+```bash
+export HIVE_CLIENT=codex
+```
+
+```powershell
+$env:HIVE_CLIENT = "cursor"
+[System.Environment]::SetEnvironmentVariable("HIVE_CLIENT", "cursor", "User")
+```
 
 - At last, it will initiate the open hive interface in your browser
 
@@ -425,3 +443,4 @@ Contributions are welcome! Fork the repository, create your feature branch, impl
 <p align="center">
   Made with 🔥 Passion in San Francisco
 </p>
+

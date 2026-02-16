@@ -576,6 +576,39 @@ detect_shell_rc() {
 SHELL_RC_FILE=$(detect_shell_rc)
 SHELL_NAME=$(basename "$SHELL")
 
+# Persist or update an export in the detected shell profile.
+upsert_shell_export() {
+    local key="$1"
+    local value="$2"
+    local line="export ${key}=\"${value}\""
+    local tmp_file
+
+    tmp_file="$(mktemp)"
+    if [ -f "$SHELL_RC_FILE" ]; then
+        awk -v key="$key" -v line="$line" '
+            BEGIN { replaced=0 }
+            $0 ~ "^export " key "=" {
+                if (!replaced) {
+                    print line
+                    replaced=1
+                }
+                next
+            }
+            { print }
+            END {
+                if (!replaced) {
+                    print ""
+                    print "# Hive client hint"
+                    print line
+                }
+            }
+        ' "$SHELL_RC_FILE" > "$tmp_file"
+        mv "$tmp_file" "$SHELL_RC_FILE"
+    else
+        printf "%s\n" "$line" > "$SHELL_RC_FILE"
+    fi
+}
+
 # Prompt the user to choose a model for their selected provider.
 # Sets SELECTED_MODEL and SELECTED_MAX_TOKENS.
 prompt_model_selection() {
@@ -1010,6 +1043,52 @@ fi
 
 echo ""
 
+# Configure HIVE_CLIENT for client-aware guidance in runtime messages.
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Client hint setup...${NC}"
+echo ""
+
+SELECTED_CLIENT_HINT="${HIVE_CLIENT:-}"
+if [ -z "$SELECTED_CLIENT_HINT" ]; then
+    prompt_choice "Select your coding client (used for tailored Hive hints):" \
+        "Generic terminal / not sure" \
+        "Claude Code" \
+        "Codex" \
+        "Cursor" \
+        "Antigravity"
+
+    case "$PROMPT_CHOICE" in
+        0) SELECTED_CLIENT_HINT="generic" ;;
+        1) SELECTED_CLIENT_HINT="claude" ;;
+        2) SELECTED_CLIENT_HINT="codex" ;;
+        3) SELECTED_CLIENT_HINT="cursor" ;;
+        4) SELECTED_CLIENT_HINT="antigravity" ;;
+    esac
+fi
+
+NORMALIZED_CLIENT_HINT="$(printf "%s" "$SELECTED_CLIENT_HINT" | tr '[:upper:]' '[:lower:]')"
+case "$NORMALIZED_CLIENT_HINT" in
+    claude|claude_code|claude-code)
+        SELECTED_CLIENT_HINT="claude"
+        ;;
+    codex)
+        SELECTED_CLIENT_HINT="codex"
+        ;;
+    cursor)
+        SELECTED_CLIENT_HINT="cursor"
+        ;;
+    antigravity|antigravity-ide|gemini)
+        SELECTED_CLIENT_HINT="antigravity"
+        ;;
+    *)
+        SELECTED_CLIENT_HINT="generic"
+        ;;
+esac
+
+upsert_shell_export "HIVE_CLIENT" "$SELECTED_CLIENT_HINT"
+export HIVE_CLIENT="$SELECTED_CLIENT_HINT"
+echo -e "${GREEN}  ✓ Saved HIVE_CLIENT=${SELECTED_CLIENT_HINT} to ${SHELL_RC_FILE}${NC}"
+echo ""
+
 # ============================================================
 # Step 6: Verify Setup
 # ============================================================
@@ -1241,6 +1320,11 @@ echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
 echo ""
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
+if [ "$SELECTED_CLIENT_HINT" = "antigravity" ] || [ -f "$HOME/.gemini/antigravity/mcp_config.json" ]; then
+    echo -e "${BOLD}Antigravity:${NC}"
+    echo -e "  Run ${CYAN}./scripts/setup-antigravity-mcp.sh${NC} to configure MCP, then restart Antigravity IDE."
+    echo ""
+fi
 
 echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
@@ -1248,5 +1332,12 @@ echo -e "  Launch the interactive dashboard to browse and run agents:"
 echo -e "  You can start an example agent or an agent built by yourself:"
 echo -e "     ${CYAN}hive tui${NC}"
 echo ""
+# Show shell sourcing reminder if we added environment variables
+if [ -n "$SELECTED_PROVIDER_ID" ] || [ -n "$HIVE_CREDENTIAL_KEY" ] || [ -n "$SELECTED_CLIENT_HINT" ]; then
+    echo -e "${BOLD}Note:${NC} To use the new environment variables in this shell, run:"
+    echo -e "  ${CYAN}source $SHELL_RC_FILE${NC}"
+    echo ""
+fi
+
 echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
 echo ""
