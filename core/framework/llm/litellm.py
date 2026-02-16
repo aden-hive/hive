@@ -528,6 +528,267 @@ class LiteLLMProvider(LLMProvider):
             raw_response=None,
         )
 
+    # ------------------------------------------------------------------
+    # Async variants — non-blocking on the event loop
+    # ------------------------------------------------------------------
+
+    async def _acompletion_with_rate_limit_retry(
+        self, max_retries: int | None = None, **kwargs: Any
+    ) -> Any:
+        """Async version of _completion_with_rate_limit_retry.
+
+        Uses litellm.acompletion and asyncio.sleep instead of blocking calls.
+        """
+        model = kwargs.get("model", self.model)
+        retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
+        for attempt in range(retries + 1):
+            try:
+                response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
+
+                content = response.choices[0].message.content if response.choices else None
+                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                if not content and not has_tool_calls:
+                    messages = kwargs.get("messages", [])
+                    last_role = next(
+                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
+                        None,
+                    )
+                    if last_role == "assistant":
+                        logger.debug(
+                            "[async-retry] Empty response after assistant message — "
+                            "expected, not retrying."
+                        )
+                        return response
+
+                    finish_reason = (
+                        response.choices[0].finish_reason if response.choices else "unknown"
+                    )
+                    token_count, token_method = _estimate_tokens(model, messages)
+                    dump_path = _dump_failed_request(
+                        model=model,
+                        kwargs=kwargs,
+                        error_type="empty_response",
+                        attempt=attempt,
+                    )
+                    logger.warning(
+                        f"[async-retry] Empty response - {len(messages)} messages, "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+
+                    if attempt == retries:
+                        logger.error(
+                            f"[async-retry] GAVE UP on {model} after {retries + 1} "
+                            f"attempts — empty response "
+                            f"(finish_reason={finish_reason}, "
+                            f"choices={len(response.choices) if response.choices else 0})"
+                        )
+                        return response
+                    wait = _compute_retry_delay(attempt)
+                    logger.warning(
+                        f"[async-retry] {model} returned empty response "
+                        f"(finish_reason={finish_reason}, "
+                        f"choices={len(response.choices) if response.choices else 0}) — "
+                        f"likely rate limited or quota exceeded. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{retries})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                return response
+            except RateLimitError as e:
+                messages = kwargs.get("messages", [])
+                token_count, token_method = _estimate_tokens(model, messages)
+                dump_path = _dump_failed_request(
+                    model=model,
+                    kwargs=kwargs,
+                    error_type="rate_limit",
+                    attempt=attempt,
+                )
+                if attempt == retries:
+                    logger.error(
+                        f"[async-retry] GAVE UP on {model} after {retries + 1} "
+                        f"attempts — rate limit error: {e!s}. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+                    raise
+                wait = _compute_retry_delay(attempt, exception=e)
+                logger.warning(
+                    f"[async-retry] {model} rate limited (429): {e!s}. "
+                    f"~{token_count} tokens ({token_method}). "
+                    f"Full request dumped to: {dump_path}. "
+                    f"Retrying in {wait}s "
+                    f"(attempt {attempt + 1}/{retries})"
+                )
+                await asyncio.sleep(wait)
+        raise RuntimeError("Exhausted rate limit retries")
+
+    async def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
+    ) -> LLMResponse:
+        """Async version of complete(). Uses litellm.acompletion — non-blocking."""
+        full_messages: list[dict[str, Any]] = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        if json_mode:
+            json_instruction = "\n\nPlease respond with a valid JSON object."
+            if full_messages and full_messages[0]["role"] == "system":
+                full_messages[0]["content"] += json_instruction
+            else:
+                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": full_messages,
+            "max_tokens": max_tokens,
+            **self.extra_kwargs,
+        }
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if tools:
+            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
+
+        content = response.choices[0].message.content or ""
+        usage = response.usage
+        input_tokens = usage.prompt_tokens if usage else 0
+        output_tokens = usage.completion_tokens if usage else 0
+
+        return LLMResponse(
+            content=content,
+            model=response.model or self.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=response.choices[0].finish_reason or "",
+            raw_response=response,
+        )
+
+    async def acomplete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[Tool],
+        tool_executor: Callable[[ToolUse], ToolResult],
+        max_iterations: int = 10,
+        max_tokens: int = 4096,
+    ) -> LLMResponse:
+        """Async version of complete_with_tools(). Uses litellm.acompletion — non-blocking."""
+        current_messages: list[dict[str, Any]] = []
+        if system:
+            current_messages.append({"role": "system", "content": system})
+        current_messages.extend(messages)
+
+        total_input_tokens = 0
+        total_output_tokens = 0
+        openai_tools = [self._tool_to_openai_format(t) for t in tools]
+
+        for _ in range(max_iterations):
+            kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": current_messages,
+                "max_tokens": max_tokens,
+                "tools": openai_tools,
+                **self.extra_kwargs,
+            }
+
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+            if self.api_base:
+                kwargs["api_base"] = self.api_base
+
+            response = await self._acompletion_with_rate_limit_retry(**kwargs)
+
+            usage = response.usage
+            if usage:
+                total_input_tokens += usage.prompt_tokens
+                total_output_tokens += usage.completion_tokens
+
+            choice = response.choices[0]
+            message = choice.message
+
+            if choice.finish_reason == "stop" or not message.tool_calls:
+                return LLMResponse(
+                    content=message.content or "",
+                    model=response.model or self.model,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    stop_reason=choice.finish_reason or "stop",
+                    raw_response=response,
+                )
+
+            current_messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ],
+                }
+            )
+
+            for tool_call in message.tool_calls:
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    current_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": "Invalid JSON arguments provided to tool.",
+                        }
+                    )
+                    continue
+
+                tool_use = ToolUse(
+                    id=tool_call.id,
+                    name=tool_call.function.name,
+                    input=args,
+                )
+
+                result = tool_executor(tool_use)
+
+                current_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": result.tool_use_id,
+                        "content": result.content,
+                    }
+                )
+
+        return LLMResponse(
+            content="Max tool iterations reached",
+            model=self.model,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            stop_reason="max_iterations",
+            raw_response=None,
+        )
+
     def _tool_to_openai_format(self, tool: Tool) -> dict[str, Any]:
         """Convert Tool to OpenAI function calling format."""
         return {

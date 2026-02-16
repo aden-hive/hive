@@ -26,6 +26,7 @@ class DummyLLMProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, object] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         return LLMResponse(content=json.dumps({"result": "ok"}), model="dummy")
 

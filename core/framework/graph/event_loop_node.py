@@ -2093,7 +2093,7 @@ class EventLoopNode(NodeProtocol):
         # internal thinking. 500 leaves nothing for the actual summary.
         summary_budget = max(1024, self._config.max_history_tokens // 10)
         try:
-            response = ctx.llm.complete(
+            response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system=(
                     "Summarize conversations concisely. Always preserve the tool history section."
