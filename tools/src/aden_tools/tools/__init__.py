@@ -60,6 +60,7 @@ from .razorpay_tool import register_tools as register_razorpay
 from .risk_scorer import register_tools as register_risk_scorer
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
+from .shortcut_tool import register_tools as register_shortcut
 from .slack_tool import register_tools as register_slack
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
 from .subdomain_enumerator import register_tools as register_subdomain_enumerator
@@ -108,6 +109,7 @@ def register_all_tools(
     register_serpapi(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
+    register_shortcut(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
     register_razorpay(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
@@ -244,6 +246,8 @@ def register_all_tools(
         "calendar_list_calendars",
         "calendar_get_calendar",
         "calendar_check_availability",
+        "create_shortcut_story",
+        "search_shortcut_stories",
         "slack_send_message",
         "slack_list_channels",
         "slack_get_channel_history",

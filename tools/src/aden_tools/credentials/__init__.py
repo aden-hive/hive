@@ -75,6 +75,7 @@ from .shell_config import (
     get_shell_config_path,
     get_shell_source_command,
 )
+from .shortcut import SHORTCUT_CREDENTIALS
 from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
 from .telegram import TELEGRAM_CREDENTIALS
@@ -97,6 +98,7 @@ CREDENTIAL_SPECS = {
     **TELEGRAM_CREDENTIALS,
     **BIGQUERY_CREDENTIALS,
     **CALCOM_CREDENTIALS,
+    **SHORTCUT_CREDENTIALS,
 }
 
 __all__ = [
@@ -137,4 +139,5 @@ __all__ = [
     "TELEGRAM_CREDENTIALS",
     "BIGQUERY_CREDENTIALS",
     "CALCOM_CREDENTIALS",
+    "SHORTCUT_CREDENTIALS",
 ]
