@@ -1,6 +1,6 @@
 import os
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from ..security import get_secure_path
 
@@ -9,7 +9,7 @@ def register_tools(mcp: FastMCP) -> None:
     """Register file view tools with the MCP server."""
     if getattr(mcp, "_file_tools_registered", False):
         return
-    mcp._file_tools_registered = True
+    mcp._file_tools_registered = True  # type: ignore[attr-defined]
 
     @mcp.tool()
     def view_file(

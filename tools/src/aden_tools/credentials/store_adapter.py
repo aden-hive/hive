@@ -26,7 +26,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .base import CredentialError, CredentialSpec
 
@@ -104,7 +104,7 @@ class CredentialStoreAdapter:
         if name not in self._specs:
             raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
 
-        return self._store.get(name)
+        return cast(str | None, self._store.get(name))
 
     def get_spec(self, name: str) -> CredentialSpec:
         """Get the spec for a credential."""
@@ -232,7 +232,7 @@ class CredentialStoreAdapter:
         Returns:
             The key value or None
         """
-        return self._store.get_key(credential_id, key_name)
+        return cast(str | None, self._store.get_key(credential_id, key_name))
 
     def resolve(self, template: str) -> str:
         """
@@ -248,7 +248,7 @@ class CredentialStoreAdapter:
             >>> credentials.resolve("Bearer {{github.access_token}}")
             "Bearer ghp_xxxxxxxxxxxx"
         """
-        return self._store.resolve(template)
+        return cast(str, self._store.resolve(template))
 
     def resolve_headers(self, headers: dict[str, str]) -> dict[str, str]:
         """
@@ -266,11 +266,11 @@ class CredentialStoreAdapter:
             ... })
             {"Authorization": "Bearer ghp_xxx"}
         """
-        return self._store.resolve_headers(headers)
+        return cast(dict[str, str], self._store.resolve_headers(headers))
 
     def resolve_params(self, params: dict[str, str]) -> dict[str, str]:
         """Resolve credential templates in query parameters."""
-        return self._store.resolve_params(params)
+        return cast(dict[str, str], self._store.resolve_params(params))
 
     @property
     def store(self) -> CredentialStore:

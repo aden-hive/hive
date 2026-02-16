@@ -126,7 +126,7 @@ def register_tools(mcp: FastMCP) -> None:
             description = ""
             meta_desc = soup.find("meta", attrs={"name": "description"})
             if meta_desc:
-                description = meta_desc.get("content", "")
+                description = str(meta_desc.get("content", ""))
 
             # Target content
             if selector:
@@ -165,7 +165,7 @@ def register_tools(mcp: FastMCP) -> None:
                 links: list[dict[str, str]] = []
                 base_url = str(response.url)  # Use final URL after redirects
                 for a in soup.find_all("a", href=True)[:50]:
-                    href = a["href"]
+                    href = str(a["href"])
                     # Convert relative URLs to absolute URLs
                     absolute_href = urljoin(base_url, href)
                     link_text = a.get_text(strip=True)

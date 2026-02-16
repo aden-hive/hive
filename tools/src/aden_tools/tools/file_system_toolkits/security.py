@@ -4,7 +4,12 @@ import os
 WORKSPACES_DIR = os.path.expanduser("~/.hive/workdir/workspaces")
 
 
-def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str) -> str:
+def get_secure_path(
+    path: str,
+    workspace_id: str | None,
+    agent_id: str | None,
+    session_id: str | None,
+) -> str:
     """Resolve and verify a path within a 3-layer sandbox (workspace/agent/session)."""
     if not workspace_id or not agent_id or not session_id:
         raise ValueError("workspace_id, agent_id, and session_id are all required")

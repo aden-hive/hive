@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 
 import httpx
+from typing import cast
 from fastmcp import FastMCP
 
 # Patterns to detect JS frameworks/libraries in HTML source
@@ -282,7 +283,7 @@ def _detect_framework_from_headers(headers: httpx.Headers) -> str | None:
     """Detect framework from HTTP headers."""
     powered_by = headers.get("x-powered-by")
     if powered_by:
-        return powered_by
+        return cast("str | None", powered_by)
     return None
 
 

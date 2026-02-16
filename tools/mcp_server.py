@@ -59,7 +59,7 @@ if "--stdio" in sys.argv:
         kwargs["file"] = sys.stderr  # Force all rich output to stderr
         _original_console_init(self, *args, **kwargs)
 
-    rich.console.Console.__init__ = _patched_console_init
+    rich.console.Console.__init__ = _patched_console_init  # type: ignore[method-assign]
 
 from fastmcp import FastMCP  # noqa: E402
 from starlette.requests import Request  # noqa: E402

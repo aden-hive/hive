@@ -19,7 +19,7 @@ TELEGRAM_CREDENTIALS = {
         description="Telegram Bot Token from @BotFather",
         # Auth method support
         aden_supported=False,
-        aden_provider_name=None,
+        aden_provider_name="",
         direct_api_key_supported=True,
         api_key_instructions="""To get a Telegram Bot Token:
 1. Open Telegram and search for @BotFather

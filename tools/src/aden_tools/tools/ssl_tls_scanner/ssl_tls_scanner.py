@@ -12,6 +12,7 @@ import hashlib
 import socket
 import ssl
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from fastmcp import FastMCP
 
@@ -107,11 +108,14 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Connection failed: {e}"}
 
         # Parse certificate details
-        subject = _format_dn(cert_dict.get("subject", ()))
-        issuer = _format_dn(cert_dict.get("issuer", ()))
+        subject = ""
+        issuer = ""
+        if cert_dict:
+            subject = _format_dn(cast(tuple, cert_dict.get("subject", ())))
+            issuer = _format_dn(cast(tuple, cert_dict.get("issuer", ())))
 
-        not_before_str = cert_dict.get("notBefore", "")
-        not_after_str = cert_dict.get("notAfter", "")
+        not_before_str = cert_dict.get("notBefore", "") if cert_dict else ""
+        not_after_str = cert_dict.get("notAfter", "") if cert_dict else ""
 
         not_before = _parse_cert_date(not_before_str)
         not_after = _parse_cert_date(not_after_str)
@@ -121,9 +125,10 @@ def register_tools(mcp: FastMCP) -> None:
 
         # SAN (Subject Alternative Names)
         san_list = []
-        for san_type, san_value in cert_dict.get("subjectAltName", ()):
-            if san_type == "DNS":
-                san_list.append(san_value)
+        if cert_dict:
+            for san_type, san_value in cast(list[tuple[str, str]], cert_dict.get("subjectAltName", ())):
+                if san_type == "DNS":
+                    san_list.append(san_value)
 
         # Self-signed check
         self_signed = subject == issuer

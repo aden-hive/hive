@@ -55,7 +55,7 @@ def register_tools(mcp: FastMCP) -> None:
                 columns = list(reader.fieldnames)
 
                 # Apply offset and limit
-                rows = []
+                rows: list[dict] = []
                 for i, row in enumerate(reader):
                     if i < offset:
                         continue
@@ -65,8 +65,8 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Get total row count (re-read for accurate count)
             with open(secure_path, encoding="utf-8", newline="") as f:
-                reader = csv.reader(f)
-                total_rows = sum(1 for row in reader if any(row)) - 1
+                count_reader = csv.reader(f)
+                total_rows = sum(1 for row in count_reader if any(row)) - 1
 
             return {
                 "success": True,
@@ -194,8 +194,8 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Get new total row count
             with open(secure_path, encoding="utf-8", newline="") as f:
-                reader = csv.reader(f)
-                total_rows = sum(1 for row in reader if any(row)) - 1  # Subtract header
+                count_reader = csv.reader(f)
+                total_rows = sum(1 for row in count_reader if any(row)) - 1  # Subtract header
 
             return {
                 "success": True,
@@ -309,7 +309,7 @@ def register_tools(mcp: FastMCP) -> None:
             query="SELECT * FROM data WHERE LOWER(name) LIKE '%phone%'"
         """
         try:
-            import duckdb
+            import duckdb  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (

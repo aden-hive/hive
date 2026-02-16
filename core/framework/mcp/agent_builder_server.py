@@ -13,7 +13,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, cast
 
 # Project root resolution.  This file lives at core/framework/mcp/agent_builder_server.py,
 # so the project root (where exports/ lives) is four parents up.
@@ -25,7 +25,7 @@ if _exports_dir.is_dir() and str(_exports_dir) not in sys.path:
     sys.path.insert(0, str(_exports_dir))
 del _exports_dir
 
-from mcp.server import FastMCP  # noqa: E402
+from fastmcp import FastMCP  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
 from framework.graph import (  # noqa: E402
@@ -483,7 +483,7 @@ def _validate_tool_credentials(tools_list: list[str]) -> dict | None:
         return None
 
     try:
-        from aden_tools.credentials import CREDENTIAL_SPECS
+        from aden_tools.credentials import CREDENTIAL_SPECS  # type: ignore[import-untyped]
 
         store = _get_credential_store()
 
@@ -1057,16 +1057,22 @@ def delete_edge(
 def validate_graph() -> str:
     """Validate the graph. Checks for unreachable nodes and context flow."""
     session = get_session()
+    result = _validate_graph_internal(session)
+    return json.dumps(result)
+
+
+def _validate_graph_internal(session: BuildSession) -> dict[str, Any]:
+    """Internal implementation of graph validation."""
     errors = []
     warnings = []
 
     if not session.goal:
         errors.append("No goal defined")
-        return json.dumps({"valid": False, "errors": errors})
+        return {"valid": False, "errors": errors}
 
     if not session.nodes:
         errors.append("No nodes defined")
-        return json.dumps({"valid": False, "errors": errors})
+        return {"valid": False, "errors": errors}
 
     # === DETECT PAUSE/RESUME ARCHITECTURE ===
     # Identify pause nodes (nodes marked as PAUSE in description)
@@ -1249,7 +1255,9 @@ def validate_graph() -> str:
 
     # Generate helpful error messages
     for node_id, missing in missing_inputs.items():
-        node = nodes_by_id.get(node_id)
+        node_obj = nodes_by_id.get(node_id)
+        if not node_obj:
+            continue
         deps = dependencies.get(node_id, [])
 
         # Check if this is a resume entry point
@@ -1417,28 +1425,26 @@ def validate_graph() -> str:
     client_facing_nodes = [n.id for n in session.nodes if n.client_facing]
     feedback_edges = [e.id for e in session.edges if e.priority < 0]
 
-    return json.dumps(
-        {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings,
-            "entry_node": entry_candidates[0] if entry_candidates else None,
-            "terminal_nodes": terminal_candidates,
-            "node_count": len(session.nodes),
-            "edge_count": len(session.edges),
-            "pause_resume_detected": is_pause_resume_agent,
-            "pause_nodes": pause_nodes,
-            "resume_entry_points": resume_entry_points,
-            "all_entry_points": entry_candidates,
-            "context_flow": {node_id: list(keys) for node_id, keys in available_context.items()}
-            if available_context
-            else None,
-            "event_loop_nodes": event_loop_nodes,
-            "client_facing_nodes": client_facing_nodes,
-            "feedback_edges": feedback_edges,
-            "deprecated_node_types": deprecated_nodes,
-        }
-    )
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "entry_node": entry_candidates[0] if entry_candidates else None,
+        "terminal_nodes": terminal_candidates,
+        "node_count": len(session.nodes),
+        "edge_count": len(session.edges),
+        "pause_resume_detected": is_pause_resume_agent,
+        "pause_nodes": pause_nodes,
+        "resume_entry_points": resume_entry_points,
+        "all_entry_points": entry_candidates,
+        "context_flow": {node_id: list(keys) for node_id, keys in available_context.items()}
+        if available_context
+        else None,
+        "event_loop_nodes": event_loop_nodes,
+        "client_facing_nodes": client_facing_nodes,
+        "feedback_edges": feedback_edges,
+        "deprecated_node_types": deprecated_nodes,
+    }
 
 
 def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -> str:
@@ -1446,6 +1452,10 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
     goal = session.goal
     nodes = session.nodes
     edges = session.edges
+
+    assert goal is not None
+    assert nodes is not None
+    assert edges is not None
 
     # Build execution flow diagram
     flow_parts = []
@@ -1659,7 +1669,7 @@ def export_graph() -> str:
     session = get_session()
 
     # Validate first
-    validation = json.loads(validate_graph())
+    validation = _validate_graph_internal(session)
     if not validation["valid"]:
         return json.dumps({"success": False, "errors": validation["errors"]})
 
@@ -1752,7 +1762,7 @@ def export_graph() -> str:
     # Build GraphSpec
     graph_spec = {
         "id": f"{session.name}-graph",
-        "goal_id": session.goal.id,
+        "goal_id": session.goal.id if session.goal else "",
         "version": "1.0.0",
         "entry_node": entry_node,
         "entry_points": entry_points,
@@ -1762,7 +1772,7 @@ def export_graph() -> str:
         "edges": edges_list,
         "max_steps": 100,
         "max_retries_per_node": 3,
-        "description": session.goal.description,
+        "description": session.goal.description if session.goal else "",
         "created_at": datetime.now().isoformat(),
     }
 
@@ -1776,15 +1786,15 @@ def export_graph() -> str:
         all_tools.update(node.tools)
 
     # Build export data
-    export_data = {
+    export_data: dict[str, Any] = {
         "agent": {
             "id": session.name,
-            "name": session.goal.name,
+            "name": session.goal.name if session.goal else "unnamed",
             "version": "1.0.0",
-            "description": session.goal.description,
+            "description": session.goal.description if session.goal else "",
         },
         "graph": graph_spec,
-        "goal": session.goal.model_dump(),
+        "goal": session.goal.model_dump() if session.goal else {},
         "required_tools": list(all_tools),
         "metadata": {
             "created_at": datetime.now().isoformat(),
@@ -1794,7 +1804,7 @@ def export_graph() -> str:
     }
 
     # Add enrichment if present in goal
-    if hasattr(session.goal, "success_criteria"):
+    if session.goal and hasattr(session.goal, "success_criteria"):
         enriched_criteria = []
         for criterion in session.goal.success_criteria:
             crit_dict = criterion.model_dump() if hasattr(criterion, "model_dump") else criterion
@@ -1855,7 +1865,7 @@ def export_graph() -> str:
             "agent": export_data["agent"],
             "files_written": files_written,
             "graph": graph_spec,
-            "goal": session.goal.model_dump(),
+            "goal": session.goal.model_dump() if session.goal else {},
             "evaluation_rules": _evaluation_rules,
             "required_tools": list(all_tools),
             "node_count": len(session.nodes),
@@ -1918,8 +1928,8 @@ def import_from_export(
         # Parse edges (same pattern as BuildSession.from_dict lines 105-118)
         edges_data = graph_data.get("edges", [])
         session.edges = []
-        for e in edges_data:
-            condition_str = e.get("condition")
+        for edge_data in edges_data:
+            condition_str = edge_data.get("condition")
             if isinstance(condition_str, str):
                 condition_map = {
                     "always": EdgeCondition.ALWAYS,
@@ -1928,8 +1938,8 @@ def import_from_export(
                     "conditional": EdgeCondition.CONDITIONAL,
                     "llm_decide": EdgeCondition.LLM_DECIDE,
                 }
-                e["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
-            session.edges.append(EdgeSpec(**e))
+                edge_data["condition"] = condition_map.get(condition_str, EdgeCondition.ON_SUCCESS)
+            session.edges.append(EdgeSpec(**edge_data))
     except (KeyError, TypeError, ValueError, ValidationError) as e:
         return json.dumps({"success": False, "error": f"Malformed agent.json: {e}"})
 
@@ -2112,7 +2122,7 @@ def add_mcp_server(
 
         mcp_config = MCPServerConfig(
             name=name,
-            transport=transport,
+            transport=cast(Any, transport),
             command=command if transport == "stdio" else None,
             args=args_list if transport == "stdio" else [],
             env=env_dict,
@@ -2230,8 +2240,8 @@ def list_mcp_tools(
                     for t in tools
                 ]
 
-        except Exception as e:
-            all_tools[server_config["name"]] = {"error": f"Failed to connect: {str(e)}"}
+        except Exception as exc:
+            all_tools[server_config["name"]] = [{"error": f"Failed to connect: {str(exc)}"}]
 
     total_tools = sum(len(tools) if isinstance(tools, list) else 0 for tools in all_tools.values())
 
@@ -2396,7 +2406,7 @@ def test_graph(
         return json.dumps({"success": False, "error": "No nodes defined"})
 
     # Validate graph first
-    validation = json.loads(validate_graph())
+    validation = _validate_graph_internal(session)
     if not validation["valid"]:
         return json.dumps(
             {
@@ -2728,6 +2738,11 @@ def validate_plan(
     - Action types are valid
     - Context flow: all $variable references can be resolved
     """
+    return _validate_plan_internal(plan_json)
+
+
+def _validate_plan_internal(plan_json: str) -> str:
+    """Internal implementation of plan validation."""
     try:
         plan = json.loads(plan_json)
     except json.JSONDecodeError as e:
@@ -2914,7 +2929,7 @@ def simulate_plan_execution(
         return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
 
     # Validate first
-    validation = json.loads(validate_plan(plan_json))
+    validation = json.loads(_validate_plan_internal(plan_json))
     if not validation["valid"]:
         return json.dumps(
             {
@@ -2925,7 +2940,7 @@ def simulate_plan_execution(
         )
 
     steps = plan.get("steps", [])
-    completed = set()
+    completed: set[str] = set()
     execution_order = []
     iteration = 0
 
@@ -3099,7 +3114,8 @@ def generate_constraint_tests(
     if err:
         return err
 
-    agent_module = _get_agent_module_from_path(path)
+    assert path is not None
+    agent_module = _get_agent_module_from_path(str(path))
 
     # Format constraints for display
     constraints_formatted = (
@@ -3187,7 +3203,8 @@ def generate_success_tests(
     if err:
         return err
 
-    agent_module = _get_agent_module_from_path(path)
+    assert path is not None
+    agent_module = _get_agent_module_from_path(str(path))
 
     # Parse node/tool names for context
     nodes = [n.strip() for n in node_names.split(",") if n.strip()]
@@ -3284,6 +3301,7 @@ def run_tests(
     if err:
         return err
 
+    assert path is not None
     tests_dir = path / "tests"
 
     if not tests_dir.exists():
@@ -3481,6 +3499,7 @@ def debug_test(
     if err:
         return err
 
+    assert path is not None
     tests_dir = path / "tests"
 
     if not tests_dir.exists():
@@ -3626,6 +3645,7 @@ def list_tests(
     if err:
         return err
 
+    assert path is not None
     tests_dir = path / "tests"
 
     if not tests_dir.exists():
@@ -3921,7 +3941,7 @@ def store_credential(
 
         cred = CredentialObject(
             id=credential_name,
-            name=display_name,
+            description=display_name,
             keys={
                 key_name: CredentialKey(
                     name=key_name,
@@ -4051,7 +4071,7 @@ def _read_session_json(path: Path) -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return cast(dict[Any, Any] | None, json.loads(path.read_text(encoding="utf-8")))
     except (json.JSONDecodeError, OSError):
         return None
 

@@ -41,7 +41,7 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": "offset and limit must be non-negative"}
 
         try:
-            from openpyxl import load_workbook
+            from openpyxl import load_workbook  # type: ignore[import-untyped]  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (
@@ -170,7 +170,7 @@ def register_tools(mcp: FastMCP) -> None:
             dict with success status and metadata
         """
         try:
-            from openpyxl import Workbook
+            from openpyxl import Workbook  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (
@@ -251,7 +251,7 @@ def register_tools(mcp: FastMCP) -> None:
             dict with success status and metadata
         """
         try:
-            from openpyxl import load_workbook
+            from openpyxl import load_workbook  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (
@@ -349,7 +349,7 @@ def register_tools(mcp: FastMCP) -> None:
             dict with file metadata (sheets, columns per sheet, row counts, file size)
         """
         try:
-            from openpyxl import load_workbook
+            from openpyxl import load_workbook  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (
@@ -436,7 +436,7 @@ def register_tools(mcp: FastMCP) -> None:
             dict with list of sheet names
         """
         try:
-            from openpyxl import load_workbook
+            from openpyxl import load_workbook  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (
@@ -508,7 +508,7 @@ def register_tools(mcp: FastMCP) -> None:
             query="SELECT s.*, p.name FROM Sales s JOIN Products p ON s.product_id = p.id"
         """
         try:
-            import duckdb
+            import duckdb  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (
@@ -518,7 +518,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            from openpyxl import load_workbook
+            from openpyxl import load_workbook  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (
@@ -573,7 +573,7 @@ def register_tools(mcp: FastMCP) -> None:
                     target_sheet = wb.sheetnames[0]
 
                 # Load all sheets into DuckDB
-                import pandas as pd
+                import pandas as pd  # type: ignore[import-untyped]
 
                 con = duckdb.connect(":memory:")
 
@@ -681,7 +681,7 @@ def register_tools(mcp: FastMCP) -> None:
             dict with list of matches containing sheet, row, column, and value
         """
         try:
-            from openpyxl import load_workbook
+            from openpyxl import load_workbook  # type: ignore[import-untyped]
         except ImportError:
             return {
                 "error": (
