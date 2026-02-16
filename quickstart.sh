@@ -1051,18 +1051,24 @@ else
 fi
 
 echo -n "  - skills... "
-SKILLS_DIR=""
+SKILL_SUMMARIES=()
 for candidate in "$SCRIPT_DIR/.agents/skills" "$SCRIPT_DIR/.agent/skills" "$SCRIPT_DIR/.cursor/skills" "$SCRIPT_DIR/.claude/skills"; do
     if [ -d "$candidate" ]; then
-        SKILLS_DIR="$candidate"
-        break
+        SKILL_COUNT=$(ls -1d "$candidate"/*/ 2>/dev/null | wc -l)
+        SKILLS_SOURCE="$(basename "$(dirname "$candidate")")/skills"
+        SKILL_SUMMARIES+=("${GREEN}${SKILL_COUNT} found${NC} ${DIM}(${SKILLS_SOURCE})${NC}")
     fi
 done
 
-if [ -n "$SKILLS_DIR" ]; then
-    SKILL_COUNT=$(ls -1d "$SKILLS_DIR"/*/ 2>/dev/null | wc -l)
-    SKILLS_SOURCE="$(basename "$(dirname "$SKILLS_DIR")")/skills"
-    echo -e "${GREEN}${SKILL_COUNT} found${NC} ${DIM}(${SKILLS_SOURCE})${NC}"
+if [ ${#SKILL_SUMMARIES[@]} -gt 0 ]; then
+    SKILLS_LINE=""
+    for entry in "${SKILL_SUMMARIES[@]}"; do
+        if [ -n "$SKILLS_LINE" ]; then
+            SKILLS_LINE+="; "
+        fi
+        SKILLS_LINE+="$entry"
+    done
+    echo -e "$SKILLS_LINE"
 else
     echo -e "${YELLOW}--${NC}"
 fi

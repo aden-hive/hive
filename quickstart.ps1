@@ -1050,17 +1050,16 @@ $skillCandidates = @(
     (Join-Path (Join-Path $ScriptDir ".cursor") "skills"),
     (Join-Path (Join-Path $ScriptDir ".claude") "skills")
 )
-$skillsDir = $null
+$skillSummaries = @()
 foreach ($candidate in $skillCandidates) {
     if (Test-Path $candidate) {
-        $skillsDir = $candidate
-        break
+        $skillCount = (Get-ChildItem -Directory $candidate -ErrorAction SilentlyContinue).Count
+        $skillsSource = (Split-Path -Leaf (Split-Path -Parent $candidate)) + "/skills"
+        $skillSummaries += "$skillCount found ($skillsSource)"
     }
 }
-if ($skillsDir) {
-    $skillCount = (Get-ChildItem -Directory $skillsDir -ErrorAction SilentlyContinue).Count
-    $skillsSource = (Split-Path -Leaf (Split-Path -Parent $skillsDir)) + "/skills"
-    Write-Ok "$skillCount found ($skillsSource)"
+if ($skillSummaries.Count -gt 0) {
+    Write-Ok ($skillSummaries -join "; ")
 } else {
     Write-Warn "skipped"
 }
