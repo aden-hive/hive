@@ -203,7 +203,7 @@ class HybridJudge:
         user_prompt = self._build_llm_user_prompt(step, result, context, rule_result)
 
         try:
-            response = self.llm.complete(
+            response = await self.llm.acomplete(
                 messages=[{"role": "user", "content": user_prompt}],
                 system=system_prompt,
             )
