@@ -655,9 +655,7 @@ def add_node(
         max_node_visits=max_node_visits,
     )
 
-    session.nodes.append(node)
-
-    # Validate
+    # Validate BEFORE persisting
     errors = []
     warnings = []
 
@@ -700,7 +698,10 @@ def add_node(
                 f"output_keys {output_keys_list}"
             )
 
-    _save_session(session)  # Auto-save
+    # Only persist if validation passed
+    if len(errors) == 0:
+        session.nodes.append(node)
+        _save_session(session)  # Auto-save
 
     return json.dumps(
         {
@@ -772,9 +773,7 @@ def add_edge(
         priority=priority,
     )
 
-    session.edges.append(edge)
-
-    # Validate
+    # Validate BEFORE persisting
     errors = []
     warnings = []
 
@@ -796,7 +795,10 @@ def add_edge(
                 "Consider increasing max_node_visits on the target node."
             )
 
-    _save_session(session)  # Auto-save
+    # Only persist if validation passed
+    if len(errors) == 0:
+        session.edges.append(edge)
+        _save_session(session)  # Auto-save
 
     return json.dumps(
         {
@@ -891,6 +893,21 @@ def update_node(
         if cred_error:
             return json.dumps(cred_error)
 
+    # Save old values before modifying so we can restore on validation failure
+    old_values = {
+        "name": node.name,
+        "description": node.description,
+        "node_type": node.node_type,
+        "input_keys": list(node.input_keys),
+        "output_keys": list(node.output_keys),
+        "system_prompt": node.system_prompt,
+        "tools": list(node.tools) if node.tools else [],
+        "routes": dict(node.routes) if node.routes else {},
+        "client_facing": node.client_facing,
+        "nullable_output_keys": list(node.nullable_output_keys) if node.nullable_output_keys else [],
+        "max_node_visits": node.max_node_visits,
+    }
+
     # Update fields if provided
     if name:
         node.name = name
@@ -946,7 +963,21 @@ def update_node(
                 f"output_keys {node.output_keys}"
             )
 
-    _save_session(session)  # Auto-save
+    # Only persist if validation passed; otherwise restore old values
+    if len(errors) == 0:
+        _save_session(session)  # Auto-save
+    else:
+        node.name = old_values["name"]
+        node.description = old_values["description"]
+        node.node_type = old_values["node_type"]
+        node.input_keys = old_values["input_keys"]
+        node.output_keys = old_values["output_keys"]
+        node.system_prompt = old_values["system_prompt"]
+        node.tools = old_values["tools"]
+        node.routes = old_values["routes"]
+        node.client_facing = old_values["client_facing"]
+        node.nullable_output_keys = old_values["nullable_output_keys"]
+        node.max_node_visits = old_values["max_node_visits"]
 
     return json.dumps(
         {
@@ -1053,6 +1084,61 @@ def delete_edge(
     )
 
 
+def _detect_feedback_edges(nodes: list, edges: list) -> set[str]:
+    """Auto-detect feedback edges via DFS back-edge detection.
+
+    Performs a DFS from entry nodes (those with no incoming edges).  Any
+    edge that targets a node already on the current DFS stack (a *back
+    edge*) is classified as a feedback edge.  Edges with ``priority < 0``
+    are always treated as feedback (backward compat).
+    """
+    feedback_ids: set[str] = set()
+
+    # Explicit override: negative priority always means feedback
+    for e in edges:
+        if e.priority < 0:
+            feedback_ids.add(e.id)
+
+    node_ids = {n.id for n in nodes}
+
+    # Build adjacency: node -> [(edge_id, target)]
+    adj: dict[str, list[tuple[str, str]]] = {nid: [] for nid in node_ids}
+    for e in edges:
+        if e.source in node_ids and e.target in node_ids:
+            adj[e.source].append((e.id, e.target))
+
+    # Find entry nodes (no incoming edges, ignoring already-classified feedback)
+    has_incoming: set[str] = set()
+    for e in edges:
+        if e.id not in feedback_ids and e.target in node_ids:
+            has_incoming.add(e.target)
+    entry_nodes = sorted(nid for nid in node_ids if nid not in has_incoming)
+    if not entry_nodes:
+        entry_nodes = sorted(node_ids)  # fallback: try all (sorted for determinism)
+
+    # DFS coloring: WHITE=unvisited, GRAY=in current path, BLACK=finished
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = {nid: WHITE for nid in node_ids}
+
+    def dfs(u: str) -> None:
+        color[u] = GRAY
+        for eid, v in adj[u]:
+            if eid in feedback_ids:
+                continue  # skip already-classified
+            if color[v] == GRAY:
+                # Back edge — v is an ancestor on the current DFS path
+                feedback_ids.add(eid)
+            elif color[v] == WHITE:
+                dfs(v)
+        color[u] = BLACK
+
+    for entry in entry_nodes:
+        if color[entry] == WHITE:
+            dfs(entry)
+
+    return feedback_ids
+
+
 @mcp.tool()
 def validate_graph() -> str:
     """Validate the graph. Checks for unreachable nodes and context flow."""
@@ -1147,10 +1233,10 @@ def validate_graph() -> str:
 
     # === CONTEXT FLOW VALIDATION ===
     # Build dependency maps — separate forward edges from feedback edges.
-    # Feedback edges (priority < 0) create cycles; they must not block the
-    # topological sort.  Context they carry arrives on *revisits*, not on
-    # the first execution of a node.
-    feedback_edge_ids = {e.id for e in session.edges if e.priority < 0}
+    # Feedback edges create cycles; they must not block the topological sort.
+    # Context they carry arrives on *revisits*, not on the first execution
+    # of a node.  Auto-detected via DFS cycle detection + priority < 0 override.
+    feedback_edge_ids = _detect_feedback_edges(session.nodes, session.edges)
     forward_dependencies: dict[str, list[str]] = {node.id: [] for node in session.nodes}
     feedback_sources: dict[str, list[str]] = {node.id: [] for node in session.nodes}
     # Combined map kept for error-message generation (all deps)
@@ -1371,7 +1457,7 @@ def validate_graph() -> str:
 
     # Feedback loop validation: targets should allow re-visits
     for edge in session.edges:
-        if edge.priority < 0:
+        if edge.id in feedback_edge_ids:
             target_node = next((n for n in session.nodes if n.id == edge.target), None)
             if target_node and target_node.max_node_visits <= 1:
                 warnings.append(
@@ -1415,7 +1501,7 @@ def validate_graph() -> str:
     # Collect summary info
     event_loop_nodes = [n.id for n in session.nodes if n.node_type == "event_loop"]
     client_facing_nodes = [n.id for n in session.nodes if n.client_facing]
-    feedback_edges = [e.id for e in session.edges if e.priority < 0]
+    feedback_edges = list(feedback_edge_ids)
 
     return json.dumps(
         {
@@ -1544,10 +1630,11 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
 
 """
 
+    _readme_fb_ids = _detect_feedback_edges(nodes, edges)
     for edge in edges:
         cond = edge.condition.value if hasattr(edge.condition, "value") else edge.condition
         priority_note = f", priority={edge.priority}" if edge.priority != 0 else ""
-        feedback_note = " **[FEEDBACK]**" if edge.priority < 0 else ""
+        feedback_note = " **[FEEDBACK]**" if edge.id in _readme_fb_ids else ""
         readme += (
             f"- `{edge.source}` → `{edge.target}` "
             f"(condition: {cond}{priority_note}){feedback_note}\n"
@@ -1969,7 +2056,7 @@ def get_session_status() -> str:
             "deprecated_nodes": [
                 n.id for n in session.nodes if n.node_type in ("llm_generate", "llm_tool_use")
             ],
-            "feedback_edges": [e.id for e in session.edges if e.priority < 0],
+            "feedback_edges": list(_detect_feedback_edges(session.nodes, session.edges)),
         }
     )
 
@@ -2486,7 +2573,8 @@ def test_graph(
                 break
 
         # Note any feedback edges from this node
-        feedback = [e for e in outgoing if e.priority < 0]
+        _fb_ids = _detect_feedback_edges(session.nodes, session.edges)
+        feedback = [e for e in outgoing if e.id in _fb_ids]
         if feedback:
             step_info["feedback_edges"] = [
                 {
