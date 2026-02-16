@@ -145,12 +145,14 @@ def register_tools(mcp: FastMCP) -> None:
             prefix = sub.replace(f".{domain}", "").lower()
             for keyword, info in INTERESTING_KEYWORDS.items():
                 if re.search(rf"\b{keyword}\b", prefix) or prefix == keyword:
-                    interesting.append({
-                        "subdomain": sub,
-                        "reason": info["reason"],
-                        "severity": info["severity"],
-                        "remediation": info["remediation"],
-                    })
+                    interesting.append(
+                        {
+                            "subdomain": sub,
+                            "reason": info["reason"],
+                            "severity": info["severity"],
+                            "remediation": info["remediation"],
+                        }
+                    )
                     break
 
         # Grade input
@@ -160,8 +162,7 @@ def register_tools(mcp: FastMCP) -> None:
             for i in interesting
         )
         has_admin = any(
-            any(kw in i["subdomain"] for kw in ("admin", "backup"))
-            for i in interesting
+            any(kw in i["subdomain"] for kw in ("admin", "backup")) for i in interesting
         )
         # "reasonable" = fewer than 50 subdomains
         reasonable_surface = len(subdomains) < 50

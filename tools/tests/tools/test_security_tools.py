@@ -12,7 +12,6 @@ from aden_tools.tools.tech_stack_detector.tech_stack_detector import (
     _extract_samesite,
 )
 
-
 # ---------------------------------------------------------------------------
 # Cookie Analysis (_analyze_cookies)
 # ---------------------------------------------------------------------------
@@ -34,9 +33,11 @@ class TestAnalyzeCookies:
     """Tests for _analyze_cookies parsing raw Set-Cookie headers."""
 
     def test_secure_and_httponly_detected(self):
-        headers = FakeHeaders([
-            "session_id=abc123; Path=/; Secure; HttpOnly",
-        ])
+        headers = FakeHeaders(
+            [
+                "session_id=abc123; Path=/; Secure; HttpOnly",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert len(result) == 1
@@ -45,9 +46,11 @@ class TestAnalyzeCookies:
         assert result[0]["httponly"] is True
 
     def test_missing_flags_detected(self):
-        headers = FakeHeaders([
-            "tracking=xyz; Path=/",
-        ])
+        headers = FakeHeaders(
+            [
+                "tracking=xyz; Path=/",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert len(result) == 1
@@ -56,54 +59,66 @@ class TestAnalyzeCookies:
         assert result[0]["httponly"] is False
 
     def test_case_insensitive(self):
-        headers = FakeHeaders([
-            "tok=val; SECURE; HTTPONLY",
-        ])
+        headers = FakeHeaders(
+            [
+                "tok=val; SECURE; HTTPONLY",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert result[0]["secure"] is True
         assert result[0]["httponly"] is True
 
     def test_samesite_lax(self):
-        headers = FakeHeaders([
-            "pref=dark; SameSite=Lax; Secure",
-        ])
+        headers = FakeHeaders(
+            [
+                "pref=dark; SameSite=Lax; Secure",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert result[0]["samesite"] == "Lax"
         assert result[0]["secure"] is True
 
     def test_samesite_strict(self):
-        headers = FakeHeaders([
-            "csrf=token; SameSite=Strict; Secure; HttpOnly",
-        ])
+        headers = FakeHeaders(
+            [
+                "csrf=token; SameSite=Strict; Secure; HttpOnly",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert result[0]["samesite"] == "Strict"
 
     def test_samesite_none(self):
-        headers = FakeHeaders([
-            "cross=val; SameSite=None; Secure",
-        ])
+        headers = FakeHeaders(
+            [
+                "cross=val; SameSite=None; Secure",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert result[0]["samesite"] == "None"
         assert result[0]["secure"] is True
 
     def test_no_samesite(self):
-        headers = FakeHeaders([
-            "id=123; Path=/; Secure",
-        ])
+        headers = FakeHeaders(
+            [
+                "id=123; Path=/; Secure",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert result[0]["samesite"] is None
 
     def test_multiple_cookies(self):
-        headers = FakeHeaders([
-            "a=1; Secure; HttpOnly",
-            "b=2; Path=/",
-            "c=3; Secure; SameSite=Strict",
-        ])
+        headers = FakeHeaders(
+            [
+                "a=1; Secure; HttpOnly",
+                "b=2; Path=/",
+                "c=3; Secure; SameSite=Strict",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert len(result) == 3
@@ -119,9 +134,11 @@ class TestAnalyzeCookies:
 
     def test_cookie_value_with_equals(self):
         """Cookie values containing '=' should not break name parsing."""
-        headers = FakeHeaders([
-            "token=abc=def==; Secure; HttpOnly",
-        ])
+        headers = FakeHeaders(
+            [
+                "token=abc=def==; Secure; HttpOnly",
+            ]
+        )
         result = _analyze_cookies(headers)
 
         assert result[0]["name"] == "token"
@@ -145,17 +162,21 @@ class TestAnalyzeCookies:
 
     def test_secure_at_end_of_header(self):
         """Secure flag at the very end without trailing semicolon."""
-        headers = FakeHeaders([
-            "id=val; Path=/; Secure",
-        ])
+        headers = FakeHeaders(
+            [
+                "id=val; Path=/; Secure",
+            ]
+        )
         result = _analyze_cookies(headers)
         assert result[0]["secure"] is True
 
     def test_no_space_after_semicolons(self):
         """Servers may omit space after semicolons (RFC 6265 Section 5.2)."""
-        headers = FakeHeaders([
-            "id=val;Secure;HttpOnly;Path=/",
-        ])
+        headers = FakeHeaders(
+            [
+                "id=val;Secure;HttpOnly;Path=/",
+            ]
+        )
         result = _analyze_cookies(headers)
         assert result[0]["name"] == "id"
         assert result[0]["secure"] is True

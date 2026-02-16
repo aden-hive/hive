@@ -47,10 +47,7 @@ def register_tools(mcp: FastMCP) -> None:
         """
         if not _DNS_AVAILABLE:
             return {
-                "error": (
-                    "dnspython is not installed. "
-                    "Install it with: pip install dnspython"
-                ),
+                "error": ("dnspython is not installed. Install it with: pip install dnspython"),
             }
 
         # Clean domain
@@ -118,9 +115,7 @@ def _check_spf(resolver: dns.resolver.Resolver, domain: str) -> dict:
                     )
                 elif "?all" in txt:
                     policy = "neutral"
-                    issues.append(
-                        "Uses ?all (neutral). SPF results are not used for filtering."
-                    )
+                    issues.append("Uses ?all (neutral). SPF results are not used for filtering.")
                 else:
                     policy = "unknown"
                     issues.append("No 'all' mechanism found in SPF record.")
@@ -179,9 +174,7 @@ def _check_dmarc(resolver: dns.resolver.Resolver, domain: str) -> dict:
         "present": False,
         "record": None,
         "policy": None,
-        "issues": [
-            "No DMARC record found. Email spoofing is not actively monitored or blocked."
-        ],
+        "issues": ["No DMARC record found. Email spoofing is not actively monitored or blocked."],
     }
 
 

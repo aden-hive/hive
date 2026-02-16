@@ -328,7 +328,7 @@ def _detect_js_libraries(html: str) -> list[str]:
             if match:
                 # Try to extract version
                 version_match = re.search(
-                    rf'{lib_name.lower().replace(".", r".")}[/-](\d+\.\d+(?:\.\d+)?)',
+                    rf"{lib_name.lower().replace('.', r'.')}[/-](\d+\.\d+(?:\.\d+)?)",
                     html,
                     re.I,
                 )
@@ -376,9 +376,17 @@ def _detect_cms_from_html(html: str) -> str | None:
         return "Ghost"
 
     # Check meta generator tag
-    gen_match = re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\'](.*?)["\']', html, re.I)
+    gen_match = re.search(
+        r'<meta[^>]+name=["\']generator["\'][^>]+content=["\'](.*?)["\']',
+        html,
+        re.I,
+    )
     if not gen_match:
-        gen_match = re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']generator["\']', html, re.I)
+        gen_match = re.search(
+            r'<meta[^>]+content=["\'](.*?)["\'][^>]+name=["\']generator["\']',
+            html,
+            re.I,
+        )
     if gen_match:
         return gen_match.group(1)
 
@@ -391,12 +399,14 @@ def _analyze_cookies(headers: httpx.Headers) -> list[dict]:
     for raw in headers.get_list("set-cookie"):
         name = raw.split("=", 1)[0].strip()
         parts = [p.strip().lower() for p in raw.split(";")]
-        result.append({
-            "name": name,
-            "secure": "secure" in parts,
-            "httponly": "httponly" in parts,
-            "samesite": _extract_samesite(raw.lower()),
-        })
+        result.append(
+            {
+                "name": name,
+                "secure": "secure" in parts,
+                "httponly": "httponly" in parts,
+                "samesite": _extract_samesite(raw.lower()),
+            }
+        )
     return result
 
 

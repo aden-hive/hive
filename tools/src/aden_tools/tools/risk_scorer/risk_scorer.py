@@ -267,7 +267,7 @@ def register_tools(mcp: FastMCP) -> None:
         # Build top risks — sorted by category score (worst first), then by finding
         all_findings.sort(key=lambda x: (x[2], x[0]))
         top_risks = []
-        for category, finding, cat_score in all_findings[:10]:
+        for category, finding, _cat_score in all_findings[:10]:
             cat_grade = categories[category]["grade"]
             cat_label = category.replace("_", " ").title()
             top_risks.append(f"{finding} ({cat_label}: {cat_grade})")

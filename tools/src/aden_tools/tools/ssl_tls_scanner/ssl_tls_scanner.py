@@ -77,14 +77,16 @@ def register_tools(mcp: FastMCP) -> None:
                 conn = ctx_noverify.wrap_socket(socket.socket(), server_hostname=hostname)
                 conn.settimeout(10)
                 conn.connect((hostname, port))
-                issues.append({
-                    "severity": "critical",
-                    "finding": f"SSL certificate verification failed: {e}",
-                    "remediation": (
-                        "Obtain a valid certificate from a trusted CA. "
-                        "Let's Encrypt provides free certificates."
-                    ),
-                })
+                issues.append(
+                    {
+                        "severity": "critical",
+                        "finding": f"SSL certificate verification failed: {e}",
+                        "remediation": (
+                            "Obtain a valid certificate from a trusted CA. "
+                            "Let's Encrypt provides free certificates."
+                        ),
+                    }
+                )
 
             # Gather TLS info
             tls_version = conn.version() or "unknown"
@@ -134,34 +136,40 @@ def register_tools(mcp: FastMCP) -> None:
         # TLS version
         tls_version_ok = tls_version not in INSECURE_TLS_VERSIONS
         if not tls_version_ok:
-            issues.append({
-                "severity": "high",
-                "finding": f"Insecure TLS version: {tls_version}",
-                "remediation": (
-                    "Disable TLS 1.0 and 1.1 in your server configuration. "
-                    "Use TLS 1.2 or 1.3 only."
-                ),
-            })
+            issues.append(
+                {
+                    "severity": "high",
+                    "finding": f"Insecure TLS version: {tls_version}",
+                    "remediation": (
+                        "Disable TLS 1.0 and 1.1 in your server configuration. "
+                        "Use TLS 1.2 or 1.3 only."
+                    ),
+                }
+            )
 
         # Cipher strength
         strong_cipher = True
         if any(weak in cipher_name.upper() for weak in WEAK_CIPHERS):
             strong_cipher = False
-            issues.append({
-                "severity": "high",
-                "finding": f"Weak cipher suite: {cipher_name}",
-                "remediation": (
-                    "Configure your server to use strong cipher suites only. "
-                    "Prefer AES-GCM and ChaCha20-Poly1305."
-                ),
-            })
+            issues.append(
+                {
+                    "severity": "high",
+                    "finding": f"Weak cipher suite: {cipher_name}",
+                    "remediation": (
+                        "Configure your server to use strong cipher suites only. "
+                        "Prefer AES-GCM and ChaCha20-Poly1305."
+                    ),
+                }
+            )
         if cipher_bits and cipher_bits < 128:
             strong_cipher = False
-            issues.append({
-                "severity": "high",
-                "finding": f"Cipher key length too short: {cipher_bits} bits",
-                "remediation": "Use cipher suites with at least 128-bit keys.",
-            })
+            issues.append(
+                {
+                    "severity": "high",
+                    "finding": f"Cipher key length too short: {cipher_bits} bits",
+                    "remediation": "Use cipher suites with at least 128-bit keys.",
+                }
+            )
 
         # Certificate validity
         cert_valid = True
@@ -169,29 +177,35 @@ def register_tools(mcp: FastMCP) -> None:
 
         if not_after and now > not_after:
             cert_valid = False
-            issues.append({
-                "severity": "critical",
-                "finding": "SSL certificate has expired",
-                "remediation": "Renew the SSL certificate immediately.",
-            })
+            issues.append(
+                {
+                    "severity": "critical",
+                    "finding": "SSL certificate has expired",
+                    "remediation": "Renew the SSL certificate immediately.",
+                }
+            )
         elif days_until_expiry is not None and days_until_expiry <= 30:
             cert_expiring_soon = True
-            issues.append({
-                "severity": "medium",
-                "finding": f"SSL certificate expires in {days_until_expiry} days",
-                "remediation": "Renew the SSL certificate before it expires.",
-            })
+            issues.append(
+                {
+                    "severity": "medium",
+                    "finding": f"SSL certificate expires in {days_until_expiry} days",
+                    "remediation": "Renew the SSL certificate before it expires.",
+                }
+            )
 
         if self_signed:
             cert_valid = False
-            issues.append({
-                "severity": "high",
-                "finding": "Self-signed certificate detected",
-                "remediation": (
-                    "Replace with a certificate from a trusted CA. "
-                    "Let's Encrypt provides free certificates."
-                ),
-            })
+            issues.append(
+                {
+                    "severity": "high",
+                    "finding": "Self-signed certificate detected",
+                    "remediation": (
+                        "Replace with a certificate from a trusted CA. "
+                        "Let's Encrypt provides free certificates."
+                    ),
+                }
+            )
 
         return {
             "hostname": hostname,

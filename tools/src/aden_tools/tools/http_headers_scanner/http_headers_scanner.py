@@ -35,9 +35,7 @@ SECURITY_HEADERS = {
     },
     "X-Frame-Options": {
         "severity": "medium",
-        "description": (
-            "No X-Frame-Options header. The site may be vulnerable to clickjacking."
-        ),
+        "description": ("No X-Frame-Options header. The site may be vulnerable to clickjacking."),
         "remediation": "Add the header: X-Frame-Options: DENY (or SAMEORIGIN)",
     },
     "X-Content-Type-Options": {
@@ -54,9 +52,7 @@ SECURITY_HEADERS = {
             "No Referrer-Policy header. Full URLs (including query params) "
             "may leak to third-party sites via the Referer header."
         ),
-        "remediation": (
-            "Add the header: Referrer-Policy: strict-origin-when-cross-origin"
-        ),
+        "remediation": ("Add the header: Referrer-Policy: strict-origin-when-cross-origin"),
     },
     "Permissions-Policy": {
         "severity": "low",
@@ -140,24 +136,28 @@ def register_tools(mcp: FastMCP) -> None:
             if header_name.lower() in {k.lower() for k in headers}:
                 headers_present.append(header_name)
             else:
-                headers_missing.append({
-                    "header": header_name,
-                    "severity": info["severity"],
-                    "description": info["description"],
-                    "remediation": info["remediation"],
-                })
+                headers_missing.append(
+                    {
+                        "header": header_name,
+                        "severity": info["severity"],
+                        "description": info["description"],
+                        "remediation": info["remediation"],
+                    }
+                )
 
         # Check for leaky headers
         leaky_found = []
         for header_name, info in LEAKY_HEADERS.items():
             value = headers.get(header_name)
             if value:
-                leaky_found.append({
-                    "header": header_name,
-                    "value": value,
-                    "severity": info["severity"],
-                    "remediation": info["remediation"],
-                })
+                leaky_found.append(
+                    {
+                        "header": header_name,
+                        "value": value,
+                        "severity": info["severity"],
+                        "remediation": info["remediation"],
+                    }
+                )
 
         # Check for deprecated X-XSS-Protection
         xss_protection = headers.get("X-XSS-Protection")
