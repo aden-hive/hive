@@ -30,6 +30,7 @@ from .csv_tool import register_tools as register_csv
 # Security scanning tools
 from .dns_security_scanner import register_tools as register_dns_security_scanner
 from .email_tool import register_tools as register_email
+from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
@@ -103,6 +104,7 @@ def register_all_tools(
     register_hubspot(mcp, credentials=credentials)
     register_news(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
+    register_exa_search(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
@@ -317,6 +319,11 @@ def register_all_tools(
         "tech_stack_detect",
         "subdomain_enumerate",
         "risk_score",
+        # Exa Search tools
+        "exa_search",
+        "exa_find_similar",
+        "exa_get_contents",
+        "exa_answer",
     ]
 
 
