@@ -8,6 +8,7 @@ from aden_tools.credentials.health_check import (
     HEALTH_CHECKERS,
     AnthropicHealthChecker,
     GitHubHealthChecker,
+    GoogleCalendarHealthChecker,
     GoogleMapsHealthChecker,
     GoogleSearchHealthChecker,
     ResendHealthChecker,
@@ -43,6 +44,11 @@ class TestHealthCheckerRegistry:
         assert "google_maps" in HEALTH_CHECKERS
         assert isinstance(HEALTH_CHECKERS["google_maps"], GoogleMapsHealthChecker)
 
+    def test_google_calendar_oauth_registered(self):
+        """GoogleCalendarHealthChecker is registered in HEALTH_CHECKERS."""
+        assert "google_calendar_oauth" in HEALTH_CHECKERS
+        assert isinstance(HEALTH_CHECKERS["google_calendar_oauth"], GoogleCalendarHealthChecker)
+
     def test_all_expected_checkers_registered(self):
         """All expected health checkers are in the registry."""
         expected = {
@@ -53,6 +59,7 @@ class TestHealthCheckerRegistry:
             "anthropic",
             "github",
             "resend",
+            "google_calendar_oauth",
             "slack",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected
@@ -414,3 +421,59 @@ class TestCheckCredentialHealthDispatcher:
 
         assert result.valid is True
         assert result.details.get("partial_check") is True
+
+
+class TestGoogleCalendarHealthCheckerTokenSanitization:
+    """Tests for token sanitization in GoogleCalendarHealthChecker error handling."""
+
+    def test_request_error_with_bearer_token_sanitized(self):
+        """GoogleCalendarHealthChecker sanitizes Bearer tokens in error messages."""
+        checker = GoogleCalendarHealthChecker()
+
+        with patch("aden_tools.credentials.health_check.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+            mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+            mock_client.get.side_effect = httpx.RequestError(
+                "Connection failed with Bearer ya29.secret-token-here"
+            )
+
+            result = checker.check("ya29.secret-token-here")
+
+        assert not result.valid
+        assert "Bearer" not in result.message
+        assert "ya29" not in result.message
+        assert "redacted" in result.message
+
+    def test_request_error_with_authorization_header_sanitized(self):
+        """GoogleCalendarHealthChecker sanitizes Authorization headers in errors."""
+        checker = GoogleCalendarHealthChecker()
+
+        with patch("aden_tools.credentials.health_check.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+            mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+            mock_client.get.side_effect = httpx.RequestError(
+                "Failed sending Authorization: Bearer token123"
+            )
+
+            result = checker.check("token123")
+
+        assert not result.valid
+        assert "token123" not in result.message
+        assert "redacted" in result.message
+
+    def test_request_error_without_sensitive_data_passes_through(self):
+        """Non-sensitive error messages pass through unchanged."""
+        checker = GoogleCalendarHealthChecker()
+
+        with patch("aden_tools.credentials.health_check.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+            mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+            mock_client.get.side_effect = httpx.RequestError("Connection refused")
+
+            result = checker.check("token123")
+
+        assert not result.valid
+        assert "Connection refused" in result.message

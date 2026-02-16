@@ -1449,6 +1449,7 @@ def _select_agent(agents_dir: Path) -> str | None:
     for path in agents_dir.iterdir():
         if _is_valid_agent_dir(path):
             agents.append(path)
+    agents.sort(key=lambda p: p.name)
 
     if not agents:
         print(f"No agents found in {agents_dir}", file=sys.stderr)

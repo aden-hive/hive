@@ -314,7 +314,7 @@ class WorkerNode:
 
             messages = [{"role": "user", "content": prompt}]
 
-            response = self.llm.complete(
+            response = await self.llm.acomplete(
                 messages=messages,
                 system=action.system_prompt,
             )

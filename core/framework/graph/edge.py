@@ -155,7 +155,7 @@ class EdgeSpec(BaseModel):
 
     model_config = {"extra": "allow"}
 
-    def should_traverse(
+    async def should_traverse(
         self,
         source_success: bool,
         source_output: dict[str, Any],
@@ -274,7 +274,7 @@ class EdgeSpec(BaseModel):
             logger.warning(f"         Available context keys: {list(context.keys())}")
             return False
 
-    def _llm_decide(
+    async def _llm_decide(
         self,
         llm: Any,
         goal: Any,
@@ -321,7 +321,7 @@ Respond with ONLY a JSON object:
 {{"proceed": true/false, "reasoning": "brief explanation"}}"""
 
         try:
-            response = llm.complete(
+            response = await llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You are a routing agent. Respond with JSON only.",
                 max_tokens=150,
