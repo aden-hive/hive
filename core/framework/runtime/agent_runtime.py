@@ -7,6 +7,7 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -161,6 +162,8 @@ class AgentRuntime:
         self._event_subscriptions: list[str] = []
         # Timer tasks for scheduled entry points
         self._timer_tasks: list[asyncio.Task] = []
+        # Next fire time for each timer entry point (ep_id -> datetime)
+        self._timer_next_fire: dict[str, float] = {}
 
         # State
         self._running = False
@@ -331,9 +334,12 @@ class AgentRuntime:
 
                 def _make_timer(entry_point_id: str, mins: float, immediate: bool):
                     async def _timer_loop():
+                        interval_secs = mins * 60
                         if not immediate:
-                            await asyncio.sleep(mins * 60)
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
+                            await asyncio.sleep(interval_secs)
                         while self._running:
+                            self._timer_next_fire.pop(entry_point_id, None)
                             try:
                                 session_state = self._get_primary_session_state(
                                     exclude_entry_point=entry_point_id
@@ -354,7 +360,8 @@ class AgentRuntime:
                                     entry_point_id,
                                     exc_info=True,
                                 )
-                            await asyncio.sleep(mins * 60)
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
+                            await asyncio.sleep(interval_secs)
 
                     return _timer_loop
 

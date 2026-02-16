@@ -8,6 +8,7 @@ arrows drawn on the right margin that visually point back up to earlier nodes.
 from __future__ import annotations
 
 import re
+import time
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -64,6 +65,9 @@ class GraphOverview(Vertical):
     def on_mount(self) -> None:
         """Display initial graph structure."""
         self._display_graph()
+        # Refresh every 1s so timer countdowns stay current
+        if self.runtime._timer_next_fire is not None:
+            self.set_interval(1.0, self._display_graph)
 
     # ------------------------------------------------------------------
     # Graph analysis helpers
@@ -455,7 +459,16 @@ class GraphOverview(Vertical):
             if ep.trigger_type == "timer":
                 interval = ep.trigger_config.get("interval_minutes", "?")
                 display.write(f"  [green]⏱[/green]  {ep.name} [dim]→ {ep.entry_node}[/dim]")
-                display.write(f"     [dim]every {interval} min[/dim]")
+                # Show interval + next fire countdown
+                next_fire = self.runtime._timer_next_fire.get(ep.id)
+                if next_fire is not None:
+                    remaining = max(0, next_fire - time.monotonic())
+                    mins, secs = divmod(int(remaining), 60)
+                    display.write(
+                        f"     [dim]every {interval} min — next in {mins}m {secs:02d}s[/dim]"
+                    )
+                else:
+                    display.write(f"     [dim]every {interval} min[/dim]")
 
             elif ep.trigger_type in ("event", "webhook"):
                 display.write(f"  [yellow]⚡[/yellow] {ep.name} [dim]→ {ep.entry_node}[/dim]")
