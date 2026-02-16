@@ -24,9 +24,13 @@ from framework.graph.node import (
     FunctionNode,
     LLMNode,
     NodeContext,
+    NodeEndEvent,
+    NodeErrorEvent,
+    NodeLifecycleHook,
     NodeProtocol,
     NodeResult,
     NodeSpec,
+    NodeStartEvent,
     RouterNode,
     SharedMemory,
 )
@@ -138,6 +142,7 @@ class GraphExecutor:
         runtime_logger: Any = None,
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
+        lifecycle_hooks: list[NodeLifecycleHook] | None = None,
     ):
         """
         Initialize the executor.
@@ -157,6 +162,7 @@ class GraphExecutor:
             runtime_logger: Optional RuntimeLogger for per-graph-run logging
             storage_path: Optional base path for conversation persistence
             loop_config: Optional EventLoopNode configuration (max_iterations, etc.)
+            lifecycle_hooks: Optional list of hooks notified on node start/end/error
         """
         self.runtime = runtime
         self.llm = llm
@@ -171,6 +177,7 @@ class GraphExecutor:
         self.runtime_logger = runtime_logger
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
+        self._lifecycle_hooks: list[NodeLifecycleHook] = lifecycle_hooks or []
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -185,6 +192,25 @@ class GraphExecutor:
 
         # Pause/resume control
         self._pause_requested = asyncio.Event()
+
+    async def _dispatch_hooks(self, method_name: str, event: Any) -> None:
+        """Dispatch a lifecycle event to all registered hooks.
+
+        Exceptions raised by individual hooks are caught and logged so that
+        a misbehaving hook never crashes node execution.
+        """
+        for hook in self._lifecycle_hooks:
+            try:
+                method = getattr(hook, method_name, None)
+                if method is not None:
+                    await method(event)
+            except Exception:
+                self.logger.warning(
+                    "Hook %s.%s raised an exception (suppressed)",
+                    type(hook).__name__,
+                    method_name,
+                    exc_info=True,
+                )
 
     def _write_progress(
         self,
@@ -743,9 +769,69 @@ class GraphExecutor:
                         stream_id=self._stream_id, node_id=current_node_id
                     )
 
+                # Lifecycle hook: on_node_start (all node types)
+                if self._lifecycle_hooks:
+                    await self._dispatch_hooks(
+                        "on_node_start",
+                        NodeStartEvent(
+                            node_id=node_spec.id,
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                        ),
+                    )
+                if self._event_bus:
+                    await self._event_bus.emit_node_started(
+                        stream_id=self._stream_id,
+                        node_id=current_node_id,
+                        node_name=node_spec.name,
+                        node_type=node_spec.node_type,
+                    )
+
                 # Execute node
                 self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
+
+                # Lifecycle hook: on_node_end / on_node_error (all node types)
+                if self._lifecycle_hooks:
+                    if result.success:
+                        await self._dispatch_hooks(
+                            "on_node_end",
+                            NodeEndEvent(
+                                node_id=node_spec.id,
+                                node_name=node_spec.name,
+                                node_type=node_spec.node_type,
+                                success=True,
+                                error=None,
+                            ),
+                        )
+                    else:
+                        await self._dispatch_hooks(
+                            "on_node_error",
+                            NodeErrorEvent(
+                                node_id=node_spec.id,
+                                node_name=node_spec.name,
+                                node_type=node_spec.node_type,
+                                error=result.error or "Unknown error",
+                                exception=None,
+                            ),
+                        )
+                if self._event_bus:
+                    if result.success:
+                        await self._event_bus.emit_node_completed(
+                            stream_id=self._stream_id,
+                            node_id=current_node_id,
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                            success=True,
+                        )
+                    else:
+                        await self._event_bus.emit_node_error(
+                            stream_id=self._stream_id,
+                            node_id=current_node_id,
+                            error=result.error or "Unknown error",
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                        )
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
@@ -1335,6 +1421,27 @@ class GraphExecutor:
 
             stack_trace = traceback.format_exc()
 
+            # Lifecycle hook: on_node_error for unhandled exception
+            if self._lifecycle_hooks and node_spec is not None:
+                await self._dispatch_hooks(
+                    "on_node_error",
+                    NodeErrorEvent(
+                        node_id=node_spec.id,
+                        node_name=node_spec.name,
+                        node_type=node_spec.node_type,
+                        error=str(e),
+                        exception=e,
+                    ),
+                )
+            if self._event_bus and node_spec is not None:
+                await self._event_bus.emit_node_error(
+                    stream_id=self._stream_id,
+                    node_id=node_spec.id,
+                    error=str(e),
+                    node_name=node_spec.name,
+                    node_type=node_spec.node_type,
+                )
+
             self.runtime.report_problem(
                 severity="critical",
                 description=str(e),
@@ -1858,11 +1965,71 @@ class GraphExecutor:
                             stream_id=self._stream_id, node_id=branch.node_id
                         )
 
+                    # Lifecycle hook: on_node_start (all node types)
+                    if self._lifecycle_hooks:
+                        await self._dispatch_hooks(
+                            "on_node_start",
+                            NodeStartEvent(
+                                node_id=node_spec.id,
+                                node_name=node_spec.name,
+                                node_type=node_spec.node_type,
+                            ),
+                        )
+                    if self._event_bus:
+                        await self._event_bus.emit_node_started(
+                            stream_id=self._stream_id,
+                            node_id=branch.node_id,
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                        )
+
                     self.logger.info(
                         f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
                     )
                     result = await node_impl.execute(ctx)
                     last_result = result
+
+                    # Lifecycle hook: on_node_end / on_node_error (all node types)
+                    if self._lifecycle_hooks:
+                        if result.success:
+                            await self._dispatch_hooks(
+                                "on_node_end",
+                                NodeEndEvent(
+                                    node_id=node_spec.id,
+                                    node_name=node_spec.name,
+                                    node_type=node_spec.node_type,
+                                    success=True,
+                                    error=None,
+                                ),
+                            )
+                        else:
+                            await self._dispatch_hooks(
+                                "on_node_error",
+                                NodeErrorEvent(
+                                    node_id=node_spec.id,
+                                    node_name=node_spec.name,
+                                    node_type=node_spec.node_type,
+                                    error=result.error or "Unknown error",
+                                    exception=None,
+                                ),
+                            )
+                    if self._event_bus:
+                        if result.success:
+                            await self._event_bus.emit_node_completed(
+                                stream_id=self._stream_id,
+                                node_id=branch.node_id,
+                                node_name=node_spec.name,
+                                node_type=node_spec.node_type,
+                                success=True,
+                            )
+                        else:
+                            await self._event_bus.emit_node_error(
+                                stream_id=self._stream_id,
+                                node_id=branch.node_id,
+                                error=result.error or "Unknown error",
+                                node_name=node_spec.name,
+                                node_type=node_spec.node_type,
+                            )
 
                     # Ensure L2 entry for this branch node
                     if self.runtime_logger:
@@ -1917,6 +2084,27 @@ class GraphExecutor:
                 branch.status = "failed"
                 branch.error = str(e)
                 self.logger.error(f"      ✗ Branch {branch.node_id}: exception - {e}")
+
+                # Lifecycle hook: on_node_error for unhandled exception
+                if self._lifecycle_hooks:
+                    await self._dispatch_hooks(
+                        "on_node_error",
+                        NodeErrorEvent(
+                            node_id=node_spec.id,
+                            node_name=node_spec.name,
+                            node_type=node_spec.node_type,
+                            error=str(e),
+                            exception=e,
+                        ),
+                    )
+                if self._event_bus:
+                    await self._event_bus.emit_node_error(
+                        stream_id=self._stream_id,
+                        node_id=branch.node_id,
+                        error=str(e),
+                        node_name=node_spec.name,
+                        node_type=node_spec.node_type,
+                    )
 
                 # Log the crashing branch node to L2 with full stack trace
                 if self.runtime_logger and node_spec is not None:

@@ -155,6 +155,15 @@ class FakeEventBus:
     async def emit_node_retry(self, **kwargs):
         self.events.append(("node_retry", kwargs))
 
+    async def emit_node_started(self, **kwargs):
+        self.events.append(("node_started", kwargs))
+
+    async def emit_node_completed(self, **kwargs):
+        self.events.append(("node_completed", kwargs))
+
+    async def emit_node_error(self, **kwargs):
+        self.events.append(("node_error", kwargs))
+
 
 @pytest.mark.asyncio
 async def test_executor_emits_node_events():
@@ -213,19 +222,24 @@ async def test_executor_emits_node_events():
     assert result.success is True
     assert result.path == ["n1", "n2"]
 
-    # Should have 5 events: started/completed for n1, edge_traversed, then started/completed for n2
-    assert len(event_bus.events) == 5
+    # Events per node: loop_started, node_started, node_completed, loop_completed
+    # Plus edge_traversed between n1 and n2 = 4 + 1 + 4 = 9
+    assert len(event_bus.events) == 9
     assert event_bus.events[0] == ("started", {"stream_id": "test-stream", "node_id": "n1"})
-    assert event_bus.events[1] == (
+    assert event_bus.events[1][0] == "node_started"
+    assert event_bus.events[2][0] == "node_completed"
+    assert event_bus.events[3] == (
         "completed",
         {"stream_id": "test-stream", "node_id": "n1", "iterations": 1},
     )
-    assert event_bus.events[2] == (
+    assert event_bus.events[4] == (
         "edge_traversed",
         {"stream_id": "test-stream", "source_node": "n1", "target_node": "n2"},
     )
-    assert event_bus.events[3] == ("started", {"stream_id": "test-stream", "node_id": "n2"})
-    assert event_bus.events[4] == (
+    assert event_bus.events[5] == ("started", {"stream_id": "test-stream", "node_id": "n2"})
+    assert event_bus.events[6][0] == "node_started"
+    assert event_bus.events[7][0] == "node_completed"
+    assert event_bus.events[8] == (
         "completed",
         {"stream_id": "test-stream", "node_id": "n2", "iterations": 1},
     )
@@ -275,8 +289,12 @@ async def test_executor_skips_events_for_event_loop_nodes():
     result = await executor.execute(graph=graph, goal=goal)
 
     assert result.success is True
-    # No events should have been emitted — event_loop nodes are skipped
-    assert len(event_bus.events) == 0
+    # NODE_LOOP_* events are skipped for event_loop nodes (they emit their own),
+    # but general NODE_STARTED/NODE_COMPLETED events fire for all node types.
+    loop_events = [e for e in event_bus.events if e[0] in ("started", "completed")]
+    assert len(loop_events) == 0  # No NODE_LOOP_* events
+    lifecycle_events = [e for e in event_bus.events if e[0] in ("node_started", "node_completed")]
+    assert len(lifecycle_events) == 2  # NODE_STARTED + NODE_COMPLETED
 
 
 @pytest.mark.asyncio

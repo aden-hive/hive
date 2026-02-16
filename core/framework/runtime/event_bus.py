@@ -46,6 +46,11 @@ class EventType(StrEnum):
     NODE_LOOP_ITERATION = "node_loop_iteration"
     NODE_LOOP_COMPLETED = "node_loop_completed"
 
+    # General node lifecycle (all node types, including event_loop)
+    NODE_STARTED = "node_started"
+    NODE_COMPLETED = "node_completed"
+    NODE_ERROR = "node_error"
+
     # LLM streaming observability
     LLM_TEXT_DELTA = "llm_text_delta"
     LLM_REASONING_DELTA = "llm_reasoning_delta"
@@ -461,6 +466,77 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"iterations": iterations},
+            )
+        )
+
+    # === GENERAL NODE LIFECYCLE PUBLISHERS ===
+
+    async def emit_node_started(
+        self,
+        stream_id: str,
+        node_id: str,
+        node_name: str = "",
+        node_type: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit general node-started event (all node types)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_STARTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"node_name": node_name, "node_type": node_type},
+            )
+        )
+
+    async def emit_node_completed(
+        self,
+        stream_id: str,
+        node_id: str,
+        node_name: str = "",
+        node_type: str = "",
+        success: bool = True,
+        error: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit general node-completed event (all node types)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_COMPLETED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "node_name": node_name,
+                    "node_type": node_type,
+                    "success": success,
+                    "error": error,
+                },
+            )
+        )
+
+    async def emit_node_error(
+        self,
+        stream_id: str,
+        node_id: str,
+        error: str,
+        node_name: str = "",
+        node_type: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit general node-error event (all node types)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_ERROR,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "node_name": node_name,
+                    "node_type": node_type,
+                    "error": error,
+                },
             )
         )
 

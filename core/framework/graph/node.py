@@ -22,7 +22,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -595,6 +595,72 @@ class NodeResult:
                     value_str += "..."
                 parts.append(f"  • {key}: {value_str}")
             return "\n".join(parts)
+
+
+# ── Node Lifecycle Hook Types ──────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class NodeStartEvent:
+    """Emitted when a node is about to execute."""
+
+    node_id: str
+    node_name: str
+    node_type: str
+
+
+@dataclass(frozen=True)
+class NodeEndEvent:
+    """Emitted after a node finishes execution."""
+
+    node_id: str
+    node_name: str
+    node_type: str
+    success: bool
+    error: str | None  # None on success, message on failure
+
+
+@dataclass(frozen=True)
+class NodeErrorEvent:
+    """Emitted when a node raises an unhandled exception."""
+
+    node_id: str
+    node_name: str
+    node_type: str
+    error: str
+    exception: BaseException | None
+
+
+@runtime_checkable
+class NodeLifecycleHook(Protocol):
+    """Minimal monitoring hook for node lifecycle events.
+
+    Implementations may provide any subset of the three methods.
+    Missing methods are silently skipped by the executor dispatcher.
+    """
+
+    async def on_node_start(self, event: NodeStartEvent) -> None: ...
+    async def on_node_end(self, event: NodeEndEvent) -> None: ...
+    async def on_node_error(self, event: NodeErrorEvent) -> None: ...
+
+
+class BaseNodeLifecycleHook:
+    """Convenience base class with no-op defaults for all lifecycle hooks.
+
+    Subclass and override only the methods you care about.
+    """
+
+    async def on_node_start(self, event: NodeStartEvent) -> None:
+        pass
+
+    async def on_node_end(self, event: NodeEndEvent) -> None:
+        pass
+
+    async def on_node_error(self, event: NodeErrorEvent) -> None:
+        pass
+
+
+# ── Node Protocol ──────────────────────────────────────────────────────────
 
 
 class NodeProtocol(ABC):
