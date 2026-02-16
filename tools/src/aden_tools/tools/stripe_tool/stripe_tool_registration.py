@@ -33,7 +33,7 @@ def register_tools(
     Returns:
         List of registered tool names (empty list if initialization fails)
     """
-    # Extract Stripe API key from credentials or environment
+    # Extract Stripe API key from credentials or environments
     api_key = None
     webhook_secret = None
 
