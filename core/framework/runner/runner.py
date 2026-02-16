@@ -1227,7 +1227,7 @@ Respond with JSON only:
 }}"""
 
         try:
-            response = eval_llm.complete(
+            response = await eval_llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You are a capability evaluator. Respond with JSON only.",
                 max_tokens=256,

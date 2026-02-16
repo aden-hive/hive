@@ -9,13 +9,18 @@ For live tests (requires API keys):
     OPENAI_API_KEY=sk-... pytest tests/test_litellm_provider.py -v -m live
 """
 
+import asyncio
 import os
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from framework.llm.anthropic import AnthropicProvider
 from framework.llm.litellm import LiteLLMProvider, _compute_retry_delay
-from framework.llm.provider import LLMProvider, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
 
 class TestLiteLLMProviderInit:
@@ -648,3 +653,176 @@ def _make_exception_with_headers(headers: dict[str, str]) -> BaseException:
     response.headers = headers
     exc.response = response  # type: ignore[attr-defined]
     return exc
+
+
+# ---------------------------------------------------------------------------
+# Async LLM methods — non-blocking event loop tests
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncComplete:
+    """Test that acomplete/acomplete_with_tools don't block the event loop."""
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_acomplete_uses_acompletion(self, mock_acompletion):
+        """acomplete() should call litellm.acompletion (async), not litellm.completion."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "async hello"
+        mock_response.choices[0].message.tool_calls = None
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "gpt-4o-mini"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+
+        # acompletion is async, so mock must return a coroutine
+        async def async_return(*args, **kwargs):
+            return mock_response
+
+        mock_acompletion.side_effect = async_return
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+        result = await provider.acomplete(
+            messages=[{"role": "user", "content": "Hello"}],
+            system="You are helpful.",
+        )
+
+        assert result.content == "async hello"
+        assert result.model == "gpt-4o-mini"
+        assert result.input_tokens == 10
+        assert result.output_tokens == 5
+        mock_acompletion.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_acomplete_does_not_block_event_loop(self, mock_acompletion):
+        """Verify event loop stays responsive during acomplete()."""
+        heartbeat_ticks = []
+
+        async def heartbeat():
+            start = time.monotonic()
+            for _ in range(10):
+                heartbeat_ticks.append(time.monotonic() - start)
+                await asyncio.sleep(0.05)
+
+        async def slow_acompletion(*args, **kwargs):
+            # Simulate a 300ms LLM call — async, so event loop should stay free
+            await asyncio.sleep(0.3)
+            resp = MagicMock()
+            resp.choices = [MagicMock()]
+            resp.choices[0].message.content = "done"
+            resp.choices[0].message.tool_calls = None
+            resp.choices[0].finish_reason = "stop"
+            resp.model = "gpt-4o-mini"
+            resp.usage.prompt_tokens = 5
+            resp.usage.completion_tokens = 3
+            return resp
+
+        mock_acompletion.side_effect = slow_acompletion
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+
+        # Run heartbeat + acomplete concurrently
+        _, result = await asyncio.gather(
+            heartbeat(),
+            provider.acomplete(
+                messages=[{"role": "user", "content": "hi"}],
+            ),
+        )
+
+        assert result.content == "done"
+        # Heartbeat should have ticked multiple times during the 300ms LLM call
+        # (if the event loop were blocked, we'd see 0-1 ticks)
+        assert len(heartbeat_ticks) >= 3, (
+            f"Event loop was blocked — only {len(heartbeat_ticks)} heartbeat ticks"
+        )
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_acomplete_with_tools_uses_acompletion(self, mock_acompletion):
+        """acomplete_with_tools() should use litellm.acompletion."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "tool result"
+        mock_response.choices[0].message.tool_calls = None
+        mock_response.choices[0].finish_reason = "stop"
+        mock_response.model = "gpt-4o-mini"
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+
+        async def async_return(*args, **kwargs):
+            return mock_response
+
+        mock_acompletion.side_effect = async_return
+
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+        tools = [
+            Tool(
+                name="search",
+                description="Search the web",
+                parameters={"properties": {"q": {"type": "string"}}, "required": ["q"]},
+            )
+        ]
+
+        result = await provider.acomplete_with_tools(
+            messages=[{"role": "user", "content": "Search for cats"}],
+            system="You are helpful.",
+            tools=tools,
+            tool_executor=lambda tu: ToolResult(tool_use_id=tu.id, content="cats"),
+        )
+
+        assert result.content == "tool result"
+        mock_acompletion.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_mock_provider_acomplete(self):
+        """MockLLMProvider.acomplete() should work without blocking."""
+        from framework.llm.mock import MockLLMProvider
+
+        provider = MockLLMProvider()
+        result = await provider.acomplete(
+            messages=[{"role": "user", "content": "test"}],
+            system="Be helpful.",
+        )
+
+        assert result.content  # Should have some mock content
+        assert result.model == "mock-model"
+
+    @pytest.mark.asyncio
+    async def test_base_provider_acomplete_offloads_to_executor(self):
+        """Base LLMProvider.acomplete() should offload sync complete() to thread pool."""
+        call_thread_ids = []
+
+        class SlowSyncProvider(LLMProvider):
+            def complete(
+                self,
+                messages,
+                system="",
+                tools=None,
+                max_tokens=1024,
+                response_format=None,
+                json_mode=False,
+                max_retries=None,
+            ):
+                call_thread_ids.append(threading.current_thread().ident)
+                time.sleep(0.1)  # Sync blocking
+                return LLMResponse(content="sync done", model="slow")
+
+            def complete_with_tools(
+                self, messages, system, tools, tool_executor, max_iterations=10
+            ):
+                return LLMResponse(content="sync tools done", model="slow")
+
+        provider = SlowSyncProvider()
+        main_thread_id = threading.current_thread().ident
+
+        result = await provider.acomplete(
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+        assert result.content == "sync done"
+        # The sync complete() should have run on a different thread
+        assert call_thread_ids[0] != main_thread_id, (
+            "Base acomplete() should offload sync complete() to a thread pool"
+        )

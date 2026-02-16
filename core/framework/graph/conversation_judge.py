@@ -86,7 +86,7 @@ CONFIDENCE: 0.X
 FEEDBACK: (reason if RETRY, empty if ACCEPT)"""
 
     try:
-        response = llm.complete(
+        response = await llm.acomplete(
             messages=[{"role": "user", "content": user_prompt}],
             system=system_prompt,
             max_tokens=max(1024, max_history_tokens // 5),

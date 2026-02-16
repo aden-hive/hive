@@ -1,69 +1,75 @@
-# fix: multi-entry event-driven agent — transient errors, shared sessions, and TUI stability
-
 ## Summary
 
-Fixes six interconnected bugs that prevented multi-entry-point event-driven agents (like Gmail Inbox Guardian) from working correctly. These agents have a primary user-facing entry point (e.g. rule setup) and async event-driven entry points (e.g. webhook triggers) that share a single session.
+- Add `acomplete()` and `acomplete_with_tools()` async methods to the `LLMProvider` base class, with a safe `run_in_executor` default that prevents any provider from blocking the event loop
+- Implement native async I/O in `LiteLLMProvider` using `litellm.acompletion()` and `asyncio.sleep()` for retries, eliminating thread-pool overhead
+- Migrate 15 call sites across the framework (nodes, judges, edges, executor, runner, orchestrator) from sync `complete()` to async `acomplete()`
+- Propagate async through internal call chains: `edge.should_traverse()`, `output_cleaner.clean_output()`, `executor._follow_edges()`, `executor._get_all_traversable_edges()`
 
-## Bugs Fixed
+Fixes #4905
 
-### 1. Transient LLM errors cause infinite retry loops (0 tokens, 50 iterations)
+## Context
 
-**Root cause:** `LiteLLMProvider.stream()` only retried `RateLimitError`. Other transient errors (`ConnectionError`, `InternalServerError`, `APIConnectionError`) were caught by the generic `except Exception` handler, which yielded a `StreamErrorEvent(recoverable=True)` without retrying. The `EventLoopNode` logged the warning and continued with an empty response — the judge saw no outputs and returned RETRY, burning all 50 iterations doing nothing.
+Every non-streaming LLM call in the framework used the synchronous `complete()` / `complete_with_tools()` methods directly from async code. Because Python's asyncio event loop is single-threaded, these blocking calls froze the entire loop for the duration of each API round-trip (often 5-30+ seconds). This prevented concurrent coroutines from making progress — heartbeats stalled, parallel node execution serialized, and the TUI became unresponsive during LLM calls.
 
-**Fix (two layers):**
+The streaming path (`stream()`) already used `litellm.acompletion()` and was unaffected. Only the non-streaming paths were blocking.
 
-- **`litellm.py`**: Added retry with exponential backoff for transient errors in the `except Exception` handler, matching the existing `RateLimitError` retry logic.
-- **`event_loop_node.py`**: After the stream completes, if a recoverable error occurred AND the response is empty (no text, no tool calls), raise `ConnectionError` so the outer transient-error handler catches it with proper backoff instead of silently burning judge iterations.
+## Changes
 
-### 2. Webhook triggers create separate sessions instead of sharing the primary session
+### LLM Provider Interface (`provider.py`)
 
-**Root cause:** `AgentRuntime._make_handler()` called `self.trigger(entry_point_id, {...})` without any `session_state`, so each webhook execution created a brand new session directory. The webhook execution couldn't access user-defined rules from the primary session, and logs were scattered across multiple session directories.
+- Added `acomplete()` with a `run_in_executor` default — any `LLMProvider` subclass automatically gets a non-blocking async path, even without overriding
+- Added `acomplete_with_tools()` with the same safety-net pattern
+- Updated `stream()` default implementation to call `acomplete()` instead of sync `complete()`
 
-**Fix:** Added `_get_primary_session_state()` to `AgentRuntime`. When a webhook fires, it finds the active primary session, reads its `state.json`, and passes `resume_session_id` + filtered memory as `session_state`. The webhook execution now runs in the same session directory, with access to shared memory (rules, config) while stale outputs from previous runs are filtered out based on the async entry node's declared `input_keys`.
+### LiteLLMProvider (`litellm.py`)
 
-### 3. Shared-session executions overwrite the primary session's state.json
+- Added `_acompletion_with_rate_limit_retry()` — async mirror of the sync retry logic, using `litellm.acompletion()` for non-blocking HTTP and `asyncio.sleep()` for non-blocking backoff
+- Added native `acomplete()` override — bypasses `run_in_executor`, uses true async I/O
+- Added native `acomplete_with_tools()` override — async tool-use loop
 
-**Root cause:** `ExecutionStream._run_execution()` unconditionally called `_write_session_state()` at start, completion, error, and cancellation. When a webhook execution shared the primary session via `resume_session_id`, these writes would overwrite the primary session's state.json with the webhook execution's state.
+### AnthropicProvider (`anthropic.py`)
 
-**Fix:** Added `_is_shared_session` guard. When `session_state` contains `resume_session_id`, all `_write_session_state()` calls are skipped — the primary execution owns `state.json`, and `_write_progress()` in the executor keeps memory up-to-date at every node transition.
+- Added `acomplete()` and `acomplete_with_tools()` delegates to `self._provider.acomplete()`
 
-### 4. TUI crashes with `call_from_thread` errors on webhook events
+### MockLLMProvider (`mock.py`)
 
-**Root cause:** The webhook HTTP server runs on Textual's main event loop thread. When webhook events fire, `_handle_event` called `call_from_thread()` — but this method requires being called from a *different* thread. Calling it from Textual's own thread raises an exception, flooding the logs with errors for every event bus emission.
+- Added `acomplete()` and `acomplete_with_tools()` — call through to sync (no I/O, instant return)
 
-**Fix:** Check `threading.get_ident() == self._thread_id` before deciding how to route the event. If already on Textual's thread, call `_route_event()` directly. Otherwise, use `call_from_thread()` as before.
+### Framework Call Sites (13 direct + 4 indirect)
 
-### 5. Stale memory from previous webhook runs leaks into new executions
+| File | Method | Change |
+|------|--------|--------|
+| `event_loop_node.py` | compaction summary | `complete()` → `await acomplete()` |
+| `node.py` | LLMNode execute (7 sites) | `complete()` / `complete_with_tools()` → async |
+| `judge.py` | HybridJudge evaluate | `complete()` → `await acomplete()` |
+| `conversation_judge.py` | Level 2 judge | `complete()` → `await acomplete()` |
+| `worker_node.py` | WorkerNode execute | `complete()` → `await acomplete()` |
+| `edge.py` | `should_traverse()`, `_llm_decide()` | Made async, `complete()` → `await acomplete()` |
+| `output_cleaner.py` | `clean_output()` | Made async, `complete()` → `await acomplete()` |
+| `executor.py` | `_follow_edges()`, `_get_all_traversable_edges()` | Made async, propagated `await` to all callers |
+| `runner.py` | capability check | `complete()` → `await acomplete()` |
+| `orchestrator.py` | multi-agent routing | `complete()` → `await acomplete()` |
 
-**Root cause:** `_get_primary_session_state()` initially passed ALL memory from the primary session's `state.json`, including outputs from previous webhook runs (`emails`, `actions_taken`, `summary_report`). When `fetch-emails` received these stale outputs in memory, edge conditions and the node's own logic treated them as already-complete work.
+### Intentionally Left As-Is
 
-**Fix:** Filter memory to only the keys declared in the async entry node's `input_keys` (e.g. `rules`, `max_emails`). Stale outputs from previous runs are excluded so each webhook trigger starts with clean execution state.
+- `node.py:_extract_json()` — rare last-resort fallback that creates its own provider instance; not on the hot path
+- `context_handoff.py:_llm_summary()` — not called from the executor's async context
+- `testing/llm_judge.py` — test-only utility
 
-### 6. fetch-emails skipped on subsequent webhook triggers (stale conversation restore)
+### Tests
 
-**Root cause:** Even after fixing stale memory, `fetch-emails` was still skipped. The `EventLoopNode._restore()` crash-recovery mechanism loaded the previous webhook run's conversation from `FileConversationStore`, which included a stale `OutputAccumulator` (stored in the cursor). The judge saw outputs already filled and accepted immediately without the LLM doing any work.
+- 5 new async tests in `test_litellm_provider.py`:
+  - `test_acomplete_uses_acompletion` — verifies `litellm.acompletion` is called
+  - `test_acomplete_does_not_block_event_loop` — heartbeat task runs concurrently during a simulated 300ms LLM call
+  - `test_acomplete_with_tools_uses_acompletion` — verifies async tool-use path
+  - `test_mock_provider_acomplete` — MockLLMProvider async works
+  - `test_base_provider_acomplete_offloads_to_executor` — verifies `run_in_executor` runs on a different thread
+- Fixed 3 test providers (`test_execution_stream.py`, `test_llm_judge.py`, `test_event_loop_integration.py`) that were missing the `max_retries` parameter
+- All 765 existing tests pass
 
-**Fix:** In the executor, detect fresh shared-session executions (`resume_session_id` present, no `paused_at`, no `resume_from_checkpoint`). Before the node runs, clear the stale cursor (resets the `OutputAccumulator` and iteration counter) and append a transition marker message to the conversation. The conversation history is preserved (continuous memory), but the execution state is fresh. The LLM sees the full thread plus a "NEW EVENT TRIGGER" marker and processes the new event from scratch.
+## Test plan
 
-## Other Changes
-
-### AgentRunner.load() now supports multi-entry agents
-
-- Reads `conversation_mode`, `identity_prompt`, `async_entry_points`, and `runtime_config` from agent modules
-- Always creates a primary "default" entry point alongside any async entry points
-- Passes `AgentRuntimeConfig` (webhook settings) through to `create_agent_runtime()`
-
-### Graph validation supports multiple entry candidates
-
-- `workflow.py` and `agent_builder_server.py`: Reachability check now starts from ALL entry candidates (nodes with no incoming edges), not just the first one. Fixes false "unreachable nodes" errors for agents with async entry points.
-
-### ExecutionStream preserves graph metadata
-
-- `_create_modified_graph()` now copies `conversation_mode`, `identity_prompt`, and `async_entry_points` from the original graph. Previously these were silently dropped, breaking continuous conversation mode and event routing for webhook-triggered executions.
-
-## Test Plan
-
-- [x] `test_execution_stream.py` — existing tests pass + new `test_shared_session_reuses_directory_and_memory` verifies session sharing, memory access, and state.json ownership
-- [x] `test_event_loop_node.py` — existing tests pass + new `test_recoverable_stream_error_retried_not_silent` verifies recoverable stream errors raise `ConnectionError` instead of silently producing empty results
-- [x] `test_executor*.py` — all executor tests pass
-- [x] Gmail Inbox Guardian agent validates successfully
+- [x] All 765 existing tests pass (no regressions)
+- [x] 5 new async tests pass, including event-loop-blocking proof test
+- [ ] Manual smoke test: run an agent with `hive run` and verify TUI remains responsive during LLM calls
+- [ ] Manual smoke test: run parallel node execution and verify nodes execute concurrently, not serially

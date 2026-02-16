@@ -627,7 +627,7 @@ class GraphExecutor:
                     )
                     # Skip execution — follow outgoing edges using current memory
                     skip_result = NodeResult(success=True, output=memory.read_all())
-                    next_node = self._follow_edges(
+                    next_node = await self._follow_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
@@ -877,7 +877,7 @@ class GraphExecutor:
                         )
 
                         # Check if there's an ON_FAILURE edge to follow
-                        next_node = self._follow_edges(
+                        next_node = await self._follow_edges(
                             graph=graph,
                             goal=goal,
                             current_node_id=current_node_id,
@@ -1032,7 +1032,7 @@ class GraphExecutor:
                     self._write_progress(current_node_id, path, memory, node_visit_counts)
                 else:
                     # Get all traversable edges for fan-out detection
-                    traversable_edges = self._get_all_traversable_edges(
+                    traversable_edges = await self._get_all_traversable_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
@@ -1092,7 +1092,7 @@ class GraphExecutor:
                             break
                     else:
                         # Sequential: follow single edge (existing logic via _follow_edges)
-                        next_node = self._follow_edges(
+                        next_node = await self._follow_edges(
                             graph=graph,
                             goal=goal,
                             current_node_id=current_node_id,
@@ -1587,7 +1587,7 @@ class GraphExecutor:
         # Should never reach here due to validation above
         raise RuntimeError(f"Unhandled node type: {node_spec.node_type}")
 
-    def _follow_edges(
+    async def _follow_edges(
         self,
         graph: GraphSpec,
         goal: Goal,
@@ -1602,7 +1602,7 @@ class GraphExecutor:
         for edge in edges:
             target_node_spec = graph.get_node(edge.target)
 
-            if edge.should_traverse(
+            if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
                 memory=memory.read_all(),
@@ -1628,7 +1628,7 @@ class GraphExecutor:
                         self.logger.warning(f"⚠ Output validation failed: {validation.errors}")
 
                         # Clean the output
-                        cleaned_output = self.output_cleaner.clean_output(
+                        cleaned_output = await self.output_cleaner.clean_output(
                             output=output_to_validate,
                             source_node_id=current_node_id,
                             target_node_spec=target_node_spec,
@@ -1666,7 +1666,7 @@ class GraphExecutor:
 
         return None
 
-    def _get_all_traversable_edges(
+    async def _get_all_traversable_edges(
         self,
         graph: GraphSpec,
         goal: Goal,
@@ -1686,7 +1686,7 @@ class GraphExecutor:
 
         for edge in edges:
             target_node_spec = graph.get_node(edge.target)
-            if edge.should_traverse(
+            if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
                 memory=memory.read_all(),
@@ -1828,7 +1828,7 @@ class GraphExecutor:
                             f"⚠ Output validation failed for branch "
                             f"{branch.node_id}: {validation.errors}"
                         )
-                        cleaned_output = self.output_cleaner.clean_output(
+                        cleaned_output = await self.output_cleaner.clean_output(
                             output=mem_snapshot,
                             source_node_id=source_node_spec.id if source_node_spec else "unknown",
                             target_node_spec=node_spec,
