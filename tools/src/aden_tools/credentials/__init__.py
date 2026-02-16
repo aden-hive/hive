@@ -66,6 +66,7 @@ from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
+from .razorpay import RAZORPAY_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .serpapi import SERPAPI_CREDENTIALS
 from .shell_config import (
@@ -92,6 +93,7 @@ CREDENTIAL_SPECS = {
     **GOOGLE_CALENDAR_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
+    **RAZORPAY_CREDENTIALS,
     **TELEGRAM_CREDENTIALS,
     **BIGQUERY_CREDENTIALS,
     **CALCOM_CREDENTIALS,
@@ -131,6 +133,7 @@ __all__ = [
     "SLACK_CREDENTIALS",
     "APOLLO_CREDENTIALS",
     "SERPAPI_CREDENTIALS",
+    "RAZORPAY_CREDENTIALS",
     "TELEGRAM_CREDENTIALS",
     "BIGQUERY_CREDENTIALS",
     "CALCOM_CREDENTIALS",
