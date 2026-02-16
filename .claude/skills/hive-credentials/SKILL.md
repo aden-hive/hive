@@ -508,7 +508,7 @@ All credential specs are defined in `tools/src/aden_tools/credentials/`:
 | `llm.py`          | LLM Providers | `anthropic`                                   | No             |
 | `search.py`       | Search Tools  | `brave_search`, `google_search`, `google_cse` | No             |
 | `email.py`        | Email         | `resend`                                      | No             |
-| `integrations.py` | Integrations  | `github`, `hubspot`                           | No / Yes       |
+| `integrations.py` | Integrations  | `github`, `hubspot`, `google_calendar_oauth`  | No / Yes       |
 
 **Note:** Additional LLM providers (Cerebras, Groq, OpenAI) are handled by LiteLLM via environment
 variables (`CEREBRAS_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`) but are not yet in CREDENTIAL_SPECS.
