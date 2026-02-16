@@ -56,7 +56,7 @@ NEVER ask the user to pick between roles. Your job is to identify the right role
 job_search_node = NodeSpec(
     id="job-search",
     name="Job Search",
-    description="Search for 10 jobs matching identified roles and scrape job posting details",
+    description="Search for 10 jobs matching identified roles by scraping job board sites directly",
     node_type="event_loop",
     client_facing=False,
     max_node_visits=1,
@@ -72,9 +72,20 @@ You are a job search specialist. Your task is to find 10 relevant job openings.
 **INPUT:** You have access to role_analysis containing target roles and skills.
 
 **PROCESS:**
-1. Use web_search to find job postings for each target role (search queries like "[role title] jobs hiring now")
-2. Use web_scrape to get details from promising job posting URLs
-3. Gather 10 quality job listings total across the target roles
+Use web_scrape to directly scrape job listings from these job boards. Build search URLs with the role title:
+
+**Recommended Job Sites (scrape these directly):**
+1. **LinkedIn Jobs:** https://www.linkedin.com/jobs/search/?keywords={role_title}
+2. **Indeed:** https://www.indeed.com/jobs?q={role_title}
+3. **Glassdoor:** https://www.glassdoor.com/Job/jobs.htm?sc.keyword={role_title}
+4. **Wellfound (Startups):** https://wellfound.com/jobs?q={role_title}
+5. **RemoteOK:** https://remoteok.com/remote-{role_title}-jobs
+
+**Strategy:**
+- For each target role in role_analysis, scrape 1-2 job board search result pages
+- Extract job listings from the scraped HTML
+- If a job looks promising, scrape its detail page for more info
+- Gather 10 quality job listings total across the target roles
 
 **For each job, extract:**
 - Job title
@@ -87,9 +98,9 @@ You are a job search specialist. Your task is to find 10 relevant job openings.
 **OUTPUT:** Once you have 10 jobs, call:
 set_output("job_listings", "<JSON array of 10 job objects with title, company, location, description, url, contact_info>")
 
-Focus on finding REAL, current job postings. Skip aggregator sites when possible — go to company career pages or specific job boards.
+Focus on finding REAL, current job postings with actual URLs the user can visit.
 """,
-    tools=["web_search", "web_scrape"],
+    tools=["web_scrape"],
 )
 
 # Node 3: Job Review (client-facing)
