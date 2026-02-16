@@ -23,7 +23,6 @@ HUBSPOT_CREDENTIALS = {
             "hubspot_get_deal",
             "hubspot_create_deal",
             "hubspot_update_deal",
-            "hubspot_update_deal_stage",
         ],
         required=True,
         startup_required=False,

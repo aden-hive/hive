@@ -218,7 +218,6 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
-        "hubspot_update_deal_stage",
         "news_search",
         "news_headlines",
         "news_by_company",
