@@ -42,6 +42,7 @@ Credential categories:
 - slack.py: Slack workspace credentials
 - google_maps.py: Google Maps Platform credentials
 - calcom.py: Cal.com scheduling API credentials
+- stripe.py: Stripe payment processing credentials
 
 Note: Tools that don't need credentials simply omit the 'credentials' parameter
 from their register_tools() function. This convention is enforced by CI tests.
@@ -66,7 +67,6 @@ from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
-from .razorpay import RAZORPAY_CREDENTIALS
 from .search import SEARCH_CREDENTIALS
 from .serpapi import SERPAPI_CREDENTIALS
 from .shell_config import (
@@ -77,6 +77,7 @@ from .shell_config import (
 )
 from .slack import SLACK_CREDENTIALS
 from .store_adapter import CredentialStoreAdapter
+from .stripe import STRIPE_CREDENTIALS
 from .telegram import TELEGRAM_CREDENTIALS
 
 # Merged registry of all credentials
@@ -93,10 +94,10 @@ CREDENTIAL_SPECS = {
     **GOOGLE_CALENDAR_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
-    **RAZORPAY_CREDENTIALS,
     **TELEGRAM_CREDENTIALS,
     **BIGQUERY_CREDENTIALS,
     **CALCOM_CREDENTIALS,
+    **STRIPE_CREDENTIALS,
 }
 
 __all__ = [
@@ -120,7 +121,7 @@ __all__ = [
     "add_env_var_to_shell_config",
     # Merged registry
     "CREDENTIAL_SPECS",
-    # Category registries (for direct access if needed)
+    # Category registriess (for direct access if needed)
     "LLM_CREDENTIALS",
     "NEWS_CREDENTIALS",
     "SEARCH_CREDENTIALS",
@@ -133,8 +134,8 @@ __all__ = [
     "SLACK_CREDENTIALS",
     "APOLLO_CREDENTIALS",
     "SERPAPI_CREDENTIALS",
-    "RAZORPAY_CREDENTIALS",
     "TELEGRAM_CREDENTIALS",
     "BIGQUERY_CREDENTIALS",
     "CALCOM_CREDENTIALS",
+    "STRIPE_CREDENTIALS",
 ]
