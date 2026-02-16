@@ -1,0 +1,26 @@
+{
+    "sample_mutual_nda": {
+        "contract_type": "Mutual NDA",
+        "confidentiality_type": "mutual",
+        "risk_score": 5.0,
+        "duration_months": 24,
+        "has_liability_cap": false,
+        "description": "Standard mutual NDA with no unusual provisions"
+    },
+    "vendor_nda_onesided": {
+        "contract_type": "One-Sided NDA",
+        "confidentiality_type": "one-sided",
+        "risk_score": 7.5,
+        "duration_months": 36,
+        "has_liability_cap": false,
+        "description": "One-sided NDA favoring vendor with unlimited liability"
+    },
+    "tech_company_nda": {
+        "contract_type": "Mutual NDA",
+        "confidentiality_type": "mutual",
+        "risk_score": 4.0,
+        "duration_months": 12,
+        "has_liability_cap": true,
+        "description": "Well-balanced mutual NDA with liability cap"
+    }
+}
