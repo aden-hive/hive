@@ -1,3 +1,4 @@
+cat > power_bi_tool.py << 'EOF'
 """
 Power BI Tool - Dataset Refresh and Report Export
 
@@ -46,6 +47,11 @@ class _PowerBIClient:
             return {"error": "Resource not found"}
         if response.status_code == 429:
             return {"error": "Rate limit exceeded"}
+        if response.status_code == 202:
+            return {
+                "status": "accepted",
+                "request_id": response.headers.get("x-ms-request-id")
+            }
         if response.status_code >= 400:
             try:
                 detail = response.json().get("message", response.text)
@@ -68,6 +74,7 @@ class _PowerBIClient:
         response = httpx.post(
             f"{POWER_BI_API_BASE}/groups/{workspace_id}/datasets/{dataset_id}/refreshes",
             headers=self._headers,
+            json={"notifyOption": "NoNotification"},
             timeout=30.0,
         )
         return self._handle_response(response)
@@ -91,16 +98,16 @@ class _PowerBIClient:
         return self._handle_response(response)
 
     def export_report(
-        self, workspace_id: str, report_id: str, format: str = "PDF"
+        self, workspace_id: str, report_id: str, export_format: str = "PDF"
     ) -> dict[str, Any]:
-        """Export a report to PDF or PPTX."""
-        if format.upper() not in ["PDF", "PPTX"]:
-            return {"error": f"Invalid format: {format}. Must be PDF or PPTX"}
+        """Export a report to PDF, PPTX, or PNG."""
+        if export_format.upper() not in ["PDF", "PPTX", "PNG"]:
+            return {"error": f"Invalid format: {export_format}. Must be PDF, PPTX, or PNG"}
         
         response = httpx.post(
-            f"{POWER_BI_API_BASE}/groups/{workspace_id}/reports/{report_id}/Export",
+            f"{POWER_BI_API_BASE}/groups/{workspace_id}/reports/{report_id}/ExportTo",
             headers=self._headers,
-            json={"format": format.upper()},
+            json={"format": export_format.upper()},
             timeout=30.0,
         )
         return self._handle_response(response)
@@ -215,15 +222,15 @@ def register_tools(
 
     @mcp.tool()
     def power_bi_export_report(
-        workspace_id: str, report_id: str, format: str = "PDF"
+        workspace_id: str, report_id: str, export_format: str = "PDF"
     ) -> dict:
         """
-        Export a Power BI report to PDF or PPTX.
+        Export a Power BI report to PDF, PPTX, or PNG.
 
         Args:
             workspace_id: The Power BI workspace ID
             report_id: The report ID to export
-            format: Export format - "PDF" or "PPTX" (default: "PDF")
+            export_format: Export format - "PDF", "PPTX", or "PNG" (default: "PDF")
 
         Returns:
             Dict with export result or error
@@ -232,8 +239,9 @@ def register_tools(
         if isinstance(client, dict):
             return client
         try:
-            return client.export_report(workspace_id, report_id, format)
+            return client.export_report(workspace_id, report_id, export_format)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+EOF
