@@ -120,3 +120,146 @@ async def test_execution_stream_retention(tmp_path):
 
     await stream.stop()
     await storage.stop()
+
+
+@pytest.mark.asyncio
+async def test_shared_session_reuses_directory_and_memory(tmp_path):
+    """When an async entry point uses resume_session_id, it should:
+    1. Run in the same session directory as the primary execution
+    2. Have access to the primary session's memory
+    3. NOT overwrite the primary session's state.json
+    """
+    goal = Goal(
+        id="test-goal",
+        name="Test",
+        description="Shared session test",
+        success_criteria=[
+            SuccessCriterion(
+                id="result",
+                description="Result present",
+                metric="output_contains",
+                target="result",
+            )
+        ],
+        constraints=[],
+    )
+
+    node = NodeSpec(
+        id="hello",
+        name="Hello",
+        description="Return a result",
+        node_type="llm_generate",
+        input_keys=["user_name"],
+        output_keys=["result"],
+        system_prompt='Return JSON: {"result": "ok"}',
+    )
+
+    graph = GraphSpec(
+        id="test-graph",
+        goal_id=goal.id,
+        version="1.0.0",
+        entry_node="hello",
+        entry_points={"start": "hello"},
+        terminal_nodes=["hello"],
+        pause_nodes=[],
+        nodes=[node],
+        edges=[],
+        default_model="dummy",
+        max_tokens=10,
+    )
+
+    storage = ConcurrentStorage(tmp_path)
+    await storage.start()
+
+    from framework.storage.session_store import SessionStore
+
+    session_store = SessionStore(tmp_path)
+
+    # Primary stream
+    primary_stream = ExecutionStream(
+        stream_id="primary",
+        entry_spec=EntryPointSpec(
+            id="primary",
+            name="Primary",
+            entry_node="hello",
+            trigger_type="manual",
+            isolation_level="shared",
+        ),
+        graph=graph,
+        goal=goal,
+        state_manager=SharedStateManager(),
+        storage=storage,
+        outcome_aggregator=OutcomeAggregator(goal, EventBus()),
+        event_bus=None,
+        llm=DummyLLMProvider(),
+        tools=[],
+        tool_executor=None,
+        session_store=session_store,
+    )
+
+    await primary_stream.start()
+
+    # Run primary execution — creates session directory and state.json
+    primary_exec_id = await primary_stream.execute({"user_name": "alice"})
+    primary_result = await primary_stream.wait_for_completion(primary_exec_id, timeout=5)
+    assert primary_result is not None
+    assert primary_result.success
+
+    # Verify primary session's state.json exists and has the primary entry_point
+    primary_state_path = tmp_path / "sessions" / primary_exec_id / "state.json"
+    assert primary_state_path.exists()
+    primary_state = json.loads(primary_state_path.read_text())
+    assert primary_state["entry_point"] == "primary"
+
+    # Async stream — simulates a webhook entry point sharing the session
+    async_stream = ExecutionStream(
+        stream_id="webhook",
+        entry_spec=EntryPointSpec(
+            id="webhook",
+            name="Webhook",
+            entry_node="hello",
+            trigger_type="event",
+            isolation_level="shared",
+        ),
+        graph=graph,
+        goal=goal,
+        state_manager=SharedStateManager(),
+        storage=storage,
+        outcome_aggregator=OutcomeAggregator(goal, EventBus()),
+        event_bus=None,
+        llm=DummyLLMProvider(),
+        tools=[],
+        tool_executor=None,
+        session_store=session_store,
+    )
+
+    await async_stream.start()
+
+    # Run async execution with resume_session_id pointing to primary session
+    session_state = {
+        "resume_session_id": primary_exec_id,
+        "memory": {"rules": "star important emails"},
+    }
+    async_exec_id = await async_stream.execute({"event": "new_email"}, session_state=session_state)
+
+    # Should reuse the primary session ID
+    assert async_exec_id == primary_exec_id
+
+    async_result = await async_stream.wait_for_completion(async_exec_id, timeout=5)
+    assert async_result is not None
+    assert async_result.success
+
+    # State.json should NOT have been overwritten by the async execution
+    # (it should still show the primary entry point)
+    final_state = json.loads(primary_state_path.read_text())
+    assert final_state["entry_point"] == "primary"
+
+    # Verify only ONE session directory exists (not two)
+    sessions_dir = tmp_path / "sessions"
+    session_dirs = [d for d in sessions_dir.iterdir() if d.is_dir()]
+    assert len(session_dirs) == 1
+    assert session_dirs[0].name == primary_exec_id
+
+    await primary_stream.stop()
+    await async_stream.stop()
+    await storage.stop()

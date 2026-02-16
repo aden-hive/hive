@@ -726,6 +726,16 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
+                if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
+                    wait = _compute_retry_delay(attempt, exception=e)
+                    logger.warning(
+                        f"[stream-retry] {self.model} transient error "
+                        f"({type(e).__name__}): {e!s}. "
+                        f"Retrying in {wait:.1f}s "
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
                 recoverable = _is_stream_transient_error(e)
                 yield StreamErrorEvent(error=str(e), recoverable=recoverable)
                 return

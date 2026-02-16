@@ -459,6 +459,66 @@ class GraphExecutor:
 
         steps = 0
 
+        # Fresh shared-session execution: clear stale cursor so the entry
+        # node doesn't restore a filled OutputAccumulator from the previous
+        # webhook run (which would cause the judge to accept immediately).
+        # The conversation history is preserved (continuous memory).
+        _is_fresh_shared = bool(
+            session_state
+            and session_state.get("resume_session_id")
+            and not session_state.get("paused_at")
+            and not session_state.get("resume_from_checkpoint")
+        )
+        if _is_fresh_shared and is_continuous and self._storage_path:
+            try:
+                from framework.storage.conversation_store import FileConversationStore
+
+                entry_conv_path = self._storage_path / "conversations" / current_node_id
+                if entry_conv_path.exists():
+                    _store = FileConversationStore(base_path=entry_conv_path)
+
+                    # Read cursor to find next seq for the transition marker.
+                    _cursor = await _store.read_cursor() or {}
+                    _next_seq = _cursor.get("next_seq", 0)
+                    if _next_seq == 0:
+                        # Fallback: scan part files for max seq
+                        _parts = await _store.read_parts()
+                        if _parts:
+                            _next_seq = max(p.get("seq", 0) for p in _parts) + 1
+
+                    # Reset cursor — clears stale accumulator outputs and
+                    # iteration counter so the node starts fresh work while
+                    # the conversation thread carries forward.
+                    await _store.write_cursor({})
+
+                    # Append a transition marker so the LLM knows a new
+                    # event arrived and previous results are outdated.
+                    await _store.write_part(
+                        _next_seq,
+                        {
+                            "role": "user",
+                            "content": (
+                                "--- NEW EVENT TRIGGER ---\n"
+                                "A new event has been received. "
+                                "Process this as a fresh request — "
+                                "previous outputs are no longer valid."
+                            ),
+                            "seq": _next_seq,
+                            "is_transition_marker": True,
+                        },
+                    )
+                    self.logger.info(
+                        "🔄 Cleared stale cursor and added transition marker "
+                        "for shared-session entry node '%s'",
+                        current_node_id,
+                    )
+            except Exception:
+                self.logger.debug(
+                    "Could not prepare conversation store for shared-session entry node '%s'",
+                    current_node_id,
+                    exc_info=True,
+                )
+
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
 

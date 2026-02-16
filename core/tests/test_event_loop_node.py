@@ -1188,6 +1188,65 @@ class TestTransientErrorRetry:
         assert len(retry_events) == 1
         assert retry_events[0].data["retry_count"] == 1
 
+    @pytest.mark.asyncio
+    async def test_recoverable_stream_error_retried_not_silent(self, runtime, node_spec, memory):
+        """Recoverable StreamErrorEvent with empty response should raise ConnectionError.
+
+        Previously, recoverable stream errors were silently swallowed,
+        producing empty responses that the judge retried — creating an
+        infinite loop of 50+ empty-response iterations.  Now they raise
+        ConnectionError so the outer transient-error retry handles them
+        with proper backoff.
+        """
+        node_spec.output_keys = ["result"]
+
+        call_index = 0
+
+        class RecoverableErrorThenSuccessLLM(LLMProvider):
+            async def stream(self, messages, system="", tools=None, max_tokens=4096):
+                nonlocal call_index
+                idx = call_index
+                call_index += 1
+                if idx == 0:
+                    # Recoverable error with no content
+                    yield StreamErrorEvent(
+                        error="503 service unavailable",
+                        recoverable=True,
+                    )
+                elif idx == 1:
+                    # Success: set output
+                    for event in tool_call_scenario(
+                        "set_output", {"key": "result", "value": "done"}
+                    ):
+                        yield event
+                else:
+                    # Subsequent calls: text-only (no more tool calls)
+                    for event in text_scenario("done"):
+                        yield event
+
+            def complete(self, messages, system="", **kwargs):
+                return LLMResponse(content="ok", model="mock", stop_reason="stop")
+
+            def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs):
+                return LLMResponse(content="", model="mock", stop_reason="stop")
+
+        llm = RecoverableErrorThenSuccessLLM()
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        assert result.output.get("result") == "done"
+        # call 0: recoverable error → ConnectionError raised → outer retry
+        # call 1: set_output tool call succeeds
+        # call 2: inner tool loop re-invokes LLM after tool result → text "done"
+        assert call_index == 3
+
 
 class TestIsTransientError:
     """Unit tests for _is_transient_error() classification."""

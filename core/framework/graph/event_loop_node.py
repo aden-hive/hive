@@ -1108,6 +1108,7 @@ class EventLoopNode(NodeProtocol):
 
             accumulated_text = ""
             tool_calls: list[ToolCallEvent] = []
+            _stream_error: StreamErrorEvent | None = None
 
             # Stream LLM response
             async for event in ctx.llm.stream(
@@ -1132,7 +1133,16 @@ class EventLoopNode(NodeProtocol):
                 elif isinstance(event, StreamErrorEvent):
                     if not event.recoverable:
                         raise RuntimeError(f"Stream error: {event.error}")
-                    logger.warning(f"Recoverable stream error: {event.error}")
+                    _stream_error = event
+                    logger.warning("Recoverable stream error: %s", event.error)
+
+            # If a recoverable stream error produced an empty response,
+            # raise so the outer transient-error retry can handle it
+            # with proper backoff instead of burning judge iterations.
+            if _stream_error and not accumulated_text and not tool_calls:
+                raise ConnectionError(
+                    f"Stream failed with recoverable error: {_stream_error.error}"
+                )
 
             final_text = accumulated_text
             logger.info(
