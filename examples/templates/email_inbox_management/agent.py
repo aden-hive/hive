@@ -1,4 +1,4 @@
-"""Agent graph construction for Inbox Management Agent."""
+"""Agent graph construction for Email Inbox Management Agent."""
 
 from pathlib import Path
 
@@ -21,8 +21,8 @@ from .nodes import (
 
 # Goal definition
 goal = Goal(
-    id="inbox-management",
-    name="Inbox Management",
+    id="email-inbox-management",
+    name="Email Inbox Management",
     description=(
         "Manage Gmail inbox emails using user-defined free-text rules. "
         "Fetch inbox emails (configurable batch size, default 100), apply the user's "
@@ -143,15 +143,15 @@ loop_config = {
 }
 conversation_mode = "continuous"
 identity_prompt = (
-    "You are an inbox management assistant. You help users manage "
+    "You are an email inbox management assistant. You help users manage "
     "their Gmail inbox by applying free-text rules to emails — trash, "
     "mark as spam, mark important, mark read/unread, star, and more."
 )
 
 
-class InboxManagementAgent:
+class EmailInboxManagementAgent:
     """
-    Inbox Management Agent — continuous 4-node pipeline for email triage.
+    Email Inbox Management Agent — continuous 4-node pipeline for email triage.
 
     Flow: intake -> fetch-emails -> classify-and-act -> report -> intake (loop)
 
@@ -179,7 +179,7 @@ class InboxManagementAgent:
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
         return GraphSpec(
-            id="inbox-management-graph",
+            id="email-inbox-management-graph",
             goal_id=self.goal.id,
             version="1.0.0",
             entry_node=self.entry_node,
@@ -198,7 +198,7 @@ class InboxManagementAgent:
 
     def _setup(self, mock_mode=False) -> None:
         """Set up the agent runtime with sessions, checkpoints, and logging."""
-        self._storage_path = Path.home() / ".hive" / "agents" / "inbox_management"
+        self._storage_path = Path.home() / ".hive" / "agents" / "email_inbox_management"
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
@@ -372,4 +372,4 @@ class InboxManagementAgent:
 
 
 # Create default instance
-default_agent = InboxManagementAgent()
+default_agent = EmailInboxManagementAgent()

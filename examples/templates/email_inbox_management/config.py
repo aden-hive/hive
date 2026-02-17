@@ -9,7 +9,7 @@ default_config = RuntimeConfig()
 
 @dataclass
 class AgentMetadata:
-    name: str = "Inbox Management Agent"
+    name: str = "Email Inbox Management Agent"
     version: str = "1.0.0"
     description: str = (
         "Automatically manage Gmail inbox emails using free-text rules. "
@@ -17,7 +17,7 @@ class AgentMetadata:
         "and more — using only native Gmail actions."
     )
     intro_message: str = (
-        "Hi! I'm your inbox management assistant. Tell me your rules "
+        "Hi! I'm your email inbox management assistant. Tell me your rules "
         "(what to trash, mark as spam, mark important, etc.) and I'll sort "
         "through your emails. How would you like me to manage your inbox?"
     )
