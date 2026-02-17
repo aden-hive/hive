@@ -11,7 +11,6 @@ The executor:
 
 import asyncio
 import logging
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,13 +20,10 @@ from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import (
-    FunctionNode,
-    LLMNode,
     NodeContext,
     NodeProtocol,
     NodeResult,
     NodeSpec,
-    RouterNode,
     SharedMemory,
 )
 from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
@@ -833,9 +829,13 @@ class GraphExecutor:
                     # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
                     max_retries = getattr(node_spec, "max_retries", 3)
 
-                    # Event loop nodes handle retry internally via judge —
-                    # executor retry is catastrophic (retry multiplication)
-                    if node_spec.node_type == "event_loop" and max_retries > 0:
+                    # EventLoopNode instances handle retry internally via judge —
+                    # executor retry would cause catastrophic retry multiplication.
+                    # Only override for actual EventLoopNode instances, not custom
+                    # NodeProtocol implementations that happen to use node_type="event_loop"
+                    from framework.graph.event_loop_node import EventLoopNode
+
+                    if isinstance(node_impl, EventLoopNode) and max_retries > 0:
                         self.logger.warning(
                             f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
                             "Overriding to 0 — event loop nodes handle retry internally via judge."
@@ -1465,16 +1465,17 @@ class GraphExecutor:
             cumulative_output_keys=cumulative_output_keys or [],
         )
 
-    # Valid node types - no ambiguous "llm" type allowed
     VALID_NODE_TYPES = {
-        "llm_tool_use",
-        "llm_generate",
-        "router",
-        "function",
-        "human_input",
         "event_loop",
     }
-    DEPRECATED_NODE_TYPES = {"llm_tool_use": "event_loop", "llm_generate": "event_loop"}
+    # Node types removed in v0.5 — provide migration guidance
+    REMOVED_NODE_TYPES = {
+        "function": "event_loop",
+        "llm_tool_use": "event_loop",
+        "llm_generate": "event_loop",
+        "router": "event_loop",  # Unused theoretical infrastructure
+        "human_input": "event_loop",  # Use client_facing=True instead
+    }
 
     def _get_node_implementation(
         self, node_spec: NodeSpec, cleanup_llm_model: str | None = None
@@ -1484,62 +1485,23 @@ class GraphExecutor:
         if node_spec.id in self.node_registry:
             return self.node_registry[node_spec.id]
 
+        # Reject removed node types with migration guidance
+        if node_spec.node_type in self.REMOVED_NODE_TYPES:
+            replacement = self.REMOVED_NODE_TYPES[node_spec.node_type]
+            raise RuntimeError(
+                f"Node type '{node_spec.node_type}' was removed in v0.5. "
+                f"Migrate node '{node_spec.id}' to '{replacement}'. "
+                f"See https://github.com/adenhq/hive/issues/4753 for migration guide."
+            )
+
         # Validate node type
         if node_spec.node_type not in self.VALID_NODE_TYPES:
             raise RuntimeError(
                 f"Invalid node type '{node_spec.node_type}' for node '{node_spec.id}'. "
-                f"Must be one of: {sorted(self.VALID_NODE_TYPES)}. "
-                f"Use 'llm_tool_use' for nodes that call tools, 'llm_generate' for text generation."
+                f"Must be one of: {sorted(self.VALID_NODE_TYPES)}."
             )
 
-        # Warn on deprecated node types
-        if node_spec.node_type in self.DEPRECATED_NODE_TYPES:
-            replacement = self.DEPRECATED_NODE_TYPES[node_spec.node_type]
-            warnings.warn(
-                f"Node type '{node_spec.node_type}' is deprecated. "
-                f"Use '{replacement}' instead. "
-                f"Node: '{node_spec.id}'",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Create based on type
-        if node_spec.node_type == "llm_tool_use":
-            if not node_spec.tools:
-                raise RuntimeError(
-                    f"Node '{node_spec.id}' is type 'llm_tool_use' but declares no tools. "
-                    "Either add tools to the node or change type to 'llm_generate'."
-                )
-            return LLMNode(
-                tool_executor=self.tool_executor,
-                require_tools=True,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
-        if node_spec.node_type == "llm_generate":
-            return LLMNode(
-                tool_executor=None,
-                require_tools=False,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
-        if node_spec.node_type == "router":
-            return RouterNode()
-
-        if node_spec.node_type == "function":
-            # Function nodes need explicit registration
-            raise RuntimeError(
-                f"Function node '{node_spec.id}' not registered. Register with node_registry."
-            )
-
-        if node_spec.node_type == "human_input":
-            # Human input nodes are handled specially by HITL mechanism
-            return LLMNode(
-                tool_executor=None,
-                require_tools=False,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
+        # Create based on type (only event_loop is valid)
         if node_spec.node_type == "event_loop":
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
@@ -1799,14 +1761,19 @@ class GraphExecutor:
                 branch.error = f"Node {branch.node_id} not found in graph"
                 return branch, RuntimeError(branch.error)
 
+            # Get node implementation to check its type
+            branch_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
+
             effective_max_retries = node_spec.max_retries
-            if node_spec.node_type == "event_loop":
-                if effective_max_retries > 1:
-                    self.logger.warning(
-                        f"EventLoopNode '{node_spec.id}' has "
-                        f"max_retries={effective_max_retries}. Overriding "
-                        "to 1 — event loop nodes handle retry internally."
-                    )
+            # Only override for actual EventLoopNode instances, not custom NodeProtocol impls
+            from framework.graph.event_loop_node import EventLoopNode
+
+            if isinstance(branch_impl, EventLoopNode) and effective_max_retries > 1:
+                self.logger.warning(
+                    f"EventLoopNode '{node_spec.id}' has "
+                    f"max_retries={effective_max_retries}. Overriding "
+                    "to 1 — event loop nodes handle retry internally."
+                )
                 effective_max_retries = 1
 
             branch.status = "running"
@@ -1971,10 +1938,6 @@ class GraphExecutor:
     def register_node(self, node_id: str, implementation: NodeProtocol) -> None:
         """Register a custom node implementation."""
         self.node_registry[node_id] = implementation
-
-    def register_function(self, node_id: str, func: Callable) -> None:
-        """Register a function as a node."""
-        self.node_registry[node_id] = FunctionNode(func)
 
     def request_pause(self) -> None:
         """

@@ -68,7 +68,7 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
             {
                 "node_id": "node-2",
                 "node_name": "Format",
-                "node_type": "function",
+                "node_type": "event_loop",
                 "success": True,
                 "total_steps": 1,
                 "tokens_used": 0,
@@ -112,7 +112,7 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
             },
             {
                 "node_id": "node-2",
-                "node_type": "function",
+                "node_type": "event_loop",
                 "step_index": 0,
                 "llm_text": "",
                 "tool_calls": [],

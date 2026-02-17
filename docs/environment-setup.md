@@ -213,7 +213,7 @@ Follow the prompts to:
 
 1. Understand the agent architecture and file structure
 2. Define the agent's goal, success criteria, and constraints
-3. Learn node types (LLM, tool-use, router, function)
+3. Learn node types (event_loop only)
 4. Discover and validate available tools before use
 
 This step establishes the core concepts and rules needed before building an agent.

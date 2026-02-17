@@ -1144,7 +1144,7 @@ class AgentRunner:
         except ImportError:
             # aden_tools not installed - fall back to direct check
             has_llm_nodes = any(
-                node.node_type in ("llm_generate", "llm_tool_use") for node in self.graph.nodes
+                node.node_type == "event_loop" for node in self.graph.nodes
             )
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
