@@ -109,61 +109,76 @@ class _LushaClient:
 
     def search_people(
         self,
-        job_titles: list[str],
-        location: str,
-        seniority: str,
-        industry: str | None = None,
-        company_name: str | None = None,
-        department: str | None = None,
+        *,
+        job_titles: list[str] | None = None,
+        seniority: list[int] | None = None,
+        departments: list[str] | None = None,
+        locations: list[dict[str, str]] | None = None,
+        company_names: list[str] | None = None,
+        industry_ids: list[int] | None = None,
+        search_text: str | None = None,
+        limit: int = 10,
     ) -> dict[str, Any]:
         """Search prospects via /prospecting/contact/search."""
-        search_terms = [*job_titles, seniority]
-        if industry:
-            search_terms.append(industry)
-
-        contact_include: dict[str, Any] = {
-            "searchText": " ".join(s for s in search_terms if s).strip(),
-            "locations": [{"country": location}],
-        }
-        if department:
-            contact_include["departments"] = [department]
+        contact_include: dict[str, Any] = {}
+        if job_titles:
+            contact_include["jobTitles"] = job_titles
+        if seniority:
+            contact_include["seniority"] = seniority
+        if departments:
+            contact_include["departments"] = departments
+        if locations:
+            contact_include["locations"] = locations
+        if search_text:
+            contact_include["searchText"] = search_text
 
         company_include: dict[str, Any] = {}
-        if company_name:
-            company_include["names"] = [company_name]
+        if company_names:
+            company_include["names"] = company_names
+        if industry_ids:
+            company_include["mainIndustriesIds"] = industry_ids
 
-        filters: dict[str, Any] = {"contacts": {"include": contact_include}}
+        filters: dict[str, Any] = {}
+        if contact_include:
+            filters["contacts"] = {"include": contact_include}
         if company_include:
             filters["companies"] = {"include": company_include}
 
         body: dict[str, Any] = {
-            "pages": {"size": 25, "page": 0},
+            "pages": {"size": max(10, min(limit, 50)), "page": 0},
             "filters": filters,
         }
         return self._request("POST", "/prospecting/contact/search", body=body)
 
     def search_companies(
         self,
-        industry_ids: list[int] | None,
-        employee_size: str,
-        location: str,
+        *,
+        industry_ids: list[int] | None = None,
+        employee_size: str | None = None,
+        locations: list[dict[str, str]] | None = None,
+        company_names: list[str] | None = None,
+        search_text: str | None = None,
+        limit: int = 10,
     ) -> dict[str, Any]:
         """Search companies via /prospecting/company/search."""
-        size_range: list[dict[str, int]] = []
-        parts = employee_size.split("-", maxsplit=1)
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            size_range = [{"min": int(parts[0]), "max": int(parts[1])}]
+        company_include: dict[str, Any] = {}
 
-        company_include: dict[str, Any] = {
-            "locations": [{"country": location}],
-        }
-        if size_range:
-            company_include["sizes"] = size_range
+        if employee_size:
+            parts = employee_size.split("-", maxsplit=1)
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                company_include["sizes"] = [{"min": int(parts[0]), "max": int(parts[1])}]
+
+        if locations:
+            company_include["locations"] = locations
         if industry_ids:
             company_include["mainIndustriesIds"] = industry_ids
+        if company_names:
+            company_include["names"] = company_names
+        if search_text:
+            company_include["searchText"] = search_text
 
         body: dict[str, Any] = {
-            "pages": {"size": 25, "page": 0},
+            "pages": {"size": max(10, min(limit, 50)), "page": 0},
             "filters": {
                 "companies": {
                     "include": company_include,
@@ -172,29 +187,24 @@ class _LushaClient:
         }
         return self._request("POST", "/prospecting/company/search", body=body)
 
-    def get_signals(self, entity_type: str, ids: list[str]) -> dict[str, Any]:
+    def get_signals(self, entity_type: str, ids: list[int]) -> dict[str, Any]:
         """Get contact/company signals by IDs."""
         if entity_type not in {"contact", "company"}:
             return {"error": "entity_type must be one of: contact, company"}
         if not ids:
             return {"error": "ids must contain at least one value"}
 
-        try:
-            numeric_ids = [int(v) for v in ids]
-        except (TypeError, ValueError):
-            return {"error": "ids must be numeric Lusha IDs"}
-
         if entity_type == "contact":
             return self._request(
                 "POST",
                 "/api/signals/contacts",
-                body={"contactIds": numeric_ids, "signals": ["allSignals"]},
+                body={"contactIds": ids, "signals": ["allSignals"]},
             )
         return self._request(
             "POST",
             "/api/signals/companies",
             body={
-                "companyIds": numeric_ids,
+                "companyIds": ids,
                 "signals": ["allSignals"],
             },
         )
@@ -285,23 +295,31 @@ def register_tools(
 
     @mcp.tool()
     def lusha_search_people(
-        job_titles: list[str],
-        location: str,
-        seniority: str,
-        industry: str | None = None,
-        company_name: str | None = None,
-        department: str | None = None,
+        job_titles: list[str] | None = None,
+        seniority: list[int] | None = None,
+        departments: list[str] | None = None,
+        locations: list[dict[str, str]] | None = None,
+        company_names: list[str] | None = None,
+        industry_ids: list[int] | None = None,
+        search_text: str | None = None,
+        limit: int = 10,
     ) -> dict:
         """
-        Search prospects using role/location/seniority filters.
+        Search prospects using structured Lusha filters.
 
         Args:
-            job_titles: List of target job titles
-            location: Target location
-            seniority: Seniority level
-            industry: Optional industry filter
-            company_name: Optional company name filter
-            department: Optional department filter
+            job_titles: Job title keywords (e.g. ["CTO", "VP Engineering"])
+            seniority: Seniority level IDs (e.g. [9, 10] for c-suite/founder).
+                Known IDs: 10=founder, 9=c-suite, 8=vp, 7=director, 6=manager,
+                5=senior, 4=entry. Refer to Lusha API docs for the full mapping.
+            departments: Department names (e.g. ["Engineering & Technical"])
+            locations: Location filters, each a dict with optional keys:
+                country, state, city, continent (e.g. [{"country": "United States"}])
+            company_names: Filter by company names (e.g. ["OpenAI", "Google"])
+            industry_ids: Lusha mainIndustriesIds (numeric). Refer to Lusha API
+                docs for the ID-to-industry mapping.
+            search_text: Optional free-text search across contact fields
+            limit: Max results to return (10-50, default 10)
 
         Returns:
             Matching contact list payload (including IDs) or error dict.
@@ -313,11 +331,13 @@ def register_tools(
         try:
             return client.search_people(
                 job_titles=job_titles,
-                location=location,
                 seniority=seniority,
-                industry=industry,
-                company_name=company_name,
-                department=department,
+                departments=departments,
+                locations=locations,
+                company_names=company_names,
+                industry_ids=industry_ids,
+                search_text=search_text,
+                limit=limit,
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -326,18 +346,25 @@ def register_tools(
 
     @mcp.tool()
     def lusha_search_companies(
-        employee_size: str,
-        location: str,
+        employee_size: str | None = None,
+        locations: list[dict[str, str]] | None = None,
         industry_ids: list[int] | None = None,
+        company_names: list[str] | None = None,
+        search_text: str | None = None,
+        limit: int = 10,
     ) -> dict:
         """
         Search companies using firmographic filters.
 
         Args:
             employee_size: Employee size range (e.g. "51-200")
-            location: Company location filter (country name)
+            locations: Location filters, each a dict with optional keys:
+                country, state, city, continent (e.g. [{"country": "United States"}])
             industry_ids: Lusha mainIndustriesIds (numeric). Refer to Lusha API
                 docs for the ID-to-industry mapping.
+            company_names: Filter by company names (e.g. ["Apple", "Microsoft"])
+            search_text: Optional free-text search across company fields
+            limit: Max results to return (10-50, default 10)
 
         Returns:
             Matching company list payload or error dict.
@@ -350,7 +377,10 @@ def register_tools(
             return client.search_companies(
                 industry_ids=industry_ids,
                 employee_size=employee_size,
-                location=location,
+                locations=locations,
+                company_names=company_names,
+                search_text=search_text,
+                limit=limit,
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -358,13 +388,13 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def lusha_get_signals(entity_type: str, ids: list[str]) -> dict:
+    def lusha_get_signals(entity_type: str, ids: list[int]) -> dict:
         """
         Retrieve signals/details for contacts or companies by IDs.
 
         Args:
             entity_type: "contact" or "company"
-            ids: List of Lusha contact/company IDs
+            ids: List of numeric Lusha contact/company IDs
 
         Returns:
             Signal/detail payload for requested entities, or error dict.

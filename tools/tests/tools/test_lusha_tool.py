@@ -93,30 +93,63 @@ class TestLushaClient:
         )
 
     @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
-    def test_search_people_body(self, mock_request):
+    def test_search_people_structured_filters(self, mock_request):
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.json.return_value = {"contacts": [{"id": "c1"}]}
         mock_request.return_value = mock_response
 
         result = self.client.search_people(
-            job_titles=["VP Sales"],
-            location="New York",
-            seniority="vp",
-            industry="software",
-            company_name="Acme",
-            department="sales",
+            job_titles=["VP Sales", "Director Sales"],
+            seniority=[8],
+            departments=["Sales"],
+            locations=[{"country": "United States", "city": "New York"}],
+            company_names=["Acme"],
+            industry_ids=[4, 5],
+            limit=25,
         )
 
         assert result["contacts"][0]["id"] == "c1"
         body = mock_request.call_args.kwargs["json"]
         assert body["pages"] == {"size": 25, "page": 0}
-        assert body["filters"]["contacts"]["include"]["searchText"] == "VP Sales vp software"
-        assert body["filters"]["contacts"]["include"]["locations"] == [{"country": "New York"}]
-        assert body["filters"]["contacts"]["include"]["departments"] == ["sales"]
-        assert "searchText" not in body["filters"]["companies"]["include"]
+        assert body["filters"]["contacts"]["include"]["jobTitles"] == [
+            "VP Sales",
+            "Director Sales",
+        ]
+        assert body["filters"]["contacts"]["include"]["seniority"] == [8]
+        assert body["filters"]["contacts"]["include"]["departments"] == ["Sales"]
+        assert body["filters"]["contacts"]["include"]["locations"] == [
+            {"country": "United States", "city": "New York"}
+        ]
         assert body["filters"]["companies"]["include"]["names"] == ["Acme"]
+        assert body["filters"]["companies"]["include"]["mainIndustriesIds"] == [4, 5]
+        assert "searchText" not in body["filters"]["contacts"]["include"]
         assert mock_request.call_args.args[1] == f"{LUSHA_API_BASE}/prospecting/contact/search"
+
+    @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
+    def test_search_people_with_search_text(self, mock_request):
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"contacts": []}
+        mock_request.return_value = mock_response
+
+        self.client.search_people(search_text="Amit", departments=["Engineering & Technical"])
+
+        body = mock_request.call_args.kwargs["json"]
+        assert body["filters"]["contacts"]["include"]["searchText"] == "Amit"
+        assert body["filters"]["contacts"]["include"]["departments"] == ["Engineering & Technical"]
+
+    @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
+    def test_search_people_limit_capped_at_50(self, mock_request):
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"contacts": []}
+        mock_request.return_value = mock_response
+
+        self.client.search_people(job_titles=["CTO"], limit=200)
+
+        body = mock_request.call_args.kwargs["json"]
+        assert body["pages"]["size"] == 50
 
     @patch("aden_tools.tools.lusha_tool.lusha_tool.httpx.request")
     def test_search_companies_body(self, mock_request):
@@ -128,13 +161,13 @@ class TestLushaClient:
         result = self.client.search_companies(
             industry_ids=[4, 5],
             employee_size="51-200",
-            location="United States",
+            locations=[{"country": "United States"}],
+            limit=30,
         )
 
         assert result["companies"][0]["id"] == "co1"
         body = mock_request.call_args.kwargs["json"]
-        assert body["pages"] == {"size": 25, "page": 0}
-        assert "names" not in body["filters"]["companies"]["include"]
+        assert body["pages"] == {"size": 30, "page": 0}
         assert body["filters"]["companies"]["include"]["mainIndustriesIds"] == [4, 5]
         assert body["filters"]["companies"]["include"]["sizes"] == [{"min": 51, "max": 200}]
         assert body["filters"]["companies"]["include"]["locations"] == [
@@ -150,9 +183,8 @@ class TestLushaClient:
         mock_request.return_value = mock_response
 
         self.client.search_companies(
-            industry_ids=None,
             employee_size="51-200",
-            location="United States",
+            locations=[{"country": "United States"}],
         )
 
         body = mock_request.call_args.kwargs["json"]
@@ -165,7 +197,7 @@ class TestLushaClient:
         mock_response.json.return_value = {"signals": [{"id": "c1"}]}
         mock_request.return_value = mock_response
 
-        result = self.client.get_signals(entity_type="contact", ids=["123"])
+        result = self.client.get_signals(entity_type="contact", ids=[123])
 
         assert result["signals"][0]["id"] == "c1"
         assert mock_request.call_args.args[1] == f"{LUSHA_API_BASE}/api/signals/contacts"
@@ -185,9 +217,13 @@ class TestLushaClient:
         assert result["remaining"] == 100
         assert mock_request.call_args.args[1] == f"{LUSHA_API_BASE}/account/usage"
 
-    def test_get_signals_requires_numeric_ids(self):
-        result = self.client.get_signals(entity_type="company", ids=["abc"])
-        assert result == {"error": "ids must be numeric Lusha IDs"}
+    def test_get_signals_invalid_entity_type(self):
+        result = self.client.get_signals(entity_type="invalid", ids=[123])
+        assert result == {"error": "entity_type must be one of: contact, company"}
+
+    def test_get_signals_empty_ids(self):
+        result = self.client.get_signals(entity_type="contact", ids=[])
+        assert result == {"error": "ids must contain at least one value"}
 
 
 class TestToolFunctions:
