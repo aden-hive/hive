@@ -492,6 +492,63 @@ class GitHubHealthChecker:
             )
 
 
+class DiscordHealthChecker:
+    """Health checker for Discord bot tokens."""
+
+    ENDPOINT = "https://discord.com/api/v10/users/@me"
+    TIMEOUT = 10.0
+
+    def check(self, bot_token: str) -> HealthCheckResult:
+        """
+        Validate Discord bot token by fetching the bot's user info.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={"Authorization": f"Bot {bot_token}"},
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    username = data.get("username", "unknown")
+                    return HealthCheckResult(
+                        valid=True,
+                        message=f"Discord bot token valid (bot: {username})",
+                        details={"username": username, "id": data.get("id")},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Discord bot token is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Discord bot token lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Discord API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Discord API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Discord API: {e}",
+                details={"error": str(e)},
+            )
+
+
 class ResendHealthChecker:
     """Health checker for Resend API credentials."""
 
@@ -624,6 +681,7 @@ class GoogleMapsHealthChecker:
 
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
+    "discord": DiscordHealthChecker(),
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
     "google_calendar_oauth": GoogleCalendarHealthChecker(),

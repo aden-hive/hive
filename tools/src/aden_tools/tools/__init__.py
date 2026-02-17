@@ -23,10 +23,16 @@ if TYPE_CHECKING:
 # Import register_tools from each tool module
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
+from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
 from .asana_tool import register_tools as register_asana
+from .discord_tool import register_tools as register_discord
+
+# Security scanning tools
+from .dns_security_scanner import register_tools as register_dns_security_scanner
 from .email_tool import register_tools as register_email
+from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
@@ -47,12 +53,19 @@ from .file_system_toolkits.write_to_file import register_tools as register_write
 from .github_tool import register_tools as register_github
 from .gmail_tool import register_tools as register_gmail
 from .google_maps_tool import register_tools as register_google_maps
+from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
+from .port_scanner import register_tools as register_port_scanner
+from .razorpay_tool import register_tools as register_razorpay
+from .risk_scorer import register_tools as register_risk_scorer
 from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
+from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .subdomain_enumerator import register_tools as register_subdomain_enumerator
+from .tech_stack_detector import register_tools as register_tech_stack_detector
 from .telegram_tool import register_tools as register_telegram
 from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
@@ -93,10 +106,14 @@ def register_all_tools(
     register_hubspot(mcp, credentials=credentials)
     register_news(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
+    register_exa_search(mcp, credentials=credentials)
     register_serpapi(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
+    register_calcom(mcp, credentials=credentials)
+    register_discord(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
     register_asana(mcp, credentials=credentials)
+    register_razorpay(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
@@ -114,6 +131,15 @@ def register_all_tools(
     register_data_tools(mcp)
     register_csv(mcp)
     register_excel(mcp)
+
+    # Security scanning tools (no credentials needed)
+    register_ssl_tls_scanner(mcp)
+    register_http_headers_scanner(mcp)
+    register_dns_security_scanner(mcp)
+    register_port_scanner(mcp)
+    register_tech_stack_detector(mcp)
+    register_subdomain_enumerator(mcp)
+    register_risk_scorer(mcp)
 
     return [
         "example_tool",
@@ -151,6 +177,19 @@ def register_all_tools(
         "apollo_enrich_company",
         "apollo_search_people",
         "apollo_search_companies",
+        "calcom_list_bookings",
+        "calcom_get_booking",
+        "calcom_create_booking",
+        "calcom_cancel_booking",
+        "calcom_get_availability",
+        "calcom_update_schedule",
+        "calcom_list_schedules",
+        "calcom_list_event_types",
+        "calcom_get_event_type",
+        "discord_list_guilds",
+        "discord_list_channels",
+        "discord_send_message",
+        "discord_get_messages",
         "github_list_repos",
         "github_get_repo",
         "github_search_repos",
@@ -194,6 +233,12 @@ def register_all_tools(
         "query_runtime_logs",
         "query_runtime_log_details",
         "query_runtime_log_raw",
+        "razorpay_list_payments",
+        "razorpay_get_payment",
+        "razorpay_create_payment_link",
+        "razorpay_list_invoices",
+        "razorpay_get_invoice",
+        "razorpay_create_refund",
         "scholar_search",
         "scholar_get_citations",
         "scholar_get_author",
@@ -300,6 +345,19 @@ def register_all_tools(
         "maps_place_search",
         "run_bigquery_query",
         "describe_dataset",
+        # Security scanning tools
+        "ssl_tls_scan",
+        "http_headers_scan",
+        "dns_security_scan",
+        "port_scan",
+        "tech_stack_detect",
+        "subdomain_enumerate",
+        "risk_score",
+        # Exa Search tools
+        "exa_search",
+        "exa_find_similar",
+        "exa_get_contents",
+        "exa_answer",
     ]
 
 

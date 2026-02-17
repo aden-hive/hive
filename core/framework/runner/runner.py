@@ -25,7 +25,7 @@ from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
 
@@ -246,6 +246,7 @@ class AgentRunner:
         storage_path: Path | None = None,
         model: str | None = None,
         intro_message: str = "",
+        runtime_config: "AgentRuntimeConfig | None" = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -258,6 +259,7 @@ class AgentRunner:
             storage_path: Path for runtime storage (defaults to temp)
             model: Model to use (reads from agent config or ~/.hive/configuration.json if None)
             intro_message: Optional greeting shown to user on TUI load
+            runtime_config: Optional AgentRuntimeConfig (webhook settings, etc.)
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -265,6 +267,7 @@ class AgentRunner:
         self.mock_mode = mock_mode
         self.model = model or self._resolve_default_model()
         self.intro_message = intro_message
+        self.runtime_config = runtime_config
 
         # Set up storage
         if storage_path:
@@ -408,19 +411,32 @@ class AgentRunner:
                 intro_message = agent_metadata.intro_message
 
             # Build GraphSpec from module-level variables
-            graph = GraphSpec(
-                id=f"{agent_path.name}-graph",
-                goal_id=goal.id,
-                version="1.0.0",
-                entry_node=getattr(agent_module, "entry_node", nodes[0].id),
-                entry_points=getattr(agent_module, "entry_points", {}),
-                terminal_nodes=getattr(agent_module, "terminal_nodes", []),
-                pause_nodes=getattr(agent_module, "pause_nodes", []),
-                nodes=nodes,
-                edges=edges,
-                max_tokens=max_tokens,
-                loop_config=getattr(agent_module, "loop_config", {}),
-            )
+            graph_kwargs: dict = {
+                "id": f"{agent_path.name}-graph",
+                "goal_id": goal.id,
+                "version": "1.0.0",
+                "entry_node": getattr(agent_module, "entry_node", nodes[0].id),
+                "entry_points": getattr(agent_module, "entry_points", {}),
+                "async_entry_points": getattr(agent_module, "async_entry_points", []),
+                "terminal_nodes": getattr(agent_module, "terminal_nodes", []),
+                "pause_nodes": getattr(agent_module, "pause_nodes", []),
+                "nodes": nodes,
+                "edges": edges,
+                "max_tokens": max_tokens,
+                "loop_config": getattr(agent_module, "loop_config", {}),
+            }
+            # Only pass optional fields if explicitly defined by the agent module
+            conversation_mode = getattr(agent_module, "conversation_mode", None)
+            if conversation_mode is not None:
+                graph_kwargs["conversation_mode"] = conversation_mode
+            identity_prompt = getattr(agent_module, "identity_prompt", None)
+            if identity_prompt is not None:
+                graph_kwargs["identity_prompt"] = identity_prompt
+
+            graph = GraphSpec(**graph_kwargs)
+
+            # Read runtime config (webhook settings, etc.) if defined
+            agent_runtime_config = getattr(agent_module, "runtime_config", None)
 
             return cls(
                 agent_path=agent_path,
@@ -430,6 +446,7 @@ class AgentRunner:
                 storage_path=storage_path,
                 model=model,
                 intro_message=intro_message,
+                runtime_config=agent_runtime_config,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
@@ -685,17 +702,19 @@ class AgentRunner:
             )
             entry_points.append(ep)
 
-        # Single-entry agent with no async entry points: create a default entry point
-        if not entry_points and self.graph.entry_node:
-            logger.info("Creating default entry point for single-entry agent")
-            entry_points.append(
+        # Always create a primary entry point for the graph's entry node.
+        # For multi-entry-point agents this ensures the primary path (e.g.
+        # user-facing rule setup) is reachable alongside async entry points.
+        if self.graph.entry_node:
+            entry_points.insert(
+                0,
                 EntryPointSpec(
                     id="default",
                     name="Default",
                     entry_node=self.graph.entry_node,
                     trigger_type="manual",
                     isolation_level="shared",
-                )
+                ),
             )
 
         # Create AgentRuntime with all entry points
@@ -722,6 +741,7 @@ class AgentRunner:
             tool_executor=tool_executor,
             runtime_log_store=log_store,
             checkpoint_config=checkpoint_config,
+            config=self.runtime_config,
         )
 
         # Pass intro_message through for TUI display
@@ -1207,7 +1227,7 @@ Respond with JSON only:
 }}"""
 
         try:
-            response = eval_llm.complete(
+            response = await eval_llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You are a capability evaluator. Respond with JSON only.",
                 max_tokens=256,

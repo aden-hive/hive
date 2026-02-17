@@ -200,7 +200,7 @@ class DeepResearchAgent:
             },
         )
 
-    def _setup(self) -> GraphExecutor:
+    def _setup(self, mock_mode: bool = False) -> None:
         """Set up the executor with all components."""
         from pathlib import Path
 

@@ -459,6 +459,66 @@ class GraphExecutor:
 
         steps = 0
 
+        # Fresh shared-session execution: clear stale cursor so the entry
+        # node doesn't restore a filled OutputAccumulator from the previous
+        # webhook run (which would cause the judge to accept immediately).
+        # The conversation history is preserved (continuous memory).
+        _is_fresh_shared = bool(
+            session_state
+            and session_state.get("resume_session_id")
+            and not session_state.get("paused_at")
+            and not session_state.get("resume_from_checkpoint")
+        )
+        if _is_fresh_shared and is_continuous and self._storage_path:
+            try:
+                from framework.storage.conversation_store import FileConversationStore
+
+                entry_conv_path = self._storage_path / "conversations" / current_node_id
+                if entry_conv_path.exists():
+                    _store = FileConversationStore(base_path=entry_conv_path)
+
+                    # Read cursor to find next seq for the transition marker.
+                    _cursor = await _store.read_cursor() or {}
+                    _next_seq = _cursor.get("next_seq", 0)
+                    if _next_seq == 0:
+                        # Fallback: scan part files for max seq
+                        _parts = await _store.read_parts()
+                        if _parts:
+                            _next_seq = max(p.get("seq", 0) for p in _parts) + 1
+
+                    # Reset cursor — clears stale accumulator outputs and
+                    # iteration counter so the node starts fresh work while
+                    # the conversation thread carries forward.
+                    await _store.write_cursor({})
+
+                    # Append a transition marker so the LLM knows a new
+                    # event arrived and previous results are outdated.
+                    await _store.write_part(
+                        _next_seq,
+                        {
+                            "role": "user",
+                            "content": (
+                                "--- NEW EVENT TRIGGER ---\n"
+                                "A new event has been received. "
+                                "Process this as a fresh request — "
+                                "previous outputs are no longer valid."
+                            ),
+                            "seq": _next_seq,
+                            "is_transition_marker": True,
+                        },
+                    )
+                    self.logger.info(
+                        "🔄 Cleared stale cursor and added transition marker "
+                        "for shared-session entry node '%s'",
+                        current_node_id,
+                    )
+            except Exception:
+                self.logger.debug(
+                    "Could not prepare conversation store for shared-session entry node '%s'",
+                    current_node_id,
+                    exc_info=True,
+                )
+
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
 
@@ -567,7 +627,7 @@ class GraphExecutor:
                     )
                     # Skip execution — follow outgoing edges using current memory
                     skip_result = NodeResult(success=True, output=memory.read_all())
-                    next_node = self._follow_edges(
+                    next_node = await self._follow_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
@@ -817,7 +877,7 @@ class GraphExecutor:
                         )
 
                         # Check if there's an ON_FAILURE edge to follow
-                        next_node = self._follow_edges(
+                        next_node = await self._follow_edges(
                             graph=graph,
                             goal=goal,
                             current_node_id=current_node_id,
@@ -972,7 +1032,7 @@ class GraphExecutor:
                     self._write_progress(current_node_id, path, memory, node_visit_counts)
                 else:
                     # Get all traversable edges for fan-out detection
-                    traversable_edges = self._get_all_traversable_edges(
+                    traversable_edges = await self._get_all_traversable_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
@@ -1032,7 +1092,7 @@ class GraphExecutor:
                             break
                     else:
                         # Sequential: follow single edge (existing logic via _follow_edges)
-                        next_node = self._follow_edges(
+                        next_node = await self._follow_edges(
                             graph=graph,
                             goal=goal,
                             current_node_id=current_node_id,
@@ -1527,7 +1587,7 @@ class GraphExecutor:
         # Should never reach here due to validation above
         raise RuntimeError(f"Unhandled node type: {node_spec.node_type}")
 
-    def _follow_edges(
+    async def _follow_edges(
         self,
         graph: GraphSpec,
         goal: Goal,
@@ -1542,7 +1602,7 @@ class GraphExecutor:
         for edge in edges:
             target_node_spec = graph.get_node(edge.target)
 
-            if edge.should_traverse(
+            if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
                 memory=memory.read_all(),
@@ -1568,7 +1628,7 @@ class GraphExecutor:
                         self.logger.warning(f"⚠ Output validation failed: {validation.errors}")
 
                         # Clean the output
-                        cleaned_output = self.output_cleaner.clean_output(
+                        cleaned_output = await self.output_cleaner.clean_output(
                             output=output_to_validate,
                             source_node_id=current_node_id,
                             target_node_spec=target_node_spec,
@@ -1606,7 +1666,7 @@ class GraphExecutor:
 
         return None
 
-    def _get_all_traversable_edges(
+    async def _get_all_traversable_edges(
         self,
         graph: GraphSpec,
         goal: Goal,
@@ -1626,7 +1686,7 @@ class GraphExecutor:
 
         for edge in edges:
             target_node_spec = graph.get_node(edge.target)
-            if edge.should_traverse(
+            if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
                 memory=memory.read_all(),
@@ -1768,7 +1828,7 @@ class GraphExecutor:
                             f"⚠ Output validation failed for branch "
                             f"{branch.node_id}: {validation.errors}"
                         )
-                        cleaned_output = self.output_cleaner.clean_output(
+                        cleaned_output = await self.output_cleaner.clean_output(
                             output=mem_snapshot,
                             source_node_id=source_node_spec.id if source_node_spec else "unknown",
                             target_node_spec=node_spec,

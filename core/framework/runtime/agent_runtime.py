@@ -7,6 +7,7 @@ while preserving the goal-driven approach.
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -159,6 +160,10 @@ class AgentRuntime:
         self._webhook_server: Any = None
         # Event-driven entry point subscriptions
         self._event_subscriptions: list[str] = []
+        # Timer tasks for scheduled entry points
+        self._timer_tasks: list[asyncio.Task] = []
+        # Next fire time for each timer entry point (ep_id -> datetime)
+        self._timer_next_fire: dict[str, float] = {}
 
         # State
         self._running = False
@@ -289,7 +294,17 @@ class AgentRuntime:
                 def _make_handler(entry_point_id: str):
                     async def _on_event(event):
                         if self._running and entry_point_id in self._streams:
-                            await self.trigger(entry_point_id, {"event": event.to_dict()})
+                            # Run in the same session as the primary entry
+                            # point so memory (e.g. user-defined rules) is
+                            # shared and logs land in one session directory.
+                            session_state = self._get_primary_session_state(
+                                exclude_entry_point=entry_point_id
+                            )
+                            await self.trigger(
+                                entry_point_id,
+                                {"event": event.to_dict()},
+                                session_state=session_state,
+                            )
 
                     return _on_event
 
@@ -301,6 +316,64 @@ class AgentRuntime:
                 )
                 self._event_subscriptions.append(sub_id)
 
+            # Start timer-driven entry points
+            for ep_id, spec in self._entry_points.items():
+                if spec.trigger_type != "timer":
+                    continue
+
+                tc = spec.trigger_config
+                interval = tc.get("interval_minutes")
+                if not interval or interval <= 0:
+                    logger.warning(
+                        f"Entry point '{ep_id}' has trigger_type='timer' "
+                        "but no valid interval_minutes in trigger_config"
+                    )
+                    continue
+
+                run_immediately = tc.get("run_immediately", False)
+
+                def _make_timer(entry_point_id: str, mins: float, immediate: bool):
+                    async def _timer_loop():
+                        interval_secs = mins * 60
+                        if not immediate:
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
+                            await asyncio.sleep(interval_secs)
+                        while self._running:
+                            self._timer_next_fire.pop(entry_point_id, None)
+                            try:
+                                session_state = self._get_primary_session_state(
+                                    exclude_entry_point=entry_point_id
+                                )
+                                await self.trigger(
+                                    entry_point_id,
+                                    {"event": {"source": "timer", "reason": "scheduled"}},
+                                    session_state=session_state,
+                                )
+                                logger.info(
+                                    "Timer fired for entry point '%s' (next in %s min)",
+                                    entry_point_id,
+                                    mins,
+                                )
+                            except Exception:
+                                logger.error(
+                                    "Timer trigger failed for '%s'",
+                                    entry_point_id,
+                                    exc_info=True,
+                                )
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
+                            await asyncio.sleep(interval_secs)
+
+                    return _timer_loop
+
+                task = asyncio.create_task(_make_timer(ep_id, interval, run_immediately)())
+                self._timer_tasks.append(task)
+                logger.info(
+                    "Started timer for entry point '%s' every %s min%s",
+                    ep_id,
+                    interval,
+                    " (immediate first run)" if run_immediately else "",
+                )
+
             self._running = True
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")
 
@@ -310,6 +383,11 @@ class AgentRuntime:
             return
 
         async with self._lock:
+            # Cancel timer tasks
+            for task in self._timer_tasks:
+                task.cancel()
+            self._timer_tasks.clear()
+
             # Unsubscribe event-driven entry points
             for sub_id in self._event_subscriptions:
                 self._event_bus.unsubscribe(sub_id)
@@ -390,6 +468,66 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
+
+    def _get_primary_session_state(self, exclude_entry_point: str) -> dict[str, Any] | None:
+        """Build session_state so an async entry point runs in the primary session.
+
+        Looks for an active execution from another stream (the "primary"
+        session, e.g. the user-facing intake loop) and returns a
+        ``session_state`` dict containing:
+
+        - ``resume_session_id``: reuse the same session directory
+        - ``memory``: only the keys that the async entry node declares
+          as inputs (e.g. ``rules``, ``max_emails``).  Stale outputs
+          from previous runs (``emails``, ``actions_taken``, …) are
+          excluded so each trigger starts fresh.
+
+        The memory is read from the primary session's ``state.json``
+        which is kept up-to-date by ``GraphExecutor._write_progress()``
+        at every node transition.
+
+        Returns ``None`` if no primary session is active (the webhook
+        execution will just create its own session).
+        """
+        import json as _json
+
+        # Determine which memory keys the async entry node needs.
+        allowed_keys: set[str] | None = None
+        ep_spec = self._entry_points.get(exclude_entry_point)
+        if ep_spec:
+            entry_node = self.graph.get_node(ep_spec.entry_node)
+            if entry_node and entry_node.input_keys:
+                allowed_keys = set(entry_node.input_keys)
+
+        for ep_id, stream in self._streams.items():
+            if ep_id == exclude_entry_point:
+                continue
+            for exec_id in stream.active_execution_ids:
+                state_path = self._storage.base_path / "sessions" / exec_id / "state.json"
+                try:
+                    if state_path.exists():
+                        data = _json.loads(state_path.read_text(encoding="utf-8"))
+                        full_memory = data.get("memory", {})
+                        if not full_memory:
+                            continue
+                        # Filter to only input keys so stale outputs
+                        # from previous triggers don't leak through.
+                        if allowed_keys is not None:
+                            memory = {k: v for k, v in full_memory.items() if k in allowed_keys}
+                        else:
+                            memory = full_memory
+                        if memory:
+                            return {
+                                "resume_session_id": exec_id,
+                                "memory": memory,
+                            }
+                except Exception:
+                    logger.debug(
+                        "Could not read state.json for %s: skipping",
+                        exec_id,
+                        exc_info=True,
+                    )
+        return None
 
     async def inject_input(self, node_id: str, content: str) -> bool:
         """Inject user input into a running client-facing node.
