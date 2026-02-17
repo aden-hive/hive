@@ -26,6 +26,7 @@ from .bigquery_tool import register_tools as register_bigquery
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
+from .discord_tool import register_tools as register_discord
 
 # Security scanning tools
 from .dns_security_scanner import register_tools as register_dns_security_scanner
@@ -108,6 +109,7 @@ def register_all_tools(
     register_serpapi(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
+    register_discord(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
     register_razorpay(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
@@ -182,6 +184,10 @@ def register_all_tools(
         "calcom_list_schedules",
         "calcom_list_event_types",
         "calcom_get_event_type",
+        "discord_list_guilds",
+        "discord_list_channels",
+        "discord_send_message",
+        "discord_get_messages",
         "github_list_repos",
         "github_get_repo",
         "github_search_repos",
