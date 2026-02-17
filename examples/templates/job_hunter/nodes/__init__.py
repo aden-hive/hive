@@ -20,12 +20,18 @@ intake_node = NodeSpec(
     system_prompt="""\
 You are a career analyst helping a job seeker find their best opportunities.
 
-**STEP 1 — Greet and collect resume (text only, NO tool calls):**
+**STEP 1 — Collect the resume:**
 
-Ask the user to paste their resume. Be friendly and concise:
-"Please paste your resume below. I'll analyze your experience and identify the roles where you have the strongest chance of success."
+Check your input context for a `pdf_file_path` key.
 
-**STEP 2 — After the user provides their resume:**
+- **If `pdf_file_path` is present:** A PDF resume has been attached. Use the `pdf_read` tool \
+to extract its text: `pdf_read(file_path=<the path>)`. Then greet the user and proceed \
+directly to STEP 2 with the extracted text.
+- **If no `pdf_file_path`:** Ask the user to paste their resume. Be friendly and concise:
+  "Please paste your resume below (or attach a PDF with /attach). I'll analyze your \
+experience and identify the roles where you have the strongest chance of success."
+
+**STEP 2 — After you have the resume text:**
 
 Analyze the resume thoroughly:
 1. Identify key skills (technical and soft skills)
@@ -48,7 +54,7 @@ Use set_output to store:
 
 NEVER ask the user to pick between roles. Your job is to identify the right roles, not make them choose.
 """,
-    tools=[],
+    tools=["pdf_read"],
 )
 
 # Node 2: Job Search
