@@ -29,22 +29,6 @@ class StripeToolConfig(BaseModel):
 class StripeTool:
     """
     Comprehensive Stripe integration tool for Hive agents.
-
-    Provides full lifecycle management for:
-    - Customers (create, update, retrieve, list, delete)
-    - Subscriptions (create, update, cancel, pause, resume, list)
-    - Invoices (create, retrieve, list, pay, void, finalize)
-    - Payment Methods (attach, detach, list, set default)
-    - Payment Intents (create, confirm, cancel, capture, list)
-    - Checkout Sessions (create, retrieve, list, expire)
-    - Products (create, update, retrieve, list, archive)
-    - Prices (create, update, retrieve, list, archive)
-    - Coupons (create, update, retrieve, list, delete)
-    - Refunds (create, retrieve, list, cancel)
-    - Disputes (retrieve, list, update, close)
-    - Balance Transactions (retrieve, list)
-    - Payouts (create, retrieve, list, cancel)
-    - Webhooks (verify signature, construct event)
     """
 
     def __init__(self, config: StripeToolConfig | None = None):
@@ -55,12 +39,10 @@ class StripeTool:
             config: StripeToolConfig instance, or None to load from environment
         """
         if config is None:
-            # Attempt to load from environment, but do NOT raise if missing.
-            # This allows the tool to register successfully in CI environments.
+            # Attempt to load from environment
             api_key = os.environ.get("STRIPE_API_KEY") or os.environ.get("STRIPE_SECRET_KEY")
             webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
-            # We create the config even if api_key is None
             config = StripeToolConfig(api_key=api_key, webhook_secret=webhook_secret)
 
         self.config = config
@@ -77,7 +59,7 @@ class StripeTool:
         """Return standardized error message when credentials are missing."""
         return {
             "error": "Stripe API key not configured.",
-            "help": "Set STRIPE_API_KEY environment variable from Stripe dashboard: https://dashboard.stripe.com/apikeys"
+            "help": "Set STRIPE_API_KEY environment variable. Get it from: https://dashboard.stripe.com/apikeys",
         }
 
     # ==================== CUSTOMER MANAGEMENT ====================
@@ -93,9 +75,7 @@ class StripeTool:
         payment_method: str | None = None,
         invoice_settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Create a new customer.
-        """
+        """Create a new customer."""
         if not self.config.api_key:
             return self._missing_creds_error
 
@@ -219,7 +199,6 @@ class StripeTool:
         if not self.config.api_key:
             return self._missing_creds_error
 
-        # Handle simplified single item creation
         items = [{"price": price_id, "quantity": quantity}]
 
         params = {
@@ -247,7 +226,6 @@ class StripeTool:
             return self._missing_creds_error
 
         subscription = stripe.Subscription.retrieve(subscription_id)
-        # Return full object, caller can check .status
         return subscription.to_dict()
 
     def get_subscription(self, subscription_id: str) -> dict[str, Any]:
@@ -275,12 +253,9 @@ class StripeTool:
 
         params = {"proration_behavior": proration_behavior}
 
-        # Handle logic for price/quantity update shortcut
         if price_id and quantity:
-            # We need to retrieve the subscription to find the item ID to update
             sub = stripe.Subscription.retrieve(subscription_id)
             if sub.items.data:
-                # Assuming single item subscription for simple update
                 item_id = sub.items.data[0].id
                 params["items"] = [{"id": item_id, "price": price_id, "quantity": quantity}]
         elif items:
@@ -606,7 +581,6 @@ class StripeTool:
         if not self.config.api_key:
             return self._missing_creds_error
 
-        # Handle simplified line items
         line_items = [{"price": price_id, "quantity": quantity}]
 
         params = {"line_items": line_items, "mode": mode}
@@ -667,7 +641,6 @@ class StripeTool:
         if not self.config.api_key:
             return self._missing_creds_error
 
-        # Handle simplified line items
         line_items = [{"price": price_id, "quantity": quantity}]
 
         params = {"line_items": line_items}
@@ -786,7 +759,7 @@ class StripeTool:
         if recurring_interval:
             params["recurring"] = {
                 "interval": recurring_interval,
-                "interval_count": recurring_interval_count
+                "interval_count": recurring_interval_count,
             }
         if metadata:
             params["metadata"] = metadata
@@ -1121,13 +1094,11 @@ class StripeTool:
         if not self.config.api_key:
             return self._missing_creds_error
 
-        # Use provided secret or fallback to config
         secret = webhook_secret or self.config.webhook_secret
-
         if not secret:
-             return {
+            return {
                 "error": "Stripe webhook secret not configured.",
-                "help": "Set STRIPE_WEBHOOK_SECRET environment variable or provide it in the call."
+                "help": "Set STRIPE_WEBHOOK_SECRET environment variable or provide it in the call.",
             }
 
         try:
@@ -1140,10 +1111,8 @@ class StripeTool:
         self, payload: str, sig_header: str, webhook_secret: str, tolerance: int = 300
     ) -> dict[str, Any]:
         """Construct a webhook event."""
-        # Note: This method might not check API key strictly if it only does signature verification,
-        # but for consistency with other methods:
         if not self.config.api_key:
-             return self._missing_creds_error
+            return self._missing_creds_error
 
         try:
             event = stripe.Webhook.construct_event(

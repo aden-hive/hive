@@ -104,7 +104,8 @@ def register_all_tools(
     register_bigquery(mcp, credentials=credentials)
 
     # Register Stripe tool
-    register_stripe(mcp)  # Note: Stripe tool handles credentials
+    # Capture the list of registered tools so we can return them below
+    stripe_tools = register_stripe(mcp)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -119,7 +120,7 @@ def register_all_tools(
     register_csv(mcp)
     register_excel(mcp)
 
-    return [
+    tool_names = [
         "example_tool",
         "web_search",
         "web_scrape",
@@ -287,26 +288,12 @@ def register_all_tools(
         "maps_place_search",
         "run_bigquery_query",
         "describe_dataset",
-        # Stripe
-        "stripe_create_customer",
-        "stripe_get_customer_by_email",
-        "stripe_get_customer_by_id",
-        "stripe_update_customer",
-        "stripe_list_customers",
-        "stripe_create_subscription",
-        "stripe_get_subscription_status",
-        "stripe_cancel_subscription",
-        "stripe_list_subscriptions",
-        "stripe_create_invoice",
-        "stripe_list_invoices",
-        "stripe_pay_invoice",
-        "stripe_create_payment_link",
-        "stripe_create_checkout_session",
-        "stripe_create_product",
-        "stripe_create_price",
-        "stripe_list_products",
-        "stripe_create_refund",
     ]
+
+    # Dynamically add Stripe tools
+    tool_names.extend(stripe_tools)
+
+    return tool_names
 
 
 __all__ = ["register_all_tools"]
