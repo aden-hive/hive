@@ -402,6 +402,40 @@ def _load_resume_state(
         }
 
 
+def _prompt_before_start(agent_path: str, runner, model: str | None = None):
+    """Prompt user to start agent or update credentials.
+
+    Returns:
+        Updated runner if user proceeds, None if user aborts.
+    """
+    from framework.credentials.setup import CredentialSetupSession
+    from framework.runner import AgentRunner
+
+    while True:
+        print()
+        try:
+            choice = input("Press Enter to start agent, or 'u' to update credentials: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+        if choice == "":
+            return runner
+        elif choice.lower() == "u":
+            session = CredentialSetupSession.from_agent_path(agent_path)
+            result = session.run_interactive()
+            if result.success:
+                # Reload runner with updated credentials
+                try:
+                    runner = AgentRunner.load(agent_path, model=model)
+                except Exception as e:
+                    print(f"Error reloading agent: {e}")
+                    return None
+            # Loop back to prompt again
+        elif choice.lower() == "q":
+            return None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
@@ -482,6 +516,12 @@ def cmd_run(args: argparse.Namespace) -> int:
                     print(f"Error loading agent: {e}")
                     return
 
+                # Prompt before starting (allows credential updates)
+                if sys.stdin.isatty():
+                    runner = _prompt_before_start(args.agent_path, runner, args.model)
+                    if runner is None:
+                        return
+
                 # Force setup inside the loop
                 if runner._agent_runtime is None:
                     runner._setup()
@@ -552,6 +592,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
+
+        # Prompt before starting (allows credential updates)
+        if sys.stdin.isatty() and not args.quiet:
+            runner = _prompt_before_start(args.agent_path, runner, args.model)
+            if runner is None:
+                return 1
 
         # Load session/checkpoint state for resume (headless mode)
         session_state = None
