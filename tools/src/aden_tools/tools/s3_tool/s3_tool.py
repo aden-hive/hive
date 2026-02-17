@@ -200,10 +200,10 @@ def _get_s3_client(credentials: CredentialStoreAdapter | None = None) -> S3Stora
                     secret_key=secret_key,
                     session_token=session_token
                 )
-        except Exception:
-            pass
-    
-    region = os.getenv('AWS_DEFAULT_REGION')
+        except Exception as e:
+            logger.warning("Credential adapter failed, falling back to env vars: %s", e)
+
+    region = os.getenv("AWS_DEFAULT_REGION")
     access_key = os.getenv('AWS_ACCESS_KEY_ID')
     secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
     session_token = os.getenv('AWS_SESSION_TOKEN')
@@ -298,44 +298,9 @@ def register_tools(mcp: Any, credentials: CredentialStoreAdapter | None = None) 
         storage = _get_s3_client(credentials)
         if isinstance(storage, dict) and not storage.get("success", True):
             return storage
-        
+
         try:
             return storage.delete_object(bucket, key, version_id)
         except Exception as e:
-            logger.error(f"s3_delete error: {e}")
+            logger.error("s3_delete error: %s", e)
             return {"success": False, "error": str(e)}
-
-    @mcp.tool()
-    def s3_check_credentials() -> dict[str, Any]:
-        """Verify that AWS credentials are properly configured and valid."""
-        storage = _get_s3_client(credentials)
-        if isinstance(storage, dict) and not storage.get("success", True):
-            return storage
-
-        try:
-            sts = boto3.client(
-                'sts',
-                aws_access_key_id=storage.client._request_signer._credentials.access_key,
-                aws_secret_access_key=storage.client._request_signer._credentials.secret_key,
-            )
-            identity = sts.get_caller_identity()
-            return {
-                "success": True,
-                "configured": True,
-                "account": identity.get('Account'),
-                "arn": identity.get('Arn'),
-                "user_id": identity.get('UserId'),
-            }
-        except ClientError as e:
-            return {
-                "success": False,
-                "configured": False,
-                "error": e.response['Error']['Code'],
-                "message": e.response['Error']['Message'],
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "configured": False,
-                "message": str(e),
-            }

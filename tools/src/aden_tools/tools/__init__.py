@@ -216,7 +216,6 @@ def register_all_tools(
         "s3_download",
         "s3_list",
         "s3_delete",
-        "s3_check_credentials",
     ]
 
 

@@ -56,7 +56,6 @@ class TestToolRegistration:
         "s3_download",
         "s3_list",
         "s3_delete",
-        "s3_check_credentials",
     }
 
     def test_all_tools_registered(self, mcp: FastMCP):
@@ -66,7 +65,7 @@ class TestToolRegistration:
 
     def test_tool_count(self, mcp: FastMCP):
         register_tools(mcp)
-        assert len(mcp._tool_manager._tools) == 5
+        assert len(mcp._tool_manager._tools) == 4
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,13 @@ from typing import Any, Protocol
 
 import httpx
 
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+except ImportError:
+    boto3 = None  # type: ignore[assignment]
+    ClientError = Exception  # type: ignore[misc, assignment]
+
 
 @dataclass
 class HealthCheckResult:
@@ -488,6 +495,37 @@ class ResendHealthChecker:
             )
 
 
+class AWSS3HealthChecker:
+    """Health checker for AWS S3 credentials (access key + secret key)."""
+
+    def check(self, access_key: str, secret_key: str) -> HealthCheckResult:
+        """Validate AWS credentials using STS GetCallerIdentity."""
+        if boto3 is None:
+            return HealthCheckResult(
+                valid=False,
+                message="boto3 is not installed; cannot validate AWS credentials",
+                details={"error": "missing_boto3"},
+            )
+        try:
+            sts = boto3.client(
+                "sts",
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+            )
+            identity = sts.get_caller_identity()
+            return HealthCheckResult(
+                valid=True,
+                message=f"AWS creds valid (account: {identity['Account']})",
+                details={"account": identity.get("Account"), "arn": identity.get("Arn")},
+            )
+        except ClientError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=e.response["Error"]["Message"],
+                details={"error": e.response["Error"].get("Code", "Unknown")},
+            )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "hubspot": HubSpotHealthChecker(),
@@ -497,6 +535,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
     "resend": ResendHealthChecker(),
+    "aws_s3": AWSS3HealthChecker(),
 }
 
 
@@ -537,5 +576,9 @@ def check_credential_health(
     if credential_name == "google_search" and "cse_id" in kwargs:
         checker = GoogleSearchHealthChecker()
         return checker.check(credential_value, kwargs["cse_id"])
+
+    # Special case for AWS S3 which needs access key + secret key
+    if credential_name == "aws_s3" and "secret_key" in kwargs:
+        return checker.check(credential_value, kwargs["secret_key"])
 
     return checker.check(credential_value)

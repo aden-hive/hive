@@ -47,6 +47,7 @@ class TestHealthCheckerRegistry:
             "github",
             "resend",
             "slack",
+            "aws_s3",
         }
         assert set(HEALTH_CHECKERS.keys()) == expected
 

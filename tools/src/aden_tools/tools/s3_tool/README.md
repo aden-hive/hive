@@ -109,10 +109,6 @@ Parameters:
 2. key (str) — Object key
 3. version_id (str, optional) — Specific object version
 
-- s3_check_credentials
-
-1. Verify that AWS credentials are properly configured and valid.
-
 ## Testing
 
 Run tests:
