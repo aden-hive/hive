@@ -357,7 +357,7 @@ def register_tools(mcp: FastMCP) -> None:
         Args:
             url: The URL to navigate to
             form_selector: Optional CSS selector for a specific form element.
-                          If None, inspects all forms on the page
+                        If None, inspects all forms on the page
             timeout: Maximum time in milliseconds to wait for page load (default: 30000)
 
         Returns:
@@ -365,12 +365,10 @@ def register_tools(mcp: FastMCP) -> None:
             Each field object contains: label, name, type, selector, required, placeholder, options (for selects)
         """
         try:
-            # Validate URL
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
 
-            # Validate timeout
-            timeout = max(5000, min(timeout, 300000))  # 5s to 5min
+            timeout = max(5000, min(timeout, 300000))
 
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
@@ -382,162 +380,165 @@ def register_tools(mcp: FastMCP) -> None:
                         "--disable-blink-features=AutomationControlled",
                     ],
                 )
-                try:
-                    context = await browser.new_context(
-                        viewport={"width": 1920, "height": 1080},
-                        user_agent=BROWSER_USER_AGENT,
-                        locale="en-US",
-                    )
-                    page = await context.new_page()
 
-                    await page.goto(url, timeout=timeout, wait_until="networkidle")
+                context = await browser.new_context(
+                    viewport={"width": 1920, "height": 1080},
+                    user_agent=BROWSER_USER_AGENT,
+                    locale="en-US",
+                )
 
-                    # JavaScript to extract form field information
-                    inspect_script = """
-                    (formSelector) => {
-                        const fields = [];
-                        
-                        // Find form(s) to inspect
-                        const forms = formSelector 
-                            ? document.querySelectorAll(formSelector)
-                            : document.querySelectorAll('form');
-                        
-                        if (forms.length === 0 && formSelector) {
-                            return { error: `No form found with selector: ${formSelector}` };
-                        }
-                        
-                        // If no forms found, look for input fields outside forms
-                        const allInputs = formSelector
-                            ? document.querySelector(formSelector)?.querySelectorAll('input, textarea, select') || []
-                            : document.querySelectorAll('input, textarea, select');
-                        
-                        const processed = new Set();
-                        
-                        allInputs.forEach((element, index) => {
-                            // Skip hidden inputs (except hidden fields that might be important)
-                            const type = element.type || element.tagName.toLowerCase();
-                            if (type === 'hidden' && element.name === '') {
-                                return;
-                            }
-                            
-                            // Generate a unique selector
-                            let selector = '';
-                            if (element.id) {
-                                selector = `#${element.id}`;
-                            } else if (element.name) {
-                                selector = `[name="${element.name}"]`;
-                                // If multiple elements have same name, add index
-                                const sameName = document.querySelectorAll(`[name="${element.name}"]`);
-                                if (sameName.length > 1) {
-                                    const idx = Array.from(sameName).indexOf(element);
-                                    selector = `[name="${element.name}"]:nth-of-type(${idx + 1})`;
-                                }
-                            } else {
-                                // Fallback: use tag + type + index
-                                const tag = element.tagName.toLowerCase();
-                                const typeAttr = element.type || '';
-                                const siblings = Array.from(element.parentElement?.children || [])
-                                    .filter(el => el.tagName.toLowerCase() === tag && (el.type || '') === typeAttr);
-                                const idx = siblings.indexOf(element);
-                                selector = `${tag}${typeAttr ? `[type="${typeAttr}"]` : ''}:nth-of-type(${idx + 1})`;
-                            }
-                            
-                            // Avoid duplicates
-                            if (processed.has(selector)) {
-                                return;
-                            }
-                            processed.add(selector);
-                            
-                            // Find label
-                            let label = '';
-                            let labelText = '';
-                            
-                            // Try to find associated label
-                            if (element.id) {
-                                const labelEl = document.querySelector(`label[for="${element.id}"]`);
-                                if (labelEl) {
-                                    labelText = labelEl.textContent?.trim() || '';
-                                }
-                            }
-                            
-                            // If no label found, look for parent label or nearby text
-                            if (!labelText) {
-                                const parentLabel = element.closest('label');
-                                if (parentLabel) {
-                                    labelText = parentLabel.textContent?.trim() || '';
-                                } else {
-                                    // Look for preceding label or text node
-                                    let prev = element.previousElementSibling;
-                                    while (prev && !labelText) {
-                                        if (prev.tagName.toLowerCase() === 'label') {
-                                            labelText = prev.textContent?.trim() || '';
-                                        } else if (prev.textContent?.trim()) {
-                                            labelText = prev.textContent.trim();
-                                        }
-                                        prev = prev.previousElementSibling;
-                                    }
-                                }
-                            }
-                            
-                            label = labelText || element.name || element.placeholder || selector;
-                            
-                            // Extract field properties
-                            const fieldInfo = {
-                                label: label,
-                                name: element.name || '',
-                                type: type,
-                                selector: selector,
-                                required: element.hasAttribute('required'),
-                                placeholder: element.placeholder || '',
-                                value: element.value || '',
-                                disabled: element.disabled,
-                            };
-                            
-                            // For select elements, get options
-                            if (element.tagName.toLowerCase() === 'select') {
-                                const options = Array.from(element.options).map(opt => ({
-                                    value: opt.value,
-                                    text: opt.text,
-                                    selected: opt.selected
-                                }));
-                                fieldInfo.options = options;
-                            }
-                            
-                            // For checkbox/radio, get checked state
-                            if (type === 'checkbox' || type === 'radio') {
-                                fieldInfo.checked = element.checked;
-                            }
-                            
-                            fields.push(fieldInfo);
-                        });
-                        
-                        return {
-                            fields: fields,
-                            forms_found: forms.length || (allInputs.length > 0 ? 1 : 0)
-                        };
+                page = await context.new_page()
+                await page.goto(url, timeout=timeout, wait_until="networkidle")
+
+                inspect_script = """
+                (formSelector) => {
+
+                    const visible = (el) => {
+                        const rect = el.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0;
+                    };
+
+                    const getSelector = (el, form) => {
+                        if (el.id) return `#${el.id}`;
+                        if (el.name) return `[name="${el.name}"]`;
+
+                        const tag = el.tagName.toLowerCase();
+                        const siblings = Array.from(form.querySelectorAll(tag));
+                        const index = siblings.indexOf(el);
+                        return `${tag}:nth-of-type(${index + 1})`;
+                    };
+
+                    const forms = formSelector
+                        ? document.querySelectorAll(formSelector)
+                        : document.querySelectorAll("form");
+
+                    if (!forms || forms.length === 0) {
+                        return { forms: [], forms_found: 0 };
                     }
-                    """
 
-                    # Execute the inspection script
-                    # Pass form_selector as argument (or None if not provided)
-                    result = await page.evaluate(inspect_script, form_selector if form_selector else None)
+                    const results = [];
 
-                    if isinstance(result, dict) and "error" in result:
-                        return result
+                    forms.forEach((form, formIndex) => {
 
-                    title = await page.title()
-                    final_url = page.url
+                        const fields = [];
+                        const elements = form.querySelectorAll("input, textarea, select");
 
-                    await browser.close()
+                        elements.forEach((el) => {
+                            const type = (el.type || el.tagName).toLowerCase();
+
+                            if (
+                                el.disabled ||
+                                type === "hidden" ||
+                                type === "submit" ||
+                                type === "button" ||
+                                type === "reset" ||
+                                !visible(el)
+                            ) {
+                                return;
+                            }
+
+                            let label = "";
+
+                            if (el.id) {
+                                const labelEl = form.querySelector(`label[for="${el.id}"]`);
+                                if (labelEl) {
+                                    label = labelEl.textContent?.trim() || "";
+                                }
+                            }
+
+                            if (!label) {
+                                const parentLabel = el.closest("label");
+                                if (parentLabel) {
+                                    label = parentLabel.textContent?.trim() || "";
+                                }
+                            }
+
+                            label = label || el.placeholder || el.name || "Unnamed Field";
+
+                            const field = {
+                                label: label,
+                                name: el.name || "",
+                                type: type,
+                                selector: getSelector(el, form),
+                                required: el.required || false,
+                                placeholder: el.placeholder || "",
+                            };
+
+                            if (el.tagName.toLowerCase() === "select") {
+                                field.options = Array.from(el.options).map(o => ({
+                                    value: o.value,
+                                    text: o.text
+                                }));
+                            }
+
+                            if (type === "checkbox" || type === "radio") {
+                                field.checked = el.checked;
+                                field.value = el.value;
+                            }
+
+                            fields.push(field);
+                        });
+
+                        results.push({
+                            form_index: formIndex,
+                            form_selector: formSelector || `form:nth-of-type(${formIndex + 1})`,
+                            fields: fields
+                        });
+                    });
 
                     return {
-                        "form_fields": result.get("fields", []),
-                        "forms_found": result.get("forms_found", 0),
-                        "title": title,
-                        "url": final_url,
-                    }
-                finally:
-                    await browser.close()
+                        forms: results,
+                        forms_found: results.length
+                    };
+                }
+                """
+
+                result = await page.evaluate(inspect_script, form_selector)
+
+                forms = result.get("forms", [])
+
+                for form in forms:
+                    form_index = form["form_index"]
+
+                    # Document-order aligned form locator
+                    form_locator = page.locator("form").nth(form_index)
+
+                    # Deterministic Playwright selector
+                    generated_form_selector = f"form >> nth={form_index}"
+                    form["generated_form_selector"] = generated_form_selector
+
+                    # 1️⃣ Try strict submit types inside this form
+                    submit_locator = form_locator.locator(
+                        'button[type="submit"], input[type="submit"]'
+                    )
+
+                    if await submit_locator.count() == 0:
+                        # 2️⃣ Fallback: visible Submit text
+                        submit_locator = form_locator.locator(
+                            "button:has-text('Submit'), button:has-text('submit')"
+                        )
+
+                    if await submit_locator.count() == 0:
+                        form["submit_selector"] = None
+                        continue
+
+                    # Since you said exactly one submit per form
+                    form["submit_selector"] = (
+                        f"{generated_form_selector} >> "
+                        f"button[type='submit'], input[type='submit'] >> nth=0"
+                    )
+
+                title = await page.title()
+                final_url = page.url
+
+                await browser.close()
+                print(result)
+                return {
+                    "forms": forms,
+                    "forms_found": result.get("forms_found", 0),
+                    "title": title,
+                    "url": final_url,
+                }
 
         except PlaywrightTimeout:
             return {"error": f"Request timed out after {timeout}ms"}
