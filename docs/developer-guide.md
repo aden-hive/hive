@@ -154,7 +154,7 @@ uv run python -c "import aden_tools; print('✓ aden_tools OK')"
 uv run python -c "import litellm; print('✓ litellm OK')"
 
 # Run an agent (after building one via /hive-create)
-PYTHONPATH=exports uv run python -m your_agent_name validate
+hive validate exports/your_agent_name
 ```
 
 ---
@@ -289,7 +289,7 @@ claude> /hive-test
 4. **Validate the Agent**
 
    ```bash
-   PYTHONPATH=exports uv run python -m your_agent_name validate
+   hive validate exports/your_agent_name
    ```
 
 5. **Test the Agent**
@@ -368,17 +368,18 @@ This generates and runs:
 
 ```bash
 # Run all tests for an agent
-PYTHONPATH=exports uv run python -m agent_name test
+# Run all tests for an agent
+hive test-run exports/agent_name
 
 # Run specific test type
-PYTHONPATH=exports uv run python -m agent_name test --type constraint
-PYTHONPATH=exports uv run python -m agent_name test --type success
+hive test-run exports/agent_name --type constraint
+hive test-run exports/agent_name --type success
 
 # Run with parallel execution
-PYTHONPATH=exports uv run python -m agent_name test --parallel 4
+hive test-run exports/agent_name --parallel 4
 
 # Fail fast (stop on first failure)
-PYTHONPATH=exports uv run python -m agent_name test --fail-fast
+hive test-run exports/agent_name --fail-fast
 ```
 
 ### Writing Custom Tests

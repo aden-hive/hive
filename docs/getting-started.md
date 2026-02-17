@@ -56,7 +56,7 @@ cd exports/my_agent
 # Create agent.json, tools.py, README.md (see developer-guide.md for structure)
 
 # Validate the agent
-PYTHONPATH=exports uv run python -m my_agent validate
+hive validate exports/my_agent
 ```
 
 ### Option 3: Manual Code-First (Minimal Example)
@@ -154,12 +154,12 @@ Get your API keys:
 # Using Claude Code
 claude> /hive-test
 
-# Or manually
-PYTHONPATH=exports uv run python -m my_agent test
+# Run all tests for a specific goal
+hive test-run exports/my_agent --goal <goal_id>
 
-# Run with specific test type
-PYTHONPATH=exports uv run python -m my_agent test --type constraint
-PYTHONPATH=exports uv run python -m my_agent test --type success
+# Run specific test type
+hive test-run exports/my_agent --goal <goal_id> --type constraint
+hive test-run exports/my_agent --goal <goal_id> --type success
 ```
 
 ## Next Steps

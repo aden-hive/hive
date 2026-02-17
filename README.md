@@ -231,27 +231,38 @@ flowchart LR
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **[Adaptiveness](docs/key_concepts/evolution.md)** → On failure, the system evolves the graph and redeploys automatically
 
-## Run Agents
+## ⌨️ CLI Usage
 
-The `hive` CLI is the primary interface for running agents.
+The `hive` CLI is the primary interface for creating, running, and managing agents.
 
-```bash
-# Browse and run agents interactively (Recommended)
-hive tui
+### Core Commands
 
-# Run a specific agent directly
-hive run exports/my_agent --input '{"task": "Your input here"}'
+| Command | Description | Example |
+| :--- | :--- | :--- |
+| `hive tui` | **(Recommended)** Launch the interactive terminal dashboard | `hive tui` |
+| `hive run` | Run an agent with specific input | `hive run exports/my-agent --input '{"task": "research"}'` |
+| `hive shell` | Start an interactive REPL session | `hive shell exports/my-agent` |
+| `hive list` | List all available agents in `exports/` | `hive list` |
+| `hive info` | Display agent metadata, goals, and nodes | `hive info exports/my-agent` |
+| `hive validate` | Check agent validity and missing tools | `hive validate exports/my-agent` |
 
-# Run a specific agent with the TUI dashboard
-hive run exports/my_agent --tui
+### Session Management
 
-# Interactive REPL
-hive shell
-```
+| Command | Description | Example |
+| :--- | :--- | :--- |
+| `hive sessions list` | List active/past sessions for an agent | `hive sessions list exports/my-agent` |
+| `hive pause` | Pause a running agent session | `hive pause exports/my-agent <session_id>` |
+| `hive resume` | Resume a paused or failed session | `hive resume exports/my-agent <session_id>` |
 
-The TUI scans both `exports/` and `examples/templates/` for available agents.
+### Testing & Quality Assurance
 
-> **Using Python directly (alternative):** You can also run agents with `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
+| Command | Description | Example |
+| :--- | :--- | :--- |
+| `hive test-run` | Run generated tests for an agent | `hive test-run exports/my-agent --goal goal-1` |
+| `hive test-list` | List available test cases | `hive test-list exports/my-agent` |
+| `hive test-debug` | Debug a specific failed test case | `hive test-debug exports/my-agent test_function_name` |
+
+> **Pro Tip:** Add `--verbose` to `hive run` for detailed execution logs, or `--quiet` for JSON-only output.
 
 See [environment-setup.md](docs/environment-setup.md) for complete setup instructions.
 
