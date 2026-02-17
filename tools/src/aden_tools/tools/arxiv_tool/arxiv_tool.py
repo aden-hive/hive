@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 from typing import Literal
+from urllib.parse import urlparse
 
 import arxiv
 import requests
@@ -130,6 +131,7 @@ def register_tools(mcp: FastMCP) -> None:
             dict: { "success": bool, "file_path": str, "paper_id": str }
         """
         local_path = None
+        tmp_file = None
         try:
             # Find the PDF Link
             search = arxiv.Search(id_list=[paper_id])
@@ -150,30 +152,60 @@ def register_tools(mcp: FastMCP) -> None:
                     "error": "PDF URL not available for this paper.",
                 }
 
+            parsed_url = urlparse(pdf_url)
+            pdf_url = parsed_url._replace(netloc="export.arxiv.org").geturl()
+
             # Clean the title to make it a valid filename
             clean_title = re.sub(r"[^\w\s-]", "", paper.title).strip().replace(" ", "_")
             clean_id = re.sub(r"[^\w\s-]", "_", paper_id)
-            filename = f"{clean_title[:50]}_{clean_id}.pdf"
-            local_path = os.path.join(tempfile.gettempdir(), filename)
+            prefix = f"{clean_title[:50]}_{clean_id}_"
 
-            # Start the Stream
-            # stream=True prevents loading the entire file into memory
-            response = requests.get(pdf_url, stream=True)
-            response.raise_for_status()
+            tmp_file = tempfile.NamedTemporaryFile(
+                prefix=prefix,
+                suffix=".pdf",
+                delete=False,  # Caller is responsible for cleanup
+            )
+            local_path = tmp_file.name
 
             # Create a Permanent Temp File
             try:
-                with open(local_path, "wb") as tmp_file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            tmp_file.write(chunk)
-            except OSError as e:
+                # Start the Stream
+                # stream=True prevents loading the entire file into memory
+                headers = {
+                    "User-Agent": "Hive-Agent/1.0 (https://github.com/adenhq/hive)"
+                }
+                response = requests.get(
+                    pdf_url, stream=True, timeout=60, headers=headers
+                )
+                response.raise_for_status()
+
+                content_type = response.headers.get("Content-Type", "")
+                if "pdf" not in content_type.lower():
+                    raise ValueError(
+                        f"Expected PDF content but got '{content_type}'. "
+                        "arXiv may have returned an error page."
+                    )
+
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        tmp_file.write(chunk)
+
+            except (requests.RequestException, OSError) as e:
+                tmp_file.close()
+                if os.path.exists(local_path):
+                    os.remove(local_path)
+                local_path = None  # prevent double-deletion in the outer except
+
                 return {
                     "success": False,
-                    "error": f"File System Error during write: {str(e)}",
+                    "error": f"Failed during download or write: {str(e)}",
                 }
 
-            local_path = tmp_file.name
+            # Always close the file handle whether we succeeded or not
+            # for Windows an open handle prevents deletion.
+            finally:
+                if not tmp_file.closed:
+                    tmp_file.close()
 
             return {
                 "success": True,
@@ -183,14 +215,8 @@ def register_tools(mcp: FastMCP) -> None:
 
         except arxiv.ArxivError as e:
             return {"success": False, "error": f"arXiv library error: {str(e)}"}
-        except (ConnectionError, requests.RequestException) as e:
-            if local_path and os.path.exists(local_path):
-                os.remove(local_path)
+        except ConnectionError as e:
             return {"success": False, "error": f"Network error: {str(e)}"}
-        except OSError as e:
-            if local_path and os.path.exists(local_path):
-                os.remove(local_path)
-            return {"success": False, "error": f"File system error: {str(e)}"}
         except Exception as e:
             if local_path and os.path.exists(local_path):
                 os.remove(local_path)
