@@ -20,14 +20,15 @@ from fastmcp import FastMCP
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
-import time
 
 _CACHE = {}
 CACHE_TTL = 300  # seconds
 MAX_CACHE_SIZE = 1000
 
+
 def _make_cache_key(query, num_results, country, language, provider):
     return (query, num_results, country, language, provider)
+
 
 def _get_from_cache(key):
     entry = _CACHE.get(key)
@@ -39,10 +40,12 @@ def _get_from_cache(key):
             del _CACHE[key]
     return None
 
+
 def _set_cache(key, value):
     if len(_CACHE) >= MAX_CACHE_SIZE:
         _CACHE.pop(next(iter(_CACHE)))  # naive FIFO eviction
     _CACHE[key] = (time.time(), value)
+
 
 def clear_cache():
     _CACHE.clear()
@@ -232,7 +235,7 @@ def register_tools(
                         "error": "Google credentials not configured",
                         "help": "Set GOOGLE_API_KEY and GOOGLE_CSE_ID environment variables",
                     }
-                result =  _search_google(
+                result = _search_google(
                     query,
                     num_results,
                     country,
