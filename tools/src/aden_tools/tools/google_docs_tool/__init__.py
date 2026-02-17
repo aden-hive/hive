@@ -1,7 +1,7 @@
 """
 Google Docs Tool - Create and manage Google Docs documents.
 
-Supports OAuth2 authentication via Google service account or OAuth2 tokens.
+Supports OAuth2 authentication via access tokens.
 """
 
 from .google_docs_tool import register_tools

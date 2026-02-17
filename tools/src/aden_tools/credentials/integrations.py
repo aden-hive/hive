@@ -62,6 +62,7 @@ INTEGRATION_CREDENTIALS = {
             "google_docs_batch_update",
             "google_docs_create_list",
             "google_docs_add_comment",
+            "google_docs_list_comments",
             "google_docs_export_content",
         ],
         required=True,

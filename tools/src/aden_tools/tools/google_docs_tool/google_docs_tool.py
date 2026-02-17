@@ -3,7 +3,6 @@ Google Docs Tool - Create and manage Google Docs documents via Google Docs API v
 
 Supports:
 - OAuth2 tokens via the credential store
-- Service account JSON credentials (GOOGLE_SERVICE_ACCOUNT_JSON)
 - Direct access token (GOOGLE_DOCS_ACCESS_TOKEN)
 
 API Reference: https://developers.google.com/docs/api/reference/rest
@@ -431,6 +430,30 @@ class _GoogleDocsClient:
         )
         return self._handle_response(response)
 
+    def list_comments(
+        self,
+        document_id: str,
+        page_size: int = 20,
+        page_token: str | None = None,
+        include_deleted: bool = False,
+    ) -> dict[str, Any]:
+        """List comments on a document (via Drive API)."""
+        params: dict[str, Any] = {
+            "fields": "comments(*),nextPageToken",
+            "pageSize": max(1, min(page_size, 100)),
+            "includeDeleted": str(include_deleted).lower(),
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        response = httpx.get(
+            f"{GOOGLE_DRIVE_API_BASE}/files/{document_id}/comments",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
     def export_document(
         self,
         document_id: str,
@@ -807,6 +830,44 @@ def register_tools(
             return client
         try:
             return client.add_comment(document_id, content, quoted_text)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def google_docs_list_comments(
+        document_id: str,
+        page_size: int = 20,
+        page_token: str | None = None,
+        include_deleted: bool = False,
+    ) -> dict:
+        """
+        Retrieve comments for a document, with pagination support.
+
+        Note: This uses the Google Drive API for comments.
+
+        Args:
+            document_id: The ID of the Google Docs document
+            page_size: Number of comments to return (1-100, default: 20)
+            page_token: Optional pagination token from a previous response
+            include_deleted: Whether to include deleted comments
+
+        Returns:
+            Dict containing comments list and optional next_page_token, or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.list_comments(document_id, page_size, page_token, include_deleted)
+            if "error" in result:
+                return result
+            return {
+                "document_id": document_id,
+                "comments": result.get("comments", []),
+                "next_page_token": result.get("nextPageToken"),
+            }
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

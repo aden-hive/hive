@@ -49,6 +49,14 @@ class TestGoogleDocsCreateDocument:
             assert "not configured" in result["error"]
             assert "help" in result
 
+    def test_service_account_json_without_access_token_is_not_used(self, mcp):
+        """Test that service account JSON alone is not treated as an access token."""
+        with patch.dict("os.environ", {"GOOGLE_SERVICE_ACCOUNT_JSON": '{"type":"service_account"}'}):
+            tool_fn = get_tool_fn(mcp, "google_docs_create_document")
+            result = tool_fn(title="Test Document")
+            assert "error" in result
+            assert "not configured" in result["error"]
+
     @patch("httpx.post")
     def test_create_document_success(self, mock_post, mcp_with_credentials):
         """Test successful document creation."""
@@ -460,3 +468,38 @@ class TestServiceAccountTokenExchange:
 
         # Should use the pre-exchanged token and make the API call
         assert "error" not in result or "not configured" not in result.get("error", "")
+
+class TestGoogleDocsListComments:
+    """Tests for google_docs_list_comments tool."""
+
+    @patch("httpx.get")
+    def test_list_comments_success(self, mock_get, mcp_with_credentials):
+        """Test retrieving comments with pagination token."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "comments": [{"id": "comment123", "content": "Looks good"}],
+            "nextPageToken": "next-token",
+        }
+        mock_get.return_value = mock_response
+
+        tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_list_comments")
+        result = tool_fn(document_id="doc123", page_size=10)
+
+        assert result["document_id"] == "doc123"
+        assert len(result["comments"]) == 1
+        assert result["comments"][0]["id"] == "comment123"
+        assert result["next_page_token"] == "next-token"
+
+    @patch("httpx.get")
+    def test_list_comments_not_found(self, mock_get, mcp_with_credentials):
+        """Test handling a missing document for comment retrieval."""
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+
+        tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_list_comments")
+        result = tool_fn(document_id="does-not-exist")
+
+        assert "error" in result
+        assert "not found" in result["error"].lower()

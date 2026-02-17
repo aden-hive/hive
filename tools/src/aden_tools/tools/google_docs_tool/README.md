@@ -11,7 +11,7 @@ Create and manage Google Docs documents via the Google Docs API v1.
 - Insert images
 - Format text (bold, italic, colors, etc.)
 - Create bulleted and numbered lists
-- Add comments
+- Add and retrieve comments
 - Export to PDF, DOCX, TXT, and more
 
 ## Setup
@@ -27,17 +27,6 @@ Create and manage Google Docs documents via the Google Docs API v1.
 
 ```bash
 export GOOGLE_DOCS_ACCESS_TOKEN="your-access-token"
-```
-
-### Option 2: Service Account (Recommended for Production)
-
-1. Create a service account in Google Cloud Console
-2. Download the JSON key file
-3. Share your documents with the service account email
-4. Set the environment variable:
-
-```bash
-export GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
 ```
 
 ### Required OAuth Scopes
@@ -59,6 +48,7 @@ export GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account",...}'
 | `google_docs_batch_update` | Execute multiple requests atomically |
 | `google_docs_create_list` | Create bulleted or numbered lists |
 | `google_docs_add_comment` | Add comments to documents |
+| `google_docs_list_comments` | Retrieve comments for a document with pagination |
 | `google_docs_export_content` | Export to PDF, DOCX, TXT, HTML, etc. |
 
 ## Usage Examples
@@ -154,7 +144,4 @@ All tools return a dict. On error, the dict contains an `"error"` key with a des
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GOOGLE_DOCS_ACCESS_TOKEN` | Yes* | OAuth2 access token |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes* | Service account JSON (alternative to access token) |
-
-*One of these is required.
+| `GOOGLE_DOCS_ACCESS_TOKEN` | Yes | OAuth2 access token |
