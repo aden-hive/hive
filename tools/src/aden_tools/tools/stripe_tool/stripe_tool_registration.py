@@ -33,7 +33,7 @@ def register_tools(
     Returns:
         List of registered tool names (empty list if initialization fails)
     """
-    # Extract Stripe API key from credentials or environmentssss
+    # Extract Stripe API key from credentials or environment
     api_key = None
     webhook_secret = None
 
@@ -54,7 +54,7 @@ def register_tools(
     # so they appear in the tool list (they'll return errors when called)
     try:
         if api_key:
-            config = StripeToolConfig(api_key=api_key)
+            config = StripeToolConfig(api_key=api_key, webhook_secret=webhook_secret)
             stripe_tool = StripeTool(config=config)
         else:
             # No API key available - print warning but continue registration
@@ -64,11 +64,9 @@ def register_tools(
                 "Set STRIPE_API_KEY environment variable or provide credentials parameter."
             )
             # Create a dummy tool that will error on use
-            # This allows tools to be registered for testing
             stripe_tool = None
     except Exception as e:
         print(f"Warning: Failed to initialize Stripe tool: {e}")
-        # Return empty list - registration failed
         return []
 
     # List to track registered tool names
@@ -85,23 +83,11 @@ def register_tools(
         payment_method: str | None = None,
         invoice_settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """
-        Create a new Stripe customer.
-
-        Args:
-            email: Customer email address (required)
-            name: Customer full name
-            description: Internal description for the customer
-            metadata: Custom key-value metadata (max 50 keys)
-            payment_method: ID of payment method to attach
-            invoice_settings: Default invoice settings for customer
-
-        Returns:
-            Dictionary containing customer details including id, email, created timestamp
-        """
+        """Create a new Stripe customer."""
         if stripe_tool is None:
-            return {"error": "Stripe API key not configured. Set STRIPE_API_KEY"
-            " environment variable."}
+            return {
+                "error": "Stripe API key not configured. Set STRIPE_API_KEY environment variable."
+            }
         return stripe_tool.create_customer(
             email=email,
             name=name,
@@ -115,15 +101,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_get_customer_by_email(email: str) -> dict[str, Any]:
-        """
-        Retrieve a customer by their email address.
-
-        Args:
-            email: Customer email to search for
-
-        Returns:
-            Customer object if found, or error if not found or multiple matches
-        """
+        """Retrieve a customer by their email address."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.get_customer_by_email(email)
@@ -132,15 +110,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_get_customer_by_id(customer_id: str) -> dict[str, Any]:
-        """
-        Retrieve a customer by their Stripe customer ID.
-
-        Args:
-            customer_id: Stripe customer ID (starts with cus_)
-
-        Returns:
-            Customer object dictionary
-        """
+        """Retrieve a customer by their Stripe customer ID."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.get_customer_by_id(customer_id)
@@ -156,20 +126,7 @@ def register_tools(
         metadata: dict[str, str] | None = None,
         default_payment_method: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Update an existing customer's information.
-
-        Args:
-            customer_id: Stripe customer ID to update
-            email: New email address
-            name: New customer name
-            description: New description
-            metadata: New or updated metadata
-            default_payment_method: New default payment method ID
-
-        Returns:
-            Updated customer object
-        """
+        """Update an existing customer's information."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.update_customer(
@@ -188,16 +145,7 @@ def register_tools(
         email: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        """
-        List customers with optional email filter.
-
-        Args:
-            email: Filter by customer email
-            limit: Maximum number of customers to return (1-100)
-
-        Returns:
-            Dictionary with 'data' array of customer objects and pagination info
-        """
+        """List customers with optional email filter."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.list_customers(email=email, limit=limit)
@@ -206,15 +154,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_delete_customer(customer_id: str) -> dict[str, Any]:
-        """
-        Delete a customer permanently.
-
-        Args:
-            customer_id: Stripe customer ID to delete
-
-        Returns:
-            Confirmation dictionary with deleted status
-        """
+        """Delete a customer permanently."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.delete_customer(customer_id)
@@ -232,21 +172,7 @@ def register_tools(
         metadata: dict[str, str] | None = None,
         payment_behavior: str = "default_incomplete",
     ) -> dict[str, Any]:
-        """
-        Create a new subscription for a customer.
-
-        Args:
-            customer_id: Stripe customer ID
-            price_id: Stripe price ID to subscribe to
-            quantity: Number of units (default 1)
-            trial_period_days: Number of trial days before billing
-            metadata: Custom metadata
-            payment_behavior: How to handle payment (default_incomplete, allow_incomplete,
-              error_if_incomplete)
-
-        Returns:
-            Subscription object with status, current_period_end, etc.
-        """
+        """Create a new subscription for a customer."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.create_subscription(
@@ -262,15 +188,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_get_subscription_status(subscription_id: str) -> dict[str, Any]:
-        """
-        Get current subscription status and details.
-
-        Args:
-            subscription_id: Stripe subscription ID
-
-        Returns:
-            Subscription object with status, billing dates, items, etc.
-        """
+        """Get current subscription status and details."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.get_subscription_status(subscription_id)
@@ -285,19 +203,7 @@ def register_tools(
         metadata: dict[str, str] | None = None,
         proration_behavior: str = "create_prorations",
     ) -> dict[str, Any]:
-        """
-        Update an existing subscription.
-
-        Args:
-            subscription_id: Subscription to update
-            price_id: New price ID to switch to
-            quantity: New quantity
-            metadata: Updated metadata
-            proration_behavior: How to handle prorations (create_prorations, none, always_invoice)
-
-        Returns:
-            Updated subscription object
-        """
+        """Update an existing subscription."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.update_subscription(
@@ -315,17 +221,7 @@ def register_tools(
         subscription_id: str,
         cancel_at_period_end: bool = False,
     ) -> dict[str, Any]:
-        """
-        Cancel a subscription immediately or at period end.
-
-        Args:
-            subscription_id: Subscription to cancel
-            cancel_at_period_end: If True, cancel at end of billing period;
-            if False,cancel immediately
-
-        Returns:
-            Updated subscription object with canceled status
-        """
+        """Cancel a subscription immediately or at period end."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.cancel_subscription(
@@ -340,16 +236,7 @@ def register_tools(
         subscription_id: str,
         resumes_at: int | None = None,
     ) -> dict[str, Any]:
-        """
-        Pause a subscription.
-
-        Args:
-            subscription_id: Subscription to pause
-            resumes_at: Unix timestamp when subscription should resume (optional)
-
-        Returns:
-            Updated subscription with paused status
-        """
+        """Pause a subscription."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.pause_subscription(
@@ -361,15 +248,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_resume_subscription(subscription_id: str) -> dict[str, Any]:
-        """
-        Resume a paused subscription.
-
-        Args:
-            subscription_id: Subscription to resume
-
-        Returns:
-            Updated subscription object with active status
-        """
+        """Resume a paused subscription."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.resume_subscription(subscription_id)
@@ -382,17 +261,7 @@ def register_tools(
         status: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        """
-        List subscriptions with optional filters.
-
-        Args:
-            customer_id: Filter by customer
-            status: Filter by status (active, past_due, canceled, etc.)
-            limit: Maximum results (1-100)
-
-        Returns:
-            Dictionary with 'data' array of subscriptions
-        """
+        """List subscriptions with optional filters."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.list_subscriptions(
@@ -413,19 +282,7 @@ def register_tools(
         description: str | None = None,
         metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """
-        Create a new invoice for a customer.
-
-        Args:
-            customer_id: Customer to invoice
-            auto_advance: Automatically finalize and attempt payment
-            collection_method: charge_automatically or send_invoice
-            description: Invoice description
-            metadata: Custom metadata
-
-        Returns:
-            Invoice object
-        """
+        """Create a new invoice for a customer."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.create_invoice(
@@ -440,15 +297,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_get_invoice(invoice_id: str) -> dict[str, Any]:
-        """
-        Retrieve invoice details.
-
-        Args:
-            invoice_id: Invoice ID to retrieve
-
-        Returns:
-            Invoice object with line items, amount, status, etc.
-        """
+        """Retrieve invoice details."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.get_invoice(invoice_id)
@@ -461,17 +310,7 @@ def register_tools(
         status: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        """
-        List invoices with filters.
-
-        Args:
-            customer_id: Filter by customer
-            status: Filter by status (draft, open, paid, void, uncollectible)
-            limit: Maximum results
-
-        Returns:
-            Dictionary with 'data' array of invoices
-        """
+        """List invoices with filters."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.list_invoices(
@@ -484,15 +323,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_pay_invoice(invoice_id: str) -> dict[str, Any]:
-        """
-        Attempt to pay an invoice.
-
-        Args:
-            invoice_id: Invoice to pay
-
-        Returns:
-            Updated invoice object
-        """
+        """Attempt to pay an invoice."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.pay_invoice(invoice_id)
@@ -501,15 +332,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_void_invoice(invoice_id: str) -> dict[str, Any]:
-        """
-        Void an invoice (mark as uncollectible).
-
-        Args:
-            invoice_id: Invoice to void
-
-        Returns:
-            Voided invoice object
-        """
+        """Void an invoice (mark as uncollectible)."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.void_invoice(invoice_id)
@@ -518,15 +341,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_finalize_invoice(invoice_id: str) -> dict[str, Any]:
-        """
-        Finalize a draft invoice (make it ready for payment).
-
-        Args:
-            invoice_id: Invoice to finalize
-
-        Returns:
-            Finalized invoice object
-        """
+        """Finalize a draft invoice (make it ready for payment)."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.finalize_invoice(invoice_id)
@@ -540,16 +355,7 @@ def register_tools(
         payment_method_id: str,
         customer_id: str,
     ) -> dict[str, Any]:
-        """
-        Attach a payment method to a customer.
-
-        Args:
-            payment_method_id: Payment method to attach
-            customer_id: Customer to attach to
-
-        Returns:
-            Updated payment method object
-        """
+        """Attach a payment method to a customer."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.attach_payment_method(payment_method_id, customer_id)
@@ -558,15 +364,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_detach_payment_method(payment_method_id: str) -> dict[str, Any]:
-        """
-        Detach a payment method from its customer.
-
-        Args:
-            payment_method_id: Payment method to detach
-
-        Returns:
-            Updated payment method object
-        """
+        """Detach a payment method from its customer."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.detach_payment_method(payment_method_id)
@@ -578,16 +376,7 @@ def register_tools(
         customer_id: str,
         type: str = "card",
     ) -> dict[str, Any]:
-        """
-        List payment methods for a customer.
-
-        Args:
-            customer_id: Customer to list methods for
-            type: Payment method type (card, us_bank_account, etc.)
-
-        Returns:
-            Dictionary with 'data' array of payment methods
-        """
+        """List payment methods for a customer."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.list_payment_methods(customer_id, type)
@@ -599,16 +388,7 @@ def register_tools(
         customer_id: str,
         payment_method_id: str,
     ) -> dict[str, Any]:
-        """
-        Set the default payment method for a customer.
-
-        Args:
-            customer_id: Customer to update
-            payment_method_id: Payment method to set as default
-
-        Returns:
-            Updated customer object
-        """
+        """Set the default payment method for a customer."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.set_default_payment_method(customer_id, payment_method_id)
@@ -626,20 +406,7 @@ def register_tools(
         description: str | None = None,
         metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """
-        Create a payment intent.
-
-        Args:
-            amount: Amount in cents (e.g., 1000 = $10.00)
-            currency: Three-letter currency code (e.g., usd, eur)
-            customer_id: Customer to charge
-            payment_method: Payment method to use
-            description: Payment description
-            metadata: Custom metadata
-
-        Returns:
-            Payment intent object with client_secret for frontend
-        """
+        """Create a payment intent."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.create_payment_intent(
@@ -655,15 +422,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_confirm_payment_intent(payment_intent_id: str) -> dict[str, Any]:
-        """
-        Confirm a payment intent.
-
-        Args:
-            payment_intent_id: Payment intent to confirm
-
-        Returns:
-            Updated payment intent object
-        """
+        """Confirm a payment intent."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.confirm_payment_intent(payment_intent_id)
@@ -672,15 +431,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_cancel_payment_intent(payment_intent_id: str) -> dict[str, Any]:
-        """
-        Cancel a payment intent.
-
-        Args:
-            payment_intent_id: Payment intent to cancel
-
-        Returns:
-            Canceled payment intent object
-        """
+        """Cancel a payment intent."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.cancel_payment_intent(payment_intent_id)
@@ -692,16 +443,7 @@ def register_tools(
         payment_intent_id: str,
         amount_to_capture: int | None = None,
     ) -> dict[str, Any]:
-        """
-        Capture a payment intent (for manual capture mode).
-
-        Args:
-            payment_intent_id: Payment intent to capture
-            amount_to_capture: Amount to capture in cents (None = full amount)
-
-        Returns:
-            Captured payment intent object
-        """
+        """Capture a payment intent (for manual capture mode)."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.capture_payment_intent(payment_intent_id, amount_to_capture)
@@ -713,16 +455,7 @@ def register_tools(
         customer_id: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        """
-        List payment intents.
-
-        Args:
-            customer_id: Filter by customer
-            limit: Maximum results
-
-        Returns:
-            Dictionary with 'data' array of payment intents
-        """
+        """List payment intents."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.list_payment_intents(customer_id, limit)
@@ -740,20 +473,7 @@ def register_tools(
         quantity: int = 1,
         mode: str = "payment",
     ) -> dict[str, Any]:
-        """
-        Create a Stripe Checkout session.
-
-        Args:
-            price_id: Price to charge
-            success_url: URL to redirect on success
-            cancel_url: URL to redirect on cancel
-            customer_id: Existing customer ID
-            quantity: Quantity of items
-            mode: payment, subscription, or setup
-
-        Returns:
-            Checkout session with url to redirect customer
-        """
+        """Create a Stripe Checkout session."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.create_checkout_session(
@@ -769,15 +489,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_get_checkout_session(session_id: str) -> dict[str, Any]:
-        """
-        Retrieve a checkout session.
-
-        Args:
-            session_id: Checkout session ID
-
-        Returns:
-            Checkout session object
-        """
+        """Retrieve a checkout session."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.get_checkout_session(session_id)
@@ -786,15 +498,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_expire_checkout_session(session_id: str) -> dict[str, Any]:
-        """
-        Expire a checkout session (prevent further use).
-
-        Args:
-            session_id: Checkout session to expire
-
-        Returns:
-            Expired checkout session
-        """
+        """Expire a checkout session (prevent further use)."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.expire_checkout_session(session_id)
@@ -807,17 +511,7 @@ def register_tools(
         quantity: int = 1,
         metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """
-        Create a payment link (shareable checkout link).
-
-        Args:
-            price_id: Price to charge
-            quantity: Default quantity
-            metadata: Custom metadata
-
-        Returns:
-            Payment link object with url
-        """
+        """Create a payment link (shareable checkout link)."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.create_payment_link(
@@ -836,17 +530,7 @@ def register_tools(
         description: str | None = None,
         metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """
-        Create a product in the catalog.
-
-        Args:
-            name: Product name
-            description: Product description
-            metadata: Custom metadata
-
-        Returns:
-            Product object
-        """
+        """Create a product in the catalog."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.create_product(
@@ -859,15 +543,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_get_product(product_id: str) -> dict[str, Any]:
-        """
-        Retrieve a product.
-
-        Args:
-            product_id: Product ID
-
-        Returns:
-            Product object
-        """
+        """Retrieve a product."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.get_product(product_id)
@@ -881,18 +557,7 @@ def register_tools(
         description: str | None = None,
         metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """
-        Update a product.
-
-        Args:
-            product_id: Product to update
-            name: New name
-            description: New description
-            metadata: Updated metadata
-
-        Returns:
-            Updated product object
-        """
+        """Update a product."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.update_product(
@@ -906,15 +571,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_list_products(limit: int = 10) -> dict[str, Any]:
-        """
-        List products.
-
-        Args:
-            limit: Maximum results
-
-        Returns:
-            Dictionary with 'data' array of products
-        """
+        """List products."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.list_products(limit)
@@ -923,15 +580,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_archive_product(product_id: str) -> dict[str, Any]:
-        """
-        Archive a product (make inactive).
-
-        Args:
-            product_id: Product to archive
-
-        Returns:
-            Archived product object
-        """
+        """Archive a product (make inactive)."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.archive_product(product_id)
@@ -946,19 +595,7 @@ def register_tools(
         recurring_interval: str | None = None,
         recurring_interval_count: int = 1,
     ) -> dict[str, Any]:
-        """
-        Create a price for a product.
-
-        Args:
-            product_id: Product to price
-            unit_amount: Price in cents
-            currency: Currency code
-            recurring_interval: For subscriptions: day, week, month, year
-            recurring_interval_count: Billing frequency (e.g., 3 for quarterly)
-
-        Returns:
-            Price object
-        """
+        """Create a price for a product."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.create_price(
@@ -973,15 +610,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_get_price(price_id: str) -> dict[str, Any]:
-        """
-        Retrieve a price.
-
-        Args:
-            price_id: Price ID
-
-        Returns:
-            Price object
-        """
+        """Retrieve a price."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.get_price(price_id)
@@ -993,16 +622,7 @@ def register_tools(
         product_id: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        """
-        List prices.
-
-        Args:
-            product_id: Filter by product
-            limit: Maximum results
-
-        Returns:
-            Dictionary with 'data' array of prices
-        """
+        """List prices."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.list_prices(product_id, limit)
@@ -1017,17 +637,7 @@ def register_tools(
         amount: int | None = None,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Create a refund.
-
-        Args:
-            payment_intent_id: Payment to refund
-            amount: Amount to refund in cents (None = full amount)
-            reason: Refund reason (duplicate, fraudulent, requested_by_customer)
-
-        Returns:
-            Refund object
-        """
+        """Create a refund."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.create_refund(
@@ -1040,15 +650,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_get_refund(refund_id: str) -> dict[str, Any]:
-        """
-        Retrieve refund details.
-
-        Args:
-            refund_id: Refund ID
-
-        Returns:
-            Refund object
-        """
+        """Retrieve refund details."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.get_refund(refund_id)
@@ -1060,16 +662,7 @@ def register_tools(
         payment_intent_id: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        """
-        List refunds.
-
-        Args:
-            payment_intent_id: Filter by payment intent
-            limit: Maximum results
-
-        Returns:
-            Dictionary with 'data' array of refunds
-        """
+        """List refunds."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.list_refunds(payment_intent_id, limit)
@@ -1078,15 +671,7 @@ def register_tools(
 
     @mcp.tool()
     def stripe_cancel_refund(refund_id: str) -> dict[str, Any]:
-        """
-        Cancel a pending refund.
-
-        Args:
-            refund_id: Refund to cancel
-
-        Returns:
-            Canceled refund object
-        """
+        """Cancel a pending refund."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         return stripe_tool.cancel_refund(refund_id)
@@ -1100,21 +685,14 @@ def register_tools(
         payload: str,
         signature: str,
     ) -> dict[str, Any]:
-        """
-        Verify a Stripe webhook signature.
-
-        Args:
-            payload: Raw webhook payload body
-            signature: Stripe-Signature header value
-
-        Returns:
-            Verified event object or error
-        """
+        """Verify a Stripe webhook signature."""
         if stripe_tool is None:
             return {"error": "Stripe API key not configured"}
         if not webhook_secret:
-            return {"error": "Stripe webhook secret not configured. Set STRIPE_WEBHOOK_SECRET "
-            "environment variable."}
+            return {
+                "error": "Stripe webhook secret not configured. Set STRIPE_WEBHOOK_SECRET"
+                " environment variable."
+            }
         return stripe_tool.verify_webhook_signature(payload, signature, webhook_secret)
 
     registered_tools.append("stripe_verify_webhook_signature")

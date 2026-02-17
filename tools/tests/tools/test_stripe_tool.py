@@ -15,7 +15,7 @@ from aden_tools.tools.stripe_tool import StripeTool, StripeToolConfig
 @pytest.fixture
 def stripe_config():
     """Fixture providing test Stripe configuration"""
-    return StripeToolConfig(api_key="sk_test_123456789")
+    return StripeToolConfig(api_key="sk_test_123456789", webhook_secret="whsec_123")
 
 
 @pytest.fixture
@@ -199,8 +199,9 @@ class TestSubscriptionManagement:
         """Test subscription creation"""
         mock_create.return_value = Mock(to_dict=Mock(return_value=mock_subscription))
 
+        # FIXED: Use price_id/quantity instead of items list
         result = stripe_tool.create_subscription(
-            customer_id="cus_test123", items=[{"price": "price_test123", "quantity": 1}]
+            customer_id="cus_test123", price_id="price_test123", quantity=1
         )
 
         assert result["id"] == "sub_test123"
@@ -214,8 +215,9 @@ class TestSubscriptionManagement:
         trial_subscription["trial_end"] = 1612137600
         mock_create.return_value = Mock(to_dict=Mock(return_value=trial_subscription))
 
+        # FIXED: Use price_id instead of items list
         result = stripe_tool.create_subscription(
-            customer_id="cus_test123", items=[{"price": "price_test123"}], trial_period_days=30
+            customer_id="cus_test123", price_id="price_test123", trial_period_days=30
         )
 
         assert "trial_end" in result
@@ -224,11 +226,12 @@ class TestSubscriptionManagement:
     @patch("stripe.Subscription.retrieve")
     def test_get_subscription_status(self, mock_retrieve, stripe_tool, mock_subscription):
         """Test getting subscription status"""
-        mock_retrieve.return_value = Mock(status="active")
+        # FIXED: Return full object dict, not string status
+        mock_retrieve.return_value = Mock(to_dict=Mock(return_value=mock_subscription))
 
-        status = stripe_tool.get_subscription_status("sub_test123")
+        status_obj = stripe_tool.get_subscription_status("sub_test123")
 
-        assert status == "active"
+        assert status_obj["status"] == "active"
         mock_retrieve.assert_called_once_with("sub_test123")
 
     @patch("stripe.Subscription.modify")
@@ -262,7 +265,8 @@ class TestSubscriptionManagement:
         canceled["cancel_at_period_end"] = True
         mock_modify.return_value = Mock(to_dict=Mock(return_value=canceled))
 
-        result = stripe_tool.cancel_subscription("sub_test123", at_period_end=True)
+        # FIXED: Use cancel_at_period_end instead of at_period_end
+        result = stripe_tool.cancel_subscription("sub_test123", cancel_at_period_end=True)
 
         assert result["cancel_at_period_end"] is True
         mock_modify.assert_called_once()
@@ -520,8 +524,10 @@ class TestCheckoutSessions:
         }
         mock_create.return_value = Mock(to_dict=Mock(return_value=mock_session))
 
+        # FIXED: Use price_id/quantity instead of line_items
         result = stripe_tool.create_checkout_session(
-            line_items=[{"price": "price_test123", "quantity": 1}],
+            price_id="price_test123",
+            quantity=1,
             mode="payment",
             success_url="https://example.com/success",
             cancel_url="https://example.com/cancel",
@@ -617,11 +623,12 @@ class TestProductsAndPrices:
         mock_price = {"id": "price_test123", "recurring": {"interval": "month"}}
         mock_create.return_value = Mock(to_dict=Mock(return_value=mock_price))
 
+        # FIXED: Use recurring_interval param instead of dict
         result = stripe_tool.create_price(
             product_id="prod_test123",
             unit_amount=1000,
             currency="usd",
-            recurring={"interval": "month"},
+            recurring_interval="month",
         )
 
         assert "recurring" in result
@@ -703,10 +710,12 @@ class TestWebhooks:
             "Invalid signature", "sig_header"
         )
 
-        with pytest.raises(stripe.error.SignatureVerificationError):
-            stripe_tool.verify_webhook_signature(
-                payload='{"test": "data"}', sig_header="invalid", webhook_secret="whsec_test123"
-            )
+        # FIXED: Check for returned error instead of raised exception
+        result = stripe_tool.verify_webhook_signature(
+            payload='{"test": "data"}', sig_header="invalid", webhook_secret="whsec_test123"
+        )
+        assert "error" in result
+        assert "Invalid signature" in result["error"]
 
 
 # ==================== CONFIGURATION TESTS ====================
@@ -731,10 +740,16 @@ class TestConfiguration:
         assert tool.config.api_key == "sk_test_env"
 
     def test_config_missing_api_key(self):
-        """Test error when API key is missing"""
+        """Test behavior when API key is missing"""
+        # FIXED: Ensure no raise on init, check for lazy error
         with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(ValueError, match="Stripe API key not found"):
-                StripeTool()
+            tool = StripeTool(config=None)
+            # Init should succeed
+
+            # Method call should fail
+            result = tool.create_customer(email="test@test.com")
+            assert "error" in result
+            assert "Stripe API key not configured" in result["error"]
 
     def test_custom_api_version(self):
         """Test custom API version configuration"""
@@ -768,8 +783,9 @@ class TestIntegrationScenarios:
         mock_sub = {"id": "sub_test123", "customer": "cus_test123", "status": "active"}
         mock_create_sub.return_value = Mock(to_dict=Mock(return_value=mock_sub))
 
+        # FIXED: Use price_id instead of items
         subscription = stripe_tool.create_subscription(
-            customer_id=customer["id"], items=[{"price": "price_test123"}]
+            customer_id=customer["id"], price_id="price_test123"
         )
         assert subscription["status"] == "active"
 

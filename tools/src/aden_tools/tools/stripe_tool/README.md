@@ -42,7 +42,7 @@ tools/
 │           ├── __init__.py                      # Tool registration
 │           └── stripe_tool/
 │               ├── __init__.py                  # Package exports
-│               ├── stripe_tool.py               # Core implementation (1,500+ lines, 45+ methods)
+│               ├── stripe_tool.py               # Core implementation 
 │               ├── stripe_tool_registration.py  # FastMCP integration
 │               └── README.md                    # This file
 │

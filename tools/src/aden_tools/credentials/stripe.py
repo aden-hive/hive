@@ -64,8 +64,8 @@ STRIPE_CREDENTIALS = {
 4. For production: Copy the live mode Secret key (starts with sk_live_)
 5. Set STRIPE_API_KEY environment variable
 
-⚠️ Use TEST keys for development (no real charges)
-⚠️ Use LIVE keys only in production (processes real payments)""",
+Use TEST keys for development (no real charges)
+Use LIVE keys only in production (processes real payments)""",
     ),
     "stripe_webhook_secret": CredentialSpec(
         env_var="STRIPE_WEBHOOK_SECRET",

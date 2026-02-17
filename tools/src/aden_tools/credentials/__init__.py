@@ -105,7 +105,7 @@ __all__ = [
     "CredentialSpec",
     "CredentialStoreAdapter",
     "CredentialError",
-    # Credential store adapter (replaces deprecated CredentialManager)
+    # Credential store adapter (replaces deprecated CredentialManasger)
     "CredentialStoreAdapter",
     # Health check utilities
     "HealthCheckResult",
