@@ -24,9 +24,9 @@ goal = Goal(
     id="email-inbox-management",
     name="Email Inbox Management",
     description=(
-        "Manage Gmail inbox emails using user-defined free-text rules. "
-        "Fetch inbox emails (configurable batch size, default 100), apply the user's "
-        "rules to each email, and execute the appropriate Gmail actions — trash, "
+        "Manage Gmail inbox emails autonomously using user-defined free-text rules. "
+        "For every five minutes, fetch inbox emails (configurable batch size, default 100), "
+        "apply the user's rules to each email, and execute the appropriate Gmail actions — trash, "
         "mark as spam, mark important, mark read/unread, star, and more."
     ),
     success_criteria=[

@@ -3,7 +3,7 @@
     "id": "email_inbox_management",
     "name": "Email Inbox Management",
     "version": "1.0.0",
-    "description": "Manage Gmail inbox emails using user-defined free-text rules. Fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more."
+    "description": "Manage Gmail inbox emails autonomously using user-defined free-text rules. For every five minutes, fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more."
   },
   "graph": {
     "id": "email-inbox-management-graph",
@@ -184,12 +184,12 @@
     ],
     "max_steps": 100,
     "max_retries_per_node": 3,
-    "description": "Manage Gmail inbox emails using user-defined free-text rules. Fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more."
+    "description": "Manage Gmail inbox emails autonomously using user-defined free-text rules. For every five minutes, fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more."
   },
   "goal": {
     "id": "email-inbox-management",
     "name": "Email Inbox Management",
-    "description": "Manage Gmail inbox emails using user-defined free-text rules. Fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more.",
+    "description": "Manage Gmail inbox emails autonomously using user-defined free-text rules. For every five minutes, fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, and more.",
     "status": "draft",
     "success_criteria": [
       {
