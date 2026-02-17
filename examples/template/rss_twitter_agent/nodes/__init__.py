@@ -104,9 +104,10 @@ Ask: "Would you like any changes to these threads, or shall I finalize them?"
 
 If the user requests changes, revise and present again.
 
-**STEP 2 — After user approves, call set_output then post_to_twitter:**
-- set_output("threads_json", <JSON string of threads array>)
-- Call post_to_twitter(threads_json=<the same JSON string>). In live mode the tool posts to Twitter/X; in draft mode it simply confirms. The tool handles missing credentials by falling back to draft and notifying the user.
+**STEP 2 — After user approves:**
+- Call set_output("threads_json", <JSON string of threads array>)
+- Call post_to_twitter(threads_json=<the same JSON string>)
+- The tool handles everything automatically. In draft mode (default) it simply saves the threads for review — no Twitter account or API key needed. Only if TWITTER_POST_MODE=live is explicitly set will it attempt to post.
 
 Each thread object should have: "article_title", "source", "thread" (array of tweet strings), "tweet_count".
 """,

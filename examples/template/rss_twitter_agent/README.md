@@ -1,5 +1,9 @@
 # RSS-to-Twitter Thread Agent
 
+> **No Twitter API required** — by default this agent runs in draft mode.
+> It fetches RSS feeds and generates threads for your review without any
+> Twitter/X credentials. API keys are only needed for the optional live posting feature.
+
 Automated content repurposing from RSS feeds to Twitter/X threads. Fetches articles from configured RSS feeds, extracts key points, and generates engaging Twitter threads for user review.
 
 ## What It Does
