@@ -18,8 +18,10 @@ class AgentMetadata:
     )
     intro_message: str = (
         "Hi! I'm your email inbox management assistant. Tell me your rules "
-        "(what to trash, mark as spam, mark important, etc.) and I'll sort "
-        "through your emails. How would you like me to manage your inbox?"
+        "(what to trash, mark as spam, mark important, etc.) and I'll run an "
+        "initial triage of your inbox. After that, I'll automatically check "
+        "and process new emails every 5 minutes — so you can set it and forget it. "
+        "What rules would you like me to apply?"
     )
 
 
