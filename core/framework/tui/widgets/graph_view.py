@@ -8,6 +8,7 @@ arrows drawn on the right margin that visually point back up to earlier nodes.
 from __future__ import annotations
 
 import re
+import textwrap
 import time
 
 from textual.app import ComposeResult
@@ -57,10 +58,12 @@ class GraphOverview(Vertical):
         # Per-node status strings shown next to the node in the graph display.
         # e.g. {"planner": "thinking...", "searcher": "web_search..."}
         self._node_status: dict[str, str] = {}
+        self._cached_width: int | None = None
 
     def compose(self) -> ComposeResult:
         # Use RichLog for formatted output
-        yield RichLog(id="graph-display", highlight=True, markup=True)
+        # Note: RichLog doesn't auto-wrap, so we handle wrapping manually in _render_node_line
+        yield RichLog(id="graph-display", highlight=True, markup=True, wrap=False)
 
     def on_mount(self) -> None:
         """Display initial graph structure."""
@@ -127,8 +130,35 @@ class GraphOverview(Vertical):
     # Line rendering (Pass 1)
     # ------------------------------------------------------------------
 
-    def _render_node_line(self, node_id: str) -> str:
-        """Render a single node with status symbol and optional status text."""
+    def _get_available_width(self) -> int:
+        """Get the available width for text wrapping."""
+        # Use cached width if available (set during _display_graph)
+        if self._cached_width:
+            return self._cached_width - 2  # Reserve space for padding
+        
+        try:
+            # Try to get the actual RichLog widget width
+            display = self.query_one("#graph-display", RichLog)
+            if display and hasattr(display, "size") and display.size and display.size.width:
+                return display.size.width - 2
+        except Exception:
+            pass
+        
+        # Fallback: try parent widget size
+        try:
+            if self.size and self.size.width:
+                return self.size.width - 4  # Reserve space for padding
+        except Exception:
+            pass
+        
+        # Final fallback - use a reasonable default
+        return 48
+
+    def _render_node_line(self, node_id: str) -> list[str]:
+        """Render a single node with status symbol and optional status text.
+        
+        Returns a list of lines to support multi-line wrapped status messages.
+        """
         graph = self.runtime.graph
         is_terminal = node_id in (graph.terminal_nodes or [])
         is_active = node_id == self.active_node
@@ -151,8 +181,77 @@ class GraphOverview(Vertical):
         else:
             name = node_id
 
-        suffix = f"  [italic]{status}[/italic]" if status else ""
-        return f"  {sym} {name}{suffix}"
+        # Base line with symbol and node name
+        base_line = f"  {sym} {name}"
+        
+        if not status:
+            return [base_line]
+        
+        # Strip markup from status to get plain text for wrapping
+        status_plain = _MARKUP_RE.sub("", status)
+        
+        # Extract markup style from original status (e.g., [red], [italic])
+        # Find opening and closing tags
+        open_tags = []
+        close_tags = []
+        for match in _MARKUP_RE.finditer(status):
+            tag = match.group(0)
+            if tag.startswith("[/"):
+                close_tags.append(tag)
+            else:
+                open_tags.append(tag)
+        
+        # Determine markup to apply (use first open tag, or default to italic)
+        markup_open = open_tags[0] if open_tags else "[italic]"
+        markup_close = close_tags[0] if close_tags else "[/italic]"
+        # Extract tag name for closing tag
+        if markup_open.startswith("["):
+            tag_name = markup_open[1:].split("]")[0]
+            markup_close = f"[/{tag_name}]"
+        
+        # Get available width for wrapping
+        available_width = self._get_available_width()
+        
+        # Calculate how much space is left after the base line
+        base_line_plain_len = _plain_len(base_line)
+        remaining_width = max(20, available_width - base_line_plain_len - 2)  # Min 20 chars, -2 for spacing
+        
+        # Check if status fits on one line
+        if len(status_plain) <= remaining_width:
+            # Status fits on one line
+            return [f"{base_line}  {status}"]
+        
+        # Status is too long - always wrap it
+        # Use a conservative wrap width to ensure it fits (account for 40% panel width)
+        # Typical terminal is 80-120 chars, so 40% = 32-48 chars, use 35 as safe default
+        wrap_width = max(30, min(available_width - 4, 45))  # Cap at 45, min 30
+        wrapped_lines = textwrap.wrap(status_plain, width=wrap_width, break_long_words=True, break_on_hyphens=True)
+        
+        # Build result lines
+        if len(wrapped_lines) == 1:
+            # Single wrapped line - try to fit after base if possible
+            if len(wrapped_lines[0]) <= remaining_width:
+                return [f"{base_line}  {markup_open}{wrapped_lines[0]}{markup_close}"]
+            else:
+                # Doesn't fit, put on new line
+                return [base_line, f"    {markup_open}{wrapped_lines[0]}{markup_close}"]
+        
+        # Multiple wrapped lines
+        # First line: try to fit as much as possible after base line
+        first_line_text = wrapped_lines[0]
+        if len(first_line_text) <= remaining_width:
+            # First wrapped line fits after base
+            result = [f"{base_line}  {markup_open}{first_line_text}{markup_close}"]
+            # Add remaining wrapped lines with indentation
+            for line in wrapped_lines[1:]:
+                result.append(f"    {markup_open}{line}{markup_close}")
+        else:
+            # Even first line doesn't fit, put everything on new lines
+            result = [base_line]
+            for line in wrapped_lines:
+                result.append(f"    {markup_open}{line}{markup_close}")
+        
+        return result
 
     def _render_edges(self, node_id: str, order_idx: dict[str, int]) -> list[str]:
         """Render forward-edge connectors from *node_id*.
@@ -405,13 +504,22 @@ class GraphOverview(Vertical):
         ordered = self._topo_order()
         order_idx = {nid: i for i, nid in enumerate(ordered)}
 
+        # Get actual widget width for wrapping calculations
+        try:
+            if display.size and display.size.width:
+                self._cached_width = display.size.width
+        except Exception:
+            self._cached_width = None
+
         # --- Pass 1: Build line buffer ---
         lines: list[str] = []
         node_line_map: dict[str, int] = {}
 
         for node_id in ordered:
             node_line_map[node_id] = len(lines)
-            lines.append(self._render_node_line(node_id))
+            node_lines = self._render_node_line(node_id)
+            for node_line in node_lines:
+                lines.append(node_line)
             for edge_line in self._render_edges(node_id, order_idx):
                 lines.append(edge_line)
 
