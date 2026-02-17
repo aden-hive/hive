@@ -331,6 +331,20 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     resume_parser.set_defaults(func=cmd_resume)
 
+    # setup-credentials command
+    setup_creds_parser = subparsers.add_parser(
+        "setup-credentials",
+        help="Interactive credential setup",
+        description="Guide through setting up required credentials for an agent.",
+    )
+    setup_creds_parser.add_argument(
+        "agent_path",
+        type=str,
+        nargs="?",
+        help="Path to agent folder (optional - runs general setup if not specified)",
+    )
+    setup_creds_parser.set_defaults(func=cmd_setup_credentials)
+
 
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
@@ -434,7 +448,36 @@ def cmd_run(args: argparse.Namespace) -> int:
                     )
                 except CredentialError as e:
                     print(f"\n{e}", file=sys.stderr)
-                    return
+                    # Offer interactive credential setup if running in a terminal
+                    if sys.stdin.isatty():
+                        print()
+                        try:
+                            choice = input("Would you like to set up credentials now? [Y/n]: ")
+                            choice = choice.strip()
+                        except (EOFError, KeyboardInterrupt):
+                            print()
+                            return
+                        if choice.lower() != "n":
+                            from framework.credentials.setup import CredentialSetupSession
+
+                            session = CredentialSetupSession.from_agent_path(args.agent_path)
+                            result = session.run_interactive()
+                            if result.success:
+                                # Retry loading with credentials now configured
+                                try:
+                                    runner = AgentRunner.load(args.agent_path, model=args.model)
+                                except CredentialError as retry_e:
+                                    print(f"\n{retry_e}", file=sys.stderr)
+                                    return
+                                except Exception as retry_e:
+                                    print(f"Error loading agent: {retry_e}")
+                                    return
+                            else:
+                                return
+                        else:
+                            return
+                    else:
+                        return
                 except Exception as e:
                     print(f"Error loading agent: {e}")
                     return
@@ -477,7 +520,35 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
-            return 1
+            # Offer interactive credential setup if running in a terminal
+            if sys.stdin.isatty():
+                print()
+                try:
+                    choice = input("Would you like to set up credentials now? [Y/n]: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 1
+                if choice.lower() != "n":
+                    from framework.credentials.setup import CredentialSetupSession
+
+                    session = CredentialSetupSession.from_agent_path(args.agent_path)
+                    result = session.run_interactive()
+                    if result.success:
+                        # Retry loading with credentials now configured
+                        try:
+                            runner = AgentRunner.load(args.agent_path, model=args.model)
+                        except CredentialError as retry_e:
+                            print(f"\n{retry_e}", file=sys.stderr)
+                            return 1
+                        except Exception as retry_e:
+                            print(f"Error loading agent: {retry_e}")
+                            return 1
+                    else:
+                        return 1
+                else:
+                    return 1
+            else:
+                return 1
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -1283,7 +1354,35 @@ def cmd_tui(args: argparse.Namespace) -> int:
             )
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
-            return
+            # Offer interactive credential setup if running in a terminal
+            if sys.stdin.isatty():
+                print()
+                try:
+                    choice = input("Would you like to set up credentials now? [Y/n]: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return
+                if choice.lower() != "n":
+                    from framework.credentials.setup import CredentialSetupSession
+
+                    session = CredentialSetupSession.from_agent_path(agent_path)
+                    result = session.run_interactive()
+                    if result.success:
+                        # Retry loading with credentials now configured
+                        try:
+                            runner = AgentRunner.load(agent_path, model=args.model)
+                        except CredentialError as retry_e:
+                            print(f"\n{retry_e}", file=sys.stderr)
+                            return
+                        except Exception as retry_e:
+                            print(f"Error loading agent: {retry_e}")
+                            return
+                    else:
+                        return
+                else:
+                    return
+            else:
+                return
         except Exception as e:
             print(f"Error loading agent: {e}")
             return
@@ -1719,3 +1818,25 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if args.tui:
         print("Mode: TUI")
     return 1
+
+
+def cmd_setup_credentials(args: argparse.Namespace) -> int:
+    """Interactive credential setup for an agent."""
+    from framework.credentials.setup import CredentialSetupSession
+
+    agent_path = getattr(args, "agent_path", None)
+
+    if agent_path:
+        # Setup credentials for a specific agent
+        session = CredentialSetupSession.from_agent_path(agent_path)
+    else:
+        # No agent specified - show usage
+        print("Usage: hive setup-credentials <agent_path>")
+        print()
+        print("Examples:")
+        print("  hive setup-credentials exports/my-agent")
+        print("  hive setup-credentials examples/templates/deep_research_agent")
+        return 1
+
+    result = session.run_interactive()
+    return 0 if result.success else 1
