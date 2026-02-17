@@ -8,18 +8,14 @@ from framework.graph.edge import AsyncEntryPointSpec, GraphSpec
 from framework.graph.executor import ExecutionResult
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import (
-    AgentRuntime,
-    AgentRuntimeConfig,
-    create_agent_runtime,
-)
+from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
-    classify_and_act_node,
-    fetch_emails_node,
     intake_node,
+    fetch_emails_node,
+    classify_and_act_node,
     report_node,
 )
 
@@ -36,47 +32,37 @@ goal = Goal(
     ),
     success_criteria=[
         SuccessCriterion(
-            id="rule-understanding",
-            description="Correctly interprets user free-text rules and maps them to Gmail actions",
-            metric="rule_accuracy",
-            target=">=95%",
-            weight=0.25,
-        ),
-        SuccessCriterion(
-            id="action-execution",
-            description="Gmail actions are applied to the correct emails based on rule matching",
+            id="correct-action-execution",
+            description=(
+                "Gmail actions are applied correctly to the right emails "
+                "based on the user's rules"
+            ),
             metric="action_correctness",
             target=">=95%",
-            weight=0.30,
+            weight=0.35,
         ),
         SuccessCriterion(
-            id="batch-completeness",
-            description="All fetched emails are processed; none silently skipped",
-            metric="emails_processed_ratio",
-            target="100%",
-            weight=0.25,
-        ),
-        SuccessCriterion(
-            id="summary-report",
+            id="action-report",
             description=(
-                "Produces a clear report of actions taken grouped by action type "
-                "with email subjects and senders"
+                "Produces a summary report showing what was done: how many emails "
+                "were affected by each action type, with email subjects listed"
             ),
             metric="report_completeness",
             target="100%",
-            weight=0.20,
+            weight=0.3,
+        ),
+        SuccessCriterion(
+            id="batch-completeness",
+            description=(
+                "All fetched emails up to the configured max are processed and acted upon; "
+                "none are silently skipped"
+            ),
+            metric="emails_processed_ratio",
+            target="100%",
+            weight=0.35,
         ),
     ],
     constraints=[
-        Constraint(
-            id="non-destructive-default",
-            description=(
-                "Archiving removes from inbox but preserves email; only explicit "
-                "trash/spam rules move emails to trash/spam"
-            ),
-            constraint_type="hard",
-            category="safety",
-        ),
         Constraint(
             id="respect-batch-limit",
             description="Must not process more emails than the configured max_emails parameter",
@@ -84,13 +70,13 @@ goal = Goal(
             category="operational",
         ),
         Constraint(
-            id="shared-rule-state",
+            id="non-destructive-default",
             description=(
-                "Rules must persist in shared memory so event-driven executions "
-                "can access them without re-asking the user"
+                "Archiving removes from inbox but preserves the email; only explicit "
+                "trash rules move emails to trash"
             ),
             constraint_type="hard",
-            category="architectural",
+            category="safety",
         ),
     ],
 )
@@ -105,15 +91,13 @@ nodes = [
 
 # Edge definitions
 edges = [
-    # intake -> intake (self-loop: user stays here to tweak rules)
     EdgeSpec(
-        id="intake-to-intake",
+        id="intake-to-fetch-emails",
         source="intake",
-        target="intake",
+        target="fetch-emails",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # fetch-emails -> classify-and-act (event-driven path only)
     EdgeSpec(
         id="fetch-emails-to-classify",
         source="fetch-emails",
@@ -121,11 +105,17 @@ edges = [
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # classify-and-act -> report
     EdgeSpec(
         id="classify-to-report",
         source="classify-and-act",
         target="report",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    EdgeSpec(
+        id="report-to-intake",
+        source="report",
+        target="intake",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
@@ -203,10 +193,10 @@ class GmailInboxGuardianAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
+        self._executor: GraphExecutor | None = None
         self._graph: GraphSpec | None = None
-        self._agent_runtime: AgentRuntime | None = None
+        self._event_bus: EventBus | None = None
         self._tool_registry: ToolRegistry | None = None
-        self._storage_path: Path | None = None
 
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
@@ -253,11 +243,17 @@ class GmailInboxGuardianAgent:
         self._storage_path = Path.home() / ".hive" / "agents" / "gmail_inbox_guardian"
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
+        self._event_bus = EventBus()
         self._tool_registry = ToolRegistry()
 
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
+
+        # Discover custom script tools (e.g. bulk_fetch_emails)
+        tools_path = Path(__file__).parent / "tools.py"
+        if tools_path.exists():
+            self._tool_registry.discover_from_module(tools_path)
 
         llm = None
         if not mock_mode:
@@ -337,12 +333,12 @@ class GmailInboxGuardianAgent:
             config=runtime_config,
         )
 
+        return self._executor
+
     async def start(self, mock_mode=False) -> None:
-        """Set up and start the agent runtime."""
-        if self._agent_runtime is None:
+        """Set up the agent (initialize executor and tools)."""
+        if self._executor is None:
             self._setup(mock_mode=mock_mode)
-        if not self._agent_runtime.is_running:
-            await self._agent_runtime.start()
 
     async def stop(self) -> None:
         """Stop the agent runtime and clean up."""
@@ -352,14 +348,16 @@ class GmailInboxGuardianAgent:
 
     async def trigger_and_wait(
         self,
-        entry_point: str = "default",
-        input_data: dict | None = None,
+        entry_point: str,
+        input_data: dict,
         timeout: float | None = None,
         session_state: dict | None = None,
     ) -> ExecutionResult | None:
         """Execute the graph and wait for completion."""
-        if self._agent_runtime is None:
+        if self._executor is None:
             raise RuntimeError("Agent not started. Call start() first.")
+        if self._graph is None:
+            raise RuntimeError("Graph not built. Call start() first.")
 
         return await self._agent_runtime.trigger_and_wait(
             entry_point_id=entry_point,
@@ -373,9 +371,7 @@ class GmailInboxGuardianAgent:
         """Run the agent (convenience method for single execution)."""
         await self.start(mock_mode=mock_mode)
         try:
-            result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
-            )
+            result = await self.trigger_and_wait("default", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
@@ -397,6 +393,10 @@ class GmailInboxGuardianAgent:
             "pause_nodes": self.pause_nodes,
             "terminal_nodes": self.terminal_nodes,
             "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
+            "async_entry_points": [
+                {"id": ep.id, "name": ep.name, "entry_node": ep.entry_node}
+                for ep in async_entry_points
+            ],
         }
 
     def validate(self):
@@ -420,9 +420,7 @@ class GmailInboxGuardianAgent:
 
         for ep_id, node_id in self.entry_points.items():
             if node_id not in node_ids:
-                errors.append(
-                    f"Entry point '{ep_id}' references unknown node '{node_id}'"
-                )
+                errors.append(f"Entry point '{ep_id}' references unknown node '{node_id}'")
 
         return {
             "valid": len(errors) == 0,
