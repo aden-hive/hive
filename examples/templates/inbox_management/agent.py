@@ -1,12 +1,15 @@
 """Agent graph construction for Inbox Management Agent."""
 
+from pathlib import Path
+
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult, GraphExecutor
-from framework.runtime.event_bus import EventBus
-from framework.runtime.core import Runtime
+from framework.graph.checkpoint_config import CheckpointConfig
+from framework.graph.edge import AsyncEntryPointSpec, GraphSpec
+from framework.graph.executor import ExecutionResult
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
+from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
@@ -120,6 +123,17 @@ edges = [
 # Graph configuration
 entry_node = "intake"
 entry_points = {"start": "intake"}
+async_entry_points = [
+    AsyncEntryPointSpec(
+        id="email-timer",
+        name="Scheduled Inbox Check",
+        entry_node="fetch-emails",
+        trigger_type="timer",
+        trigger_config={"interval_minutes": 5},
+        isolation_level="shared",
+        max_concurrent=1,
+    ),
+]
 pause_nodes = []
 terminal_nodes = []
 loop_config = {
@@ -127,6 +141,12 @@ loop_config = {
     "max_tool_calls_per_turn": 50,
     "max_history_tokens": 32000,
 }
+conversation_mode = "continuous"
+identity_prompt = (
+    "You are an inbox management assistant. You help users manage "
+    "their Gmail inbox by applying free-text rules to emails — trash, "
+    "mark as spam, mark important, mark read/unread, star, and more."
+)
 
 
 class InboxManagementAgent:
@@ -134,6 +154,12 @@ class InboxManagementAgent:
     Inbox Management Agent — continuous 4-node pipeline for email triage.
 
     Flow: intake -> fetch-emails -> classify-and-act -> report -> intake (loop)
+
+    Uses AgentRuntime for:
+    - Multi-entry-point execution (primary + timer-driven)
+    - Session-scoped storage
+    - Shared state for rules persistence across entry points
+    - Checkpointing for resume capability
     """
 
     def __init__(self, config=None):
@@ -145,10 +171,10 @@ class InboxManagementAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
-        self._executor: GraphExecutor | None = None
         self._graph: GraphSpec | None = None
-        self._event_bus: EventBus | None = None
+        self._agent_runtime: AgentRuntime | None = None
         self._tool_registry: ToolRegistry | None = None
+        self._storage_path: Path | None = None
 
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
@@ -165,22 +191,16 @@ class InboxManagementAgent:
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
             loop_config=loop_config,
-            conversation_mode="continuous",
-            identity_prompt=(
-                "You are an inbox management assistant. You help users manage "
-                "their Gmail inbox by applying free-text rules to emails — trash, "
-                "mark as spam, mark important, mark read/unread, star, and more."
-            ),
+            conversation_mode=conversation_mode,
+            identity_prompt=identity_prompt,
+            async_entry_points=async_entry_points,
         )
 
-    def _setup(self, mock_mode=False) -> GraphExecutor:
-        """Set up the executor with all components."""
-        from pathlib import Path
+    def _setup(self, mock_mode=False) -> None:
+        """Set up the agent runtime with sessions, checkpoints, and logging."""
+        self._storage_path = Path.home() / ".hive" / "agents" / "inbox_management"
+        self._storage_path.mkdir(parents=True, exist_ok=True)
 
-        storage_path = Path.home() / ".hive" / "agents" / "inbox_management"
-        storage_path.mkdir(parents=True, exist_ok=True)
-
-        self._event_bus = EventBus()
         self._tool_registry = ToolRegistry()
 
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
@@ -204,29 +224,59 @@ class InboxManagementAgent:
         tools = list(self._tool_registry.get_tools().values())
 
         self._graph = self._build_graph()
-        runtime = Runtime(storage_path)
 
-        self._executor = GraphExecutor(
-            runtime=runtime,
+        checkpoint_config = CheckpointConfig(
+            enabled=True,
+            checkpoint_on_node_start=False,
+            checkpoint_on_node_complete=True,
+            checkpoint_max_age_days=7,
+            async_checkpoint=True,
+        )
+
+        # Build entry point specs for AgentRuntime
+        entry_point_specs = [
+            # Primary entry point (user-facing)
+            EntryPointSpec(
+                id="default",
+                name="Default",
+                entry_node=self.entry_node,
+                trigger_type="manual",
+                isolation_level="shared",
+            ),
+            # Timer-driven entry point
+            EntryPointSpec(
+                id="email-timer",
+                name="Scheduled Inbox Check",
+                entry_node="fetch-emails",
+                trigger_type="timer",
+                trigger_config={"interval_minutes": 5},
+                isolation_level="shared",
+                max_concurrent=1,
+            ),
+        ]
+
+        self._agent_runtime = create_agent_runtime(
+            graph=self._graph,
+            goal=self.goal,
+            storage_path=self._storage_path,
+            entry_points=entry_point_specs,
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            event_bus=self._event_bus,
-            storage_path=storage_path,
-            loop_config=self._graph.loop_config,
+            checkpoint_config=checkpoint_config,
         )
 
-        return self._executor
-
     async def start(self, mock_mode=False) -> None:
-        """Set up the agent (initialize executor and tools)."""
-        if self._executor is None:
+        """Set up and start the agent runtime."""
+        if self._agent_runtime is None:
             self._setup(mock_mode=mock_mode)
+        if not self._agent_runtime.is_running:
+            await self._agent_runtime.start()
 
     async def stop(self) -> None:
-        """Clean up resources."""
-        self._executor = None
-        self._event_bus = None
+        """Stop and clean up the agent runtime."""
+        if self._agent_runtime is not None and self._agent_runtime.is_running:
+            await self._agent_runtime.stop()
 
     async def trigger_and_wait(
         self,
@@ -236,15 +286,13 @@ class InboxManagementAgent:
         session_state: dict | None = None,
     ) -> ExecutionResult | None:
         """Execute the graph and wait for completion."""
-        if self._executor is None:
+        if self._agent_runtime is None:
             raise RuntimeError("Agent not started. Call start() first.")
-        if self._graph is None:
-            raise RuntimeError("Graph not built. Call start() first.")
 
-        return await self._executor.execute(
-            graph=self._graph,
-            goal=self.goal,
+        return await self._agent_runtime.trigger_and_wait(
+            entry_point_id=entry_point,
             input_data=input_data,
+            timeout=timeout,
             session_state=session_state,
         )
 
@@ -255,7 +303,7 @@ class InboxManagementAgent:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait(
-                "start", context, session_state=session_state
+                "default", context, session_state=session_state
             )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
@@ -278,6 +326,10 @@ class InboxManagementAgent:
             "pause_nodes": self.pause_nodes,
             "terminal_nodes": self.terminal_nodes,
             "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
+            "async_entry_points": [
+                {"id": ep.id, "name": ep.name, "entry_node": ep.entry_node}
+                for ep in async_entry_points
+            ],
         }
 
     def validate(self):
@@ -303,6 +355,13 @@ class InboxManagementAgent:
             if node_id not in node_ids:
                 errors.append(
                     f"Entry point '{ep_id}' references unknown node '{node_id}'"
+                )
+
+        # Validate async entry points
+        for ep in async_entry_points:
+            if ep.entry_node not in node_ids:
+                errors.append(
+                    f"Async entry point '{ep.id}' references unknown node '{ep.entry_node}'"
                 )
 
         return {
