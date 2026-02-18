@@ -313,6 +313,9 @@ class GraphExecutor:
         cumulative_tool_names: set[str] = set()
         cumulative_output_keys: list[str] = []  # Output keys from all visited nodes
 
+        # Build node registry for subagent lookup
+        node_registry: dict[str, NodeSpec] = {node.id: node for node in graph.nodes}
+
         # Initialize checkpoint store if checkpointing is enabled
         checkpoint_store: CheckpointStore | None = None
         if checkpoint_config and checkpoint_config.enabled and self._storage_path:
@@ -690,6 +693,7 @@ class GraphExecutor:
                     inherited_conversation=continuous_conversation if is_continuous else None,
                     override_tools=cumulative_tools if is_continuous else None,
                     cumulative_output_keys=cumulative_output_keys if is_continuous else None,
+                    node_registry=node_registry,
                 )
 
                 # Log actual input data being read
@@ -1076,6 +1080,7 @@ class GraphExecutor:
                             source_result=result,
                             source_node_spec=node_spec,
                             path=path,
+                            node_registry=node_registry,
                         )
 
                         total_tokens += branch_tokens
@@ -1430,6 +1435,7 @@ class GraphExecutor:
         inherited_conversation: Any = None,
         override_tools: list | None = None,
         cumulative_output_keys: list[str] | None = None,
+        node_registry: dict[str, NodeSpec] | None = None,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1463,6 +1469,7 @@ class GraphExecutor:
             continuous_mode=continuous_mode,
             inherited_conversation=inherited_conversation,
             cumulative_output_keys=cumulative_output_keys or [],
+            node_registry=node_registry or {},
         )
 
     # Valid node types - no ambiguous "llm" type allowed
@@ -1757,6 +1764,7 @@ class GraphExecutor:
         source_result: NodeResult,
         source_node_spec: Any,
         path: list[str],
+        node_registry: dict[str, NodeSpec] | None = None,
     ) -> tuple[dict[str, NodeResult], int, int]:
         """
         Execute multiple branches in parallel using asyncio.gather.
@@ -1849,7 +1857,10 @@ class GraphExecutor:
                     branch.retry_count = attempt
 
                     # Build context for this branch
-                    ctx = self._build_context(node_spec, memory, goal, mapped, graph.max_tokens)
+                    ctx = self._build_context(
+                        node_spec, memory, goal, mapped, graph.max_tokens,
+                        node_registry=node_registry,
+                    )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
                     # Emit node-started event (skip event_loop nodes)

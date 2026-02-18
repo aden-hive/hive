@@ -298,13 +298,22 @@ class EventLoopNode(NodeProtocol):
                 if initial_message:
                     await conversation.add_user_message(initial_message)
 
-        # 3. Build tool list: node tools + synthetic set_output + ask_user tools
+        # 3. Build tool list: node tools + synthetic set_output + ask_user + delegate tools
         tools = list(ctx.available_tools)
         set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
         if set_output_tool:
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing:
             tools.append(self._build_ask_user_tool())
+
+        # Add delegate_to_sub_agent tool if:
+        # - Node has sub_agents defined
+        # - We are NOT in subagent mode (prevents nested delegation)
+        if not ctx.is_subagent_mode:
+            sub_agents = getattr(ctx.node_spec, "sub_agents", [])
+            delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
+            if delegate_tool:
+                tools.append(delegate_tool)
 
         logger.info(
             "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
@@ -1192,9 +1201,10 @@ class EventLoopNode(NodeProtocol):
             )
 
             # Phase 1: triage — handle framework tools immediately,
-            # queue real tools for parallel execution.
+            # queue real tools and subagents for parallel execution.
             results_by_id: dict[str, ToolResult] = {}
             pending_real: list[ToolCallEvent] = []
+            pending_subagent: list[ToolCallEvent] = []
 
             for tc in tool_calls:
                 tool_call_count += 1
@@ -1258,6 +1268,11 @@ class EventLoopNode(NodeProtocol):
                     )
                     results_by_id[tc.tool_use_id] = result
 
+                elif tc.tool_name == "delegate_to_sub_agent":
+                    # --- Framework-level subagent delegation ---
+                    # Queue for parallel execution in Phase 2
+                    pending_subagent.append(tc)
+
                 else:
                     # --- Real tool: check for truncated args, else queue ---
                     if "_raw" in tc.tool_input:
@@ -1279,7 +1294,7 @@ class EventLoopNode(NodeProtocol):
                     else:
                         pending_real.append(tc)
 
-            # Phase 2: execute real tools in parallel.
+            # Phase 2a: execute real tools in parallel.
             if pending_real:
                 raw_results = await asyncio.gather(
                     *(self._execute_tool(tc) for tc in pending_real),
@@ -1296,6 +1311,46 @@ class EventLoopNode(NodeProtocol):
                         result = raw
                     results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
 
+            # Phase 2b: execute subagent delegations in parallel.
+            if pending_subagent:
+                subagent_results = await asyncio.gather(
+                    *(
+                        self._execute_subagent(
+                            ctx,
+                            tc.tool_input.get("agent_id", ""),
+                            tc.tool_input.get("task", ""),
+                        )
+                        for tc in pending_subagent
+                    ),
+                    return_exceptions=True,
+                )
+                for tc, raw in zip(pending_subagent, subagent_results, strict=True):
+                    if isinstance(raw, BaseException):
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=json.dumps({
+                                "message": f"Sub-agent execution raised: {raw}",
+                                "data": None,
+                                "metadata": {"success": False, "error": str(raw)},
+                            }),
+                            is_error=True,
+                        )
+                    else:
+                        # Attach the tool_use_id to the result
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=raw.content,
+                            is_error=raw.is_error,
+                        )
+                    results_by_id[tc.tool_use_id] = result
+                    logged_tool_calls.append({
+                        "tool_use_id": tc.tool_use_id,
+                        "tool_name": "delegate_to_sub_agent",
+                        "tool_input": tc.tool_input,
+                        "content": result.content,
+                        "is_error": result.is_error,
+                    })
+
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
             for tc in tool_calls[:executed_in_batch]:
@@ -1303,8 +1358,8 @@ class EventLoopNode(NodeProtocol):
                 if result is None:
                     continue  # shouldn't happen
 
-                # Build log entries for real tools
-                if tc.tool_name not in ("set_output", "ask_user"):
+                # Build log entries for real tools (exclude synthetic tools)
+                if tc.tool_name not in ("set_output", "ask_user", "delegate_to_sub_agent"):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
@@ -1473,6 +1528,59 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": ["key", "value"],
+            },
+        )
+
+    def _build_delegate_tool(
+        self, sub_agents: list[str], node_registry: dict[str, Any]
+    ) -> Tool | None:
+        """Build the synthetic delegate_to_sub_agent tool for subagent invocation.
+
+        Args:
+            sub_agents: List of node IDs that can be invoked as subagents.
+            node_registry: Map of node_id -> NodeSpec for looking up subagent descriptions.
+
+        Returns:
+            Tool definition if sub_agents is non-empty, None otherwise.
+        """
+        if not sub_agents:
+            return None
+
+        agent_descriptions = []
+        for agent_id in sub_agents:
+            spec = node_registry.get(agent_id)
+            if spec:
+                desc = getattr(spec, "description", "(no description)")
+                agent_descriptions.append(f"- {agent_id}: {desc}")
+            else:
+                agent_descriptions.append(f"- {agent_id}: (not found in registry)")
+
+        return Tool(
+            name="delegate_to_sub_agent",
+            description=(
+                "Delegate a task to a specialized sub-agent. The sub-agent runs "
+                "autonomously with read-only access to current memory and returns "
+                "its result. Use this to parallelize work or leverage specialized capabilities.\n\n"
+                "Available sub-agents:\n" + "\n".join(agent_descriptions)
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": f"The sub-agent to invoke. Must be one of: {sub_agents}",
+                        "enum": sub_agents,
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": (
+                            "The task description for the sub-agent to execute. "
+                            "Be specific about what you want the sub-agent to do and "
+                            "what information to return."
+                        ),
+                    },
+                },
+                "required": ["agent_id", "task"],
             },
         )
 
@@ -2423,4 +2531,144 @@ class EventLoopNode(NodeProtocol):
                 stream_id=stream_id,
                 node_id=node_id,
                 key=key,
+            )
+
+    # -------------------------------------------------------------------
+    # Subagent Execution
+    # -------------------------------------------------------------------
+
+    async def _execute_subagent(
+        self,
+        ctx: NodeContext,
+        agent_id: str,
+        task: str,
+    ) -> ToolResult:
+        """Execute a subagent and return the result as a ToolResult.
+
+        The subagent:
+        - Gets a fresh conversation with just the task
+        - Has read-only access to the parent's readable memory
+        - Cannot delegate to its own subagents (prevents recursion)
+        - Returns its output in structured JSON format
+
+        Args:
+            ctx: Parent node's context (for memory, tools, LLM access).
+            agent_id: The node ID of the subagent to invoke.
+            task: The task description to give the subagent.
+
+        Returns:
+            ToolResult with structured JSON output containing:
+            - message: Human-readable summary
+            - data: Subagent's output (free-form JSON)
+            - metadata: Execution metadata (success, tokens, latency)
+        """
+        from framework.graph.node import NodeContext, SharedMemory
+
+        # 1. Validate agent exists in registry
+        if agent_id not in ctx.node_registry:
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps({
+                    "message": f"Sub-agent '{agent_id}' not found in registry",
+                    "data": None,
+                    "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
+                }),
+                is_error=True,
+            )
+
+        subagent_spec = ctx.node_registry[agent_id]
+
+        # 2. Create read-only memory snapshot
+        # Subagent can read everything the parent can read, but write nothing
+        parent_data = ctx.memory.read_all()
+        subagent_memory = SharedMemory()
+        for key, value in parent_data.items():
+            subagent_memory.write(key, value, validate=False)
+
+        # Scope to read-only: subagent can read all, write none
+        scoped_memory = subagent_memory.with_permissions(
+            read_keys=list(parent_data.keys()),
+            write_keys=[],  # Read-only!
+        )
+
+        # 3. Filter tools for subagent
+        # Only include tools declared in subagent's spec, never include delegate_to_sub_agent
+        subagent_tool_names = set(subagent_spec.tools or [])
+        subagent_tools = [
+            t for t in ctx.available_tools
+            if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
+        ]
+
+        # 4. Build subagent context
+        subagent_ctx = NodeContext(
+            runtime=ctx.runtime,
+            node_id=f"{ctx.node_id}:subagent:{agent_id}",
+            node_spec=subagent_spec,
+            memory=scoped_memory,
+            input_data={"task": task, **parent_data},
+            llm=ctx.llm,
+            available_tools=subagent_tools,
+            goal_context=ctx.goal_context,
+            goal=ctx.goal,
+            max_tokens=ctx.max_tokens,
+            runtime_logger=ctx.runtime_logger,
+            is_subagent_mode=True,  # Prevents nested delegation
+            node_registry={},  # Empty - no nested subagents
+        )
+
+        # 5. Create and execute subagent EventLoopNode
+        subagent_node = EventLoopNode(
+            event_bus=None,  # Subagents don't emit events to parent's bus
+            judge=None,  # Implicit judge: accept when output_keys filled
+            config=LoopConfig(
+                max_iterations=min(self._config.max_iterations, 20),  # Limit iterations
+                max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
+                max_history_tokens=self._config.max_history_tokens,
+                stall_detection_threshold=self._config.stall_detection_threshold,
+            ),
+            tool_executor=self._tool_executor,
+            conversation_store=None,  # No persistence for subagents
+        )
+
+        try:
+            start_time = time.time()
+            result = await subagent_node.execute(subagent_ctx)
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            result_json = {
+                "message": (
+                    f"Sub-agent '{agent_id}' completed successfully"
+                    if result.success
+                    else f"Sub-agent '{agent_id}' failed: {result.error}"
+                ),
+                "data": result.output,
+                "metadata": {
+                    "agent_id": agent_id,
+                    "success": result.success,
+                    "tokens_used": result.tokens_used,
+                    "latency_ms": latency_ms,
+                },
+            }
+
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2, default=str),
+                is_error=not result.success,
+            )
+
+        except Exception as e:
+            logger.exception("Subagent '%s' raised exception", agent_id)
+            result_json = {
+                "message": f"Sub-agent '{agent_id}' raised exception: {e}",
+                "data": None,
+                "metadata": {
+                    "agent_id": agent_id,
+                    "success": False,
+                    "error": str(e),
+                },
+            }
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(result_json, indent=2),
+                is_error=True,
             )

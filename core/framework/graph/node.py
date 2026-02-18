@@ -196,6 +196,12 @@ class NodeSpec(BaseModel):
         default=None, description="Specific model to use (defaults to graph default)"
     )
 
+    # For subagent delegation
+    sub_agents: list[str] = Field(
+        default_factory=list,
+        description="Node IDs that can be invoked as subagents from this node",
+    )
+
     # For function nodes
     function: str | None = Field(
         default=None, description="Function name or path for function nodes"
@@ -497,6 +503,10 @@ class NodeContext:
     continuous_mode: bool = False  # True when graph has conversation_mode="continuous"
     inherited_conversation: Any = None  # NodeConversation | None (from prior node)
     cumulative_output_keys: list[str] = field(default_factory=list)  # All output keys from path
+
+    # Subagent mode
+    is_subagent_mode: bool = False  # True when running as a subagent (prevents nested delegation)
+    node_registry: dict[str, "NodeSpec"] = field(default_factory=dict)  # For subagent lookup
 
 
 @dataclass
