@@ -140,43 +140,99 @@ report_node = NodeSpec(
     system_prompt="""\
 Write a research report as an HTML file and present it to the user.
 
-IMPORTANT: save_data requires TWO separate arguments: filename and data.
-Call it like: save_data(filename="report.html", data="<html>...</html>")
+**CRITICAL: You MUST build the file in multiple append_data calls. NEVER try to write the \
+entire HTML in a single save_data call — it will exceed the output token limit and fail.**
+
+IMPORTANT: save_data and append_data require TWO separate arguments: filename and data.
+Call like: save_data(filename="report.html", data="<html>...")
 Do NOT use _raw, do NOT nest arguments inside a JSON string.
+Do NOT include data_dir in tool calls — it is auto-injected.
 
-**STEP 1 — Write and save the HTML report (tool calls, NO text to user yet):**
+**PROCESS (follow exactly):**
 
-Build a clean HTML document. Keep the HTML concise — aim for clarity over length.
-Use minimal embedded CSS (a few lines of style, not a full framework).
+**Step 1 — Write HTML head + executive summary (save_data):**
+Call save_data to create the file with the HTML head, CSS, title, and executive summary.
+```
+save_data(filename="report.html", data="<!DOCTYPE html>\\n<html>...")
+```
 
-Report structure:
-- Title & date
-- Executive Summary (2-3 paragraphs)
-- Key Findings (organized by theme, with [n] citation links)
-- Analysis (synthesis, implications)
-- Conclusion (key takeaways)
-- References (numbered list with clickable URLs)
+Include: DOCTYPE, head with ALL styles below, opening body, h1 title, date, and the \
+executive summary (2-3 paragraphs). End after the executive summary section.
 
-Requirements:
-- Every factual claim must cite its source with [n] notation
-- Be objective — present multiple viewpoints where sources disagree
-- Answer the original research questions from the brief
+**CSS to use (copy exactly):**
+```
+body{font-family:Georgia,'Times New Roman',serif;max-width:800px;margin:0 auto;\
+padding:40px;line-height:1.8;color:#333}
+h1{font-size:1.8em;color:#1a1a1a;border-bottom:2px solid #333;padding-bottom:10px}
+h2{font-size:1.4em;color:#1a1a1a;margin-top:40px;padding-top:20px;\
+border-top:1px solid #ddd}
+h3{font-size:1.1em;color:#444;margin-top:25px}
+p{margin:12px 0}
+.date{color:#666;font-size:0.95em;margin-bottom:30px}
+.executive-summary{background:#f8f9fa;padding:25px;border-radius:8px;\
+margin:25px 0;border-left:4px solid #333}
+.finding-section{margin:20px 0}
+.citation{color:#1a73e8;text-decoration:none;font-size:0.85em}
+.citation:hover{text-decoration:underline}
+.analysis{background:#fff;padding:20px 0}
+.references{margin-top:40px;padding-top:20px;border-top:2px solid #333}
+.references ol{padding-left:20px}
+.references li{margin:8px 0;font-size:0.95em}
+.references a{color:#1a73e8;text-decoration:none}
+.references a:hover{text-decoration:underline}
+.footer{text-align:center;color:#999;border-top:1px solid #ddd;\
+padding-top:20px;margin-top:50px;font-size:0.85em;font-family:sans-serif}
+```
 
-Save the HTML:
-  save_data(filename="report.html", data="<html>...</html>")
+**Step 2 — Append key findings (append_data):**
+```
+append_data(filename="report.html", data="<h2>Key Findings</h2>...")
+```
 
-Then get the clickable link:
-  serve_file_to_user(filename="report.html", label="Research Report")
+Organize findings by theme. Use [n] citation notation for every factual claim. \
+Pattern per theme:
+```
+<div class="finding-section">
+  <h3>{Theme Name}</h3>
+  <p>{Finding text with <a class="citation" href="#ref-n">[n]</a> citations}</p>
+</div>
+```
 
-If save_data fails, simplify and shorten the HTML, then retry.
+**Step 3 — Append analysis + conclusion (append_data):**
+```
+append_data(filename="report.html", data="<h2>Analysis</h2>...")
+```
 
-**STEP 2 — Present the link to the user (text only, NO tool calls):**
+Include: synthesis of findings, implications, and a Conclusion section with key \
+takeaways. Be objective — present multiple viewpoints where sources disagree.
 
-Tell the user the report is ready and include the file:// URI from
-serve_file_to_user so they can click it to open. Give a brief summary
-of what the report covers. Ask if they have questions or want to continue.
+**Step 4 — Append references + footer (append_data):**
+```
+append_data(filename="report.html", data="<div class='references'>...")
+```
 
-**STEP 3 — After the user responds:**
+Include: numbered reference list with clickable URLs, then footer, then \
+`</body></html>`. Pattern:
+```
+<div class="references">
+  <h2>References</h2>
+  <ol>
+    <li id="ref-1"><a href="{url}" target="_blank">{title}</a> — {source}</li>
+  </ol>
+</div>
+```
+
+**Step 5 — Serve the file:**
+```
+serve_file_to_user(filename="report.html", label="Research Report", open_in_browser=true)
+```
+
+**Step 6 — Present to user (text only, NO tool calls):**
+**CRITICAL: Print the file_path from the serve_file_to_user result in your response** \
+so the user can click it to reopen the report later. Give a brief summary of what the \
+report covers. Ask if they have questions.
+
+**Step 7 — After the user responds:**
 - Answer any follow-up questions from the research material
 - When the user is ready to move on, ask what they'd like to do next:
   - Research a new topic?
@@ -185,15 +241,13 @@ of what the report covers. Ask if they have questions or want to continue.
   - set_output("delivery_status", "completed")
   - set_output("next_action", "new_topic")       — if they want a new topic
   - set_output("next_action", "more_research")   — if they want deeper research
+
+**IMPORTANT:**
+- Every factual claim MUST cite its source with [n] notation
+- Answer the original research questions from the brief
+- If an append_data call fails with a truncation error, break it into smaller chunks
 """,
-    tools=[
-        "save_data",
-        "append_data",
-        "edit_data",
-        "serve_file_to_user",
-        "load_data",
-        "list_data_files",
-    ],
+    tools=["save_data", "append_data", "serve_file_to_user"],
 )
 
 __all__ = [

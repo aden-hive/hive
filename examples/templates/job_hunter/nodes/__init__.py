@@ -20,12 +20,18 @@ intake_node = NodeSpec(
     system_prompt="""\
 You are a career analyst helping a job seeker find their best opportunities.
 
-**STEP 1 — Greet and collect resume (text only, NO tool calls):**
+**STEP 1 — Collect the resume:**
 
-Ask the user to paste their resume. Be friendly and concise:
-"Please paste your resume below. I'll analyze your experience and identify the roles where you have the strongest chance of success."
+Check your input context for a `pdf_file_path` key.
 
-**STEP 2 — After the user provides their resume:**
+- **If `pdf_file_path` is present:** A PDF resume has been attached. Use the `pdf_read` tool \
+to extract its text: `pdf_read(file_path=<the path>)`. Then greet the user and proceed \
+directly to STEP 2 with the extracted text.
+- **If no `pdf_file_path`:** Ask the user to paste their resume. Be friendly and concise:
+  "Please paste your resume below (or attach a PDF with /attach). I'll analyze your \
+experience and identify the roles where you have the strongest chance of success."
+
+**STEP 2 — After you have the resume text:**
 
 Analyze the resume thoroughly:
 1. Identify key skills (technical and soft skills)
@@ -48,7 +54,7 @@ Use set_output to store:
 
 NEVER ask the user to pick between roles. Your job is to identify the right roles, not make them choose.
 """,
-    tools=[],
+    tools=["pdf_read"],
 )
 
 # Node 2: Job Search
@@ -170,91 +176,79 @@ You are a career coach creating personalized application materials.
 
 **INPUT:** You have the user's resume and their selected jobs.
 
-**OUTPUT FORMAT: Single HTML Report**
-Generate ONE polished HTML report containing materials for ALL selected jobs.
+**OUTPUT FORMAT: Single HTML Report — Built Incrementally**
+Build ONE polished HTML report, but write it in CHUNKS using append_data to avoid token limits.
 
-**HTML Structure:**
-```html
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Job Application Materials</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 40px; line-height: 1.6; }
-    h1 { color: #1a1a1a; border-bottom: 2px solid #0066cc; padding-bottom: 10px; }
-    h2 { color: #0066cc; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; }
-    h3 { color: #333; margin-top: 20px; }
-    .job-section { margin-bottom: 60px; }
-    .email-card { background: #f8f9fa; border-left: 4px solid #0066cc; padding: 20px; margin: 20px 0; white-space: pre-wrap; }
-    .customization-list { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; }
-    ul { line-height: 1.8; }
-    .toc { background: #f0f4f8; padding: 20px; border-radius: 8px; margin-bottom: 40px; }
-    .toc a { color: #0066cc; text-decoration: none; }
-    .toc a:hover { text-decoration: underline; }
-    .job-url { color: #666; font-size: 0.9em; }
-  </style>
-</head>
-<body>
-  <h1>Job Application Materials</h1>
-  <div class="toc">
-    <strong>Table of Contents:</strong>
-    <ol>
-      <li><a href="#job-1">Job Title at Company</a></li>
-      <!-- ... more jobs ... -->
-    </ol>
-  </div>
+**CRITICAL: You MUST build the file in multiple append_data calls. NEVER try to write the \
+entire HTML in a single save_data call — it will exceed the output token limit and fail.**
 
-  <!-- For each job: -->
-  <div class="job-section" id="job-1">
-    <h2>Job Title at Company</h2>
-    <p class="job-url">URL: <a href="...">link</a></p>
+**PROCESS (follow exactly):**
 
-    <h3>Resume Customization List</h3>
-    <div class="customization-list">
-      <h4>Priority Changes</h4>
-      <ul>
-        <li>...</li>
-      </ul>
-      <h4>Keywords to Incorporate</h4>
-      <ul>...</ul>
-      <h4>Experiences to Emphasize</h4>
-      <ul>...</ul>
-      <h4>Suggested Rewrites</h4>
-      <ul>...</ul>
-    </div>
+**Step 1 — Write HTML header + table of contents:**
+Call save_data to create the file with the HTML head, styles, and TOC:
+```
+save_data(filename="application_materials.html", data="<!DOCTYPE html>\\n<html>\\n<head>...")
+```
+Include: DOCTYPE, head with styles, opening body tag, h1, and the table of contents \
+linking to each selected job. End with the TOC closing div.
 
-    <h3>Cold Outreach Email</h3>
-    <div class="email-card">
-Subject: ...
+CSS to use:
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 0 auto; padding: 40px; line-height: 1.6; }
+  h1 { color: #1a1a1a; border-bottom: 2px solid #0066cc; padding-bottom: 10px; }
+  h2 { color: #0066cc; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; }
+  h3 { color: #333; margin-top: 20px; }
+  .job-section { margin-bottom: 60px; }
+  .email-card { background: #f8f9fa; border-left: 4px solid #0066cc; padding: 20px; margin: 20px 0; white-space: pre-wrap; }
+  .customization-list { background: #fff; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; }
+  ul { line-height: 1.8; }
+  .toc { background: #f0f4f8; padding: 20px; border-radius: 8px; margin-bottom: 40px; }
+  .toc a { color: #0066cc; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .job-url { color: #666; font-size: 0.9em; }
 
-Dear Hiring Manager,
+**Step 2 — Append each job section ONE AT A TIME:**
+For EACH selected job, call append_data with that job's section:
+```
+append_data(filename="application_materials.html", data="<div class='job-section' id='job-N'>...")
+```
+Each section should contain:
+- Job title + company as h2
+- Job URL link
+- Resume Customization List (Priority Changes, Keywords, Experiences to Emphasize, Suggested Rewrites)
+- Cold Outreach Email in an email-card div (subject line + body, under 150 words)
 
-...
-
-Best regards,
-[Your Name]
-    </div>
-  </div>
-</body>
-</html>
+**Step 3 — Append HTML footer:**
+```
+append_data(filename="application_materials.html", data="</body>\\n</html>")
 ```
 
-**PROCESS:**
-1. Generate the complete HTML report for ALL selected jobs
-2. Save it using: save_data(filename="application_materials.html", data="<the HTML content>")
-3. Get the clickable file path using: serve_file_to_user(filename="application_materials.html", open_in_browser=true)
-4. **CRITICAL: Print the file path in your response so the user can click it:**
-   "Your application materials have been saved and opened in your browser.
+**Step 4 — Serve the file:**
+Call serve_file_to_user(filename="application_materials.html", open_in_browser=true)
+Print the file_path from the result so the user can click it later.
 
-   **File location:** [print the file_path from serve_file_to_user result]"
-5. Call set_output("application_materials", "Created application_materials.html with materials for {N} jobs")
+**Step 5 — Create Gmail Drafts (in batches of 5):**
+IMPORTANT: Do NOT create all drafts in one turn. Create at most 5 gmail_create_draft calls \
+per turn to stay within tool call limits. If there are more than 5 jobs, create the first 5 \
+drafts, then create the remaining drafts in the next turn.
+
+For each selected job, call gmail_create_draft with:
+- to: hiring manager email if available, otherwise "hiring@company-domain.com"
+- subject: the cold email subject line
+- html: the cold email body as HTML
+If gmail_create_draft errors (e.g. credentials not configured), skip ALL remaining drafts and tell the user:
+"Gmail drafts could not be created (Gmail not connected). You can copy the emails from the HTML report instead."
+
+**Step 6 — Finish:**
+Call set_output("application_materials", "Created application_materials.html with materials for {N} jobs")
 
 **IMPORTANT:**
 - Only suggest truthful resume changes — enhance presentation, never fabricate
 - Cold emails must be professional, personalized, and under 150 words
 - ALWAYS print the full file path so users can easily access the file later
+- If a save_data or append_data call fails with a truncation error, you are writing too much \
+in one call. Break it into smaller chunks.
 """,
-    tools=["save_data", "serve_file_to_user"],
+    tools=["save_data", "append_data", "serve_file_to_user", "gmail_create_draft"],
 )
 
 __all__ = [

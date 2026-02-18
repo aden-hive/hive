@@ -198,6 +198,7 @@ class AdenTUI(App):
         Binding("ctrl+l", "toggle_logs", "Toggle Logs", show=True, priority=True),
         Binding("ctrl+z", "pause_execution", "Pause", show=True, priority=True),
         Binding("ctrl+r", "show_sessions", "Sessions", show=True, priority=True),
+        Binding("ctrl+p", "attach_pdf", "Attach PDF", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
     ]
@@ -665,6 +666,24 @@ class AdenTUI(App):
                 severity="information",
                 timeout=3,
             )
+
+    async def action_attach_pdf(self) -> None:
+        """Open native OS file dialog for PDF selection (bound to Ctrl+P)."""
+        from framework.tui.widgets.file_browser import _has_gui, pick_pdf_file
+
+        if not _has_gui():
+            self.notify(
+                "No GUI available. Use /attach <path> instead.",
+                severity="warning",
+                timeout=5,
+            )
+            return
+
+        self.notify("Opening file dialog...", severity="information", timeout=2)
+        path = await pick_pdf_file()
+
+        if path is not None:
+            self.chat_repl.attach_pdf(path)
 
     async def on_unmount(self) -> None:
         """Cleanup on app shutdown - cancel execution which will save state."""
