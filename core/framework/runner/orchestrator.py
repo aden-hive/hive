@@ -456,7 +456,7 @@ Respond with JSON only:
 }}"""
 
         try:
-            response = self._llm.complete(
+            response = await self._llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You are a request router. Respond with JSON only.",
                 max_tokens=256,

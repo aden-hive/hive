@@ -35,6 +35,7 @@ class MockLLMProvider(LLMProvider):
         max_tokens=1024,
         response_format=None,
         json_mode=False,
+        max_retries=None,
     ):
         self.complete_calls.append(
             {

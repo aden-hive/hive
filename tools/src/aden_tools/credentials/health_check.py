@@ -162,6 +162,69 @@ class BraveSearchHealthChecker:
             )
 
 
+class GoogleCalendarHealthChecker:
+    """Health checker for Google Calendar OAuth tokens."""
+
+    ENDPOINT = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+    TIMEOUT = 10.0
+
+    def check(self, access_token: str) -> HealthCheckResult:
+        """
+        Validate Google Calendar token by making lightweight API call.
+
+        Makes a GET request for 1 calendar to verify the token works.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/json",
+                    },
+                    params={"maxResults": "1"},
+                )
+
+                if response.status_code == 200:
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Google Calendar credentials valid",
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Google Calendar token is invalid or expired",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Google Calendar token lacks required scopes",
+                        details={"status_code": 403, "required": "calendar"},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Google Calendar API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Google Calendar API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            error_msg = str(e)
+            if "Bearer" in error_msg or "Authorization" in error_msg:
+                error_msg = "Request failed (details redacted for security)"
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Google Calendar: {error_msg}",
+                details={"error": error_msg},
+            )
+
+
 class GoogleSearchHealthChecker:
     """Health checker for Google Custom Search API."""
 
@@ -429,6 +492,63 @@ class GitHubHealthChecker:
             )
 
 
+class DiscordHealthChecker:
+    """Health checker for Discord bot tokens."""
+
+    ENDPOINT = "https://discord.com/api/v10/users/@me"
+    TIMEOUT = 10.0
+
+    def check(self, bot_token: str) -> HealthCheckResult:
+        """
+        Validate Discord bot token by fetching the bot's user info.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    headers={"Authorization": f"Bot {bot_token}"},
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    username = data.get("username", "unknown")
+                    return HealthCheckResult(
+                        valid=True,
+                        message=f"Discord bot token valid (bot: {username})",
+                        details={"username": username, "id": data.get("id")},
+                    )
+                elif response.status_code == 401:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Discord bot token is invalid",
+                        details={"status_code": 401},
+                    )
+                elif response.status_code == 403:
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Discord bot token lacks required permissions",
+                        details={"status_code": 403},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Discord API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Discord API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Discord API: {e}",
+                details={"error": str(e)},
+            )
+
+
 class ResendHealthChecker:
     """Health checker for Resend API credentials."""
 
@@ -488,12 +608,86 @@ class ResendHealthChecker:
             )
 
 
+class GoogleMapsHealthChecker:
+    """Health checker for Google Maps Platform API key."""
+
+    ENDPOINT = "https://maps.googleapis.com/maps/api/geocode/json"
+    TIMEOUT = 10.0
+
+    def check(self, api_key: str) -> HealthCheckResult:
+        """
+        Validate Google Maps API key with a lightweight geocode request.
+
+        Makes a minimal geocode request for a well-known address to verify
+        the key is valid and the Geocoding API is enabled.
+        """
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                response = client.get(
+                    self.ENDPOINT,
+                    params={
+                        "address": "1600 Amphitheatre Parkway",
+                        "key": api_key,
+                    },
+                )
+
+                if response.status_code != 200:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Google Maps API returned HTTP {response.status_code}",
+                        details={"status_code": response.status_code},
+                    )
+
+                data = response.json()
+                status = data.get("status", "UNKNOWN_ERROR")
+
+                if status == "OK":
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Google Maps API key valid",
+                    )
+                elif status == "REQUEST_DENIED":
+                    return HealthCheckResult(
+                        valid=False,
+                        message="Google Maps API key is invalid or Geocoding API not enabled",
+                        details={"status": status},
+                    )
+                elif status in ("OVER_DAILY_LIMIT", "OVER_QUERY_LIMIT"):
+                    # Quota exceeded but key itself is valid
+                    return HealthCheckResult(
+                        valid=True,
+                        message="Google Maps API key valid (quota exceeded)",
+                        details={"status": status, "rate_limited": True},
+                    )
+                else:
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Google Maps API returned status: {status}",
+                        details={"status": status},
+                    )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Google Maps API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Google Maps API: {e}",
+                details={"error": str(e)},
+            )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
+    "discord": DiscordHealthChecker(),
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
+    "google_calendar_oauth": GoogleCalendarHealthChecker(),
     "slack": SlackHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
+    "google_maps": GoogleMapsHealthChecker(),
     "anthropic": AnthropicHealthChecker(),
     "github": GitHubHealthChecker(),
     "resend": ResendHealthChecker(),

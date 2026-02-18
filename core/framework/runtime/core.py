@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from framework.observability import set_trace_context
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.backend import FileStorage
@@ -55,6 +56,12 @@ class Runtime:
     """
 
     def __init__(self, storage_path: str | Path):
+        # Validate and create storage path if needed
+        path = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        if not path.exists():
+            logger.warning(f"Storage path does not exist, creating: {path}")
+            path.mkdir(parents=True, exist_ok=True)
+
         self.storage = FileStorage(storage_path)
         self._current_run: Run | None = None
         self._current_node: str = "unknown"
@@ -79,6 +86,14 @@ class Runtime:
             The run ID
         """
         run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        trace_id = uuid.uuid4().hex
+        execution_id = uuid.uuid4().hex  # 32 hex, OTel/W3C-aligned for logs
+
+        set_trace_context(
+            trace_id=trace_id,
+            execution_id=execution_id,
+            goal_id=goal_id,
+        )
 
         self._current_run = Run(
             id=run_id,

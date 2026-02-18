@@ -238,6 +238,16 @@ class NodeSpec(BaseModel):
         description="If True, this node streams output to the end user and can request input.",
     )
 
+    # Phase completion criteria for conversation-aware judge (Level 2)
+    success_criteria: str | None = Field(
+        default=None,
+        description=(
+            "Natural-language criteria for phase completion. When set, the "
+            "implicit judge upgrades to Level 2: after output keys are satisfied, "
+            "a fast LLM evaluates whether the conversation meets these criteria."
+        ),
+    )
+
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
 
@@ -480,6 +490,14 @@ class NodeContext:
     # Runtime logging (optional)
     runtime_logger: Any = None  # RuntimeLogger | None — uses Any to avoid import
 
+    # Pause control (optional) - asyncio.Event for pause requests
+    pause_event: Any = None  # asyncio.Event | None
+
+    # Continuous conversation mode
+    continuous_mode: bool = False  # True when graph has conversation_mode="continuous"
+    inherited_conversation: Any = None  # NodeConversation | None (from prior node)
+    cumulative_output_keys: list[str] = field(default_factory=list)  # All output keys from path
+
 
 @dataclass
 class NodeResult:
@@ -507,6 +525,9 @@ class NodeResult:
 
     # Pydantic validation errors (if any)
     validation_errors: list[str] = field(default_factory=list)
+
+    # Continuous conversation mode: return conversation for threading to next node
+    conversation: Any = None  # NodeConversation | None
 
     def to_summary(self, node_spec: Any = None) -> str:
         """
@@ -910,7 +931,7 @@ Keep the same JSON structure but with shorter content values.
                     )
                     return result
 
-                response = ctx.llm.complete_with_tools(
+                response = await ctx.llm.acomplete_with_tools(
                     messages=messages,
                     system=system,
                     tools=ctx.available_tools,
@@ -930,7 +951,7 @@ Keep the same JSON structure but with shorter content values.
                         f"         📋 Expecting JSON output with keys: {ctx.node_spec.output_keys}"
                     )
 
-                response = ctx.llm.complete(
+                response = await ctx.llm.acomplete(
                     messages=messages,
                     system=system,
                     json_mode=use_json_mode,
@@ -964,7 +985,7 @@ Keep the same JSON structure but with shorter content values.
 
                 # Retry the call with compaction instruction
                 if ctx.available_tools and self.tool_executor:
-                    response = ctx.llm.complete_with_tools(
+                    response = await ctx.llm.acomplete_with_tools(
                         messages=compaction_messages,
                         system=system,
                         tools=ctx.available_tools,
@@ -972,7 +993,7 @@ Keep the same JSON structure but with shorter content values.
                         max_tokens=ctx.max_tokens,
                     )
                 else:
-                    response = ctx.llm.complete(
+                    response = await ctx.llm.acomplete(
                         messages=compaction_messages,
                         system=system,
                         json_mode=use_json_mode,
@@ -1053,7 +1074,7 @@ Keep the same JSON structure but with shorter content values.
 
                                 # Re-call LLM with feedback
                                 if ctx.available_tools and self.tool_executor:
-                                    response = ctx.llm.complete_with_tools(
+                                    response = await ctx.llm.acomplete_with_tools(
                                         messages=current_messages,
                                         system=system,
                                         tools=ctx.available_tools,
@@ -1061,7 +1082,7 @@ Keep the same JSON structure but with shorter content values.
                                         max_tokens=ctx.max_tokens,
                                     )
                                 else:
-                                    response = ctx.llm.complete(
+                                    response = await ctx.llm.acomplete(
                                         messages=current_messages,
                                         system=system,
                                         json_mode=use_json_mode,
@@ -1131,7 +1152,7 @@ Keep the same JSON structure but with shorter content values.
                 decision_id=decision_id,
                 success=True,
                 result=response.content,
-                tokens_used=response.input_tokens + response.output_tokens,
+                tokens_used=total_input_tokens + total_output_tokens,
                 latency_ms=latency_ms,
             )
 
@@ -1230,7 +1251,7 @@ Keep the same JSON structure but with shorter content values.
                         success=False,
                         error=_extraction_error,
                         output={},
-                        tokens_used=response.input_tokens + response.output_tokens,
+                        tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
                     )
                     # JSON extraction failed completely - still strip code blocks
@@ -1272,7 +1293,7 @@ Keep the same JSON structure but with shorter content values.
             return NodeResult(
                 success=True,
                 output=output,
-                tokens_used=response.input_tokens + response.output_tokens,
+                tokens_used=total_input_tokens + total_output_tokens,
                 latency_ms=latency_ms,
             )
 
@@ -1801,7 +1822,7 @@ Respond with ONLY a JSON object:
         logger.info("      🤔 Router using LLM to choose path...")
 
         try:
-            response = ctx.llm.complete(
+            response = await ctx.llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system=ctx.node_spec.system_prompt
                 or "You are a routing agent. Respond with JSON only.",

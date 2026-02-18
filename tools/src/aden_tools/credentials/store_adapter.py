@@ -353,13 +353,26 @@ class CredentialStoreAdapter:
         cls,
         specs: dict[str, CredentialSpec] | None = None,
     ) -> CredentialStoreAdapter:
-        """Create adapter with encrypted storage primary and env var fallback."""
+        """Create adapter with encrypted storage primary and env var fallback.
+
+        When ADEN_API_KEY is set, builds the store with AdenSyncProvider and
+        AdenCachedStorage so that OAuth credentials (Google, HubSpot, Slack)
+        auto-refresh via the Aden server.  Non-Aden credentials (brave_search,
+        anthropic, resend) still resolve from environment variables.
+
+        When ADEN_API_KEY is not set, behaves identically to before.
+        """
+        import logging
+        import os
+
         from framework.credentials import CredentialStore
         from framework.credentials.storage import (
             CompositeStorage,
             EncryptedFileStorage,
             EnvVarStorage,
         )
+
+        log = logging.getLogger(__name__)
 
         if specs is None:
             from . import CREDENTIAL_SPECS
@@ -368,17 +381,69 @@ class CredentialStoreAdapter:
 
         env_mapping = {name: spec.env_var for name, spec in specs.items()}
 
+        # --- Aden sync branch ---
+        # Note: we don't use CredentialStore.with_aden_sync() here because it
+        # only wraps EncryptedFileStorage.  We need CompositeStorage (encrypted
+        # + env var fallback) so non-Aden credentials like brave_search still
+        # resolve from environment variables.
+        aden_api_key = os.environ.get("ADEN_API_KEY")
+        if aden_api_key:
+            try:
+                from framework.credentials.aden import (
+                    AdenCachedStorage,
+                    AdenClientConfig,
+                    AdenCredentialClient,
+                    AdenSyncProvider,
+                )
+
+                # Local storage: encrypted primary + env var fallback
+                encrypted = EncryptedFileStorage()
+                env = EnvVarStorage(env_mapping)
+                local_composite = CompositeStorage(primary=encrypted, fallbacks=[env])
+
+                # Aden components
+                client = AdenCredentialClient(
+                    AdenClientConfig(
+                        base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
+                    )
+                )
+                provider = AdenSyncProvider(client=client)
+
+                # AdenCachedStorage wraps composite, giving Aden priority
+                cached_storage = AdenCachedStorage(
+                    local_storage=local_composite,
+                    aden_provider=provider,
+                    cache_ttl_seconds=300,
+                )
+
+                store = CredentialStore(
+                    storage=cached_storage,
+                    providers=[provider],
+                    auto_refresh=True,
+                )
+
+                # Initial sync: populate local cache from Aden
+                try:
+                    synced = provider.sync_all(store)
+                    log.info("Aden credential sync complete: %d credentials synced", synced)
+                except Exception as e:
+                    log.warning("Aden initial sync failed (will retry on access): %s", e)
+
+                return cls(store=store, specs=specs)
+
+            except Exception as e:
+                log.warning(
+                    "Aden credential sync unavailable, falling back to default storage: %s", e
+                )
+
+        # --- Default branch (no ADEN_API_KEY or Aden setup failed) ---
         try:
             encrypted = EncryptedFileStorage()
             env = EnvVarStorage(env_mapping)
             composite = CompositeStorage(primary=encrypted, fallbacks=[env])
             store = CredentialStore(storage=composite)
         except Exception as e:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Encrypted credential storage unavailable, falling back to env vars: %s", e
-            )
+            log.warning("Encrypted credential storage unavailable, falling back to env vars: %s", e)
             store = CredentialStore.with_env_storage(env_mapping)
 
         return cls(store=store, specs=specs)

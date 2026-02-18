@@ -1,6 +1,6 @@
 [project]
 name = "framework"
-version = "0.1.0"
+version = "0.4.2"
 description = "Goal-driven agent runtime with Builder-friendly observability"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tui = ["textual>=0.75.0"]
+webhook = ["aiohttp>=3.9.0"]
 
 [project.scripts]
 hive = "framework.cli:main"
