@@ -167,13 +167,17 @@ class ConcurrentStorage:
             run: Run to save
             immediate: If True, save immediately (bypasses batching)
         """
+        # Invalidate summary cache since the run data is changing
+        # This ensures load_summary() fetches fresh data after the save
+        self._cache.pop(f"summary:{run.id}", None)
+
         if immediate or not self._running:
             await self._save_run_locked(run)
+            # Update cache only after successful immediate write
+            self._cache[f"run:{run.id}"] = CacheEntry(run, time.time())
         else:
+            # For batched writes, cache will be updated in _flush_batch after successful write
             await self._write_queue.put(("run", run))
-
-        # Update cache
-        self._cache[f"run:{run.id}"] = CacheEntry(run, time.time())
 
     async def _save_run_locked(self, run: Run) -> None:
         """Save a run with file locking, including index locks."""
@@ -363,8 +367,12 @@ class ConcurrentStorage:
             try:
                 if item_type == "run":
                     await self._save_run_locked(item)
+                    # Update cache only after successful batched write
+                    # This fixes the race condition where cache was updated before write completed
+                    self._cache[f"run:{item.id}"] = CacheEntry(item, time.time())
             except Exception as e:
                 logger.error(f"Failed to save {item_type}: {e}")
+                # Cache is NOT updated on failure - prevents stale/inconsistent cache state
 
     async def _flush_pending(self) -> None:
         """Flush all pending writes."""

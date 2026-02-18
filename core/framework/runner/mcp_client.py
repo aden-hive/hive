@@ -183,8 +183,11 @@ class MCPClient:
                         from mcp import ClientSession
                         from mcp.client.stdio import stdio_client
 
-                        # Create persistent stdio client context
-                        self._stdio_context = stdio_client(server_params)
+                        # Create persistent stdio client context.
+                        # Redirect server stderr to devnull to prevent raw
+                        # output from leaking behind the TUI.
+                        devnull = open(os.devnull, "w")  # noqa: SIM115
+                        self._stdio_context = stdio_client(server_params, errlog=devnull)
                         (
                             self._read_stream,
                             self._write_stream,
@@ -361,6 +364,15 @@ class MCPClient:
 
         # Call tool using persistent session
         result = await self._session.call_tool(tool_name, arguments=arguments)
+
+        # Check for server-side errors (validation failures, tool exceptions, etc.)
+        if getattr(result, "isError", False):
+            error_text = ""
+            if result.content:
+                content_item = result.content[0]
+                if hasattr(content_item, "text"):
+                    error_text = content_item.text
+            raise RuntimeError(f"MCP tool '{tool_name}' failed: {error_text}")
 
         # Extract content
         if result.content:

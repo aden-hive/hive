@@ -9,7 +9,7 @@ for understanding the core runtime loop:
 Setup -> Graph definition -> Execution -> Result
 
 Run with:
-    PYTHONPATH=core python core/examples/manual_agent.py
+    uv run python core/examples/manual_agent.py
 """
 
 import asyncio

@@ -27,6 +27,9 @@ class Message:
     tool_use_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     is_error: bool = False
+    # Phase-aware compaction metadata (continuous mode)
+    phase_id: str | None = None
+    is_transition_marker: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -60,6 +63,10 @@ class Message:
             d["tool_calls"] = self.tool_calls
         if self.is_error:
             d["is_error"] = self.is_error
+        if self.phase_id is not None:
+            d["phase_id"] = self.phase_id
+        if self.is_transition_marker:
+            d["is_transition_marker"] = self.is_transition_marker
         return d
 
     @classmethod
@@ -72,7 +79,19 @@ class Message:
             tool_use_id=data.get("tool_use_id"),
             tool_calls=data.get("tool_calls"),
             is_error=data.get("is_error", False),
+            phase_id=data.get("phase_id"),
+            is_transition_marker=data.get("is_transition_marker", False),
         )
+
+
+def _extract_spillover_filename(content: str) -> str | None:
+    """Extract spillover filename from a truncated tool result.
+
+    Matches the pattern produced by EventLoopNode._truncate_tool_result():
+        "saved to 'tool_github_list_stargazers_abc123.txt'"
+    """
+    match = re.search(r"saved to '([^']+)'", content)
+    return match.group(1) if match else None
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +127,50 @@ class ConversationStore(Protocol):
 # ---------------------------------------------------------------------------
 
 
+def _try_extract_key(content: str, key: str) -> str | None:
+    """Try 4 strategies to extract a *key*'s value from message content.
+
+    Strategies (in order):
+    1. Whole message is JSON — ``json.loads``, check for key.
+    2. Embedded JSON via ``find_json_object`` helper.
+    3. Colon format: ``key: value``.
+    4. Equals format: ``key = value``.
+    """
+    from framework.graph.node import find_json_object
+
+    # 1. Whole message is JSON
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict) and key in parsed:
+            val = parsed[key]
+            return json.dumps(val) if not isinstance(val, str) else val
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 2. Embedded JSON via find_json_object
+    json_str = find_json_object(content)
+    if json_str:
+        try:
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict) and key in parsed:
+                val = parsed[key]
+                return json.dumps(val) if not isinstance(val, str) else val
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # 3. Colon format: key: value
+    match = re.search(rf"\b{re.escape(key)}\s*:\s*(.+)", content)
+    if match:
+        return match.group(1).strip()
+
+    # 4. Equals format: key = value
+    match = re.search(rf"\b{re.escape(key)}\s*=\s*(.+)", content)
+    if match:
+        return match.group(1).strip()
+
+    return None
+
+
 class NodeConversation:
     """Message history for a graph node with optional write-through persistence.
 
@@ -133,12 +196,41 @@ class NodeConversation:
         self._messages: list[Message] = []
         self._next_seq: int = 0
         self._meta_persisted: bool = False
+        self._last_api_input_tokens: int | None = None
+        self._current_phase: str | None = None
 
     # --- Properties --------------------------------------------------------
 
     @property
     def system_prompt(self) -> str:
         return self._system_prompt
+
+    def update_system_prompt(self, new_prompt: str) -> None:
+        """Update the system prompt.
+
+        Used in continuous conversation mode at phase transitions to swap
+        Layer 3 (focus) while preserving the conversation history.
+        """
+        self._system_prompt = new_prompt
+
+    def set_current_phase(self, phase_id: str) -> None:
+        """Set the current phase ID. Subsequent messages will be stamped with it."""
+        self._current_phase = phase_id
+
+    async def switch_store(self, new_store: ConversationStore) -> None:
+        """Switch to a new persistence store at a phase transition.
+
+        Subsequent messages are written to *new_store*.  Meta (system
+        prompt, config) is re-persisted on the next write so the new
+        store's ``meta.json`` reflects the updated prompt.
+        """
+        self._store = new_store
+        self._meta_persisted = False
+        await new_store.write_cursor({"next_seq": self._next_seq})
+
+    @property
+    def current_phase(self) -> str | None:
+        return self._current_phase
 
     @property
     def messages(self) -> list[Message]:
@@ -161,8 +253,19 @@ class NodeConversation:
 
     # --- Add messages ------------------------------------------------------
 
-    async def add_user_message(self, content: str) -> Message:
-        msg = Message(seq=self._next_seq, role="user", content=content)
+    async def add_user_message(
+        self,
+        content: str,
+        *,
+        is_transition_marker: bool = False,
+    ) -> Message:
+        msg = Message(
+            seq=self._next_seq,
+            role="user",
+            content=content,
+            phase_id=self._current_phase,
+            is_transition_marker=is_transition_marker,
+        )
         self._messages.append(msg)
         self._next_seq += 1
         await self._persist(msg)
@@ -178,6 +281,7 @@ class NodeConversation:
             role="assistant",
             content=content,
             tool_calls=tool_calls,
+            phase_id=self._current_phase,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -196,6 +300,7 @@ class NodeConversation:
             content=content,
             tool_use_id=tool_use_id,
             is_error=is_error,
+            phase_id=self._current_phase,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -205,13 +310,77 @@ class NodeConversation:
     # --- Query -------------------------------------------------------------
 
     def to_llm_messages(self) -> list[dict[str, Any]]:
-        """Return messages as OpenAI-format dicts (system prompt excluded)."""
-        return [m.to_llm_dict() for m in self._messages]
+        """Return messages as OpenAI-format dicts (system prompt excluded).
+
+        Automatically repairs orphaned tool_use blocks (assistant messages
+        with tool_calls that lack corresponding tool-result messages).  This
+        can happen when a loop is cancelled mid-tool-execution.
+        """
+        msgs = [m.to_llm_dict() for m in self._messages]
+        return self._repair_orphaned_tool_calls(msgs)
+
+    @staticmethod
+    def _repair_orphaned_tool_calls(
+        msgs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Ensure every tool_call has a matching tool-result message."""
+        repaired: list[dict[str, Any]] = []
+        for i, m in enumerate(msgs):
+            repaired.append(m)
+            tool_calls = m.get("tool_calls")
+            if m.get("role") != "assistant" or not tool_calls:
+                continue
+            # Collect IDs of tool results that follow this assistant message
+            answered: set[str] = set()
+            for j in range(i + 1, len(msgs)):
+                if msgs[j].get("role") == "tool":
+                    tid = msgs[j].get("tool_call_id")
+                    if tid:
+                        answered.add(tid)
+                else:
+                    break  # stop at first non-tool message
+            # Patch any missing results
+            for tc in tool_calls:
+                tc_id = tc.get("id")
+                if tc_id and tc_id not in answered:
+                    repaired.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": "ERROR: Tool execution was interrupted.",
+                        }
+                    )
+        return repaired
 
     def estimate_tokens(self) -> int:
-        """Rough token estimate: total characters / 4."""
+        """Best available token estimate.
+
+        Uses actual API input token count when available (set via
+        :meth:`update_token_count`), otherwise falls back to the rough
+        ``total_chars / 4`` heuristic.
+        """
+        if self._last_api_input_tokens is not None:
+            return self._last_api_input_tokens
         total_chars = sum(len(m.content) for m in self._messages)
         return total_chars // 4
+
+    def update_token_count(self, actual_input_tokens: int) -> None:
+        """Store actual API input token count for more accurate compaction.
+
+        Called by EventLoopNode after each LLM call with the ``input_tokens``
+        value from the API response.  This value includes system prompt and
+        tool definitions, so it may be higher than a message-only estimate.
+        """
+        self._last_api_input_tokens = actual_input_tokens
+
+    def usage_ratio(self) -> float:
+        """Current token usage as a fraction of *max_history_tokens*.
+
+        Returns 0.0 when ``max_history_tokens`` is zero (unlimited).
+        """
+        if self._max_history_tokens <= 0:
+            return 0.0
+        return self.estimate_tokens() / self._max_history_tokens
 
     def needs_compaction(self) -> bool:
         return self.estimate_tokens() >= self._max_history_tokens * self._compaction_threshold
@@ -244,62 +413,151 @@ class NodeConversation:
 
     def _try_extract_key(self, content: str, key: str) -> str | None:
         """Try 4 strategies to extract a key's value from message content."""
-        from framework.graph.node import find_json_object
-
-        # 1. Whole message is JSON
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, dict) and key in parsed:
-                val = parsed[key]
-                return json.dumps(val) if not isinstance(val, str) else val
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        # 2. Embedded JSON via find_json_object
-        json_str = find_json_object(content)
-        if json_str:
-            try:
-                parsed = json.loads(json_str)
-                if isinstance(parsed, dict) and key in parsed:
-                    val = parsed[key]
-                    return json.dumps(val) if not isinstance(val, str) else val
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # 3. Colon format: key: value
-        match = re.search(rf"\b{re.escape(key)}\s*:\s*(.+)", content)
-        if match:
-            return match.group(1).strip()
-
-        # 4. Equals format: key = value
-        match = re.search(rf"\b{re.escape(key)}\s*=\s*(.+)", content)
-        if match:
-            return match.group(1).strip()
-
-        return None
+        return _try_extract_key(content, key)
 
     # --- Lifecycle ---------------------------------------------------------
 
-    async def compact(self, summary: str, keep_recent: int = 2) -> None:
+    async def prune_old_tool_results(
+        self,
+        protect_tokens: int = 5000,
+        min_prune_tokens: int = 2000,
+    ) -> int:
+        """Replace old tool result content with compact placeholders.
+
+        Walks backward through messages. Recent tool results (within
+        *protect_tokens*) are kept intact. Older tool results have their
+        content replaced with a ~100-char placeholder that preserves the
+        spillover filename reference (if any). Message structure (role,
+        seq, tool_use_id) stays valid for the LLM API.
+
+        Phase-aware behavior (continuous mode): when messages have ``phase_id``
+        metadata, all messages in the current phase are protected regardless of
+        token budget. Transition markers are never pruned. Older phases' tool
+        results are pruned more aggressively.
+
+        Error tool results are never pruned — they prevent re-calling
+        failing tools.
+
+        Returns the number of messages pruned (0 if nothing was pruned).
+        """
+        if not self._messages:
+            return 0
+
+        # Walk backward, classify tool results as protected vs pruneable
+        protected_tokens = 0
+        pruneable: list[int] = []  # indices into self._messages
+        pruneable_tokens = 0
+
+        for i in range(len(self._messages) - 1, -1, -1):
+            msg = self._messages[i]
+
+            # Transition markers are never pruned (any role)
+            if msg.is_transition_marker:
+                continue
+
+            if msg.role != "tool":
+                continue
+            if msg.is_error:
+                continue  # never prune errors
+            if msg.content.startswith("[Pruned tool result"):
+                continue  # already pruned
+
+            # Phase-aware: protect current phase messages
+            if self._current_phase and msg.phase_id == self._current_phase:
+                continue
+
+            est = len(msg.content) // 4
+            if protected_tokens < protect_tokens:
+                protected_tokens += est
+            else:
+                pruneable.append(i)
+                pruneable_tokens += est
+
+        # Only prune if enough to be worthwhile
+        if pruneable_tokens < min_prune_tokens:
+            return 0
+
+        # Replace content with compact placeholder
+        count = 0
+        for i in pruneable:
+            msg = self._messages[i]
+            orig_len = len(msg.content)
+            spillover = _extract_spillover_filename(msg.content)
+
+            if spillover:
+                placeholder = (
+                    f"[Pruned tool result: {orig_len} chars. "
+                    f"Full data in '{spillover}'. "
+                    f"Use load_data('{spillover}') to retrieve.]"
+                )
+            else:
+                placeholder = f"[Pruned tool result: {orig_len} chars cleared from context.]"
+
+            self._messages[i] = Message(
+                seq=msg.seq,
+                role=msg.role,
+                content=placeholder,
+                tool_use_id=msg.tool_use_id,
+                tool_calls=msg.tool_calls,
+                is_error=msg.is_error,
+                phase_id=msg.phase_id,
+                is_transition_marker=msg.is_transition_marker,
+            )
+            count += 1
+
+            if self._store:
+                await self._store.write_part(msg.seq, self._messages[i].to_storage_dict())
+
+        # Reset token estimate — content lengths changed
+        self._last_api_input_tokens = None
+        return count
+
+    async def compact(
+        self,
+        summary: str,
+        keep_recent: int = 2,
+        phase_graduated: bool = False,
+    ) -> None:
         """Replace old messages with a summary, optionally keeping recent ones.
 
         Args:
             summary: Caller-provided summary text.
             keep_recent: Number of recent messages to preserve (default 2).
                          Clamped to [0, len(messages) - 1].
+            phase_graduated: When True and messages have phase_id metadata,
+                split at phase boundaries instead of using keep_recent.
+                Keeps current + previous phase intact; compacts older phases.
         """
         if not self._messages:
             return
 
-        # Clamp: must discard at least 1 message
-        keep_recent = max(0, min(keep_recent, len(self._messages) - 1))
+        total = len(self._messages)
 
-        if keep_recent > 0:
-            old_messages = self._messages[:-keep_recent]
-            recent_messages = self._messages[-keep_recent:]
+        # Phase-graduated: find the split point based on phase boundaries.
+        # Keeps current phase + previous phase intact, compacts older phases.
+        if phase_graduated and self._current_phase:
+            split = self._find_phase_graduated_split()
         else:
-            old_messages = self._messages
-            recent_messages = []
+            split = None
+
+        if split is None:
+            # Fallback: use keep_recent (non-phase or single-phase conversation)
+            keep_recent = max(0, min(keep_recent, total - 1))
+            split = total - keep_recent if keep_recent > 0 else total
+
+        # Advance split past orphaned tool results at the boundary.
+        # Tool-role messages reference a tool_use from the preceding
+        # assistant message; if that assistant message falls into the
+        # compacted (old) portion the tool_result becomes invalid.
+        while split < total and self._messages[split].role == "tool":
+            split += 1
+
+        # Nothing to compact
+        if split == 0:
+            return
+
+        old_messages = list(self._messages[:split])
+        recent_messages = list(self._messages[split:])
 
         # Extract protected values from messages being discarded
         if self._output_keys:
@@ -330,6 +588,34 @@ class NodeConversation:
             await self._store.write_cursor({"next_seq": self._next_seq})
 
         self._messages = [summary_msg] + recent_messages
+        self._last_api_input_tokens = None  # reset; next LLM call will recalibrate
+
+    def _find_phase_graduated_split(self) -> int | None:
+        """Find split point that preserves current + previous phase.
+
+        Returns the index of the first message in the protected set,
+        or None if phase graduation doesn't apply (< 3 phases).
+        """
+        # Collect distinct phases in order of first appearance
+        phases_seen: list[str] = []
+        for msg in self._messages:
+            if msg.phase_id and msg.phase_id not in phases_seen:
+                phases_seen.append(msg.phase_id)
+
+        # Need at least 3 phases for graduation to be meaningful
+        # (current + previous are protected, older get compacted)
+        if len(phases_seen) < 3:
+            return None
+
+        # Protect: current phase + previous phase
+        protected_phases = {phases_seen[-1], phases_seen[-2]}
+
+        # Find split: first message belonging to a protected phase
+        for i, msg in enumerate(self._messages):
+            if msg.phase_id in protected_phases:
+                return i
+
+        return None
 
     async def clear(self) -> None:
         """Remove all messages, keep system prompt, preserve ``_next_seq``."""
@@ -337,6 +623,7 @@ class NodeConversation:
             await self._store.delete_parts_before(self._next_seq)
             await self._store.write_cursor({"next_seq": self._next_seq})
         self._messages.clear()
+        self._last_api_input_tokens = None
 
     def export_summary(self) -> str:
         """Structured summary with [STATS], [CONFIG], [RECENT_MESSAGES] sections."""

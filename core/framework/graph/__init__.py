@@ -1,8 +1,22 @@
 """Graph structures: Goals, Nodes, Edges, and Flexible Execution."""
 
+from framework.graph.client_io import (
+    ActiveNodeClientIO,
+    ClientIOGateway,
+    InertNodeClientIO,
+    NodeClientIO,
+)
 from framework.graph.code_sandbox import CodeSandbox, safe_eval, safe_exec
+from framework.graph.context_handoff import ContextHandoff, HandoffContext
 from framework.graph.conversation import ConversationStore, Message, NodeConversation
-from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.edge import DEFAULT_MAX_TOKENS, EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.event_loop_node import (
+    EventLoopNode,
+    JudgeProtocol,
+    JudgeVerdict,
+    LoopConfig,
+    OutputAccumulator,
+)
 from framework.graph.executor import GraphExecutor
 from framework.graph.flexible_executor import ExecutorConfig, FlexibleGraphExecutor
 from framework.graph.goal import Constraint, Goal, GoalStatus, SuccessCriterion
@@ -44,6 +58,7 @@ __all__ = [
     "EdgeSpec",
     "EdgeCondition",
     "GraphSpec",
+    "DEFAULT_MAX_TOKENS",
     # Executor (fixed graph)
     "GraphExecutor",
     # Plan (flexible execution)
@@ -77,4 +92,18 @@ __all__ = [
     "NodeConversation",
     "ConversationStore",
     "Message",
+    # Event Loop
+    "EventLoopNode",
+    "LoopConfig",
+    "OutputAccumulator",
+    "JudgeProtocol",
+    "JudgeVerdict",
+    # Context Handoff
+    "ContextHandoff",
+    "HandoffContext",
+    # Client I/O
+    "NodeClientIO",
+    "ActiveNodeClientIO",
+    "InertNodeClientIO",
+    "ClientIOGateway",
 ]

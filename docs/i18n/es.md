@@ -14,7 +14,6 @@
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
 [![Y Combinator](https://img.shields.io/badge/Y%20Combinator-Aden-orange)](https://www.ycombinator.com/companies/aden)
-[![Docker Pulls](https://img.shields.io/docker/pulls/adenhq/hive?logo=Docker&labelColor=%23528bff)](https://hub.docker.com/u/adenhq)
 [![Discord](https://img.shields.io/discord/1172610340073242735?logo=discord&labelColor=%235462eb&logoColor=%23f5f5f5&color=%235462eb)](https://discord.com/invite/MXE49hrKDk)
 [![Twitter Follow](https://img.shields.io/twitter/follow/teamaden?logo=X&color=%23f5f5f5)](https://x.com/aden_hq)
 [![LinkedIn](https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff)](https://www.linkedin.com/company/teamaden/)
@@ -42,7 +41,7 @@ Visita [adenhq.com](https://adenhq.com) para documentación completa, ejemplos y
 ## ¿Qué es Aden?
 
 <p align="center">
-  <img width="100%" alt="Aden Architecture" src="docs/assets/aden-architecture-diagram.jpg" />
+  <img width="100%" alt="Aden Architecture" src="../assets/aden-architecture-diagram.jpg" />
 </p>
 
 Aden es una plataforma para construir, desplegar, operar y adaptar agentes de IA:
@@ -66,7 +65,6 @@ Aden es una plataforma para construir, desplegar, operar y adaptar agentes de IA
 ### Prerrequisitos
 
 - [Python 3.11+](https://www.python.org/downloads/) - Para desarrollo de agentes
-- [Docker](https://docs.docker.com/get-docker/) (v20.10+) - Opcional, para herramientas en contenedores
 
 ### Instalación
 
@@ -80,6 +78,7 @@ cd hive
 ```
 
 Esto instala:
+
 - **framework** - Runtime del agente principal y ejecutor de grafos
 - **aden_tools** - 19 herramientas MCP para capacidades de agentes
 - Todas las dependencias requeridas
@@ -91,16 +90,16 @@ Esto instala:
 ./quickstart.sh
 
 # Construir un agente usando Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Probar tu agente
-claude> /testing-agent
+claude> /hive-test
 
 # Ejecutar tu agente
-PYTHONPATH=core:exports python -m your_agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m your_agent_name run --input '{...}'
 ```
 
-**[📖 Guía de Configuración Completa](ENVIRONMENT_SETUP.md)** - Instrucciones detalladas para desarrollo de agentes
+**[📖 Guía de Configuración Completa](../environment-setup.md)** - Instrucciones detalladas para desarrollo de agentes
 
 ## Características
 
@@ -164,14 +163,14 @@ flowchart LR
 
 ### La Ventaja de Aden
 
-| Frameworks Tradicionales | Aden |
-|--------------------------|------|
-| Codificar flujos de trabajo de agentes | Describir objetivos en lenguaje natural |
-| Definición manual de grafos | Grafos de agentes auto-generados |
-| Manejo reactivo de errores | Auto-evolución proactiva |
-| Configuraciones de herramientas estáticas | Nodos dinámicos envueltos en SDK |
-| Configuración de monitoreo separada | Observabilidad en tiempo real integrada |
-| Gestión de presupuesto DIY | Controles de costos y degradación integrados |
+| Frameworks Tradicionales                  | Aden                                         |
+| ----------------------------------------- | -------------------------------------------- |
+| Codificar flujos de trabajo de agentes    | Describir objetivos en lenguaje natural      |
+| Definición manual de grafos               | Grafos de agentes auto-generados             |
+| Manejo reactivo de errores                | Auto-evolución proactiva                     |
+| Configuraciones de herramientas estáticas | Nodos dinámicos envueltos en SDK             |
+| Configuración de monitoreo separada       | Observabilidad en tiempo real integrada      |
+| Gestión de presupuesto DIY                | Controles de costos y degradación integrados |
 
 ### Cómo Funciona
 
@@ -215,10 +214,7 @@ hive/
 ├── docs/                   # Documentación y guías
 ├── scripts/                # Scripts de construcción y utilidades
 ├── .claude/                # Habilidades de Claude Code para construir agentes
-├── ENVIRONMENT_SETUP.md    # Guía de configuración de Python para desarrollo de agentes
-├── DEVELOPER.md            # Guía del desarrollador
 ├── CONTRIBUTING.md         # Directrices de contribución
-└── ROADMAP.md              # Hoja de ruta del producto
 ```
 
 ## Desarrollo
@@ -237,20 +233,20 @@ Para construir y ejecutar agentes orientados a objetivos con el framework:
 # - Todas las dependencias
 
 # Construir nuevos agentes usando habilidades de Claude Code
-claude> /building-agents-construction
+claude> /hive
 
 # Probar agentes
-claude> /testing-agent
+claude> /hive-test
 
 # Ejecutar agentes
-PYTHONPATH=core:exports python -m agent_name run --input '{...}'
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ```
 
-Consulta [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instrucciones de configuración completas.
+Consulta [environment-setup.md](../environment-setup.md) para instrucciones de configuración completas.
 
 ## Documentación
 
-- **[Guía del Desarrollador](DEVELOPER.md)** - Guía completa para desarrolladores
+- **[Guía del Desarrollador](../developer-guide.md)** - Guía completa para desarrolladores
 - [Primeros Pasos](docs/getting-started.md) - Instrucciones de configuración rápida
 - [Guía de Configuración](docs/configuration.md) - Todas las opciones de configuración
 - [Visión General de Arquitectura](docs/architecture/README.md) - Diseño y estructura del sistema
@@ -259,7 +255,7 @@ Consulta [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) para instrucciones de conf
 
 El Framework de Agentes Aden tiene como objetivo ayudar a los desarrolladores a construir agentes auto-adaptativos orientados a resultados. Encuentra nuestra hoja de ruta aquí
 
-[ROADMAP.md](ROADMAP.md)
+[roadmap.md](../roadmap.md)
 
 ```mermaid
 timeline

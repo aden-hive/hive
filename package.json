@@ -9,14 +9,11 @@
   },
   "license": "Apache-2.0",
   "scripts": {
-    "setup": "echo '⚠️  This npm setup is for the archived web application. For agent development, use: ./scripts/setup-python.sh' && bash scripts/setup.sh",
     "test:duplicates": "bun test scripts/auto-close-duplicates"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.0",
-    "yaml": "^2.3.0"
+    "typescript": "^5.3.0"
   },
   "engines": {
     "node": ">=20.0.0",

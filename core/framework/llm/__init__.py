@@ -1,8 +1,31 @@
 """LLM provider abstraction."""
 
 from framework.llm.provider import LLMProvider, LLMResponse
+from framework.llm.stream_events import (
+    FinishEvent,
+    ReasoningDeltaEvent,
+    ReasoningStartEvent,
+    StreamErrorEvent,
+    StreamEvent,
+    TextDeltaEvent,
+    TextEndEvent,
+    ToolCallEvent,
+    ToolResultEvent,
+)
 
-__all__ = ["LLMProvider", "LLMResponse"]
+__all__ = [
+    "LLMProvider",
+    "LLMResponse",
+    "StreamEvent",
+    "TextDeltaEvent",
+    "TextEndEvent",
+    "ToolCallEvent",
+    "ToolResultEvent",
+    "ReasoningStartEvent",
+    "ReasoningDeltaEvent",
+    "FinishEvent",
+    "StreamErrorEvent",
+]
 
 try:
     from framework.llm.anthropic import AnthropicProvider  # noqa: F401

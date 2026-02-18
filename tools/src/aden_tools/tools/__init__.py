@@ -7,7 +7,7 @@ Usage:
     from aden_tools.credentials import CredentialStoreAdapter
 
     mcp = FastMCP("my-server")
-    credentials = CredentialStoreAdapter.with_env_storage()
+    credentials = CredentialStoreAdapter.default()
     register_all_tools(mcp, credentials=credentials)
 """
 
@@ -21,11 +21,22 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .apollo_tool import register_tools as register_apollo
+from .bigquery_tool import register_tools as register_bigquery
+from .calcom_tool import register_tools as register_calcom
+from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
+from .discord_tool import register_tools as register_discord
+
+# Security scanning tools
+from .dns_security_scanner import register_tools as register_dns_security_scanner
 from .email_tool import register_tools as register_email
+from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
+from .excel_tool import register_tools as register_excel
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
+from .file_system_toolkits.data_tools import register_tools as register_data_tools
 from .file_system_toolkits.execute_command_tool import (
     register_tools as register_execute_command,
 )
@@ -38,9 +49,21 @@ from .file_system_toolkits.replace_file_content import (
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
-from .google_docs_tool import register_tools as register_google_docs
 from .hubspot_tool import register_tools as register_hubspot
+from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
+from .port_scanner import register_tools as register_port_scanner
+from .razorpay_tool import register_tools as register_razorpay
+from .risk_scorer import register_tools as register_risk_scorer
+from .runtime_logs_tool import register_tools as register_runtime_logs
+from .serpapi_tool import register_tools as register_serpapi
+from .slack_tool import register_tools as register_slack
+from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .subdomain_enumerator import register_tools as register_subdomain_enumerator
+from .tech_stack_detector import register_tools as register_tech_stack_detector
+from .telegram_tool import register_tools as register_telegram
+from .time_tool import register_tools as register_time
+from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 
@@ -64,15 +87,18 @@ def register_all_tools(
     register_example(mcp)
     register_web_scrape(mcp)
     register_pdf_read(mcp)
+    register_time(mcp)
+    register_runtime_logs(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
     register_web_search(mcp, credentials=credentials)
-    # email supports multiple providers (Resend) with auto-detection
+    register_github(mcp, credentials=credentials)
+    # email supports multiple providers (Gmail, Resend)
     register_email(mcp, credentials=credentials)
+    # Gmail inbox management (read, trash, modify labels)
+    register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
-    # Google Docs integration
-    register_google_docs(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -83,13 +109,25 @@ def register_all_tools(
     register_apply_patch(mcp)
     register_grep_search(mcp)
     register_execute_command(mcp)
+    register_data_tools(mcp)
     register_csv(mcp)
+    register_excel(mcp)
+
+    # Security scanning tools (no credentials needed)
+    register_ssl_tls_scanner(mcp)
+    register_http_headers_scanner(mcp)
+    register_dns_security_scanner(mcp)
+    register_port_scanner(mcp)
+    register_tech_stack_detector(mcp)
+    register_subdomain_enumerator(mcp)
+    register_risk_scorer(mcp)
 
     return [
         "example_tool",
         "web_search",
         "web_scrape",
         "pdf_read",
+        "get_current_time",
         "view_file",
         "write_to_file",
         "list_dir",
@@ -98,13 +136,65 @@ def register_all_tools(
         "apply_patch",
         "grep_search",
         "execute_command_tool",
+        "load_data",
+        "save_data",
+        "append_data",
+        "edit_data",
+        "list_data_files",
+        "serve_file_to_user",
         "csv_read",
         "csv_write",
         "csv_append",
         "csv_info",
         "csv_sql",
+        "excel_read",
+        "excel_write",
+        "excel_append",
+        "excel_info",
+        "excel_sheet_list",
+        "excel_sql",
+        "excel_search",
+        "apollo_enrich_person",
+        "apollo_enrich_company",
+        "apollo_search_people",
+        "apollo_search_companies",
+        "calcom_list_bookings",
+        "calcom_get_booking",
+        "calcom_create_booking",
+        "calcom_cancel_booking",
+        "calcom_get_availability",
+        "calcom_update_schedule",
+        "calcom_list_schedules",
+        "calcom_list_event_types",
+        "calcom_get_event_type",
+        "discord_list_guilds",
+        "discord_list_channels",
+        "discord_send_message",
+        "discord_get_messages",
+        "github_list_repos",
+        "github_get_repo",
+        "github_search_repos",
+        "github_list_issues",
+        "github_get_issue",
+        "github_create_issue",
+        "github_update_issue",
+        "github_list_pull_requests",
+        "github_get_pull_request",
+        "github_create_pull_request",
+        "github_search_code",
+        "github_list_branches",
+        "github_get_branch",
+        "github_list_stargazers",
+        "github_get_user_profile",
+        "github_get_user_emails",
         "send_email",
-        "send_budget_alert_email",
+        "gmail_reply_email",
+        "gmail_list_messages",
+        "gmail_get_message",
+        "gmail_trash_message",
+        "gmail_modify_message",
+        "gmail_batch_modify_messages",
+        "gmail_batch_get_messages",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",
@@ -117,17 +207,6 @@ def register_all_tools(
         "hubspot_get_deal",
         "hubspot_create_deal",
         "hubspot_update_deal",
-        "google_docs_create_document",
-        "google_docs_get_document",
-        "google_docs_insert_text",
-        "google_docs_replace_all_text",
-        "google_docs_insert_image",
-        "google_docs_format_text",
-        "google_docs_batch_update",
-        "google_docs_create_list",
-        "google_docs_add_comment",
-        "google_docs_list_comments",
-        "google_docs_export_content",
     ]
 
 

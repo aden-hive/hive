@@ -96,7 +96,7 @@ class BaseOAuth2Provider(CredentialProvider):
                 self._client = httpx.Client(timeout=self.config.request_timeout)
             except ImportError as e:
                 raise ImportError(
-                    "OAuth2 provider requires 'httpx'. Install with: pip install httpx"
+                    "OAuth2 provider requires 'httpx'. Install with: uv pip install httpx"
                 ) from e
         return self._client
 
