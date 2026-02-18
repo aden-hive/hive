@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from fastmcp import FastMCP
 from playwright.async_api import (
@@ -131,8 +130,11 @@ def register_tools(mcp: FastMCP) -> None:
             # Validate timeout
             timeout = max(5000, min(timeout, 300000))  # 5s to 5min
 
-            # Ensure output directory exists
-            output_file = Path(output_path)
+            # Ensure output directory exists and path is within working directory
+            output_file = Path(output_path).resolve()
+            allowed_base = Path.cwd().resolve()
+            if not str(output_file).startswith(str(allowed_base)):
+                return {"error": "output_path must be within the working directory"}
             output_file.parent.mkdir(parents=True, exist_ok=True)
 
             async with async_playwright() as p:
@@ -158,7 +160,6 @@ def register_tools(mcp: FastMCP) -> None:
                     await page.screenshot(path=str(output_path), full_page=full_page)
 
                     viewport = page.viewport_size
-                    await browser.close()
 
                     return {
                         "path": str(output_path),
@@ -234,8 +235,6 @@ def register_tools(mcp: FastMCP) -> None:
 
                     title = await page.title()
                     final_url = page.url
-
-                    await browser.close()
 
                     return {
                         "text": text,
@@ -323,8 +322,6 @@ def register_tools(mcp: FastMCP) -> None:
                     title = await page.title()
                     final_url = page.url
 
-                    await browser.close()
-
                     return {
                         "html": content,
                         "title": title,
@@ -361,8 +358,8 @@ def register_tools(mcp: FastMCP) -> None:
             timeout: Maximum time in milliseconds to wait for page load (default: 30000)
 
         Returns:
-            Dict with keys: form_fields (list of field objects), forms_found (count), or error dict.
-            Each field object contains: label, name, type, selector, required, placeholder, options (for selects)
+            Dict with keys: forms (list of form objects, each containing fields list),
+            forms_found (count), title, url, or error dict.
         """
         try:
             if not url.startswith(("http://", "https://")):
@@ -380,17 +377,17 @@ def register_tools(mcp: FastMCP) -> None:
                         "--disable-blink-features=AutomationControlled",
                     ],
                 )
+                try:
+                    context = await browser.new_context(
+                        viewport={"width": 1920, "height": 1080},
+                        user_agent=BROWSER_USER_AGENT,
+                        locale="en-US",
+                    )
 
-                context = await browser.new_context(
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=BROWSER_USER_AGENT,
-                    locale="en-US",
-                )
+                    page = await context.new_page()
+                    await page.goto(url, timeout=timeout, wait_until="networkidle")
 
-                page = await context.new_page()
-                await page.goto(url, timeout=timeout, wait_until="networkidle")
-
-                inspect_script = """
+                    inspect_script = """
                 (formSelector) => {
 
                     const visible = (el) => {
@@ -493,52 +490,51 @@ def register_tools(mcp: FastMCP) -> None:
                 }
                 """
 
-                result = await page.evaluate(inspect_script, form_selector)
+                    result = await page.evaluate(inspect_script, form_selector)
 
-                forms = result.get("forms", [])
+                    forms = result.get("forms", [])
 
-                for form in forms:
-                    form_index = form["form_index"]
+                    for form in forms:
+                        form_index = form["form_index"]
 
-                    # Document-order aligned form locator
-                    form_locator = page.locator("form").nth(form_index)
+                        # Document-order aligned form locator
+                        form_locator = page.locator("form").nth(form_index)
 
-                    # Deterministic Playwright selector
-                    generated_form_selector = f"form >> nth={form_index}"
-                    form["generated_form_selector"] = generated_form_selector
+                        # Deterministic Playwright selector
+                        generated_form_selector = f"form >> nth={form_index}"
+                        form["generated_form_selector"] = generated_form_selector
 
-                    # 1️⃣ Try strict submit types inside this form
-                    submit_locator = form_locator.locator(
-                        'button[type="submit"], input[type="submit"]'
-                    )
+                        # 1️⃣ Try strict submit types inside this form
+                        strict_selector = 'button[type="submit"], input[type="submit"]'
+                        text_selector = "button:has-text('Submit'), button:has-text('submit')"
 
-                    if await submit_locator.count() == 0:
-                        # 2️⃣ Fallback: visible Submit text
-                        submit_locator = form_locator.locator(
-                            "button:has-text('Submit'), button:has-text('submit')"
+                        submit_locator = form_locator.locator(strict_selector)
+                        used_selector = strict_selector
+
+                        if await submit_locator.count() == 0:
+                            # 2️⃣ Fallback: visible Submit text
+                            submit_locator = form_locator.locator(text_selector)
+                            used_selector = text_selector
+
+                        if await submit_locator.count() == 0:
+                            form["submit_selector"] = None
+                            continue
+
+                        form["submit_selector"] = (
+                            f"{generated_form_selector} >> {used_selector} >> nth=0"
                         )
 
-                    if await submit_locator.count() == 0:
-                        form["submit_selector"] = None
-                        continue
+                    title = await page.title()
+                    final_url = page.url
 
-                    # Since you said exactly one submit per form
-                    form["submit_selector"] = (
-                        f"{generated_form_selector} >> "
-                        f"button[type='submit'], input[type='submit'] >> nth=0"
-                    )
-
-                title = await page.title()
-                final_url = page.url
-
-                await browser.close()
-                print(result)
-                return {
-                    "forms": forms,
-                    "forms_found": result.get("forms_found", 0),
-                    "title": title,
-                    "url": final_url,
-                }
+                    return {
+                        "forms": forms,
+                        "forms_found": result.get("forms_found", 0),
+                        "title": title,
+                        "url": final_url,
+                    }
+                finally:
+                    await browser.close()
 
         except PlaywrightTimeout:
             return {"error": f"Request timed out after {timeout}ms"}
@@ -583,9 +579,12 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Parse JSON
             try:
-                fields_dict: dict[str, str] = json.loads(form_fields)
+                fields_dict = json.loads(form_fields)
             except json.JSONDecodeError as e:
                 return {"error": f"Invalid JSON in form_fields: {e!s}"}
+
+            if not isinstance(fields_dict, dict):
+                return {"error": "form_fields must be a JSON object mapping selectors to values"}
 
             if not fields_dict:
                 return {"error": "form_fields cannot be empty"}
@@ -666,7 +665,9 @@ def register_tools(mcp: FastMCP) -> None:
                     # Submit Handling (Robust)
                     if submit:
                         try:
-                            old_content = await page.content()
+                            old_length = await page.evaluate(
+                                "() => document.documentElement.outerHTML.length"
+                            )
 
                             if submit_selector:
                                 await page.wait_for_selector(
@@ -696,8 +697,8 @@ def register_tools(mcp: FastMCP) -> None:
                                 # Wait for any DOM change (short window)
                                 try:
                                     await page.wait_for_function(
-                                        "(oldHtml) => document.documentElement.outerHTML !== oldHtml",
-                                        arg=old_content,
+                                        "(oldLen) => document.documentElement.outerHTML.length !== oldLen",
+                                        arg=old_length,
                                         timeout=5000,
                                     )
                                 except PlaywrightTimeout:
