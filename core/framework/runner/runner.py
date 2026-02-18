@@ -776,6 +776,7 @@ class AgentRunner:
             runtime_log_store=log_store,
             checkpoint_config=checkpoint_config,
             config=runtime_config,
+            graph_id=self.graph.id or self.agent_path.name,
         )
 
         # Pass intro_message through for TUI display
@@ -1392,6 +1393,61 @@ Respond with JSON only:
             content={"error": f"Unknown message type: {message.type}"},
             type=MessageType.RESPONSE,
         )
+
+    @classmethod
+    async def setup_as_secondary(
+        cls,
+        agent_path: str | Path,
+        runtime: AgentRuntime,
+        graph_id: str | None = None,
+    ) -> str:
+        """Load an agent and register it as a secondary graph on *runtime*.
+
+        Uses :meth:`AgentRunner.load` to parse the agent, then calls
+        :meth:`AgentRuntime.add_graph` with the extracted graph, goal,
+        and entry points.
+
+        Args:
+            agent_path: Path to the agent directory
+            runtime: The running AgentRuntime to attach to
+            graph_id: Optional graph identifier (defaults to directory name)
+
+        Returns:
+            The graph_id used for registration
+        """
+        agent_path = Path(agent_path)
+        runner = cls.load(agent_path)
+        gid = graph_id or agent_path.name
+
+        # Build entry points
+        entry_points: dict[str, EntryPointSpec] = {}
+        if runner.graph.entry_node:
+            entry_points["default"] = EntryPointSpec(
+                id="default",
+                name="Default",
+                entry_node=runner.graph.entry_node,
+                trigger_type="manual",
+                isolation_level="shared",
+            )
+        for aep in runner.graph.async_entry_points:
+            entry_points[aep.id] = EntryPointSpec(
+                id=aep.id,
+                name=aep.name,
+                entry_node=aep.entry_node,
+                trigger_type=aep.trigger_type,
+                trigger_config=aep.trigger_config,
+                isolation_level=aep.isolation_level,
+                priority=aep.priority,
+                max_concurrent=aep.max_concurrent,
+            )
+
+        await runtime.add_graph(
+            graph_id=gid,
+            graph=runner.graph,
+            goal=runner.goal,
+            entry_points=entry_points,
+        )
+        return gid
 
     def cleanup(self) -> None:
         """Clean up resources (synchronous)."""

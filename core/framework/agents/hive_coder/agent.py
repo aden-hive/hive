@@ -90,10 +90,10 @@ goal = Goal(
     ],
 )
 
-# Single node — the entire agent is one continuous loop
+# Nodes — single coder node (guardian is now auto-attached by the framework)
 nodes = [coder_node]
 
-# No edges needed — single forever-alive node
+# No edges needed — single forever-alive event_loop node
 edges = []
 
 # Graph configuration
@@ -101,6 +101,9 @@ entry_node = "coder"
 entry_points = {"start": "coder"}
 pause_nodes = []
 terminal_nodes = []  # Forever-alive: loops until user exits
+
+# No async entry points — guardian is now auto-attached via attach_guardian()
+async_entry_points = []
 
 # Module-level variables read by AgentRunner.load()
 conversation_mode = "continuous"
@@ -126,9 +129,8 @@ class HiveCoderAgent:
     """
     Hive Coder — builds Hive agent packages from natural language.
 
-    Single-node architecture inspired by opencode's while(true) loop.
-    One continuous conversation handles discover → design → implement →
-    verify → present → iterate.
+    Single-node architecture: the coder runs in a continuous while(true) loop.
+    The guardian watchdog is auto-attached by the framework in TUI mode.
     """
 
     def __init__(self, config=None):
@@ -140,6 +142,7 @@ class HiveCoderAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
+        self.async_entry_points = async_entry_points
         self._graph: GraphSpec | None = None
         self._agent_runtime: AgentRuntime | None = None
         self._tool_registry: ToolRegistry | None = None
@@ -162,6 +165,7 @@ class HiveCoderAgent:
             loop_config=loop_config,
             conversation_mode=conversation_mode,
             identity_prompt=identity_prompt,
+            async_entry_points=self.async_entry_points,
         )
 
     def _setup(self, mock_mode=False) -> None:
@@ -203,7 +207,7 @@ class HiveCoderAgent:
                 entry_node=self.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
-            )
+            ),
         ]
 
         self._agent_runtime = create_agent_runtime(
@@ -215,6 +219,7 @@ class HiveCoderAgent:
             tools=tools,
             tool_executor=tool_executor,
             checkpoint_config=checkpoint_config,
+            graph_id="hive_coder",
         )
 
     async def start(self, mock_mode=False) -> None:

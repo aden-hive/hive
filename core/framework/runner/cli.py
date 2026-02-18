@@ -75,6 +75,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Resume from a specific checkpoint (requires --resume-session)",
     )
+    run_parser.add_argument(
+        "--no-guardian",
+        action="store_true",
+        help="Disable the Agent Guardian watchdog in TUI mode",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -206,6 +211,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
     )
+    tui_parser.add_argument(
+        "--no-guardian",
+        action="store_true",
+        help="Disable the Agent Guardian watchdog",
+    )
     tui_parser.set_defaults(func=cmd_tui)
 
     # code command (Hive Coder — framework agent builder)
@@ -220,6 +230,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
+    )
+    code_parser.add_argument(
+        "--no-guardian",
+        action="store_true",
+        help="Disable the Agent Guardian watchdog",
     )
     code_parser.set_defaults(func=cmd_code)
 
@@ -461,6 +476,12 @@ def cmd_run(args: argparse.Namespace) -> int:
                     except CredentialError as e:
                         print(f"\n{e}", file=sys.stderr)
                         return
+
+                # Attach guardian watchdog (before start — register_entry_point requires it)
+                if not getattr(args, "no_guardian", False) and runner._agent_runtime:
+                    from framework.agents.guardian import attach_guardian
+
+                    attach_guardian(runner._agent_runtime, runner._tool_registry)
 
                 # Start runtime before TUI so it's ready for user input
                 if runner._agent_runtime and not runner._agent_runtime.is_running:
@@ -1250,7 +1271,11 @@ def _get_framework_agents_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "agents"
 
 
-def _launch_agent_tui(agent_path: str | Path, model: str | None = None) -> int:
+def _launch_agent_tui(
+    agent_path: str | Path,
+    model: str | None = None,
+    no_guardian: bool = False,
+) -> int:
     """Load an agent and launch the TUI. Shared by cmd_tui and cmd_code."""
     from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
@@ -1275,6 +1300,12 @@ def _launch_agent_tui(agent_path: str | Path, model: str | None = None) -> int:
             except CredentialError as e:
                 print(f"\n{e}", file=sys.stderr)
                 return
+
+        # Attach guardian watchdog (before start)
+        if not no_guardian and runner._agent_runtime:
+            from framework.agents.guardian import attach_guardian
+
+            attach_guardian(runner._agent_runtime, runner._tool_registry)
 
         if runner._agent_runtime and not runner._agent_runtime.is_running:
             await runner._agent_runtime.start()
@@ -1349,11 +1380,20 @@ def cmd_tui(args: argparse.Namespace) -> int:
     if not agent_path:
         return 1
 
-    return _launch_agent_tui(agent_path, model=args.model)
+    return _launch_agent_tui(
+        agent_path,
+        model=args.model,
+        no_guardian=getattr(args, "no_guardian", False),
+    )
 
 
 def cmd_code(args: argparse.Namespace) -> int:
-    """Launch Hive Coder to build agents."""
+    """Launch Hive Coder with multi-graph support.
+
+    Unlike ``_launch_agent_tui``, this sets up graph lifecycle tools and
+    assigns ``graph_id="hive_coder"`` so the coder can load, supervise,
+    and restart secondary agent graphs within the same session.
+    """
     import logging
 
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
@@ -1370,7 +1410,68 @@ def cmd_code(args: argparse.Namespace) -> int:
     if fa_str not in sys.path:
         sys.path.insert(0, fa_str)
 
-    return _launch_agent_tui(hive_coder_path, model=args.model)
+    from framework.credentials.models import CredentialError
+    from framework.runner import AgentRunner
+    from framework.tools.session_graph_tools import register_graph_tools
+    from framework.tui.app import AdenTUI
+
+    async def run_with_tui():
+        try:
+            runner = AgentRunner.load(hive_coder_path, model=args.model)
+        except CredentialError as e:
+            print(f"\n{e}", file=sys.stderr)
+            return
+        except Exception as e:
+            print(f"Error loading agent: {e}")
+            return
+
+        if runner._agent_runtime is None:
+            try:
+                runner._setup()
+            except CredentialError as e:
+                print(f"\n{e}", file=sys.stderr)
+                return
+
+        runtime = runner._agent_runtime
+
+        # -- Multi-graph setup --
+        # Tag the primary graph so events carry graph_id="hive_coder"
+        runtime._graph_id = "hive_coder"
+        runtime._active_graph_id = "hive_coder"
+
+        # Register graph lifecycle tools (load_agent, unload_agent, etc.)
+        register_graph_tools(runner._tool_registry, runtime)
+
+        # Refresh tool schemas AND executor so streams see the new tools.
+        # The executor closure references the registry dict by ref, but
+        # refreshing both is robust against any copy-on-read behavior.
+        runtime._tools = list(runner._tool_registry.get_tools().values())
+        runtime._tool_executor = runner._tool_registry.get_executor()
+
+        # Attach guardian watchdog (before start — skips re-registering
+        # graph tools since register_graph_tools() was already called above)
+        if not getattr(args, "no_guardian", False):
+            from framework.agents.guardian import attach_guardian
+
+            attach_guardian(runtime, runner._tool_registry)
+
+        if not runtime.is_running:
+            await runtime.start()
+
+        app = AdenTUI(runtime)
+        try:
+            await app.run_async()
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            print(f"TUI error: {e}")
+
+        await runner.cleanup_async()
+
+    asyncio.run(run_with_tui())
+    print("TUI session ended.")
+    return 0
 
 
 def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:

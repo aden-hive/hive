@@ -394,6 +394,32 @@ class AdenTUI(App):
         try:
             et = event.type
 
+            # --- Multi-graph filtering ---
+            # If the event has a graph_id and it's not the active graph,
+            # show a notification for important events and drop the rest.
+            if event.graph_id is not None and event.graph_id != self.runtime.active_graph_id:
+                if et == EventType.CLIENT_INPUT_REQUESTED:
+                    self.notify(
+                        f"[bold]{event.graph_id}[/bold] is waiting for input",
+                        severity="warning",
+                        timeout=10,
+                    )
+                elif et == EventType.EXECUTION_FAILED:
+                    error = event.data.get("error", "Unknown error")[:60]
+                    self.notify(
+                        f"[bold red]{event.graph_id}[/bold red] failed: {error}",
+                        severity="error",
+                        timeout=10,
+                    )
+                elif et == EventType.EXECUTION_COMPLETED:
+                    self.notify(
+                        f"[bold green]{event.graph_id}[/bold green] completed",
+                        severity="information",
+                        timeout=5,
+                    )
+                # All other background events are silently dropped (visible in logs)
+                return
+
             # --- Chat REPL events ---
             if et in (EventType.LLM_TEXT_DELTA, EventType.CLIENT_OUTPUT_DELTA):
                 self.chat_repl.handle_text_delta(
@@ -418,6 +444,7 @@ class AdenTUI(App):
             elif et == EventType.CLIENT_INPUT_REQUESTED:
                 self.chat_repl.handle_input_requested(
                     event.node_id or event.data.get("node_id", ""),
+                    graph_id=event.graph_id,
                 )
             elif et == EventType.NODE_LOOP_STARTED:
                 self.chat_repl.handle_node_started(event.node_id or "")
@@ -543,6 +570,27 @@ class AdenTUI(App):
                 exc_info=True,
             )
 
+    def action_switch_graph(self, graph_id: str) -> None:
+        """Switch the active graph focus in the TUI."""
+        try:
+            self.runtime.active_graph_id = graph_id
+        except ValueError:
+            self.notify(f"Graph '{graph_id}' not found", severity="error", timeout=3)
+            return
+
+        # Update status bar
+        self.status_bar.set_graph_id(graph_id)
+
+        # Update graph view
+        reg = self.runtime.get_graph_registration(graph_id)
+        if reg:
+            self.graph_view.switch_graph(reg.graph)
+
+        # Flush chat streaming state
+        self.chat_repl.flush_streaming()
+
+        self.notify(f"Switched to graph: {graph_id}", severity="information", timeout=3)
+
     def save_screenshot(self, filename: str | None = None) -> str:
         """Save a screenshot of the current screen as SVG (viewable in browsers).
 
@@ -627,7 +675,19 @@ class AdenTUI(App):
 
             # Find and cancel the execution task - executor will catch and save state
             task_cancelled = False
-            for stream in self.runtime._streams.values():
+            # Search active graph first, then all graphs
+            all_streams = []
+            active_reg = self.runtime.get_graph_registration(self.runtime.active_graph_id)
+            if active_reg:
+                all_streams.extend(active_reg.streams.values())
+            for gid in self.runtime.list_graphs():
+                if gid == self.runtime.active_graph_id:
+                    continue
+                reg = self.runtime.get_graph_registration(gid)
+                if reg:
+                    all_streams.extend(reg.streams.values())
+
+            for stream in all_streams:
                 exec_id = chat_repl._current_exec_id
                 task = stream._execution_tasks.get(exec_id)
                 if task and not task.done():
@@ -677,8 +737,13 @@ class AdenTUI(App):
 
             chat_repl = self.query_one(ChatRepl)
             if chat_repl._current_exec_id:
-                # Find the stream with this execution
-                for stream in self.runtime._streams.values():
+                # Find the stream with this execution across all graphs
+                all_streams = []
+                for gid in self.runtime.list_graphs():
+                    reg = self.runtime.get_graph_registration(gid)
+                    if reg:
+                        all_streams.extend(reg.streams.values())
+                for stream in all_streams:
                     exec_id = chat_repl._current_exec_id
                     task = stream._execution_tasks.get(exec_id)
                     if task and not task.done():

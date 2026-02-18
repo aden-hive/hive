@@ -359,6 +359,27 @@ After user confirms satisfaction:
 
 If building another agent, just start the loop again — no need to \
 set_output until the user is done.
+
+## 7. Live Test (optional)
+
+After the user approves, offer to load and run the agent in-session. \
+This runs it alongside you, with the Agent Guardian watching for \
+failures automatically.
+
+```
+load_agent("exports/{name}")   # registers as secondary graph
+start_agent("{name}")           # triggers default entry point
+```
+
+If the agent fails, the guardian fires and triages. You can also:
+- `list_agents()` — see all loaded graphs and status
+- `restart_agent("{name}")` then `load_agent` — pick up code changes
+- `unload_agent("{name}")` — remove it from the session
+- `get_user_presence()` — check if user is around
+
+The agent runs in a shared session: it can read memory you've set and \
+its outputs are visible to you. If the guardian escalates a failure, \
+you'll see the error and can fix the code, then reload.
 """,
     tools=[
         "read_file",
@@ -377,6 +398,12 @@ set_output until the user is done.
         "list_agent_checkpoints",
         "get_agent_checkpoint",
         "run_agent_tests",
+        # Graph lifecycle tools (multi-graph sessions)
+        "load_agent",
+        "unload_agent",
+        "start_agent",
+        "restart_agent",
+        "get_user_presence",
     ],
 )
 

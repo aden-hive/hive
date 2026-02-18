@@ -274,10 +274,21 @@ class EventLoopNode(NodeProtocol):
             )
             accumulator = OutputAccumulator(store=self._conversation_store)
             start_iteration = 0
+            _restored_recent_responses: list[str] = []
+            _restored_tool_fingerprints: list[list[tuple[str, str]]] = []
         else:
             # Try crash-recovery restore from store, then fall back to fresh.
-            conversation, accumulator, start_iteration = await self._restore(ctx)
-            if conversation is None:
+            restored = await self._restore(ctx)
+            if restored is not None:
+                conversation = restored.conversation
+                accumulator = restored.accumulator
+                start_iteration = restored.start_iteration
+                _restored_recent_responses = restored.recent_responses
+                _restored_tool_fingerprints = restored.recent_tool_fingerprints
+            else:
+                _restored_recent_responses = []
+                _restored_tool_fingerprints = []
+
                 # Fresh conversation: either isolated mode or first node in continuous mode.
                 from framework.graph.prompt_composer import _with_datetime
 
@@ -320,10 +331,9 @@ class EventLoopNode(NodeProtocol):
         # 4. Publish loop started
         await self._publish_loop_started(stream_id, node_id)
 
-        # 5. Stall / doom loop detection state
-        recent_responses: list[str] = []
-        recent_tool_fingerprints: list[list[tuple[str, str]]] = []
-        user_interaction_count = 0  # tracks how many times this node blocked for user input
+        # 5. Stall / doom loop detection state (restored from cursor if resuming)
+        recent_responses: list[str] = _restored_recent_responses
+        recent_tool_fingerprints: list[list[tuple[str, str]]] = _restored_tool_fingerprints
 
         # 6. Main loop
         for iteration in range(start_iteration, self._config.max_iterations):
@@ -620,8 +630,15 @@ class EventLoopNode(NodeProtocol):
                 # Text-only turn breaks the doom loop chain
                 recent_tool_fingerprints.clear()
 
-            # 6g. Write cursor checkpoint
-            await self._write_cursor(ctx, conversation, accumulator, iteration)
+            # 6g. Write cursor checkpoint (includes stall/doom state for resume)
+            await self._write_cursor(
+                ctx,
+                conversation,
+                accumulator,
+                iteration,
+                recent_responses=recent_responses,
+                recent_tool_fingerprints=recent_tool_fingerprints,
+            )
 
             # 6h. Client-facing input blocking
             #
@@ -738,7 +755,6 @@ class EventLoopNode(NodeProtocol):
                         conversation=conversation if _is_continuous else None,
                     )
 
-                user_interaction_count += 1
                 recent_responses.clear()
 
                 if _cf_auto:
@@ -2207,29 +2223,60 @@ class EventLoopNode(NodeProtocol):
     # Persistence: restore, cursor, injection, pause
     # -------------------------------------------------------------------
 
+    @dataclass
+    class _RestoredState:
+        """State recovered from a previous checkpoint."""
+
+        conversation: NodeConversation
+        accumulator: OutputAccumulator
+        start_iteration: int
+        recent_responses: list[str]
+        recent_tool_fingerprints: list[list[tuple[str, str]]]
+
     async def _restore(
         self,
         ctx: NodeContext,
-    ) -> tuple[NodeConversation | None, OutputAccumulator | None, int]:
-        """Attempt to restore from a previous checkpoint."""
+    ) -> _RestoredState | None:
+        """Attempt to restore from a previous checkpoint.
+
+        Returns a ``_RestoredState`` with conversation, accumulator, iteration
+        counter, and stall/doom-loop detection state — everything needed to
+        resume exactly where execution stopped.
+        """
         if self._conversation_store is None:
-            return None, None, 0
+            return None
 
         conversation = await NodeConversation.restore(self._conversation_store)
         if conversation is None:
-            return None, None, 0
+            return None
 
         accumulator = await OutputAccumulator.restore(self._conversation_store)
 
         cursor = await self._conversation_store.read_cursor()
         start_iteration = cursor.get("iteration", 0) + 1 if cursor else 0
 
+        # Restore stall/doom-loop detection state
+        recent_responses: list[str] = cursor.get("recent_responses", []) if cursor else []
+        raw_fps = cursor.get("recent_tool_fingerprints", []) if cursor else []
+        recent_tool_fingerprints: list[list[tuple[str, str]]] = [
+            [tuple(pair) for pair in fps]  # type: ignore[misc]
+            for fps in raw_fps
+        ]
+
         logger.info(
             f"Restored event loop: iteration={start_iteration}, "
             f"messages={conversation.message_count}, "
-            f"outputs={list(accumulator.values.keys())}"
+            f"outputs={list(accumulator.values.keys())}, "
+            f"stall_window={len(recent_responses)}, "
+            f"doom_window={len(recent_tool_fingerprints)}"
         )
-        return conversation, accumulator, start_iteration
+        return EventLoopNode._RestoredState(
+            conversation=conversation,
+            accumulator=accumulator,
+            start_iteration=start_iteration,
+            recent_responses=recent_responses,
+            recent_tool_fingerprints=recent_tool_fingerprints,
+        )
 
     async def _write_cursor(
         self,
@@ -2237,8 +2284,15 @@ class EventLoopNode(NodeProtocol):
         conversation: NodeConversation,
         accumulator: OutputAccumulator,
         iteration: int,
+        *,
+        recent_responses: list[str] | None = None,
+        recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
     ) -> None:
-        """Write checkpoint cursor for crash recovery."""
+        """Write checkpoint cursor for crash recovery.
+
+        Persists iteration counter, accumulator outputs, and stall/doom-loop
+        detection state so that resume picks up exactly where execution stopped.
+        """
         if self._conversation_store:
             cursor = await self._conversation_store.read_cursor() or {}
             cursor.update(
@@ -2249,6 +2303,14 @@ class EventLoopNode(NodeProtocol):
                     "outputs": accumulator.to_dict(),
                 }
             )
+            # Persist stall/doom-loop detection state for reliable resume
+            if recent_responses is not None:
+                cursor["recent_responses"] = recent_responses
+            if recent_tool_fingerprints is not None:
+                # Convert list[list[tuple]] → list[list[list]] for JSON
+                cursor["recent_tool_fingerprints"] = [
+                    [list(pair) for pair in fps] for fps in recent_tool_fingerprints
+                ]
             await self._conversation_store.write_cursor(cursor)
 
     async def _drain_injection_queue(self, conversation: NodeConversation) -> int:

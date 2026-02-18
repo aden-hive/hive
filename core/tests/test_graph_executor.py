@@ -5,7 +5,7 @@ Focused on minimal success and failure scenarios.
 
 import pytest
 
-from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.edge import GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import NodeResult, NodeSpec
@@ -157,7 +157,6 @@ class FakeEventBus:
 
 
 @pytest.mark.asyncio
-
 
 # ---- Fake event_loop node (registered, so executor won't emit for it) ----
 class FakeEventLoopNode:

@@ -112,6 +112,7 @@ class ChatRepl(Vertical):
         self._streaming_snapshot: str = ""
         self._waiting_for_input: bool = False
         self._input_node_id: str | None = None
+        self._input_graph_id: str | None = None
         self._pending_ask_question: str = ""
         self._active_node_id: str | None = None  # Currently executing node
         self._resume_session = resume_session
@@ -203,15 +204,19 @@ class ChatRepl(Vertical):
   [bold]/resume[/bold] <session_id>         - Resume session by ID
   [bold]/recover[/bold] <session_id> <cp_id> - Recover from specific checkpoint
   [bold]/pause[/bold]                      - Pause current execution (Ctrl+Z)
+  [bold]/graphs[/bold]                     - List loaded graphs and their status
+  [bold]/graph[/bold] <id>                 - Switch active graph focus
+  [bold]/load[/bold] <path>                - Load an agent graph into the session
+  [bold]/unload[/bold] <id>                - Remove a graph from the session
   [bold]/help[/bold]                       - Show this help message
 
 [dim]Examples:[/dim]
   /sessions                              [dim]# List all sessions[/dim]
-  /sessions session_20260208_143022      [dim]# Show session details[/dim]
-  /resume                                [dim]# Show numbered session list[/dim]
   /resume 1                              [dim]# Resume first listed session[/dim]
-  /resume session_20260208_143022        [dim]# Resume by full session ID[/dim]
-  /recover session_20260208_143022 cp_xxx [dim]# Recover from specific checkpoint[/dim]
+  /graphs                                [dim]# Show loaded agent graphs[/dim]
+  /graph email_agent                     [dim]# Switch focus to email_agent[/dim]
+  /load exports/email_agent              [dim]# Load agent into session[/dim]
+  /unload email_agent                    [dim]# Remove agent from session[/dim]
   /pause                                 [dim]# Pause (or Ctrl+Z)[/dim]
 """)
         elif cmd == "/sessions":
@@ -254,6 +259,23 @@ class ChatRepl(Vertical):
             await self._cmd_recover(session_id, checkpoint_id)
         elif cmd == "/pause":
             await self._cmd_pause()
+        elif cmd == "/graphs":
+            self._cmd_graphs()
+        elif cmd == "/graph":
+            if len(parts) < 2:
+                self._write_history("[bold red]Usage:[/bold red] /graph <graph_id>")
+            else:
+                self._cmd_switch_graph(parts[1].strip())
+        elif cmd == "/load":
+            if len(parts) < 2:
+                self._write_history("[bold red]Usage:[/bold red] /load <agent_path>")
+            else:
+                await self._cmd_load_graph(parts[1].strip())
+        elif cmd == "/unload":
+            if len(parts) < 2:
+                self._write_history("[bold red]Usage:[/bold red] /unload <graph_id>")
+            else:
+                await self._cmd_unload_graph(parts[1].strip())
         else:
             self._write_history(
                 f"[bold red]Unknown command:[/bold red] {cmd}\n"
@@ -698,6 +720,90 @@ class ChatRepl(Vertical):
         if not task_cancelled:
             self._write_history("[bold yellow]Execution already completed[/bold yellow]")
 
+    def _cmd_graphs(self) -> None:
+        """List all loaded graphs and their status."""
+        graphs = self.runtime.list_graphs()
+        if not graphs:
+            self._write_history("[dim]No graphs loaded[/dim]")
+            return
+
+        lines = ["[bold cyan]Loaded Graphs:[/bold cyan]"]
+        for gid in graphs:
+            reg = self.runtime.get_graph_registration(gid)
+            if reg is None:
+                continue
+            is_primary = gid == self.runtime.graph_id
+            is_active = gid == self.runtime.active_graph_id
+            markers = []
+            if is_primary:
+                markers.append("primary")
+            if is_active:
+                markers.append("active")
+            marker_str = f" [dim]({', '.join(markers)})[/dim]" if markers else ""
+            ep_list = ", ".join(reg.entry_points.keys())
+            active_execs = sum(len(s.active_execution_ids) for s in reg.streams.values())
+            exec_str = f" [green]{active_execs} running[/green]" if active_execs else ""
+            lines.append(f"  [bold]{gid}[/bold]{marker_str} — eps: {ep_list}{exec_str}")
+        self._write_history("\n".join(lines))
+
+    def _cmd_switch_graph(self, graph_id: str) -> None:
+        """Switch the active graph focus."""
+        try:
+            self.runtime.active_graph_id = graph_id
+        except ValueError:
+            self._write_history(
+                f"[bold red]Graph '{graph_id}' not found.[/bold red] "
+                "Use /graphs to see loaded graphs."
+            )
+            return
+
+        # Tell the app to update the UI
+        app = self.app
+        if hasattr(app, "action_switch_graph"):
+            app.action_switch_graph(graph_id)
+        else:
+            self._write_history(f"[bold green]Switched to graph: {graph_id}[/bold green]")
+
+    async def _cmd_load_graph(self, agent_path: str) -> None:
+        """Load an agent graph into the session."""
+        from pathlib import Path
+
+        path = Path(agent_path).resolve()
+        if not path.exists():
+            self._write_history(f"[bold red]Path does not exist:[/bold red] {path}")
+            return
+
+        self._write_history(f"[dim]Loading agent from {path}...[/dim]")
+
+        try:
+            from framework.runner.runner import AgentRunner
+
+            graph_id = await AgentRunner.setup_as_secondary(path, self.runtime)
+            self._write_history(
+                f"[bold green]Loaded graph '{graph_id}'[/bold green] — "
+                "use /graphs to see all, /graph to switch"
+            )
+        except Exception as e:
+            self._write_history(f"[bold red]Failed to load agent:[/bold red] {e}")
+
+    async def _cmd_unload_graph(self, graph_id: str) -> None:
+        """Unload a secondary graph from the session."""
+        try:
+            await self.runtime.remove_graph(graph_id)
+            self._write_history(f"[bold green]Unloaded graph '{graph_id}'[/bold green]")
+        except ValueError as e:
+            self._write_history(f"[bold red]Error:[/bold red] {e}")
+
+    def flush_streaming(self) -> None:
+        """Flush any accumulated streaming text to history.
+
+        Called by the app when switching graphs to ensure in-progress
+        streaming content is preserved before the UI context changes.
+        """
+        if self._streaming_snapshot:
+            self._write_history(f"[bold blue]Agent:[/bold blue] {self._streaming_snapshot}")
+            self._streaming_snapshot = ""
+
     def on_mount(self) -> None:
         """Add welcome message and check for resumable sessions."""
         history = self.query_one("#chat-history", RichLog)
@@ -832,11 +938,13 @@ class ChatRepl(Vertical):
             indicator.update("Thinking...")
 
             node_id = self._input_node_id
+            graph_id = self._input_graph_id
             self._input_node_id = None
+            self._input_graph_id = None
 
             try:
                 future = asyncio.run_coroutine_threadsafe(
-                    self.runtime.inject_input(node_id, user_input),
+                    self.runtime.inject_input(node_id, user_input, graph_id=graph_id),
                     self._agent_loop,
                 )
                 await asyncio.wrap_future(future)
@@ -1044,7 +1152,7 @@ class ChatRepl(Vertical):
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
 
-    def handle_input_requested(self, node_id: str) -> None:
+    def handle_input_requested(self, node_id: str, graph_id: str | None = None) -> None:
         """Handle a client-facing node requesting user input.
 
         Transitions to 'waiting for input' state: flushes the current
@@ -1066,6 +1174,7 @@ class ChatRepl(Vertical):
 
         self._waiting_for_input = True
         self._input_node_id = node_id or None
+        self._input_graph_id = graph_id
 
         indicator = self.query_one("#processing-indicator", Label)
         indicator.update("Waiting for your input...")

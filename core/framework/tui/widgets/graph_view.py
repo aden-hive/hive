@@ -52,11 +52,25 @@ class GraphOverview(Vertical):
     def __init__(self, runtime: AgentRuntime):
         super().__init__()
         self.runtime = runtime
+        self._override_graph = None  # Set by switch_graph() for secondary graphs
         self.active_node: str | None = None
         self.execution_path: list[str] = []
         # Per-node status strings shown next to the node in the graph display.
         # e.g. {"planner": "thinking...", "searcher": "web_search..."}
         self._node_status: dict[str, str] = {}
+
+    @property
+    def _graph(self):
+        """The graph currently being displayed (may be a secondary graph)."""
+        return self._override_graph or self.runtime.graph
+
+    def switch_graph(self, graph) -> None:
+        """Switch to displaying a different graph and refresh."""
+        self._override_graph = graph
+        self.active_node = None
+        self.execution_path = []
+        self._node_status = {}
+        self._display_graph()
 
     def compose(self) -> ComposeResult:
         # Use RichLog for formatted output
@@ -75,7 +89,7 @@ class GraphOverview(Vertical):
 
     def _topo_order(self) -> list[str]:
         """BFS from entry_node following edges."""
-        graph = self.runtime.graph
+        graph = self._graph
         visited: list[str] = []
         seen: set[str] = set()
         queue = [graph.entry_node]
@@ -102,7 +116,7 @@ class GraphOverview(Vertical):
         order_idx = {nid: i for i, nid in enumerate(ordered)}
         back_edges: list[dict] = []
         for node_id in ordered:
-            for edge in self.runtime.graph.get_outgoing_edges(node_id):
+            for edge in self._graph.get_outgoing_edges(node_id):
                 target_idx = order_idx.get(edge.target, -1)
                 source_idx = order_idx.get(node_id, -1)
                 if target_idx != -1 and target_idx <= source_idx:
@@ -129,7 +143,7 @@ class GraphOverview(Vertical):
 
     def _render_node_line(self, node_id: str) -> str:
         """Render a single node with status symbol and optional status text."""
-        graph = self.runtime.graph
+        graph = self._graph
         is_terminal = node_id in (graph.terminal_nodes or [])
         is_active = node_id == self.active_node
         is_done = node_id in self.execution_path and not is_active
@@ -160,7 +174,7 @@ class GraphOverview(Vertical):
         Back-edges are excluded here — they are drawn by the return-channel
         overlay in Pass 2.
         """
-        all_edges = self.runtime.graph.get_outgoing_edges(node_id)
+        all_edges = self._graph.get_outgoing_edges(node_id)
         if not all_edges:
             return []
 
@@ -399,7 +413,7 @@ class GraphOverview(Vertical):
         display = self.query_one("#graph-display", RichLog)
         display.clear()
 
-        graph = self.runtime.graph
+        graph = self._graph
         display.write(f"[bold cyan]Agent Graph:[/bold cyan] {graph.id}\n")
 
         ordered = self._topo_order()
@@ -515,7 +529,7 @@ class GraphOverview(Vertical):
             self._node_status.clear()
             self.execution_path.clear()
             entry_node = event.data.get("entry_node") or (
-                self.runtime.graph.entry_node if self.runtime else None
+                self._graph.entry_node if self.runtime else None
             )
             if entry_node:
                 self.update_active_node(entry_node)

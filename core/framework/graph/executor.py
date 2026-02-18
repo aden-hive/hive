@@ -1290,6 +1290,36 @@ class GraphExecutor:
             # Handle cancellation (e.g., TUI quit) - save as paused instead of failed
             self.logger.info("⏸ Execution cancelled - saving state for resume")
 
+            # Flush WIP accumulator outputs from the interrupted node's
+            # cursor.json into SharedMemory so they survive resume.  The
+            # accumulator writes to cursor.json on every set() call, but
+            # only writes to SharedMemory when the judge ACCEPTs.  Without
+            # this, edge conditions checking these keys see None on resume.
+            if current_node_id and self._storage_path:
+                try:
+                    import json as _json
+
+                    cursor_path = (
+                        self._storage_path / "conversations" / current_node_id / "cursor.json"
+                    )
+                    if cursor_path.exists():
+                        cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
+                        wip_outputs = cursor_data.get("outputs", {})
+                        for key, value in wip_outputs.items():
+                            if value is not None:
+                                memory.write(key, value, validate=False)
+                        if wip_outputs:
+                            self.logger.info(
+                                "Flushed %d WIP accumulator outputs to memory: %s",
+                                len(wip_outputs),
+                                list(wip_outputs.keys()),
+                            )
+                except Exception:
+                    self.logger.debug(
+                        "Could not flush accumulator outputs from cursor",
+                        exc_info=True,
+                    )
+
             # Save memory and state for resume
             saved_memory = memory.read_all()
             session_state_out: dict[str, Any] = {
@@ -1366,6 +1396,25 @@ class GraphExecutor:
                     node_path=path,
                     execution_quality="failed",
                 )
+
+            # Flush WIP accumulator outputs (same as CancelledError path)
+            if current_node_id and self._storage_path:
+                try:
+                    import json as _json
+
+                    cursor_path = (
+                        self._storage_path / "conversations" / current_node_id / "cursor.json"
+                    )
+                    if cursor_path.exists():
+                        cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
+                        for key, value in cursor_data.get("outputs", {}).items():
+                            if value is not None:
+                                memory.write(key, value, validate=False)
+                except Exception:
+                    self.logger.debug(
+                        "Could not flush accumulator outputs from cursor",
+                        exc_info=True,
+                    )
 
             # Save memory and state for potential resume
             saved_memory = memory.read_all()
