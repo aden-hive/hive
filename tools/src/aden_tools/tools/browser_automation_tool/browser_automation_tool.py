@@ -542,7 +542,7 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Browser error: {e!s}"}
         except Exception as e:
             return {"error": f"Failed to inspect form: {e!s}"}
-    
+
     @mcp.tool()
     async def browser_fill_form(
         url: str,
@@ -552,22 +552,24 @@ def register_tools(mcp: FastMCP) -> None:
         wait_for_selector: str | None = None,
         timeout: int = 30000,
     ) -> dict:
-        """ 
-        Navigate to a URL, fill form fields by CSS selector, optionally submit, and return result. 
-        Use this when you need to automate form submissions, login flows, or data entry. 
-        Form fields should be provided as a JSON string mapping CSS selectors to values. 
-        
-        Args: 
-            url: The URL to navigate to 
-            form_fields: JSON string mapping CSS selectors to values. Use browser_inspect_form tool to get the correct selectors.
-                Example: '{"#username": "user@example.com", "#password": "secret123"}' 
-            submit: Whether to submit the form after filling (default: False) 
-            submit_selector: CSS selector of submit button (if different from form submit) 
-            wait_for_selector: Optional CSS selector to wait for after submission (defaults to waiting for network idle) 
-            timeout: Maximum time in milliseconds to wait for page load (default: 30000) 
-        
-        Returns: Dict with keys: html, title, url, filled_fields, submitted or error dict 
-        
+        """
+        Navigate to a URL, fill form fields by CSS selector, optionally submit, and return result.
+        Use this when you need to automate form submissions, login flows, or data entry.
+        Form fields should be provided as a JSON string mapping CSS selectors to values.
+
+        Args:
+            url: The URL to navigate to
+            form_fields: JSON string mapping CSS selectors to values.
+                Use browser_inspect_form tool to get the correct selectors.
+                Example: '{"#username": "user@example.com", "#password": "secret123"}'
+            submit: Whether to submit the form after filling (default: False)
+            submit_selector: CSS selector of submit button (if different from form submit)
+            wait_for_selector: Optional CSS selector to wait for after submission
+                (defaults to waiting for network idle)
+            timeout: Maximum time in milliseconds to wait for page load (default: 30000)
+
+        Returns: Dict with keys: html, title, url, filled_fields, submitted or error dict
+
         """
 
         try:
@@ -615,17 +617,13 @@ def register_tools(mcp: FastMCP) -> None:
                     # Fill Fields
                     for selector, value in fields_dict.items():
                         try:
-                            await page.wait_for_selector(
-                                selector, timeout=timeout, state="visible"
-                            )
+                            await page.wait_for_selector(selector, timeout=timeout, state="visible")
 
                             element = await page.query_selector(selector)
                             if not element:
                                 return {"error": f"Element not found: {selector}"}
 
-                            tag_name = await element.evaluate(
-                                "el => el.tagName.toLowerCase()"
-                            )
+                            tag_name = await element.evaluate("el => el.tagName.toLowerCase()")
                             input_type = (await element.get_attribute("type") or "").lower()
 
                             # SELECT
@@ -697,7 +695,10 @@ def register_tools(mcp: FastMCP) -> None:
                                 # Wait for any DOM change (short window)
                                 try:
                                     await page.wait_for_function(
-                                        "(oldLen) => document.documentElement.outerHTML.length !== oldLen",
+                                        """
+                                        (oldLen) =>
+                                            document.documentElement.outerHTML.length !== oldLen
+                                        """,
                                         arg=old_length,
                                         timeout=5000,
                                     )
@@ -709,7 +710,6 @@ def register_tools(mcp: FastMCP) -> None:
 
                         except Exception as e:
                             return {"error": f"Failed to submit form: {e!s}"}
-
 
                     # Capture Final State
                     content = await page.content()

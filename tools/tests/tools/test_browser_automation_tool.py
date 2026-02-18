@@ -14,7 +14,9 @@ from aden_tools.tools.browser_automation_tool import register_tools
 _PW_PATH = "aden_tools.tools.browser_automation_tool.browser_automation_tool.async_playwright"
 
 
-def _make_playwright_mocks(html="<html><body>Test</body></html>", title="Test Page", final_url="https://example.com"):
+def _make_playwright_mocks(
+    html="<html><body>Test</body></html>", title="Test Page", final_url="https://example.com"
+):
     """Build a full playwright mock chain and return (context_manager, page)."""
     mock_page = AsyncMock()
     mock_page.goto.return_value = MagicMock(status=200, url=final_url)
@@ -282,7 +284,9 @@ class TestBrowserScreenshot:
         mock_cm, mock_page = _make_playwright_mocks()
         mock_pw.return_value = mock_cm
 
-        await browser_screenshot_fn(url="https://example.com", output_path=output_path, full_page=True)
+        await browser_screenshot_fn(
+            url="https://example.com", output_path=output_path, full_page=True
+        )
 
         call_args = mock_page.screenshot.call_args
         assert call_args.kwargs["full_page"] is True
@@ -295,7 +299,9 @@ class TestBrowserScreenshot:
         mock_cm, mock_page = _make_playwright_mocks()
         mock_pw.return_value = mock_cm
 
-        await browser_screenshot_fn(url="https://example.com", output_path=output_path, full_page=False)
+        await browser_screenshot_fn(
+            url="https://example.com", output_path=output_path, full_page=False
+        )
 
         call_args = mock_page.screenshot.call_args
         assert call_args.kwargs["full_page"] is False
@@ -348,7 +354,9 @@ class TestBrowserScreenshot:
 
     @pytest.mark.asyncio
     @patch(_PW_PATH)
-    async def test_viewport_none_returns_none_dimensions(self, mock_pw, browser_screenshot_fn, tmp_path):
+    async def test_viewport_none_returns_none_dimensions(
+        self, mock_pw, browser_screenshot_fn, tmp_path
+    ):
         """Returns None dimensions when viewport_size is None."""
         output_path = str(tmp_path / "screenshot.png")
         mock_cm, mock_page = _make_playwright_mocks()
@@ -594,7 +602,9 @@ class TestBrowserClickAndExtract:
 
     @pytest.mark.asyncio
     @patch(_PW_PATH)
-    async def test_network_idle_fallback_when_no_wait_selector(self, mock_pw, browser_click_and_extract_fn):
+    async def test_network_idle_fallback_when_no_wait_selector(
+        self, mock_pw, browser_click_and_extract_fn
+    ):
         """Waits for networkidle when wait_for_selector is not provided."""
         mock_cm, mock_page = _make_playwright_mocks()
         mock_pw.return_value = mock_cm
@@ -1196,7 +1206,9 @@ class TestBrowserFillForm:
 
         form_fields = '{"#username": "user"}'
         result = await browser_fill_form_fn(
-            url="https://example.com", form_fields=form_fields, submit=True,
+            url="https://example.com",
+            form_fields=form_fields,
+            submit=True,
         )
 
         assert "error" not in result
@@ -1244,7 +1256,7 @@ class TestBrowserFillForm:
     @patch(_PW_PATH)
     async def test_non_dict_json_returns_error(self, mock_pw, browser_fill_form_fn):
         """Returns error when form_fields JSON is not a dict."""
-        result = await browser_fill_form_fn(url="https://example.com", form_fields='[1, 2, 3]')
+        result = await browser_fill_form_fn(url="https://example.com", form_fields="[1, 2, 3]")
 
         assert "error" in result
 
@@ -1261,7 +1273,9 @@ class TestBrowserFillForm:
 
         form_fields = '{"#field": "value"}'
         result = await browser_fill_form_fn(
-            url="https://example.com", form_fields=form_fields, submit=False,
+            url="https://example.com",
+            form_fields=form_fields,
+            submit=False,
         )
 
         assert "error" not in result
