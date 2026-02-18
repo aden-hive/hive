@@ -1506,6 +1506,18 @@ def _select_agent(agents_dir: Path) -> str | None:
         try:
             key = _read_key()
 
+            if key == "\x1b":
+                ch1 = _getch()
+                if ch1 == "[":
+                    ch2 = _getch()
+                    if ch2 == "C":
+                        key = "RIGHT"
+                    elif ch2 == "D":
+                        key = "LEFT"
+                    elif ch2 in ("A", "B"):
+                        print()
+                        continue  # Silently ignore Up/Down arrows to avoid error spam
+
             if key == "RIGHT" and page < total_pages - 1:
                 page += 1
                 print()  # Newline before redrawing
@@ -1513,6 +1525,14 @@ def _select_agent(agents_dir: Path) -> str | None:
                 page -= 1
                 print()
             elif key == "q":
+
+            # if key == "RIGHT" and page < total_pages - 1:
+            #     page += 1
+            #     print()  # Newline before redrawing
+            # elif key == "LEFT" and page > 0:
+            #     page -= 1
+            #     print()
+            # elif key == "q":
                 print()
                 return None
             elif key in ("n", ">") and page < total_pages - 1:
