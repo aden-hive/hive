@@ -302,7 +302,7 @@ Terminal node: `publisher`
   - 12 nodes, 11 edges
   - Added: resume_parser, preference_intake, market_analyst, job_selector, jd_parser, ats_analyzer, chief_strategist, senior_copywriter, critic, revision_router, publisher
   - Replaced: intake, job-search, job-review, customize
-  - New capabilities: PDF/DOCX upload with OCR, ATS scoring engine, live market research, strategy briefs, editorial critique loop
+  - New capabilities: PDF/DOCX upload with OCR, ATS scoring enginea, live market research, strategy briefs, editorial critique loop
 
 - **1.0.0** (2026-02-13): Initial release
   - 4 nodes, 3 edges

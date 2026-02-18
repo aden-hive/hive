@@ -349,7 +349,12 @@ job_selector_node = NodeSpec(
     node_type="event_loop",
     client_facing=True,
     max_node_visits=1,
-    input_keys=["market_intelligence", "confirmed_roles", "user_preferences", "parsed_resume"],
+    input_keys=[
+        "market_intelligence",
+        "confirmed_roles",
+        "user_preferences",
+        "parsed_resume",
+    ],
     output_keys=["job_listings", "selected_jobs"],
     success_criteria=(
         "10 real job listings found and presented. "
@@ -578,7 +583,12 @@ chief_strategist_node = NodeSpec(
     node_type="event_loop",
     client_facing=False,
     max_node_visits=1,
-    input_keys=["parsed_resume", "parsed_job_descriptions", "ats_reports", "market_intelligence"],
+    input_keys=[
+        "parsed_resume",
+        "parsed_job_descriptions",
+        "ats_reports",
+        "market_intelligence",
+    ],
     output_keys=["strategy_briefs"],
     success_criteria=(
         "Each selected job has a strategy brief covering positioning, "
@@ -646,7 +656,12 @@ senior_copywriter_node = NodeSpec(
     node_type="event_loop",
     client_facing=False,
     max_node_visits=1,
-    input_keys=["strategy_briefs", "parsed_resume", "parsed_job_descriptions", "ats_reports"],
+    input_keys=[
+        "strategy_briefs",
+        "parsed_resume",
+        "parsed_job_descriptions",
+        "ats_reports",
+    ],
     output_keys=["draft_materials"],
     success_criteria=(
         "Each selected job has a complete draft: full resume customization list "

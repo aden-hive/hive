@@ -188,7 +188,7 @@ async def _interactive_shell(verbose=False):
     # Initialize agent and runtime manually to control the loop
     agent = JobHunterAgent()
     await agent.start()
-    
+
     # We must maintain a session ID to keep context across turns
     session_id = str(uuid.uuid4())
     click.echo(f"Session ID: {session_id}\n")
@@ -197,23 +197,25 @@ async def _interactive_shell(verbose=False):
         # First trigger to start the graph
         # This will run until it hits the first EventLoopNode (resume_uploader)
         result = await agent.trigger_and_wait(
-            "start", 
+            "start",
             {"user_input": "START"},  # Initial trigger
-            session_state={"session_id": session_id}
+            session_state={"session_id": session_id},
         )
-        
+
         # Display initial output from the agent
         if result and result.output:
-             # Check for 'response' or fallback to 'output' depending on node implementation
-             response = result.output.get('response') or result.output.get('output') or "Ready."
-             click.echo(f"\nAgent: {response}\n")
+            # Check for 'response' or fallback to 'output' depending on node implementation
+            response = (
+                result.output.get("response") or result.output.get("output") or "Ready."
+            )
+            click.echo(f"\nAgent: {response}\n")
 
         while True:
             try:
                 user_input = await asyncio.get_event_loop().run_in_executor(
                     None, input, "> "
                 )
-                
+
                 if user_input.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break
@@ -225,9 +227,11 @@ async def _interactive_shell(verbose=False):
 
                 # Resume the existing session with user input
                 result = await agent.trigger_and_wait(
-                    "start", 
+                    "start",
                     {"user_input": user_input},
-                    session_state={"session_id": session_id} # Critical: Maintain session
+                    session_state={
+                        "session_id": session_id
+                    },  # Critical: Maintain session
                 )
 
                 if result is None:
@@ -241,8 +245,8 @@ async def _interactive_shell(verbose=False):
                         click.echo("\n--- Application Materials Generated ---\n")
                         click.echo(output["application_materials"])
                         click.echo("\n")
-                        break # Exit loop on completion
-                    
+                        break  # Exit loop on completion
+
                     response = output.get("response")
                     if response:
                         # Agent is asking a question (EventLoopNode)
@@ -259,6 +263,7 @@ async def _interactive_shell(verbose=False):
                 click.echo(f"Error: {e}", err=True)
                 if verbose:
                     import traceback
+
                     traceback.print_exc()
     finally:
         await agent.stop()
