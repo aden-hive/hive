@@ -88,7 +88,6 @@ def tui(mock, verbose, debug):
     from framework.llm import LiteLLMProvider
     from framework.runner.tool_registry import ToolRegistry
     from framework.runtime.agent_runtime import create_agent_runtime
-    from framework.runtime.event_bus import EventBus
     from framework.runtime.execution_stream import EntryPointSpec
 
     async def run_with_tui():
