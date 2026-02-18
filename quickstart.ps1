@@ -1078,8 +1078,11 @@ if ($credKey) {
 
 Write-Color -Text "Build a New Agent:" -Color White
 Write-Host ""
-Write-Host "  1. Open Claude Code in this directory:"
+Write-Host "  1. Open your coding agent in this directory:"
 Write-Color -Text "     claude" -Color Cyan
+Write-Host "     (Claude Code)" -ForegroundColor DarkGray
+Write-Color -Text "     Cursor" -Color Cyan
+Write-Host "     (open this folder in Cursor, or run 'cursor .' if the Cursor CLI is installed)" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  2. Build a new agent:"
 Write-Color -Text "     /hive" -Color Cyan

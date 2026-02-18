@@ -1053,10 +1053,11 @@ if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo ""
 fi
 
-echo -e "${BOLD}Build a New Agent (Claude):${NC}"
+echo -e "${BOLD}Build a New Agent:${NC}"
 echo ""
-echo -e "  1. Open Claude Code in this directory:"
-echo -e "     ${CYAN}claude${NC}"
+echo -e "  1. Open your coding agent in this directory:"
+echo -e "     ${CYAN}claude${NC} ${DIM}(Claude Code)${NC}"
+echo -e "     ${CYAN}Cursor${NC} ${DIM}(open this folder in Cursor, or run 'cursor .' if the Cursor CLI is installed)${NC}"
 echo ""
 echo -e "  2. Build a new agent:"
 echo -e "     ${CYAN}/hive${NC}"
