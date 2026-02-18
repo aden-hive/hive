@@ -1,14 +1,14 @@
-"""Agent graph construction for Gmail Inbox Guardian."""
+"""Agent graph construction for Email Inbox Management Agent."""
 
 from pathlib import Path
 
-from framework.graph import Constraint, EdgeCondition, EdgeSpec, Goal, SuccessCriterion
+from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import AsyncEntryPointSpec, GraphSpec
 from framework.graph.executor import ExecutionResult
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
+from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
@@ -19,23 +19,15 @@ from .nodes import (
     report_node,
 )
 
-# Loop configuration (used by AgentRunner.load() and _build_graph())
-loop_config = {
-    "max_iterations": 100,
-    "max_tool_calls_per_turn": 20,
-    "max_history_tokens": 32000,
-}
-
 # Goal definition
 goal = Goal(
-    id="gmail-inbox-guardian",
-    name="Gmail Inbox Guardian",
+    id="email-inbox-management",
+    name="Email Inbox Management",
     description=(
-        "An event-driven Gmail inbox agent. The user defines free-text rules for "
-        "email triage (e.g., 'star emails from my boss', 'spam marketing newsletters'). "
-        "When triggered by external events (webhooks, manual triggers), the agent fetches "
-        "new emails, classifies each one against the user's rules, executes the appropriate "
-        "Gmail actions, and reports what was done."
+        "Manage Gmail inbox emails autonomously using user-defined free-text rules. "
+        "For every five minutes, fetch inbox emails (configurable batch size, default 100), "
+        "apply the user's rules to each email, and execute the appropriate Gmail actions — trash, "
+        "mark as spam, mark important, mark read/unread, star, and more."
     ),
     success_criteria=[
         SuccessCriterion(
@@ -133,15 +125,6 @@ entry_node = "intake"
 entry_points = {"start": "intake"}
 async_entry_points = [
     AsyncEntryPointSpec(
-        id="email-event",
-        name="Email Event Handler",
-        entry_node="fetch-emails",
-        trigger_type="event",
-        trigger_config={"event_types": ["webhook_received"]},
-        isolation_level="shared",
-        max_concurrent=10,
-    ),
-    AsyncEntryPointSpec(
         id="email-timer",
         name="Scheduled Inbox Check",
         entry_node="fetch-emails",
@@ -153,40 +136,28 @@ async_entry_points = [
 ]
 pause_nodes = []
 terminal_nodes = []
+loop_config = {
+    "max_iterations": 100,
+    "max_tool_calls_per_turn": 50,
+    "max_history_tokens": 32000,
+}
 conversation_mode = "continuous"
 identity_prompt = (
-    "You are an inbox management assistant. You help users manage their "
-    "Gmail inbox by applying free-text rules to emails — trash, mark as spam, "
-    "mark important, mark read/unread, star, and more."
-)
-runtime_config = AgentRuntimeConfig(
-    webhook_host="127.0.0.1",
-    webhook_port=8080,
-    webhook_routes=[
-        {
-            "source_id": "gmail",
-            "path": "/webhooks/gmail",
-            "methods": ["POST"],
-        },
-    ],
+    "You are an email inbox management assistant. You help users manage "
+    "their Gmail inbox by applying free-text rules to emails — trash, "
+    "mark as spam, mark important, mark read/unread, star, and more."
 )
 
 
 class EmailInboxManagementAgent:
     """
-    Gmail Inbox Guardian — event-driven email triage agent.
+    Email Inbox Management Agent — continuous 4-node pipeline for email triage.
 
-    Primary:  intake ↻ (forever-alive, user tweaks rules)
-    Async:    fetch-emails -> classify-and-act -> report (per event/timer trigger)
-
-    Entry Points:
-    - "start" (primary): User sets up triage rules via intake node
-    - "email-event" (async): External events trigger fetch-emails directly
-    - "email-timer" (timer): Scheduled inbox check every 20 minutes
+    Flow: intake -> fetch-emails -> classify-and-act -> report -> intake (loop)
 
     Uses AgentRuntime for:
-    - Multi-entry-point execution (primary + event-driven + timer)
-    - Session-scoped storage (sessions/{session_id}/)
+    - Multi-entry-point execution (primary + timer-driven)
+    - Session-scoped storage
     - Shared state for rules persistence across entry points
     - Checkpointing for resume capability
     """
@@ -200,15 +171,15 @@ class EmailInboxManagementAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
-        self._executor: GraphExecutor | None = None
         self._graph: GraphSpec | None = None
-        self._event_bus: EventBus | None = None
+        self._agent_runtime: AgentRuntime | None = None
         self._tool_registry: ToolRegistry | None = None
+        self._storage_path: Path | None = None
 
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
         return GraphSpec(
-            id="gmail-inbox-guardian-graph",
+            id="email-inbox-management-graph",
             goal_id=self.goal.id,
             version="1.0.0",
             entry_node=self.entry_node,
@@ -220,33 +191,16 @@ class EmailInboxManagementAgent:
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
             loop_config=loop_config,
-            conversation_mode="continuous",
-            identity_prompt=(
-                "You are an inbox management assistant. You help users manage their "
-                "Gmail inbox by applying free-text rules to emails — trash, mark as spam, "
-                "mark important, mark read/unread, star, and more."
-            ),
-            async_entry_points=[
-                AsyncEntryPointSpec(
-                    id="email-event",
-                    name="Email Event Handler",
-                    entry_node="fetch-emails",
-                    trigger_type="event",
-                    trigger_config={
-                        "event_types": ["webhook_received"],
-                    },
-                    isolation_level="shared",
-                    max_concurrent=10,
-                ),
-            ],
+            conversation_mode=conversation_mode,
+            identity_prompt=identity_prompt,
+            async_entry_points=async_entry_points,
         )
 
     def _setup(self, mock_mode=False) -> None:
         """Set up the agent runtime with sessions, checkpoints, and logging."""
-        self._storage_path = Path.home() / ".hive" / "agents" / "gmail_inbox_guardian"
+        self._storage_path = Path.home() / ".hive" / "agents" / "email_inbox_management"
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
-        self._event_bus = EventBus()
         self._tool_registry = ToolRegistry()
 
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
@@ -279,50 +233,27 @@ class EmailInboxManagementAgent:
             async_checkpoint=True,
         )
 
-        # Primary entry point (user-facing rule setup)
+        # Build entry point specs for AgentRuntime
         entry_point_specs = [
+            # Primary entry point (user-facing)
             EntryPointSpec(
                 id="default",
-                name="Rule Setup",
+                name="Default",
                 entry_node=self.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
             ),
-            # Event-driven entry point (triggered by external events)
-            EntryPointSpec(
-                id="email-event",
-                name="Email Event Handler",
-                entry_node="fetch-emails",
-                trigger_type="event",
-                trigger_config={
-                    "event_types": ["webhook_received"],
-                },
-                isolation_level="shared",
-                max_concurrent=10,
-            ),
-            # Scheduled entry point (fires every 20 minutes)
+            # Timer-driven entry point
             EntryPointSpec(
                 id="email-timer",
                 name="Scheduled Inbox Check",
                 entry_node="fetch-emails",
                 trigger_type="timer",
-                trigger_config={"interval_minutes": 20},
+                trigger_config={"interval_minutes": 5},
                 isolation_level="shared",
                 max_concurrent=1,
             ),
         ]
-
-        runtime_config = AgentRuntimeConfig(
-            webhook_host="127.0.0.1",
-            webhook_port=8080,
-            webhook_routes=[
-                {
-                    "source_id": "gmail",
-                    "path": "/webhooks/gmail",
-                    "methods": ["POST"],
-                },
-            ],
-        )
 
         self._agent_runtime = create_agent_runtime(
             graph=self._graph,
@@ -333,21 +264,19 @@ class EmailInboxManagementAgent:
             tools=tools,
             tool_executor=tool_executor,
             checkpoint_config=checkpoint_config,
-            config=runtime_config,
         )
 
-        return self._executor
-
     async def start(self, mock_mode=False) -> None:
-        """Set up the agent (initialize executor and tools)."""
-        if self._executor is None:
+        """Set up and start the agent runtime."""
+        if self._agent_runtime is None:
             self._setup(mock_mode=mock_mode)
+        if not self._agent_runtime.is_running:
+            await self._agent_runtime.start()
 
     async def stop(self) -> None:
-        """Stop the agent runtime and clean up."""
-        if self._agent_runtime and self._agent_runtime.is_running:
+        """Stop and clean up the agent runtime."""
+        if self._agent_runtime is not None and self._agent_runtime.is_running:
             await self._agent_runtime.stop()
-        self._agent_runtime = None
 
     async def trigger_and_wait(
         self,
@@ -357,14 +286,13 @@ class EmailInboxManagementAgent:
         session_state: dict | None = None,
     ) -> ExecutionResult | None:
         """Execute the graph and wait for completion."""
-        if self._executor is None:
+        if self._agent_runtime is None:
             raise RuntimeError("Agent not started. Call start() first.")
-        if self._graph is None:
-            raise RuntimeError("Graph not built. Call start() first.")
 
         return await self._agent_runtime.trigger_and_wait(
             entry_point_id=entry_point,
-            input_data=input_data or {},
+            input_data=input_data,
+            timeout=timeout,
             session_state=session_state,
         )
 
@@ -374,7 +302,9 @@ class EmailInboxManagementAgent:
         """Run the agent (convenience method for single execution)."""
         await self.start(mock_mode=mock_mode)
         try:
-            result = await self.trigger_and_wait("default", context, session_state=session_state)
+            result = await self.trigger_and_wait(
+                "default", context, session_state=session_state
+            )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
@@ -423,7 +353,16 @@ class EmailInboxManagementAgent:
 
         for ep_id, node_id in self.entry_points.items():
             if node_id not in node_ids:
-                errors.append(f"Entry point '{ep_id}' references unknown node '{node_id}'")
+                errors.append(
+                    f"Entry point '{ep_id}' references unknown node '{node_id}'"
+                )
+
+        # Validate async entry points
+        for ep in async_entry_points:
+            if ep.entry_node not in node_ids:
+                errors.append(
+                    f"Async entry point '{ep.id}' references unknown node '{ep.entry_node}'"
+                )
 
         return {
             "valid": len(errors) == 0,
