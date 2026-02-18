@@ -231,11 +231,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
     )
-    code_parser.add_argument(
-        "--no-guardian",
-        action="store_true",
-        help="Disable the Agent Guardian watchdog",
-    )
     code_parser.set_defaults(func=cmd_code)
 
     # sessions command group (checkpoint/resume management)
@@ -477,9 +472,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                         print(f"\n{e}", file=sys.stderr)
                         return
 
-                # Attach guardian watchdog (before start — register_entry_point requires it)
+                # Attach hive_coder's guardian watchdog (before start)
                 if not getattr(args, "no_guardian", False) and runner._agent_runtime:
-                    from framework.agents.guardian import attach_guardian
+                    from framework.agents.hive_coder.guardian import attach_guardian
 
                     attach_guardian(runner._agent_runtime, runner._tool_registry)
 
@@ -1301,9 +1296,9 @@ def _launch_agent_tui(
                 print(f"\n{e}", file=sys.stderr)
                 return
 
-        # Attach guardian watchdog (before start)
+        # Attach hive_coder's guardian watchdog (before start)
         if not no_guardian and runner._agent_runtime:
-            from framework.agents.guardian import attach_guardian
+            from framework.agents.hive_coder.guardian import attach_guardian
 
             attach_guardian(runner._agent_runtime, runner._tool_registry)
 
@@ -1447,13 +1442,6 @@ def cmd_code(args: argparse.Namespace) -> int:
         # refreshing both is robust against any copy-on-read behavior.
         runtime._tools = list(runner._tool_registry.get_tools().values())
         runtime._tool_executor = runner._tool_registry.get_executor()
-
-        # Attach guardian watchdog (before start — skips re-registering
-        # graph tools since register_graph_tools() was already called above)
-        if not getattr(args, "no_guardian", False):
-            from framework.agents.guardian import attach_guardian
-
-            attach_guardian(runtime, runner._tool_registry)
 
         if not runtime.is_running:
             await runtime.start()

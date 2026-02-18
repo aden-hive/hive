@@ -1,13 +1,12 @@
-"""Attach the Agent Guardian to any AgentRuntime.
+"""Attach the Hive Coder's guardian node to any agent runtime.
 
 Usage::
 
-    from framework.agents.guardian import attach_guardian
+    from framework.agents.hive_coder.guardian import attach_guardian
 
     runner._setup()
-    runtime = runner._agent_runtime
-    attach_guardian(runtime, runner._tool_registry)
-    await runtime.start()
+    attach_guardian(runner._agent_runtime, runner._tool_registry)
+    await runner._agent_runtime.start()
 
 Must be called **before** ``runtime.start()`` — it injects the
 guardian node into the graph and registers an event-driven entry point.
@@ -24,7 +23,7 @@ if TYPE_CHECKING:
 
 from framework.runtime.execution_stream import EntryPointSpec
 
-from .node import ALL_GUARDIAN_TOOLS, guardian_node
+from .nodes import ALL_GUARDIAN_TOOLS, guardian_node
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ GUARDIAN_ENTRY_POINT = EntryPointSpec(
     trigger_type="event",
     trigger_config={
         "event_types": ["execution_failed"],
-        "exclude_own_graph": True,
+        "exclude_own_graph": False,
     },
     isolation_level="shared",
 )
@@ -45,7 +44,7 @@ def attach_guardian(
     runtime: AgentRuntime,
     tool_registry: ToolRegistry,
 ) -> None:
-    """Inject the guardian node into *runtime*'s graph and register its entry point.
+    """Inject hive_coder's guardian node into *runtime*'s graph.
 
     1. Registers graph lifecycle tools if not already present.
     2. Refreshes the runtime's tool list and executor.
