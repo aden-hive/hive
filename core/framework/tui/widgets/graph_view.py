@@ -457,18 +457,23 @@ class GraphOverview(Vertical):
 
         for ep in event_sources:
             if ep.trigger_type == "timer":
+                cron_expr = ep.trigger_config.get("cron")
                 interval = ep.trigger_config.get("interval_minutes", "?")
+                schedule_label = f"cron: {cron_expr}" if cron_expr else f"every {interval} min"
                 display.write(f"  [green]⏱[/green]  {ep.name} [dim]→ {ep.entry_node}[/dim]")
-                # Show interval + next fire countdown
+                # Show schedule + next fire countdown
                 next_fire = self.runtime._timer_next_fire.get(ep.id)
                 if next_fire is not None:
                     remaining = max(0, next_fire - time.monotonic())
-                    mins, secs = divmod(int(remaining), 60)
-                    display.write(
-                        f"     [dim]every {interval} min — next in {mins}m {secs:02d}s[/dim]"
-                    )
+                    hours, rem = divmod(int(remaining), 3600)
+                    mins, secs = divmod(rem, 60)
+                    if hours > 0:
+                        countdown = f"{hours}h {mins:02d}m {secs:02d}s"
+                    else:
+                        countdown = f"{mins}m {secs:02d}s"
+                    display.write(f"     [dim]{schedule_label} — next in {countdown}[/dim]")
                 else:
-                    display.write(f"     [dim]every {interval} min[/dim]")
+                    display.write(f"     [dim]{schedule_label}[/dim]")
 
             elif ep.trigger_type in ("event", "webhook"):
                 display.write(f"  [yellow]⚡[/yellow] {ep.name} [dim]→ {ep.entry_node}[/dim]")

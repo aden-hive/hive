@@ -10,6 +10,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -322,57 +323,146 @@ class AgentRuntime:
                     continue
 
                 tc = spec.trigger_config
+                cron_expr = tc.get("cron")
                 interval = tc.get("interval_minutes")
-                if not interval or interval <= 0:
-                    logger.warning(
-                        f"Entry point '{ep_id}' has trigger_type='timer' "
-                        "but no valid interval_minutes in trigger_config"
-                    )
-                    continue
-
                 run_immediately = tc.get("run_immediately", False)
 
-                def _make_timer(entry_point_id: str, mins: float, immediate: bool):
-                    async def _timer_loop():
-                        interval_secs = mins * 60
-                        if not immediate:
-                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
-                            await asyncio.sleep(interval_secs)
-                        while self._running:
-                            self._timer_next_fire.pop(entry_point_id, None)
-                            try:
-                                session_state = self._get_primary_session_state(
-                                    exclude_entry_point=entry_point_id
-                                )
-                                await self.trigger(
-                                    entry_point_id,
-                                    {"event": {"source": "timer", "reason": "scheduled"}},
-                                    session_state=session_state,
-                                )
-                                logger.info(
-                                    "Timer fired for entry point '%s' (next in %s min)",
-                                    entry_point_id,
-                                    mins,
-                                )
-                            except Exception:
-                                logger.error(
-                                    "Timer trigger failed for '%s'",
-                                    entry_point_id,
-                                    exc_info=True,
-                                )
-                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
-                            await asyncio.sleep(interval_secs)
+                if cron_expr:
+                    # Cron expression mode — takes priority over interval_minutes
+                    try:
+                        from croniter import croniter
 
-                    return _timer_loop
+                        # Validate the expression upfront
+                        if not croniter.is_valid(cron_expr):
+                            raise ValueError(f"Invalid cron expression: {cron_expr}")
+                    except (ImportError, ValueError) as e:
+                        logger.warning(
+                            "Entry point '%s' has invalid cron config: %s",
+                            ep_id,
+                            e,
+                        )
+                        continue
 
-                task = asyncio.create_task(_make_timer(ep_id, interval, run_immediately)())
-                self._timer_tasks.append(task)
-                logger.info(
-                    "Started timer for entry point '%s' every %s min%s",
-                    ep_id,
-                    interval,
-                    " (immediate first run)" if run_immediately else "",
-                )
+                    def _make_cron_timer(entry_point_id: str, expr: str, immediate: bool):
+                        async def _cron_loop():
+                            from croniter import croniter
+
+                            if not immediate:
+                                cron = croniter(expr, datetime.now())
+                                next_dt = cron.get_next(datetime)
+                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                self._timer_next_fire[entry_point_id] = (
+                                    time.monotonic() + sleep_secs
+                                )
+                                await asyncio.sleep(max(0, sleep_secs))
+                            while self._running:
+                                self._timer_next_fire.pop(entry_point_id, None)
+                                try:
+                                    session_state = self._get_primary_session_state(
+                                        exclude_entry_point=entry_point_id
+                                    )
+                                    await self.trigger(
+                                        entry_point_id,
+                                        {
+                                            "event": {
+                                                "source": "timer",
+                                                "reason": "scheduled",
+                                            }
+                                        },
+                                        session_state=session_state,
+                                    )
+                                    logger.info(
+                                        "Cron fired for entry point '%s' (expr: %s)",
+                                        entry_point_id,
+                                        expr,
+                                    )
+                                except Exception:
+                                    logger.error(
+                                        "Cron trigger failed for '%s'",
+                                        entry_point_id,
+                                        exc_info=True,
+                                    )
+                                # Calculate next fire from now
+                                cron = croniter(expr, datetime.now())
+                                next_dt = cron.get_next(datetime)
+                                sleep_secs = (next_dt - datetime.now()).total_seconds()
+                                self._timer_next_fire[entry_point_id] = (
+                                    time.monotonic() + sleep_secs
+                                )
+                                await asyncio.sleep(max(0, sleep_secs))
+
+                        return _cron_loop
+
+                    task = asyncio.create_task(
+                        _make_cron_timer(ep_id, cron_expr, run_immediately)()
+                    )
+                    self._timer_tasks.append(task)
+                    logger.info(
+                        "Started cron timer for entry point '%s' with expression '%s'%s",
+                        ep_id,
+                        cron_expr,
+                        " (immediate first run)" if run_immediately else "",
+                    )
+
+                elif interval and interval > 0:
+                    # Fixed interval mode (original behavior)
+                    def _make_timer(entry_point_id: str, mins: float, immediate: bool):
+                        async def _timer_loop():
+                            interval_secs = mins * 60
+                            if not immediate:
+                                self._timer_next_fire[entry_point_id] = (
+                                    time.monotonic() + interval_secs
+                                )
+                                await asyncio.sleep(interval_secs)
+                            while self._running:
+                                self._timer_next_fire.pop(entry_point_id, None)
+                                try:
+                                    session_state = self._get_primary_session_state(
+                                        exclude_entry_point=entry_point_id
+                                    )
+                                    await self.trigger(
+                                        entry_point_id,
+                                        {
+                                            "event": {
+                                                "source": "timer",
+                                                "reason": "scheduled",
+                                            }
+                                        },
+                                        session_state=session_state,
+                                    )
+                                    logger.info(
+                                        "Timer fired for entry point '%s' (next in %s min)",
+                                        entry_point_id,
+                                        mins,
+                                    )
+                                except Exception:
+                                    logger.error(
+                                        "Timer trigger failed for '%s'",
+                                        entry_point_id,
+                                        exc_info=True,
+                                    )
+                                self._timer_next_fire[entry_point_id] = (
+                                    time.monotonic() + interval_secs
+                                )
+                                await asyncio.sleep(interval_secs)
+
+                        return _timer_loop
+
+                    task = asyncio.create_task(_make_timer(ep_id, interval, run_immediately)())
+                    self._timer_tasks.append(task)
+                    logger.info(
+                        "Started timer for entry point '%s' every %s min%s",
+                        ep_id,
+                        interval,
+                        " (immediate first run)" if run_immediately else "",
+                    )
+
+                else:
+                    logger.warning(
+                        "Entry point '%s' has trigger_type='timer' "
+                        "but no 'cron' or valid 'interval_minutes' in trigger_config",
+                        ep_id,
+                    )
 
             self._running = True
             logger.info(f"AgentRuntime started with {len(self._streams)} streams")

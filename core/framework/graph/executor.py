@@ -615,7 +615,7 @@ class GraphExecutor:
                     cnt = node_visit_counts.get(current_node_id, 0) + 1
                     node_visit_counts[current_node_id] = cnt
                 _is_retry = False
-                max_visits = getattr(node_spec, "max_node_visits", 1)
+                max_visits = getattr(node_spec, "max_node_visits", 0)
                 if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
                     self.logger.warning(
                         f"   ⊘ Node '{node_spec.name}' visit limit reached "

@@ -279,7 +279,9 @@ class EventLoopNode(NodeProtocol):
             conversation, accumulator, start_iteration = await self._restore(ctx)
             if conversation is None:
                 # Fresh conversation: either isolated mode or first node in continuous mode.
-                system_prompt = ctx.node_spec.system_prompt or ""
+                from framework.graph.prompt_composer import _with_datetime
+
+                system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,

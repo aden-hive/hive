@@ -16,6 +16,7 @@ Layer 3 — Focus (per-node system_prompt, reframed as focus directive):
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,13 @@ if TYPE_CHECKING:
     from framework.graph.node import NodeSpec, SharedMemory
 
 logger = logging.getLogger(__name__)
+
+
+def _with_datetime(prompt: str) -> str:
+    """Append current datetime with local timezone to a system prompt."""
+    local = datetime.now().astimezone()
+    stamp = f"Current date and time: {local.strftime('%Y-%m-%d %H:%M %Z (UTC%z)')}"
+    return f"{prompt}\n\n{stamp}" if prompt else stamp
 
 
 def compose_system_prompt(
@@ -39,7 +47,7 @@ def compose_system_prompt(
         narrative: Layer 2 — auto-generated from conversation state.
 
     Returns:
-        Composed system prompt with all layers present.
+        Composed system prompt with all layers present, plus current datetime.
     """
     parts: list[str] = []
 
@@ -55,7 +63,7 @@ def compose_system_prompt(
     if focus_prompt:
         parts.append(f"\n--- Current Focus ---\n{focus_prompt}")
 
-    return "\n".join(parts) if parts else ""
+    return _with_datetime("\n".join(parts) if parts else "")
 
 
 def build_narrative(

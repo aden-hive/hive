@@ -56,6 +56,13 @@ def _configure_paths():
     if (project_root / "core").is_dir() and core_str not in sys.path:
         sys.path.insert(0, core_str)
 
+    # Add core/framework/agents/ so framework agents are importable as top-level packages
+    framework_agents_dir = project_root / "core" / "framework" / "agents"
+    if framework_agents_dir.is_dir():
+        fa_str = str(framework_agents_dir)
+        if fa_str not in sys.path:
+            sys.path.insert(0, fa_str)
+
 
 def main():
     _configure_paths()

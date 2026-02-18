@@ -19,7 +19,6 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import UTC
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -202,10 +201,11 @@ class NodeSpec(BaseModel):
 
     # Visit limits (for feedback/callback edges)
     max_node_visits: int = Field(
-        default=1,
+        default=0,
         description=(
             "Max times this node executes in one graph run. "
-            "Set >1 for feedback loops. 0 = unlimited (max_steps guards)."
+            "0 = unlimited (default, required for forever-alive agents). "
+            "Set >1 for one-shot agents with feedback loops."
         ),
     )
 
@@ -645,5 +645,3 @@ class NodeProtocol(ABC):
             if key not in ctx.input_data and ctx.memory.read(key) is None:
                 errors.append(f"Missing required input: {key}")
         return errors
-
-

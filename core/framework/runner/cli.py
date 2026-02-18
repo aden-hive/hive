@@ -208,6 +208,21 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     tui_parser.set_defaults(func=cmd_tui)
 
+    # code command (Hive Coder — framework agent builder)
+    code_parser = subparsers.add_parser(
+        "code",
+        help="Launch Hive Coder to build agents",
+        description="Interactive agent builder. Describe what you want and Hive Coder builds it.",
+    )
+    code_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model to use (any LiteLLM-compatible name)",
+    )
+    code_parser.set_defaults(func=cmd_code)
+
     # sessions command group (checkpoint/resume management)
     sessions_parser = subparsers.add_parser(
         "sessions",
@@ -441,7 +456,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
                 # Force setup inside the loop
                 if runner._agent_runtime is None:
-                    runner._setup()
+                    try:
+                        runner._setup()
+                    except CredentialError as e:
+                        print(f"\n{e}", file=sys.stderr)
+                        return
 
                 # Start runtime before TUI so it's ready for user input
                 if runner._agent_runtime and not runner._agent_runtime.is_running:
@@ -1226,60 +1245,22 @@ def cmd_shell(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_tui(args: argparse.Namespace) -> int:
-    """Browse agents and launch the interactive TUI dashboard."""
-    import logging
+def _get_framework_agents_dir() -> Path:
+    """Resolve the framework agents directory relative to this file."""
+    return Path(__file__).resolve().parent.parent / "agents"
 
+
+def _launch_agent_tui(agent_path: str | Path, model: str | None = None) -> int:
+    """Load an agent and launch the TUI. Shared by cmd_tui and cmd_code."""
     from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
     from framework.tui.app import AdenTUI
 
-    logging.basicConfig(level=logging.WARNING, format="%(message)s")
-
-    exports_dir = Path("exports")
-    examples_dir = Path("examples/templates")
-
-    has_exports = _has_agents(exports_dir)
-    has_examples = _has_agents(examples_dir)
-
-    if not has_exports and not has_examples:
-        print("No agents found in exports/ or examples/templates/", file=sys.stderr)
-        return 1
-
-    # Determine which directory to browse
-    if has_exports and has_examples:
-        print("\nAgent sources:\n")
-        print("  1. Your Agents (exports/)")
-        print("  2. Sample Agents (examples/templates/)")
-        print()
-        try:
-            choice = input("Select source (number): ").strip()
-            if choice == "1":
-                agents_dir = exports_dir
-            elif choice == "2":
-                agents_dir = examples_dir
-            else:
-                print("Invalid selection")
-                return 1
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return 1
-    elif has_exports:
-        agents_dir = exports_dir
-    else:
-        agents_dir = examples_dir
-
-    # Let user pick an agent
-    agent_path = _select_agent(agents_dir)
-    if not agent_path:
-        return 1
-
-    # Launch TUI (same pattern as cmd_run --tui)
     async def run_with_tui():
         try:
             runner = AgentRunner.load(
                 agent_path,
-                model=args.model,
+                model=model,
             )
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
@@ -1289,7 +1270,11 @@ def cmd_tui(args: argparse.Namespace) -> int:
             return
 
         if runner._agent_runtime is None:
-            runner._setup()
+            try:
+                runner._setup()
+            except CredentialError as e:
+                print(f"\n{e}", file=sys.stderr)
+                return
 
         if runner._agent_runtime and not runner._agent_runtime.is_running:
             await runner._agent_runtime.start()
@@ -1308,6 +1293,84 @@ def cmd_tui(args: argparse.Namespace) -> int:
     asyncio.run(run_with_tui())
     print("TUI session ended.")
     return 0
+
+
+def cmd_tui(args: argparse.Namespace) -> int:
+    """Browse agents and launch the interactive TUI dashboard."""
+    import logging
+
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    exports_dir = Path("exports")
+    examples_dir = Path("examples/templates")
+    framework_agents_dir = _get_framework_agents_dir()
+
+    # Build list of available agent sources
+    sources = []
+    if _has_agents(framework_agents_dir):
+        sources.append(("Framework Agents", framework_agents_dir))
+    if _has_agents(exports_dir):
+        sources.append(("Your Agents (exports/)", exports_dir))
+    if _has_agents(examples_dir):
+        sources.append(("Sample Agents (examples/templates/)", examples_dir))
+
+    if not sources:
+        print("No agents found.", file=sys.stderr)
+        return 1
+
+    # Pick source
+    if len(sources) == 1:
+        agents_dir = sources[0][1]
+    else:
+        print("\nAgent sources:\n")
+        for i, (label, _) in enumerate(sources, 1):
+            print(f"  {i}. {label}")
+        print()
+        try:
+            choice = input("Select source (number): ").strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(sources):
+                agents_dir = sources[idx][1]
+            else:
+                print("Invalid selection")
+                return 1
+        except (ValueError, EOFError, KeyboardInterrupt):
+            print()
+            return 1
+
+    # Ensure framework agents dir is on sys.path for import
+    if agents_dir == framework_agents_dir:
+        fa_str = str(framework_agents_dir)
+        if fa_str not in sys.path:
+            sys.path.insert(0, fa_str)
+
+    # Let user pick an agent
+    agent_path = _select_agent(agents_dir)
+    if not agent_path:
+        return 1
+
+    return _launch_agent_tui(agent_path, model=args.model)
+
+
+def cmd_code(args: argparse.Namespace) -> int:
+    """Launch Hive Coder to build agents."""
+    import logging
+
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    framework_agents_dir = _get_framework_agents_dir()
+    hive_coder_path = framework_agents_dir / "hive_coder"
+
+    if not (hive_coder_path / "agent.py").exists():
+        print("Error: Hive Coder agent not found.", file=sys.stderr)
+        return 1
+
+    # Ensure framework agents dir is on sys.path for import
+    fa_str = str(framework_agents_dir)
+    if fa_str not in sys.path:
+        sys.path.insert(0, fa_str)
+
+    return _launch_agent_tui(hive_coder_path, model=args.model)
 
 
 def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
