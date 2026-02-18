@@ -87,6 +87,11 @@ Use Hive when you need:
 
 ### Installation
 
+>**Note**
+> Hive uses a `uv` workspace layout and is not installed with `pip install`.
+> Running `pip install -e .` from the repository root will create a placeholder package and Hive will not function correctly.
+> Please use the quickstart script below to set up the environment.
+
 ```bash
 # Clone the repository
 git clone https://github.com/adenhq/hive.git
