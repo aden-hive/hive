@@ -157,6 +157,7 @@ class TestEventLoopOutputKeyOverlap:
         key_errors = [e for e in errors if "output_key" in e]
         assert len(key_errors) == 0
 
+
 # ---------------------------------------------------------------------------
 # Baseline: no fan-out -> no errors from these rules
 # ---------------------------------------------------------------------------

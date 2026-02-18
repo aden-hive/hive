@@ -229,7 +229,11 @@ async def test_convergence_at_fan_in_node(runtime, goal):
         id="b2", name="B2", description="branch 2", node_type="event_loop", output_keys=["b2_out"]
     )
     merge = NodeSpec(
-        id="merge", name="Merge", description="fan-in", node_type="event_loop", output_keys=["merged"]
+        id="merge",
+        name="Merge",
+        description="fan-in",
+        node_type="event_loop",
+        output_keys=["merged"],
     )
 
     graph = _make_fanout_graph([b1, b2], fan_in_node=merge)

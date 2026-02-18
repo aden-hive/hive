@@ -81,7 +81,9 @@ def goal():
 
 def test_max_node_visits_default():
     """NodeSpec.max_node_visits should default to 1."""
-    spec = NodeSpec(id="n", name="N", description="test", node_type="event_loop", output_keys=["out"])
+    spec = NodeSpec(
+        id="n", name="N", description="test", node_type="event_loop", output_keys=["out"]
+    )
     assert spec.max_node_visits == 1
 
 

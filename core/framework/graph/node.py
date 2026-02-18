@@ -19,7 +19,6 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import UTC
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -645,5 +644,3 @@ class NodeProtocol(ABC):
             if key not in ctx.input_data and ctx.memory.read(key) is None:
                 errors.append(f"Missing required input: {key}")
         return errors
-
-

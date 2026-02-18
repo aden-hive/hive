@@ -36,10 +36,7 @@ from framework.graph import (  # noqa: E402
     NodeSpec,
     SuccessCriterion,
 )
-# Testing framework imports
-from framework.testing.prompts import (  # noqa: E402
-    PYTEST_TEST_FILE_HEADER,
-)
+from framework.testing.prompts import PYTEST_TEST_FILE_HEADER  # noqa: E402
 from framework.utils.io import atomic_write  # noqa: E402
 
 # Initialize MCP server
@@ -665,9 +662,7 @@ def add_node(
 
     # Reject removed node types
     if node_type in ("function", "llm_tool_use", "llm_generate"):
-        errors.append(
-            f"Node type '{node_type}' is no longer supported. Use 'event_loop' instead."
-        )
+        errors.append(f"Node type '{node_type}' is no longer supported. Use 'event_loop' instead.")
 
     if node_type == "router" and not routes_dict:
         errors.append(f"Router node '{node_id}' must specify routes")
@@ -1377,7 +1372,6 @@ def validate_graph() -> str:
                     f"must be a subset of output_keys {node.output_keys}"
                 )
 
-
     # Warn if all event_loop nodes are client_facing (common misconfiguration)
     el_nodes = [n for n in session.nodes if n.node_type == "event_loop"]
     cf_el_nodes = [n for n in el_nodes if n.client_facing]
@@ -1413,7 +1407,6 @@ def validate_graph() -> str:
             "event_loop_nodes": event_loop_nodes,
             "client_facing_nodes": client_facing_nodes,
             "feedback_edges": feedback_edges,
-            "deprecated_node_types": deprecated_nodes,
         }
     )
 

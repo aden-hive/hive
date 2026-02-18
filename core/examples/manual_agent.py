@@ -119,7 +119,7 @@ async def main():
 
     # 9. Verify Results
     if result.success:
-        print(f"\nSuccess!")
+        print("\nSuccess!")
         print(f"Path taken: {' -> '.join(result.path)}")
         print(f"Final output: {result.output.get('final_greeting')}")
     else:
