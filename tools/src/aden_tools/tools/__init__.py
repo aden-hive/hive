@@ -34,6 +34,11 @@ from .email_tool import register_tools as register_email
 from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
+from .github_tool import register_tools as register_github
+from .gmail_tool import register_tools as register_gmail
+from .google_docs_tool import register_tools as register_google_docs
+from .google_maps_tool import register_tools as register_google_maps
+from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -99,6 +104,20 @@ def register_all_tools(
     # Gmail inbox management (read, trash, modify labels)
     register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
+    register_apollo(mcp, credentials=credentials)
+    register_bigquery(mcp, credentials=credentials)
+    register_calcom(mcp, credentials=credentials)
+    register_calendar(mcp, credentials=credentials)
+    register_discord(mcp, credentials=credentials)
+    register_exa_search(mcp, credentials=credentials)
+    register_news(mcp, credentials=credentials)
+    register_razorpay(mcp, credentials=credentials)
+    register_serpapi(mcp, credentials=credentials)
+    register_slack(mcp, credentials=credentials)
+    register_telegram(mcp, credentials=credentials)
+    register_vision(mcp, credentials=credentials)
+    register_google_docs(mcp, credentials=credentials)
+    register_google_maps(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -122,92 +141,8 @@ def register_all_tools(
     register_subdomain_enumerator(mcp)
     register_risk_scorer(mcp)
 
-    return [
-        "example_tool",
-        "web_search",
-        "web_scrape",
-        "pdf_read",
-        "get_current_time",
-        "view_file",
-        "write_to_file",
-        "list_dir",
-        "replace_file_content",
-        "apply_diff",
-        "apply_patch",
-        "grep_search",
-        "execute_command_tool",
-        "load_data",
-        "save_data",
-        "append_data",
-        "edit_data",
-        "list_data_files",
-        "serve_file_to_user",
-        "csv_read",
-        "csv_write",
-        "csv_append",
-        "csv_info",
-        "csv_sql",
-        "excel_read",
-        "excel_write",
-        "excel_append",
-        "excel_info",
-        "excel_sheet_list",
-        "excel_sql",
-        "excel_search",
-        "apollo_enrich_person",
-        "apollo_enrich_company",
-        "apollo_search_people",
-        "apollo_search_companies",
-        "calcom_list_bookings",
-        "calcom_get_booking",
-        "calcom_create_booking",
-        "calcom_cancel_booking",
-        "calcom_get_availability",
-        "calcom_update_schedule",
-        "calcom_list_schedules",
-        "calcom_list_event_types",
-        "calcom_get_event_type",
-        "discord_list_guilds",
-        "discord_list_channels",
-        "discord_send_message",
-        "discord_get_messages",
-        "github_list_repos",
-        "github_get_repo",
-        "github_search_repos",
-        "github_list_issues",
-        "github_get_issue",
-        "github_create_issue",
-        "github_update_issue",
-        "github_list_pull_requests",
-        "github_get_pull_request",
-        "github_create_pull_request",
-        "github_search_code",
-        "github_list_branches",
-        "github_get_branch",
-        "github_list_stargazers",
-        "github_get_user_profile",
-        "github_get_user_emails",
-        "send_email",
-        "gmail_reply_email",
-        "gmail_list_messages",
-        "gmail_get_message",
-        "gmail_trash_message",
-        "gmail_modify_message",
-        "gmail_batch_modify_messages",
-        "gmail_batch_get_messages",
-        "hubspot_search_contacts",
-        "hubspot_get_contact",
-        "hubspot_create_contact",
-        "hubspot_update_contact",
-        "hubspot_search_companies",
-        "hubspot_get_company",
-        "hubspot_create_company",
-        "hubspot_update_company",
-        "hubspot_search_deals",
-        "hubspot_get_deal",
-        "hubspot_create_deal",
-        "hubspot_update_deal",
-    ]
+    # Return the list of all registered tool names
+    return list(mcp._tool_manager._tools.keys())
 
 
 __all__ = ["register_all_tools"]
