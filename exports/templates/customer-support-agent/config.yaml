@@ -1,0 +1,42 @@
+# Customer Support Agent Configuration
+# 
+# This file allows you to customize the agent's behavior without
+# modifying the code. Adjust these settings to match your use case.
+
+# Knowledge Base
+# Path to your FAQ/knowledge base JSON file
+knowledge_base_path: "knowledge_base.json"
+
+# Escalation Threshold
+# Confidence score (0-1) below which inquiries are escalated to humans
+# Lower = more escalations (safer but more human involvement)
+# Higher = fewer escalations (more autonomous but higher risk)
+# Recommended: 0.7 for production start, adjust based on outcomes
+escalation_threshold: 0.7
+
+# Response Tone
+# Options: "formal", "casual", "friendly"
+# - formal: Professional, corporate language
+# - casual: Relaxed, conversational language
+# - friendly: Warm, empathetic language (recommended)
+tone: "friendly"
+
+# Maximum Response Length
+# Maximum number of words in agent responses
+# Keeps responses concise and scannable
+max_response_length: 150
+
+# Evolution Settings
+# How often the agent evaluates and adjusts its behavior
+evolution_frequency: 10
+
+# Sentiment Detection Thresholds
+sentiment:
+  frustration_threshold: 0.5
+  immediate_escalation_threshold: 0.7
+
+# Performance Tracking
+tracking:
+  log_interactions: true
+  interaction_log_path: "interaction_log.json"
+  enable_metrics: true

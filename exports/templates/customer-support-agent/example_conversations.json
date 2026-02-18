@@ -1,0 +1,55 @@
+{
+  "examples": [
+    {
+      "id": "example_001",
+      "scenario": "Simple Password Reset",
+      "customer_message": "How do I reset my password?",
+      "expected_action": "respond",
+      "expected_confidence": 0.85,
+      "sample_response": "I can help with that! Click 'Forgot Password' on the login page. Enter your email address and we'll send you a reset link. The link is valid for 24 hours. Let me know if you need anything else!",
+      "explanation": "Straightforward question with high-confidence KB match. Agent responds directly."
+    },
+    {
+      "id": "example_002",
+      "scenario": "Frustrated Customer - Immediate Escalation",
+      "customer_message": "I'm REALLY frustrated! My payment isn't going through and I need access NOW!",
+      "expected_action": "escalate",
+      "expected_confidence": 1.0,
+      "escalation_reason": "Customer shows high frustration",
+      "explanation": "High frustration detected (caps, exclamation, urgency words). Agent escalates immediately regardless of KB match."
+    },
+    {
+      "id": "example_003",
+      "scenario": "Data Export Request",
+      "customer_message": "Can you help me export my data?",
+      "expected_action": "respond",
+      "expected_confidence": 0.80,
+      "sample_response": "I can help with that! Navigate to Settings > Data & Privacy > Export Data. Select the data you want to export and click 'Start Export'. You'll receive an email when your export is ready. Let me know if you need anything else!",
+      "explanation": "Clear intent match to knowledge base article. Agent provides step-by-step instructions."
+    },
+    {
+      "id": "example_004",
+      "scenario": "Ambiguous Question - Low Confidence",
+      "customer_message": "Something isn't working right",
+      "expected_action": "escalate",
+      "expected_confidence": 0.30,
+      "escalation_reason": "Low confidence match (0.30)",
+      "explanation": "Vague question doesn't match KB well. Agent recognizes uncertainty and escalates to ensure customer gets accurate help."
+    },
+    {
+      "id": "example_005",
+      "scenario": "Positive Follow-up",
+      "customer_message": "Thanks for your help earlier, one more question - how do I update my credit card?",
+      "expected_action": "respond",
+      "expected_confidence": 0.85,
+      "sample_response": "I can help with that! You can update your payment method by going to Settings > Billing > Payment Methods. Click 'Add Payment Method' and follow the prompts. Let me know if you need anything else!",
+      "explanation": "Positive sentiment + clear billing question. Agent maintains friendly tone and provides direct answer."
+    }
+  ],
+  "metrics": {
+    "expected_resolution_rate": "70-80%",
+    "expected_escalation_rate": "20-30%",
+    "expected_satisfaction_rate": "85-90%",
+    "note": "These are typical ranges for a well-configured customer support agent. Your results may vary based on knowledge base quality and escalation threshold settings."
+  }
+}
