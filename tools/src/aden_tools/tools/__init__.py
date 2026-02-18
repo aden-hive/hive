@@ -212,6 +212,7 @@ def register_all_tools(
         "gmail_modify_message",
         "gmail_batch_modify_messages",
         "gmail_batch_get_messages",
+        "gmail_create_draft",
         "hubspot_search_contacts",
         "hubspot_get_contact",
         "hubspot_create_contact",

@@ -19,6 +19,13 @@ from .nodes import (
     report_node,
 )
 
+# Loop configuration (used by AgentRunner.load() and _build_graph())
+loop_config = {
+    "max_iterations": 100,
+    "max_tool_calls_per_turn": 20,
+    "max_history_tokens": 32000,
+}
+
 # Goal definition
 goal = Goal(
     id="gmail-inbox-guardian",
@@ -165,7 +172,7 @@ runtime_config = AgentRuntimeConfig(
 )
 
 
-class GmailInboxGuardianAgent:
+class EmailInboxManagementAgent:
     """
     Gmail Inbox Guardian — event-driven email triage agent.
 
@@ -212,11 +219,7 @@ class GmailInboxGuardianAgent:
             edges=self.edges,
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
-            loop_config={
-                "max_iterations": 100,
-                "max_tool_calls_per_turn": 20,
-                "max_history_tokens": 32000,
-            },
+            loop_config=loop_config,
             conversation_mode="continuous",
             identity_prompt=(
                 "You are an inbox management assistant. You help users manage their "
@@ -430,4 +433,4 @@ class GmailInboxGuardianAgent:
 
 
 # Create default instance
-default_agent = GmailInboxGuardianAgent()
+default_agent = EmailInboxManagementAgent()
