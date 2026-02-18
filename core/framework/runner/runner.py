@@ -587,6 +587,7 @@ class AgentRunner:
             config = get_hive_config()
             llm_config = config.get("llm", {})
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
+            api_base = llm_config.get("api_base")
 
             api_key = None
             if use_claude_code:
@@ -598,7 +599,7 @@ class AgentRunner:
 
             if api_key:
                 # Use Claude Code subscription token
-                self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+                self._llm = LiteLLMProvider(model=self.model, api_key=api_key, api_base=api_base)
             else:
                 # Fall back to environment variable
                 # First check api_key_env_var from config (set by quickstart)
@@ -606,12 +607,18 @@ class AgentRunner:
                     self.model
                 )
                 if api_key_env and os.environ.get(api_key_env):
-                    self._llm = LiteLLMProvider(model=self.model)
+                    self._llm = LiteLLMProvider(
+                        model=self.model,
+                        api_key=os.environ[api_key_env],
+                        api_base=api_base,
+                    )
                 else:
                     # Fall back to credential store
                     api_key = self._get_api_key_from_credential_store()
                     if api_key:
-                        self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+                        self._llm = LiteLLMProvider(
+                            model=self.model, api_key=api_key, api_base=api_base
+                        )
                         # Set env var so downstream code (e.g. cleanup LLM in
                         # node._extract_json) can also find it
                         if api_key_env:
@@ -619,6 +626,20 @@ class AgentRunner:
                     elif api_key_env:
                         print(f"Warning: {api_key_env} not set. LLM calls will fail.")
                         print(f"Set it with: export {api_key_env}=your-api-key")
+
+            # Fail fast if the agent needs an LLM but none was configured
+            if self._llm is None:
+                has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+                if has_llm_nodes:
+                    from framework.credentials.models import CredentialError
+
+                    api_key_env = self._get_api_key_env_var(self.model)
+                    hint = (
+                        f"Set it with: export {api_key_env}=your-api-key"
+                        if api_key_env
+                        else "Configure an API key for your LLM provider."
+                    )
+                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
 
         # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
@@ -731,6 +752,19 @@ class AgentRunner:
             async_checkpoint=True,  # Non-blocking
         )
 
+        # Handle runtime_config - ensure it's AgentRuntimeConfig, not RuntimeConfig
+        # RuntimeConfig is for LLM settings; AgentRuntimeConfig is for AgentRuntime settings
+        runtime_config = None
+        if self.runtime_config is not None:
+            from framework.config import RuntimeConfig
+
+            # If it's a RuntimeConfig (LLM config), don't pass it
+            if isinstance(self.runtime_config, RuntimeConfig):
+                runtime_config = None
+            else:
+                # It's already an AgentRuntimeConfig or compatible type
+                runtime_config = self.runtime_config
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -741,7 +775,7 @@ class AgentRunner:
             tool_executor=tool_executor,
             runtime_log_store=log_store,
             checkpoint_config=checkpoint_config,
-            config=self.runtime_config,
+            config=runtime_config,
         )
 
         # Pass intro_message through for TUI display
@@ -1143,9 +1177,7 @@ class AgentRunner:
                     warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(
-                node.node_type == "event_loop" for node in self.graph.nodes
-            )
+            has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):

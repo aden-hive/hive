@@ -58,6 +58,11 @@ def get_api_key() -> str | None:
     return None
 
 
+def get_api_base() -> str | None:
+    """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
+    return get_hive_config().get("llm", {}).get("api_base")
+
+
 # ---------------------------------------------------------------------------
 # RuntimeConfig – shared across agent templates
 # ---------------------------------------------------------------------------
@@ -71,4 +76,4 @@ class RuntimeConfig:
     temperature: float = 0.7
     max_tokens: int = field(default_factory=get_max_tokens)
     api_key: str | None = field(default_factory=get_api_key)
-    api_base: str | None = None
+    api_base: str | None = field(default_factory=get_api_base)
