@@ -10,18 +10,18 @@ default_config = RuntimeConfig()
 @dataclass
 class AgentMetadata:
     name: str = "Job Hunter"
-    version: str = "1.0.0"
+    version: str = "2.0.0"
     description: str = (
-        "Analyze your resume to identify your strongest role fits, find matching "
-        "job opportunities, and generate customized application materials including "
-        "resume customization lists, cold outreach emails, and Gmail drafts."
+        "Parse your resume, score it for ATS compatibility, identify errors and gaps, "
+        "research live market demand for your skills, find matching job opportunities, "
+        "and generate ATS-optimized resume customizations and cold outreach emails "
+        "for each position you select."
     )
     intro_message: str = (
-        "Hi! I'm your job hunting assistant. Please upload your resume and I'll "
-        "analyze it to identify roles where you have the highest chance of success, "
-        "find matching job openings, and create personalized application materials "
-        "for the positions you choose — including Gmail drafts ready for you to "
-        "review and send. Ready to get started?"
+        "Welcome to Job Hunter Pro. Upload your resume and this pipeline will: "
+        "parse it for structure and errors, score it against each job for ATS compatibility, "
+        "research live market demand for your skills, find 10 matched job openings, "
+        "and generate tailored resume edits and cold outreach emails for the roles you choose."
     )
 
 

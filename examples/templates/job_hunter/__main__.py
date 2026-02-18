@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import sys
+import uuid  # Added for session management
 import click
 
 from .agent import default_agent, JobHunterAgent
@@ -26,9 +27,9 @@ def setup_logging(verbose=False, debug=False):
 
 
 @click.group()
-@click.version_option(version="1.0.0")
+@click.version_option(version="2.0.0")
 def cli():
-    """Job Hunter Agent - Find jobs and create personalized application materials."""
+    """Job Hunter Agent - Parse resumes, score for ATS, find matched jobs, generate application materials."""
     pass
 
 
@@ -116,7 +117,7 @@ def tui(mock, verbose, debug):
                 EntryPointSpec(
                     id="start",
                     name="Start Job Hunt",
-                    entry_node="intake",
+                    entry_node="resume_uploader",
                     trigger_type="manual",
                     isolation_level="isolated",
                 ),
@@ -184,15 +185,35 @@ async def _interactive_shell(verbose=False):
     click.echo("=== Job Hunter Agent ===")
     click.echo("Paste your resume to get started (or 'quit' to exit):\n")
 
+    # Initialize agent and runtime manually to control the loop
     agent = JobHunterAgent()
     await agent.start()
+    
+    # We must maintain a session ID to keep context across turns
+    session_id = str(uuid.uuid4())
+    click.echo(f"Session ID: {session_id}\n")
 
     try:
+        # First trigger to start the graph
+        # This will run until it hits the first EventLoopNode (resume_uploader)
+        result = await agent.trigger_and_wait(
+            "start", 
+            {"user_input": "START"},  # Initial trigger
+            session_state={"session_id": session_id}
+        )
+        
+        # Display initial output from the agent
+        if result and result.output:
+             # Check for 'response' or fallback to 'output' depending on node implementation
+             response = result.output.get('response') or result.output.get('output') or "Ready."
+             click.echo(f"\nAgent: {response}\n")
+
         while True:
             try:
                 user_input = await asyncio.get_event_loop().run_in_executor(
                     None, input, "> "
                 )
+                
                 if user_input.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break
@@ -202,7 +223,12 @@ async def _interactive_shell(verbose=False):
 
                 click.echo("\nProcessing...\n")
 
-                result = await agent.trigger_and_wait("start", {"resume": user_input})
+                # Resume the existing session with user input
+                result = await agent.trigger_and_wait(
+                    "start", 
+                    {"user_input": user_input},
+                    session_state={"session_id": session_id} # Critical: Maintain session
+                )
 
                 if result is None:
                     click.echo("\n[Execution timed out]\n")
@@ -210,10 +236,19 @@ async def _interactive_shell(verbose=False):
 
                 if result.success:
                     output = result.output
+                    # Check for final output or intermediate response
                     if "application_materials" in output:
                         click.echo("\n--- Application Materials Generated ---\n")
                         click.echo(output["application_materials"])
                         click.echo("\n")
+                        break # Exit loop on completion
+                    
+                    response = output.get("response")
+                    if response:
+                        # Agent is asking a question (EventLoopNode)
+                        click.echo(f"\nAgent: {response}\n")
+                    else:
+                        click.echo(f"\nAgent Step Complete. Output: {output}\n")
                 else:
                     click.echo(f"\nFailed: {result.error}\n")
 
@@ -222,9 +257,9 @@ async def _interactive_shell(verbose=False):
                 break
             except Exception as e:
                 click.echo(f"Error: {e}", err=True)
-                import traceback
-
-                traceback.print_exc()
+                if verbose:
+                    import traceback
+                    traceback.print_exc()
     finally:
         await agent.stop()
 

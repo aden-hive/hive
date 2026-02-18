@@ -13,10 +13,18 @@ from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
-    intake_node,
-    job_search_node,
-    job_review_node,
-    customize_node,
+    resume_uploader_node,
+    resume_parser_node,
+    preference_intake_node,
+    market_analyst_node,
+    job_selector_node,
+    jd_parser_node,
+    ats_analyzer_node,
+    chief_strategist_node,
+    senior_copywriter_node,
+    critic_node,
+    revision_router_node,
+    publisher_node,
 )
 
 # Goal definition
@@ -24,123 +32,218 @@ goal = Goal(
     id="job-hunter",
     name="Job Hunter",
     description=(
-        "Analyze a user's resume to identify their strongest role fits, find 10 "
-        "matching job opportunities, let the user select which to pursue, then "
-        "generate a resume customization list and cold outreach email for each selected job."
+        "Parse and ATS-score a user's resume, research live market demand, find 10 matching "
+        "job opportunities, let the user select which to pursue, then generate ATS-optimized "
+        "resume customizations and cold outreach emails for each selected job."
     ),
     success_criteria=[
         SuccessCriterion(
+            id="resume-parsing-accuracy",
+            description="Resume is fully parsed with all sections, skills, and errors identified",
+            metric="parse_completeness",
+            target=">=0.95",
+            weight=0.1,
+        ),
+        SuccessCriterion(
+            id="ats-scoring-accuracy",
+            description="ATS scores accurately reflect keyword match rate and format quality",
+            metric="ats_score_validity",
+            target=">=0.85",
+            weight=0.15,
+        ),
+        SuccessCriterion(
             id="role-identification",
-            description="Identifies 2-3 role types that genuinely match the user's experience",
+            description="Identifies 3-5 role types that genuinely match the user's actual experience",
             metric="role_match_accuracy",
             target=">=0.8",
-            weight=0.2,
+            weight=0.15,
         ),
         SuccessCriterion(
             id="job-relevance",
             description="Found jobs align with identified roles and user's background",
             metric="job_relevance_score",
             target=">=0.8",
-            weight=0.2,
+            weight=0.15,
         ),
         SuccessCriterion(
             id="customization-quality",
             description="Resume changes are specific, actionable, and tailored to each job posting",
             metric="customization_specificity",
             target=">=0.85",
-            weight=0.25,
+            weight=0.2,
         ),
         SuccessCriterion(
             id="email-effectiveness",
-            description="Cold emails are personalized, professional, and reference specific company/role details",
+            description="Cold emails are personalized, professional, and reference specific company details",
             metric="email_personalization_score",
             target=">=0.85",
-            weight=0.2,
+            weight=0.15,
         ),
         SuccessCriterion(
             id="user-satisfaction",
             description="User approves outputs without major revisions needed",
             metric="approval_rate",
             target=">=0.9",
-            weight=0.15,
+            weight=0.1,
         ),
     ],
     constraints=[
         Constraint(
             id="realistic-roles",
-            description="Only suggest roles the user is realistically qualified for - no aspirational stretch roles",
+            description="Only suggest roles the user is realistically qualified for — no aspirational stretch roles",
             constraint_type="quality",
             category="accuracy",
         ),
         Constraint(
             id="truthful-customizations",
-            description="Resume customizations must be truthful - enhance presentation, never fabricate experience",
+            description="Resume customizations must be truthful — enhance presentation, never fabricate experience",
             constraint_type="ethical",
             category="integrity",
         ),
         Constraint(
             id="professional-emails",
-            description="Cold emails must be professional and not spammy",
+            description="Cold emails must be professional, specific, and not spammy",
             constraint_type="quality",
             category="tone",
         ),
         Constraint(
             id="respect-selection",
-            description="Only customize for jobs the user explicitly selects",
+            description="Only generate materials for jobs the user explicitly selects",
             constraint_type="behavioral",
             category="user_control",
+        ),
+        Constraint(
+            id="no-fabrication",
+            description="Keyword injections and bullet rewrites must never introduce experience the candidate does not have",
+            constraint_type="ethical",
+            category="integrity",
         ),
     ],
 )
 
 # Node list
 nodes = [
-    intake_node,
-    job_search_node,
-    job_review_node,
-    customize_node,
+    resume_uploader_node,
+    resume_parser_node,
+    preference_intake_node,
+    market_analyst_node,
+    job_selector_node,
+    jd_parser_node,
+    ats_analyzer_node,
+    chief_strategist_node,
+    senior_copywriter_node,
+    critic_node,
+    revision_router_node,
+    publisher_node,
 ]
 
 # Edge definitions
 edges = [
-    # intake -> job-search
+    # resume_uploader -> resume_parser
     EdgeSpec(
-        id="intake-to-job-search",
-        source="intake",
-        target="job-search",
+        id="resume-uploader-to-resume-parser",
+        source="resume_uploader",
+        target="resume_parser",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # job-search -> job-review
+    # resume_parser -> preference_intake
     EdgeSpec(
-        id="job-search-to-job-review",
-        source="job-search",
-        target="job-review",
+        id="resume-parser-to-preference-intake",
+        source="resume_parser",
+        target="preference_intake",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
-    # job-review -> customize
+    # preference_intake -> market_analyst
     EdgeSpec(
-        id="job-review-to-customize",
-        source="job-review",
-        target="customize",
+        id="preference-intake-to-market-analyst",
+        source="preference_intake",
+        target="market_analyst",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    # market_analyst -> job_selector
+    EdgeSpec(
+        id="market-analyst-to-job-selector",
+        source="market_analyst",
+        target="job_selector",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    # job_selector -> jd_parser
+    EdgeSpec(
+        id="job-selector-to-jd-parser",
+        source="job_selector",
+        target="jd_parser",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    # jd_parser -> ats_analyzer
+    EdgeSpec(
+        id="jd-parser-to-ats-analyzer",
+        source="jd_parser",
+        target="ats_analyzer",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    # ats_analyzer -> chief_strategist
+    EdgeSpec(
+        id="ats-analyzer-to-chief-strategist",
+        source="ats_analyzer",
+        target="chief_strategist",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    # chief_strategist -> senior_copywriter
+    EdgeSpec(
+        id="chief-strategist-to-senior-copywriter",
+        source="chief_strategist",
+        target="senior_copywriter",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    # senior_copywriter -> critic
+    EdgeSpec(
+        id="senior-copywriter-to-critic",
+        source="senior_copywriter",
+        target="critic",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    # critic -> revision_router
+    EdgeSpec(
+        id="critic-to-revision-router",
+        source="critic",
+        target="revision_router",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),
+    # revision_router -> publisher
+    EdgeSpec(
+        id="revision-router-to-publisher",
+        source="revision_router",
+        target="publisher",
         condition=EdgeCondition.ON_SUCCESS,
         priority=1,
     ),
 ]
 
 # Graph configuration
-entry_node = "intake"
-entry_points = {"start": "intake"}
+entry_node = "resume_uploader"
+entry_points = {"start": "resume_uploader"}
 pause_nodes = []
-terminal_nodes = ["customize"]
+terminal_nodes = ["publisher"]
 
 
 class JobHunterAgent:
     """
-    Job Hunter Agent — 4-node pipeline for job search and application materials.
+    Job Hunter Agent — 12-node pipeline for resume analysis, job search, and application materials.
 
-    Flow: intake -> job-search -> job-review -> customize
+    Flow:
+      resume_uploader -> resume_parser -> preference_intake -> market_analyst
+      -> job_selector -> jd_parser -> ats_analyzer -> chief_strategist
+      -> senior_copywriter -> critic -> revision_router -> publisher
 
     Uses AgentRuntime for proper session management:
     - Session-scoped storage (sessions/{session_id}/)
@@ -168,7 +271,7 @@ class JobHunterAgent:
         return GraphSpec(
             id="job-hunter-graph",
             goal_id=self.goal.id,
-            version="1.0.0",
+            version="2.0.0",
             entry_node=self.entry_node,
             entry_points=self.entry_points,
             terminal_nodes=self.terminal_nodes,
@@ -178,17 +281,16 @@ class JobHunterAgent:
             default_model=self.config.model,
             max_tokens=self.config.max_tokens,
             loop_config={
-                "max_iterations": 100,
+                "max_iterations": 200,
                 "max_tool_calls_per_turn": 20,
                 "max_history_tokens": 32000,
             },
             conversation_mode="continuous",
             identity_prompt=(
-                "You are a job hunting assistant. You analyze resumes to identify "
-                "the strongest role fits, search for matching job opportunities, "
-                "and help create personalized application materials. You only "
-                "suggest roles the user is realistically qualified for, and you "
-                "never fabricate experience — only enhance presentation truthfully."
+                "You are a job hunting assistant. You parse resumes, score them for ATS "
+                "compatibility, research live market demand, find matching jobs, and produce "
+                "tailored application materials. You only suggest roles the user is realistically "
+                "qualified for, and you never fabricate experience — only enhance presentation truthfully."
             ),
         )
 
