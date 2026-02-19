@@ -8,63 +8,69 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 
 def ensure_credential_key_env() -> None:
-    """Load HIVE_CREDENTIAL_KEY from shell config if not already in environment.
+    """Load HIVE_CREDENTIAL_KEY and ADEN_API_KEY from shell config if not in environment.
 
-    The setup-credentials skill writes the encryption key to ~/.zshrc or ~/.bashrc.
-    If the user hasn't sourced their config in the current shell, this reads it
-    directly so the runner (and any MCP subprocesses it spawns) can unlock the
-    encrypted credential store.
-
-    Only HIVE_CREDENTIAL_KEY is loaded this way — all other secrets (API keys, etc.)
-    come from the credential store itself.
+    The setup-credentials skill writes these to ~/.zshrc or ~/.bashrc.
+    If the user hasn't sourced their config in the current shell, this reads
+    them directly so the runner (and any MCP subprocesses it spawns) can:
+    - Unlock the encrypted credential store (HIVE_CREDENTIAL_KEY)
+    - Enable Aden OAuth sync for Google/HubSpot/etc. (ADEN_API_KEY)
     """
-    if os.environ.get("HIVE_CREDENTIAL_KEY"):
-        return
-
     try:
         from aden_tools.credentials.shell_config import check_env_var_in_shell_config
-
-        found, value = check_env_var_in_shell_config("HIVE_CREDENTIAL_KEY")
-        if found and value:
-            os.environ["HIVE_CREDENTIAL_KEY"] = value
-            logger.debug("Loaded HIVE_CREDENTIAL_KEY from shell config")
     except ImportError:
-        pass
+        return
+
+    for var_name in ("HIVE_CREDENTIAL_KEY", "ADEN_API_KEY"):
+        if os.environ.get(var_name):
+            continue
+        found, value = check_env_var_in_shell_config(var_name)
+        if found and value:
+            os.environ[var_name] = value
+            logger.debug("Loaded %s from shell config", var_name)
 
 
-def validate_agent_credentials(nodes: list) -> None:
+@dataclass
+class _CredentialCheck:
+    """Result of checking a single credential."""
+
+    env_var: str
+    source: str
+    used_by: str
+    available: bool
+    help_url: str = ""
+
+
+def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
     """Check that required credentials are available before running an agent.
 
-    Scans node specs for required tools and node types, then checks whether
-    the corresponding credentials exist in the credential store.
+    Uses CredentialStoreAdapter.default() which includes Aden sync support,
+    correctly resolving OAuth credentials stored under hashed IDs.
 
+    Prints a summary of all credentials and their sources (encrypted store, env var).
     Raises CredentialError with actionable guidance if any are missing.
 
     Args:
         nodes: List of NodeSpec objects from the agent graph.
+        quiet: If True, suppress the credential summary output.
     """
-    required_tools: set[str] = set()
-    for node in nodes:
-        if node.tools:
-            required_tools.update(node.tools)
-    node_types: set[str] = {node.node_type for node in nodes}
+    # Collect required tools and node types
+    required_tools = {tool for node in nodes if node.tools for tool in node.tools}
+    node_types = {node.node_type for node in nodes}
 
     try:
         from aden_tools.credentials import CREDENTIAL_SPECS
-
-        from framework.credentials import CredentialStore
-        from framework.credentials.storage import (
-            CompositeStorage,
-            EncryptedFileStorage,
-            EnvVarStorage,
-        )
     except ImportError:
         return  # aden_tools not installed, skip check
+
+    from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+    from framework.credentials.store import CredentialStore
 
     # Build credential store
     env_mapping = {
