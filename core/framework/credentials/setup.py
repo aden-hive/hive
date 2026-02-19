@@ -236,9 +236,9 @@ class CredentialSetupSession:
     def _print_header(self) -> None:
         """Print the setup header."""
         self._print("")
-        self._print(f"{Colors.YELLOW}{'='*60}{Colors.NC}")
+        self._print(f"{Colors.YELLOW}{'=' * 60}{Colors.NC}")
         self._print(f"{Colors.BOLD}  CREDENTIAL SETUP{Colors.NC}")
-        self._print(f"{Colors.YELLOW}{'='*60}{Colors.NC}")
+        self._print(f"{Colors.YELLOW}{'=' * 60}{Colors.NC}")
         self._print("")
         self._print(f"  {len(self.missing)} credential(s) need to be configured:")
         for cred in self.missing:
@@ -301,13 +301,13 @@ class CredentialSetupSession:
 
     def _setup_single_credential(self, cred: MissingCredential) -> bool:
         """Set up a single credential. Returns True if configured."""
-        self._print(f"\n{Colors.CYAN}{'─'*60}{Colors.NC}")
+        self._print(f"\n{Colors.CYAN}{'─' * 60}{Colors.NC}")
         self._print(f"{Colors.BOLD}Setting up: {cred.credential_name}{Colors.NC}")
         affected = cred.tools or cred.node_types
         self._print(f"{Colors.DIM}Required for: {', '.join(affected)}{Colors.NC}")
         if cred.description:
             self._print(f"{Colors.DIM}{cred.description}{Colors.NC}")
-        self._print(f"{Colors.CYAN}{'─'*60}{Colors.NC}")
+        self._print(f"{Colors.CYAN}{'─' * 60}{Colors.NC}")
 
         # Show auth options
         options = self._get_auth_options(cred)
@@ -327,24 +327,30 @@ class CredentialSetupSession:
         options = []
 
         if cred.direct_api_key_supported:
-            options.append((
-                "direct",
-                "Enter API key directly",
-                "Paste your API key from the provider's dashboard",
-            ))
+            options.append(
+                (
+                    "direct",
+                    "Enter API key directly",
+                    "Paste your API key from the provider's dashboard",
+                )
+            )
 
         if cred.aden_supported:
-            options.append((
-                "aden",
-                "Use Aden Platform (OAuth)",
-                "Secure OAuth2 flow via hive.adenhq.com",
-            ))
+            options.append(
+                (
+                    "aden",
+                    "Use Aden Platform (OAuth)",
+                    "Secure OAuth2 flow via hive.adenhq.com",
+                )
+            )
 
-        options.append((
-            "skip",
-            "Skip for now",
-            "Configure this credential later",
-        ))
+        options.append(
+            (
+                "skip",
+                "Skip for now",
+                "Configure this credential later",
+            )
+        )
 
         return options
 
@@ -515,14 +521,12 @@ class CredentialSetupSession:
         os.environ[cred.env_var] = value
         self._print(f"{Colors.GREEN}✓ Exported to current session{Colors.NC}")
 
-    def _print_summary(
-        self, configured: list[str], skipped: list[str], errors: list[str]
-    ) -> None:
+    def _print_summary(self, configured: list[str], skipped: list[str], errors: list[str]) -> None:
         """Print final summary."""
         self._print("")
-        self._print(f"{Colors.YELLOW}{'='*60}{Colors.NC}")
+        self._print(f"{Colors.YELLOW}{'=' * 60}{Colors.NC}")
         self._print(f"{Colors.BOLD}  SETUP COMPLETE{Colors.NC}")
-        self._print(f"{Colors.YELLOW}{'='*60}{Colors.NC}")
+        self._print(f"{Colors.YELLOW}{'=' * 60}{Colors.NC}")
 
         if configured:
             self._print(f"\n{Colors.GREEN}✓ Configured:{Colors.NC}")

@@ -92,9 +92,7 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
     store = CredentialStore(storage=storage)
 
     # Build reverse mappings: tool/node_type -> credential_name
-    tool_to_cred = {
-        tool: name for name, spec in CREDENTIAL_SPECS.items() for tool in spec.tools
-    }
+    tool_to_cred = {tool: name for name, spec in CREDENTIAL_SPECS.items() for tool in spec.tools}
     node_type_to_cred = {
         nt: name for name, spec in CREDENTIAL_SPECS.items() for nt in spec.node_types
     }
