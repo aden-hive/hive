@@ -814,10 +814,6 @@ class AdenTUI(App):
                 self.chat_repl.handle_node_started(event.node_id or "")
             elif et == EventType.NODE_LOOP_ITERATION:
                 self.chat_repl.handle_loop_iteration(event.data.get("iteration", 0))
-
-            # Track active node in chat_repl for mid-execution input
-            if et == EventType.NODE_LOOP_STARTED:
-                self.chat_repl.handle_node_started(event.node_id or "")
             elif et == EventType.NODE_LOOP_COMPLETED:
                 self.chat_repl.handle_node_completed(event.node_id or "")
 
