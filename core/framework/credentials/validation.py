@@ -47,18 +47,50 @@ class _CredentialCheck:
     help_url: str = ""
 
 
-def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
-    """Check that required credentials are available before running an agent.
+def _presync_aden_tokens(credential_specs: dict) -> None:
+    """Sync Aden-backed OAuth tokens into env vars for validation.
 
-    Uses CredentialStoreAdapter.default() which includes Aden sync support,
-    correctly resolving OAuth credentials stored under hashed IDs.
+    When ADEN_API_KEY is available, fetches fresh OAuth tokens from the Aden
+    server and exports them to env vars.  This ensures validation sees real
+    tokens instead of stale or mis-stored values in the encrypted store.
+    Only touches credentials that are ``aden_supported`` AND whose env var
+    is not already set (so explicit user exports always win).
+    """
+    from framework.credentials.store import CredentialStore
 
-    Prints a summary of all credentials and their sources (encrypted store, env var).
-    Raises CredentialError with actionable guidance if any are missing.
+    try:
+        aden_store = CredentialStore.with_aden_sync(auto_sync=True)
+    except Exception:
+        logger.debug("Aden pre-sync unavailable, skipping")
+        return
+
+    for name, spec in credential_specs.items():
+        if not spec.aden_supported:
+            continue
+        if os.environ.get(spec.env_var):
+            continue  # Already set — don't overwrite
+        cred_id = spec.credential_id or name
+        try:
+            value = aden_store.get_key(cred_id, spec.credential_key)
+            if value:
+                os.environ[spec.env_var] = value
+                logger.debug("Pre-synced %s from Aden", spec.env_var)
+        except Exception:
+            pass
+
+
+def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = True) -> None:
+    """Check that required credentials are available and valid before running an agent.
+
+    Two-phase validation:
+    1. **Presence** — is the credential set (env var, encrypted store, or Aden sync)?
+    2. **Health check** — does the credential actually work? Uses each tool's
+       registered ``check_credential_health`` endpoint (lightweight HTTP call).
 
     Args:
         nodes: List of NodeSpec objects from the agent graph.
         quiet: If True, suppress the credential summary output.
+        verify: If True (default), run health checks on present credentials.
     """
     # Collect required tools and node types
     required_tools = {tool for node in nodes if node.tools for tool in node.tools}
@@ -72,17 +104,24 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
     from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
     from framework.credentials.store import CredentialStore
 
-    # Build credential store
+    # Build credential store.
+    # Env vars take priority — if a user explicitly exports a fresh key it
+    # must win over a potentially stale value in the encrypted store.
+    #
+    # Pre-sync: when ADEN_API_KEY is available, sync OAuth tokens from Aden
+    # into env vars so validation sees fresh tokens instead of stale values
+    # in the encrypted store (e.g., a previously mis-stored google.enc).
+    if os.environ.get("ADEN_API_KEY"):
+        _presync_aden_tokens(CREDENTIAL_SPECS)
+
     env_mapping = {
         (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
     }
-    storages: list = [EnvVarStorage(env_mapping=env_mapping)]
+    env_storage = EnvVarStorage(env_mapping=env_mapping)
     if os.environ.get("HIVE_CREDENTIAL_KEY"):
-        storages.insert(0, EncryptedFileStorage())
-    if len(storages) == 1:
-        storage = storages[0]
+        storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
     else:
-        storage = CompositeStorage(primary=storages[0], fallbacks=storages[1:])
+        storage = env_storage
     store = CredentialStore(storage=storage)
 
     # Build reverse mappings
@@ -95,7 +134,11 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
             node_type_to_cred[nt] = cred_name
 
     missing: list[str] = []
+    invalid: list[str] = []
+    failed_cred_names: list[str] = []  # all cred names that need (re-)collection
     checked: set[str] = set()
+    # Credentials that are present and should be health-checked
+    to_verify: list[tuple[str, str]] = []  # (cred_name, used_by_label)
 
     # Check tool credentials
     for tool_name in sorted(required_tools):
@@ -105,12 +148,18 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
         checked.add(cred_name)
         spec = CREDENTIAL_SPECS[cred_name]
         cred_id = spec.credential_id or cred_name
-        if spec.required and not store.is_available(cred_id):
-            affected = sorted(t for t in required_tools if t in spec.tools)
-            entry = f"  {spec.env_var} for {', '.join(affected)}"
+        if not spec.required:
+            continue
+        affected = sorted(t for t in required_tools if t in spec.tools)
+        label = ", ".join(affected)
+        if not store.is_available(cred_id):
+            entry = f"  {spec.env_var} for {label}"
             if spec.help_url:
                 entry += f"\n    Get it at: {spec.help_url}"
             missing.append(entry)
+            failed_cred_names.append(cred_name)
+        elif verify and spec.health_check_endpoint:
+            to_verify.append((cred_name, label))
 
     # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
     for nt in sorted(node_types):
@@ -120,20 +169,128 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
         checked.add(cred_name)
         spec = CREDENTIAL_SPECS[cred_name]
         cred_id = spec.credential_id or cred_name
-        if spec.required and not store.is_available(cred_id):
-            affected_types = sorted(t for t in node_types if t in spec.node_types)
-            entry = f"  {spec.env_var} for {', '.join(affected_types)} nodes"
+        if not spec.required:
+            continue
+        affected_types = sorted(t for t in node_types if t in spec.node_types)
+        label = ", ".join(affected_types) + " nodes"
+        if not store.is_available(cred_id):
+            entry = f"  {spec.env_var} for {label}"
             if spec.help_url:
                 entry += f"\n    Get it at: {spec.help_url}"
             missing.append(entry)
+            failed_cred_names.append(cred_name)
+        elif verify and spec.health_check_endpoint:
+            to_verify.append((cred_name, label))
 
-    if missing:
+    # Phase 2: health-check present credentials
+    if to_verify:
+        try:
+            from aden_tools.credentials import check_credential_health
+        except ImportError:
+            check_credential_health = None  # type: ignore[assignment]
+
+        if check_credential_health is not None:
+            for cred_name, label in to_verify:
+                spec = CREDENTIAL_SPECS[cred_name]
+                cred_id = spec.credential_id or cred_name
+                value = store.get(cred_id)
+                if not value:
+                    continue
+                try:
+                    result = check_credential_health(
+                        cred_name,
+                        value,
+                        health_check_endpoint=spec.health_check_endpoint,
+                        health_check_method=spec.health_check_method,
+                    )
+                    if not result.valid:
+                        entry = f"  {spec.env_var} for {label} — {result.message}"
+                        if spec.help_url:
+                            entry += f"\n    Get a new key at: {spec.help_url}"
+                        invalid.append(entry)
+                        failed_cred_names.append(cred_name)
+                except Exception as exc:
+                    logger.debug("Health check for %s failed: %s", cred_name, exc)
+
+    errors = missing + invalid
+    if errors:
         from framework.credentials.models import CredentialError
 
-        lines = ["Missing required credentials:\n"]
-        lines.extend(missing)
+        lines: list[str] = []
+        if missing:
+            lines.append("Missing credentials:\n")
+            lines.extend(missing)
+        if invalid:
+            if missing:
+                lines.append("")
+            lines.append("Invalid or expired credentials:\n")
+            lines.extend(invalid)
         lines.append(
             "\nTo fix: run /hive-credentials in Claude Code."
             "\nIf you've already set up credentials, restart your terminal to load them."
         )
-        raise CredentialError("\n".join(lines))
+        exc = CredentialError("\n".join(lines))
+        exc.failed_cred_names = failed_cred_names  # type: ignore[attr-defined]
+        raise exc
+
+
+def build_setup_session_from_error(
+    credential_error: Exception,
+    nodes: list | None = None,
+    agent_path: str | None = None,
+):
+    """Build a ``CredentialSetupSession`` that covers all failed credentials.
+
+    ``validate_agent_credentials`` attaches ``failed_cred_names`` (both missing
+    and invalid) to the ``CredentialError``.  This helper converts those names
+    into ``MissingCredential`` entries so the setup screen can re-collect them.
+
+    Falls back to the normal ``from_nodes`` / ``from_agent_path`` detection
+    when the attribute is absent.
+
+    Args:
+        credential_error: The ``CredentialError`` raised by validation.
+        nodes: Graph nodes (preferred — avoids re-loading from disk).
+        agent_path: Agent directory path (used when nodes aren't available).
+    """
+    from framework.credentials.setup import CredentialSetupSession, MissingCredential
+
+    # Start with normal detection (picks up truly missing creds)
+    if nodes is not None:
+        session = CredentialSetupSession.from_nodes(nodes)
+    elif agent_path is not None:
+        session = CredentialSetupSession.from_agent_path(agent_path)
+    else:
+        session = CredentialSetupSession(missing=[])
+
+    # Add credentials that are present but failed health checks
+    already = {m.credential_name for m in session.missing}
+    failed_names: list[str] = getattr(credential_error, "failed_cred_names", [])
+    if failed_names:
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+
+            for name in failed_names:
+                if name in already:
+                    continue
+                spec = CREDENTIAL_SPECS.get(name)
+                if spec is None:
+                    continue
+                session.missing.append(
+                    MissingCredential(
+                        credential_name=name,
+                        env_var=spec.env_var,
+                        description=spec.description,
+                        help_url=spec.help_url,
+                        api_key_instructions=spec.api_key_instructions,
+                        tools=list(spec.tools),
+                        aden_supported=spec.aden_supported,
+                        direct_api_key_supported=spec.direct_api_key_supported,
+                        credential_id=spec.credential_id,
+                        credential_key=spec.credential_key,
+                    )
+                )
+        except ImportError:
+            pass
+
+    return session

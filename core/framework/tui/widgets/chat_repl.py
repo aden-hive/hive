@@ -966,6 +966,10 @@ class ChatRepl(Vertical):
         stream_log = self.query_one("#streaming-output", RichLog)
         stream_log.clear()
         stream_log.display = False
+        # Hiding the streaming pane makes chat-history taller (1fr reclaims
+        # the space).  Re-scroll so subsequent _write_history calls see
+        # is_vertical_scroll_end == True.
+        self.query_one("#chat-history", RichLog).scroll_end(animate=False)
 
     def flush_streaming(self) -> None:
         """Flush any accumulated streaming text to history.
@@ -1236,6 +1240,9 @@ class ChatRepl(Vertical):
         stream_log = self.query_one("#streaming-output", RichLog)
         if not stream_log.display:
             stream_log.display = True
+            # Showing the streaming pane shrinks chat-history (height: 1fr).
+            # Re-scroll so _write_history still sees is_vertical_scroll_end.
+            self.query_one("#chat-history", RichLog).scroll_end(animate=False)
 
         # Rewrite the full snapshot as a single block so text wraps
         # naturally instead of one token per line.
