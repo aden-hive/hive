@@ -17,6 +17,7 @@ Client-facing input:
 import asyncio
 import logging
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,7 @@ class ChatRepl(Vertical):
         self._session_index: list[str] = []  # IDs from last listing
         self._show_logs: bool = False  # Clean mode by default
         self._log_buffer: list[str] = []  # Buffered log lines for backfill on toggle ON
+        self._attached_pdf: dict | None = None  # Pending PDF attachment for next message
 
         # Dedicated event loop for agent execution.
         # Keeps blocking runtime code (LLM calls, MCP tools) off
@@ -196,6 +198,9 @@ class ChatRepl(Vertical):
 
         if cmd == "/help":
             self._write_history("""[bold cyan]Available Commands:[/bold cyan]
+  [bold]/attach[/bold]                      - Open file dialog to attach a PDF
+  [bold]/attach[/bold] <file_path>          - Attach a PDF from a specific path
+  [bold]/detach[/bold]                      - Remove the currently attached PDF
   [bold]/sessions[/bold]                    - List all sessions for this agent
   [bold]/sessions[/bold] <session_id>       - Show session details and checkpoints
   [bold]/resume[/bold]                      - List sessions and pick one to resume
@@ -206,12 +211,11 @@ class ChatRepl(Vertical):
   [bold]/help[/bold]                       - Show this help message
 
 [dim]Examples:[/dim]
+  /attach                                [dim]# Open file picker dialog[/dim]
+  /attach ~/Documents/report.pdf         [dim]# Attach a specific PDF[/dim]
+  /detach                                [dim]# Remove attached PDF[/dim]
   /sessions                              [dim]# List all sessions[/dim]
-  /sessions session_20260208_143022      [dim]# Show session details[/dim]
-  /resume                                [dim]# Show numbered session list[/dim]
   /resume 1                              [dim]# Resume first listed session[/dim]
-  /resume session_20260208_143022        [dim]# Resume by full session ID[/dim]
-  /recover session_20260208_143022 cp_xxx [dim]# Recover from specific checkpoint[/dim]
   /pause                                 [dim]# Pause (or Ctrl+Z)[/dim]
 """)
         elif cmd == "/sessions":
@@ -252,6 +256,16 @@ class ChatRepl(Vertical):
             session_id = parts[1].strip()
             checkpoint_id = parts[2].strip()
             await self._cmd_recover(session_id, checkpoint_id)
+        elif cmd == "/attach":
+            file_path = parts[1].strip() if len(parts) > 1 else None
+            await self._cmd_attach(file_path)
+        elif cmd == "/detach":
+            if self._attached_pdf:
+                name = self._attached_pdf["filename"]
+                self._attached_pdf = None
+                self._write_history(f"[dim]Detached: {name}[/dim]")
+            else:
+                self._write_history("[dim]No PDF attached.[/dim]")
         elif cmd == "/pause":
             await self._cmd_pause()
         else:
@@ -259,6 +273,63 @@ class ChatRepl(Vertical):
                 f"[bold red]Unknown command:[/bold red] {cmd}\n"
                 "Type [bold]/help[/bold] for available commands"
             )
+
+    def attach_pdf(self, path: Path) -> None:
+        """Validate and stage a PDF file for the next message.
+
+        Copies the PDF to ~/.hive/assets/ and stores the path. The agent's
+        pdf_read tool handles text extraction at runtime.
+
+        Called by /attach <path> or by the native file dialog.
+        """
+        path = Path(path).expanduser().resolve()
+
+        if not path.exists():
+            self._write_history(f"[bold red]Error:[/bold red] File not found: {path}")
+            return
+        if path.suffix.lower() != ".pdf":
+            self._write_history("[bold red]Error:[/bold red] Only PDF files are supported")
+            return
+
+        # Copy to ~/.hive/assets/, deduplicating like a normal filesystem:
+        # resume.pdf → resume(1).pdf → resume(2).pdf
+        assets_dir = Path.home() / ".hive" / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        dest = assets_dir / path.name
+        counter = 1
+        while dest.exists():
+            dest = assets_dir / f"{path.stem}({counter}){path.suffix}"
+            counter += 1
+        shutil.copy2(path, dest)
+
+        self._attached_pdf = {
+            "filename": path.name,
+            "path": str(dest),
+        }
+
+        self._write_history(f"[green]Attached:[/green] {path.name}")
+        self._write_history("[dim]PDF will be read by the agent on your next message.[/dim]")
+
+    async def _cmd_attach(self, file_path: str | None = None) -> None:
+        """Attach a PDF file for context injection into the next message."""
+        if file_path is None:
+            from framework.tui.widgets.file_browser import _has_gui, pick_pdf_file
+
+            if not _has_gui():
+                self._write_history(
+                    "[bold yellow]No GUI available.[/bold yellow] "
+                    "Provide a path: [bold]/attach /path/to/file.pdf[/bold]"
+                )
+                return
+
+            self._write_history("[dim]Opening file dialog...[/dim]")
+            path = await pick_pdf_file()
+
+            if path is not None:
+                self.attach_pdf(path)
+            return
+
+        self.attach_pdf(Path(file_path))
 
     async def _cmd_sessions(self, session_id: str | None) -> None:
         """List sessions or show details of a specific session."""
@@ -895,6 +966,13 @@ class ChatRepl(Vertical):
             chat_input = self.query_one("#chat-input", ChatTextArea)
             chat_input.placeholder = "Commands available: /pause, /sessions, /help"
 
+            # Build input data, injecting attached PDF file path if present
+            input_data = {input_key: user_input}
+            if self._attached_pdf:
+                input_data["pdf_file_path"] = self._attached_pdf["path"]
+                self._write_history(f"[dim]Including PDF: {self._attached_pdf['filename']}[/dim]")
+                self._attached_pdf = None
+
             # Submit execution to the dedicated agent loop so blocking
             # runtime code (LLM, MCP tools) never touches Textual's loop.
             # trigger() returns immediately with an exec_id; the heavy
@@ -902,7 +980,7 @@ class ChatRepl(Vertical):
             future = asyncio.run_coroutine_threadsafe(
                 self.runtime.trigger(
                     entry_point_id=entry_point.id,
-                    input_data={input_key: user_input},
+                    input_data=input_data,
                 ),
                 self._agent_loop,
             )
