@@ -205,6 +205,7 @@ class EventLoopNode(NodeProtocol):
         self._injection_queue: asyncio.Queue[str] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
+        self._awaiting_input = False
         self._shutdown = False
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
@@ -303,7 +304,7 @@ class EventLoopNode(NodeProtocol):
         set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
         if set_output_tool:
             tools.append(set_output_tool)
-        if ctx.node_spec.client_facing:
+        if ctx.node_spec.client_facing and not ctx.event_triggered:
             tools.append(self._build_ask_user_tool())
 
         logger.info(
@@ -599,7 +600,7 @@ class EventLoopNode(NodeProtocol):
                         "same tool calls with identical arguments. "
                         "Try a different approach or different arguments."
                     )
-                    if ctx.node_spec.client_facing:
+                    if ctx.node_spec.client_facing and not ctx.event_triggered:
                         await conversation.add_user_message(warning_msg)
                         self._input_ready.clear()
                         if self._event_bus:
@@ -608,7 +609,11 @@ class EventLoopNode(NodeProtocol):
                                 node_id=node_id,
                                 prompt=doom_desc,
                             )
-                        await self._input_ready.wait()
+                        self._awaiting_input = True
+                        try:
+                            await self._input_ready.wait()
+                        finally:
+                            self._awaiting_input = False
                         recent_tool_fingerprints.clear()
                         recent_responses.clear()
                     else:
@@ -636,7 +641,7 @@ class EventLoopNode(NodeProtocol):
             # conversation — they flow through without blocking.
             _cf_block = False
             _cf_auto = False
-            if ctx.node_spec.client_facing:
+            if ctx.node_spec.client_facing and not ctx.event_triggered:
                 if user_input_requested:
                     _cf_block = True
                 elif assistant_text and not real_tool_results and not outputs_set:
@@ -1035,7 +1040,11 @@ class EventLoopNode(NodeProtocol):
                 prompt="",
             )
 
-        await self._input_ready.wait()
+        self._awaiting_input = True
+        try:
+            await self._input_ready.wait()
+        finally:
+            self._awaiting_input = False
         return not self._shutdown
 
     # -------------------------------------------------------------------

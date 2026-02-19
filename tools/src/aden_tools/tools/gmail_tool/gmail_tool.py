@@ -517,3 +517,83 @@ def register_tools(
             "draft_id": data.get("id", ""),
             "message_id": data.get("message", {}).get("id", ""),
         }
+
+    @mcp.tool()
+    def gmail_list_labels() -> dict:
+        """
+        List all Gmail labels for the user's account.
+
+        Returns both system labels (INBOX, SENT, SPAM, TRASH, etc.) and
+        user-created custom labels.
+
+        Returns:
+            Dict with "labels" list (each has "id", "name", "type"),
+            or error dict.
+        """
+        token = _require_token()
+        if isinstance(token, dict):
+            return token
+
+        try:
+            response = _gmail_request("GET", "labels", token)
+        except httpx.HTTPError as e:
+            return {"error": f"Request failed: {e}"}
+
+        error = _handle_error(response)
+        if error:
+            return error
+
+        data = response.json()
+        return {"labels": data.get("labels", [])}
+
+    @mcp.tool()
+    def gmail_create_label(
+        name: str,
+        label_list_visibility: Literal["labelShow", "labelShowIfUnread", "labelHide"] = "labelShow",
+        message_list_visibility: Literal["show", "hide"] = "show",
+    ) -> dict:
+        """
+        Create a new Gmail label.
+
+        Args:
+            name: The display name for the new label. Must be unique.
+                Supports nesting with "/" separator (e.g. "Agent/Important").
+            label_list_visibility: Whether label appears in the label list.
+                "labelShow" (default) - always visible.
+                "labelShowIfUnread" - only visible when unread mail exists.
+                "labelHide" - hidden from label list.
+            message_list_visibility: Whether label appears in message list.
+                "show" (default) or "hide".
+
+        Returns:
+            Dict with "success", "id", "name", and "type", or error dict.
+        """
+        if not name or not name.strip():
+            return {"error": "Label name is required"}
+
+        token = _require_token()
+        if isinstance(token, dict):
+            return token
+
+        body = {
+            "name": name,
+            "labelListVisibility": label_list_visibility,
+            "messageListVisibility": message_list_visibility,
+        }
+
+        try:
+            response = _gmail_request("POST", "labels", token, json=body)
+        except httpx.HTTPError as e:
+            return {"error": f"Request failed: {e}"}
+
+        error = _handle_error(response)
+        if error:
+            return error
+
+        data = response.json()
+        return {
+            "success": True,
+            "id": data.get("id", ""),
+            "name": data.get("name", ""),
+            "type": data.get("type", "user"),
+        }
