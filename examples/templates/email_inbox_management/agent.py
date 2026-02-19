@@ -5,10 +5,11 @@ from pathlib import Path
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import AsyncEntryPointSpec, GraphSpec
-from framework.graph.executor import ExecutionResult
+from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.agent_runtime import create_agent_runtime
+from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
@@ -187,10 +188,10 @@ class EmailInboxManagementAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
+        self._executor: GraphExecutor | None = None
         self._graph: GraphSpec | None = None
-        self._agent_runtime: AgentRuntime | None = None
+        self._event_bus: EventBus | None = None
         self._tool_registry: ToolRegistry | None = None
-        self._storage_path: Path | None = None
 
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
@@ -217,6 +218,7 @@ class EmailInboxManagementAgent:
         self._storage_path = Path.home() / ".hive" / "agents" / "email_inbox_management"
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
+        self._event_bus = EventBus()
         self._tool_registry = ToolRegistry()
 
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
@@ -282,12 +284,12 @@ class EmailInboxManagementAgent:
             checkpoint_config=checkpoint_config,
         )
 
+        return self._executor
+
     async def start(self, mock_mode=False) -> None:
-        """Set up and start the agent runtime."""
-        if self._agent_runtime is None:
+        """Set up the agent (initialize executor and tools)."""
+        if self._executor is None:
             self._setup(mock_mode=mock_mode)
-        if not self._agent_runtime.is_running:
-            await self._agent_runtime.start()
 
     async def stop(self) -> None:
         """Stop and clean up the agent runtime."""
@@ -302,8 +304,10 @@ class EmailInboxManagementAgent:
         session_state: dict | None = None,
     ) -> ExecutionResult | None:
         """Execute the graph and wait for completion."""
-        if self._agent_runtime is None:
+        if self._executor is None:
             raise RuntimeError("Agent not started. Call start() first.")
+        if self._graph is None:
+            raise RuntimeError("Graph not built. Call start() first.")
 
         return await self._agent_runtime.trigger_and_wait(
             entry_point_id=entry_point,

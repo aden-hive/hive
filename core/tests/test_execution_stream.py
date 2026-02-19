@@ -1,13 +1,15 @@
 """Tests for ExecutionStream retention behavior."""
 
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 import pytest
 
 from framework.graph import Goal, NodeSpec, SuccessCriterion
 from framework.graph.edge import GraphSpec
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.stream_events import FinishEvent, StreamEvent, TextDeltaEvent, ToolCallEvent
 from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
@@ -16,7 +18,13 @@ from framework.storage.concurrent import ConcurrentStorage
 
 
 class DummyLLMProvider(LLMProvider):
-    """Deterministic LLM provider for execution stream tests."""
+    """Deterministic LLM provider for execution stream tests.
+
+    Uses set_output tool call to properly set outputs, avoiding stall detection.
+    """
+
+    def __init__(self):
+        self._call_count = 0
 
     def complete(
         self,
@@ -28,7 +36,7 @@ class DummyLLMProvider(LLMProvider):
         json_mode: bool = False,
         max_retries: int | None = None,
     ) -> LLMResponse:
-        return LLMResponse(content=json.dumps({"result": "ok"}), model="dummy")
+        return LLMResponse(content="Summary for compaction.", model="dummy")
 
     def complete_with_tools(
         self,
@@ -38,7 +46,29 @@ class DummyLLMProvider(LLMProvider):
         tool_executor: Callable,
         max_iterations: int = 10,
     ) -> LLMResponse:
-        return LLMResponse(content=json.dumps({"result": "ok"}), model="dummy")
+        return LLMResponse(content="Summary for compaction.", model="dummy")
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[StreamEvent]:
+        self._call_count += 1
+
+        if self._call_count == 1:
+            # First call: set the output via tool call
+            yield ToolCallEvent(
+                tool_use_id=f"tc_{self._call_count}",
+                tool_name="set_output",
+                tool_input={"key": "result", "value": "ok"},
+            )
+            yield FinishEvent(stop_reason="tool_use", input_tokens=10, output_tokens=10)
+        else:
+            # Subsequent calls: just finish with text
+            yield TextDeltaEvent(content="Done.", snapshot="Done.")
+            yield FinishEvent(stop_reason="end_turn", input_tokens=5, output_tokens=5)
 
 
 @pytest.mark.asyncio
@@ -62,7 +92,7 @@ async def test_execution_stream_retention(tmp_path):
         id="hello",
         name="Hello",
         description="Return a result",
-        node_type="llm_generate",
+        node_type="event_loop",
         input_keys=["user_name"],
         output_keys=["result"],
         system_prompt='Return JSON: {"result": "ok"}',
@@ -149,7 +179,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
         id="hello",
         name="Hello",
         description="Return a result",
-        node_type="llm_generate",
+        node_type="event_loop",
         input_keys=["user_name"],
         output_keys=["result"],
         system_prompt='Return JSON: {"result": "ok"}',

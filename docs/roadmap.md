@@ -241,7 +241,7 @@ classDef done fill:#9e9e9e,color:#fff,stroke:#757575
     - [ ] Migrate from monolithic run storage
 - [ ] **Context Building & Conversation Loop**
     - [ ] Implement `Message.stream(sessionID)`
-    - [ ] Update `LLMNode.execute()` for full context building
+    - [ ] Update `EventLoopNode.execute()` for full context building
     - [ ] Implement `Message.toModelMessages()` conversion
 - [ ] **Proactive Compaction**
     - [ ] Implement proactive overflow detection
