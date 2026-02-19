@@ -80,11 +80,11 @@ def goal():
 
 
 def test_max_node_visits_default():
-    """NodeSpec.max_node_visits should default to 1."""
+    """NodeSpec.max_node_visits should default to 0 (unbounded, for forever-alive agents)."""
     spec = NodeSpec(
         id="n", name="N", description="test", node_type="event_loop", output_keys=["out"]
     )
-    assert spec.max_node_visits == 1
+    assert spec.max_node_visits == 0
 
 
 # ---------------------------------------------------------------------------
