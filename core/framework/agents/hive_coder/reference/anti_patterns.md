@@ -74,8 +74,34 @@ One client-facing node handles ALL user interaction (setup, logging, reports). O
 
 ## Testing Errors
 
-20. **Running full integration tests without API keys** — Structural tests (validate, import) work without keys. Full integration tests need `ANTHROPIC_API_KEY`.
+20. **Using `runner.run()` on forever-alive agents** — `runner.run()` calls `trigger_and_wait()` which blocks until the graph reaches a terminal node. Forever-alive agents have `terminal_nodes=[]`, so **`runner.run()` hangs forever**. This is the #1 cause of stuck test suites.
 
-21. **Forgetting sys.path setup in conftest.py** — Tests need `exports/` and `core/` on sys.path.
+**For forever-alive agents, write structural tests instead:**
+- Validate graph structure (nodes, edges, entry points)
+- Verify node specs (tools, prompts, client-facing flag)
+- Check goal/constraints/success criteria definitions
+- Test that `AgentRunner.load()` + `_setup()` succeeds (skip if no API key)
 
-22. **Not using auto_responder for client-facing nodes** — Tests with client-facing nodes hang without an auto-responder that injects input.
+**What NOT to do:**
+```python
+# WRONG — hangs forever on forever-alive agents
+result = await runner.run({"topic": "quantum computing"})
+```
+
+**Correct pattern for structure tests:**
+```python
+def test_research_has_web_tools(self):
+    assert "web_search" in research_node.tools
+
+def test_research_routes_back_to_interact(self):
+    edges_to_interact = [e for e in edges if e.source == "research" and e.target == "interact"]
+    assert edges_to_interact
+```
+
+21. **Stale tests after agent restructuring** — When you change an agent's node count or names (e.g., 4 nodes → 2 nodes), the tests MUST be updated too. Tests referencing old node names (e.g., `"review"`, `"report"`) will fail or hang. Always check that test assertions match the current `nodes/__init__.py`.
+
+22. **Running full integration tests without API keys** — Structural tests (validate, import) work without keys. Full integration tests need `ANTHROPIC_API_KEY`. Use `pytest.skip()` in the runner fixture when `_setup()` fails due to missing credentials.
+
+23. **Forgetting sys.path setup in conftest.py** — Tests need `exports/` and `core/` on sys.path.
+
+24. **Not using auto_responder for client-facing nodes** — Tests with client-facing nodes hang without an auto-responder that injects input. But note: even WITH auto_responder, forever-alive agents still hang because the graph never terminates. Auto-responder only helps for agents with terminal nodes.

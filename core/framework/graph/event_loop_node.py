@@ -318,6 +318,7 @@ class EventLoopNode(NodeProtocol):
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing:
             tools.append(self._build_ask_user_tool())
+            tools.append(self._build_escalate_tool())
 
         logger.info(
             "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
@@ -587,7 +588,8 @@ class EventLoopNode(NodeProtocol):
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
-                if tc.get("tool_name") not in ("set_output", "ask_user") and not tc.get("is_error")
+                if tc.get("tool_name") not in ("set_output", "ask_user", "escalate_to_coder")
+                and not tc.get("is_error")
             ]
             if mcp_tool_calls:
                 fps = self._fingerprint_tool_calls(mcp_tool_calls)
@@ -1276,6 +1278,26 @@ class EventLoopNode(NodeProtocol):
                     )
                     results_by_id[tc.tool_use_id] = result
 
+                elif tc.tool_name == "escalate_to_coder":
+                    # --- Framework-level escalation handling ---
+                    if self._event_bus:
+                        await self._event_bus.emit_escalation_requested(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            reason=tc.tool_input.get("reason", ""),
+                            context=tc.tool_input.get("context", ""),
+                            execution_id=ctx.execution_id,
+                        )
+                    # Block like ask_user — the TUI loads the coder,
+                    # and /back injects a message to unblock us.
+                    user_input_requested = True
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content="Escalating to Hive Coder. You will resume when done.",
+                        is_error=False,
+                    )
+                    results_by_id[tc.tool_use_id] = result
+
                 else:
                     # --- Real tool: check for truncated args, else queue ---
                     if "_raw" in tc.tool_input:
@@ -1322,7 +1344,7 @@ class EventLoopNode(NodeProtocol):
                     continue  # shouldn't happen
 
                 # Build log entries for real tools
-                if tc.tool_name not in ("set_output", "ask_user"):
+                if tc.tool_name not in ("set_output", "ask_user", "escalate_to_coder"):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
@@ -1464,6 +1486,46 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": [],
+            },
+        )
+
+    def _build_escalate_tool(self) -> Tool:
+        """Build the synthetic escalate_to_coder tool.
+
+        Client-facing nodes call this when the user's request requires
+        capabilities beyond the current agent (code changes, feature
+        expansion, debugging).  The TUI intercepts the event and loads
+        hive_coder in the foreground.
+        """
+        return Tool(
+            name="escalate_to_coder",
+            description=(
+                "Call this tool when the user requests something you "
+                "cannot handle — a code change, feature expansion, bug "
+                "fix, or framework-level modification. This will bring "
+                "in Hive Coder, a coding agent that can read and write "
+                "files. Provide a clear reason and relevant context so "
+                "the coder can pick up where you left off."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Why you are escalating (what the user needs that you cannot do)."
+                        ),
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": (
+                            "Relevant context: what you discussed, "
+                            "what files are involved, what the user "
+                            "wants changed."
+                        ),
+                    },
+                },
+                "required": ["reason"],
             },
         )
 

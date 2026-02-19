@@ -83,6 +83,9 @@ class EventType(StrEnum):
     # Custom events
     CUSTOM = "custom"
 
+    # Escalation (agent requests handoff to hive_coder)
+    ESCALATION_REQUESTED = "escalation_requested"
+
 
 @dataclass
 class AgentEvent:
@@ -827,6 +830,25 @@ class EventBus:
                     "payload": payload,
                     "query_params": query_params or {},
                 },
+            )
+        )
+
+    async def emit_escalation_requested(
+        self,
+        stream_id: str,
+        node_id: str,
+        reason: str = "",
+        context: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit escalation requested event (agent wants hive_coder)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.ESCALATION_REQUESTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"reason": reason, "context": context},
             )
         )
 

@@ -348,6 +348,18 @@ run_agent_tests("{name}")
 
 If anything fails: read error, fix with edit_file, re-validate. Up to 3x.
 
+**CRITICAL: Testing forever-alive agents**
+Most agents use `terminal_nodes=[]` (forever-alive). This means \
+`runner.run()` NEVER returns — it hangs forever waiting for a \
+terminal node that doesn't exist. Agent tests MUST be structural:
+- Validate graph, node specs, edges, tools, prompts
+- Check goal/constraints/success criteria definitions
+- Test `AgentRunner.load()` + `_setup()` (skip if no API key)
+- NEVER call `runner.run()` or `trigger_and_wait()` in tests for \
+forever-alive agents — they will hang and time out.
+When you restructure an agent (change nodes/edges), always update \
+the tests to match. Stale tests referencing old node names will fail.
+
 ## 6. Present
 
 Show the user what you built: agent name, goal summary, graph ASCII \
@@ -429,52 +441,89 @@ guardian_node = NodeSpec(
     name="Agent Guardian",
     description=(
         "Event-driven guardian that monitors supervised agent graphs. "
-        "Triggers on EXECUTION_FAILED events from the primary graph, "
-        "assesses failure severity, and decides: ask the user for help "
-        "(if present), attempt an autonomous fix (if away), or escalate "
-        "catastrophic failures for post-mortem."
+        "Triggers on failures, stalls, tool doom loops, and constraint "
+        "violations. Assesses severity, checks user presence, and decides: "
+        "ask the user (if present), attempt autonomous fix (if away), or "
+        "escalate for post-mortem."
     ),
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
-    input_keys=["failure_event"],
+    input_keys=["event"],
     output_keys=["resolution"],
     nullable_output_keys=["resolution"],
     success_criteria=(
         "Failure is resolved — either by user guidance, autonomous fix, or documented escalation."
     ),
     system_prompt="""\
-You are the Agent Guardian — a watchdog that fires when a supervised \
-agent graph fails. Your job: triage, fix, or escalate.
+You are the Agent Guardian — a watchdog that monitors supervised agent \
+graphs. You fire on failures, stalls, doom loops, and constraint \
+violations. Your job: triage, fix, or escalate.
 
-# Context
+# Event Types
 
-You receive a failure event from an agent graph. The event contains \
-the graph_id, error message, and execution details. You also have \
-access to shared session memory and the user presence status.
+You trigger on these events:
+
+## execution_failed
+The agent graph crashed — unhandled exception, LLM error, or tool failure.
+- Read the error message and stack trace from the event data.
+- Transient errors (rate limit, timeout, network): auto-retry via restart.
+- Config errors (bad API key, missing tool): needs user input.
+- Logic bugs (bad output, crash in code): read source, fix, reload.
+- Catastrophic (data corruption): escalate, unload the agent.
+
+## node_stalled
+A node has been running too long without producing output. The LLM may \
+be stuck in a reasoning loop, waiting for input that won't come, or \
+the tool call is hanging.
+- Check what node is stalled and how long it's been running.
+- If the node is autonomous: restart the agent to break the stall.
+- If the node is client-facing: check user presence — the user may \
+  have left. Alert them or restart after a timeout.
+- If a tool call is hanging: the MCP server may be down. Restart.
+
+## node_tool_doom_loop
+The LLM is calling the same tools repeatedly without making progress. \
+This usually means the prompt is inadequate, the tool is returning \
+unhelpful errors, or the LLM is stuck in a retry loop.
+- Identify which tool is looping and what errors it's returning.
+- If it's a transient tool error: restart to reset context.
+- If it's a prompt/logic issue: read the node's source, fix the \
+  system prompt or tool configuration, then reload and restart.
+- If the tool itself is broken: unload and escalate.
+
+## constraint_violation
+The agent violated a defined constraint (e.g., token budget exceeded, \
+forbidden action attempted, output format invalid).
+- Read which constraint was violated from the event data.
+- Soft constraints (budget warning): log and notify user.
+- Hard constraints (forbidden action): halt the agent immediately, \
+  escalate to user.
+- Format violations: may be fixable by restarting with better context.
 
 # Decision Protocol
 
-1. **Assess severity.** Read the error. Is it:
-   - Transient (timeout, rate limit, network blip) -> auto-retry
-   - Configuration (bad API key, missing tool) -> needs user input
-   - Logic bug (wrong output format, infinite loop) -> needs code fix
-   - Catastrophic (data corruption, unrecoverable) -> escalate
+1. **Identify the event type** and read the event data carefully.
 
-2. **Check user presence.** Call get_user_presence().
+2. **Assess severity:**
+   - Transient / auto-recoverable -> auto-retry
+   - Configuration / environment -> needs user input
+   - Logic bug / prompt issue -> needs code fix
+   - Catastrophic / safety -> escalate immediately
+
+3. **Check user presence.** Call get_user_presence().
    - **present** (idle < 2 min): Ask the user for guidance. Present the \
-     error clearly and suggest options.
+     issue clearly and suggest options.
    - **idle** (2-10 min): Attempt autonomous fix first. If it fails, \
      queue a notification for when user returns.
    - **away** (> 10 min) or **never_seen**: Attempt autonomous fix. \
      Save escalation log via write_file if fix fails.
 
-3. **Act.**
-   - For transient errors: restart_agent(graph_id), then start_agent.
-   - For config issues: if user present, ask. If away, log and wait.
-   - For logic bugs: read the agent's source code, identify the issue, \
-     fix with edit_file, restart_agent, start_agent.
-   - For catastrophic: save detailed escalation log, unload the agent.
+4. **Act.**
+   - Auto-retry: restart_agent(graph_id), then start_agent.
+   - Config issues: if user present, ask. If away, log and wait.
+   - Code fixes: read source, fix with edit_file, restart_agent.
+   - Escalation: save detailed log, unload the agent.
 
 # Tools
 
@@ -490,12 +539,14 @@ access to shared session memory and the user presence status.
 
 # Rules
 
-- Be concise. State the problem, your assessment, and your action.
-- If asking the user, present the error and 2-3 concrete options.
+- Be concise. State the event type, your assessment, and your action.
+- If asking the user, present the issue and 2-3 concrete options.
 - After a fix attempt, verify it works before declaring success.
+- For doom loops and stalls, prefer restart first — it's the cheapest fix.
 - set_output("resolution", "...") only after the issue is resolved or \
   escalated. Use a brief description: "auto-fixed: retry after timeout", \
-  "escalated: missing API key", "user-resolved: updated config".
+  "escalated: missing API key", "user-resolved: updated config", \
+  "auto-fixed: restarted stalled node", "escalated: doom loop in tool X".
 """,
     # Placeholder — attach_guardian() replaces with filtered list at runtime
     tools=ALL_GUARDIAN_TOOLS,

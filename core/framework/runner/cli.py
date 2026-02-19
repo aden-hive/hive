@@ -1322,64 +1322,23 @@ def _launch_agent_tui(
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
-    """Browse agents and launch the interactive TUI dashboard."""
+    """Launch the interactive TUI dashboard with in-app agent picker."""
     import logging
 
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
-    exports_dir = Path("exports")
-    examples_dir = Path("examples/templates")
-    framework_agents_dir = _get_framework_agents_dir()
+    from framework.tui.app import AdenTUI
 
-    # Build list of available agent sources
-    sources = []
-    if _has_agents(framework_agents_dir):
-        sources.append(("Framework Agents", framework_agents_dir))
-    if _has_agents(exports_dir):
-        sources.append(("Your Agents (exports/)", exports_dir))
-    if _has_agents(examples_dir):
-        sources.append(("Sample Agents (examples/templates/)", examples_dir))
+    async def run_tui():
+        app = AdenTUI(
+            model=args.model,
+            no_guardian=getattr(args, "no_guardian", False),
+        )
+        await app.run_async()
 
-    if not sources:
-        print("No agents found.", file=sys.stderr)
-        return 1
-
-    # Pick source
-    if len(sources) == 1:
-        agents_dir = sources[0][1]
-    else:
-        print("\nAgent sources:\n")
-        for i, (label, _) in enumerate(sources, 1):
-            print(f"  {i}. {label}")
-        print()
-        try:
-            choice = input("Select source (number): ").strip()
-            idx = int(choice) - 1
-            if 0 <= idx < len(sources):
-                agents_dir = sources[idx][1]
-            else:
-                print("Invalid selection")
-                return 1
-        except (ValueError, EOFError, KeyboardInterrupt):
-            print()
-            return 1
-
-    # Ensure framework agents dir is on sys.path for import
-    if agents_dir == framework_agents_dir:
-        fa_str = str(framework_agents_dir)
-        if fa_str not in sys.path:
-            sys.path.insert(0, fa_str)
-
-    # Let user pick an agent
-    agent_path = _select_agent(agents_dir)
-    if not agent_path:
-        return 1
-
-    return _launch_agent_tui(
-        agent_path,
-        model=args.model,
-        no_guardian=getattr(args, "no_guardian", False),
-    )
+    asyncio.run(run_tui())
+    print("TUI session ended.")
+    return 0
 
 
 def cmd_code(args: argparse.Namespace) -> int:

@@ -663,11 +663,12 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     Args:
         command: Shell command to execute
         cwd: Working directory (relative to project root)
-        timeout: Timeout in seconds (default: 120)
+        timeout: Timeout in seconds (default: 120, max: 300)
 
     Returns:
         Combined stdout/stderr with exit code
     """
+    timeout = min(timeout, 300)  # Cap at 5 minutes
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 
     try:
@@ -1377,13 +1378,15 @@ def run_agent_tests(
             cmd,
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=120,
             env=env,
         )
     except subprocess.TimeoutExpired:
         return json.dumps(
             {
-                "error": "Tests timed out after 10 minutes",
+                "error": "Tests timed out after 120 seconds. A test may be hanging "
+                "(e.g. a client-facing node waiting for stdin). Use mock mode "
+                "or add timeouts to async tests.",
                 "command": " ".join(cmd),
             }
         )

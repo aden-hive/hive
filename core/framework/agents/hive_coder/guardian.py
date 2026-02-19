@@ -33,7 +33,12 @@ GUARDIAN_ENTRY_POINT = EntryPointSpec(
     entry_node="guardian",
     trigger_type="event",
     trigger_config={
-        "event_types": ["execution_failed"],
+        "event_types": [
+            "execution_failed",
+            "node_stalled",
+            "node_tool_doom_loop",
+            "constraint_violation",
+        ],
         "exclude_own_graph": False,
     },
     isolation_level="shared",
@@ -49,7 +54,8 @@ def attach_guardian(
     1. Registers graph lifecycle tools if not already present.
     2. Refreshes the runtime's tool list and executor.
     3. Adds the guardian node (with dynamically filtered tools) to the graph.
-    4. Registers an event-driven entry point that fires on ``execution_failed``.
+    4. Registers an event-driven entry point that fires on execution failures,
+       stalls, tool doom loops, and constraint violations.
 
     Must be called **before** ``runtime.start()``.
 
