@@ -414,9 +414,45 @@ class AgentRunner:
     def _validate_credentials(self) -> None:
         """Check that required credentials are available before spawning MCP servers.
 
-        Raises CredentialError with actionable guidance if any are missing.
+        If validation fails and stdin is a TTY, automatically launches the
+        interactive credential setup flow so the user can fix the issue
+        in-place.  Re-validates after setup succeeds.
+
+        Raises CredentialError only if setup is skipped/fails or stdin is
+        not interactive.
         """
-        validate_agent_credentials(self.graph.nodes)
+        import sys
+
+        from framework.credentials.models import CredentialError
+
+        try:
+            validate_agent_credentials(self.graph.nodes)
+            return  # All good
+        except CredentialError as e:
+            if not sys.stdin.isatty():
+                raise
+
+            # Interactive: show the error then enter credential setup
+            print(f"\n{e}", file=sys.stderr)
+
+            from framework.credentials.setup import CredentialSetupSession
+
+            session = CredentialSetupSession.from_nodes(self.graph.nodes)
+            if not session.missing:
+                # Health-check-only failure (creds present but invalid) —
+                # nothing for setup to collect.  Re-raise so the user
+                # knows they need new keys.
+                raise
+
+            result = session.run_interactive()
+            if not result.success:
+                raise CredentialError(
+                    "Credential setup incomplete. "
+                    "Run again after configuring the required credentials."
+                ) from None
+
+            # Re-validate after setup
+            validate_agent_credentials(self.graph.nodes)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):

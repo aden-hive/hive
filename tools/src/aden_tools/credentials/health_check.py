@@ -162,56 +162,59 @@ class BraveSearchHealthChecker:
             )
 
 
-class GoogleCalendarHealthChecker:
-    """Health checker for Google Calendar OAuth tokens."""
+class OAuthBearerHealthChecker:
+    """Generic health checker for OAuth2 Bearer token credentials.
 
-    ENDPOINT = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+    Validates by making a GET request with ``Authorization: Bearer <token>``
+    to the given endpoint.  Reused for Google Gmail, Google Calendar, and as
+    the automatic fallback for any credential spec that defines a
+    ``health_check_endpoint`` but has no dedicated checker.
+    """
+
     TIMEOUT = 10.0
 
-    def check(self, access_token: str) -> HealthCheckResult:
-        """
-        Validate Google Calendar token by making lightweight API call.
+    def __init__(self, endpoint: str, service_name: str = "Service"):
+        self.endpoint = endpoint
+        self.service_name = service_name
 
-        Makes a GET request for 1 calendar to verify the token works.
-        """
+    def check(self, access_token: str) -> HealthCheckResult:
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
                 response = client.get(
-                    self.ENDPOINT,
+                    self.endpoint,
                     headers={
                         "Authorization": f"Bearer {access_token}",
                         "Accept": "application/json",
                     },
-                    params={"maxResults": "1"},
                 )
 
                 if response.status_code == 200:
                     return HealthCheckResult(
                         valid=True,
-                        message="Google Calendar credentials valid",
+                        message=f"{self.service_name} credentials valid",
                     )
                 elif response.status_code == 401:
                     return HealthCheckResult(
                         valid=False,
-                        message="Google Calendar token is invalid or expired",
+                        message=f"{self.service_name} token is invalid or expired",
                         details={"status_code": 401},
                     )
                 elif response.status_code == 403:
                     return HealthCheckResult(
                         valid=False,
-                        message="Google Calendar token lacks required scopes",
-                        details={"status_code": 403, "required": "calendar"},
+                        message=f"{self.service_name} token lacks required scopes",
+                        details={"status_code": 403},
                     )
                 else:
                     return HealthCheckResult(
                         valid=False,
-                        message=f"Google Calendar API returned status {response.status_code}",
+                        message=f"{self.service_name} API returned status {response.status_code}",
                         details={"status_code": response.status_code},
                     )
         except httpx.TimeoutException:
             return HealthCheckResult(
                 valid=False,
-                message="Google Calendar API request timed out",
+                message=f"{self.service_name} API request timed out",
                 details={"error": "timeout"},
             )
         except httpx.RequestError as e:
@@ -220,9 +223,19 @@ class GoogleCalendarHealthChecker:
                 error_msg = "Request failed (details redacted for security)"
             return HealthCheckResult(
                 valid=False,
-                message=f"Failed to connect to Google Calendar: {error_msg}",
+                message=f"Failed to connect to {self.service_name}: {error_msg}",
                 details={"error": error_msg},
             )
+
+
+class GoogleCalendarHealthChecker(OAuthBearerHealthChecker):
+    """Health checker for Google Calendar OAuth tokens."""
+
+    def __init__(self):
+        super().__init__(
+            endpoint="https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1",
+            service_name="Google Calendar",
+        )
 
 
 class GoogleSearchHealthChecker:
@@ -679,12 +692,23 @@ class GoogleMapsHealthChecker:
             )
 
 
+class GoogleGmailHealthChecker(OAuthBearerHealthChecker):
+    """Health checker for Google Gmail OAuth tokens."""
+
+    def __init__(self):
+        super().__init__(
+            endpoint="https://gmail.googleapis.com/gmail/v1/users/me/profile",
+            service_name="Gmail",
+        )
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "discord": DiscordHealthChecker(),
     "hubspot": HubSpotHealthChecker(),
     "brave_search": BraveSearchHealthChecker(),
     "google_calendar_oauth": GoogleCalendarHealthChecker(),
+    "google": GoogleGmailHealthChecker(),
     "slack": SlackHealthChecker(),
     "google_search": GoogleSearchHealthChecker(),
     "google_maps": GoogleMapsHealthChecker(),
@@ -705,7 +729,12 @@ def check_credential_health(
     Args:
         credential_name: Name of the credential (e.g., 'hubspot', 'brave_search')
         credential_value: The credential value to validate
-        **kwargs: Additional arguments passed to the checker (e.g., cse_id for Google)
+        **kwargs: Additional arguments passed to the checker.
+            - cse_id: CSE ID for Google Custom Search
+            - health_check_endpoint: Fallback endpoint URL when no dedicated
+              checker is registered. Used automatically by
+              ``validate_agent_credentials`` from the credential spec.
+            - health_check_method: HTTP method for fallback (default GET).
 
     Returns:
         HealthCheckResult with validation status
@@ -720,12 +749,19 @@ def check_credential_health(
     checker = HEALTH_CHECKERS.get(credential_name)
 
     if checker is None:
-        # No health checker registered - assume valid
-        return HealthCheckResult(
-            valid=True,
-            message=f"No health checker for '{credential_name}', assuming valid",
-            details={"no_checker": True},
-        )
+        # No dedicated checker — try generic fallback using the spec's endpoint
+        endpoint = kwargs.get("health_check_endpoint")
+        if endpoint:
+            checker = OAuthBearerHealthChecker(
+                endpoint=endpoint,
+                service_name=credential_name.replace("_", " ").title(),
+            )
+        else:
+            return HealthCheckResult(
+                valid=True,
+                message=f"No health checker for '{credential_name}', assuming valid",
+                details={"no_checker": True},
+            )
 
     # Special case for Google which needs CSE ID
     if credential_name == "google_search" and "cse_id" in kwargs:

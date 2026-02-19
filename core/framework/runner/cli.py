@@ -500,6 +500,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             try:
                 # Load runner inside the async loop to ensure strict loop affinity
                 # (only one load — avoids spawning duplicate MCP subprocesses)
+                # AgentRunner handles credential setup interactively when stdin is a TTY.
                 try:
                     runner = AgentRunner.load(
                         args.agent_path,
@@ -507,36 +508,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                     )
                 except CredentialError as e:
                     print(f"\n{e}", file=sys.stderr)
-                    # Offer interactive credential setup if running in a terminal
-                    if sys.stdin.isatty():
-                        print()
-                        try:
-                            choice = input("Would you like to set up credentials now? [Y/n]: ")
-                            choice = choice.strip()
-                        except (EOFError, KeyboardInterrupt):
-                            print()
-                            return
-                        if choice.lower() != "n":
-                            from framework.credentials.setup import CredentialSetupSession
-
-                            session = CredentialSetupSession.from_agent_path(args.agent_path)
-                            result = session.run_interactive()
-                            if result.success:
-                                # Retry loading with credentials now configured
-                                try:
-                                    runner = AgentRunner.load(args.agent_path, model=args.model)
-                                except CredentialError as retry_e:
-                                    print(f"\n{retry_e}", file=sys.stderr)
-                                    return
-                                except Exception as retry_e:
-                                    print(f"Error loading agent: {retry_e}")
-                                    return
-                            else:
-                                return
-                        else:
-                            return
-                    else:
-                        return
+                    return
                 except Exception as e:
                     print(f"Error loading agent: {e}")
                     return
@@ -588,6 +560,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 0
     else:
         # Standard execution — load runner here (not shared with TUI path)
+        # AgentRunner handles credential setup interactively when stdin is a TTY.
         try:
             runner = AgentRunner.load(
                 args.agent_path,
@@ -595,35 +568,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
-            # Offer interactive credential setup if running in a terminal
-            if sys.stdin.isatty():
-                print()
-                try:
-                    choice = input("Would you like to set up credentials now? [Y/n]: ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return 1
-                if choice.lower() != "n":
-                    from framework.credentials.setup import CredentialSetupSession
-
-                    session = CredentialSetupSession.from_agent_path(args.agent_path)
-                    result = session.run_interactive()
-                    if result.success:
-                        # Retry loading with credentials now configured
-                        try:
-                            runner = AgentRunner.load(args.agent_path, model=args.model)
-                        except CredentialError as retry_e:
-                            print(f"\n{retry_e}", file=sys.stderr)
-                            return 1
-                        except Exception as retry_e:
-                            print(f"Error loading agent: {retry_e}")
-                            return 1
-                    else:
-                        return 1
-                else:
-                    return 1
-            else:
-                return 1
+            return 1
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -1394,6 +1339,7 @@ def _launch_agent_tui(
     from framework.tui.app import AdenTUI
 
     async def run_with_tui():
+        # AgentRunner handles credential setup interactively when stdin is a TTY.
         try:
             runner = AgentRunner.load(
                 agent_path,
@@ -1401,35 +1347,7 @@ def _launch_agent_tui(
             )
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
-            # Offer interactive credential setup if running in a terminal
-            if sys.stdin.isatty():
-                print()
-                try:
-                    choice = input("Would you like to set up credentials now? [Y/n]: ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return
-                if choice.lower() != "n":
-                    from framework.credentials.setup import CredentialSetupSession
-
-                    session = CredentialSetupSession.from_agent_path(agent_path)
-                    result = session.run_interactive()
-                    if result.success:
-                        # Retry loading with credentials now configured
-                        try:
-                            runner = AgentRunner.load(agent_path, model=model)
-                        except CredentialError as retry_e:
-                            print(f"\n{retry_e}", file=sys.stderr)
-                            return
-                        except Exception as retry_e:
-                            print(f"Error loading agent: {retry_e}")
-                            return
-                    else:
-                        return
-                else:
-                    return
-            else:
-                return
+            return
         except Exception as e:
             print(f"Error loading agent: {e}")
             return

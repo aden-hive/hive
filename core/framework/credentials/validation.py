@@ -47,18 +47,18 @@ class _CredentialCheck:
     help_url: str = ""
 
 
-def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
-    """Check that required credentials are available before running an agent.
+def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = True) -> None:
+    """Check that required credentials are available and valid before running an agent.
 
-    Uses CredentialStoreAdapter.default() which includes Aden sync support,
-    correctly resolving OAuth credentials stored under hashed IDs.
-
-    Prints a summary of all credentials and their sources (encrypted store, env var).
-    Raises CredentialError with actionable guidance if any are missing.
+    Two-phase validation:
+    1. **Presence** — is the credential set (env var, encrypted store, or Aden sync)?
+    2. **Health check** — does the credential actually work? Uses each tool's
+       registered ``check_credential_health`` endpoint (lightweight HTTP call).
 
     Args:
         nodes: List of NodeSpec objects from the agent graph.
         quiet: If True, suppress the credential summary output.
+        verify: If True (default), run health checks on present credentials.
     """
     # Collect required tools and node types
     required_tools = {tool for node in nodes if node.tools for tool in node.tools}
@@ -72,17 +72,17 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
     from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
     from framework.credentials.store import CredentialStore
 
-    # Build credential store
+    # Build credential store.
+    # Env vars take priority — if a user explicitly exports a fresh key it
+    # must win over a potentially stale value in the encrypted store.
     env_mapping = {
         (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
     }
-    storages: list = [EnvVarStorage(env_mapping=env_mapping)]
+    env_storage = EnvVarStorage(env_mapping=env_mapping)
     if os.environ.get("HIVE_CREDENTIAL_KEY"):
-        storages.insert(0, EncryptedFileStorage())
-    if len(storages) == 1:
-        storage = storages[0]
+        storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
     else:
-        storage = CompositeStorage(primary=storages[0], fallbacks=storages[1:])
+        storage = env_storage
     store = CredentialStore(storage=storage)
 
     # Build reverse mappings
@@ -95,7 +95,10 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
             node_type_to_cred[nt] = cred_name
 
     missing: list[str] = []
+    invalid: list[str] = []
     checked: set[str] = set()
+    # Credentials that are present and should be health-checked
+    to_verify: list[tuple[str, str]] = []  # (cred_name, used_by_label)
 
     # Check tool credentials
     for tool_name in sorted(required_tools):
@@ -105,12 +108,17 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
         checked.add(cred_name)
         spec = CREDENTIAL_SPECS[cred_name]
         cred_id = spec.credential_id or cred_name
-        if spec.required and not store.is_available(cred_id):
-            affected = sorted(t for t in required_tools if t in spec.tools)
-            entry = f"  {spec.env_var} for {', '.join(affected)}"
+        if not spec.required:
+            continue
+        affected = sorted(t for t in required_tools if t in spec.tools)
+        label = ", ".join(affected)
+        if not store.is_available(cred_id):
+            entry = f"  {spec.env_var} for {label}"
             if spec.help_url:
                 entry += f"\n    Get it at: {spec.help_url}"
             missing.append(entry)
+        elif verify and spec.health_check_endpoint:
+            to_verify.append((cred_name, label))
 
     # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
     for nt in sorted(node_types):
@@ -120,18 +128,60 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
         checked.add(cred_name)
         spec = CREDENTIAL_SPECS[cred_name]
         cred_id = spec.credential_id or cred_name
-        if spec.required and not store.is_available(cred_id):
-            affected_types = sorted(t for t in node_types if t in spec.node_types)
-            entry = f"  {spec.env_var} for {', '.join(affected_types)} nodes"
+        if not spec.required:
+            continue
+        affected_types = sorted(t for t in node_types if t in spec.node_types)
+        label = ", ".join(affected_types) + " nodes"
+        if not store.is_available(cred_id):
+            entry = f"  {spec.env_var} for {label}"
             if spec.help_url:
                 entry += f"\n    Get it at: {spec.help_url}"
             missing.append(entry)
+        elif verify and spec.health_check_endpoint:
+            to_verify.append((cred_name, label))
 
-    if missing:
+    # Phase 2: health-check present credentials
+    if to_verify:
+        try:
+            from aden_tools.credentials import check_credential_health
+        except ImportError:
+            check_credential_health = None  # type: ignore[assignment]
+
+        if check_credential_health is not None:
+            for cred_name, label in to_verify:
+                spec = CREDENTIAL_SPECS[cred_name]
+                cred_id = spec.credential_id or cred_name
+                value = store.get(cred_id)
+                if not value:
+                    continue
+                try:
+                    result = check_credential_health(
+                        cred_name,
+                        value,
+                        health_check_endpoint=spec.health_check_endpoint,
+                        health_check_method=spec.health_check_method,
+                    )
+                    if not result.valid:
+                        entry = f"  {spec.env_var} for {label} — {result.message}"
+                        if spec.help_url:
+                            entry += f"\n    Get a new key at: {spec.help_url}"
+                        invalid.append(entry)
+                except Exception as exc:
+                    logger.debug("Health check for %s failed: %s", cred_name, exc)
+
+    errors = missing + invalid
+    if errors:
         from framework.credentials.models import CredentialError
 
-        lines = ["Missing required credentials:\n"]
-        lines.extend(missing)
+        lines: list[str] = []
+        if missing:
+            lines.append("Missing credentials:\n")
+            lines.extend(missing)
+        if invalid:
+            if missing:
+                lines.append("")
+            lines.append("Invalid or expired credentials:\n")
+            lines.extend(invalid)
         lines.append(
             "\nTo fix: run /hive-credentials in Claude Code."
             "\nIf you've already set up credentials, restart your terminal to load them."
