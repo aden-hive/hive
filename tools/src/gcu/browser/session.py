@@ -3,13 +3,19 @@ Browser session management.
 
 Manages Playwright browser instances with support for multiple profiles,
 each with independent browser context and multiple tabs.
+
+Supports two modes:
+- Ephemeral: Fresh browser state each time (default for testing/CI)
+- Persistent: Chrome profile persisted to disk (cookies, history, storage retained)
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from playwright.async_api import (
@@ -20,6 +26,9 @@ from playwright.async_api import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Enable debug logging for browser session
+logging.basicConfig(level=logging.DEBUG, format="[%(name)s] %(levelname)s: %(message)s")
 
 # Browser User-Agent for stealth mode
 BROWSER_USER_AGENT = (
@@ -39,10 +48,13 @@ class BrowserSession:
     Manages a browser session with multiple tabs.
 
     Each session corresponds to a profile and maintains:
-    - A single browser instance
+    - A single browser instance (or persistent context)
     - A browser context with shared cookies/storage
     - Multiple pages (tabs)
     - Console message capture per tab
+
+    When persistent=True, the browser profile is stored at:
+    ~/.hive/agents/{agent_name}/browser/{profile}/
     """
 
     profile: str
@@ -54,42 +66,167 @@ class BrowserSession:
     _playwright: Any = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    async def start(self, headless: bool = True) -> dict:
-        """Start the browser."""
+    # Persistent profile fields
+    persistent: bool = False
+    user_data_dir: Path | None = None
+    cdp_port: int | None = None
+
+    def _is_running(self) -> bool:
+        """Check if browser is currently running."""
+        if self.persistent:
+            # Persistent context doesn't have a separate browser object
+            return self.context is not None
+        return self.browser is not None and self.browser.is_connected()
+
+    async def start(self, headless: bool = True, persistent: bool = True) -> dict:
+        """
+        Start the browser.
+
+        Args:
+            headless: Run browser in headless mode (default: True)
+            persistent: Use persistent profile for cookies/storage (default: True)
+                When True, browser data persists at ~/.hive/agents/{agent}/browser/{profile}/
+
+        Returns:
+            Dict with start status, including user_data_dir and cdp_port when persistent
+        """
         async with self._lock:
-            if self.browser and self.browser.is_connected():
-                return {"ok": True, "status": "already_running", "profile": self.profile}
+            if self._is_running():
+                return {
+                    "ok": True,
+                    "status": "already_running",
+                    "profile": self.profile,
+                    "persistent": self.persistent,
+                    "user_data_dir": str(self.user_data_dir) if self.user_data_dir else None,
+                    "cdp_port": self.cdp_port,
+                }
 
             self._playwright = await async_playwright().start()
-            self.browser = await self._playwright.chromium.launch(
-                headless=headless,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-blink-features=AutomationControlled",
-                ],
-            )
-            self.context = await self.browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent=BROWSER_USER_AGENT,
-                locale="en-US",
-            )
-            return {"ok": True, "status": "started", "profile": self.profile}
+            self.persistent = persistent
+
+            # Common Chrome flags
+            chrome_args = [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--no-first-run",
+                "--no-default-browser-check",
+            ]
+
+            if persistent:
+                # Get storage path from environment (set by AgentRunner)
+                storage_path_str = os.environ.get("HIVE_STORAGE_PATH")
+                agent_name = os.environ.get("HIVE_AGENT_NAME", "default")
+
+                logger.debug(f"Environment: HIVE_STORAGE_PATH={storage_path_str}")
+                logger.debug(f"Environment: HIVE_AGENT_NAME={agent_name}")
+
+                if storage_path_str:
+                    self.user_data_dir = Path(storage_path_str) / "browser" / self.profile
+                else:
+                    # Fallback to ~/.hive/agents/{agent}/browser/{profile}
+                    self.user_data_dir = (
+                        Path.home() / ".hive" / "agents" / agent_name / "browser" / self.profile
+                    )
+
+                logger.debug(f"User data dir: {self.user_data_dir}")
+
+                self.user_data_dir.mkdir(parents=True, exist_ok=True)
+
+                # Allocate CDP port
+                from .port_manager import allocate_port
+
+                self.cdp_port = allocate_port(self.profile)
+                chrome_args.append(f"--remote-debugging-port={self.cdp_port}")
+
+                logger.info(
+                    f"Starting persistent browser: profile={self.profile}, "
+                    f"user_data_dir={self.user_data_dir}, cdp_port={self.cdp_port}"
+                )
+
+                # Use launch_persistent_context for true Chrome profile persistence
+                # Note: Returns BrowserContext directly, no separate Browser object
+                self.context = await self._playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(self.user_data_dir),
+                    headless=headless,
+                    viewport={"width": 1920, "height": 1080},
+                    user_agent=BROWSER_USER_AGENT,
+                    locale="en-US",
+                    args=chrome_args,
+                )
+                self.browser = None  # No separate browser object with persistent context
+
+                # Register existing pages from restored session
+                for page in self.context.pages:
+                    target_id = f"tab_{id(page)}"
+                    self.pages[target_id] = page
+                    self.console_messages[target_id] = []
+                    page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
+                    if self.active_page_id is None:
+                        self.active_page_id = target_id
+
+                # Open about:blank as initial tab if no pages exist
+                if not self.context.pages:
+                    page = await self.context.new_page()
+                    target_id = f"tab_{id(page)}"
+                    self.pages[target_id] = page
+                    self.active_page_id = target_id
+                    self.console_messages[target_id] = []
+                    page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
+                    await page.goto("about:blank")
+            else:
+                # Ephemeral mode - original behavior
+                logger.info(f"Starting ephemeral browser: profile={self.profile}")
+                self.browser = await self._playwright.chromium.launch(
+                    headless=headless,
+                    args=chrome_args,
+                )
+                self.context = await self.browser.new_context(
+                    viewport={"width": 1920, "height": 1080},
+                    user_agent=BROWSER_USER_AGENT,
+                    locale="en-US",
+                )
+
+            return {
+                "ok": True,
+                "status": "started",
+                "profile": self.profile,
+                "persistent": self.persistent,
+                "user_data_dir": str(self.user_data_dir) if self.user_data_dir else None,
+                "cdp_port": self.cdp_port,
+            }
 
     async def stop(self) -> dict:
         """Stop the browser and clean up resources."""
         async with self._lock:
+            # Release CDP port if allocated
+            if self.cdp_port:
+                from .port_manager import release_port
+
+                release_port(self.cdp_port)
+                self.cdp_port = None
+
+            # Close context (works for both persistent and ephemeral)
+            if self.context:
+                await self.context.close()
+                self.context = None
+
+            # Close browser if not using persistent context
             if self.browser:
                 await self.browser.close()
                 self.browser = None
+
             if self._playwright:
                 await self._playwright.stop()
                 self._playwright = None
-            self.context = None
+
             self.pages.clear()
             self.active_page_id = None
             self.console_messages.clear()
+            self.user_data_dir = None
+            self.persistent = False
+
             return {"ok": True, "status": "stopped", "profile": self.profile}
 
     async def status(self) -> dict:
@@ -97,15 +234,18 @@ class BrowserSession:
         return {
             "ok": True,
             "profile": self.profile,
-            "running": self.browser is not None and self.browser.is_connected(),
+            "running": self._is_running(),
+            "persistent": self.persistent,
+            "user_data_dir": str(self.user_data_dir) if self.user_data_dir else None,
+            "cdp_port": self.cdp_port,
             "tabs": len(self.pages),
             "active_tab": self.active_page_id,
         }
 
     async def ensure_running(self) -> None:
         """Ensure browser is running, starting it if necessary."""
-        if not self.browser or not self.browser.is_connected():
-            await self.start()
+        if not self._is_running():
+            await self.start(persistent=self.persistent)
 
     async def open_tab(self, url: str) -> dict:
         """Open a new tab with the given URL."""

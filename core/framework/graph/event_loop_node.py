@@ -1271,6 +1271,11 @@ class EventLoopNode(NodeProtocol):
                 elif tc.tool_name == "delegate_to_sub_agent":
                     # --- Framework-level subagent delegation ---
                     # Queue for parallel execution in Phase 2
+                    logger.info(
+                        "🔄 LLM requesting subagent delegation: agent_id='%s', task='%s'",
+                        tc.tool_input.get("agent_id", "?"),
+                        (tc.tool_input.get("task", "")[:100] + "...") if len(tc.tool_input.get("task", "")) > 100 else tc.tool_input.get("task", ""),
+                    )
                     pending_subagent.append(tc)
 
                 else:
@@ -2564,6 +2569,20 @@ class EventLoopNode(NodeProtocol):
         """
         from framework.graph.node import NodeContext, SharedMemory
 
+        # Log subagent invocation start
+        logger.info(
+            "\n" + "=" * 60 + "\n"
+            "🤖 SUBAGENT INVOCATION\n"
+            "=" * 60 + "\n"
+            "Parent Node: %s\n"
+            "Subagent ID: %s\n"
+            "Task: %s\n"
+            + "=" * 60,
+            ctx.node_id,
+            agent_id,
+            task[:500] + "..." if len(task) > 500 else task,
+        )
+
         # 1. Validate agent exists in registry
         if agent_id not in ctx.node_registry:
             return ToolResult(
@@ -2599,6 +2618,18 @@ class EventLoopNode(NodeProtocol):
             if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
         ]
 
+        logger.info(
+            "📦 Subagent '%s' configuration:\n"
+            "   - System prompt: %s\n"
+            "   - Tools available (%d): %s\n"
+            "   - Memory keys inherited: %s",
+            agent_id,
+            (subagent_spec.system_prompt[:200] + "...") if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200 else subagent_spec.system_prompt,
+            len(subagent_tools),
+            [t.name for t in subagent_tools],
+            list(parent_data.keys()),
+        )
+
         # 4. Build subagent context
         subagent_ctx = NodeContext(
             runtime=ctx.runtime,
@@ -2631,9 +2662,26 @@ class EventLoopNode(NodeProtocol):
         )
 
         try:
+            logger.info("🚀 Starting subagent '%s' execution...", agent_id)
             start_time = time.time()
             result = await subagent_node.execute(subagent_ctx)
             latency_ms = int((time.time() - start_time) * 1000)
+
+            logger.info(
+                "\n" + "-" * 60 + "\n"
+                "✅ SUBAGENT '%s' COMPLETED\n"
+                "-" * 60 + "\n"
+                "Success: %s\n"
+                "Latency: %dms\n"
+                "Tokens used: %s\n"
+                "Output keys: %s\n"
+                + "-" * 60,
+                agent_id,
+                result.success,
+                latency_ms,
+                result.tokens_used,
+                list(result.output.keys()) if result.output else [],
+            )
 
             result_json = {
                 "message": (
@@ -2657,7 +2705,15 @@ class EventLoopNode(NodeProtocol):
             )
 
         except Exception as e:
-            logger.exception("Subagent '%s' raised exception", agent_id)
+            logger.exception(
+                "\n" + "!" * 60 + "\n"
+                "❌ SUBAGENT '%s' FAILED\n"
+                "!" * 60 + "\n"
+                "Error: %s\n"
+                + "!" * 60,
+                agent_id,
+                str(e),
+            )
             result_json = {
                 "message": f"Sub-agent '{agent_id}' raised exception: {e}",
                 "data": None,
