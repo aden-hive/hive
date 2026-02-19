@@ -65,9 +65,12 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
     node_types = {node.node_type for node in nodes}
 
     try:
-        from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+        from aden_tools.credentials import CREDENTIAL_SPECS
     except ImportError:
         return  # aden_tools not installed, skip check
+
+    from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+    from framework.credentials.store import CredentialStore
 
     # Build credential store
     env_mapping = {
@@ -128,10 +131,7 @@ def validate_agent_credentials(nodes: list, quiet: bool = False) -> None:
         from framework.credentials.models import CredentialError
 
         lines = ["Missing required credentials:\n"]
-        for c in missing:
-            lines.append(f"  {c.env_var} for {c.used_by}")
-            if c.help_url:
-                lines.append(f"    Get it at: {c.help_url}")
+        lines.extend(missing)
         lines.append(
             "\nTo fix: run /hive-credentials in Claude Code."
             "\nIf you've already set up credentials, restart your terminal to load them."
