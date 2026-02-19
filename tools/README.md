@@ -111,7 +111,7 @@ python mcp_server.py
 
 | Tool | Description |
 | ---- | ----------- |
-| `gmail_*` | Read, send, reply, draft, and manage Gmail messages |
+| `gmail_*` | Read, reply, draft, and manage Gmail messages |
 | `send_email` | Send email via SMTP |
 | `slack_*` | Send messages, manage channels, users, and files in Slack |
 | `discord_send_message`, `discord_get_messages`, `discord_list_channels`, `discord_list_guilds` | Send and read Discord messages |
