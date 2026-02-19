@@ -353,11 +353,21 @@ class AdenTUI(App):
         self.status_bar.set_graph_id(f"Loading {agent_name}...")
         self.notify(f"Loading agent: {agent_name}...", timeout=3)
 
-        # 3. Load new agent
+        # 3. Load new agent (run blocking I/O in thread to avoid freezing the TUI)
+        import asyncio
+        import functools
+
+        loop = asyncio.get_event_loop()
         try:
-            runner = AgentRunner.load(agent_path, model=self._model)
+            load_fn = functools.partial(
+                AgentRunner.load,
+                agent_path,
+                model=self._model,
+                interactive=False,
+            )
+            runner = await loop.run_in_executor(None, load_fn)
             if runner._agent_runtime is None:
-                runner._setup()
+                await loop.run_in_executor(None, runner._setup)
 
             if not self._no_guardian and runner._agent_runtime:
                 from framework.agents.hive_coder.guardian import attach_guardian
@@ -369,9 +379,12 @@ class AdenTUI(App):
 
             self._runner = runner
             self.runtime = runner._agent_runtime
-        except CredentialError:
+        except CredentialError as e:
             self.status_bar.set_graph_id("")
-            self._show_credential_setup(str(agent_path))
+            self._show_credential_setup(
+                str(agent_path),
+                credential_error=e,
+            )
             return
         except Exception as e:
             self.status_bar.set_graph_id("")
@@ -392,21 +405,29 @@ class AdenTUI(App):
         self,
         agent_path: str,
         on_cancel: object | None = None,
+        credential_error: Exception | None = None,
     ) -> None:
         """Show the credential setup screen for an agent with missing credentials.
 
         Args:
             agent_path: Path to the agent that needs credentials.
             on_cancel: Callable to invoke if the user skips/cancels setup.
+            credential_error: The CredentialError from validation (carries
+                ``failed_cred_names`` for both missing and invalid creds).
         """
-        from framework.credentials.setup import CredentialSetupSession
+        from framework.credentials.validation import build_setup_session_from_error
         from framework.tui.screens.credential_setup import CredentialSetupScreen
 
-        session = CredentialSetupSession.from_agent_path(agent_path)
+        session = build_setup_session_from_error(
+            credential_error or Exception("unknown"),
+            agent_path=agent_path,
+        )
 
         if not session.missing:
+            self.status_bar.set_graph_id("")
             self.notify(
-                "Credential error but no missing credentials detected",
+                "Credential error but no missing credentials detected. "
+                "Run 'hive setup-credentials' from the terminal.",
                 severity="error",
                 timeout=10,
             )
@@ -419,6 +440,7 @@ class AdenTUI(App):
                 # Credentials saved — retry loading the agent
                 self._do_load_agent(agent_path)
             else:
+                self.status_bar.set_graph_id("")
                 self.notify(
                     "Credential setup skipped. Agent not loaded.",
                     severity="warning",
@@ -525,10 +547,20 @@ class AdenTUI(App):
         framework_agents_dir = Path(__file__).resolve().parent.parent / "agents"
         hive_coder_path = framework_agents_dir / "hive_coder"
 
+        import asyncio
+        import functools
+
+        loop = asyncio.get_event_loop()
         try:
-            runner = AgentRunner.load(hive_coder_path, model=self._model)
+            load_fn = functools.partial(
+                AgentRunner.load,
+                str(hive_coder_path),
+                model=self._model,
+                interactive=False,
+            )
+            runner = await loop.run_in_executor(None, load_fn)
             if runner._agent_runtime is None:
-                runner._setup()
+                await loop.run_in_executor(None, runner._setup)
 
             coder_runtime = runner._agent_runtime
             coder_runtime._graph_id = "hive_coder"
@@ -544,13 +576,12 @@ class AdenTUI(App):
 
             self._runner = runner
             self.runtime = coder_runtime
-        except CredentialError:
+        except CredentialError as e:
             self.status_bar.set_graph_id("")
-            coder_path = str(hive_coder_path)
-            self.call_from_thread(
-                self._show_credential_setup,
-                coder_path,
-                self._restore_from_escalation_stack,
+            self._show_credential_setup(
+                str(hive_coder_path),
+                on_cancel=self._restore_from_escalation_stack,
+                credential_error=e,
             )
             return
         except Exception as e:
@@ -864,10 +895,6 @@ class AdenTUI(App):
                 self.chat_repl.handle_node_started(event.node_id or "")
             elif et == EventType.NODE_LOOP_ITERATION:
                 self.chat_repl.handle_loop_iteration(event.data.get("iteration", 0))
-
-            # Track active node in chat_repl for mid-execution input
-            if et == EventType.NODE_LOOP_STARTED:
-                self.chat_repl.handle_node_started(event.node_id or "")
             elif et == EventType.NODE_LOOP_COMPLETED:
                 self.chat_repl.handle_node_completed(event.node_id or "")
 

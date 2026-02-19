@@ -24,6 +24,7 @@ Ctrl+E  # or /coder in chat
 ```
 
 The Coder ships with:
+
 - **Reference documentation** -- anti-patterns, construction guide, and design patterns baked into its system prompt
 - **Guardian watchdog** -- an event-driven monitor that catches agent failures and triggers automatic remediation
 - **Coder Tools MCP server** -- file I/O, fuzzy-match editing, git snapshots, and sandboxed shell execution (`tools/coder_tools_server.py`)
@@ -90,13 +91,13 @@ The quickstart script auto-detects Claude Code subscriptions and ZAI Code instal
 
 ### New Tool Integrations
 
-| Tool | Description | Contributor |
-|------|-------------|-------------|
-| **Discord** | 4 MCP tools (`discord_list_guilds`, `discord_list_channels`, `discord_send_message`, `discord_get_messages`) with rate-limit retry and channel filtering | @mishrapravin114 |
-| **Exa Search API** | 4 AI-powered search tools (`exa_search`, `exa_find_similar`, `exa_get_contents`, `exa_answer`) with neural/keyword search, domain filters, and citation-backed answers | @JeetKaria06 |
-| **Razorpay** | 6 payment processing tools for payments, invoices, payment links, and refunds with HTTP Basic Auth | @shivamshahi07 |
-| **Google Docs** | Document creation, reading, and editing with OAuth credential support | @haliaeetusvocifer |
-| **Gmail enhancements** | Expanded mail operations for inbox management | @bryanadenhq |
+| Tool                   | Description                                                                                                                                                            | Contributor        |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| **Discord**            | 4 MCP tools (`discord_list_guilds`, `discord_list_channels`, `discord_send_message`, `discord_get_messages`) with rate-limit retry and channel filtering               | @mishrapravin114   |
+| **Exa Search API**     | 4 AI-powered search tools (`exa_search`, `exa_find_similar`, `exa_get_contents`, `exa_answer`) with neural/keyword search, domain filters, and citation-backed answers | @JeetKaria06       |
+| **Razorpay**           | 6 payment processing tools for payments, invoices, payment links, and refunds with HTTP Basic Auth                                                                     | @shivamshahi07     |
+| **Google Docs**        | Document creation, reading, and editing with OAuth credential support                                                                                                  | @haliaeetusvocifer |
+| **Gmail enhancements** | Expanded mail operations for inbox management                                                                                                                          | @bryanadenhq       |
 
 ### Infrastructure
 
@@ -184,7 +185,7 @@ NodeSpec(node_type="function", function=my_func, ...)
 NodeSpec(node_type="event_loop", ...)  # or just omit node_type (it's the default now)
 ```
 
-If your agents set `max_node_visits=1` explicitly, they'll still work. The only change is the *default* -- new agents without an explicit value now get unlimited visits.
+If your agents set `max_node_visits=1` explicitly, they'll still work. The only change is the _default_ -- new agents without an explicit value now get unlimited visits.
 
 To try the new Hive Coder:
 

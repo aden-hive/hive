@@ -350,6 +350,7 @@ class AgentRunner:
         model: str | None = None,
         intro_message: str = "",
         runtime_config: "AgentRuntimeConfig | None" = None,
+        interactive: bool = True,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -363,6 +364,8 @@ class AgentRunner:
             model: Model to use (reads from agent config or ~/.hive/configuration.json if None)
             intro_message: Optional greeting shown to user on TUI load
             runtime_config: Optional AgentRuntimeConfig (webhook settings, etc.)
+            interactive: If True (default), offer interactive credential setup on failure.
+                Set to False when called from the TUI (which handles setup via its own screen).
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -371,6 +374,7 @@ class AgentRunner:
         self.model = model or self._resolve_default_model()
         self.intro_message = intro_message
         self.runtime_config = runtime_config
+        self._interactive = interactive
 
         # Set up storage
         if storage_path:
@@ -414,9 +418,47 @@ class AgentRunner:
     def _validate_credentials(self) -> None:
         """Check that required credentials are available before spawning MCP servers.
 
-        Raises CredentialError with actionable guidance if any are missing.
+        If ``interactive`` is True and stdin is a TTY, automatically launches
+        the interactive credential setup flow so the user can fix the issue
+        in-place.  Re-validates after setup succeeds.
+
+        When ``interactive`` is False (e.g. TUI callers), the CredentialError
+        propagates immediately so the caller can handle it with its own UI.
         """
-        validate_agent_credentials(self.graph.nodes)
+        if not self._interactive:
+            # Let the CredentialError propagate — caller handles UI.
+            validate_agent_credentials(self.graph.nodes)
+            return
+
+        import sys
+
+        from framework.credentials.models import CredentialError
+
+        try:
+            validate_agent_credentials(self.graph.nodes)
+            return  # All good
+        except CredentialError as e:
+            if not sys.stdin.isatty():
+                raise
+
+            # Interactive: show the error then enter credential setup
+            print(f"\n{e}", file=sys.stderr)
+
+            from framework.credentials.validation import build_setup_session_from_error
+
+            session = build_setup_session_from_error(e, nodes=self.graph.nodes)
+            if not session.missing:
+                raise
+
+            result = session.run_interactive()
+            if not result.success:
+                raise CredentialError(
+                    "Credential setup incomplete. "
+                    "Run again after configuring the required credentials."
+                ) from None
+
+            # Re-validate after setup
+            validate_agent_credentials(self.graph.nodes)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -461,6 +503,7 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str | None = None,
+        interactive: bool = True,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -474,6 +517,8 @@ class AgentRunner:
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to ~/.hive/agents/{name})
             model: LLM model to use (reads from agent's default_config if None)
+            interactive: If True (default), offer interactive credential setup.
+                Set to False from TUI callers that handle setup via their own UI.
 
         Returns:
             AgentRunner instance ready to run
@@ -550,6 +595,7 @@ class AgentRunner:
                 model=model,
                 intro_message=intro_message,
                 runtime_config=agent_runtime_config,
+                interactive=interactive,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
@@ -567,6 +613,7 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+            interactive=interactive,
         )
 
     def register_tool(

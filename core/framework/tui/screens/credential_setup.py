@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
@@ -15,6 +17,10 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
     """Modal screen for configuring missing agent credentials.
 
     Shows a form with one password Input per missing credential.
+    For Aden-backed credentials (``aden_supported=True``), prompts for
+    ``ADEN_API_KEY`` and runs the Aden sync flow instead of storing a
+    raw value.
+
     Returns True on successful save, or None on cancel/skip.
     """
 
@@ -76,6 +82,13 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
         super().__init__()
         self._session = session
         self._missing: list[MissingCredential] = session.missing
+        # Track which credentials need Aden sync vs direct API key
+        self._aden_creds: set[int] = set()
+        self._needs_aden_key = False
+        for i, cred in enumerate(self._missing):
+            if cred.aden_supported and not cred.direct_api_key_supported:
+                self._aden_creds.add(i)
+                self._needs_aden_key = True
 
     def compose(self) -> ComposeResult:
         n = len(self._missing)
@@ -86,7 +99,28 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
                 id="cred-subtitle",
             )
             with VerticalScroll(id="cred-scroll"):
+                # If any credential needs Aden, show ADEN_API_KEY input first
+                if self._needs_aden_key:
+                    aden_key = os.environ.get("ADEN_API_KEY", "")
+                    with Vertical(classes="cred-entry"):
+                        yield Label("[bold]ADEN_API_KEY[/bold]")
+                        aden_names = [
+                            self._missing[i].credential_name for i in sorted(self._aden_creds)
+                        ]
+                        yield Label(f"[dim]Required for OAuth sync: {', '.join(aden_names)}[/dim]")
+                        yield Label("[cyan]Get key:[/cyan] https://hive.adenhq.com")
+                        yield Input(
+                            placeholder="Paste ADEN_API_KEY..."
+                            if not aden_key
+                            else "Already set (leave blank to keep)",
+                            password=True,
+                            id="key-aden",
+                        )
+
+                # Show direct API key inputs for non-Aden credentials
                 for i, cred in enumerate(self._missing):
+                    if i in self._aden_creds:
+                        continue  # Handled via Aden sync above
                     with Vertical(classes="cred-entry"):
                         yield Label(f"[bold]{cred.env_var}[/bold]")
                         affected = cred.tools or cred.node_types
@@ -117,11 +151,39 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
 
     def _save_credentials(self) -> None:
         """Collect inputs, store credentials, and dismiss."""
-        # Init encryption key (generates one if missing)
         self._session._ensure_credential_key()
 
         configured = 0
+
+        # Handle Aden-backed credentials
+        if self._needs_aden_key:
+            aden_input = self.query_one("#key-aden", Input)
+            aden_key = aden_input.value.strip()
+            if aden_key:
+                os.environ["ADEN_API_KEY"] = aden_key
+                # Persist to shell config
+                try:
+                    from aden_tools.credentials.shell_config import (
+                        add_env_var_to_shell_config,
+                    )
+
+                    add_env_var_to_shell_config(
+                        "ADEN_API_KEY",
+                        aden_key,
+                        comment="Aden Platform API key",
+                    )
+                except Exception:
+                    pass
+
+            # Run Aden sync for all Aden-backed creds
+            if aden_key or os.environ.get("ADEN_API_KEY"):
+                synced = self._sync_aden_credentials()
+                configured += synced
+
+        # Handle direct API key credentials
         for i, cred in enumerate(self._missing):
+            if i in self._aden_creds:
+                continue
             input_widget = self.query_one(f"#key-{i}", Input)
             value = input_widget.value.strip()
             if not value:
@@ -135,7 +197,70 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
         if configured > 0:
             self.dismiss(True)
         else:
-            self.notify("No credentials entered", severity="warning", timeout=3)
+            self.notify("No credentials configured", severity="warning", timeout=3)
+
+    def _sync_aden_credentials(self) -> int:
+        """Sync Aden-backed credentials and return count of successfully synced."""
+        try:
+            from framework.credentials import CredentialStore
+
+            store = CredentialStore.with_aden_sync(
+                base_url="https://api.adenhq.com",
+                auto_sync=True,
+            )
+        except Exception as e:
+            self.notify(f"Aden sync failed: {e}", severity="error", timeout=5)
+            return 0
+
+        synced = 0
+        for i in sorted(self._aden_creds):
+            cred = self._missing[i]
+            cred_id = cred.credential_id or cred.credential_name
+            if store.is_available(cred_id):
+                # Export the synced token to the current process
+                try:
+                    value = store.get_key(cred_id, cred.credential_key)
+                    if value:
+                        os.environ[cred.env_var] = value
+                        # Also persist under the canonical ID so the local
+                        # encrypted store has the real token (overwrites any
+                        # stale entry like a previously mis-stored google.enc).
+                        self._persist_to_local_store(cred_id, cred.credential_key, value)
+                        synced += 1
+                except Exception:
+                    pass
+            else:
+                self.notify(
+                    f"{cred.credential_name} not found in Aden. "
+                    "Connect this integration at hive.adenhq.com first.",
+                    severity="warning",
+                    timeout=8,
+                )
+        return synced
+
+    @staticmethod
+    def _persist_to_local_store(cred_id: str, key_name: str, value: str) -> None:
+        """Save a synced token to the local encrypted store under the canonical ID."""
+        try:
+            from pydantic import SecretStr
+
+            from framework.credentials.models import CredentialKey, CredentialObject, CredentialType
+            from framework.credentials.storage import EncryptedFileStorage
+
+            cred_obj = CredentialObject(
+                id=cred_id,
+                credential_type=CredentialType.OAUTH2,
+                keys={
+                    key_name: CredentialKey(
+                        name=key_name,
+                        value=SecretStr(value),
+                    ),
+                },
+                auto_refresh=True,
+            )
+            EncryptedFileStorage().save(cred_obj)
+        except Exception:
+            pass  # Best-effort; env var is the primary delivery mechanism
 
     def action_dismiss_setup(self) -> None:
         self.dismiss(None)
