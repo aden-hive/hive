@@ -445,9 +445,59 @@ class TestErrorCategorizer:
             test_id="t1",
             passed=False,
             duration_ms=100,
-            error_message="timeout: request took longer than expected",
+            error_message="unexpected format: received xml instead of json",
         )
         assert categorizer.categorize(result) == ErrorCategory.EDGE_CASE
+
+    def test_categorize_timeout_error(self, categorizer):
+        """Test categorization of timeout errors."""
+        result = TestResult(
+            test_id="t1",
+            passed=False,
+            duration_ms=100,
+            error_message="timeout: request took longer than expected",
+        )
+        assert categorizer.categorize(result) == ErrorCategory.TIMEOUT_ERROR
+
+    def test_categorize_auth_error(self, categorizer):
+        """Test categorization of auth errors."""
+        result = TestResult(
+            test_id="t1",
+            passed=False,
+            duration_ms=100,
+            error_message="401 Unauthorized: Invalid API key",
+        )
+        assert categorizer.categorize(result) == ErrorCategory.AUTH_ERROR
+
+    def test_categorize_rate_limit_error(self, categorizer):
+        """Test categorization of rate limit errors."""
+        result = TestResult(
+            test_id="t1",
+            passed=False,
+            duration_ms=100,
+            error_message="429 Too Many Requests: quota exceeded",
+        )
+        assert categorizer.categorize(result) == ErrorCategory.RATE_LIMIT_ERROR
+
+    def test_categorize_tool_error(self, categorizer):
+        """Test categorization of tool errors."""
+        result = TestResult(
+            test_id="t1",
+            passed=False,
+            duration_ms=100,
+            error_message="tool execution failed: ConnectionError",
+        )
+        assert categorizer.categorize(result) == ErrorCategory.TOOL_ERROR
+
+    def test_categorize_import_error(self, categorizer):
+        """Test categorization of import errors."""
+        result = TestResult(
+            test_id="t1",
+            passed=False,
+            duration_ms=100,
+            error_message="ModuleNotFoundError: No module named 'numpy'",
+        )
+        assert categorizer.categorize(result) == ErrorCategory.IMPORT_ERROR
 
     def test_categorize_from_stack_trace(self, categorizer):
         """Test categorization from stack trace."""

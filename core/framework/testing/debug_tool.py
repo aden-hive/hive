@@ -206,6 +206,11 @@ class DebugTool:
         tests = self.test_storage.get_tests_by_goal(goal_id)
 
         failures_by_category: dict[str, list[str]] = {
+            "import_error": [],
+            "auth_error": [],
+            "rate_limit_error": [],
+            "timeout_error": [],
+            "tool_error": [],
             "logic_error": [],
             "implementation_error": [],
             "edge_case": [],
@@ -215,10 +220,14 @@ class DebugTool:
         for test in tests:
             if test.last_result == "failed":
                 result = self.test_storage.get_latest_result(test.id)
-                if result and result.error_category:
-                    failures_by_category[result.error_category.value].append(test.id)
-                else:
-                    failures_by_category["uncategorized"].append(test.id)
+                cat_key = (
+                    result.error_category.value
+                    if result and result.error_category
+                    else "uncategorized"
+                )
+                if cat_key not in failures_by_category:
+                    cat_key = "uncategorized"
+                failures_by_category[cat_key].append(test.id)
 
         return {
             "goal_id": goal_id,
@@ -259,28 +268,65 @@ class DebugTool:
         """Generate iteration suggestions based on failure categories."""
         suggestions = []
 
-        if failures_by_category["logic_error"]:
+        # Infrastructure / config issues first — fix these before touching code
+        if failures_by_category.get("import_error"):
+            n = len(failures_by_category["import_error"])
             suggestions.append(
-                f"Found {len(failures_by_category['logic_error'])} logic errors. "
+                f"Found {n} import error(s). Run `uv add <missing-package>` to install "
+                "the missing dependency, then re-run tests."
+            )
+
+        if failures_by_category.get("auth_error"):
+            n = len(failures_by_category["auth_error"])
+            suggestions.append(
+                f"Found {n} auth error(s). Run `hive credentials list` to check what's "
+                "set, then `hive credentials set <KEY>` to add the missing credential."
+            )
+
+        if failures_by_category.get("rate_limit_error"):
+            n = len(failures_by_category["rate_limit_error"])
+            suggestions.append(
+                f"Found {n} rate-limit error(s). Re-run with `--concurrency 1` to serialize "
+                "requests, or add exponential backoff to the failing node."
+            )
+
+        if failures_by_category.get("timeout_error"):
+            n = len(failures_by_category["timeout_error"])
+            suggestions.append(
+                f"Found {n} timeout error(s). Optimize slow nodes, add caching, or increase "
+                "execution_timeout in your entry point config."
+            )
+
+        if failures_by_category.get("tool_error"):
+            n = len(failures_by_category["tool_error"])
+            suggestions.append(
+                f"Found {n} tool error(s). Check tool API keys, network connectivity, "
+                "and whether the external service is operational."
+            )
+
+        # Code / design issues
+        if failures_by_category.get("logic_error"):
+            suggestions.append(
+                f"Found {len(failures_by_category['logic_error'])} logic error(s). "
                 "Review and update Goal success_criteria/constraints, then restart "
                 "the full Goal → Agent → Eval flow."
             )
 
-        if failures_by_category["implementation_error"]:
+        if failures_by_category.get("implementation_error"):
             suggestions.append(
-                f"Found {len(failures_by_category['implementation_error'])} implementation errors. "
+                f"Found {len(failures_by_category['implementation_error'])} implementation error(s). "
                 "Fix agent node/edge code and re-run Eval."
             )
 
-        if failures_by_category["edge_case"]:
+        if failures_by_category.get("edge_case"):
             suggestions.append(
-                f"Found {len(failures_by_category['edge_case'])} edge cases. "
-                "These are new scenarios - add tests for them."
+                f"Found {len(failures_by_category['edge_case'])} edge case(s). "
+                "These are new scenarios — add tests for them."
             )
 
-        if failures_by_category["uncategorized"]:
+        if failures_by_category.get("uncategorized"):
             suggestions.append(
-                f"Found {len(failures_by_category['uncategorized'])} uncategorized failures. "
+                f"Found {len(failures_by_category['uncategorized'])} uncategorized failure(s). "
                 "Manual review required."
             )
 

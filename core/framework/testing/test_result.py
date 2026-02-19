@@ -20,11 +20,21 @@ class ErrorCategory(StrEnum):
     - LOGIC_ERROR: Goal definition is wrong → update success_criteria/constraints
     - IMPLEMENTATION_ERROR: Code bug → fix nodes/edges in Agent stage
     - EDGE_CASE: New scenario discovered → add new test only
+    - TIMEOUT_ERROR: Agent exceeded time budget → optimize node logic or increase timeout
+    - AUTH_ERROR: Missing or invalid API credentials → run `hive credentials set`
+    - RATE_LIMIT_ERROR: LLM/tool API quota hit → add retry logic or reduce test parallelism
+    - TOOL_ERROR: External tool call failed → check tool config, network, or API key
+    - IMPORT_ERROR: Missing Python package → add to pyproject.toml / run `uv add <pkg>`
     """
 
     LOGIC_ERROR = "logic_error"
     IMPLEMENTATION_ERROR = "implementation_error"
     EDGE_CASE = "edge_case"
+    TIMEOUT_ERROR = "timeout_error"
+    AUTH_ERROR = "auth_error"
+    RATE_LIMIT_ERROR = "rate_limit_error"
+    TOOL_ERROR = "tool_error"
+    IMPORT_ERROR = "import_error"
 
 
 class TestResult(BaseModel):

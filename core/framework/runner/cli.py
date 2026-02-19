@@ -111,6 +111,12 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         help="Path to agent folder (containing agent.json)",
     )
+    validate_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="output_json",
+        help="Output validation results as JSON (for programmatic use)",
+    )
     validate_parser.set_defaults(func=cmd_validate)
 
     # list command
@@ -820,7 +826,9 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
-    """Validate an exported agent."""
+    """Validate an exported agent and print a structured per-check report."""
+    import json as _json
+
     from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
@@ -835,23 +843,92 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     validation = runner.validate()
 
-    if validation.valid:
-        print("✓ Agent is valid")
+    # ------------------------------------------------------------------ #
+    #  JSON mode (programmatic / CI use)                                   #
+    # ------------------------------------------------------------------ #
+    if getattr(args, "output_json", False):
+        result = {
+            "valid": validation.valid,
+            "errors": validation.errors,
+            "warnings": validation.warnings,
+            "missing_tools": validation.missing_tools,
+            "missing_credentials": validation.missing_credentials,
+        }
+        print(_json.dumps(result, indent=2))
+        runner.cleanup()
+        return 0 if validation.valid else 1
+
+    # ------------------------------------------------------------------ #
+    #  Human-readable structured report                                    #
+    # ------------------------------------------------------------------ #
+    agent_name = Path(args.agent_path).name
+    print(f"\nValidating agent: {agent_name}")
+    print("=" * 50)
+
+    # --- Graph Structure ---
+    print("\nGraph Structure")
+    graph = runner.graph
+    node_count = len(list(graph.nodes)) if graph else 0
+    edge_count = len(list(graph.edges)) if graph else 0
+    entry_points = [
+        n.id for n in (graph.nodes if graph else []) if getattr(n, "is_entry_point", False)
+    ]
+    print(f"  {'✓' if node_count > 0 else '✗'} Nodes: {node_count}")
+    print(f"  {'✓' if node_count > 0 else '✗'} Edges: {edge_count}")
+    if entry_points:
+        print(f"  ✓ Entry points: {', '.join(entry_points)}")
     else:
-        print("✗ Agent has errors:")
+        print("  ✗ Entry points: none found")
+
+    # --- Goal ---
+    print("\nGoal")
+    goal = getattr(runner, "goal", None)
+    if goal:
+        goal_text = str(goal.goal_statement) if hasattr(goal, "goal_statement") else str(goal)
+        short = goal_text[:70] + "..." if len(goal_text) > 70 else goal_text
+        print(f"  ✓ Goal: {short}")
+        sc_count = len(goal.success_criteria) if hasattr(goal, "success_criteria") else 0
+        print(f"  {'✓' if sc_count > 0 else '⚠'} Success criteria: {sc_count}")
+    else:
+        print("  ✗ Goal: not found")
+
+    # --- Tools ---
+    print("\nTools")
+    if not validation.missing_tools:
+        print("  ✓ All required tools are registered")
+    else:
+        for tool in validation.missing_tools:
+            print(f"  ✗ Missing: {tool}")
+        print(
+            "  → Fix: create tools.py in the agent folder or register tools programmatically"
+        )
+
+    # --- Credentials ---
+    print("\nCredentials")
+    if not validation.missing_credentials:
+        print("  ✓ All required credentials are set")
+    else:
+        for cred in validation.missing_credentials:
+            print(f"  ✗ Missing: {cred}")
+        print("  → Fix: run `hive credentials set <KEY>` for each missing credential")
+
+    # --- Errors & Warnings ---
+    if validation.errors:
+        print("\nErrors")
         for error in validation.errors:
-            print(f"  ERROR: {error}")
+            print(f"  ✗ {error}")
 
     if validation.warnings:
-        print("\nWarnings:")
+        print("\nWarnings")
         for warning in validation.warnings:
-            print(f"  WARNING: {warning}")
+            print(f"  ⚠ {warning}")
 
-    if validation.missing_tools:
-        print("\nMissing tool implementations:")
-        for tool in validation.missing_tools:
-            print(f"  - {tool}")
-        print("\nTo fix: Create tools.py in the agent folder or register tools programmatically")
+    # --- Summary ---
+    print()
+    if validation.valid:
+        print("✓ Agent is valid and ready to run")
+    else:
+        print("✗ Agent has validation errors — fix the issues above before running")
 
     runner.cleanup()
     return 0 if validation.valid else 1
