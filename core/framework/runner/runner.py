@@ -303,6 +303,11 @@ class AgentRunner:
         if tools_path.exists():
             self._tool_registry.discover_from_module(tools_path)
 
+        # Set environment variables for MCP subprocesses
+        # These are inherited by MCP servers (e.g., GCU browser tools)
+        os.environ["HIVE_AGENT_NAME"] = agent_path.name
+        os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
+
         # Auto-discover MCP servers from mcp_servers.json
         mcp_config_path = agent_path / "mcp_servers.json"
         if mcp_config_path.exists():
