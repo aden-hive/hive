@@ -253,9 +253,7 @@ class _GoogleDocsClient:
         )
         return self._handle_response(response)
 
-    def batch_update(
-        self, document_id: str, requests: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def batch_update(self, document_id: str, requests: list[dict[str, Any]]) -> dict[str, Any]:
         """Execute multiple requests in a single atomic operation."""
         response = httpx.post(
             f"{GOOGLE_DOCS_API_BASE}/documents/{document_id}:batchUpdate",
