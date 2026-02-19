@@ -1417,7 +1417,7 @@ def _launch_agent_tui(
                     if result.success:
                         # Retry loading with credentials now configured
                         try:
-                            runner = AgentRunner.load(agent_path, model=args.model)
+                            runner = AgentRunner.load(agent_path, model=model)
                         except CredentialError as retry_e:
                             print(f"\n{retry_e}", file=sys.stderr)
                             return
