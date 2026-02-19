@@ -870,9 +870,25 @@ def cmd_validate(args: argparse.Namespace) -> int:
     graph = runner.graph
     node_count = len(list(graph.nodes)) if graph else 0
     edge_count = len(list(graph.edges)) if graph else 0
-    entry_points = [
-        n.id for n in (graph.nodes if graph else []) if getattr(n, "is_entry_point", False)
-    ]
+    # Derive entry points
+    entry_points = set()
+    if graph:
+        # Single entry node
+        if hasattr(graph, "entry_node") and graph.entry_node:
+            n = graph.entry_node
+            entry_points.add(str(getattr(n, "id", n)))
+
+        # Dict entry points
+        if hasattr(graph, "entry_points") and isinstance(graph.entry_points, dict):
+            for v in graph.entry_points.values():
+                entry_points.add(str(getattr(v, "id", v)))
+
+        # Async entry points
+        if hasattr(graph, "async_entry_points") and isinstance(graph.async_entry_points, dict):
+            for v in graph.async_entry_points.values():
+                entry_points.add(str(getattr(v, "id", v)))
+
+    entry_points = sorted(list(entry_points))
     print(f"  {'✓' if node_count > 0 else '✗'} Nodes: {node_count}")
     print(f"  {'✓' if node_count > 0 else '✗'} Edges: {edge_count}")
     if entry_points:

@@ -91,8 +91,8 @@ class ErrorCategorizer:
 
     # Patterns indicating missing or invalid credentials
     AUTH_ERROR_PATTERNS = [
-        r"401",
-        r"403",
+        r"\b401\b",
+        r"\b403\b",
         r"Unauthorized",
         r"Forbidden",
         r"authentication.*failed",
@@ -113,7 +113,7 @@ class ErrorCategorizer:
     RATE_LIMIT_ERROR_PATTERNS = [
         r"rate.*limit",
         r"quota.*exceeded",
-        r"429",
+        r"\b429\b",
         r"too many requests",
         r"retry.*exhausted",
         r"backoff",

@@ -515,6 +515,12 @@ class TestErrorCategorizer:
         assert "Goal" in categorizer.get_fix_suggestion(ErrorCategory.LOGIC_ERROR)
         assert "code" in categorizer.get_fix_suggestion(ErrorCategory.IMPLEMENTATION_ERROR).lower()
         assert "test" in categorizer.get_fix_suggestion(ErrorCategory.EDGE_CASE).lower()
+        # New categories
+        assert "optimize" in categorizer.get_fix_suggestion(ErrorCategory.TIMEOUT_ERROR).lower()
+        assert "credentials" in categorizer.get_fix_suggestion(ErrorCategory.AUTH_ERROR).lower()
+        assert "retry" in categorizer.get_fix_suggestion(ErrorCategory.RATE_LIMIT_ERROR).lower()
+        assert "tool" in categorizer.get_fix_suggestion(ErrorCategory.TOOL_ERROR).lower()
+        assert "pkg" in categorizer.get_fix_suggestion(ErrorCategory.IMPORT_ERROR).lower() or "add" in categorizer.get_fix_suggestion(ErrorCategory.IMPORT_ERROR).lower()
 
     def test_get_iteration_guidance(self, categorizer):
         """Test iteration guidance."""
@@ -524,6 +530,10 @@ class TestErrorCategorizer:
 
         guidance = categorizer.get_iteration_guidance(ErrorCategory.IMPLEMENTATION_ERROR)
         assert guidance["stage"] == "Agent"
+        assert guidance["restart_required"] is False
+
+        guidance = categorizer.get_iteration_guidance(ErrorCategory.AUTH_ERROR)
+        assert guidance["stage"] == "Config"
         assert guidance["restart_required"] is False
 
 
