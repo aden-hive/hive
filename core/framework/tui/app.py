@@ -369,9 +369,9 @@ class AdenTUI(App):
 
             self._runner = runner
             self.runtime = runner._agent_runtime
-        except CredentialError as e:
+        except CredentialError:
             self.status_bar.set_graph_id("")
-            self.notify(f"Credential error: {e}", severity="error", timeout=10)
+            self._show_credential_setup(str(agent_path))
             return
         except Exception as e:
             self.status_bar.set_graph_id("")
@@ -387,6 +387,47 @@ class AdenTUI(App):
         self._resume_checkpoint = None
 
         self.notify(f"Agent loaded: {agent_name}", severity="information", timeout=3)
+
+    def _show_credential_setup(
+        self,
+        agent_path: str,
+        on_cancel: object | None = None,
+    ) -> None:
+        """Show the credential setup screen for an agent with missing credentials.
+
+        Args:
+            agent_path: Path to the agent that needs credentials.
+            on_cancel: Callable to invoke if the user skips/cancels setup.
+        """
+        from framework.credentials.setup import CredentialSetupSession
+        from framework.tui.screens.credential_setup import CredentialSetupScreen
+
+        session = CredentialSetupSession.from_agent_path(agent_path)
+
+        if not session.missing:
+            self.notify(
+                "Credential error but no missing credentials detected",
+                severity="error",
+                timeout=10,
+            )
+            if callable(on_cancel):
+                on_cancel()
+            return
+
+        def _on_result(result: bool | None) -> None:
+            if result is True:
+                # Credentials saved — retry loading the agent
+                self._do_load_agent(agent_path)
+            else:
+                self.notify(
+                    "Credential setup skipped. Agent not loaded.",
+                    severity="warning",
+                    timeout=5,
+                )
+                if callable(on_cancel):
+                    on_cancel()
+
+        self.push_screen(CredentialSetupScreen(session), callback=_on_result)
 
     # -- Agent picker --
 
@@ -503,7 +544,16 @@ class AdenTUI(App):
 
             self._runner = runner
             self.runtime = coder_runtime
-        except (CredentialError, Exception) as e:
+        except CredentialError:
+            self.status_bar.set_graph_id("")
+            coder_path = str(hive_coder_path)
+            self.call_from_thread(
+                self._show_credential_setup,
+                coder_path,
+                self._restore_from_escalation_stack,
+            )
+            return
+        except Exception as e:
             self.status_bar.set_graph_id("")
             self.notify(f"Failed to load coder: {e}", severity="error", timeout=10)
             self._restore_from_escalation_stack()
