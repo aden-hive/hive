@@ -85,17 +85,19 @@ class ChatRepl(Vertical):
         width: 100%;
         height: auto;
         min-height: 0;
-        max-height: 50%;
-        background: $surface;
-        border: none;
+        max-height: 20%;
+        background: $panel;
+        border-top: solid $primary 40%;
         display: none;
         scrollbar-background: $panel;
         scrollbar-color: $primary;
+        padding: 0 1;
     }
 
     ChatRepl > #processing-indicator {
         width: 100%;
-        height: 1;
+        height: auto;
+        max-height: 4;
         background: $primary 20%;
         color: $text;
         text-style: bold;
@@ -185,12 +187,10 @@ class ChatRepl(Vertical):
         return self._FILE_URI_RE.sub(_shorten, text)
 
     def _write_history(self, content: str) -> None:
-        """Write to chat history, only auto-scrolling if user is at the bottom."""
+        """Write to chat history and scroll to bottom."""
         history = self.query_one("#chat-history", RichLog)
-        was_at_bottom = history.is_vertical_scroll_end
         history.write(self._linkify(content))
-        if was_at_bottom:
-            history.scroll_end(animate=False)
+        history.scroll_end(animate=False)
 
     def toggle_logs(self) -> None:
         """Toggle inline log display on/off. Backfills buffered logs on toggle ON."""
@@ -1299,6 +1299,7 @@ class ChatRepl(Vertical):
     def handle_execution_completed(self, output: dict[str, Any]) -> None:
         """Handle execution finishing successfully."""
         indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("")
         indicator.display = False
 
         # Write the final streaming snapshot to permanent history (if any)
@@ -1326,6 +1327,7 @@ class ChatRepl(Vertical):
     def handle_execution_failed(self, error: str) -> None:
         """Handle execution failing."""
         indicator = self.query_one("#processing-indicator", Label)
+        indicator.update("")
         indicator.display = False
 
         self._write_history(f"[bold red]Error:[/bold red] {error}")
@@ -1399,8 +1401,11 @@ class ChatRepl(Vertical):
             self._active_node_id = None
 
     def handle_internal_output(self, node_id: str, content: str) -> None:
-        """Show output from non-client-facing nodes."""
-        self._write_history(f"[dim cyan]⟨{node_id}⟩[/dim cyan] {content}")
+        """Buffer output from non-client-facing nodes. Only display if logs are ON."""
+        line = f"[dim cyan]⟨{node_id}⟩[/dim cyan] {content}"
+        self._log_buffer.append(line)
+        if self._show_logs:
+            self._write_history(line)
 
     def handle_execution_paused(self, node_id: str, reason: str) -> None:
         """Show that execution has been paused."""
