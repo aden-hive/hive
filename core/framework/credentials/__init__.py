@@ -59,6 +59,13 @@ from .provider import (
     CredentialProvider,
     StaticProvider,
 )
+from .setup import (
+    CredentialSetupSession,
+    MissingCredential,
+    SetupResult,
+    detect_missing_credentials_from_nodes,
+    run_credential_setup_cli,
+)
 from .storage import (
     CompositeStorage,
     CredentialStorage,
@@ -67,13 +74,6 @@ from .storage import (
     InMemoryStorage,
 )
 from .store import CredentialStore
-from .setup import (
-    CredentialSetupSession,
-    MissingCredential,
-    SetupResult,
-    detect_missing_credentials_from_nodes,
-    run_credential_setup_cli,
-)
 from .template import TemplateResolver
 from .validation import ensure_credential_key_env, validate_agent_credentials
 

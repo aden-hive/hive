@@ -29,9 +29,10 @@ import getpass
 import json
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from framework.graph import NodeSpec
@@ -157,13 +158,13 @@ class CredentialSetupSession:
             Colors.disable()
 
     @classmethod
-    def from_nodes(cls, nodes: list["NodeSpec"]) -> "CredentialSetupSession":
+    def from_nodes(cls, nodes: list[NodeSpec]) -> CredentialSetupSession:
         """Create a setup session by detecting missing credentials from nodes."""
         missing = detect_missing_credentials_from_nodes(nodes)
         return cls(missing)
 
     @classmethod
-    def from_agent_path(cls, agent_path: str | Path) -> "CredentialSetupSession":
+    def from_agent_path(cls, agent_path: str | Path) -> CredentialSetupSession:
         """Create a setup session for an agent by path."""
         agent_path = Path(agent_path)
 
@@ -281,7 +282,6 @@ class CredentialSetupSession:
         try:
             from aden_tools.credentials.shell_config import (
                 add_env_var_to_shell_config,
-                get_shell_config_path,
             )
 
             success, config_path = add_env_var_to_shell_config(
@@ -293,8 +293,9 @@ class CredentialSetupSession:
                 self._print(f"{Colors.GREEN}✓ Encryption key saved to {config_path}{Colors.NC}")
         except Exception:
             # Fallback: just tell the user
+            self._print("\n")
             self._print(
-                f"\n{Colors.YELLOW}Add this to your shell config (~/.zshrc or ~/.bashrc):{Colors.NC}"
+                f"{Colors.YELLOW}Add this to your shell config (~/.zshrc or ~/.bashrc):{Colors.NC}"
             )
             self._print(f'  export HIVE_CREDENTIAL_KEY="{key}"')
 
