@@ -2,6 +2,7 @@
 arXiv Tool - Search and download scientific papers.
 """
 
+import atexit
 import os
 import re
 import tempfile
@@ -13,6 +14,9 @@ import requests
 from fastmcp import FastMCP
 
 _SHARED_ARXIV_CLIENT = arxiv.Client(page_size=100, delay_seconds=3, num_retries=3)
+
+_TEMP_DIR = tempfile.TemporaryDirectory(prefix="arxiv_papers_")
+atexit.register(_TEMP_DIR.cleanup)
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -122,16 +126,17 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def download_paper(paper_id: str) -> dict:
         """
-        Downloads a paper from arXiv by its ID and saves it to a temporary PDF file.
+         Downloads a paper from arXiv by its ID and saves it to a managed temporary directory
+          for the lifetime of the server process.
 
         Args:
-            paper_id (str): The arXiv identifier (e.g., "2207.13219v4").
+             paper_id (str): The arXiv identifier (e.g., "2207.13219v4").
 
-        Returns:
-            dict: { "success": bool, "file_path": str, "paper_id": str }
+         Returns:
+             dict: { "success": bool, "file_path": str, "paper_id": str }
+                 The file is valid until the server process exits. No cleanup needed.
         """
         local_path = None
-        tmp_file = None
         try:
             # Find the PDF Link
             search = arxiv.Search(id_list=[paper_id])
@@ -160,20 +165,24 @@ def register_tools(mcp: FastMCP) -> None:
             clean_id = re.sub(r"[^\w\s-]", "_", paper_id)
             prefix = f"{clean_title[:50]}_{clean_id}_"
 
-            tmp_file = tempfile.NamedTemporaryFile(
-                prefix=prefix,
-                suffix=".pdf",
-                delete=False,  # Caller is responsible for cleanup
-            )
-            local_path = tmp_file.name
+            filename = f"{prefix}.pdf"
+            local_path = os.path.join(_TEMP_DIR.name, filename)
 
-            # Create a Permanent Temp File
             try:
                 # Start the Stream
                 # stream=True prevents loading the entire file into memory
                 headers = {
                     "User-Agent": "Hive-Agent/1.0 (https://github.com/adenhq/hive)"
                 }
+
+                # No rate limiting needed for PDF download.
+                # The 3-second rule only applies to the metadata API (export.arxiv.org/api/query),
+                # as explicitly stated in the arXiv API User Manual.
+                # This is a plain HTTPS file download (export.arxiv.org/pdf/...), not an API call.
+                # The deprecated arxiv.py helper `Result.download_pdf()` confirms this —
+                # it was just a bare urlretrieve() call,
+                # with zero rate limiting or client involvement,
+                # because Result objects are pure data and hold no reference back to the Client.
                 response = requests.get(
                     pdf_url, stream=True, timeout=60, headers=headers
                 )
@@ -186,12 +195,12 @@ def register_tools(mcp: FastMCP) -> None:
                         "arXiv may have returned an error page."
                     )
 
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        tmp_file.write(chunk)
+                with open(local_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
 
             except (requests.RequestException, OSError) as e:
-                tmp_file.close()
                 if os.path.exists(local_path):
                     os.remove(local_path)
                 local_path = None  # prevent double-deletion in the outer except
@@ -200,12 +209,6 @@ def register_tools(mcp: FastMCP) -> None:
                     "success": False,
                     "error": f"Failed during download or write: {str(e)}",
                 }
-
-            # Always close the file handle whether we succeeded or not
-            # for Windows an open handle prevents deletion.
-            finally:
-                if not tmp_file.closed:
-                    tmp_file.close()
 
             return {
                 "success": True,
