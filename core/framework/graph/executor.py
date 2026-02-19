@@ -346,6 +346,9 @@ class GraphExecutor:
             for key, value in input_data.items():
                 memory.write(key, value)
 
+        # Detect event-triggered execution (timer/webhook) — no interactive user.
+        _event_triggered = bool(input_data and isinstance(input_data.get("event"), dict))
+
         path: list[str] = []
         total_tokens = 0
         total_latency = 0
@@ -690,6 +693,7 @@ class GraphExecutor:
                     inherited_conversation=continuous_conversation if is_continuous else None,
                     override_tools=cumulative_tools if is_continuous else None,
                     cumulative_output_keys=cumulative_output_keys if is_continuous else None,
+                    event_triggered=_event_triggered,
                 )
 
                 # Log actual input data being read
@@ -1430,6 +1434,7 @@ class GraphExecutor:
         inherited_conversation: Any = None,
         override_tools: list | None = None,
         cumulative_output_keys: list[str] | None = None,
+        event_triggered: bool = False,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1463,6 +1468,7 @@ class GraphExecutor:
             continuous_mode=continuous_mode,
             inherited_conversation=inherited_conversation,
             cumulative_output_keys=cumulative_output_keys or [],
+            event_triggered=event_triggered,
         )
 
     # Valid node types - no ambiguous "llm" type allowed

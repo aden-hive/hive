@@ -46,6 +46,8 @@ EMAIL_CREDENTIALS = {
             "gmail_batch_modify_messages",
             "gmail_batch_get_messages",
             "gmail_create_draft",
+            "gmail_list_labels",
+            "gmail_create_label",
         ],
         node_types=[],
         required=True,

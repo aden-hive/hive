@@ -30,6 +30,8 @@ The following Gmail actions are available — map the user's rules to whichever 
 - **Mark as read** / mark as unread
 - **Star** / unstar emails
 - **Add/remove Gmail labels** (INBOX, UNREAD, IMPORTANT, STARRED, SPAM, CATEGORY_PERSONAL, CATEGORY_SOCIAL, CATEGORY_PROMOTIONS, CATEGORY_UPDATES, CATEGORY_FORUMS)
+- **Draft replies** — create draft reply emails (never sent automatically)
+- **Create/apply custom labels** — create new Gmail labels and apply them to emails
 
 Present the rules back to the user in plain language. Do NOT refuse rules — if the user asks for any of the above actions, confirm you will do it.
 
@@ -37,12 +39,16 @@ Also confirm the batch size (max_emails). If max_emails is not provided, default
 
 Ask the user to confirm: "Does this look right? I'll proceed once you confirm."
 
-**STEP 2 — After the user confirms, call set_output:**
+**STEP 2 — Show existing labels (tool call):**
+
+Call gmail_list_labels() to show the user their current Gmail labels. This helps them reference existing labels or decide whether new custom labels are needed for their rules.
+
+**STEP 3 — After the user confirms, call set_output:**
 
 - set_output("rules", <the confirmed rules as a clear text description>)
 - set_output("max_emails", <the confirmed max_emails as a string number, e.g. "100">)
 """,
-    tools=[],
+    tools=["gmail_list_labels"],
 )
 
 # Node 2: Fetch Emails (event_loop — fetches emails with pagination support)
@@ -117,27 +123,36 @@ You are an inbox management assistant. Apply the user's rules to their emails an
 - gmail_batch_modify_messages(message_ids, add_labels, remove_labels) — Modify Gmail labels in batch. ALWAYS prefer this.
 - gmail_modify_message(message_id, add_labels, remove_labels) — Modify a single message's labels.
 - gmail_trash_message(message_id) — Move a message to trash. No batch version; call per email.
+- gmail_create_draft(to, subject, body) — Create a draft reply. NEVER sends automatically.
+- gmail_create_label(name) — Create a new Gmail label. Returns the label ID.
+- gmail_list_labels() — List all existing Gmail labels with their IDs.
 - set_output(key, value) — Set an output value. Call ONLY after all actions are executed.
 
 **CONTEXT:**
 - "rules" = the user's rule to apply (e.g. "mark all as unread")
 - "emails" = a filename (e.g. "emails.jsonl") containing the fetched emails as JSONL. Each line has: id, subject, from, to, date, snippet, labels.
 
-**STEP 1 — LOAD EMAILS (your first tool call MUST be load_data):**
-Call load_data(filename=<the "emails" value from context>) to read the email data.
-- If the result is empty, call set_output("actions_taken", "no emails to process") and stop.
-- If has_more=true, load more pages with load_data(filename=..., offset=...) until all emails are loaded.
+**PROCESS EMAILS ONE CHUNK AT A TIME (you will get multiple turns):**
 
-**STEP 2 — DETERMINE STRATEGY:**
-- **Blanket rule** (same action for ALL emails, e.g. "mark all as unread"): Collect all message IDs, then execute ONE gmail_batch_modify_messages call.
-- **Classification rule** (different actions for different emails): Classify each email, group by action, execute batch operations per group.
+Each turn, process exactly ONE chunk: load → classify → act → record. Then STOP and wait for your next turn to load the next chunk.
 
-**STEP 3 — EXECUTE ACTIONS:**
-Call the appropriate Gmail tool(s) with the real message IDs from the loaded emails. Then record each action:
-- append_data(filename="actions.jsonl", data=<JSON of {email_id, subject, from, action}>)
+1. Call load_data(filename=<emails value>, limit_bytes=7500).
+   - Parse the visible JSONL lines: split by \n, JSON.parse each complete line.
+   - Ignore the last line if it appears cut off (incomplete JSON).
+   - Note the next_offset_bytes value from the result.
 
-**STEP 4 — FINISH:**
-After ALL actions are executed, call set_output("actions_taken", "actions.jsonl").
+2. Classify the emails in THIS chunk against the rules. For each email, decide the action: trash, draft reply, label change, or no action.
+
+3. Execute Gmail actions for this chunk immediately:
+   - **Label changes:** gmail_batch_modify_messages for all IDs in this chunk that need the same label change.
+   - **Trash:** gmail_trash_message per email.
+   - **Drafts:** gmail_create_draft per email.
+   - Record each action: append_data(filename="actions.jsonl", data=<JSON of {email_id, subject, from, action}>)
+
+4. If has_more=true, STOP HERE. On your next turn, call load_data with offset_bytes=<next_offset_bytes> and repeat from step 2.
+   If has_more=false, you are done processing — call set_output("actions_taken", "actions.jsonl").
+
+**CRITICAL:** Only call load_data ONCE per turn. Do NOT pre-load multiple chunks. You must see the emails before you can act on them.
 
 **GMAIL LABEL REFERENCE:**
 - MARK AS UNREAD — add_labels=["UNREAD"]
@@ -149,17 +164,24 @@ After ALL actions are executed, call set_output("actions_taken", "actions.jsonl"
 - ARCHIVE — remove_labels=["INBOX"]
 - MARK AS SPAM — add_labels=["SPAM"], remove_labels=["INBOX"]
 - TRASH — use gmail_trash_message(message_id) per email
+- DRAFT REPLY — use gmail_create_draft(to=<sender>, subject="Re: <subject>", body=<contextual reply based on email content>). Creates a draft only, never sends.
+- CREATE CUSTOM LABEL — use gmail_create_label(name=<label_name>) to create, then apply via gmail_modify_message with add_labels=[<label_id>]
+- APPLY CUSTOM LABEL — add_labels=[<label_id>] using the ID from gmail_create_label or gmail_list_labels
 
 **CRITICAL RULES:**
 - Your FIRST tool call MUST be load_data. Do NOT skip this.
 - You MUST call Gmail tools to execute real actions. Do NOT just report what should be done.
 - Do NOT call set_output until all Gmail actions are executed.
 - Pass ONLY the filename "actions.jsonl" to set_output, NOT raw data.
+- NEVER send emails. Only create drafts via gmail_create_draft.
 """,
     tools=[
         "gmail_trash_message",
         "gmail_modify_message",
         "gmail_batch_modify_messages",
+        "gmail_create_draft",
+        "gmail_create_label",
+        "gmail_list_labels",
         "load_data",
         "append_data",
     ],

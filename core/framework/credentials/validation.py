@@ -13,35 +13,33 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_credential_key_env() -> None:
-    """Load HIVE_CREDENTIAL_KEY from shell config if not already in environment.
+    """Load HIVE_CREDENTIAL_KEY and ADEN_API_KEY from shell config if not in environment.
 
-    The setup-credentials skill writes the encryption key to ~/.zshrc or ~/.bashrc.
-    If the user hasn't sourced their config in the current shell, this reads it
-    directly so the runner (and any MCP subprocesses it spawns) can unlock the
-    encrypted credential store.
-
-    Only HIVE_CREDENTIAL_KEY is loaded this way — all other secrets (API keys, etc.)
-    come from the credential store itself.
+    The setup-credentials skill writes these to ~/.zshrc or ~/.bashrc.
+    If the user hasn't sourced their config in the current shell, this reads
+    them directly so the runner (and any MCP subprocesses it spawns) can:
+    - Unlock the encrypted credential store (HIVE_CREDENTIAL_KEY)
+    - Enable Aden OAuth sync for Google/HubSpot/etc. (ADEN_API_KEY)
     """
-    if os.environ.get("HIVE_CREDENTIAL_KEY"):
-        return
-
     try:
         from aden_tools.credentials.shell_config import check_env_var_in_shell_config
-
-        found, value = check_env_var_in_shell_config("HIVE_CREDENTIAL_KEY")
-        if found and value:
-            os.environ["HIVE_CREDENTIAL_KEY"] = value
-            logger.debug("Loaded HIVE_CREDENTIAL_KEY from shell config")
     except ImportError:
-        pass
+        return
+
+    for var_name in ("HIVE_CREDENTIAL_KEY", "ADEN_API_KEY"):
+        if os.environ.get(var_name):
+            continue
+        found, value = check_env_var_in_shell_config(var_name)
+        if found and value:
+            os.environ[var_name] = value
+            logger.debug("Loaded %s from shell config", var_name)
 
 
 def validate_agent_credentials(nodes: list) -> None:
     """Check that required credentials are available before running an agent.
 
-    Scans node specs for required tools and node types, then checks whether
-    the corresponding credentials exist in the credential store.
+    Uses CredentialStoreAdapter.default() which includes Aden sync support,
+    correctly resolving OAuth credentials stored under hashed IDs.
 
     Raises CredentialError with actionable guidance if any are missing.
 
@@ -55,71 +53,30 @@ def validate_agent_credentials(nodes: list) -> None:
     node_types: set[str] = {node.node_type for node in nodes}
 
     try:
-        from aden_tools.credentials import CREDENTIAL_SPECS
-
-        from framework.credentials import CredentialStore
-        from framework.credentials.storage import (
-            CompositeStorage,
-            EncryptedFileStorage,
-            EnvVarStorage,
-        )
+        from aden_tools.credentials.store_adapter import CredentialStoreAdapter
     except ImportError:
         return  # aden_tools not installed, skip check
 
-    # Build credential store
-    env_mapping = {
-        (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
-    }
-    storages: list = [EnvVarStorage(env_mapping=env_mapping)]
-    if os.environ.get("HIVE_CREDENTIAL_KEY"):
-        storages.insert(0, EncryptedFileStorage())
-    if len(storages) == 1:
-        storage = storages[0]
-    else:
-        storage = CompositeStorage(primary=storages[0], fallbacks=storages[1:])
-    store = CredentialStore(storage=storage)
-
-    # Build reverse mappings
-    tool_to_cred: dict[str, str] = {}
-    node_type_to_cred: dict[str, str] = {}
-    for cred_name, spec in CREDENTIAL_SPECS.items():
-        for tool_name in spec.tools:
-            tool_to_cred[tool_name] = cred_name
-        for nt in spec.node_types:
-            node_type_to_cred[nt] = cred_name
+    ensure_credential_key_env()
+    adapter = CredentialStoreAdapter.default()
 
     missing: list[str] = []
-    checked: set[str] = set()
 
     # Check tool credentials
-    for tool_name in sorted(required_tools):
-        cred_name = tool_to_cred.get(tool_name)
-        if cred_name is None or cred_name in checked:
-            continue
-        checked.add(cred_name)
-        spec = CREDENTIAL_SPECS[cred_name]
-        cred_id = spec.credential_id or cred_name
-        if spec.required and not store.is_available(cred_id):
-            affected = sorted(t for t in required_tools if t in spec.tools)
-            entry = f"  {spec.env_var} for {', '.join(affected)}"
-            if spec.help_url:
-                entry += f"\n    Get it at: {spec.help_url}"
-            missing.append(entry)
+    for _cred_name, spec in adapter.get_missing_for_tools(sorted(required_tools)):
+        affected = sorted(t for t in required_tools if t in spec.tools)
+        entry = f"  {spec.env_var} for {', '.join(affected)}"
+        if spec.help_url:
+            entry += f"\n    Get it at: {spec.help_url}"
+        missing.append(entry)
 
     # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
-    for nt in sorted(node_types):
-        cred_name = node_type_to_cred.get(nt)
-        if cred_name is None or cred_name in checked:
-            continue
-        checked.add(cred_name)
-        spec = CREDENTIAL_SPECS[cred_name]
-        cred_id = spec.credential_id or cred_name
-        if spec.required and not store.is_available(cred_id):
-            affected_types = sorted(t for t in node_types if t in spec.node_types)
-            entry = f"  {spec.env_var} for {', '.join(affected_types)} nodes"
-            if spec.help_url:
-                entry += f"\n    Get it at: {spec.help_url}"
-            missing.append(entry)
+    for _cred_name, spec in adapter.get_missing_for_node_types(sorted(node_types)):
+        affected_types = sorted(t for t in node_types if t in spec.node_types)
+        entry = f"  {spec.env_var} for {', '.join(affected_types)} nodes"
+        if spec.help_url:
+            entry += f"\n    Get it at: {spec.help_url}"
+        missing.append(entry)
 
     if missing:
         from framework.credentials.models import CredentialError

@@ -341,19 +341,25 @@ class AgentRuntime:
                         while self._running:
                             self._timer_next_fire.pop(entry_point_id, None)
                             try:
-                                session_state = self._get_primary_session_state(
-                                    exclude_entry_point=entry_point_id
-                                )
-                                await self.trigger(
-                                    entry_point_id,
-                                    {"event": {"source": "timer", "reason": "scheduled"}},
-                                    session_state=session_state,
-                                )
-                                logger.info(
-                                    "Timer fired for entry point '%s' (next in %s min)",
-                                    entry_point_id,
-                                    mins,
-                                )
+                                if self._should_skip_timer(entry_point_id):
+                                    logger.info(
+                                        "Timer '%s' skipped — primary stream busy",
+                                        entry_point_id,
+                                    )
+                                else:
+                                    session_state = self._get_primary_session_state(
+                                        exclude_entry_point=entry_point_id
+                                    )
+                                    await self.trigger(
+                                        entry_point_id,
+                                        {"event": {"source": "timer", "reason": "scheduled"}},
+                                        session_state=session_state,
+                                    )
+                                    logger.info(
+                                        "Timer fired for entry point '%s' (next in %s min)",
+                                        entry_point_id,
+                                        mins,
+                                    )
                             except Exception:
                                 logger.error(
                                     "Timer trigger failed for '%s'",
@@ -468,6 +474,23 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
+
+    def _should_skip_timer(self, timer_ep_id: str) -> bool:
+        """Return True if a non-timer stream is actively running (not waiting for input).
+
+        Timers should only fire when the primary stream is idle (blocked
+        waiting for client input) or has no active execution.  This prevents
+        concurrent pipeline runs that would race on shared memory.
+        """
+        for ep_id, stream in self._streams.items():
+            if ep_id == timer_ep_id:
+                continue
+            spec = self._entry_points.get(ep_id)
+            if spec and spec.trigger_type == "timer":
+                continue
+            if stream.active_execution_ids and not stream.is_awaiting_input:
+                return True
+        return False
 
     def _get_primary_session_state(self, exclude_entry_point: str) -> dict[str, Any] | None:
         """Build session_state so an async entry point runs in the primary session.
