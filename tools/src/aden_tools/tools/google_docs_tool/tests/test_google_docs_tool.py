@@ -51,8 +51,7 @@ class TestGoogleDocsCreateDocument:
 
     def test_service_account_json_without_access_token_is_not_used(self, mcp):
         """Test that service account JSON alone is not treated as an access token."""
-        env = {"GOOGLE_SERVICE_ACCOUNT_JSON": '{"type":"service_account"}'}
-        with patch.dict("os.environ", env):
+        with patch.dict("os.environ", {"GOOGLE_SERVICE_ACCOUNT_JSON": '{"type":"service_account"}'}):
             tool_fn = get_tool_fn(mcp, "google_docs_create_document")
             result = tool_fn(title="Test Document")
             assert "error" in result
