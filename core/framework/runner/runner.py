@@ -1064,83 +1064,33 @@ class AgentRunner:
             warnings.append(f"Missing tool implementations: {', '.join(missing_tools)}")
 
         # Check credentials for required tools and node types
-        # Uses CredentialStore (encrypted files + env var fallback)
+        # Uses CredentialStoreAdapter.default() which includes Aden sync support
         missing_credentials = []
         try:
-            from aden_tools.credentials import CREDENTIAL_SPECS
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
-            from framework.credentials import CredentialStore
-            from framework.credentials.storage import (
-                CompositeStorage,
-                EncryptedFileStorage,
-                EnvVarStorage,
-            )
-
-            # Build env mapping for credential lookup
-            env_mapping = {
-                (spec.credential_id or name): spec.env_var
-                for name, spec in CREDENTIAL_SPECS.items()
-            }
-
-            # Only use EncryptedFileStorage if the encryption key is configured;
-            # otherwise just check env vars (avoids generating a throwaway key)
-            storages: list = [EnvVarStorage(env_mapping=env_mapping)]
-            if os.environ.get("HIVE_CREDENTIAL_KEY"):
-                storages.insert(0, EncryptedFileStorage())
-
-            if len(storages) == 1:
-                storage = storages[0]
-            else:
-                storage = CompositeStorage(
-                    primary=storages[0],
-                    fallbacks=storages[1:],
-                )
-            store = CredentialStore(storage=storage)
-
-            # Build reverse mappings
-            tool_to_cred: dict[str, str] = {}
-            node_type_to_cred: dict[str, str] = {}
-            for cred_name, spec in CREDENTIAL_SPECS.items():
-                for tool_name in spec.tools:
-                    tool_to_cred[tool_name] = cred_name
-                for nt in spec.node_types:
-                    node_type_to_cred[nt] = cred_name
+            adapter = CredentialStoreAdapter.default()
 
             # Check tool credentials
-            checked: set[str] = set()
-            for tool_name in info.required_tools:
-                cred_name = tool_to_cred.get(tool_name)
-                if cred_name is None or cred_name in checked:
-                    continue
-                checked.add(cred_name)
-                spec = CREDENTIAL_SPECS[cred_name]
-                cred_id = spec.credential_id or cred_name
-                if spec.required and not store.is_available(cred_id):
-                    missing_credentials.append(spec.env_var)
-                    affected_tools = [t for t in info.required_tools if t in spec.tools]
-                    tools_str = ", ".join(affected_tools)
-                    warning_msg = f"Missing {spec.env_var} for {tools_str}"
-                    if spec.help_url:
-                        warning_msg += f"\n  Get it at: {spec.help_url}"
-                    warnings.append(warning_msg)
+            for _cred_name, spec in adapter.get_missing_for_tools(list(info.required_tools)):
+                missing_credentials.append(spec.env_var)
+                affected_tools = [t for t in info.required_tools if t in spec.tools]
+                tools_str = ", ".join(affected_tools)
+                warning_msg = f"Missing {spec.env_var} for {tools_str}"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
 
             # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
             node_types = list({node.node_type for node in self.graph.nodes})
-            for nt in node_types:
-                cred_name = node_type_to_cred.get(nt)
-                if cred_name is None or cred_name in checked:
-                    continue
-                checked.add(cred_name)
-                spec = CREDENTIAL_SPECS[cred_name]
-                cred_id = spec.credential_id or cred_name
-                if spec.required and not store.is_available(cred_id):
-                    missing_credentials.append(spec.env_var)
-                    affected_types = [t for t in node_types if t in spec.node_types]
-                    types_str = ", ".join(affected_types)
-                    warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
-                    if spec.help_url:
-                        warning_msg += f"\n  Get it at: {spec.help_url}"
-                    warnings.append(warning_msg)
+            for _cred_name, spec in adapter.get_missing_for_node_types(node_types):
+                missing_credentials.append(spec.env_var)
+                affected_types = [t for t in node_types if t in spec.node_types]
+                types_str = ", ".join(affected_types)
+                warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
             has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)

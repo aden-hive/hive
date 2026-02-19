@@ -28,7 +28,8 @@ goal = Goal(
         "Manage Gmail inbox emails autonomously using user-defined free-text rules. "
         "For every five minutes, fetch inbox emails (configurable batch size, default 100), "
         "apply the user's rules to each email, and execute the appropriate Gmail actions — trash, "
-        "mark as spam, mark important, mark read/unread, star, and more."
+        "mark as spam, mark important, mark read/unread, star, draft replies, "
+        "create/apply custom labels, and more."
     ),
     success_criteria=[
         SuccessCriterion(
@@ -39,7 +40,7 @@ goal = Goal(
             ),
             metric="action_correctness",
             target=">=95%",
-            weight=0.35,
+            weight=0.30,
         ),
         SuccessCriterion(
             id="action-report",
@@ -49,7 +50,7 @@ goal = Goal(
             ),
             metric="report_completeness",
             target="100%",
-            weight=0.3,
+            weight=0.25,
         ),
         SuccessCriterion(
             id="batch-completeness",
@@ -59,7 +60,14 @@ goal = Goal(
             ),
             metric="emails_processed_ratio",
             target="100%",
-            weight=0.35,
+            weight=0.30,
+        ),
+        SuccessCriterion(
+            id="label-management",
+            description="Custom labels are created and applied correctly when rules require them",
+            metric="label_coverage",
+            target="100%",
+            weight=0.15,
         ),
     ],
     constraints=[
@@ -75,6 +83,12 @@ goal = Goal(
                 "Archiving removes from inbox but preserves the email; only explicit "
                 "trash rules move emails to trash"
             ),
+            constraint_type="hard",
+            category="safety",
+        ),
+        Constraint(
+            id="draft-not-send",
+            description="Agent creates draft replies but NEVER sends them automatically",
             constraint_type="hard",
             category="safety",
         ),
@@ -139,14 +153,16 @@ pause_nodes = []
 terminal_nodes = []
 loop_config = {
     "max_iterations": 100,
-    "max_tool_calls_per_turn": 50,
+    "max_tool_calls_per_turn": 30,
+    "max_tool_result_chars": 8000,
     "max_history_tokens": 32000,
 }
 conversation_mode = "continuous"
 identity_prompt = (
     "You are an email inbox management assistant. You help users manage "
     "their Gmail inbox by applying free-text rules to emails — trash, "
-    "mark as spam, mark important, mark read/unread, star, and more."
+    "mark as spam, mark important, mark read/unread, star, draft replies, "
+    "create/apply custom labels, and more."
 )
 
 

@@ -59,6 +59,13 @@ from .provider import (
     CredentialProvider,
     StaticProvider,
 )
+from .setup import (
+    CredentialSetupSession,
+    MissingCredential,
+    SetupResult,
+    detect_missing_credentials_from_nodes,
+    run_credential_setup_cli,
+)
 from .storage import (
     CompositeStorage,
     CredentialStorage,
@@ -115,6 +122,12 @@ __all__ = [
     # Validation
     "ensure_credential_key_env",
     "validate_agent_credentials",
+    # Interactive setup
+    "CredentialSetupSession",
+    "MissingCredential",
+    "SetupResult",
+    "detect_missing_credentials_from_nodes",
+    "run_credential_setup_cli",
     # Aden sync (optional - requires httpx)
     "AdenSyncProvider",
     "AdenCredentialClient",

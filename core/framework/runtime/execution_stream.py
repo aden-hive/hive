@@ -201,6 +201,17 @@ class ExecutionStream:
         """Return IDs of all currently active executions."""
         return list(self._active_executions.keys())
 
+    @property
+    def is_awaiting_input(self) -> bool:
+        """True when an active execution is blocked waiting for client input."""
+        if not self._active_executors:
+            return False
+        for executor in self._active_executors.values():
+            for node in executor.node_registry.values():
+                if getattr(node, "_awaiting_input", False):
+                    return True
+        return False
+
     def _record_execution_result(self, execution_id: str, result: ExecutionResult) -> None:
         """Record a completed execution result with retention pruning."""
         self._execution_results[execution_id] = result

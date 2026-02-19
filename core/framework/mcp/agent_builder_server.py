@@ -3207,30 +3207,31 @@ def list_tests(
 
 
 def _get_credential_store():
-    """Get a CredentialStore that checks encrypted files and env vars.
+    """Get a CredentialStore that checks encrypted files, env vars, and Aden sync.
 
-    Uses CompositeStorage: encrypted file storage (primary) with env var fallback.
-    This ensures credentials stored via `store_credential` AND env vars are both found.
+    Uses CredentialStoreAdapter.default() which handles:
+    - Aden sync + provider index (resolving hashed IDs for OAuth)
+    - CompositeStorage (encrypted primary + env fallback)
+    - Auto-refresh of OAuth tokens
+    - Graceful fallback if Aden is unavailable
     """
-    from framework.credentials import CredentialStore
-    from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
-
-    # Build env var mapping from CREDENTIAL_SPECS for the fallback
-    env_mapping: dict[str, str] = {}
     try:
-        from aden_tools.credentials import CREDENTIAL_SPECS
+        from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
-        for name, spec in CREDENTIAL_SPECS.items():
-            cred_id = spec.credential_id or name
-            env_mapping[cred_id] = spec.env_var
+        return CredentialStoreAdapter.default().store
     except ImportError:
-        pass
+        from framework.credentials import CredentialStore
+        from framework.credentials.storage import (
+            CompositeStorage,
+            EncryptedFileStorage,
+            EnvVarStorage,
+        )
 
-    storage = CompositeStorage(
-        primary=EncryptedFileStorage(),
-        fallbacks=[EnvVarStorage(env_mapping=env_mapping)],
-    )
-    return CredentialStore(storage=storage)
+        storage = CompositeStorage(
+            primary=EncryptedFileStorage(),
+            fallbacks=[EnvVarStorage(env_mapping={})],
+        )
+        return CredentialStore(storage=storage)
 
 
 @mcp.tool()
