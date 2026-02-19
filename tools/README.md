@@ -102,7 +102,8 @@ python mcp_server.py
 | ---- | ----------- |
 | `web_search` | Search the web (Google or Brave, auto-detected) |
 | `web_scrape` | Scrape and extract content from webpages |
-| `scholar_search`, `patents_search` | Search academic papers and patents via SerpAPI |
+| `scholar_search`, `scholar_get_citations`, `scholar_get_author` | Search academic papers, get citations and author profiles via SerpAPI |
+| `patents_search`, `patents_get_details` | Search patents and retrieve patent details via SerpAPI |
 | `exa_search`, `exa_answer`, `exa_find_similar`, `exa_get_contents` | Semantic search and content retrieval via Exa AI |
 | `news_search`, `news_headlines`, `news_by_company`, `news_sentiment` | Search news articles and analyse sentiment |
 
