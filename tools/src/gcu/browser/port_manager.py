@@ -7,9 +7,12 @@ debugging ports. Ports are persisted to disk for reuse across browser restarts.
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Port range for CDP debugging
 CDP_PORT_MIN = 18800
@@ -71,6 +74,7 @@ def allocate_port(profile: str, storage_path: Path | None = None) -> int:
             if CDP_PORT_MIN <= stored_port <= CDP_PORT_MAX:
                 if _is_port_available(stored_port):
                     _allocated_ports.add(stored_port)
+                    logger.info(f"Reusing stored CDP port {stored_port} for profile '{profile}'")
                     return stored_port
         except (ValueError, OSError):
             pass  # Stored port invalid or unavailable
@@ -79,12 +83,13 @@ def allocate_port(profile: str, storage_path: Path | None = None) -> int:
     for port in range(CDP_PORT_MIN, CDP_PORT_MAX + 1):
         if port not in _allocated_ports and _is_port_available(port):
             _allocated_ports.add(port)
+            logger.info(f"Allocated new CDP port {port} for profile '{profile}'")
             # Persist port assignment
             if port_file:
                 try:
                     port_file.write_text(str(port))
-                except OSError:
-                    pass  # Continue even if we can't persist
+                except OSError as e:
+                    logger.warning(f"Failed to save port to file: {e}")
             return port
 
     raise RuntimeError(f"No available CDP ports in range {CDP_PORT_MIN}-{CDP_PORT_MAX}")

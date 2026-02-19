@@ -27,15 +27,132 @@ from playwright.async_api import (
 
 logger = logging.getLogger(__name__)
 
-# Enable debug logging for browser session
-logging.basicConfig(level=logging.DEBUG, format="[%(name)s] %(levelname)s: %(message)s")
-
 # Browser User-Agent for stealth mode
 BROWSER_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/131.0.0.0 Safari/537.36"
 )
+
+# Stealth script to hide automation detection
+# Injected via add_init_script() to run before any page scripts
+STEALTH_SCRIPT = """
+// Override navigator.webdriver to return false
+Object.defineProperty(navigator, 'webdriver', {
+    get: () => false,
+    configurable: true
+});
+
+// Remove webdriver from navigator prototype
+delete Object.getPrototypeOf(navigator).webdriver;
+
+// Override permissions.query to hide automation
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        originalQuery(parameters)
+);
+
+// Hide Chrome automation extensions
+if (window.chrome) {
+    window.chrome.runtime = undefined;
+}
+
+// Override plugins to look more realistic
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [
+        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+        { name: 'Native Client', filename: 'internal-nacl-plugin' }
+    ],
+    configurable: true
+});
+
+// Override languages
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['en-US', 'en'],
+    configurable: true
+});
+"""
+
+# Branded start page HTML with Hive theme
+HIVE_START_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hive Browser</title>
+    <style>
+        :root {
+            --primary: #FAC43B;
+            --bg: #1a1a1a;
+            --text: #ffffff;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: var(--primary);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 24px;
+            font-size: 40px;
+        }
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--primary);
+        }
+        p {
+            color: #888;
+            font-size: 14px;
+        }
+        .status {
+            position: fixed;
+            bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #666;
+            font-size: 12px;
+        }
+        .dot {
+            width: 8px;
+            height: 8px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="logo">🐝</div>
+    <h1>Hive Browser</h1>
+    <p>Ready for automation</p>
+    <div class="status">
+        <span class="dot"></span>
+        <span>Agent connected</span>
+    </div>
+</body>
+</html>
+"""
 
 # Default timeouts
 DEFAULT_TIMEOUT_MS = 30000
@@ -119,9 +236,6 @@ class BrowserSession:
                 storage_path_str = os.environ.get("HIVE_STORAGE_PATH")
                 agent_name = os.environ.get("HIVE_AGENT_NAME", "default")
 
-                logger.debug(f"Environment: HIVE_STORAGE_PATH={storage_path_str}")
-                logger.debug(f"Environment: HIVE_AGENT_NAME={agent_name}")
-
                 if storage_path_str:
                     self.user_data_dir = Path(storage_path_str) / "browser" / self.profile
                 else:
@@ -129,8 +243,6 @@ class BrowserSession:
                     self.user_data_dir = (
                         Path.home() / ".hive" / "agents" / agent_name / "browser" / self.profile
                     )
-
-                logger.debug(f"User data dir: {self.user_data_dir}")
 
                 self.user_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -157,6 +269,9 @@ class BrowserSession:
                 )
                 self.browser = None  # No separate browser object with persistent context
 
+                # Inject stealth script to hide automation detection
+                await self.context.add_init_script(STEALTH_SCRIPT)
+
                 # Register existing pages from restored session
                 for page in self.context.pages:
                     target_id = f"tab_{id(page)}"
@@ -166,15 +281,13 @@ class BrowserSession:
                     if self.active_page_id is None:
                         self.active_page_id = target_id
 
-                # Open about:blank as initial tab if no pages exist
-                if not self.context.pages:
-                    page = await self.context.new_page()
-                    target_id = f"tab_{id(page)}"
-                    self.pages[target_id] = page
-                    self.active_page_id = target_id
-                    self.console_messages[target_id] = []
-                    page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
-                    await page.goto("about:blank")
+                # Set branded Hive start page on the first blank page
+                if self.context.pages:
+                    first_page = self.context.pages[0]
+                    url = first_page.url
+                    # Only set branded content if it's a blank/new tab page
+                    if url in ("", "about:blank", "chrome://newtab/"):
+                        await first_page.set_content(HIVE_START_PAGE)
             else:
                 # Ephemeral mode - original behavior
                 logger.info(f"Starting ephemeral browser: profile={self.profile}")
@@ -187,6 +300,9 @@ class BrowserSession:
                     user_agent=BROWSER_USER_AGENT,
                     locale="en-US",
                 )
+
+                # Inject stealth script to hide automation detection
+                await self.context.add_init_script(STEALTH_SCRIPT)
 
             return {
                 "ok": True,

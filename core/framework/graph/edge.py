@@ -638,6 +638,13 @@ class GraphSpec(BaseModel):
             for edge in self.get_outgoing_edges(current):
                 to_visit.append(edge.target)
 
+        # Also mark sub-agents as reachable (they're invoked via delegate_to_sub_agent, not edges)
+        for node in self.nodes:
+            if node.id in reachable:
+                sub_agents = getattr(node, "sub_agents", []) or []
+                for sub_agent_id in sub_agents:
+                    reachable.add(sub_agent_id)
+
         # Build set of async entry point nodes for quick lookup
         async_entry_nodes = {ep.entry_node for ep in self.async_entry_points}
 
