@@ -174,11 +174,11 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
                     )
                 except Exception:
                     pass
+                configured += 1  # ADEN_API_KEY itself counts as configured
 
-            # Run Aden sync for all Aden-backed creds
+            # Run Aden sync for all Aden-backed creds (best-effort)
             if aden_key or os.environ.get("ADEN_API_KEY"):
-                synced = self._sync_aden_credentials()
-                configured += synced
+                self._sync_aden_credentials()
 
         # Handle direct API key credentials
         for i, cred in enumerate(self._missing):
@@ -201,15 +201,55 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
 
     def _sync_aden_credentials(self) -> int:
         """Sync Aden-backed credentials and return count of successfully synced."""
+        # Build the Aden sync components directly so we get real errors
+        # instead of CredentialStore.with_aden_sync() silently falling back.
+        try:
+            from framework.credentials.aden import (
+                AdenCachedStorage,
+                AdenClientConfig,
+                AdenCredentialClient,
+                AdenSyncProvider,
+            )
+            from framework.credentials.storage import EncryptedFileStorage
+
+            client = AdenCredentialClient(AdenClientConfig(base_url="https://api.adenhq.com"))
+            provider = AdenSyncProvider(client=client)
+            local_storage = EncryptedFileStorage()
+            cached_storage = AdenCachedStorage(
+                local_storage=local_storage,
+                aden_provider=provider,
+            )
+        except Exception as e:
+            self.notify(
+                f"Aden setup error: {e}",
+                severity="error",
+                timeout=8,
+            )
+            return 0
+
+        # Sync all integrations from Aden to get the provider index populated
         try:
             from framework.credentials import CredentialStore
 
-            store = CredentialStore.with_aden_sync(
-                base_url="https://api.adenhq.com",
-                auto_sync=True,
+            store = CredentialStore(
+                storage=cached_storage,
+                providers=[provider],
+                auto_refresh=True,
             )
+            num_synced = provider.sync_all(store)
+            if num_synced == 0:
+                self.notify(
+                    "No active integrations found in Aden. "
+                    "Connect integrations at hive.adenhq.com.",
+                    severity="warning",
+                    timeout=8,
+                )
         except Exception as e:
-            self.notify(f"Aden sync failed: {e}", severity="error", timeout=5)
+            self.notify(
+                f"Aden sync error: {e}",
+                severity="error",
+                timeout=8,
+            )
             return 0
 
         synced = 0
@@ -217,22 +257,31 @@ class CredentialSetupScreen(ModalScreen[bool | None]):
             cred = self._missing[i]
             cred_id = cred.credential_id or cred.credential_name
             if store.is_available(cred_id):
-                # Export the synced token to the current process
                 try:
                     value = store.get_key(cred_id, cred.credential_key)
                     if value:
                         os.environ[cred.env_var] = value
-                        # Also persist under the canonical ID so the local
-                        # encrypted store has the real token (overwrites any
-                        # stale entry like a previously mis-stored google.enc).
                         self._persist_to_local_store(cred_id, cred.credential_key, value)
                         synced += 1
-                except Exception:
-                    pass
+                    else:
+                        self.notify(
+                            f"{cred.credential_name}: key "
+                            f"'{cred.credential_key}' not found "
+                            f"in credential '{cred_id}'",
+                            severity="warning",
+                            timeout=8,
+                        )
+                except Exception as e:
+                    self.notify(
+                        f"{cred.credential_name} extraction failed: {e}",
+                        severity="error",
+                        timeout=8,
+                    )
             else:
                 self.notify(
-                    f"{cred.credential_name} not found in Aden. "
-                    "Connect this integration at hive.adenhq.com first.",
+                    f"{cred.credential_name} (id='{cred_id}') "
+                    f"not found in Aden. Connect this "
+                    f"integration at hive.adenhq.com first.",
                     severity="warning",
                     timeout=8,
                 )

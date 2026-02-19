@@ -60,8 +60,8 @@ def _presync_aden_tokens(credential_specs: dict) -> None:
 
     try:
         aden_store = CredentialStore.with_aden_sync(auto_sync=True)
-    except Exception:
-        logger.debug("Aden pre-sync unavailable, skipping")
+    except Exception as e:
+        logger.warning("Aden pre-sync unavailable: %s", e)
         return
 
     for name, spec in credential_specs.items():
@@ -75,8 +75,20 @@ def _presync_aden_tokens(credential_specs: dict) -> None:
             if value:
                 os.environ[spec.env_var] = value
                 logger.debug("Pre-synced %s from Aden", spec.env_var)
-        except Exception:
-            pass
+            else:
+                logger.warning(
+                    "Pre-sync: %s (id=%s) available but key '%s' returned None",
+                    spec.env_var,
+                    cred_id,
+                    spec.credential_key,
+                )
+        except Exception as e:
+            logger.warning(
+                "Pre-sync failed for %s (id=%s): %s",
+                spec.env_var,
+                cred_id,
+                e,
+            )
 
 
 def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = True) -> None:
@@ -135,10 +147,33 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
 
     missing: list[str] = []
     invalid: list[str] = []
+    # Aden-backed creds where ADEN_API_KEY is set but integration not connected
+    aden_not_connected: list[str] = []
     failed_cred_names: list[str] = []  # all cred names that need (re-)collection
+    has_aden_key = bool(os.environ.get("ADEN_API_KEY"))
     checked: set[str] = set()
     # Credentials that are present and should be health-checked
     to_verify: list[tuple[str, str]] = []  # (cred_name, used_by_label)
+
+    def _check_credential(spec, cred_name: str, label: str) -> None:
+        cred_id = spec.credential_id or cred_name
+        if not store.is_available(cred_id):
+            # If ADEN_API_KEY is set and this is an Aden-only credential,
+            # the issue is that the integration isn't connected on hive.adenhq.com,
+            # NOT that the user needs to re-enter ADEN_API_KEY.
+            if has_aden_key and spec.aden_supported and not spec.direct_api_key_supported:
+                aden_not_connected.append(
+                    f"  {spec.env_var} for {label}"
+                    f"\n    Connect this integration at hive.adenhq.com first."
+                )
+            else:
+                entry = f"  {spec.env_var} for {label}"
+                if spec.help_url:
+                    entry += f"\n    Get it at: {spec.help_url}"
+                missing.append(entry)
+                failed_cred_names.append(cred_name)
+        elif verify and spec.health_check_endpoint:
+            to_verify.append((cred_name, label))
 
     # Check tool credentials
     for tool_name in sorted(required_tools):
@@ -147,19 +182,11 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
             continue
         checked.add(cred_name)
         spec = CREDENTIAL_SPECS[cred_name]
-        cred_id = spec.credential_id or cred_name
         if not spec.required:
             continue
         affected = sorted(t for t in required_tools if t in spec.tools)
         label = ", ".join(affected)
-        if not store.is_available(cred_id):
-            entry = f"  {spec.env_var} for {label}"
-            if spec.help_url:
-                entry += f"\n    Get it at: {spec.help_url}"
-            missing.append(entry)
-            failed_cred_names.append(cred_name)
-        elif verify and spec.health_check_endpoint:
-            to_verify.append((cred_name, label))
+        _check_credential(spec, cred_name, label)
 
     # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
     for nt in sorted(node_types):
@@ -168,19 +195,11 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
             continue
         checked.add(cred_name)
         spec = CREDENTIAL_SPECS[cred_name]
-        cred_id = spec.credential_id or cred_name
         if not spec.required:
             continue
         affected_types = sorted(t for t in node_types if t in spec.node_types)
         label = ", ".join(affected_types) + " nodes"
-        if not store.is_available(cred_id):
-            entry = f"  {spec.env_var} for {label}"
-            if spec.help_url:
-                entry += f"\n    Get it at: {spec.help_url}"
-            missing.append(entry)
-            failed_cred_names.append(cred_name)
-        elif verify and spec.health_check_endpoint:
-            to_verify.append((cred_name, label))
+        _check_credential(spec, cred_name, label)
 
     # Phase 2: health-check present credentials
     if to_verify:
@@ -212,7 +231,7 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
                 except Exception as exc:
                     logger.debug("Health check for %s failed: %s", cred_name, exc)
 
-    errors = missing + invalid
+    errors = missing + invalid + aden_not_connected
     if errors:
         from framework.credentials.models import CredentialError
 
@@ -225,9 +244,18 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
                 lines.append("")
             lines.append("Invalid or expired credentials:\n")
             lines.extend(invalid)
+        if aden_not_connected:
+            if missing or invalid:
+                lines.append("")
+            lines.append(
+                "Aden integrations not connected "
+                "(ADEN_API_KEY is set but OAuth tokens unavailable):\n"
+            )
+            lines.extend(aden_not_connected)
         lines.append(
             "\nTo fix: run /hive-credentials in Claude Code."
-            "\nIf you've already set up credentials, restart your terminal to load them."
+            "\nIf you've already set up credentials, "
+            "restart your terminal to load them."
         )
         exc = CredentialError("\n".join(lines))
         exc.failed_cred_names = failed_cred_names  # type: ignore[attr-defined]

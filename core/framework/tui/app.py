@@ -425,12 +425,23 @@ class AdenTUI(App):
 
         if not session.missing:
             self.status_bar.set_graph_id("")
-            self.notify(
-                "Credential error but no missing credentials detected. "
-                "Run 'hive setup-credentials' from the terminal.",
-                severity="error",
-                timeout=10,
-            )
+            error_msg = str(credential_error) if credential_error else ""
+            if "not connected" in error_msg or "Aden" in error_msg:
+                self.notify(
+                    "ADEN_API_KEY is set but OAuth integrations "
+                    "are not connected. Visit hive.adenhq.com "
+                    "to connect them, then reload the agent.",
+                    severity="warning",
+                    timeout=15,
+                )
+            else:
+                self.notify(
+                    "Credential error but no missing credentials "
+                    "detected. Run 'hive setup-credentials' "
+                    "from the terminal.",
+                    severity="error",
+                    timeout=10,
+                )
             if callable(on_cancel):
                 on_cancel()
             return
