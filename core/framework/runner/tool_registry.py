@@ -1,5 +1,6 @@
 """Tool discovery and registration for agent runner."""
 
+import asyncio
 import contextvars
 import importlib.util
 import inspect
@@ -224,7 +225,18 @@ class ToolRegistry:
         Get unified tool executor function.
 
         Returns a function that dispatches to the appropriate tool executor.
+        Handles both sync and async tool implementations — async results are
+        wrapped so that ``EventLoopNode._execute_tool`` can await them.
         """
+
+        def _wrap_result(tool_use_id: str, result: Any) -> ToolResult:
+            if isinstance(result, ToolResult):
+                return result
+            return ToolResult(
+                tool_use_id=tool_use_id,
+                content=json.dumps(result) if not isinstance(result, str) else result,
+                is_error=False,
+            )
 
         def executor(tool_use: ToolUse) -> ToolResult:
             if tool_use.name not in self._tools:
@@ -237,13 +249,24 @@ class ToolRegistry:
             registered = self._tools[tool_use.name]
             try:
                 result = registered.executor(tool_use.input)
-                if isinstance(result, ToolResult):
-                    return result
-                return ToolResult(
-                    tool_use_id=tool_use.id,
-                    content=json.dumps(result) if not isinstance(result, str) else result,
-                    is_error=False,
-                )
+
+                # Async tool: wrap the awaitable so the caller can await it
+                if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+
+                    async def _await_and_wrap():
+                        try:
+                            r = await result
+                            return _wrap_result(tool_use.id, r)
+                        except Exception as exc:
+                            return ToolResult(
+                                tool_use_id=tool_use.id,
+                                content=json.dumps({"error": str(exc)}),
+                                is_error=True,
+                            )
+
+                    return _await_and_wrap()
+
+                return _wrap_result(tool_use.id, result)
             except Exception as e:
                 return ToolResult(
                     tool_use_id=tool_use.id,

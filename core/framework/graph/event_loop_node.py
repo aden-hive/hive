@@ -275,12 +275,25 @@ class EventLoopNode(NodeProtocol):
             )
             accumulator = OutputAccumulator(store=self._conversation_store)
             start_iteration = 0
+            _restored_recent_responses: list[str] = []
+            _restored_tool_fingerprints: list[list[tuple[str, str]]] = []
         else:
             # Try crash-recovery restore from store, then fall back to fresh.
-            conversation, accumulator, start_iteration = await self._restore(ctx)
-            if conversation is None:
+            restored = await self._restore(ctx)
+            if restored is not None:
+                conversation = restored.conversation
+                accumulator = restored.accumulator
+                start_iteration = restored.start_iteration
+                _restored_recent_responses = restored.recent_responses
+                _restored_tool_fingerprints = restored.recent_tool_fingerprints
+            else:
+                _restored_recent_responses = []
+                _restored_tool_fingerprints = []
+
                 # Fresh conversation: either isolated mode or first node in continuous mode.
-                system_prompt = ctx.node_spec.system_prompt or ""
+                from framework.graph.prompt_composer import _with_datetime
+
+                system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
@@ -306,6 +319,7 @@ class EventLoopNode(NodeProtocol):
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing and not ctx.event_triggered:
             tools.append(self._build_ask_user_tool())
+            tools.append(self._build_escalate_tool())
 
         logger.info(
             "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
@@ -319,10 +333,9 @@ class EventLoopNode(NodeProtocol):
         # 4. Publish loop started
         await self._publish_loop_started(stream_id, node_id)
 
-        # 5. Stall / doom loop detection state
-        recent_responses: list[str] = []
-        recent_tool_fingerprints: list[list[tuple[str, str]]] = []
-        user_interaction_count = 0  # tracks how many times this node blocked for user input
+        # 5. Stall / doom loop detection state (restored from cursor if resuming)
+        recent_responses: list[str] = _restored_recent_responses
+        recent_tool_fingerprints: list[list[tuple[str, str]]] = _restored_tool_fingerprints
 
         # 6. Main loop
         for iteration in range(start_iteration, self._config.max_iterations):
@@ -576,7 +589,8 @@ class EventLoopNode(NodeProtocol):
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
-                if tc.get("tool_name") not in ("set_output", "ask_user") and not tc.get("is_error")
+                if tc.get("tool_name") not in ("set_output", "ask_user", "escalate_to_coder")
+                and not tc.get("is_error")
             ]
             if mcp_tool_calls:
                 fps = self._fingerprint_tool_calls(mcp_tool_calls)
@@ -623,8 +637,15 @@ class EventLoopNode(NodeProtocol):
                 # Text-only turn breaks the doom loop chain
                 recent_tool_fingerprints.clear()
 
-            # 6g. Write cursor checkpoint
-            await self._write_cursor(ctx, conversation, accumulator, iteration)
+            # 6g. Write cursor checkpoint (includes stall/doom state for resume)
+            await self._write_cursor(
+                ctx,
+                conversation,
+                accumulator,
+                iteration,
+                recent_responses=recent_responses,
+                recent_tool_fingerprints=recent_tool_fingerprints,
+            )
 
             # 6h. Client-facing input blocking
             #
@@ -741,7 +762,6 @@ class EventLoopNode(NodeProtocol):
                         conversation=conversation if _is_continuous else None,
                     )
 
-                user_interaction_count += 1
                 recent_responses.clear()
 
                 if _cf_auto:
@@ -1267,6 +1287,26 @@ class EventLoopNode(NodeProtocol):
                     )
                     results_by_id[tc.tool_use_id] = result
 
+                elif tc.tool_name == "escalate_to_coder":
+                    # --- Framework-level escalation handling ---
+                    if self._event_bus:
+                        await self._event_bus.emit_escalation_requested(
+                            stream_id=stream_id,
+                            node_id=node_id,
+                            reason=tc.tool_input.get("reason", ""),
+                            context=tc.tool_input.get("context", ""),
+                            execution_id=ctx.execution_id,
+                        )
+                    # Block like ask_user — the TUI loads the coder,
+                    # and /back injects a message to unblock us.
+                    user_input_requested = True
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content="Escalating to Hive Coder. You will resume when done.",
+                        is_error=False,
+                    )
+                    results_by_id[tc.tool_use_id] = result
+
                 else:
                     # --- Real tool: check for truncated args, else queue ---
                     if "_raw" in tc.tool_input:
@@ -1313,7 +1353,7 @@ class EventLoopNode(NodeProtocol):
                     continue  # shouldn't happen
 
                 # Build log entries for real tools
-                if tc.tool_name not in ("set_output", "ask_user"):
+                if tc.tool_name not in ("set_output", "ask_user", "escalate_to_coder"):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
@@ -1455,6 +1495,46 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": [],
+            },
+        )
+
+    def _build_escalate_tool(self) -> Tool:
+        """Build the synthetic escalate_to_coder tool.
+
+        Client-facing nodes call this when the user's request requires
+        capabilities beyond the current agent (code changes, feature
+        expansion, debugging).  The TUI intercepts the event and loads
+        hive_coder in the foreground.
+        """
+        return Tool(
+            name="escalate_to_coder",
+            description=(
+                "Call this tool when the user requests something you "
+                "cannot handle — a code change, feature expansion, bug "
+                "fix, or framework-level modification. This will bring "
+                "in Hive Coder, a coding agent that can read and write "
+                "files. Provide a clear reason and relevant context so "
+                "the coder can pick up where you left off."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": (
+                            "Why you are escalating (what the user needs that you cannot do)."
+                        ),
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": (
+                            "Relevant context: what you discussed, "
+                            "what files are involved, what the user "
+                            "wants changed."
+                        ),
+                    },
+                },
+                "required": ["reason"],
             },
         )
 
@@ -2214,29 +2294,60 @@ class EventLoopNode(NodeProtocol):
     # Persistence: restore, cursor, injection, pause
     # -------------------------------------------------------------------
 
+    @dataclass
+    class _RestoredState:
+        """State recovered from a previous checkpoint."""
+
+        conversation: NodeConversation
+        accumulator: OutputAccumulator
+        start_iteration: int
+        recent_responses: list[str]
+        recent_tool_fingerprints: list[list[tuple[str, str]]]
+
     async def _restore(
         self,
         ctx: NodeContext,
-    ) -> tuple[NodeConversation | None, OutputAccumulator | None, int]:
-        """Attempt to restore from a previous checkpoint."""
+    ) -> _RestoredState | None:
+        """Attempt to restore from a previous checkpoint.
+
+        Returns a ``_RestoredState`` with conversation, accumulator, iteration
+        counter, and stall/doom-loop detection state — everything needed to
+        resume exactly where execution stopped.
+        """
         if self._conversation_store is None:
-            return None, None, 0
+            return None
 
         conversation = await NodeConversation.restore(self._conversation_store)
         if conversation is None:
-            return None, None, 0
+            return None
 
         accumulator = await OutputAccumulator.restore(self._conversation_store)
 
         cursor = await self._conversation_store.read_cursor()
         start_iteration = cursor.get("iteration", 0) + 1 if cursor else 0
 
+        # Restore stall/doom-loop detection state
+        recent_responses: list[str] = cursor.get("recent_responses", []) if cursor else []
+        raw_fps = cursor.get("recent_tool_fingerprints", []) if cursor else []
+        recent_tool_fingerprints: list[list[tuple[str, str]]] = [
+            [tuple(pair) for pair in fps]  # type: ignore[misc]
+            for fps in raw_fps
+        ]
+
         logger.info(
             f"Restored event loop: iteration={start_iteration}, "
             f"messages={conversation.message_count}, "
-            f"outputs={list(accumulator.values.keys())}"
+            f"outputs={list(accumulator.values.keys())}, "
+            f"stall_window={len(recent_responses)}, "
+            f"doom_window={len(recent_tool_fingerprints)}"
         )
-        return conversation, accumulator, start_iteration
+        return EventLoopNode._RestoredState(
+            conversation=conversation,
+            accumulator=accumulator,
+            start_iteration=start_iteration,
+            recent_responses=recent_responses,
+            recent_tool_fingerprints=recent_tool_fingerprints,
+        )
 
     async def _write_cursor(
         self,
@@ -2244,8 +2355,15 @@ class EventLoopNode(NodeProtocol):
         conversation: NodeConversation,
         accumulator: OutputAccumulator,
         iteration: int,
+        *,
+        recent_responses: list[str] | None = None,
+        recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
     ) -> None:
-        """Write checkpoint cursor for crash recovery."""
+        """Write checkpoint cursor for crash recovery.
+
+        Persists iteration counter, accumulator outputs, and stall/doom-loop
+        detection state so that resume picks up exactly where execution stopped.
+        """
         if self._conversation_store:
             cursor = await self._conversation_store.read_cursor() or {}
             cursor.update(
@@ -2256,6 +2374,14 @@ class EventLoopNode(NodeProtocol):
                     "outputs": accumulator.to_dict(),
                 }
             )
+            # Persist stall/doom-loop detection state for reliable resume
+            if recent_responses is not None:
+                cursor["recent_responses"] = recent_responses
+            if recent_tool_fingerprints is not None:
+                # Convert list[list[tuple]] → list[list[list]] for JSON
+                cursor["recent_tool_fingerprints"] = [
+                    [list(pair) for pair in fps] for fps in recent_tool_fingerprints
+                ]
             await self._conversation_store.write_cursor(cursor)
 
     async def _drain_injection_queue(self, conversation: NodeConversation) -> int:

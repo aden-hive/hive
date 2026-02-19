@@ -36,7 +36,11 @@ from framework.graph import (  # noqa: E402
     NodeSpec,
     SuccessCriterion,
 )
-from framework.testing.prompts import PYTEST_TEST_FILE_HEADER  # noqa: E402
+
+# Testing framework imports
+from framework.testing.prompts import (  # noqa: E402
+    PYTEST_TEST_FILE_HEADER,
+)
 from framework.utils.io import atomic_write  # noqa: E402
 
 # Initialize MCP server

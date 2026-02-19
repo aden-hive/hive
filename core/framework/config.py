@@ -50,12 +50,53 @@ def get_max_tokens() -> int:
 
 
 def get_api_key() -> str | None:
-    """Return the API key from the environment variable specified in configuration."""
+    """Return the API key, supporting env var, Claude Code subscription, and ZAI Code.
+
+    Priority:
+    1. Claude Code subscription (``use_claude_code_subscription: true``)
+       reads the OAuth token from ``~/.claude/.credentials.json``.
+    2. Environment variable named in ``api_key_env_var``.
+    """
     llm = get_hive_config().get("llm", {})
+
+    # Claude Code subscription: read OAuth token directly
+    if llm.get("use_claude_code_subscription"):
+        try:
+            from framework.runner.runner import get_claude_code_token
+
+            token = get_claude_code_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
+    # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
     return None
+
+
+def get_api_base() -> str | None:
+    """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
+    return get_hive_config().get("llm", {}).get("api_base")
+
+
+def get_llm_extra_kwargs() -> dict[str, Any]:
+    """Return extra kwargs for LiteLLMProvider (e.g. OAuth headers).
+
+    When ``use_claude_code_subscription`` is enabled, returns
+    ``extra_headers`` with the OAuth Bearer token so that litellm's
+    built-in Anthropic OAuth handler adds the required beta headers.
+    """
+    llm = get_hive_config().get("llm", {})
+    if llm.get("use_claude_code_subscription"):
+        api_key = get_api_key()
+        if api_key:
+            return {
+                "extra_headers": {"authorization": f"Bearer {api_key}"},
+            }
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -71,4 +112,5 @@ class RuntimeConfig:
     temperature: float = 0.7
     max_tokens: int = field(default_factory=get_max_tokens)
     api_key: str | None = field(default_factory=get_api_key)
-    api_base: str | None = None
+    api_base: str | None = field(default_factory=get_api_base)
+    extra_kwargs: dict[str, Any] = field(default_factory=get_llm_extra_kwargs)

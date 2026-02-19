@@ -36,26 +36,129 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
+CLAUDE_OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+# Buffer in seconds before token expiry to trigger a proactive refresh
+_TOKEN_REFRESH_BUFFER_SECS = 300  # 5 minutes
+
+
+def _refresh_claude_code_token(refresh_token: str) -> dict | None:
+    """Refresh the Claude Code OAuth token using the refresh token.
+
+    POSTs to the Anthropic OAuth token endpoint with form-urlencoded data
+    (per OAuth 2.0 RFC 6749 Section 4.1.3).
+
+    Returns:
+        Dict with new token data (access_token, refresh_token, expires_in)
+        on success, None on failure.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    data = urllib.parse.urlencode(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": CLAUDE_OAUTH_CLIENT_ID,
+        }
+    ).encode("utf-8")
+
+    req = urllib.request.Request(
+        CLAUDE_OAUTH_TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
+        logger.debug("Claude Code token refresh failed: %s", exc)
+        return None
+
+
+def _save_refreshed_credentials(token_data: dict) -> None:
+    """Write refreshed token data back to ~/.claude/.credentials.json."""
+    import time
+
+    if not CLAUDE_CREDENTIALS_FILE.exists():
+        return
+
+    try:
+        with open(CLAUDE_CREDENTIALS_FILE) as f:
+            creds = json.load(f)
+
+        oauth = creds.get("claudeAiOauth", {})
+        oauth["accessToken"] = token_data["access_token"]
+        if "refresh_token" in token_data:
+            oauth["refreshToken"] = token_data["refresh_token"]
+        if "expires_in" in token_data:
+            oauth["expiresAt"] = int((time.time() + token_data["expires_in"]) * 1000)
+        creds["claudeAiOauth"] = oauth
+
+        with open(CLAUDE_CREDENTIALS_FILE, "w") as f:
+            json.dump(creds, f, indent=2)
+        logger.debug("Claude Code credentials refreshed successfully")
+    except (json.JSONDecodeError, OSError, KeyError) as exc:
+        logger.debug("Failed to save refreshed credentials: %s", exc)
 
 
 def get_claude_code_token() -> str | None:
-    """
-    Get the OAuth token from Claude Code subscription.
+    """Get the OAuth token from Claude Code subscription with auto-refresh.
 
     Reads from ~/.claude/.credentials.json which is created by the
     Claude Code CLI when users authenticate with their subscription.
 
+    If the token is expired or close to expiry, attempts an automatic
+    refresh using the stored refresh token.
+
     Returns:
         The access token if available, None otherwise.
     """
+    import time
+
     if not CLAUDE_CREDENTIALS_FILE.exists():
         return None
+
     try:
         with open(CLAUDE_CREDENTIALS_FILE) as f:
             creds = json.load(f)
-        return creds.get("claudeAiOauth", {}).get("accessToken")
     except (json.JSONDecodeError, OSError):
         return None
+
+    oauth = creds.get("claudeAiOauth", {})
+    access_token = oauth.get("accessToken")
+    if not access_token:
+        return None
+
+    # Check token expiry (expiresAt is in milliseconds)
+    expires_at_ms = oauth.get("expiresAt", 0)
+    now_ms = int(time.time() * 1000)
+    buffer_ms = _TOKEN_REFRESH_BUFFER_SECS * 1000
+
+    if expires_at_ms > now_ms + buffer_ms:
+        # Token is still valid
+        return access_token
+
+    # Token is expired or near expiry — attempt refresh
+    refresh_token = oauth.get("refreshToken")
+    if not refresh_token:
+        logger.warning("Claude Code token expired and no refresh token available")
+        return access_token  # Return expired token; it may still work briefly
+
+    logger.info("Claude Code token expired or near expiry, refreshing...")
+    token_data = _refresh_claude_code_token(refresh_token)
+
+    if token_data and "access_token" in token_data:
+        _save_refreshed_credentials(token_data)
+        return token_data["access_token"]
+
+    # Refresh failed — return the existing token and warn
+    logger.warning("Claude Code token refresh failed. Run 'claude' to re-authenticate.")
+    return access_token
 
 
 @dataclass
@@ -587,6 +690,7 @@ class AgentRunner:
             config = get_hive_config()
             llm_config = config.get("llm", {})
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
+            api_base = llm_config.get("api_base")
 
             api_key = None
             if use_claude_code:
@@ -596,9 +700,16 @@ class AgentRunner:
                     print("Warning: Claude Code subscription configured but no token found.")
                     print("Run 'claude' to authenticate, then try again.")
 
-            if api_key:
-                # Use Claude Code subscription token
-                self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+            if api_key and use_claude_code:
+                # Use litellm's built-in Anthropic OAuth support.
+                # The lowercase "authorization" key triggers OAuth detection which
+                # adds the required anthropic-beta and browser-access headers.
+                self._llm = LiteLLMProvider(
+                    model=self.model,
+                    api_key=api_key,
+                    api_base=api_base,
+                    extra_headers={"authorization": f"Bearer {api_key}"},
+                )
             else:
                 # Fall back to environment variable
                 # First check api_key_env_var from config (set by quickstart)
@@ -606,12 +717,18 @@ class AgentRunner:
                     self.model
                 )
                 if api_key_env and os.environ.get(api_key_env):
-                    self._llm = LiteLLMProvider(model=self.model)
+                    self._llm = LiteLLMProvider(
+                        model=self.model,
+                        api_key=os.environ[api_key_env],
+                        api_base=api_base,
+                    )
                 else:
                     # Fall back to credential store
                     api_key = self._get_api_key_from_credential_store()
                     if api_key:
-                        self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+                        self._llm = LiteLLMProvider(
+                            model=self.model, api_key=api_key, api_base=api_base
+                        )
                         # Set env var so downstream code (e.g. cleanup LLM in
                         # node._extract_json) can also find it
                         if api_key_env:
@@ -619,6 +736,20 @@ class AgentRunner:
                     elif api_key_env:
                         print(f"Warning: {api_key_env} not set. LLM calls will fail.")
                         print(f"Set it with: export {api_key_env}=your-api-key")
+
+            # Fail fast if the agent needs an LLM but none was configured
+            if self._llm is None:
+                has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+                if has_llm_nodes:
+                    from framework.credentials.models import CredentialError
+
+                    api_key_env = self._get_api_key_env_var(self.model)
+                    hint = (
+                        f"Set it with: export {api_key_env}=your-api-key"
+                        if api_key_env
+                        else "Configure an API key for your LLM provider."
+                    )
+                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
 
         # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
@@ -731,6 +862,19 @@ class AgentRunner:
             async_checkpoint=True,  # Non-blocking
         )
 
+        # Handle runtime_config - ensure it's AgentRuntimeConfig, not RuntimeConfig
+        # RuntimeConfig is for LLM settings; AgentRuntimeConfig is for AgentRuntime settings
+        runtime_config = None
+        if self.runtime_config is not None:
+            from framework.config import RuntimeConfig
+
+            # If it's a RuntimeConfig (LLM config), don't pass it
+            if isinstance(self.runtime_config, RuntimeConfig):
+                runtime_config = None
+            else:
+                # It's already an AgentRuntimeConfig or compatible type
+                runtime_config = self.runtime_config
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -741,7 +885,8 @@ class AgentRunner:
             tool_executor=tool_executor,
             runtime_log_store=log_store,
             checkpoint_config=checkpoint_config,
-            config=self.runtime_config,
+            config=runtime_config,
+            graph_id=self.graph.id or self.agent_path.name,
         )
 
         # Pass intro_message through for TUI display
@@ -1308,6 +1453,61 @@ Respond with JSON only:
             content={"error": f"Unknown message type: {message.type}"},
             type=MessageType.RESPONSE,
         )
+
+    @classmethod
+    async def setup_as_secondary(
+        cls,
+        agent_path: str | Path,
+        runtime: AgentRuntime,
+        graph_id: str | None = None,
+    ) -> str:
+        """Load an agent and register it as a secondary graph on *runtime*.
+
+        Uses :meth:`AgentRunner.load` to parse the agent, then calls
+        :meth:`AgentRuntime.add_graph` with the extracted graph, goal,
+        and entry points.
+
+        Args:
+            agent_path: Path to the agent directory
+            runtime: The running AgentRuntime to attach to
+            graph_id: Optional graph identifier (defaults to directory name)
+
+        Returns:
+            The graph_id used for registration
+        """
+        agent_path = Path(agent_path)
+        runner = cls.load(agent_path)
+        gid = graph_id or agent_path.name
+
+        # Build entry points
+        entry_points: dict[str, EntryPointSpec] = {}
+        if runner.graph.entry_node:
+            entry_points["default"] = EntryPointSpec(
+                id="default",
+                name="Default",
+                entry_node=runner.graph.entry_node,
+                trigger_type="manual",
+                isolation_level="shared",
+            )
+        for aep in runner.graph.async_entry_points:
+            entry_points[aep.id] = EntryPointSpec(
+                id=aep.id,
+                name=aep.name,
+                entry_node=aep.entry_node,
+                trigger_type=aep.trigger_type,
+                trigger_config=aep.trigger_config,
+                isolation_level=aep.isolation_level,
+                priority=aep.priority,
+                max_concurrent=aep.max_concurrent,
+            )
+
+        await runtime.add_graph(
+            graph_id=gid,
+            graph=runner.graph,
+            goal=runner.goal,
+            entry_points=entry_points,
+        )
+        return gid
 
     def cleanup(self) -> None:
         """Clean up resources (synchronous)."""

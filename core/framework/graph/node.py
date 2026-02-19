@@ -201,10 +201,11 @@ class NodeSpec(BaseModel):
 
     # Visit limits (for feedback/callback edges)
     max_node_visits: int = Field(
-        default=1,
+        default=0,
         description=(
             "Max times this node executes in one graph run. "
-            "Set >1 for feedback loops. 0 = unlimited (max_steps guards)."
+            "0 = unlimited (default, required for forever-alive agents). "
+            "Set >1 for one-shot agents with feedback loops."
         ),
     )
 

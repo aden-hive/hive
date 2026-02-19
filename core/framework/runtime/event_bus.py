@@ -83,6 +83,9 @@ class EventType(StrEnum):
     # Custom events
     CUSTOM = "custom"
 
+    # Escalation (agent requests handoff to hive_coder)
+    ESCALATION_REQUESTED = "escalation_requested"
+
 
 @dataclass
 class AgentEvent:
@@ -95,6 +98,7 @@ class AgentEvent:
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     correlation_id: str | None = None  # For tracking related events
+    graph_id: str | None = None  # Which graph emitted this event (multi-graph sessions)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -106,6 +110,7 @@ class AgentEvent:
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
             "correlation_id": self.correlation_id,
+            "graph_id": self.graph_id,
         }
 
 
@@ -123,6 +128,7 @@ class Subscription:
     filter_stream: str | None = None  # Only receive events from this stream
     filter_node: str | None = None  # Only receive events from this node
     filter_execution: str | None = None  # Only receive events from this execution
+    filter_graph: str | None = None  # Only receive events from this graph
 
 
 class EventBus:
@@ -182,6 +188,7 @@ class EventBus:
         filter_stream: str | None = None,
         filter_node: str | None = None,
         filter_execution: str | None = None,
+        filter_graph: str | None = None,
     ) -> str:
         """
         Subscribe to events.
@@ -192,6 +199,7 @@ class EventBus:
             filter_stream: Only receive events from this stream
             filter_node: Only receive events from this node
             filter_execution: Only receive events from this execution
+            filter_graph: Only receive events from this graph
 
         Returns:
             Subscription ID (use to unsubscribe)
@@ -206,6 +214,7 @@ class EventBus:
             filter_stream=filter_stream,
             filter_node=filter_node,
             filter_execution=filter_execution,
+            filter_graph=filter_graph,
         )
 
         self._subscriptions[sub_id] = subscription
@@ -269,6 +278,10 @@ class EventBus:
 
         # Check execution filter
         if subscription.filter_execution and subscription.filter_execution != event.execution_id:
+            return False
+
+        # Check graph filter
+        if subscription.filter_graph and subscription.filter_graph != event.graph_id:
             return False
 
         return True
@@ -820,6 +833,25 @@ class EventBus:
             )
         )
 
+    async def emit_escalation_requested(
+        self,
+        stream_id: str,
+        node_id: str,
+        reason: str = "",
+        context: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit escalation requested event (agent wants hive_coder)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.ESCALATION_REQUESTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"reason": reason, "context": context},
+            )
+        )
+
     # === QUERY OPERATIONS ===
 
     def get_history(
@@ -873,6 +905,7 @@ class EventBus:
         stream_id: str | None = None,
         node_id: str | None = None,
         execution_id: str | None = None,
+        graph_id: str | None = None,
         timeout: float | None = None,
     ) -> AgentEvent | None:
         """
@@ -883,6 +916,7 @@ class EventBus:
             stream_id: Filter by stream
             node_id: Filter by node
             execution_id: Filter by execution
+            graph_id: Filter by graph
             timeout: Maximum time to wait (seconds)
 
         Returns:
@@ -903,6 +937,7 @@ class EventBus:
             filter_stream=stream_id,
             filter_node=node_id,
             filter_execution=execution_id,
+            filter_graph=graph_id,
         )
 
         try:

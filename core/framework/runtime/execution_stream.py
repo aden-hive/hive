@@ -26,12 +26,37 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
-    from framework.runtime.event_bus import EventBus
+    from framework.runtime.event_bus import AgentEvent, EventBus
     from framework.runtime.outcome_aggregator import OutcomeAggregator
     from framework.storage.concurrent import ConcurrentStorage
     from framework.storage.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
+
+
+class _GraphScopedEventBus:
+    """Thin proxy that stamps ``graph_id`` on every published event.
+
+    The ``GraphExecutor`` and ``EventLoopNode`` emit events via the
+    convenience methods on ``EventBus`` (e.g. ``emit_llm_text_delta``).
+    Rather than threading ``graph_id`` through every one of those 20+
+    methods, this proxy intercepts ``publish()`` and sets ``graph_id``
+    before forwarding to the real bus.  All other attribute access is
+    delegated unchanged.
+    """
+
+    __slots__ = ("_bus", "_graph_id")
+
+    def __init__(self, bus: "EventBus", graph_id: str) -> None:
+        object.__setattr__(self, "_bus", bus)
+        object.__setattr__(self, "_graph_id", graph_id)
+
+    async def publish(self, event: "AgentEvent") -> None:  # type: ignore[override]
+        event.graph_id = object.__getattribute__(self, "_graph_id")
+        await object.__getattribute__(self, "_bus").publish(event)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "_bus"), name)
 
 
 @dataclass
@@ -117,6 +142,7 @@ class ExecutionStream:
         runtime_log_store: Any = None,
         session_store: "SessionStore | None" = None,
         checkpoint_config: CheckpointConfig | None = None,
+        graph_id: str | None = None,
     ):
         """
         Initialize execution stream.
@@ -136,11 +162,13 @@ class ExecutionStream:
             runtime_log_store: Optional RuntimeLogStore for per-execution logging
             session_store: Optional SessionStore for unified session storage
             checkpoint_config: Optional checkpoint configuration for resumable sessions
+            graph_id: Optional graph identifier for multi-graph sessions
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
         self.graph = graph
         self.goal = goal
+        self.graph_id = graph_id
         self._state_manager = state_manager
         self._storage = storage
         self._outcome_aggregator = outcome_aggregator
@@ -173,6 +201,11 @@ class ExecutionStream:
         self._semaphore = asyncio.Semaphore(entry_spec.max_concurrent)
         self._lock = asyncio.Lock()
 
+        # Graph-scoped event bus (stamps graph_id on published events)
+        self._scoped_event_bus = self._event_bus
+        if self._event_bus and self.graph_id:
+            self._scoped_event_bus = _GraphScopedEventBus(self._event_bus, self.graph_id)
+
         # State
         self._running = False
 
@@ -185,10 +218,10 @@ class ExecutionStream:
         logger.info(f"ExecutionStream '{self.stream_id}' started")
 
         # Emit stream started event
-        if self._event_bus:
+        if self._scoped_event_bus:
             from framework.runtime.event_bus import AgentEvent, EventType
 
-            await self._event_bus.publish(
+            await self._scoped_event_bus.publish(
                 AgentEvent(
                     type=EventType.STREAM_STARTED,
                     stream_id=self.stream_id,
@@ -262,10 +295,10 @@ class ExecutionStream:
         logger.info(f"ExecutionStream '{self.stream_id}' stopped")
 
         # Emit stream stopped event
-        if self._event_bus:
+        if self._scoped_event_bus:
             from framework.runtime.event_bus import AgentEvent, EventType
 
-            await self._event_bus.publish(
+            await self._scoped_event_bus.publish(
                 AgentEvent(
                     type=EventType.STREAM_STOPPED,
                     stream_id=self.stream_id,
@@ -369,8 +402,8 @@ class ExecutionStream:
 
             try:
                 # Emit started event
-                if self._event_bus:
-                    await self._event_bus.emit_execution_started(
+                if self._scoped_event_bus:
+                    await self._scoped_event_bus.emit_execution_started(
                         stream_id=self.stream_id,
                         execution_id=execution_id,
                         input_data=ctx.input_data,
@@ -415,7 +448,7 @@ class ExecutionStream:
                     llm=self._llm,
                     tools=self._tools,
                     tool_executor=self._tool_executor,
-                    event_bus=self._event_bus,
+                    event_bus=self._scoped_event_bus,
                     stream_id=self.stream_id,
                     storage_path=exec_storage,
                     runtime_logger=runtime_logger,
@@ -465,16 +498,16 @@ class ExecutionStream:
                     await self._write_session_state(execution_id, ctx, result=result)
 
                 # Emit completion/failure event
-                if self._event_bus:
+                if self._scoped_event_bus:
                     if result.success:
-                        await self._event_bus.emit_execution_completed(
+                        await self._scoped_event_bus.emit_execution_completed(
                             stream_id=self.stream_id,
                             execution_id=execution_id,
                             output=result.output,
                             correlation_id=ctx.correlation_id,
                         )
                     else:
-                        await self._event_bus.emit_execution_failed(
+                        await self._scoped_event_bus.emit_execution_failed(
                             stream_id=self.stream_id,
                             execution_id=execution_id,
                             error=result.error or "Unknown error",
@@ -552,8 +585,8 @@ class ExecutionStream:
                     pass  # Don't let end_run errors mask the original error
 
                 # Emit failure event
-                if self._event_bus:
-                    await self._event_bus.emit_execution_failed(
+                if self._scoped_event_bus:
+                    await self._scoped_event_bus.emit_execution_failed(
                         stream_id=self.stream_id,
                         execution_id=execution_id,
                         error=str(e),
