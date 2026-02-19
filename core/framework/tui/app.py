@@ -603,11 +603,14 @@ class AdenTUI(App):
                     timeout=5,
                 )
 
-        # 5. Show return in chat
-        self.chat_repl._write_history("[bold cyan]Returned from Hive Coder.[/bold cyan]")
-        if summary:
-            self.chat_repl._write_history(f"[dim]{summary}[/dim]")
+        # 5. Show return in chat (deferred — widgets need a tick to mount)
+        def _show_return():
+            if self.chat_repl:
+                self.chat_repl._write_history("[bold cyan]Returned from Hive Coder.[/bold cyan]")
+                if summary:
+                    self.chat_repl._write_history(f"[dim]{summary}[/dim]")
 
+        self.call_later(_show_return)
         self.notify("Returned to worker agent", severity="information", timeout=3)
         self.refresh_bindings()
 
