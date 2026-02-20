@@ -228,6 +228,25 @@ flowchart LR
 | Separate monitoring setup  | Built-in real-time observability       |
 | DIY budget management      | Integrated cost controls & degradation |
 
+## How Aden Works (High-Level)
+
+Aden turns plain-English goals into working AI workflows. You describe an outcome and the Coding Agent automatically generates an agent graph, connection code, and basic tests.
+
+Worker Agents run the graph while the platform monitors decisions and results in real time. If an execution meets the goal, it finishes; if not, the system captures failure data and evolves the graph or connection code before retrying.
+
+This **generate → execute → monitor → learn** loop helps Aden improve agent behavior over time with minimal manual workflow changes.
+
+```mermaid
+flowchart LR
+    A["Define Goal"] --> B["Auto-Generate Graph"]
+    B --> C["Execute Agents"]
+    C --> D["Monitor"]
+    D --> E{"Pass?"}
+    E -- Yes --> F["Done"]
+    E -- No --> G["Evolve Graph"]
+    G --> C
+   
+
 ### How It Works
 
 1. **[Define Your Goal](docs/key_concepts/goals_outcome.md)** → Describe what you want to achieve in plain English
