@@ -1122,6 +1122,44 @@ def cmd_shell(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
+    # Validate agent before starting interactive session
+    try:
+        validation = runner.validate()
+    except Exception as e:
+        print(f"Error validating agent: {e}", file=sys.stderr)
+        try:
+            runner.cleanup()
+        except Exception:
+            pass
+        return 1
+
+    if not validation.valid:
+        print(
+            f"\n⚠ Agent has validation errors. Run `hive validate {agent_path}` for details.",
+            file=sys.stderr,
+        )
+
+        # Show a short summary (up to 5 errors) for quick context
+        if getattr(validation, "errors", None):
+            print("\nErrors:", file=sys.stderr)
+            for err in validation.errors[:5]:
+                print(f"  - {err}", file=sys.stderr)
+            if len(validation.errors) > 5:
+                print(f"  ... and {len(validation.errors) - 5} more", file=sys.stderr)
+
+        # Show warnings if present
+        if getattr(validation, "warnings", None):
+            print("\nWarnings:", file=sys.stderr)
+            for w in validation.warnings[:5]:
+                print(f"  - {w}", file=sys.stderr)
+
+        try:
+            runner.cleanup()
+        except Exception:
+            pass
+        return 1
+    
+    
     # Set up approval callback by default (unless --no-approve is set)
     if not getattr(args, "no_approve", False):
         runner.set_approval_callback(_interactive_approval)
