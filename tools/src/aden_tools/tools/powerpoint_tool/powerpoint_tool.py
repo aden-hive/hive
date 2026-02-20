@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, List
+from typing import Any, List, cast
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
@@ -105,10 +105,10 @@ def register_tools(mcp: FastMCP) -> None:
                     if sl.shapes.title:
                         sl.shapes.title.text = s.title
 
-                    body = None
+                    body: Any | None = None
                     for shape in sl.shapes:
                         if shape.has_text_frame and shape != sl.shapes.title:
-                            body = shape.text_frame
+                            body = cast(Any, shape).text_frame
                             break
 
                     if body and s.bullets:

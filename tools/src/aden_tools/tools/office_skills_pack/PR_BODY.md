@@ -50,3 +50,11 @@ In strict mode, limits return `INVALID_SCHEMA`; in non-strict mode, outputs are 
 - Templates: `tools/examples/pack_*.json`
 - Docs: `README.md`, `SCHEMAS.md`
 - Tests: `tools/tests/examples/test_office_pack_*`, `golden` tests
+
+## Suggested merge
+Squash into:
+1) feat: Office Skills Pack (schema-first XLSX/PPTX/DOCX + charts + pack tool + CLI)
+2) chore: docs/tests/ci/dev tooling
+
+Suggested PR title:
+`feat(tools): schema-first Office Skills Pack (XLSX/PPTX/DOCX + charts + one-call pack + CLI)`

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
@@ -71,6 +71,12 @@ def _apply_guardrails(spec: PackSpec) -> ArtifactError | None:
 
 
 def register_tools(mcp: FastMCP) -> None:
+    def _tool_fn(name: str) -> Callable[..., dict[str, Any]] | None:
+        tool_obj = mcp._tool_manager._tools.get(name)
+        if tool_obj is None:
+            return None
+        return cast(Callable[..., dict[str, Any]], getattr(tool_obj, "fn", None))
+
     @mcp.tool()
     def office_pack_generate(
         pack: dict[str, Any],
@@ -120,10 +126,10 @@ def register_tools(mcp: FastMCP) -> None:
                     ).model_dump()
                 )
 
-            chart_png = mcp._tool_manager._tools.get("chart_render_png")
-            xlsx = mcp._tool_manager._tools.get("excel_write")
-            pptx = mcp._tool_manager._tools.get("powerpoint_generate")
-            docx = mcp._tool_manager._tools.get("word_generate")
+            chart_png = _tool_fn("chart_render_png")
+            xlsx = _tool_fn("excel_write")
+            pptx = _tool_fn("powerpoint_generate")
+            docx = _tool_fn("word_generate")
 
             if chart_png is None or xlsx is None or pptx is None or docx is None:
                 return done(
@@ -134,7 +140,7 @@ def register_tools(mcp: FastMCP) -> None:
                 )
 
             for job in spec.charts:
-                r = chart_png.fn(
+                r = chart_png(
                     path=job.path,
                     chart=job.chart.model_dump(),
                     workspace_id=workspace_id,
@@ -158,7 +164,7 @@ def register_tools(mcp: FastMCP) -> None:
             items: List[Dict[str, Any]] = []
 
             if spec.xlsx_path and spec.workbook is not None:
-                r = xlsx.fn(
+                r = xlsx(
                     path=spec.xlsx_path,
                     workbook=spec.workbook.model_dump(),
                     workspace_id=workspace_id,
@@ -174,7 +180,7 @@ def register_tools(mcp: FastMCP) -> None:
                     )
 
             if spec.pptx_path and spec.deck is not None:
-                r = pptx.fn(
+                r = pptx(
                     path=spec.pptx_path,
                     deck=spec.deck.model_dump(),
                     workspace_id=workspace_id,
@@ -194,7 +200,7 @@ def register_tools(mcp: FastMCP) -> None:
                     )
 
             if spec.docx_path and spec.doc is not None:
-                r = docx.fn(
+                r = docx(
                     path=spec.docx_path,
                     doc=spec.doc.model_dump(),
                     workspace_id=workspace_id,

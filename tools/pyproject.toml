@@ -43,6 +43,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pyright>=1.1.380",
+    "pre-commit>=3.7.0",
 ]
 sandbox = [
     "RestrictedPython>=7.0",
@@ -53,6 +54,15 @@ ocr = [
 ]
 excel = [
     "openpyxl>=3.1.0",
+]
+powerpoint = [
+    "python-pptx>=1.0.0",
+]
+word = [
+    "python-docx>=1.1.0",
+]
+charts = [
+    "matplotlib>=3.8.0",
 ]
 sql = [
     "duckdb>=1.0.0",
@@ -69,6 +79,8 @@ all = [
     "google-cloud-bigquery>=3.0.0",
     "python-pptx>=1.0.0",
     "matplotlib>=3.8.0",
+    "pyright>=1.1.380",
+    "pre-commit>=3.7.0",
 
 
 ]

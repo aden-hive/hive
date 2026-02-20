@@ -14,6 +14,14 @@ From `tools/`:
 python -m pip install -e ".[excel,word,powerpoint,charts]"
 ```
 
+## Dev setup
+```bash
+cd tools
+pip install -e ".[dev,excel,word,powerpoint,charts]"
+pre-commit run -a
+python scripts/typecheck_office.py
+```
+
 ## Contract
 All tools return:
 
