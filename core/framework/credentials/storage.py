@@ -224,12 +224,21 @@ class EncryptedFileStorage(CredentialStorage):
 
     def list_all(self) -> list[str]:
         """List all credential IDs."""
+        import fcntl
+
         index_path = self.base_path / "metadata" / "index.json"
         if not index_path.exists():
             return []
-        with open(index_path) as f:
-            index = json.load(f)
-        return list(index.get("credentials", {}).keys())
+
+        lock_path = self.base_path / "metadata" / ".index.lock"
+        with open(lock_path, "a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                with open(index_path) as f:
+                    index = json.load(f)
+                return list(index.get("credentials", {}).keys())
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
 
     def exists(self, credential_id: str) -> bool:
         """Check if credential exists."""
@@ -264,27 +273,35 @@ class EncryptedFileStorage(CredentialStorage):
         operation: str,
         credential_type: str | None = None,
     ) -> None:
-        """Update the metadata index."""
+        """Update the metadata index with file locking for concurrency safety."""
+        import fcntl
+
         index_path = self.base_path / "metadata" / "index.json"
+        lock_path = self.base_path / "metadata" / ".index.lock"
 
-        if index_path.exists():
-            with open(index_path) as f:
-                index = json.load(f)
-        else:
-            index = {"credentials": {}, "version": "1.0"}
+        with open(lock_path, "a") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            try:
+                if index_path.exists():
+                    with open(index_path) as f:
+                        index = json.load(f)
+                else:
+                    index = {"credentials": {}, "version": "1.0"}
 
-        if operation == "save":
-            index["credentials"][credential_id] = {
-                "updated_at": datetime.now(UTC).isoformat(),
-                "type": credential_type,
-            }
-        elif operation == "delete":
-            index["credentials"].pop(credential_id, None)
+                if operation == "save":
+                    index["credentials"][credential_id] = {
+                        "updated_at": datetime.now(UTC).isoformat(),
+                        "type": credential_type,
+                    }
+                elif operation == "delete":
+                    index["credentials"].pop(credential_id, None)
 
-        index["last_modified"] = datetime.now(UTC).isoformat()
+                index["last_modified"] = datetime.now(UTC).isoformat()
 
-        with open(index_path, "w") as f:
-            json.dump(index, f, indent=2)
+                with open(index_path, "w") as f:
+                    json.dump(index, f, indent=2)
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 class EnvVarStorage(CredentialStorage):
