@@ -11,6 +11,7 @@ The executor:
 
 import asyncio
 import logging
+import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -850,11 +851,18 @@ class GraphExecutor:
                         # Retry - don't increment steps for retries
                         steps -= 1
 
-                        # --- EXPONENTIAL BACKOFF ---
+                        # --- EXPONENTIAL BACKOFF WITH JITTER ---
                         retry_count = node_retry_counts[current_node_id]
-                        # Backoff formula: 1.0 * (2^(retry - 1)) -> 1s, 2s, 4s...
-                        delay = 1.0 * (2 ** (retry_count - 1))
-                        self.logger.info(f"   Using backoff: Sleeping {delay}s before retry...")
+                        # Backoff formula with Full Jitter (50% variance):
+                        # base * (2^(retry-1)) * random(0.5, 1.5)
+                        # This prevents thundering herd when multiple agents retry simultaneously
+                        base_delay = 1.0 * (2 ** (retry_count - 1))
+                        jitter = random.uniform(0.5, 1.5)
+                        delay = base_delay * jitter
+                        self.logger.info(
+                            f"   Using backoff with jitter: Sleeping {delay:.2f}s "
+                            f"(base: {base_delay:.1f}s) before retry..."
+                        )
                         await asyncio.sleep(delay)
                         # --------------------------------------
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -101,7 +102,7 @@ class AdenClientConfig:
     """Number of retry attempts for transient failures."""
 
     retry_delay: float = 1.0
-    """Base delay between retries in seconds (exponential backoff)."""
+    """Base delay between retries in seconds (exponential backoff with jitter)."""
 
     def __post_init__(self) -> None:
         """Load API key from environment if not provided."""
@@ -307,9 +308,14 @@ class AdenCredentialClient:
             except (httpx.ConnectError, httpx.TimeoutException) as e:
                 last_error = e
                 if attempt < self.config.retry_attempts - 1:
-                    delay = self.config.retry_delay * (2**attempt)
+                    # Exponential backoff with Full Jitter (50% variance)
+                    # This prevents thundering herd when multiple pods retry simultaneously
+                    base_delay = self.config.retry_delay * (2**attempt)
+                    jitter = random.uniform(0.5, 1.5)
+                    delay = base_delay * jitter
                     logger.warning(
-                        f"Aden request failed (attempt {attempt + 1}), retrying in {delay}s: {e}"
+                        f"Aden request failed (attempt {attempt + 1}), "
+                        f"retrying in {delay:.2f}s (base: {base_delay:.1f}s): {e}"
                     )
                     time.sleep(delay)
                 else:
