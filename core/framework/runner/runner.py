@@ -744,8 +744,8 @@ class AgentRunner:
                 # Get OAuth token from Claude Code subscription
                 api_key = get_claude_code_token()
                 if not api_key:
-                    print("Warning: Claude Code subscription configured but no token found.")
-                    print("Run 'claude' to authenticate, then try again.")
+                    logger.warning("Claude Code subscription configured but no token found.")
+                    logger.warning("Run 'claude' to authenticate, then try again.")
 
             if api_key and use_claude_code:
                 # Use litellm's built-in Anthropic OAuth support.
@@ -781,8 +781,8 @@ class AgentRunner:
                         if api_key_env:
                             os.environ[api_key_env] = api_key
                     elif api_key_env:
-                        print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                        print(f"Set it with: export {api_key_env}=your-api-key")
+                        logger.warning(f"{api_key_env} not set. LLM calls will fail.")
+                        logger.warning(f"Set it with: export {api_key_env}=your-api-key")
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
