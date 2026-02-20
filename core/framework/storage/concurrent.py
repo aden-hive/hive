@@ -424,7 +424,9 @@ class ConcurrentStorage:
 
     def save_run_sync(self, run: Run) -> None:
         """Synchronous save (uses base storage directly with lock)."""
-        # Use threading lock for sync operations
+        # Invalidate caches to prevent stale reads (matches async behavior)
+        self._cache.pop(f"run:{run.id}", None)
+        self._cache.pop(f"summary:{run.id}", None)
         self._base_storage.save_run(run)
 
     def load_run_sync(self, run_id: str) -> Run | None:
