@@ -228,6 +228,17 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
                             entry += f"\n    Get a new key at: {spec.help_url}"
                         invalid.append(entry)
                         failed_cred_names.append(cred_name)
+                    elif result.valid:
+                        # Persist identity from health check (best-effort)
+                        identity_data = result.details.get("identity")
+                        if identity_data and isinstance(identity_data, dict):
+                            try:
+                                cred_obj = store.get_credential(cred_id, refresh_if_needed=False)
+                                if cred_obj:
+                                    cred_obj.set_identity(**identity_data)
+                                    store.save_credential(cred_obj)
+                            except Exception:
+                                pass  # Identity persistence is best-effort
                 except Exception as exc:
                     logger.debug("Health check for %s failed: %s", cred_name, exc)
 

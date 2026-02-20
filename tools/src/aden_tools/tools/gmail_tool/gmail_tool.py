@@ -40,9 +40,11 @@ def register_tools(
 ) -> None:
     """Register Gmail inbox tools with the MCP server."""
 
-    def _get_token() -> str | None:
+    def _get_token(account: str = "") -> str | None:
         """Get Gmail access token from credentials or environment."""
         if credentials is not None:
+            if account:
+                return credentials.get_by_alias("google", account)
             return credentials.get("google")
         return os.getenv("GOOGLE_ACCESS_TOKEN")
 
@@ -76,9 +78,9 @@ def register_tools(
             "error": f"Gmail API error (HTTP {response.status_code}): {response.text}",
         }
 
-    def _require_token() -> dict | str:
+    def _require_token(account: str = "") -> dict | str:
         """Get token or return error dict."""
-        token = _get_token()
+        token = _get_token(account)
         if not token:
             return {
                 "error": "Gmail credentials not configured",
@@ -100,6 +102,7 @@ def register_tools(
         query: str = "is:unread",
         max_results: int = 100,
         page_token: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         List Gmail messages matching a search query.
@@ -112,13 +115,15 @@ def register_tools(
             query: Gmail search query (default: "is:unread").
             max_results: Maximum messages to return (1-500, default 100).
             page_token: Token for fetching the next page of results.
+            account: Account to use when multiple accounts are connected
+                (e.g. "alice@gmail.com"). Leave empty for default.
 
         Returns:
             Dict with "messages" list (each has "id" and "threadId"),
             "result_size_estimate", and optional "next_page_token",
             or error dict.
         """
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 
@@ -148,6 +153,7 @@ def register_tools(
     def gmail_get_message(
         message_id: str,
         format: Literal["full", "metadata", "minimal"] = "metadata",
+        account: str = "",
     ) -> dict:
         """
         Get a Gmail message by ID.
@@ -172,7 +178,7 @@ def register_tools(
         except ValueError as e:
             return {"error": str(e)}
 
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 
@@ -236,7 +242,7 @@ def register_tools(
         return None
 
     @mcp.tool()
-    def gmail_trash_message(message_id: str) -> dict:
+    def gmail_trash_message(message_id: str, account: str = "") -> dict:
         """
         Move a Gmail message to trash.
 
@@ -253,7 +259,7 @@ def register_tools(
         except ValueError as e:
             return {"error": str(e)}
 
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 
@@ -273,6 +279,7 @@ def register_tools(
         message_id: str,
         add_labels: list[str] | None = None,
         remove_labels: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Modify labels on a Gmail message.
@@ -303,7 +310,7 @@ def register_tools(
             message_id = _sanitize_path_param(message_id, "message_id")
         except ValueError as e:
             return {"error": str(e)}
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 
@@ -337,6 +344,7 @@ def register_tools(
         message_ids: list[str],
         add_labels: list[str] | None = None,
         remove_labels: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Modify labels on multiple Gmail messages at once.
@@ -355,7 +363,7 @@ def register_tools(
         if not message_ids:
             return {"error": "message_ids list is required and must not be empty"}
 
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 
@@ -384,6 +392,7 @@ def register_tools(
     def gmail_batch_get_messages(
         message_ids: list[str],
         format: Literal["full", "metadata", "minimal"] = "metadata",
+        account: str = "",
     ) -> dict:
         """
         Fetch multiple Gmail messages by ID in a single call.
@@ -407,7 +416,7 @@ def register_tools(
         if len(message_ids) > 50:
             return {"error": "Maximum 50 message IDs per call"}
 
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 
@@ -463,6 +472,7 @@ def register_tools(
         to: str,
         subject: str,
         html: str,
+        account: str = "",
     ) -> dict:
         """
         Create a draft email in the user's Gmail Drafts folder.
@@ -485,7 +495,7 @@ def register_tools(
         if not html:
             return {"error": "Email body (html) is required"}
 
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 
@@ -519,7 +529,7 @@ def register_tools(
         }
 
     @mcp.tool()
-    def gmail_list_labels() -> dict:
+    def gmail_list_labels(account: str = "") -> dict:
         """
         List all Gmail labels for the user's account.
 
@@ -530,7 +540,7 @@ def register_tools(
             Dict with "labels" list (each has "id", "name", "type"),
             or error dict.
         """
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 
@@ -551,6 +561,7 @@ def register_tools(
         name: str,
         label_list_visibility: Literal["labelShow", "labelShowIfUnread", "labelHide"] = "labelShow",
         message_list_visibility: Literal["show", "hide"] = "show",
+        account: str = "",
     ) -> dict:
         """
         Create a new Gmail label.
@@ -571,7 +582,7 @@ def register_tools(
         if not name or not name.strip():
             return {"error": "Label name is required"}
 
-        token = _require_token()
+        token = _require_token(account)
         if isinstance(token, dict):
             return token
 

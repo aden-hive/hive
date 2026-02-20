@@ -61,11 +61,13 @@ def mock_client(aden_config):
 def aden_response():
     """Create a sample Aden credential response."""
     return AdenCredentialResponse(
-        integration_id="hubspot",
-        integration_type="hubspot",
+        integration_id="aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1",
         access_token="test-access-token",
         token_type="Bearer",
         expires_at=datetime.now(UTC) + timedelta(hours=1),
+        provider="hubspot",
+        alias="My HubSpot",
+        email="test@example.com",
         scopes=["crm.objects.contacts.read", "crm.objects.contacts.write"],
         metadata={"portal_id": "12345"},
     )
@@ -108,18 +110,20 @@ class TestAdenCredentialResponse:
     """Tests for AdenCredentialResponse dataclass."""
 
     def test_from_dict_basic(self):
-        """Test creating response from dict."""
+        """Test creating response from dict (real get-token format)."""
         data = {
-            "integration_id": "github",
-            "integration_type": "github",
             "access_token": "ghp_xxxxx",
+            "token_type": "Bearer",
+            "provider": "github",
+            "alias": "Work",
         }
 
-        response = AdenCredentialResponse.from_dict(data)
+        response = AdenCredentialResponse.from_dict(data, integration_id="Z2l0aHViOldvcms6MTIzNDU")
 
-        assert response.integration_id == "github"
-        assert response.integration_type == "github"
+        assert response.integration_id == "Z2l0aHViOldvcms6MTIzNDU"
         assert response.access_token == "ghp_xxxxx"
+        assert response.provider == "github"
+        assert response.integration_type == "github"  # backward compat property
         assert response.token_type == "Bearer"
         assert response.expires_at is None
         assert response.scopes == []
@@ -127,19 +131,23 @@ class TestAdenCredentialResponse:
     def test_from_dict_full(self):
         """Test creating response with all fields."""
         data = {
-            "integration_id": "hubspot",
-            "integration_type": "hubspot",
             "access_token": "token123",
             "token_type": "Bearer",
             "expires_at": "2026-01-28T15:30:00Z",
+            "provider": "hubspot",
+            "alias": "My HubSpot",
+            "email": "test@example.com",
             "scopes": ["read", "write"],
             "metadata": {"key": "value"},
         }
 
-        response = AdenCredentialResponse.from_dict(data)
+        response = AdenCredentialResponse.from_dict(data, integration_id="aHVic3BvdDp0ZXN0")
 
-        assert response.integration_id == "hubspot"
+        assert response.integration_id == "aHVic3BvdDp0ZXN0"
         assert response.access_token == "token123"
+        assert response.provider == "hubspot"
+        assert response.alias == "My HubSpot"
+        assert response.email == "test@example.com"
         assert response.expires_at is not None
         assert response.scopes == ["read", "write"]
         assert response.metadata == {"key": "value"}
@@ -149,20 +157,43 @@ class TestAdenIntegrationInfo:
     """Tests for AdenIntegrationInfo dataclass."""
 
     def test_from_dict(self):
-        """Test creating integration info from dict."""
+        """Test creating integration info from real API format."""
         data = {
-            "integration_id": "slack",
-            "integration_type": "slack",
+            "integration_id": "c2xhY2s6V29yayBTbGFjazoxMjM0NQ",
+            "provider": "slack",
+            "alias": "Work Slack",
             "status": "active",
-            "expires_at": "2026-02-01T00:00:00Z",
+            "email": "user@example.com",
+            "expires_at": "2026-02-20T21:46:04.863Z",
         }
 
         info = AdenIntegrationInfo.from_dict(data)
 
-        assert info.integration_id == "slack"
-        assert info.integration_type == "slack"
+        assert info.integration_id == "c2xhY2s6V29yayBTbGFjazoxMjM0NQ"
+        assert info.provider == "slack"
+        assert info.integration_type == "slack"  # backward compat property
+        assert info.alias == "Work Slack"
+        assert info.email == "user@example.com"
         assert info.status == "active"
         assert info.expires_at is not None
+
+    def test_from_dict_minimal(self):
+        """Test creating integration info with minimal fields."""
+        data = {
+            "integration_id": "Z29vZ2xlOlRpbW90aHk6MTYwNjc",
+            "provider": "google",
+            "alias": "Timothy",
+            "status": "requires_reauth",
+        }
+
+        info = AdenIntegrationInfo.from_dict(data)
+
+        assert info.integration_id == "Z29vZ2xlOlRpbW90aHk6MTYwNjc"
+        assert info.provider == "google"
+        assert info.alias == "Timothy"
+        assert info.status == "requires_reauth"
+        assert info.email == ""
+        assert info.expires_at is None
 
 
 # =============================================================================
@@ -220,10 +251,11 @@ class TestAdenSyncProvider:
 
     def test_refresh_success(self, provider, mock_client, aden_response):
         """Test successful credential refresh."""
+        hash_id = "aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1"
         mock_client.request_refresh.return_value = aden_response
 
         cred = CredentialObject(
-            id="hubspot",
+            id=hash_id,
             credential_type=CredentialType.OAUTH2,
             keys={
                 "access_token": CredentialKey(
@@ -239,7 +271,7 @@ class TestAdenSyncProvider:
         assert refreshed.keys["access_token"].value.get_secret_value() == "test-access-token"
         assert refreshed.keys["_aden_managed"].value.get_secret_value() == "true"
         assert refreshed.last_refreshed is not None
-        mock_client.request_refresh.assert_called_once_with("hubspot")
+        mock_client.request_refresh.assert_called_once_with(hash_id)
 
     def test_refresh_requires_reauth(self, provider, mock_client):
         """Test refresh that requires re-authorization."""
@@ -339,12 +371,13 @@ class TestAdenSyncProvider:
 
     def test_fetch_from_aden(self, provider, mock_client, aden_response):
         """Test fetching credential from Aden."""
+        hash_id = "aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1"
         mock_client.get_credential.return_value = aden_response
 
-        cred = provider.fetch_from_aden("hubspot")
+        cred = provider.fetch_from_aden(hash_id)
 
         assert cred is not None
-        assert cred.id == "hubspot"
+        assert cred.id == hash_id
         assert cred.keys["access_token"].value.get_secret_value() == "test-access-token"
         assert cred.auto_refresh is True
 
@@ -360,13 +393,15 @@ class TestAdenSyncProvider:
         """Test syncing all credentials."""
         mock_client.list_integrations.return_value = [
             AdenIntegrationInfo(
-                integration_id="hubspot",
-                integration_type="hubspot",
+                integration_id="aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1",
+                provider="hubspot",
+                alias="My HubSpot",
                 status="active",
             ),
             AdenIntegrationInfo(
-                integration_id="github",
-                integration_type="github",
+                integration_id="Z2l0aHViOnRlc3Q6OTk5",
+                provider="github",
+                alias="Work GitHub",
                 status="requires_reauth",  # Should be skipped
             ),
         ]
@@ -376,7 +411,7 @@ class TestAdenSyncProvider:
         synced = provider.sync_all(store)
 
         assert synced == 1  # Only active one was synced
-        assert store.get_credential("hubspot") is not None
+        assert store.get_credential("aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1") is not None
 
     def test_validate_via_aden(self, provider, mock_client):
         """Test validation via Aden introspection."""
@@ -608,7 +643,7 @@ class TestAdenCachedStorage:
 
         cached_storage.save(cred)
 
-        assert cached_storage._provider_index["hubspot"] == "aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1"
+        assert cached_storage._provider_index["hubspot"] == ["aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1"]
 
     def test_load_by_provider_name(self, cached_storage):
         """Test load resolves provider name to hash-based credential ID."""
@@ -711,8 +746,8 @@ class TestAdenCachedStorage:
         indexed = cached_storage.rebuild_provider_index()
 
         assert indexed == 2
-        assert cached_storage._provider_index["hubspot"] == "hash_hub"
-        assert cached_storage._provider_index["slack"] == "hash_slack"
+        assert cached_storage._provider_index["hubspot"] == ["hash_hub"]
+        assert cached_storage._provider_index["slack"] == ["hash_slack"]
 
     def test_save_without_integration_type_no_index(self, cached_storage):
         """Test save does not index credentials without _integration_type key."""
@@ -743,19 +778,23 @@ class TestAdenIntegration:
 
     def test_full_workflow(self, mock_client, aden_response):
         """Test full workflow: sync, get, refresh."""
+        hash_id = "aHVic3BvdDp0ZXN0OjEzNjExOjExNTI1"
+
         # Setup
         mock_client.list_integrations.return_value = [
             AdenIntegrationInfo(
-                integration_id="hubspot",
-                integration_type="hubspot",
+                integration_id=hash_id,
+                provider="hubspot",
+                alias="My HubSpot",
                 status="active",
             ),
         ]
         mock_client.get_credential.return_value = aden_response
         mock_client.request_refresh.return_value = AdenCredentialResponse(
-            integration_id="hubspot",
-            integration_type="hubspot",
+            integration_id=hash_id,
             access_token="refreshed-token",
+            provider="hubspot",
+            alias="My HubSpot",
             expires_at=datetime.now(UTC) + timedelta(hours=2),
             scopes=[],
         )
@@ -772,8 +811,8 @@ class TestAdenIntegration:
         synced = provider.sync_all(store)
         assert synced == 1
 
-        # Get credential
-        cred = store.get_credential("hubspot")
+        # Get credential by hash ID
+        cred = store.get_credential(hash_id)
         assert cred is not None
         assert cred.keys["access_token"].value.get_secret_value() == "test-access-token"
 

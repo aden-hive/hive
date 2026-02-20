@@ -802,7 +802,21 @@ class AgentRunner:
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
-        self._setup_agent_runtime(tools, tool_executor)
+        # Collect connected account info for system prompt injection
+        accounts_prompt = ""
+        try:
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+
+            adapter = CredentialStoreAdapter.default()
+            accounts = adapter.get_all_account_info()
+            if accounts:
+                from framework.graph.prompt_composer import build_accounts_prompt
+
+                accounts_prompt = build_accounts_prompt(accounts)
+        except Exception:
+            pass  # Best-effort — agent works without account info
+
+        self._setup_agent_runtime(tools, tool_executor, accounts_prompt=accounts_prompt)
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -863,7 +877,9 @@ class AgentRunner:
         except Exception:
             return None
 
-    def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
+    def _setup_agent_runtime(
+        self, tools: list, tool_executor: Callable | None, accounts_prompt: str = ""
+    ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
         entry_points = []
@@ -934,6 +950,7 @@ class AgentRunner:
             checkpoint_config=checkpoint_config,
             config=runtime_config,
             graph_id=self.graph.id or self.agent_path.name,
+            accounts_prompt=accounts_prompt,
         )
 
         # Pass intro_message through for TUI display

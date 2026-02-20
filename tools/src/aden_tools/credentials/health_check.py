@@ -177,6 +177,10 @@ class OAuthBearerHealthChecker:
         self.endpoint = endpoint
         self.service_name = service_name
 
+    def _extract_identity(self, data: dict) -> dict[str, str]:
+        """Override to extract identity fields from a successful response."""
+        return {}
+
     def check(self, access_token: str) -> HealthCheckResult:
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
@@ -189,9 +193,16 @@ class OAuthBearerHealthChecker:
                 )
 
                 if response.status_code == 200:
+                    identity: dict[str, str] = {}
+                    try:
+                        data = response.json()
+                        identity = self._extract_identity(data)
+                    except Exception:
+                        pass  # Identity extraction is best-effort
                     return HealthCheckResult(
                         valid=True,
                         message=f"{self.service_name} credentials valid",
+                        details={"identity": identity} if identity else {},
                     )
                 elif response.status_code == 401:
                     return HealthCheckResult(
@@ -236,6 +247,15 @@ class GoogleCalendarHealthChecker(OAuthBearerHealthChecker):
             endpoint="https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1",
             service_name="Google Calendar",
         )
+
+    def _extract_identity(self, data: dict) -> dict[str, str]:
+        # Primary calendar ID is the user's email
+        for item in data.get("items", []):
+            if item.get("primary"):
+                cal_id = item.get("id", "")
+                if "@" in cal_id:
+                    return {"email": cal_id}
+        return {}
 
 
 class GoogleSearchHealthChecker:
@@ -335,6 +355,11 @@ class SlackHealthChecker:
 
                 data = response.json()
                 if data.get("ok"):
+                    identity: dict[str, str] = {}
+                    if data.get("team"):
+                        identity["workspace"] = data["team"]
+                    if data.get("user"):
+                        identity["username"] = data["user"]
                     return HealthCheckResult(
                         valid=True,
                         message="Slack bot token valid",
@@ -342,6 +367,7 @@ class SlackHealthChecker:
                             "team": data.get("team"),
                             "user": data.get("user"),
                             "bot_id": data.get("bot_id"),
+                            "identity": identity,
                         },
                     )
                 else:
@@ -468,10 +494,13 @@ class GitHubHealthChecker:
                 if response.status_code == 200:
                     data = response.json()
                     username = data.get("login", "unknown")
+                    identity: dict[str, str] = {}
+                    if username and username != "unknown":
+                        identity["username"] = username
                     return HealthCheckResult(
                         valid=True,
                         message=f"GitHub token valid (authenticated as {username})",
-                        details={"username": username},
+                        details={"username": username, "identity": identity},
                     )
                 elif response.status_code == 401:
                     return HealthCheckResult(
@@ -525,10 +554,15 @@ class DiscordHealthChecker:
                 if response.status_code == 200:
                     data = response.json()
                     username = data.get("username", "unknown")
+                    identity: dict[str, str] = {}
+                    if username and username != "unknown":
+                        identity["username"] = username
+                    if data.get("id"):
+                        identity["account_id"] = data["id"]
                     return HealthCheckResult(
                         valid=True,
                         message=f"Discord bot token valid (bot: {username})",
-                        details={"username": username, "id": data.get("id")},
+                        details={"username": username, "id": data.get("id"), "identity": identity},
                     )
                 elif response.status_code == 401:
                     return HealthCheckResult(
@@ -700,6 +734,10 @@ class GoogleGmailHealthChecker(OAuthBearerHealthChecker):
             endpoint="https://gmail.googleapis.com/gmail/v1/users/me/profile",
             service_name="Gmail",
         )
+
+    def _extract_identity(self, data: dict) -> dict[str, str]:
+        email = data.get("emailAddress")
+        return {"email": email} if email else {}
 
 
 # Registry of health checkers

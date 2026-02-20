@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -34,10 +34,36 @@ def _with_datetime(prompt: str) -> str:
     return f"{prompt}\n\n{stamp}" if prompt else stamp
 
 
+def build_accounts_prompt(accounts: list[dict[str, Any]]) -> str:
+    """Build a prompt section describing connected accounts.
+
+    Args:
+        accounts: List of account info dicts from CredentialStoreAdapter.get_all_account_info().
+
+    Returns:
+        Formatted accounts block, or empty string if no accounts.
+    """
+    if not accounts:
+        return ""
+    lines = [
+        "Connected accounts (use the alias as the `account` parameter "
+        "when calling tools to target a specific account):"
+    ]
+    for acct in accounts:
+        provider = acct.get("provider", "unknown")
+        alias = acct.get("alias", "unknown")
+        identity = acct.get("identity", {})
+        detail_parts = [f"{k}: {v}" for k, v in identity.items() if v]
+        detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
+        lines.append(f"- {provider}/{alias}{detail}")
+    return "\n".join(lines)
+
+
 def compose_system_prompt(
     identity_prompt: str | None,
     focus_prompt: str | None,
     narrative: str | None = None,
+    accounts_prompt: str | None = None,
 ) -> str:
     """Compose the three-layer system prompt.
 
@@ -45,6 +71,7 @@ def compose_system_prompt(
         identity_prompt: Layer 1 — static agent identity (from GraphSpec).
         focus_prompt: Layer 3 — per-node focus directive (from NodeSpec.system_prompt).
         narrative: Layer 2 — auto-generated from conversation state.
+        accounts_prompt: Connected accounts block (sits between identity and narrative).
 
     Returns:
         Composed system prompt with all layers present, plus current datetime.
@@ -54,6 +81,10 @@ def compose_system_prompt(
     # Layer 1: Identity (always first, anchors the personality)
     if identity_prompt:
         parts.append(identity_prompt)
+
+    # Accounts (semi-static, deployment-specific)
+    if accounts_prompt:
+        parts.append(f"\n{accounts_prompt}")
 
     # Layer 2: Narrative (what's happened so far)
     if narrative:

@@ -294,6 +294,9 @@ class EventLoopNode(NodeProtocol):
                 from framework.graph.prompt_composer import _with_datetime
 
                 system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
+                # Append connected accounts info if available
+                if ctx.accounts_prompt:
+                    system_prompt = f"{system_prompt}\n\n{ctx.accounts_prompt}"
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
