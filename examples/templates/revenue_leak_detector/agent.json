@@ -1,0 +1,24 @@
+{
+  "id": "revenue-leak-detector",
+  "name": "Revenue Leak Detector",
+  "version": "1.0.0",
+  "entry_node": "monitor",
+  "nodes": [
+    {
+      "id": "monitor",
+      "type": "event_loop"
+    },
+    {
+      "id": "analyze",
+      "type": "event_loop"
+    },
+    {
+      "id": "notify",
+      "type": "event_loop"
+    },
+    {
+      "id": "followup",
+      "type": "event_loop"
+    }
+  ]
+}
