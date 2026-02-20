@@ -109,6 +109,23 @@ This sets up:
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
 
+### Windows (Native) Setup (Using uv)
+
+If you are running Hive on native Windows (without WSL), `pip install -e .` may fail due to packaging limitations (see #3802).
+
+Recommended setup using `uv`:
+
+```bash
+# Create virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install uv
+pip install uv
+
+# Install dependencies
+uv sync
+
 ### Build Your First Agent
 
 ```bash
