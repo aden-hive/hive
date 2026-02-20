@@ -77,6 +77,26 @@ Use Hive when you need:
 - **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
+## Using Hive with Next.js (Example Integration)
+
+You can integrate Hive agents with a Next.js application by running Hive agents from API routes or backend services.
+
+Example API route:
+
+```js
+// pages/api/run-agent.js
+
+import { exec } from "child_process";
+
+export default function handler(req, res) {
+  exec("hive run exports/my_agent --input '{\"task\": \"example\"}'", (error, stdout, stderr) => {
+    if (error) {
+      res.status(500).json({ error: stderr });
+      return;
+    }
+    res.status(200).json({ output: stdout });
+  });
+}
 
 ### Prerequisites
 
