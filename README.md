@@ -85,6 +85,26 @@ Use Hive when you need:
 
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
+### Choosing an LLM Provider
+
+Hive requires you to connect with an LLM provider to build and run agents. During setup, you might see options like:
+
+- Claude account with subscription · Pro, Max, Team, or Enterprise
+- Anthropic Console account · API usage billing
+- 3rd-party platform · Amazon Bedrock, Microsoft Foundry, or Vertex AI
+
+> **Important:**  Some of these options need paid access or special configuration. If you're new, we suggest starting with the easiest provider setup available to you.
+
+#### Suggested Onboarding Improvement (Community Proposal)
+
+New contributors have suggested:
+- Limited trial tokens for first-time users
+- Sandbox mode for testing agent creation without a billing setup
+
+> This is being discussed in the community to improve onboarding for first-time users and reduce setup issues.
+
+Track discussion: https://github.com/adenhq/hive/issues/4316
+
 ### Installation
 
 >**Note**
