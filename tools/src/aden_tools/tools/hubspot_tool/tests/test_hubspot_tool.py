@@ -488,3 +488,61 @@ class TestCredentialSpec:
         assert "hubspot_search_contacts" in spec.tools
         assert "hubspot_create_deal" in spec.tools
         assert len(spec.tools) == 12
+
+# --- HubSpot webhook tools tests ---
+
+class TestHubSpotWebhookTools:
+    def setup_method(self):
+        self.mcp = MagicMock()
+        self.fns = []
+        self.mcp.tool.return_value = lambda fn: self.fns.append(fn) or fn
+        register_tools(self.mcp)
+
+    def _fn(self, name):
+        return next(f for f in self.fns if f.__name__ == name)
+
+    def test_webhook_verify_valid(self):
+        import hashlib
+        import hmac
+
+        tool = self._fn("hubspot_webhook_verify")
+
+        body = '{"event":"test"}'
+        secret = "mysecret"
+
+        digest = hmac.new(
+            secret.encode(),
+            body.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+
+        headers = {"X-HubSpot-Signature-256": f"sha256={digest}"}
+
+        result = tool(body=body, headers=headers, signing_secret=secret)
+
+        assert result["valid"] is True
+
+    def test_webhook_verify_invalid(self):
+        tool = self._fn("hubspot_webhook_verify")
+
+        result = tool(
+            body="{}",
+            headers={"X-HubSpot-Signature-256": "sha256=wrong"},
+            signing_secret="secret",
+        )
+
+        assert result["valid"] is False
+
+    def test_webhook_receive(self):
+        tool = self._fn("hubspot_webhook_receive")
+
+        payload = {
+            "subscriptionType": "contact.creation",
+            "objectId": 123,
+            "occurredAt": 1111111,
+        }
+
+        result = tool(event=payload)
+
+        assert result["event_type"] == "contact.creation"
+        assert result["object_id"] == 123
