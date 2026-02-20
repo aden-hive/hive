@@ -38,6 +38,8 @@ def tool(func):
 _CURRENT_CYCLE_DATA: dict = {}
 _CURRENT_LEAKS: list = []
 
+MAX_CYCLES = 3  # halt after this many consecutive low-severity cycles
+
 
 # ---------------------------------------------------------------------------
 # HubSpot CRM integration helpers  
@@ -327,7 +329,7 @@ def detect_revenue_leaks(cycle: int) -> dict:
         halt = False
     else:
         severity = "low"
-        halt = False
+        halt = int(cycle) >= MAX_CYCLES  # stop after MAX_CYCLES with no leaks
 
     print(
         f"[detect_revenue_leaks] Cycle {cycle} — "
