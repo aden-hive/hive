@@ -109,6 +109,14 @@ This sets up:
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
 
+### Verify Installation
+
+Before building your own agent, run the included manual example to confirm your environment is set up correctly:
+
+```bash
+PYTHONPATH=core python core/examples/manual_agent.py
+```
+
 ### Build Your First Agent
 
 ```bash
