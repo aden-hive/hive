@@ -216,10 +216,6 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
         return func(*args, **keywords)
 
-    def visit_Index(self, node: ast.Index) -> Any:
-        # Python < 3.9
-        return self.visit(node.value)
-
 
 def safe_eval(expr: str, context: dict[str, Any] | None = None) -> Any:
     """
