@@ -63,6 +63,10 @@ all = [
     "duckdb>=1.0.0",
     "openpyxl>=3.1.0",
     "google-cloud-bigquery>=3.0.0",
+    "python-pptx>=1.0.0",
+    "matplotlib>=3.8.0",
+
+
 ]
 
 [tool.uv.sources]
@@ -110,3 +114,13 @@ dev = [
     "ruff>=0.14.14",
     "duckdb>=1.4.4",
 ]
+powerpoint = [
+    "python-pptx>=1.0.0",
+]
+word = [
+    "python-docx>=1.1.0",
+]
+charts = [
+    "matplotlib>=3.8.0",
+]
+

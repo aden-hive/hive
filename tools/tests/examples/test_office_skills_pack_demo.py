@@ -8,7 +8,8 @@ from aden_tools.tools.powerpoint_tool.powerpoint_tool import register_tools as r
 from aden_tools.tools.word_tool.word_tool import register_tools as register_word
 
 from aden_tools.tools.file_system_toolkits.security import get_secure_path
-from aden_tools.tools.testing_utils import get_tool_fn
+from aden_tools.tools.mcp_helpers import get_tool_fn
+
 
 
 def test_office_skills_pack_demo_smoke(tmp_path: Path):

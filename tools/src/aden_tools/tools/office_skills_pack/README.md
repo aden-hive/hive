@@ -43,3 +43,17 @@ All tools return a standardized response:
 - `metadata: {...}`
 
 This makes it safe for agents/workflows to branch on stable error codes.
+## Chart workflow (MVP)
+Agents can generate charts as PNG and embed them:
+
+1) `chart_render_png("out/chart.png", ...)`
+2) `powerpoint_generate(... image_paths=["out/chart.png"])`
+3) `excel_write(...)` (v2: embed PNG directly into workbook)
+
+Reason: PNG is the simplest portable intermediate for local-only MVP.
+
+## Charts
+Generate PNG using `chart_render_png`, then embed into:
+- PPTX via `powerpoint_generate` (`image_paths` / `charts`)
+- XLSX via `excel_write` (`sheets[].images`)
+- DOCX via `word_generate` (`sections[].image_paths` / `sections[].charts`)

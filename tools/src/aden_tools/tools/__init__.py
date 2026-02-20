@@ -27,6 +27,7 @@ from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
 from .discord_tool import register_tools as register_discord
+from .chart_tool import register_tools as register_chart
 
 # Security scanning tools
 from .dns_security_scanner import register_tools as register_dns_security_scanner
@@ -34,6 +35,7 @@ from .email_tool import register_tools as register_email
 from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
+from .excel_write_tool import register_tools as register_excel_write
 from .github_tool import register_tools as register_github
 from .gmail_tool import register_tools as register_gmail
 from .google_docs_tool import register_tools as register_google_docs
@@ -57,6 +59,7 @@ from .file_system_toolkits.write_to_file import register_tools as register_write
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
+from .powerpoint_tool import register_tools as register_powerpoint
 from .port_scanner import register_tools as register_port_scanner
 from .razorpay_tool import register_tools as register_razorpay
 from .risk_scorer import register_tools as register_risk_scorer
@@ -71,6 +74,7 @@ from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
+from .word_tool import register_tools as register_word
 
 
 def register_all_tools(
@@ -131,6 +135,10 @@ def register_all_tools(
     register_data_tools(mcp)
     register_csv(mcp)
     register_excel(mcp)
+    register_excel_write(mcp)
+    register_powerpoint(mcp)
+    register_word(mcp)
+    register_chart(mcp)
 
     # Security scanning tools (no credentials needed)
     register_ssl_tls_scanner(mcp)
