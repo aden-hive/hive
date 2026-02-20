@@ -27,9 +27,9 @@ from typing import Any
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Label, TextArea
+from textual.widgets import Button, Label, TextArea
 
 from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.event_bus import AgentEvent
@@ -72,6 +72,42 @@ class ChatRepl(Vertical):
         layout: vertical;
     }
 
+    ChatRepl > #input-row {
+        width: 100%;
+        height: auto;
+        dock: bottom;
+    }
+
+    ChatRepl > #input-row > ChatTextArea {
+        width: 1fr;
+        height: auto;
+        max-height: 7;
+        dock: none;
+        margin-top: 1;
+    }
+
+    ChatRepl > #input-row > #stop-button {
+        width: auto;
+        height: auto;
+        min-width: 8;
+        margin-top: 1;
+        margin-left: 1;
+        background: red;
+        color: white;
+        border: none;
+        dock: none;
+    }
+
+    ChatRepl > #input-row > #stop-button:hover {
+        background: darkred;
+    }
+
+    ChatRepl > #input-row > #stop-button:disabled {
+        background: $panel;
+        color: $text-muted;
+        opacity: 0.5;
+    }
+
     ChatRepl > RichLog {
         width: 100%;
         height: 1fr;
@@ -104,17 +140,12 @@ class ChatRepl(Vertical):
         display: none;
     }
 
-    ChatRepl > ChatTextArea {
-        width: 100%;
-        height: auto;
-        max-height: 7;
-        dock: bottom;
+    ChatRepl > #input-row > ChatTextArea {
         background: $surface;
         border: tall $primary;
-        margin-top: 1;
     }
 
-    ChatRepl > ChatTextArea:focus {
+    ChatRepl > #input-row > ChatTextArea:focus {
         border: tall $accent;
     }
     """
@@ -171,7 +202,9 @@ class ChatRepl(Vertical):
             min_width=0,
         )
         yield Label("Agent is processing...", id="processing-indicator")
-        yield ChatTextArea(id="chat-input", placeholder="Enter input for agent...")
+        with Horizontal(id="input-row"):
+            yield ChatTextArea(id="chat-input", placeholder="Enter input for agent...")
+            yield Button("■ Stop", id="stop-button", disabled=True)
 
     # Regex for file:// URIs that are NOT already inside Rich [link=...] markup
     _FILE_URI_RE = re.compile(r"(?<!\[link=)(file://[^\s)\]>*]+)")
@@ -1091,6 +1124,11 @@ class ChatRepl(Vertical):
         """Handle chat input submission."""
         await self._submit_input(message.text)
 
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle stop button click."""
+        if event.button.id == "stop-button":
+            await self._cmd_pause()
+
     async def _submit_input(self, user_input: str) -> None:
         """Handle submitted text — either start new execution or inject input."""
         if not user_input:
@@ -1175,6 +1213,10 @@ class ChatRepl(Vertical):
             # Show processing indicator
             indicator.update("Thinking...")
             indicator.display = True
+
+            # Enable stop button
+            stop_button = self.query_one("#stop-button", Button)
+            stop_button.disabled = False
 
             # Keep input enabled for commands during execution
             chat_input = self.query_one("#chat-input", ChatTextArea)
@@ -1325,11 +1367,13 @@ class ChatRepl(Vertical):
         self._pending_ask_question = ""
         self._log_buffer.clear()
 
-        # Re-enable input
+        # Re-enable input, disable stop button
         chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
+        stop_button = self.query_one("#stop-button", Button)
+        stop_button.disabled = True
 
     def handle_execution_failed(self, error: str) -> None:
         """Handle execution failing."""
@@ -1348,11 +1392,13 @@ class ChatRepl(Vertical):
         self._active_node_id = None
         self._log_buffer.clear()
 
-        # Re-enable input
+        # Re-enable input, disable stop button
         chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
+        stop_button = self.query_one("#stop-button", Button)
+        stop_button.disabled = True
 
     def handle_escalation_requested(self, data: dict) -> None:
         """Display escalation request from the worker agent."""
