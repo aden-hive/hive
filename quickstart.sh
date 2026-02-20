@@ -171,6 +171,27 @@ fi
 
 UV_VERSION=$(uv --version)
 echo -e "${GREEN}  ✓ uv detected: $UV_VERSION${NC}"
+
+# Check minimum uv version (workspace support requires >= 0.4.0)
+UV_VER_NUM=$(echo "$UV_VERSION" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+UV_MAJOR=$(echo "$UV_VER_NUM" | cut -d. -f1)
+UV_MINOR=$(echo "$UV_VER_NUM" | cut -d. -f2)
+MIN_UV_MAJOR=0
+MIN_UV_MINOR=4
+
+if [ "$UV_MAJOR" -lt "$MIN_UV_MAJOR" ] || \
+   ([ "$UV_MAJOR" -eq "$MIN_UV_MAJOR" ] && [ "$UV_MINOR" -lt "$MIN_UV_MINOR" ]); then
+    echo -e "${YELLOW}  ⚠ uv $UV_VER_NUM is too old (need >= 0.4.0). Upgrading...${NC}"
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+    if ! command -v uv &> /dev/null; then
+        echo -e "${RED}  ✗ uv upgrade failed. Please upgrade manually: https://astral.sh/uv/${NC}"
+        exit 1
+    fi
+    UV_VERSION=$(uv --version)
+    echo -e "${GREEN}  ✓ uv upgraded: $UV_VERSION${NC}"
+fi
+
 echo ""
 
 # ============================================================
