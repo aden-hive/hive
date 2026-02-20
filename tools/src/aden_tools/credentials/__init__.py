@@ -67,6 +67,7 @@ from .google_docs import GOOGLE_DOCS_CREDENTIALS
 from .google_maps import GOOGLE_MAPS_CREDENTIALS
 from .health_check import HealthCheckResult, check_credential_health
 from .hubspot import HUBSPOT_CREDENTIALS
+from .brevo import BREVO_CREDENTIALS
 from .llm import LLM_CREDENTIALS
 from .news import NEWS_CREDENTIALS
 from .razorpay import RAZORPAY_CREDENTIALS
@@ -95,6 +96,7 @@ CREDENTIAL_SPECS = {
     **GOOGLE_DOCS_CREDENTIALS,
     **GOOGLE_MAPS_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
+    **BREVO_CREDENTIALS,
     **GOOGLE_CALENDAR_CREDENTIALS,
     **SLACK_CREDENTIALS,
     **SERPAPI_CREDENTIALS,
@@ -135,6 +137,7 @@ __all__ = [
     "GOOGLE_DOCS_CREDENTIALS",
     "GOOGLE_MAPS_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",
+    "BREVO_CREDENTIALS",
     "GOOGLE_CALENDAR_CREDENTIALS",
     "SLACK_CREDENTIALS",
     "APOLLO_CREDENTIALS",
