@@ -456,3 +456,14 @@ Hive focuses on generating agents that run real business processes, rather than 
 <p align="center">
   Made with 🔥 Passion in San Francisco
 </p>
+##‍ Contributing​
+
+Thank you for your interest in contributing to th⁠is⁠ project‌!⁠
+
+#‌## Getting Started
+1. Fork‍ the‌ repository
+2. Clone your fork loca⁠lly
+3‍. Install​ dep⁠endencies
+4. Run the proj​e‍ct l‍oca​lly
+‌
+​Feel free to open issue‍s for bugs‌, improveme​nts, or feature sug⁠gestions.
