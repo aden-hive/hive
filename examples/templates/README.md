@@ -42,5 +42,6 @@ uv run python -m exports.my_research_agent --input '{"topic": "..."}'
 
 | Template | Description |
 |----------|-------------|
+| [ai_paper_research_agent](ai_paper_research_agent/) | Deep AI-paper research assistant for ML researchers; discovers papers, analyzes methods/results, and delivers a structured learning brief |
 | [deep_research_agent](deep_research_agent/) | Interactive research agent that searches diverse sources, evaluates findings with user checkpoints, and produces a cited HTML report |
 | [tech_news_reporter](tech_news_reporter/) | Researches the latest technology and AI news from the web and produces a well-organized report |
