@@ -1,0 +1,1 @@
+{"hive-tools":{"transport":"stdio","command":"uv","args":["run","python","mcp_server.py","--stdio"],"cwd":"../../../tools","description":"Hive tools MCP server: list_dir, view_file, grep_search, save_data, append_data, serve_file_to_user"}}

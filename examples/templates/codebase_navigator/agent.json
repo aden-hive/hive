@@ -1,0 +1,17 @@
+{
+  "agent": {
+    "id": "codebase_navigator",
+    "name": "Codebase Navigator",
+    "version": "1.0.0",
+    "description": "Navigate unfamiliar codebases using file tools only. Explores structure, searches for relevant files, synthesizes answers with file:line citations. No third-party credentials."
+  },
+  "graph": {
+    "id": "codebase_navigator-graph",
+    "goal_id": "codebase-navigator",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {"start": "intake"},
+    "pause_nodes": [],
+    "terminal_nodes": []
+  }
+}
