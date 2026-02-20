@@ -228,6 +228,37 @@ flowchart LR
 | Separate monitoring setup  | Built-in real-time observability       |
 | DIY budget management      | Integrated cost controls & degradation |
 
+
+
+## From Workflows to Outcome-Driven Agents
+
+If you’re coming from workflow-first frameworks (where you manually wire steps, tools, and edges), Hive uses a different mental model: **you describe the outcome, and the system generates and evolves the execution graph**.
+
+### Goals Instead of Hardcoded Workflows
+Traditional agent systems require you to define a fixed workflow graph up front.  
+In Hive, you define the goal in natural language, and a coding agent generates:
+- the node graph  
+- the connection logic  
+- validation tests  
+
+This shifts development from manually designing execution paths to defining desired outcomes.
+
+### Adaptive Behavior Instead of Manual Debugging
+In many frameworks, failures require manual debugging, code updates, and redeployment.  
+Hive captures failure data, evaluates what went wrong relative to the defined goal, and can evolve the agent graph automatically — enabling continuous improvement over time.
+
+### Built-In Control and Observability
+Hive is designed for production environments and includes:
+- human-in-the-loop checkpoints  
+- real-time execution monitoring  
+- credential management  
+- cost and budget controls  
+
+These capabilities are integrated into the framework rather than added externally.
+
+### Designed for Real Business Processes
+Hive is intended for long-running, autonomous agents that operate within guardrails and evolve based on outcomes — not just simple chains or one-off scripts.
+
 ### How It Works
 
 1. **[Define Your Goal](docs/key_concepts/goals_outcome.md)** → Describe what you want to achieve in plain English
