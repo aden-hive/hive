@@ -103,6 +103,11 @@ class LoopConfig:
     tool_doom_loop_threshold: int = 3
     tool_doom_loop_enabled: bool = True
 
+    # --- Per-tool timeout ---
+    # Maximum seconds to wait for a single tool call before returning a
+    # timeout error to the agent.  Set to 0 or None to disable.
+    tool_timeout: float = 120.0
+
 
 # ---------------------------------------------------------------------------
 # Output accumulator with write-through persistence
@@ -1935,9 +1940,24 @@ class EventLoopNode(NodeProtocol):
                 is_error=True,
             )
         tool_use = ToolUse(id=tc.tool_use_id, name=tc.tool_name, input=tc.tool_input)
-        result = self._tool_executor(tool_use)
-        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
-            result = await result
+
+        timeout = self._config.tool_timeout
+        try:
+            result = self._tool_executor(tool_use)
+            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                if timeout and timeout > 0:
+                    result = await asyncio.wait_for(result, timeout=timeout)
+                else:
+                    result = await result
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Tool '%s' timed out after %.0fs", tc.tool_name, timeout,
+            )
+            return ToolResult(
+                tool_use_id=tc.tool_use_id,
+                content=f"Tool '{tc.tool_name}' timed out after {timeout:.0f}s",
+                is_error=True,
+            )
         return result
 
     def _truncate_tool_result(
