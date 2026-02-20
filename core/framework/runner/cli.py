@@ -1,10 +1,18 @@
 """CLI commands for agent runner."""
 
+from __future__ import annotations
+
 import argparse
 import asyncio
 import json
 import sys
 from pathlib import Path
+
+
+def _clear_screen() -> None:
+    """Clear terminal and move cursor to top-left, only if stdout is a TTY."""
+    if sys.stdout.isatty():
+        print("\033[2J\033[H", end="", flush=True)
 
 
 def register_commands(subparsers: argparse._SubParsersAction) -> None:
@@ -1595,16 +1603,41 @@ def _getch() -> str:
 
 
 def _read_key() -> str:
-    """Read a key, handling arrow key escape sequences."""
+    """Read a key, handling arrow key escape sequences.
+
+    Supports both ESC [ A/B/C/D (standard) and ESC O A/B/C/D (application keypad).
+    Consumes remaining bytes of unknown sequences so they do not leak into next read.
+    """
     ch = _getch()
     if ch == "\x1b":  # Escape sequence start
         ch2 = _getch()
         if ch2 == "[":
             ch3 = _getch()
+            if ch3 == "A":  # Up arrow
+                return "UP"
+            if ch3 == "B":  # Down arrow
+                return "DOWN"
             if ch3 == "C":  # Right arrow
                 return "RIGHT"
-            elif ch3 == "D":  # Left arrow
+            if ch3 == "D":  # Left arrow
                 return "LEFT"
+            # Extended sequence (e.g. ESC [ 1 ; 2 R): consume until letter or ~
+            for _ in range(16):
+                ch3 = _getch()
+                if not ch3 or ch3 in "~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz":
+                    break
+            return ""
+        if ch2 == "O":  # Application keypad: ESC O A/B/C/D
+            ch3 = _getch()
+            if ch3 == "A":
+                return "UP"
+            if ch3 == "B":
+                return "DOWN"
+            if ch3 == "C":
+                return "RIGHT"
+            if ch3 == "D":
+                return "LEFT"
+            return ""
     return ch
 
 
@@ -1629,8 +1662,9 @@ def _select_agent(agents_dir: Path) -> str | None:
         print(f"No agents found in {agents_dir}", file=sys.stderr)
         return None
 
-    # Pagination setup
+    # Pagination and selection: selection is 0-based index into agents
     page = 0
+    selection = 0
     total_pages = (len(agents) + AGENTS_PER_PAGE - 1) // AGENTS_PER_PAGE
 
     while True:
@@ -1638,14 +1672,22 @@ def _select_agent(agents_dir: Path) -> str | None:
         end_idx = min(start_idx + AGENTS_PER_PAGE, len(agents))
         page_agents = agents[start_idx:end_idx]
 
+        # Keep selection in range when list or page changes
+        selection = max(0, min(selection, len(agents) - 1))
+
+        _clear_screen()
+
         # Show page header with indicator
         if total_pages > 1:
             print(f"\nAvailable agents in {agents_dir} (Page {page + 1}/{total_pages}):\n")
         else:
             print(f"\nAvailable agents in {agents_dir}:\n")
 
-        # Display agents for current page (with global numbering)
-        for i, agent_path in enumerate(page_agents, start_idx + 1):
+        # Display agents for current page (with global numbering and cursor)
+        for i, agent_path in enumerate(page_agents):
+            global_idx = start_idx + i
+            cursor = " > " if global_idx == selection else "   "
+            num = global_idx + 1
             try:
                 agent_json = agent_path / "agent.json"
                 if agent_json.exists():
@@ -1658,43 +1700,58 @@ def _select_agent(agents_dir: Path) -> str | None:
                     # Python-based agent - extract from config.py
                     name, desc = _extract_python_agent_metadata(agent_path)
                 desc = desc[:50] + "..." if len(desc) > 50 else desc
-                print(f"  {i}. {name}")
+                print(f"{cursor}{num}. {name}")
                 print(f"     {desc}")
             except Exception as e:
-                print(f"  {i}. {agent_path.name} (error: {e})")
+                print(f"{cursor}{num}. {agent_path.name} (error: {e})")
 
         # Build navigation options
-        nav_options = []
+        nav_options = ["↑/↓=select", "Enter=confirm"]
         if total_pages > 1:
-            nav_options.append("←/→ or p/n=navigate")
+            nav_options.append("←/→=page")
         nav_options.append("q=quit")
 
         print()
-        if total_pages > 1:
-            print(f"  [{', '.join(nav_options)}]")
-            print()
+        print(f"  [{', '.join(nav_options)}]")
+        print()
 
         # Show prompt
-        print("Select agent (number), use arrows to navigate, or q to quit: ", end="", flush=True)
+        print("Select agent (arrows + Enter, or number), or q to quit: ", end="", flush=True)
 
         try:
             key = _read_key()
 
-            if key == "RIGHT" and page < total_pages - 1:
+            if key == "UP":
+                selection = max(0, selection - 1)
+                page = selection // AGENTS_PER_PAGE
+                print()
+            elif key == "DOWN":
+                selection = min(len(agents) - 1, selection + 1)
+                page = selection // AGENTS_PER_PAGE
+                print()
+            elif key == "RIGHT" and page < total_pages - 1:
                 page += 1
-                print()  # Newline before redrawing
+                selection = page * AGENTS_PER_PAGE
+                print()
             elif key == "LEFT" and page > 0:
                 page -= 1
+                selection = page * AGENTS_PER_PAGE
                 print()
             elif key == "q":
                 print()
                 return None
             elif key in ("n", ">") and page < total_pages - 1:
                 page += 1
+                selection = page * AGENTS_PER_PAGE
                 print()
             elif key in ("p", "<") and page > 0:
                 page -= 1
+                selection = page * AGENTS_PER_PAGE
                 print()
+            elif key in ("\r", "\n"):
+                # Confirm current selection
+                print()
+                return str(agents[selection])
             elif key.isdigit():
                 # Build number with support for backspace
                 buffer = key
@@ -1734,8 +1791,9 @@ def _select_agent(agents_dir: Path) -> str | None:
                         print("Invalid selection")
                     except ValueError:
                         print("Invalid input")
-            elif key == "\r" or key == "\n":
-                print()  # Just pressed enter, redraw
+            elif key == "":
+                # Consumed escape sequence: redraw without error
+                print()
             else:
                 print()
                 print("Invalid input")
