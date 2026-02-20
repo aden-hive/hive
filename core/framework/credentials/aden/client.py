@@ -43,19 +43,13 @@ logger = logging.getLogger(__name__)
 class AdenClientError(Exception):
     """Base exception for Aden client errors."""
 
-    pass
-
 
 class AdenAuthenticationError(AdenClientError):
     """Raised when API key is invalid or revoked."""
 
-    pass
-
 
 class AdenNotFoundError(AdenClientError):
     """Raised when integration is not found."""
-
-    pass
 
 
 class AdenRefreshError(AdenClientError):
