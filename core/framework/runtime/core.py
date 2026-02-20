@@ -85,6 +85,9 @@ class Runtime:
         Returns:
             The run ID
         """
+        # Reset node context so the next decision does not inherit stale state
+        self._current_node = "unknown"
+
         run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         trace_id = uuid.uuid4().hex
         execution_id = uuid.uuid4().hex  # 32 hex, OTel/W3C-aligned for logs
@@ -131,6 +134,8 @@ class Runtime:
         # Save to storage
         self.storage.save_run(self._current_run)
         self._current_run = None
+        # Reset node context when a run ends to keep runtime state clean
+        self._current_node = "unknown"
 
     def set_node(self, node_id: str) -> None:
         """Set the current node context for subsequent decisions."""

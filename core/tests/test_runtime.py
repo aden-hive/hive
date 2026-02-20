@@ -135,6 +135,35 @@ class TestDecisionRecording:
 
         runtime.end_run(success=True)
 
+    def test_node_context_resets_between_runs(self, tmp_path: Path):
+        """Node context should not leak across runs when reusing a runtime."""
+        runtime = Runtime(tmp_path)
+
+        runtime.start_run("goal_one", "First run")
+        runtime.set_node("first-node")
+        runtime.quick_decision(
+            intent="Initial action",
+            action="Do something",
+            reasoning="Testing node context",
+        )
+
+        first_decision = runtime.current_run.decisions[0]
+        assert first_decision.node_id == "first-node"
+
+        runtime.end_run(success=True)
+
+        runtime.start_run("goal_two", "Second run")
+        decision_id = runtime.quick_decision(
+            intent="New run action",
+            action="Do something else",
+            reasoning="Ensure node resets",
+        )
+
+        second_run = runtime.current_run
+        assert second_run is not None
+        assert decision_id == "dec_0"
+        assert second_run.decisions[0].node_id == "unknown"
+
 
 class TestOutcomeRecording:
     """Test recording outcomes of decisions."""
