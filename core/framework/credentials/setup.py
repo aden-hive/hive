@@ -584,17 +584,16 @@ def detect_missing_credentials_from_nodes(nodes: list) -> list[MissingCredential
         if hasattr(node, "node_type"):
             node_types.add(node.node_type)
 
-    # Build credential store to check availability
+    # Build credential store to check availability.
+    # Env vars take priority over encrypted store (fresh key wins over stale).
     env_mapping = {
         (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
     }
-    storages: list = [EnvVarStorage(env_mapping=env_mapping)]
+    env_storage = EnvVarStorage(env_mapping=env_mapping)
     if os.environ.get("HIVE_CREDENTIAL_KEY"):
-        storages.insert(0, EncryptedFileStorage())
-    if len(storages) == 1:
-        storage = storages[0]
+        storage = CompositeStorage(primary=env_storage, fallbacks=[EncryptedFileStorage()])
     else:
-        storage = CompositeStorage(primary=storages[0], fallbacks=storages[1:])
+        storage = env_storage
     store = CredentialStore(storage=storage)
 
     # Build reverse mappings
