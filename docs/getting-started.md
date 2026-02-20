@@ -119,6 +119,8 @@ hive/
 
 ## Running an Agent
 
+Run these commands from the project root (the `hive/` directory). Replace `my_agent` with your agent's package name (the folder name under `exports/`).
+
 ```bash
 # Browse and run agents interactively (Recommended)
 hive tui
