@@ -9,7 +9,9 @@ from typing import Any, Dict, List, Optional
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
+from aden_tools.tools.office_skills_pack.hash_utils import sha256_file
 from aden_tools.tools.office_skills_pack.limits import MAX_SHEET_CELLS, MAX_SHEET_ROWS
+from aden_tools.tools.office_skills_pack.logging_utils import tool_span
 from ..file_system_toolkits.security import get_secure_path
 
 
@@ -78,221 +80,208 @@ def register_tools(mcp: FastMCP) -> None:
         """
         Write an Excel (.xlsx) file from a strict schema into the session sandbox.
         """
-
-        if not path.lower().endswith(".xlsx"):
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INVALID_SCHEMA",
-                    message="path must end with .xlsx",
-                ),
-            ).model_dump()
-
-        if mode not in {"create", "update"}:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INVALID_SCHEMA",
-                    message="mode must be 'create' or 'update'",
-                ),
-            ).model_dump()
-
-
-
-
-        try:
-            spec = WorkbookSpec.model_validate(workbook)
-        except Exception as e:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INVALID_SCHEMA",
-                    message="Invalid workbook schema",
-                    details=str(e),
-                ),
-            ).model_dump()
-
-
-        try:
-            from openpyxl import Workbook, load_workbook
-            from openpyxl.styles import Font, PatternFill
-        except ImportError:
-
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(code="DEP_MISSING", message="openpyxl not installed. Install with: pip install -e '.[excel]'"),
-            ).model_dump()
-
-
-        try:
-            out_path = get_secure_path(path, workspace_id, agent_id, session_id)
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
-            if mode == "update":
-                if os.path.exists(out_path):
-                    wb = load_workbook(out_path)
-                elif strict:
-                    return ArtifactResult(
-                        success=False,
-                        error=ArtifactError(
-                            code="INVALID_PATH",
-                            message="xlsx to update not found",
-                        ),
-                    ).model_dump()
-                else:
-                    wb = Workbook()
-                    if wb.sheetnames:
-                        wb.remove(wb[wb.sheetnames[0]])
-            else:
-                wb = Workbook()
-                # remove default sheet
-                if wb.sheetnames:
-                    wb.remove(wb[wb.sheetnames[0]])
-
-            header_font = Font(bold=True)
-
-
-            if "sheets" not in workbook:
+        with tool_span(
+            "excel_write",
+            {"workspace_id": workspace_id, "agent_id": agent_id, "session_id": session_id, "output_path": path},
+        ):
+            if not path.lower().endswith(".xlsx"):
                 return ArtifactResult(
                     success=False,
                     error=ArtifactError(
                         code="INVALID_SCHEMA",
-                        message="Invalid workbook structure: 'sheets' key not found",
+                        message="path must end with .xlsx",
                     ),
                 ).model_dump()
 
+            if mode not in {"create", "update"}:
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="INVALID_SCHEMA",
+                        message="mode must be 'create' or 'update'",
+                    ),
+                ).model_dump()
 
-            for sheet in spec.sheets:
-                if len(sheet.rows) > MAX_SHEET_ROWS:
-                    if strict:
+            try:
+                spec = WorkbookSpec.model_validate(workbook)
+            except Exception as e:
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="INVALID_SCHEMA",
+                        message="Invalid workbook schema",
+                        details=str(e),
+                    ),
+                ).model_dump()
+
+            try:
+                from openpyxl import Workbook, load_workbook
+                from openpyxl.styles import Font, PatternFill
+            except ImportError:
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="DEP_MISSING",
+                        message="openpyxl not installed. Install with: pip install -e '.[excel]'",
+                    ),
+                ).model_dump()
+
+            try:
+                out_path = get_secure_path(path, workspace_id, agent_id, session_id)
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+                if mode == "update":
+                    if os.path.exists(out_path):
+                        wb = load_workbook(out_path)
+                    elif strict:
                         return ArtifactResult(
                             success=False,
                             error=ArtifactError(
-                                code="INVALID_SCHEMA",
-                                message="too many rows",
-                                details={"sheet": sheet.name, "rows": len(sheet.rows), "max": MAX_SHEET_ROWS},
+                                code="INVALID_PATH",
+                                message="xlsx to update not found",
                             ),
                         ).model_dump()
-                    sheet.rows = sheet.rows[:MAX_SHEET_ROWS]
+                    else:
+                        wb = Workbook()
+                        if wb.sheetnames:
+                            wb.remove(wb[wb.sheetnames[0]])
+                else:
+                    wb = Workbook()
+                    if wb.sheetnames:
+                        wb.remove(wb[wb.sheetnames[0]])
 
-                cell_count = len(sheet.columns) * len(sheet.rows)
-                if cell_count > MAX_SHEET_CELLS:
-                    if strict:
-                        return ArtifactResult(
-                            success=False,
-                            error=ArtifactError(
-                                code="INVALID_SCHEMA",
-                                message="too many cells",
-                                details={
-                                    "sheet": sheet.name,
-                                    "cells": cell_count,
-                                    "max": MAX_SHEET_CELLS,
-                                },
-                            ),
-                        ).model_dump()
-                    max_rows = max(1, MAX_SHEET_CELLS // max(1, len(sheet.columns)))
-                    sheet.rows = sheet.rows[:max_rows]
+                header_font = Font(bold=True)
 
-                sheet_name = sheet.name[:31]  # Excel sheet name limit
-                if sheet_name in wb.sheetnames:
-                    del wb[sheet_name]
-                ws = wb.create_sheet(title=sheet_name)
+                if "sheets" not in workbook:
+                    return ArtifactResult(
+                        success=False,
+                        error=ArtifactError(
+                            code="INVALID_SCHEMA",
+                            message="Invalid workbook structure: 'sheets' key not found",
+                        ),
+                    ).model_dump()
 
-                # header
-                for j, col in enumerate(sheet.columns, start=1):
-                    c = ws.cell(row=1, column=j, value=col)
-                    c.font = header_font
-                if sheet.header_fill:
-                    fill = PatternFill(
-                        start_color="D9E1F2",
-                        end_color="D9E1F2",
-                        fill_type="solid",
-                    )
-                    for j in range(1, len(sheet.columns) + 1):
-                        ws.cell(row=1, column=j).fill = fill
+                for sheet in spec.sheets:
+                    if len(sheet.rows) > MAX_SHEET_ROWS:
+                        if strict:
+                            return ArtifactResult(
+                                success=False,
+                                error=ArtifactError(
+                                    code="INVALID_SCHEMA",
+                                    message="too many rows",
+                                    details={"sheet": sheet.name, "rows": len(sheet.rows), "max": MAX_SHEET_ROWS},
+                                ),
+                            ).model_dump()
+                        sheet.rows = sheet.rows[:MAX_SHEET_ROWS]
 
-                # rows
-                for i, row in enumerate(sheet.rows, start=2):
-                    for j in range(1, len(sheet.columns) + 1):
-                        v = row[j - 1] if j - 1 < len(row) else None
-                        ws.cell(row=i, column=j, value=v)
+                    cell_count = len(sheet.columns) * len(sheet.rows)
+                    if cell_count > MAX_SHEET_CELLS:
+                        if strict:
+                            return ArtifactResult(
+                                success=False,
+                                error=ArtifactError(
+                                    code="INVALID_SCHEMA",
+                                    message="too many cells",
+                                    details={
+                                        "sheet": sheet.name,
+                                        "cells": cell_count,
+                                        "max": MAX_SHEET_CELLS,
+                                    },
+                                ),
+                            ).model_dump()
+                        max_rows = max(1, MAX_SHEET_CELLS // max(1, len(sheet.columns)))
+                        sheet.rows = sheet.rows[:max_rows]
 
-                # freeze panes
-                if sheet.freeze_panes:
-                    ws.freeze_panes = sheet.freeze_panes
+                    sheet_name = sheet.name[:31]
+                    if sheet_name in wb.sheetnames:
+                        del wb[sheet_name]
+                    ws = wb.create_sheet(title=sheet_name)
 
-                # apply number formats by column name
-                col_to_idx = {name: idx + 1 for idx, name in enumerate(sheet.columns)}
-                for col_name, fmt in sheet.number_formats.items():
-                    idx = col_to_idx.get(col_name)
-                    if not idx:
-                        continue
-                    for r in range(2, ws.max_row + 1):
-                        ws.cell(row=r, column=idx).number_format = fmt
+                    for j, col in enumerate(sheet.columns, start=1):
+                        c = ws.cell(row=1, column=j, value=col)
+                        c.font = header_font
+                    if sheet.header_fill:
+                        fill = PatternFill(
+                            start_color="D9E1F2",
+                            end_color="D9E1F2",
+                            fill_type="solid",
+                        )
+                        for j in range(1, len(sheet.columns) + 1):
+                            ws.cell(row=1, column=j).fill = fill
 
-                # explicit column widths
-                for col_name, width in sheet.column_widths.items():
-                    idx = col_to_idx.get(col_name)
-                    if not idx:
-                        continue
-                    from openpyxl.utils import get_column_letter
-                    ws.column_dimensions[get_column_letter(idx)].width = float(width)
+                    for i, row in enumerate(sheet.rows, start=2):
+                        for j in range(1, len(sheet.columns) + 1):
+                            v = row[j - 1] if j - 1 < len(row) else None
+                            ws.cell(row=i, column=j, value=v)
 
-                # autosize as fallback
-                _best_effort_autosize(ws)
+                    if sheet.freeze_panes:
+                        ws.freeze_panes = sheet.freeze_panes
 
-                if sheet.auto_filter:
-                    ws.auto_filter.ref = ws.dimensions
-
-                # images
-                if sheet.images:
-                    from openpyxl.drawing.image import Image as XLImage
-
-                    for img in sheet.images:
-                        ext = os.path.splitext(img.path.lower())[1]
-                        if ext not in [".png", ".jpg", ".jpeg"]:
-                            if strict:
-                                return ArtifactResult(
-                                    success=False,
-                                    error=ArtifactError(
-                                        code="INVALID_PATH",
-                                        message=f"unsupported image extension: {ext}",
-                                    ),
-                                ).model_dump()
+                    col_to_idx = {name: idx + 1 for idx, name in enumerate(sheet.columns)}
+                    for col_name, fmt in sheet.number_formats.items():
+                        idx = col_to_idx.get(col_name)
+                        if not idx:
                             continue
-                        img_abs = get_secure_path(img.path, workspace_id, agent_id, session_id)
-                        if not os.path.exists(img_abs):
-                            if strict:
-                                return ArtifactResult(
-                                    success=False,
-                                    error=ArtifactError(
-                                        code="INVALID_PATH",
-                                        message=f"image not found: {img.path}",
-                                    ),
-                                ).model_dump()
+                        for r in range(2, ws.max_row + 1):
+                            ws.cell(row=r, column=idx).number_format = fmt
+
+                    for col_name, width in sheet.column_widths.items():
+                        idx = col_to_idx.get(col_name)
+                        if not idx:
                             continue
-                        xl_img = XLImage(img_abs)
-                        if img.width:
-                            xl_img.width = int(img.width)
-                        ws.add_image(xl_img, img.cell)
+                        from openpyxl.utils import get_column_letter
 
-            wb.save(out_path)
+                        ws.column_dimensions[get_column_letter(idx)].width = float(width)
 
-            
-        
-            return ArtifactResult(
-                success=True,
-                output_path=str(out_path),
-                metadata={"sheets": len(spec.sheets)},
-            ).model_dump()
+                    _best_effort_autosize(ws)
 
+                    if sheet.auto_filter:
+                        ws.auto_filter.ref = ws.dimensions
 
-        except Exception as e:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INTERNAL_ERROR",
-                    message="Failed to generate Excel workbook",
-                    details=str(e),
-                ),
-            ).model_dump()
+                    if sheet.images:
+                        from openpyxl.drawing.image import Image as XLImage
+
+                        for img in sheet.images:
+                            ext = os.path.splitext(img.path.lower())[1]
+                            if ext not in [".png", ".jpg", ".jpeg"]:
+                                if strict:
+                                    return ArtifactResult(
+                                        success=False,
+                                        error=ArtifactError(
+                                            code="INVALID_PATH",
+                                            message=f"unsupported image extension: {ext}",
+                                        ),
+                                    ).model_dump()
+                                continue
+                            img_abs = get_secure_path(img.path, workspace_id, agent_id, session_id)
+                            if not os.path.exists(img_abs):
+                                if strict:
+                                    return ArtifactResult(
+                                        success=False,
+                                        error=ArtifactError(
+                                            code="INVALID_PATH",
+                                            message=f"image not found: {img.path}",
+                                        ),
+                                    ).model_dump()
+                                continue
+                            xl_img = XLImage(img_abs)
+                            if img.width:
+                                xl_img.width = int(img.width)
+                            ws.add_image(xl_img, img.cell)
+
+                wb.save(out_path)
+                digest = sha256_file(out_path)
+                return ArtifactResult(
+                    success=True,
+                    output_path=str(out_path),
+                    metadata={"sheets": len(spec.sheets), "sha256": digest},
+                ).model_dump()
+            except Exception as e:
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="INTERNAL_ERROR",
+                        message="Failed to generate Excel workbook",
+                        details=str(e),
+                    ),
+                ).model_dump()

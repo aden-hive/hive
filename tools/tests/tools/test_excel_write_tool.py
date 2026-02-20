@@ -51,6 +51,7 @@ def test_excel_write_multisheet_and_format(excel_tools):
     )
     assert res.get("success") is True
     assert res.get("metadata", {}).get("sheets") == 2
+    assert len(res.get("metadata", {}).get("sha256", "")) == 64
 
 
     out_abs = (

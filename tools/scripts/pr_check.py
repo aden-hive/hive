@@ -16,6 +16,7 @@ if __name__ == "__main__":
             "--spec",
             "tools/examples/pack_finance.json",
             "--dry-run",
+            "--print-markdown",
         ]
     )
 

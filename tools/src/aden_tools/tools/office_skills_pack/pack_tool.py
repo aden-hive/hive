@@ -17,6 +17,7 @@ from aden_tools.tools.office_skills_pack.limits import (
     MAX_SHEET_ROWS,
     MAX_SLIDES,
 )
+from aden_tools.tools.office_skills_pack.logging_utils import tool_span
 from aden_tools.tools.office_skills_pack.manifest_tool import ManifestSpec
 from aden_tools.tools.powerpoint_tool.powerpoint_tool import DeckSpec
 from aden_tools.tools.word_tool.word_tool import DocSpec
@@ -39,6 +40,36 @@ class PackSpec(BaseModel):
     doc: Optional[DocSpec] = None
 
 
+def _apply_guardrails(spec: PackSpec) -> ArtifactError | None:
+    for job in spec.charts:
+        total_points = sum(min(len(s.x), len(s.y)) for s in job.chart.series)
+        if total_points > MAX_CHART_POINTS and spec.strict:
+            return ArtifactError(
+                code="INVALID_SCHEMA",
+                message="chart too large",
+                details={"points": total_points, "max": MAX_CHART_POINTS},
+            )
+
+    if spec.deck and len(spec.deck.slides) > MAX_SLIDES and spec.strict:
+        return ArtifactError(
+            code="INVALID_SCHEMA",
+            message="too many slides",
+            details={"slides": len(spec.deck.slides), "max": MAX_SLIDES},
+        )
+
+    if spec.workbook:
+        for sh in spec.workbook.sheets:
+            if len(sh.rows) > MAX_SHEET_ROWS:
+                if spec.strict:
+                    return ArtifactError(
+                        code="INVALID_SCHEMA",
+                        message="too many rows",
+                        details={"sheet": sh.name, "rows": len(sh.rows), "max": MAX_SHEET_ROWS},
+                    )
+                sh.rows = sh.rows[:MAX_SHEET_ROWS]
+    return None
+
+
 def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def office_pack_generate(
@@ -51,150 +82,183 @@ def register_tools(mcp: FastMCP) -> None:
         One-call generation: charts (png) + xlsx + pptx + docx.
         Returns ArtifactResult with manifest metadata.
         """
-        try:
-            spec = PackSpec.model_validate(pack)
-        except Exception as e:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(code="INVALID_SCHEMA", message="Invalid pack schema", details=str(e)),
-            ).model_dump()
+        with tool_span(
+            "office_pack_generate",
+            {
+                "workspace_id": workspace_id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+            },
+        ) as done:
+            try:
+                spec = PackSpec.model_validate(pack)
+            except Exception as e:
+                return done(
+                    ArtifactResult(
+                        success=False,
+                        error=ArtifactError(code="INVALID_SCHEMA", message="Invalid pack schema", details=str(e)),
+                    ).model_dump()
+                )
 
-        for job in spec.charts:
-            total_points = sum(min(len(s.x), len(s.y)) for s in job.chart.series)
-            if total_points > MAX_CHART_POINTS and spec.strict:
-                return ArtifactResult(
-                    success=False,
-                    error=ArtifactError(
-                        code="INVALID_SCHEMA",
-                        message="chart too large",
-                        details={"points": total_points, "max": MAX_CHART_POINTS},
-                    ),
-                ).model_dump()
+            guardrail_error = _apply_guardrails(spec)
+            if guardrail_error:
+                return done(ArtifactResult(success=False, error=guardrail_error).model_dump())
 
-        if spec.deck and len(spec.deck.slides) > MAX_SLIDES and spec.strict:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INVALID_SCHEMA",
-                    message="too many slides",
-                    details={"slides": len(spec.deck.slides), "max": MAX_SLIDES},
-                ),
-            ).model_dump()
+            if spec.dry_run:
+                return done(
+                    ArtifactResult(
+                        success=True,
+                        metadata={
+                            "dry_run": True,
+                            "will_generate": {
+                                "charts": [c.path for c in spec.charts],
+                                "xlsx": spec.xlsx_path,
+                                "pptx": spec.pptx_path,
+                                "docx": spec.docx_path,
+                            },
+                        },
+                    ).model_dump()
+                )
 
-        if spec.workbook:
-            for sh in spec.workbook.sheets:
-                if len(sh.rows) > MAX_SHEET_ROWS:
-                    if spec.strict:
-                        return ArtifactResult(
+            chart_png = mcp._tool_manager._tools.get("chart_render_png")
+            xlsx = mcp._tool_manager._tools.get("excel_write")
+            pptx = mcp._tool_manager._tools.get("powerpoint_generate")
+            docx = mcp._tool_manager._tools.get("word_generate")
+
+            if chart_png is None or xlsx is None or pptx is None or docx is None:
+                return done(
+                    ArtifactResult(
+                        success=False,
+                        error=ArtifactError(code="DEP_MISSING", message="Office pack tools not registered in MCP"),
+                    ).model_dump()
+                )
+
+            for job in spec.charts:
+                r = chart_png.fn(
+                    path=job.path,
+                    chart=job.chart.model_dump(),
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    strict=spec.strict,
+                )
+                if not r.get("success") and spec.strict:
+                    err = r.get("error") or {}
+                    return done(
+                        ArtifactResult(
                             success=False,
                             error=ArtifactError(
-                                code="INVALID_SCHEMA",
-                                message="too many rows",
-                                details={"sheet": sh.name, "rows": len(sh.rows), "max": MAX_SHEET_ROWS},
+                                code=err.get("code", "UNKNOWN"),
+                                message=err.get("message", "chart generation failed"),
+                                details=err.get("details"),
                             ),
                         ).model_dump()
-                    sh.rows = sh.rows[:MAX_SHEET_ROWS]
+                    )
 
-        if spec.dry_run:
-            return ArtifactResult(
-                success=True,
-                metadata={
-                    "dry_run": True,
-                    "will_generate": {
-                        "charts": [c.path for c in spec.charts],
-                        "xlsx": spec.xlsx_path,
-                        "pptx": spec.pptx_path,
-                        "docx": spec.docx_path,
-                    },
-                },
-            ).model_dump()
+            items: List[Dict[str, Any]] = []
 
-        chart_png = mcp._tool_manager._tools.get("chart_render_png")
-        xlsx = mcp._tool_manager._tools.get("excel_write")
-        pptx = mcp._tool_manager._tools.get("powerpoint_generate")
-        docx = mcp._tool_manager._tools.get("word_generate")
+            if spec.xlsx_path and spec.workbook is not None:
+                r = xlsx.fn(
+                    path=spec.xlsx_path,
+                    workbook=spec.workbook.model_dump(),
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    strict=spec.strict,
+                )
+                if not r.get("success") and spec.strict:
+                    return done(ArtifactResult(success=False, error=ArtifactError(**r["error"])).model_dump())
+                if r.get("success"):
+                    items.append(
+                        {"tool": "excel_write", "output_path": spec.xlsx_path, "metadata": r.get("metadata", {})}
+                    )
 
-        if chart_png is None or xlsx is None or pptx is None or docx is None:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(code="DEP_MISSING", message="Office pack tools not registered in MCP"),
-            ).model_dump()
+            if spec.pptx_path and spec.deck is not None:
+                r = pptx.fn(
+                    path=spec.pptx_path,
+                    deck=spec.deck.model_dump(),
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    strict=spec.strict,
+                )
+                if not r.get("success") and spec.strict:
+                    return done(ArtifactResult(success=False, error=ArtifactError(**r["error"])).model_dump())
+                if r.get("success"):
+                    items.append(
+                        {
+                            "tool": "powerpoint_generate",
+                            "output_path": spec.pptx_path,
+                            "metadata": r.get("metadata", {}),
+                        }
+                    )
 
-        for job in spec.charts:
-            r = chart_png.fn(
-                path=job.path,
-                chart=job.chart.model_dump(),
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                strict=spec.strict,
-            )
-            if not r.get("success") and spec.strict:
-                err = r.get("error") or {}
-                return ArtifactResult(
-                    success=False,
-                    error=ArtifactError(
-                        code=err.get("code", "UNKNOWN"),
-                        message=err.get("message", "chart generation failed"),
-                        details=err.get("details"),
-                    ),
+            if spec.docx_path and spec.doc is not None:
+                r = docx.fn(
+                    path=spec.docx_path,
+                    doc=spec.doc.model_dump(),
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    strict=spec.strict,
+                )
+                if not r.get("success") and spec.strict:
+                    return done(ArtifactResult(success=False, error=ArtifactError(**r["error"])).model_dump())
+                if r.get("success"):
+                    items.append(
+                        {"tool": "word_generate", "output_path": spec.docx_path, "metadata": r.get("metadata", {})}
+                    )
+
+            manifest = ManifestSpec.model_validate({"items": items})
+            return done(
+                ArtifactResult(
+                    success=True,
+                    contract_version=CONTRACT_VERSION,
+                    metadata={"manifest": [i.model_dump() for i in manifest.items]},
                 ).model_dump()
-
-        items: List[Dict[str, Any]] = []
-
-        if spec.xlsx_path and spec.workbook is not None:
-            r = xlsx.fn(
-                path=spec.xlsx_path,
-                workbook=spec.workbook.model_dump(),
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                strict=spec.strict,
             )
-            if not r.get("success") and spec.strict:
-                return ArtifactResult(success=False, error=ArtifactError(**r["error"])).model_dump()
-            if r.get("success"):
-                items.append(
-                    {"tool": "excel_write", "output_path": spec.xlsx_path, "metadata": r.get("metadata", {})}
+
+    @mcp.tool()
+    def office_pack_validate(
+        pack: dict[str, Any],
+        workspace_id: str,
+        agent_id: str,
+        session_id: str,
+    ) -> dict:
+        with tool_span(
+            "office_pack_validate",
+            {
+                "workspace_id": workspace_id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+            },
+        ) as done:
+            try:
+                spec = PackSpec.model_validate(pack)
+            except Exception as e:
+                return done(
+                    ArtifactResult(
+                        success=False,
+                        error=ArtifactError(code="INVALID_SCHEMA", message="Invalid pack schema", details=str(e)),
+                    ).model_dump()
                 )
 
-        if spec.pptx_path and spec.deck is not None:
-            r = pptx.fn(
-                path=spec.pptx_path,
-                deck=spec.deck.model_dump(),
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                strict=spec.strict,
-            )
-            if not r.get("success") and spec.strict:
-                return ArtifactResult(success=False, error=ArtifactError(**r["error"])).model_dump()
-            if r.get("success"):
-                items.append(
-                    {
-                        "tool": "powerpoint_generate",
-                        "output_path": spec.pptx_path,
-                        "metadata": r.get("metadata", {}),
-                    }
-                )
+            guardrail_error = _apply_guardrails(spec)
+            if guardrail_error:
+                return done(ArtifactResult(success=False, error=guardrail_error).model_dump())
 
-        if spec.docx_path and spec.doc is not None:
-            r = docx.fn(
-                path=spec.docx_path,
-                doc=spec.doc.model_dump(),
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                strict=spec.strict,
+            return done(
+                ArtifactResult(
+                    success=True,
+                    metadata={
+                        "valid": True,
+                        "dry_run": True,
+                        "will_generate": {
+                            "charts": [c.path for c in spec.charts],
+                            "xlsx": spec.xlsx_path,
+                            "pptx": spec.pptx_path,
+                            "docx": spec.docx_path,
+                        },
+                    },
+                ).model_dump()
             )
-            if not r.get("success") and spec.strict:
-                return ArtifactResult(success=False, error=ArtifactError(**r["error"])).model_dump()
-            if r.get("success"):
-                items.append({"tool": "word_generate", "output_path": spec.docx_path, "metadata": r.get("metadata", {})})
-
-        manifest = ManifestSpec.model_validate({"items": items})
-        return ArtifactResult(
-            success=True,
-            contract_version=CONTRACT_VERSION,
-            metadata={"manifest": [i.model_dump() for i in manifest.items]},
-        ).model_dump()

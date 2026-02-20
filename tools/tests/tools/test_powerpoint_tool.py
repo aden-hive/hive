@@ -53,6 +53,7 @@ def test_powerpoint_generate_creates_pptx(powerpoint_tools):
     )
 
     assert res.get("success") is True, res
+    assert len(res.get("metadata", {}).get("sha256", "")) == 64
     out_abs = res.get("output_path")
     assert out_abs, res
     prs = Presentation(str(out_abs))

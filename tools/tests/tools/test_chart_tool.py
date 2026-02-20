@@ -35,6 +35,7 @@ def test_chart_render_png_and_embed_in_pptx(tmp_path: Path):
             session_id="s",
         )
         assert r["success"] is True, r
+        assert len(r.get("metadata", {}).get("sha256", "")) == 64
 
         chart_abs = get_secure_path("out/chart.png", "w", "a", "s")
         assert Path(chart_abs).exists()

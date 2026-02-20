@@ -64,6 +64,7 @@ def test_word_generate_creates_docx(word_tools):
 
     # d = Document(str(out_abs))
     assert res.get("success") is True, res
+    assert len(res.get("metadata", {}).get("sha256", "")) == 64
     out_abs = res.get("output_path")
     assert out_abs, res
     d = Document(str(out_abs))

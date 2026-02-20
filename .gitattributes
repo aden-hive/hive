@@ -1,5 +1,10 @@
 # Normalize line endings for all text files
 * text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
 
 # Source code
 *.py text diff=python

@@ -9,6 +9,8 @@ from typing import Any, List, Optional
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
+from aden_tools.tools.office_skills_pack.hash_utils import sha256_file
+from aden_tools.tools.office_skills_pack.logging_utils import tool_span
 from ..file_system_toolkits.security import get_secure_path
 
 
@@ -52,134 +54,129 @@ def register_tools(mcp: FastMCP) -> None:
         Generate a Word (.docx) report from a strict schema and save it to the session sandbox.
         """
 
-        if not path.lower().endswith(".docx"):
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INVALID_EXTENSION",
-                    message="path must end with .docx",
-                ),
-            ).model_dump()
+        with tool_span(
+            "word_generate",
+            {"workspace_id": workspace_id, "agent_id": agent_id, "session_id": session_id, "output_path": path},
+        ):
+            if not path.lower().endswith(".docx"):
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="INVALID_EXTENSION",
+                        message="path must end with .docx",
+                    ),
+                ).model_dump()
 
-        if mode not in {"create", "append"}:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INVALID_SCHEMA",
-                    message="mode must be 'create' or 'append'",
-                ),
-            ).model_dump()
+            if mode not in {"create", "append"}:
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="INVALID_SCHEMA",
+                        message="mode must be 'create' or 'append'",
+                    ),
+                ).model_dump()
 
+            try:
+                spec = DocSpec.model_validate(doc)
+            except Exception as e:
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="INVALID_SCHEMA",
+                        message="Invalid doc schema",
+                        details=str(e),
+                    ),
+                ).model_dump()
 
+            try:
+                from docx import Document
+                from docx.shared import Inches
+            except ImportError:
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="DEP_MISSING",
+                        message="python-docx not installed. Install with: pip install -e '.[word]' (from tools/)",
+                    ),
+                ).model_dump()
 
-        try:
-            spec = DocSpec.model_validate(doc)
-        except Exception as e:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INVALID_SCHEMA",
-                    message="Invalid doc schema",
-                    details=str(e),
-                ),
-            ).model_dump()
+            try:
+                out_path = get_secure_path(path, workspace_id, agent_id, session_id)
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-
-        try:
-            from docx import Document
-            from docx.shared import Inches
-        except ImportError:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="DEP_MISSING",
-                    message="python-docx not installed. Install with: pip install -e '.[word]' (from tools/)",
-                ),
-            ).model_dump()
-           
-            
-
-        try:
-            out_path = get_secure_path(path, workspace_id, agent_id, session_id)
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
-            if mode == "append":
-                if os.path.exists(out_path):
-                    d = Document(out_path)
-                elif strict:
-                    return ArtifactResult(
-                        success=False,
-                        error=ArtifactError(
-                            code="INVALID_PATH",
-                            message="docx to append not found",
-                        ),
-                    ).model_dump()
-                else:
-                    d = Document()
-            else:
-                d = Document()
-                d.add_heading(spec.title, level=0)
-            
-            for sec in spec.sections:
-                d.add_heading(sec.heading, level=1)
-
-                for p in sec.paragraphs:
-                    d.add_paragraph(p)
-
-                for b in sec.bullets:
-                    d.add_paragraph(b, style="List Bullet")
-
-                if sec.table is not None:
-                    if strict and any(len(row) > len(sec.table.columns) for row in sec.table.rows):
+                if mode == "append":
+                    if os.path.exists(out_path):
+                        d = Document(out_path)
+                    elif strict:
                         return ArtifactResult(
                             success=False,
                             error=ArtifactError(
-                                code="INVALID_SCHEMA",
-                                message="Table row has more values than columns",
+                                code="INVALID_PATH",
+                                message="docx to append not found",
                             ),
                         ).model_dump()
-                    t = d.add_table(rows=1, cols=len(sec.table.columns))
-                    hdr = t.rows[0].cells
-                    for i, c in enumerate(sec.table.columns):
-                        hdr[i].text = str(c)
+                    else:
+                        d = Document()
+                else:
+                    d = Document()
+                    d.add_heading(spec.title, level=0)
 
-                    for row in sec.table.rows:
-                        r = t.add_row().cells
-                        for i in range(min(len(r), len(row))):
-                            r[i].text = "" if row[i] is None else str(row[i])
+                for sec in spec.sections:
+                    d.add_heading(sec.heading, level=1)
 
-                for rel_path in [*sec.image_paths, *sec.charts]:
-                    img_path = get_secure_path(rel_path, workspace_id, agent_id, session_id)
-                    if not os.path.exists(img_path):
-                        if strict:
+                    for p in sec.paragraphs:
+                        d.add_paragraph(p)
+
+                    for b in sec.bullets:
+                        d.add_paragraph(b, style="List Bullet")
+
+                    if sec.table is not None:
+                        if strict and any(len(row) > len(sec.table.columns) for row in sec.table.rows):
                             return ArtifactResult(
                                 success=False,
                                 error=ArtifactError(
-                                    code="INVALID_PATH",
-                                    message=f"Image not found: {rel_path}",
+                                    code="INVALID_SCHEMA",
+                                    message="Table row has more values than columns",
                                 ),
                             ).model_dump()
-                        continue
-                    d.add_picture(str(img_path), width=Inches(5.8))
+                        t = d.add_table(rows=1, cols=len(sec.table.columns))
+                        hdr = t.rows[0].cells
+                        for i, c in enumerate(sec.table.columns):
+                            hdr[i].text = str(c)
 
-                
-            d.save(out_path)
+                        for row in sec.table.rows:
+                            r = t.add_row().cells
+                            for i in range(min(len(r), len(row))):
+                                r[i].text = "" if row[i] is None else str(row[i])
 
+                    for rel_path in [*sec.image_paths, *sec.charts]:
+                        img_path = get_secure_path(rel_path, workspace_id, agent_id, session_id)
+                        if not os.path.exists(img_path):
+                            if strict:
+                                return ArtifactResult(
+                                    success=False,
+                                    error=ArtifactError(
+                                        code="INVALID_PATH",
+                                        message=f"Image not found: {rel_path}",
+                                    ),
+                                ).model_dump()
+                            continue
+                        d.add_picture(str(img_path), width=Inches(5.8))
 
-            return ArtifactResult(
-                success=True,
-                output_path=str(out_path),
-                metadata={"sections": len(spec.sections)}
+                d.save(out_path)
+                digest = sha256_file(out_path)
 
-            ).model_dump()
-                        
-
-        except Exception as e:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="INTERNAL_ERROR",
-                    message="Failed to generate Word document",
-                    details=str(e),
-                ),
-            ).model_dump()
+                return ArtifactResult(
+                    success=True,
+                    output_path=str(out_path),
+                    metadata={"sections": len(spec.sections), "sha256": digest},
+                ).model_dump()
+            except Exception as e:
+                return ArtifactResult(
+                    success=False,
+                    error=ArtifactError(
+                        code="INTERNAL_ERROR",
+                        message="Failed to generate Word document",
+                        details=str(e),
+                    ),
+                ).model_dump()

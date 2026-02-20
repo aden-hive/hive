@@ -8,7 +8,9 @@ from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 from aden_tools.tools.office_skills_pack.contracts import ArtifactError, ArtifactResult
+from aden_tools.tools.office_skills_pack.hash_utils import sha256_file
 from aden_tools.tools.office_skills_pack.limits import MAX_CHART_POINTS
+from aden_tools.tools.office_skills_pack.logging_utils import tool_span
 from ..file_system_toolkits.security import get_secure_path
 
 
@@ -38,85 +40,101 @@ def register_tools(mcp: FastMCP) -> None:
         """
         Render a simple multi-series line chart into a PNG (schema-first) saved into the session sandbox.
         """
-        if not path.lower().endswith(".png"):
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(code="INVALID_PATH", message="path must end with .png"),
-            ).model_dump()
+        with tool_span(
+            "chart_render_png",
+            {"workspace_id": workspace_id, "agent_id": agent_id, "session_id": session_id, "output_path": path},
+        ) as done:
+            if not path.lower().endswith(".png"):
+                return done(
+                    ArtifactResult(
+                        success=False,
+                        error=ArtifactError(code="INVALID_PATH", message="path must end with .png"),
+                    ).model_dump()
+                )
 
-        try:
-            spec = ChartSpec.model_validate(chart)
-        except Exception as e:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(code="INVALID_SCHEMA", message="Invalid chart schema", details=str(e)),
-            ).model_dump()
+            try:
+                spec = ChartSpec.model_validate(chart)
+            except Exception as e:
+                return done(
+                    ArtifactResult(
+                        success=False,
+                        error=ArtifactError(code="INVALID_SCHEMA", message="Invalid chart schema", details=str(e)),
+                    ).model_dump()
+                )
 
-        try:
-            import matplotlib
+            try:
+                import matplotlib
 
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-        except ImportError:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(
-                    code="DEP_MISSING",
-                    message="matplotlib not installed",
-                    details="Install with: pip install -e '.[charts]' (from tools/)",
-                ),
-            ).model_dump()
-
-        try:
-            total_points = sum(min(len(s.x), len(s.y)) for s in spec.series)
-            downsample_step = 1
-            if total_points > MAX_CHART_POINTS:
-                if strict:
-                    return ArtifactResult(
+                matplotlib.use("Agg")
+                import matplotlib.pyplot as plt
+            except ImportError:
+                return done(
+                    ArtifactResult(
                         success=False,
                         error=ArtifactError(
-                            code="INVALID_SCHEMA",
-                            message="chart too large",
-                            details={"points": total_points, "max": MAX_CHART_POINTS},
+                            code="DEP_MISSING",
+                            message="matplotlib not installed",
+                            details="Install with: pip install -e '.[charts]' (from tools/)",
                         ),
                     ).model_dump()
-                downsample_step = max(2, ceil(total_points / MAX_CHART_POINTS))
+                )
 
-            out_path = get_secure_path(path, workspace_id, agent_id, session_id)
-            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            try:
+                total_points = sum(min(len(s.x), len(s.y)) for s in spec.series)
+                downsample_step = 1
+                if total_points > MAX_CHART_POINTS:
+                    if strict:
+                        return done(
+                            ArtifactResult(
+                                success=False,
+                                error=ArtifactError(
+                                    code="INVALID_SCHEMA",
+                                    message="chart too large",
+                                    details={"points": total_points, "max": MAX_CHART_POINTS},
+                                ),
+                            ).model_dump()
+                        )
+                    downsample_step = max(2, ceil(total_points / MAX_CHART_POINTS))
 
-            plt.figure()
-            for s in spec.series:
-                # handle mismatched lengths safely
-                n = min(len(s.x), len(s.y))
-                x_vals = s.x[:n]
-                y_vals = s.y[:n]
-                if downsample_step > 1:
-                    x_vals = x_vals[::downsample_step]
-                    y_vals = y_vals[::downsample_step]
-                plt.plot(x_vals, y_vals, label=s.name)
+                out_path = get_secure_path(path, workspace_id, agent_id, session_id)
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-            plt.title(spec.title)
-            if spec.x_label:
-                plt.xlabel(spec.x_label)
-            if spec.y_label:
-                plt.ylabel(spec.y_label)
+                plt.figure()
+                for s in spec.series:
+                    n = min(len(s.x), len(s.y))
+                    x_vals = s.x[:n]
+                    y_vals = s.y[:n]
+                    if downsample_step > 1:
+                        x_vals = x_vals[::downsample_step]
+                        y_vals = y_vals[::downsample_step]
+                    plt.plot(x_vals, y_vals, label=s.name)
 
-            if len(spec.series) > 1:
-                plt.legend()
+                plt.title(spec.title)
+                if spec.x_label:
+                    plt.xlabel(spec.x_label)
+                if spec.y_label:
+                    plt.ylabel(spec.y_label)
 
-            plt.tight_layout()
-            plt.savefig(out_path, dpi=150)
-            plt.close()
+                if len(spec.series) > 1:
+                    plt.legend()
 
-            return ArtifactResult(
-                success=True,
-                output_path=path,
-                metadata={"series": len(spec.series)},
-            ).model_dump()
+                plt.tight_layout()
+                plt.savefig(out_path, dpi=150)
+                plt.close()
+                digest = sha256_file(out_path)
 
-        except Exception as e:
-            return ArtifactResult(
-                success=False,
-                error=ArtifactError(code="IO_ERROR", message="Failed to write png", details=str(e)),
-            ).model_dump()
+                return done(
+                    ArtifactResult(
+                        success=True,
+                        output_path=path,
+                        metadata={"series": len(spec.series), "sha256": digest},
+                    ).model_dump()
+                )
+
+            except Exception as e:
+                return done(
+                    ArtifactResult(
+                        success=False,
+                        error=ArtifactError(code="IO_ERROR", message="Failed to write png", details=str(e)),
+                    ).model_dump()
+                )

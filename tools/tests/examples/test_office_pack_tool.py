@@ -104,3 +104,23 @@ def test_office_pack_generate_strict_fails_missing_image(tmp_path: Path):
             session_id="s",
         )
         assert res["success"] is False, res
+
+
+def test_office_pack_validate_reports_valid(tmp_path: Path):
+    with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        mcp = FastMCP("pack-validate")
+        register_office_skills_pack(mcp)
+        validate = mcp._tool_manager._tools["office_pack_validate"].fn
+
+        res = validate(
+            pack={
+                "strict": True,
+                "xlsx_path": "out/ok.xlsx",
+                "workbook": {"sheets": [{"name": "S", "columns": ["A"], "rows": [[1]]}]},
+            },
+            workspace_id="w",
+            agent_id="a",
+            session_id="s",
+        )
+        assert res["success"] is True, res
+        assert res["metadata"]["valid"] is True

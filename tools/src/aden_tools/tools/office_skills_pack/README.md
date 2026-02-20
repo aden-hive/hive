@@ -63,6 +63,15 @@ python tools/examples/office_skills_pack_demo.py
 ## Example payloads
 See `tools/tests/fixtures/office_skills_pack/` for sample JSON inputs.
 
+## Custom template
+Start from:
+- `tools/examples/pack_custom_template.json`
+
+Dry-run:
+```bash
+python -m aden_tools.cli.office_pack --spec tools/examples/pack_custom_template.json --dry-run
+```
+
 ## One-call generation
 Use `office_pack_generate` to create charts + XLSX + PPTX + DOCX in one request.
 It returns a manifest in `metadata.manifest`.
@@ -71,6 +80,12 @@ CLI example:
 
 ```bash
 python -m aden_tools.cli.office_pack --spec tools/examples/pack_finance.json
+```
+
+CLI with markdown summary:
+
+```bash
+python -m aden_tools.cli.office_pack --spec tools/examples/pack_custom_template.json --dry-run --print-markdown
 ```
 
 Manifest example:
