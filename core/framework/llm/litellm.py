@@ -274,6 +274,7 @@ class LiteLLMProvider(LLMProvider):
         self.model = model
         self.api_key = api_key
         self.api_base = api_base
+        self.request_timeout: float = kwargs.pop("request_timeout", 120.0)
         self.extra_kwargs = kwargs
 
         if litellm is None:
@@ -289,6 +290,8 @@ class LiteLLMProvider(LLMProvider):
         retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
         for attempt in range(retries + 1):
             try:
+                if "timeout" not in kwargs and self.request_timeout > 0:
+                    kwargs["timeout"] = self.request_timeout
                 response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
                 # Some providers (e.g. Gemini) return 200 with empty content on
@@ -588,6 +591,8 @@ class LiteLLMProvider(LLMProvider):
         retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
         for attempt in range(retries + 1):
             try:
+                if "timeout" not in kwargs and self.request_timeout > 0:
+                    kwargs["timeout"] = self.request_timeout
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
 
                 content = response.choices[0].message.content if response.choices else None
@@ -905,6 +910,8 @@ class LiteLLMProvider(LLMProvider):
             output_tokens = 0
 
             try:
+                if "timeout" not in kwargs and self.request_timeout > 0:
+                    kwargs["timeout"] = self.request_timeout
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
 
                 async for chunk in response:
