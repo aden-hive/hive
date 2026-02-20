@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
@@ -52,6 +53,7 @@ class RuntimeLogger:
         self._started_at = ""
         self._logged_node_ids: set[str] = set()
         self._lock = threading.Lock()
+        self._io_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="runtime-log")
 
     def start_run(self, goal_id: str = "", session_id: str = "") -> str:
         """Start a new run. Called by GraphExecutor at graph start. Returns run_id.
@@ -143,7 +145,7 @@ class RuntimeLogger:
         )
 
         with self._lock:
-            self._store.append_step(self._run_id, step_log)
+            self._io_pool.submit(self._store.append_step, self._run_id, step_log)
 
     def log_node_complete(
         self,
@@ -228,7 +230,7 @@ class RuntimeLogger:
         )
 
         with self._lock:
-            self._store.append_node_detail(self._run_id, detail)
+            self._io_pool.submit(self._store.append_node_detail, self._run_id, detail)
             self._logged_node_ids.add(node_id)
 
     def ensure_node_logged(
@@ -278,6 +280,10 @@ class RuntimeLogger:
         propagate to the caller.
         """
         try:
+            # Drain pending I/O writes before reading back
+            self._io_pool.shutdown(wait=True)
+            self._io_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="runtime-log")
+
             # Read L2 back from disk to aggregate into L1
             node_details = self._store.read_node_details_sync(self._run_id)
 
