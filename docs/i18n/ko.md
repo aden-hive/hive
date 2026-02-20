@@ -9,7 +9,8 @@
   <a href="pt.md">Português</a> |
   <a href="ja.md">日本語</a> |
   <a href="ru.md">Русский</a> |
-  <a href="ko.md">한국어</a>
+  <a href="ko.md">한국어</a> |
+  <a href="id.md">Bahasa Indonesia</a>
 </p>
 
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/adenhq/hive/blob/main/LICENSE)
