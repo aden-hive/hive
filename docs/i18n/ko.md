@@ -259,9 +259,9 @@ PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ## 문서
 
 - **[개발자 가이드](../developer-guide.md)** - 개발자를 위한 종합 가이드
-- [시작하기](docs/getting-started.md) - 빠른 설정 방법
-- [설정 가이드](docs/configuration.md) - 모든 설정 옵션 안내
-- [아키텍처 개요](docs/architecture/README.md) - 시스템 설계 및 구조
+- [시작하기](../getting-started.md) - 빠른 설정 방법
+- [설정 가이드](../configuration.md) - 모든 설정 옵션 안내
+- [아키텍처 개요](../architecture/README.md) - 시스템 설계 및 구조
 
 ## 로드맵
 
@@ -296,7 +296,7 @@ Aden은 지원, 기능 요청, 커뮤니티 토론을 위해 [Discord](https://d
 
 ## 기여하기
 
-기여를 환영합니다. 기여 가이드라인은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고해 주세요.
+기여를 환영합니다. 기여 가이드라인은 [CONTRIBUTING.md](../../CONTRIBUTING.md)를 참고해 주세요.
 
 **중요:** PR을 제출하기 전에 먼저 Issue에 할당받으세요. Issue에 댓글을 달아 담당을 요청하면 유지관리자가 24시간 내에 할당해 드립니다. 이는 중복 작업을 방지하는 데 도움이 됩니다.
 
@@ -315,11 +315,11 @@ Aden은 지원, 기능 요청, 커뮤니티 토론을 위해 [Discord](https://d
 
 ## 보안
 
-보안 관련 문의 사항은 [SECURITY.md](SECURITY.md)를 참고해 주세요.
+보안 관련 문의 사항은 [SECURITY.md](../../SECURITY.md)를 참고해 주세요.
 
 ## 라이선스
 
-본 프로젝트는 Apache License 2.0 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE)를 참고해 주세요.
+본 프로젝트는 Apache License 2.0 하에 배포됩니다. 자세한 내용은 [LICENSE](../../LICENSE)를 참고해 주세요.
 
 ## Frequently Asked Questions (FAQ)
 
@@ -381,7 +381,7 @@ Aden은 지출 한도, 호출 제한, 자동 모델 다운그레이드 정책 �
 
 **Q: Aden에 기여하려면 어떻게 해야 하나요?**
 
-기여를 환영합니다. 저장소를 포크하고 기능 브랜치를 생성한 뒤 변경 사항을 구현하여 Pull Request를 제출해 주세요. 자세한 내용은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고해 주세요.
+기여를 환영합니다. 저장소를 포크하고 기능 브랜치를 생성한 뒤 변경 사항을 구현하여 Pull Request를 제출해 주세요. 자세한 내용은 [CONTRIBUTING.md](../../CONTRIBUTING.md)를 참고해 주세요.
 
 **Q: Aden은 엔터프라이즈 지원을 제공하나요?**
 

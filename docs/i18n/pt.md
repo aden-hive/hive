@@ -186,7 +186,7 @@ flowchart LR
 
 Aden adota uma abordagem fundamentalmente diferente para o desenvolvimento de agentes. Enquanto a maioria dos frameworks exige que você codifique fluxos de trabalho ou defina manualmente grafos de agentes, Aden usa um **agente de codificação para gerar todo o seu sistema de agentes** a partir de objetivos em linguagem natural. Quando os agentes falham, o framework não apenas registra erros—**ele evolui automaticamente o grafo de agentes** e reimplanta.
 
-> **Nota:** Para a tabela de comparação detalhada de frameworks e perguntas frequentes, consulte o [README.md](README.md) em inglês.
+> **Nota:** Para a tabela de comparação detalhada de frameworks e perguntas frequentes, consulte o [README.md](../../README.md) em inglês.
 
 ### Quando Escolher Aden
 
@@ -249,9 +249,9 @@ Consulte [environment-setup.md](../environment-setup.md) para instruções compl
 ## Documentação
 
 - **[Guia do Desenvolvedor](../developer-guide.md)** - Guia abrangente para desenvolvedores
-- [Começando](docs/getting-started.md) - Instruções de configuração rápida
-- [Guia de Configuração](docs/configuration.md) - Todas as opções de configuração
-- [Visão Geral da Arquitetura](docs/architecture/README.md) - Design e estrutura do sistema
+- [Começando](../getting-started.md) - Instruções de configuração rápida
+- [Guia de Configuração](../configuration.md) - Todas as opções de configuração
+- [Visão Geral da Arquitetura](../architecture/README.md) - Design e estrutura do sistema
 
 ## Roadmap
 
@@ -285,7 +285,7 @@ Usamos [Discord](https://discord.com/invite/MXE49hrKDk) para suporte, solicitaç
 
 ## Contribuindo
 
-Aceitamos contribuições! Por favor, consulte [CONTRIBUTING.md](CONTRIBUTING.md) para diretrizes.
+Aceitamos contribuições! Por favor, consulte [CONTRIBUTING.md](../../CONTRIBUTING.md) para diretrizes.
 
 **Importante:** Por favor, seja atribuído a uma issue antes de enviar um PR. Comente na issue para reivindicá-la e um mantenedor irá atribuí-la a você em 24 horas. Isso ajuda a evitar trabalho duplicado.
 
@@ -304,15 +304,15 @@ Aceitamos contribuições! Por favor, consulte [CONTRIBUTING.md](CONTRIBUTING.md
 
 ## Segurança
 
-Para questões de segurança, por favor consulte [SECURITY.md](SECURITY.md).
+Para questões de segurança, por favor consulte [SECURITY.md](../../SECURITY.md).
 
 ## Licença
 
-Este projeto está licenciado sob a Licença Apache 2.0 - veja o arquivo [LICENSE](LICENSE) para detalhes.
+Este projeto está licenciado sob a Licença Apache 2.0 - veja o arquivo [LICENSE](../../LICENSE) para detalhes.
 
 ## Perguntas Frequentes (FAQ)
 
-> **Nota:** Para as perguntas frequentes completas, consulte o [README.md](README.md) em inglês.
+> **Nota:** Para as perguntas frequentes completas, consulte o [README.md](../../README.md) em inglês.
 
 **P: O Aden depende do LangChain ou outros frameworks de agentes?**
 

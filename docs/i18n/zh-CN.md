@@ -186,7 +186,7 @@ flowchart LR
 
 Aden 在智能体开发方面采取了根本不同的方法。虽然大多数框架要求您硬编码工作流或手动定义智能体图，但 Aden 使用**编码智能体从自然语言目标生成整个智能体系统**。当智能体失败时，框架不仅记录错误——它会**自动进化智能体图**并重新部署。
 
-> **注意：** 详细的框架比较表和常见问题解答，请参阅英文版 [README.md](README.md)。
+> **注意：** 详细的框架比较表和常见问题解答，请参阅英文版 [README.md](../../README.md)。
 
 ### 何时选择 Aden
 
@@ -249,9 +249,9 @@ PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
 ## 文档
 
 - **[开发者指南](../developer-guide.md)** - 开发者综合指南
-- [入门指南](docs/getting-started.md) - 快速设置说明
-- [配置指南](docs/configuration.md) - 所有配置选项
-- [架构概述](docs/architecture/README.md) - 系统设计和结构
+- [入门指南](../getting-started.md) - 快速设置说明
+- [配置指南](../configuration.md) - 所有配置选项
+- [架构概述](../architecture/README.md) - 系统设计和结构
 
 ## 路线图
 
@@ -285,7 +285,7 @@ timeline
 
 ## 贡献
 
-我们欢迎贡献！请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 了解指南。
+我们欢迎贡献！请参阅 [CONTRIBUTING.md](../../CONTRIBUTING.md) 了解指南。
 
 **重要提示：** 请在提交 PR 之前先认领 Issue。在 Issue 下评论认领，维护者将在 24 小时内分配给您。我们致力于避免重复工作，让大家的努力不被浪费。
 
@@ -304,15 +304,15 @@ timeline
 
 ## 安全
 
-有关安全问题，请参阅 [SECURITY.md](SECURITY.md)。
+有关安全问题，请参阅 [SECURITY.md](../../SECURITY.md)。
 
 ## 许可证
 
-本项目采用 Apache License 2.0 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
+本项目采用 Apache License 2.0 许可证 - 详情请参阅 [LICENSE](../../LICENSE) 文件。
 
 ## 常见问题 (FAQ)
 
-> **注意：** 完整的常见问题解答，请参阅英文版 [README.md](README.md)。
+> **注意：** 完整的常见问题解答，请参阅英文版 [README.md](../../README.md)。
 
 **问：Aden 是否依赖 LangChain 或其他智能体框架？**
 
