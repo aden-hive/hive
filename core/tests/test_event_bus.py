@@ -65,6 +65,7 @@ class TestAgentEvent:
             execution_id="exec_1",
             data={"output": "result"},
             correlation_id="corr_1",
+            graph_id="graph_1",
         )
         d = event.to_dict()
         assert d["type"] == "execution_completed"
@@ -73,6 +74,7 @@ class TestAgentEvent:
         assert d["execution_id"] == "exec_1"
         assert d["data"] == {"output": "result"}
         assert d["correlation_id"] == "corr_1"
+        assert d["graph_id"] == "graph_1"
         assert "timestamp" in d
 
 
@@ -331,6 +333,30 @@ class TestEventFiltering:
         )
 
         assert len(received) == 1
+
+    @pytest.mark.asyncio
+    async def test_filter_by_graph(self):
+        """filter_graph only receives events from that graph."""
+        bus = EventBus()
+        received = []
+
+        async def handler(event: AgentEvent) -> None:
+            received.append(event.graph_id)
+
+        bus.subscribe(
+            event_types=[EventType.EXECUTION_STARTED],
+            handler=handler,
+            filter_graph="graph_a",
+        )
+
+        await bus.publish(
+            AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", graph_id="graph_a")
+        )
+        await bus.publish(
+            AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", graph_id="graph_b")
+        )
+
+        assert received == ["graph_a"]
 
 
 # ---------------------------------------------------------------------------
@@ -714,6 +740,56 @@ class TestConveniencePublishers:
         assert received[0].data["method"] == "POST"
         assert received[0].data["payload"] == {"data": "test"}
 
+    @pytest.mark.asyncio
+    async def test_emit_tool_doom_loop(self):
+        """emit_tool_doom_loop publishes correct event."""
+        bus = EventBus()
+        received = []
+
+        async def handler(event: AgentEvent) -> None:
+            received.append(event)
+
+        bus.subscribe(event_types=[EventType.NODE_TOOL_DOOM_LOOP], handler=handler)
+
+        await bus.emit_tool_doom_loop(
+            stream_id="test_stream",
+            node_id="node_1",
+            description="Tool called same endpoint 5 times",
+            execution_id="exec_1",
+        )
+
+        assert len(received) == 1
+        assert received[0].type == EventType.NODE_TOOL_DOOM_LOOP
+        assert received[0].stream_id == "test_stream"
+        assert received[0].node_id == "node_1"
+        assert received[0].data["description"] == "Tool called same endpoint 5 times"
+
+    @pytest.mark.asyncio
+    async def test_emit_escalation_requested(self):
+        """emit_escalation_requested publishes correct event."""
+        bus = EventBus()
+        received = []
+
+        async def handler(event: AgentEvent) -> None:
+            received.append(event)
+
+        bus.subscribe(event_types=[EventType.ESCALATION_REQUESTED], handler=handler)
+
+        await bus.emit_escalation_requested(
+            stream_id="test_stream",
+            node_id="node_1",
+            reason="Need human intervention",
+            context="Complex decision required",
+            execution_id="exec_1",
+        )
+
+        assert len(received) == 1
+        assert received[0].type == EventType.ESCALATION_REQUESTED
+        assert received[0].stream_id == "test_stream"
+        assert received[0].node_id == "node_1"
+        assert received[0].data["reason"] == "Need human intervention"
+        assert received[0].data["context"] == "Complex decision required"
+
 
 # ---------------------------------------------------------------------------
 # EventType enum tests
@@ -739,3 +815,5 @@ class TestEventType:
         assert EventType.TOOL_CALL_STARTED
         assert EventType.TOOL_CALL_COMPLETED
         assert EventType.WEBHOOK_RECEIVED
+        assert EventType.NODE_TOOL_DOOM_LOOP
+        assert EventType.ESCALATION_REQUESTED
