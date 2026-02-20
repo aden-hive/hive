@@ -1,0 +1,101 @@
+{
+  "strict": true,
+  "dry_run": false,
+  "charts": [
+    {
+      "path": "out/custom_chart_1.png",
+      "chart": {
+        "title": "Series Comparison",
+        "x_label": "Period",
+        "y_label": "Value",
+        "series": [
+          {
+            "name": "Series A",
+            "x": [1, 2, 3, 4, 5],
+            "y": [10, 12, 11, 15, 14]
+          },
+          {
+            "name": "Series B",
+            "x": [1, 2, 3, 4, 5],
+            "y": [8, 9, 10, 11, 13]
+          }
+        ]
+      }
+    }
+  ],
+  "xlsx_path": "out/custom_report.xlsx",
+  "pptx_path": "out/custom_report.pptx",
+  "docx_path": "out/custom_report.docx",
+  "workbook": {
+    "sheets": [
+      {
+        "name": "Summary",
+        "columns": ["Item", "Metric 1", "Metric 2"],
+        "rows": [
+          ["Item A", 0.12, -0.03],
+          ["Item B", 0.07, -0.01]
+        ],
+        "freeze_panes": "A2",
+        "number_formats": {
+          "Metric 1": "0.00%",
+          "Metric 2": "0.00%"
+        },
+        "auto_filter": true,
+        "header_fill": true
+      },
+      {
+        "name": "Charts",
+        "columns": ["Chart"],
+        "rows": [["Primary comparison chart"]],
+        "images": [
+          {
+            "path": "out/custom_chart_1.png",
+            "cell": "A3",
+            "width": 600
+          }
+        ],
+        "auto_filter": false,
+        "header_fill": false
+      }
+    ]
+  },
+  "deck": {
+    "title": "Custom Business Brief",
+    "slides": [
+      {
+        "title": "Summary",
+        "bullets": ["Replace with your key message 1", "Replace with your key message 2"],
+        "image_paths": [],
+        "charts": []
+      },
+      {
+        "title": "Chart",
+        "bullets": ["Primary trend overview"],
+        "image_paths": ["out/custom_chart_1.png"],
+        "charts": []
+      }
+    ]
+  },
+  "doc": {
+    "title": "Custom Report",
+    "sections": [
+      {
+        "heading": "Executive Summary",
+        "paragraphs": ["Replace this paragraph with your own context."],
+        "bullets": ["Point 1", "Point 2"]
+      },
+      {
+        "heading": "Data Table",
+        "paragraphs": [],
+        "bullets": [],
+        "table": {
+          "columns": ["Item", "Metric 1", "Metric 2"],
+          "rows": [
+            ["Item A", 0.12, -0.03],
+            ["Item B", 0.07, -0.01]
+          ]
+        }
+      }
+    ]
+  }
+}
