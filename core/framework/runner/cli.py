@@ -1122,6 +1122,22 @@ def cmd_shell(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
+    # Validate agent before starting session (fail fast on invalid graphs)
+    validation = runner.validate()
+    if not validation.valid:
+        print("✗ Agent validation failed:", file=sys.stderr)
+        for error in validation.errors:
+            print(f"  ERROR: {error}", file=sys.stderr)
+        if validation.warnings:
+            for warning in validation.warnings:
+                print(f"  WARNING: {warning}", file=sys.stderr)
+        print(
+            "\nRun 'hive validate <agent_path>' for full details.",
+            file=sys.stderr,
+        )
+        runner.cleanup()
+        return 1
+
     # Set up approval callback by default (unless --no-approve is set)
     if not getattr(args, "no_approve", False):
         runner.set_approval_callback(_interactive_approval)
