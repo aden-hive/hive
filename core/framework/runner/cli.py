@@ -513,6 +513,21 @@ def cmd_run(args: argparse.Namespace) -> int:
                     print(f"Error loading agent: {e}")
                     return
 
+                # Validate agent before execution (fail fast on invalid graphs)
+                validation = runner.validate()
+                if not validation.valid:
+                    print("✗ Agent validation failed:", file=sys.stderr)
+                    for error in validation.errors:
+                        print(f"  ERROR: {error}", file=sys.stderr)
+                    if validation.warnings:
+                        for warning in validation.warnings:
+                            print(f"  WARNING: {warning}", file=sys.stderr)
+                    print(
+                        "\nRun 'hive validate <agent_path>' for full details.",
+                        file=sys.stderr,
+                    )
+                    return
+
                 # Prompt before starting (allows credential updates)
                 if sys.stdin.isatty():
                     runner = _prompt_before_start(args.agent_path, runner, args.model)
@@ -571,6 +586,22 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
+            return 1
+
+        # Validate agent before execution (fail fast on invalid graphs)
+        validation = runner.validate()
+        if not validation.valid:
+            print("✗ Agent validation failed:", file=sys.stderr)
+            for error in validation.errors:
+                print(f"  ERROR: {error}", file=sys.stderr)
+            if validation.warnings:
+                for warning in validation.warnings:
+                    print(f"  WARNING: {warning}", file=sys.stderr)
+            print(
+                "\nRun 'hive validate <agent_path>' for full details.",
+                file=sys.stderr,
+            )
+            runner.cleanup()
             return 1
 
         # Prompt before starting (allows credential updates)
