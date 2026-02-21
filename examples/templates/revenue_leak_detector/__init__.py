@@ -6,13 +6,13 @@ stalled deals, overdue invoices, churn risk), sends structured alerts via
 Telegram, and emails GHOSTED contacts via Gmail.
 """
 
-from .agent import RevenuLeakDetectorAgent, default_agent, goal, nodes, edges
+from .agent import RevenueLeakDetectorAgent, default_agent, goal, nodes, edges
 from .config import RuntimeConfig, AgentMetadata, default_config, metadata
 
 __version__ = "1.0.0"
 
 __all__ = [
-    "RevenuLeakDetectorAgent",
+    "RevenueLeakDetectorAgent",
     "default_agent",
     "goal",
     "nodes",

@@ -86,7 +86,7 @@ pause_nodes = []
 # Agent class
 # ---------------------------------------------------------------------------
 
-class RevenuLeakDetectorAgent:
+class RevenueLeakDetectorAgent:
     """
     Revenue Leak Detector Agent — 4-node event_loop pipeline.
 
@@ -280,10 +280,10 @@ class RevenuLeakDetectorAgent:
 
 
 # Create default instance
-default_agent = RevenuLeakDetectorAgent()
+default_agent = RevenueLeakDetectorAgent()
 
 __all__ = [
-    "RevenuLeakDetectorAgent",
+    "RevenueLeakDetectorAgent",
     "default_agent",
     "goal",
     "nodes",
