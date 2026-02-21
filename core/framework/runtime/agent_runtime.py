@@ -712,6 +712,9 @@ class AgentRuntime:
                     # Skip events from this graph's own executions
                     if _exclude_own and event.graph_id == gid:
                         return
+                    # 🔥 Critical fix: prevent Guardian self-trigger loop
+                    if event.stream_id == entry_point_id:
+                        return
                     reg = self._graphs[gid]
                     local_ep = entry_point_id.split("::", 1)[-1]
                     stream = reg.streams.get(local_ep)

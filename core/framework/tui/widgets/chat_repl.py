@@ -811,27 +811,30 @@ class ChatRepl(Vertical):
             self._write_history(f"[dim]{traceback.format_exc()}[/dim]")
 
     async def _cmd_pause(self) -> None:
-        """Immediately pause execution by cancelling task (same as Ctrl+Z)."""
-        # Check if there's a current execution
-        if not self._current_exec_id:
-            self._write_history("[bold yellow]No active execution to pause[/bold yellow]")
-            self._write_history("  Start an execution first, then use /pause during execution")
-            return
-
-        # Find and cancel the execution task - executor will catch and save state
+        """Immediately pause execution by cancelling ALL active tasks (multi-graph safe)."""
         task_cancelled = False
-        for stream in self.runtime._streams.values():
-            exec_id = self._current_exec_id
-            task = stream._execution_tasks.get(exec_id)
-            if task and not task.done():
-                task.cancel()
-                task_cancelled = True
-                self._write_history("[bold green]⏸ Execution paused - state saved[/bold green]")
-                self._write_history("  Resume later with: [bold]/resume[/bold]")
-                break
 
-        if not task_cancelled:
-            self._write_history("[bold yellow]Execution already completed[/bold yellow]")
+        # Iterate through all registered graphs (primary + secondary)
+        for gid in self.runtime.list_graphs():
+            reg = self.runtime.get_graph_registration(gid)
+            if not reg:
+                continue
+
+            # Cancel all running execution tasks in all streams
+            for stream in reg.streams.values():
+                for exec_id, task in list(stream._execution_tasks.items()):
+                    if task and not task.done():
+                        # Thread-safe cancellation from TUI thread to agent loop thread
+                        self._agent_loop.call_soon_threadsafe(task.cancel)
+                        task_cancelled = True
+
+        if task_cancelled:
+            # Clear current exec tracking since we've cancelled everything
+            self._current_exec_id = None
+            self._write_history("[bold green]⏸ All executions stopped[/bold green]")
+            self._write_history("  State saved. Resume later with: [bold]/resume[/bold]")
+        else:
+            self._write_history("[bold yellow]No active executions found[/bold yellow]")
 
     async def _cmd_coder(self, reason: str = "") -> None:
         """User-initiated escalation to Hive Coder."""

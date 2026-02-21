@@ -1188,46 +1188,37 @@ class AdenTUI(App):
         self.notify(f"Logs {mode}", severity="information", timeout=2)
 
     def action_pause_execution(self) -> None:
-        """Immediately pause execution by cancelling task (bound to Ctrl+Z)."""
+        """Immediately pause execution by cancelling ALL active tasks (bound to Ctrl+Z)."""
         if self.chat_repl is None or self.runtime is None:
             return
         try:
-            if not self.chat_repl._current_exec_id:
+            task_cancelled = False
+
+            # Iterate through all registered graphs (primary + secondary)
+            for gid in self.runtime.list_graphs():
+                reg = self.runtime.get_graph_registration(gid)
+                if not reg:
+                    continue
+
+                # Cancel all running execution tasks in all streams
+                for stream in reg.streams.values():
+                    for _exec_id, task in list(stream._execution_tasks.items()):
+                        if task and not task.done():
+                            # Thread-safe cancellation from TUI thread to agent loop thread
+                            self.chat_repl._agent_loop.call_soon_threadsafe(task.cancel)
+                            task_cancelled = True
+
+            if task_cancelled:
+                # Clear current exec tracking since we've cancelled everything
+                self.chat_repl._current_exec_id = None
                 self.notify(
-                    "No active execution to pause",
+                    "All executions stopped - state saved",
                     severity="information",
                     timeout=3,
                 )
-                return
-
-            task_cancelled = False
-            all_streams = []
-            active_reg = self.runtime.get_graph_registration(self.runtime.active_graph_id)
-            if active_reg:
-                all_streams.extend(active_reg.streams.values())
-            for gid in self.runtime.list_graphs():
-                if gid == self.runtime.active_graph_id:
-                    continue
-                reg = self.runtime.get_graph_registration(gid)
-                if reg:
-                    all_streams.extend(reg.streams.values())
-
-            for stream in all_streams:
-                exec_id = self.chat_repl._current_exec_id
-                task = stream._execution_tasks.get(exec_id)
-                if task and not task.done():
-                    task.cancel()
-                    task_cancelled = True
-                    self.notify(
-                        "Execution paused - state saved",
-                        severity="information",
-                        timeout=3,
-                    )
-                    break
-
-            if not task_cancelled:
+            else:
                 self.notify(
-                    "Execution already completed",
+                    "No active executions found",
                     severity="information",
                     timeout=2,
                 )
