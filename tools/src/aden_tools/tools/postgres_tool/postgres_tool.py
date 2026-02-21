@@ -1,26 +1,30 @@
 """
 PostgreSQL MCP Tool (Read-only)
 
-Provides safe, read-only access to PostgreSQL for agents via MCP.
+Provides safe, read-only access to PostgreSQL databases for AI agents via MCP.
+
+Security features:
+- SELECT-only enforcement via SQL guard
+- Database-level read-only transaction enforcement
+- Statement timeout
+- SQL hashing for safe logging (no raw query logs)
+- CredentialStore integration
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import re
 import time
 from typing import Any
 
-import psycopg
+import psycopg2 as psycopg
 from fastmcp import FastMCP
 
-from .db.connection import get_connection
-from .security.sql_guard import validate_sql
-from .sql.introspection import (
-    DESCRIBE_TABLE_SQL,
-    LIST_SCHEMAS_SQL,
-    LIST_TABLES_SQL,
-)
+from aden_tools.credentials import CREDENTIAL_SPECS
+from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
 MAX_ROWS = 1000
 STATEMENT_TIMEOUT_MS = 3000
@@ -28,53 +32,202 @@ STATEMENT_TIMEOUT_MS = 3000
 logger = logging.getLogger(__name__)
 
 
+# ============================================================
+# SQL GUARD (First-pass validation)
+# ============================================================
+
+FORBIDDEN_PATTERN = re.compile(
+    r"\b(insert|update|delete|merge|upsert|create|alter|drop|truncate|grant|revoke|"
+    r"call|execute|prepare|deallocate|vacuum|analyze)\b",
+    re.IGNORECASE,
+)
+
+
+def validate_sql(sql: str) -> str:
+    """
+    Validate SQL to ensure:
+    - Single statement
+    - SELECT-only
+    - No mutation keywords
+
+    Note: Database-level read-only enforcement is the final authority.
+    """
+    sql = sql.strip()
+
+    if sql.endswith(";"):
+        sql = sql[:-1]
+
+    if ";" in sql:
+        raise ValueError("Multiple statements are not allowed")
+
+    if not sql.lower().startswith("select"):
+        raise ValueError("Only SELECT queries are allowed")
+
+    if FORBIDDEN_PATTERN.search(sql):
+        raise ValueError("Forbidden SQL keyword detected")
+
+    return sql
+
+
+# ============================================================
+# INTROSPECTION SQL
+# ============================================================
+
+LIST_SCHEMAS_SQL = """
+SELECT schema_name
+FROM information_schema.schemata
+ORDER BY schema_name
+"""
+
+LIST_TABLES_SQL = """
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_type = 'BASE TABLE'
+"""
+
+DESCRIBE_TABLE_SQL = """
+SELECT
+    column_name,
+    data_type,
+    is_nullable,
+    column_default
+FROM information_schema.columns
+WHERE table_schema = %(schema)s
+  AND table_name = %(table)s
+ORDER BY ordinal_position
+"""
+
+
+# ============================================================
+# Helpers
+# ============================================================
 
 def _hash_sql(sql: str) -> str:
-    """Hash SQL so we never log raw queries."""
+    """
+    Hash a SQL query and return a shortened version of the hash.
+
+    The hash is used to identify cached query results. The shortened hash is
+    returned to prevent the hash from growing too large.
+
+    Args:
+        sql (str): SQL query to hash
+
+    Returns:
+        str: Shortened hash of the SQL query
+    """
     return hashlib.sha256(sql.encode("utf-8")).hexdigest()[:12]
 
 
 def _error_response(message: str) -> dict:
-    """Standardized MCP error payload."""
+    """
+    Return a standardized error response for the Postgres tool.
+
+    The response will contain an 'error' key with the provided message and a
+    'success' key set to False.
+
+    :param message: The error message to include in the response.
+    :return: A dictionary containing the error response.
+    """
+    return {"error": message, "success": False}
+
+
+def _missing_credential_response() -> dict:
+    """
+    Return a standardized response for a missing required credential.
+
+    The response will contain an error message with the name of the required
+    credential and a help message pointing to the relevant API key instructions.
+
+    :return: A dictionary containing the error message and help instructions.
+    :rtype: dict
+    """
+    spec = CREDENTIAL_SPECS["postgres"]
     return {
-        "error": message,
+        "error": f"Missing required credential: {spec.description}",
+        "help": spec.api_key_instructions,
         "success": False,
     }
 
 
-def register_tools(mcp: FastMCP) -> None:
+def _get_database_url(
+    credentials: CredentialStoreAdapter | None,
+) -> str | None:
     """
-    Register PostgreSQL read-only tools with the MCP server.
+    Return a PostgreSQL connection string.
+
+    If `credentials` is provided, it will be queried first.
+    If no connection string is found in `credentials`, the `DATABASE_URL`
+    environment variable will be checked.
+
+    Parameters:
+        credentials (CredentialStoreAdapter | None): Credential store to query.
+
+    Returns:
+        str | None: PostgreSQL connection string or None if not found.
+    """
+    database_url: str | None = None
+
+    if credentials:
+        database_url = credentials.get("postgres")
+
+    if not database_url:
+        database_url = os.getenv("DATABASE_URL")
+
+    return database_url
+
+
+def _get_connection(database_url: str) -> psycopg.extensions.connection:
+    """
+    Establish a read-only PostgreSQL connection.
+
+    Parameters:
+        database_url (str): The PostgreSQL connection string
+
+    Returns:
+        psycopg.extensions.connection: A read-only PostgreSQL connection
+    """
+    conn = psycopg.connect(database_url)
+    conn.set_session(readonly=True)
+    return conn
+
+
+def register_tools(
+    mcp: FastMCP,
+    credentials: CredentialStoreAdapter | None = None,
+) -> None:
+    """
+    Register PostgreSQL tools with the MCP server.
+
+    Parameters:
+        mcp (FastMCP): The FastMCP server instance to register tools with.
+        credentials (CredentialStoreAdapter | None): Optional credential store adapter instance.
+            If provided, use the credentials to connect to the PostgreSQL database.
+            If not provided, fall back to using environment variables.
+
+    Returns:
+        None
     """
     @mcp.tool()
     def pg_query(sql: str, params: dict | None = None) -> dict:
         """
-        Safely execute a PostgreSQL query with parameterized inputs.
-
-        This tool executes a read-only PostgreSQL query with parameterized inputs.
-        It returns a dictionary containing the column names, rows, row count, and
-        execution duration in milliseconds.
+        Execute a read-only SELECT query.
 
         Parameters:
-            sql (str): SQL query to execute
-            params (dict | None): Dictionary of parameter values (optional)
+            sql (str): SQL SELECT query
+            params (dict, optional): Parameterized query values
 
         Returns:
-            dict: {
-                "columns": list[str], column names
-                "rows": list[list[Any]], query results
-                "row_count": int, number of rows returned
-                "max_rows": int, maximum number of rows to return
-                "duration_ms": int, execution duration in milliseconds
-                "success": bool, success status
-            }
-
-        Raises:
-            ValueError: If the query is invalid or missing required parameters
-            psycopg.errors.QueryCanceled: If the query timed out
-            psycopg.Error: If a database-level error occurred
-            Exception: If an unexpected error occurred
+            dict:
+                columns (list[str])
+                rows (list[list[Any]])
+                row_count (int)
+                duration_ms (int)
+                success (bool)
         """
+        database_url = _get_database_url(credentials)
+        if not database_url:
+            return _missing_credential_response()
+
         start = time.monotonic()
         sql_hash = _hash_sql(sql)
 
@@ -82,12 +235,16 @@ def register_tools(mcp: FastMCP) -> None:
             sql = validate_sql(sql)
             params = params or {}
 
-            with get_connection() as conn, conn.cursor() as cur:
-                cur.execute(f"SET statement_timeout = {STATEMENT_TIMEOUT_MS}")
-                cur.execute(sql, params)
+            with _get_connection(database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SET statement_timeout TO %s",
+                        (STATEMENT_TIMEOUT_MS,),
+                    )
+                    cur.execute(sql, params)
 
-                columns = [d.name for d in cur.description]
-                rows = cur.fetchmany(MAX_ROWS)
+                    columns = [d.name for d in cur.description]
+                    rows = cur.fetchmany(MAX_ROWS)
 
             duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -124,15 +281,13 @@ def register_tools(mcp: FastMCP) -> None:
             return _error_response("Query timed out")
 
         except psycopg.Error as e:
-            # Database-level errors (sanitized)
             logger.error(
                 "postgres.query.db_error",
-                extra={"sql_hash": sql_hash, "pgcode": e.pgcode},
+                extra={"sql_hash": sql_hash, "error": str(e)},
             )
             return _error_response("Database error while executing query")
 
         except Exception:
-            # Absolute last-resort guard
             logger.exception(
                 "postgres.query.unexpected_error",
                 extra={"sql_hash": sql_hash},
@@ -142,25 +297,31 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def pg_list_schemas() -> dict:
         """
-        List all schemas in the database.
+        List all schemas in the PostgreSQL database.
 
         Returns:
-            dict with a list of schema names and success status
-        """
-        try:
-            with get_connection() as conn, conn.cursor() as cur:
-                cur.execute(LIST_SCHEMAS_SQL)
-                result = [r[0] for r in cur.fetchall()]
+            dict: A dictionary containing the list of schemas.
+                - result (list): A list of schema names.
+                - success (bool): Whether the operation succeeded.
 
-            logger.info(
-                "postgres.list_schemas.success",
-                extra={"count": len(result)},
-            )
+        Raises:
+            dict: An error dictionary containing information about the failure.
+                - error (str): A description of the error.
+                - help (str): Optional help text.
+        """
+        database_url = _get_database_url(credentials)
+        if not database_url:
+            return _missing_credential_response()
+
+        try:
+            with _get_connection(database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(LIST_SCHEMAS_SQL)
+                    result = [r[0] for r in cur.fetchall()]
 
             return {"result": result, "success": True}
 
         except psycopg.Error:
-            logger.exception("postgres.list_schemas.db_error")
             return _error_response("Failed to list schemas")
 
     @mcp.tool()
@@ -169,11 +330,19 @@ def register_tools(mcp: FastMCP) -> None:
         List all tables in the database.
 
         Args:
-            schema: str, Optional. Filter results to a specific schema.
+            schema (str | None): The schema to filter tables by. If None, all tables are returned.
 
         Returns:
-            dict: MCP response with a list of dictionaries containing the schema and table names.
+            dict: A dictionary containing the list of tables.
+                - result (list): A list of dictionaries, each containing:
+                    - schema (str): The schema of the table.
+                    - table (str): The name of the table.
+                - success (bool): Whether the operation succeeded.
         """
+        database_url = _get_database_url(credentials)
+        if not database_url:
+            return _missing_credential_response()
+
         try:
             params: dict[str, Any] = {}
             sql = LIST_TABLES_SQL
@@ -182,42 +351,57 @@ def register_tools(mcp: FastMCP) -> None:
                 sql += " AND table_schema = %(schema)s"
                 params["schema"] = schema
 
-            with get_connection() as conn, conn.cursor() as cur:
-                cur.execute(sql, params)
-                rows = cur.fetchall()
+            with _get_connection(database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    rows = cur.fetchall()
 
-            result = [{"schema": r[0], "table": r[1]} for r in rows]
-
-            logger.info(
-                "postgres.list_tables.success",
-                extra={"schema": schema, "count": len(result)},
-            )
+            result = [
+                {"schema": r[0], "table": r[1]}
+                for r in rows
+                if len(r) >= 2
+            ]
 
             return {"result": result, "success": True}
 
         except psycopg.Error:
-            logger.exception("postgres.list_tables.db_error")
             return _error_response("Failed to list tables")
 
     @mcp.tool()
     def pg_describe_table(schema: str, table: str) -> dict:
         """
-        Describe a table in the database.
+        Describe a PostgreSQL table.
 
         Args:
-            schema: str, Schema name
-            table: str, Table name
+            schema (str): The schema of the table.
+            table (str): The name of the table.
 
         Returns:
-            dict with the table description or error
+            dict: A dictionary containing the description of the table.
+                - result (list): A list of column descriptions, each containing:
+                    - column (str): The column name.
+                    - type (str): The column type.
+                    - nullable (bool): Whether the column is nullable.
+                    - default (str): The column's default value.
+                - success (bool): Whether the operation succeeded.
+
+        Raises:
+            dict: An error dictionary containing information about the failure.
+                - error (str): A description of the error.
+                - help (str): Optional help text.
         """
+        database_url = _get_database_url(credentials)
+        if not database_url:
+            return _missing_credential_response()
+
         try:
-            with get_connection() as conn, conn.cursor() as cur:
-                cur.execute(
-                    DESCRIBE_TABLE_SQL,
-                    {"schema": schema, "table": table},
-                )
-                rows = cur.fetchall()
+            with _get_connection(database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        DESCRIBE_TABLE_SQL,
+                        {"schema": schema, "table": table},
+                    )
+                    rows = cur.fetchall()
 
             result = [
                 {
@@ -229,40 +413,46 @@ def register_tools(mcp: FastMCP) -> None:
                 for r in rows
             ]
 
-            logger.info(
-                "postgres.describe_table.success",
-                extra={"schema": schema, "table": table},
-            )
-
             return {"result": result, "success": True}
 
         except psycopg.Error:
-            logger.exception("postgres.describe_table.db_error")
             return _error_response("Failed to describe table")
 
     @mcp.tool()
     def pg_explain(sql: str) -> dict:
         """
-        Explain the execution plan for a given SQL query.
+        Explain the execution plan of a query.
 
         Args:
-            sql: str, SQL query to explain
+            sql (str): SQL query to explain
 
         Returns:
-            dict with the execution plan and success status
+            dict: Execution plan as a list of strings
         """
+        database_url = _get_database_url(credentials)
+        if not database_url:
+            return _missing_credential_response()
+
         sql_hash = _hash_sql(sql)
+        start = time.monotonic()
 
         try:
             sql = validate_sql(sql)
 
-            with get_connection() as conn, conn.cursor() as cur:
-                cur.execute(f"EXPLAIN {sql}")
-                plan = [r[0] for r in cur.fetchall()]
+            with _get_connection(database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("EXPLAIN " + sql)
+                    plan = [r[0] for r in cur.fetchall()]
+
+            duration_ms = int((time.monotonic() - start) * 1000)
 
             logger.info(
                 "postgres.explain.success",
-                extra={"sql_hash": sql_hash},
+                extra={
+                    "sql_hash": sql_hash,
+                    "duration_ms": duration_ms,
+                    "plan_lines": len(plan),
+                },
             )
 
             return {"result": plan, "success": True}
@@ -270,13 +460,19 @@ def register_tools(mcp: FastMCP) -> None:
         except ValueError as e:
             logger.warning(
                 "postgres.explain.validation_error",
-                extra={"sql_hash": sql_hash, "error": str(e)},
+                extra={
+                    "sql_hash": sql_hash,
+                    "error": str(e),
+                },
             )
             return _error_response(str(e))
 
-        except psycopg.Error:
-            logger.exception(
+        except psycopg.Error as e:
+            logger.error(
                 "postgres.explain.db_error",
-                extra={"sql_hash": sql_hash},
+                extra={
+                    "sql_hash": sql_hash,
+                    "pgcode": getattr(e, "pgcode", None),
+                },
             )
             return _error_response("Failed to explain query")
