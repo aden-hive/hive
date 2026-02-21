@@ -77,3 +77,5 @@ core/tests/*dumps/*
 
 screenshots/*
 
+# Office tool generated test exports
+tools/tests/tools/exports/
