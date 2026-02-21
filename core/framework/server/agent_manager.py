@@ -13,9 +13,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Sentinel placed in _slots while an agent is loading (prevents duplicate loads).
-_LOADING = object()
-
 
 @dataclass
 class AgentSlot:
@@ -39,6 +36,7 @@ class AgentManager:
 
     def __init__(self, model: str | None = None) -> None:
         self._slots: dict[str, AgentSlot] = {}
+        self._loading: set[str] = set()
         self._model = model
         self._lock = asyncio.Lock()
 
@@ -69,9 +67,9 @@ class AgentManager:
         resolved_model = model or self._model
 
         async with self._lock:
-            if resolved_id in self._slots:
+            if resolved_id in self._slots or resolved_id in self._loading:
                 raise ValueError(f"Agent '{resolved_id}' is already loaded")
-            self._slots[resolved_id] = _LOADING  # claim slot
+            self._loading.add(resolved_id)  # claim slot
 
         try:
             # Blocking I/O — load in executor (same as tui/app.py:362-368)
@@ -108,13 +106,14 @@ class AgentManager:
 
             async with self._lock:
                 self._slots[resolved_id] = slot
+                self._loading.discard(resolved_id)
 
             logger.info(f"Agent '{resolved_id}' loaded from {agent_path}")
             return slot
 
         except Exception:
             async with self._lock:
-                self._slots.pop(resolved_id, None)
+                self._loading.discard(resolved_id)
             raise
 
     async def unload_agent(self, agent_id: str) -> bool:
@@ -137,13 +136,10 @@ class AgentManager:
         return True
 
     def get_agent(self, agent_id: str) -> AgentSlot | None:
-        slot = self._slots.get(agent_id)
-        if slot is _LOADING:
-            return None
-        return slot
+        return self._slots.get(agent_id)
 
     def list_agents(self) -> list[AgentSlot]:
-        return [s for s in self._slots.values() if s is not _LOADING]
+        return list(self._slots.values())
 
     async def shutdown_all(self) -> None:
         """Gracefully unload all agents. Called on server shutdown."""

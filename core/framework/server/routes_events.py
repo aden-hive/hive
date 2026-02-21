@@ -64,6 +64,9 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     if slot is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
+    if not slot.runtime:
+        return web.json_response({"error": "Agent runtime not started"}, status=503)
+
     event_bus = slot.runtime.event_bus
     event_types = _parse_event_types(request.query.get("types"))
 

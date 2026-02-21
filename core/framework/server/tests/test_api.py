@@ -118,6 +118,9 @@ class MockRuntime:
     async def get_goal_progress(self):
         return {"progress": 0.5, "criteria": []}
 
+    def find_awaiting_node(self):
+        return None, None
+
     def get_stats(self):
         return {"running": True, "executions": 1}
 

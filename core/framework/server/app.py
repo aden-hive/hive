@@ -156,9 +156,9 @@ def _setup_static_serving(app: web.Application) -> None:
     async def handle_spa(request: web.Request) -> web.FileResponse:
         """Serve static files with SPA fallback to index.html."""
         rel_path = request.match_info.get("path", "")
-        file_path = dist_dir / rel_path
+        file_path = (dist_dir / rel_path).resolve()
 
-        if file_path.is_file():
+        if file_path.is_file() and file_path.is_relative_to(dist_dir):
             return web.FileResponse(file_path)
 
         # SPA fallback
