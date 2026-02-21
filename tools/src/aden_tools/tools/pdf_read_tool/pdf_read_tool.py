@@ -130,7 +130,13 @@ def register_tools(mcp: FastMCP) -> None:
                 max_pages = 1000
 
             # Open and read PDF
-            reader = PdfReader(path)
+            #reader = PdfReader(path)
+
+            with open(path, "rb") as f:
+                reader = PdfReader(f)
+
+
+
 
             # Check for encryption
             if reader.is_encrypted:
