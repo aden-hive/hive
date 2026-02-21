@@ -51,6 +51,7 @@ class ToolRegistry:
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
         self._session_context: dict[str, Any] = {}  # Auto-injected context for tools
+        self._provider_index: dict[str, set[str]] = {}  # provider -> tool names
 
     def register(
         self,
@@ -479,6 +480,56 @@ class ToolRegistry:
         )
 
         return tool
+
+    # ------------------------------------------------------------------
+    # Provider-based tool filtering
+    # ------------------------------------------------------------------
+
+    def build_provider_index(self) -> None:
+        """Build provider -> tool-name mapping from CREDENTIAL_SPECS.
+
+        Populates ``_provider_index`` so :meth:`get_by_provider` works.
+        Safe to call even if ``aden_tools`` is not installed (silently no-ops).
+        """
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+        except ImportError:
+            logger.debug("aden_tools not available, skipping provider index")
+            return
+
+        self._provider_index.clear()
+        for spec in CREDENTIAL_SPECS.values():
+            provider = spec.aden_provider_name
+            if provider:
+                if provider not in self._provider_index:
+                    self._provider_index[provider] = set()
+                self._provider_index[provider].update(spec.tools)
+
+    def get_by_provider(self, provider: str) -> dict[str, Tool]:
+        """Return registered tools that belong to *provider*.
+
+        Lazily builds the provider index on first call.
+        """
+        if not self._provider_index:
+            self.build_provider_index()
+        tool_names = self._provider_index.get(provider, set())
+        return {name: rt.tool for name, rt in self._tools.items() if name in tool_names}
+
+    def get_tool_names_by_provider(self, provider: str) -> list[str]:
+        """Return sorted registered tool names for *provider*."""
+        if not self._provider_index:
+            self.build_provider_index()
+        tool_names = self._provider_index.get(provider, set())
+        return sorted(name for name in self._tools if name in tool_names)
+
+    def get_all_provider_tool_names(self) -> list[str]:
+        """Return sorted names of all registered tools that belong to any provider."""
+        if not self._provider_index:
+            self.build_provider_index()
+        all_names: set[str] = set()
+        for names in self._provider_index.values():
+            all_names.update(names)
+        return sorted(name for name in self._tools if name in all_names)
 
     def cleanup(self) -> None:
         """Clean up all MCP client connections."""

@@ -134,6 +134,7 @@ class GraphExecutor:
         runtime_logger: Any = None,
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
+        accounts_prompt: str = "",
     ):
         """
         Initialize the executor.
@@ -153,6 +154,7 @@ class GraphExecutor:
             runtime_logger: Optional RuntimeLogger for per-graph-run logging
             storage_path: Optional base path for conversation persistence
             loop_config: Optional EventLoopNode configuration (max_iterations, etc.)
+            accounts_prompt: Connected accounts block for system prompt injection
         """
         self.runtime = runtime
         self.llm = llm
@@ -167,6 +169,7 @@ class GraphExecutor:
         self.runtime_logger = runtime_logger
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
+        self.accounts_prompt = accounts_prompt
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -1171,11 +1174,29 @@ class GraphExecutor:
                         # Build Layer 2 (narrative) from current state
                         narrative = build_narrative(memory, path, graph)
 
-                        # Compose new system prompt (Layer 1 + 2 + 3)
+                        # Read agent working memory (adapt.md) once for both
+                        # system prompt and transition marker.
+                        _adapt_text: str | None = None
+                        if self._storage_path:
+                            _adapt_path = self._storage_path / "data" / "adapt.md"
+                            if _adapt_path.exists():
+                                _raw = _adapt_path.read_text(encoding="utf-8").strip()
+                                _adapt_text = _raw or None
+
+                        # Merge adapt.md into narrative for system prompt
+                        if _adapt_text:
+                            narrative = (
+                                f"{narrative}\n\n--- Agent Memory ---\n{_adapt_text}"
+                                if narrative
+                                else _adapt_text
+                            )
+
+                        # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
                             focus_prompt=next_spec.system_prompt,
                             narrative=narrative,
+                            accounts_prompt=self.accounts_prompt or None,
                         )
                         continuous_conversation.update_system_prompt(new_system)
 
@@ -1199,6 +1220,7 @@ class GraphExecutor:
                             memory=memory,
                             cumulative_tool_names=sorted(cumulative_tool_names),
                             data_dir=data_dir,
+                            adapt_content=_adapt_text,
                         )
                         await continuous_conversation.add_user_message(
                             marker,
@@ -1518,6 +1540,7 @@ class GraphExecutor:
             inherited_conversation=inherited_conversation,
             cumulative_output_keys=cumulative_output_keys or [],
             event_triggered=event_triggered,
+            accounts_prompt=self.accounts_prompt,
         )
 
     VALID_NODE_TYPES = {

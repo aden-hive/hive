@@ -294,6 +294,30 @@ class EventLoopNode(NodeProtocol):
                 from framework.graph.prompt_composer import _with_datetime
 
                 system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
+                # Append connected accounts info if available
+                if ctx.accounts_prompt:
+                    system_prompt = f"{system_prompt}\n\n{ctx.accounts_prompt}"
+
+                # Inject agent working memory (adapt.md).
+                # If it doesn't exist yet, seed it with available context.
+                if self._config.spillover_dir:
+                    _adapt_path = Path(self._config.spillover_dir) / "adapt.md"
+                    if not _adapt_path.exists() and ctx.accounts_prompt:
+                        _adapt_path.parent.mkdir(parents=True, exist_ok=True)
+                        _adapt_path.write_text(
+                            f"## Identity\n{ctx.accounts_prompt}\n",
+                            encoding="utf-8",
+                        )
+                    if _adapt_path.exists():
+                        _adapt_text = _adapt_path.read_text(encoding="utf-8").strip()
+                        if _adapt_text:
+                            system_prompt = (
+                                f"{system_prompt}\n\n"
+                                f"--- Your Memory ---\n{_adapt_text}\n--- End Memory ---\n\n"
+                                'Maintain your memory by calling save_data("adapt.md", ...) '
+                                'or edit_data("adapt.md", ...) as you work. '
+                                "Record identity, session history, decisions, and working notes."
+                            )
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
@@ -1295,7 +1319,7 @@ class EventLoopNode(NodeProtocol):
                             node_id=node_id,
                             reason=tc.tool_input.get("reason", ""),
                             context=tc.tool_input.get("context", ""),
-                            execution_id=ctx.execution_id,
+                            execution_id=stream_id,
                         )
                     # Block like ask_user — the TUI loads the coder,
                     # and /back injects a message to unblock us.
@@ -1668,6 +1692,12 @@ class EventLoopNode(NodeProtocol):
                             f"Use set_output to set at least one of: {output_keys}"
                         ),
                     )
+
+                # Client-facing nodes with no output keys are meant for
+                # continuous interaction — they should not auto-accept.
+                # Only exit via shutdown, max_iterations, or max_node_visits.
+                if not output_keys and ctx.node_spec.client_facing:
+                    return JudgeVerdict(action="RETRY", feedback="")
 
                 # Level 2: conversation-aware quality check (if success_criteria set)
                 if ctx.node_spec.success_criteria and ctx.llm:
