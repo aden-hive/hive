@@ -59,15 +59,18 @@ def register_tools(mcp: FastMCP) -> None:
             with open(secure_path, encoding=encoding) as f:
                 content = f.read()
 
-            if len(content.encode(encoding)) > max_size:
-                content = content[:max_size]
+            content_bytes = content.encode(encoding)
+            if len(content_bytes) > max_size:
+                # Truncate by bytes to avoid splitting multibyte sequences (e.g. UTF-8 emojis)
+                truncated_bytes = content_bytes[:max_size]
+                content = truncated_bytes.decode(encoding, errors="ignore")
                 content += "\n\n[... Content truncated due to size limit ...]"
 
             return {
                 "success": True,
                 "path": path,
                 "content": content,
-                "size_bytes": len(content.encode("utf-8")),
+                "size_bytes": len(content.encode(encoding)),
                 "lines": len(content.splitlines()),
             }
         except Exception as e:
