@@ -1319,7 +1319,7 @@ class EventLoopNode(NodeProtocol):
                             node_id=node_id,
                             reason=tc.tool_input.get("reason", ""),
                             context=tc.tool_input.get("context", ""),
-                            execution_id=stream_id,
+                            execution_id=ctx.execution_id,
                         )
                     # Block like ask_user — the TUI loads the coder,
                     # and /back injects a message to unblock us.

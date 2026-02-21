@@ -1541,6 +1541,7 @@ class GraphExecutor:
             cumulative_output_keys=cumulative_output_keys or [],
             event_triggered=event_triggered,
             accounts_prompt=self.accounts_prompt,
+            execution_id=self.runtime.execution_id,
         )
 
     VALID_NODE_TYPES = {
