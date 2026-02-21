@@ -10,7 +10,7 @@ import logging
 import sys
 import click
 
-from .agent import default_agent, RevenuLeakDetectorAgent
+from .agent import default_agent, RevenueLeakDetectorAgent
 
 
 def setup_logging(verbose=False, debug=False):
@@ -80,7 +80,7 @@ def tui(mock, verbose, debug):
     from framework.runtime.execution_stream import EntryPointSpec
 
     async def run_with_tui():
-        agent = RevenuLeakDetectorAgent()
+        agent = RevenueLeakDetectorAgent()
 
         storage_path = Path.home() / ".hive" / "agents" / "revenue_leak_detector"
         storage_path.mkdir(parents=True, exist_ok=True)
