@@ -147,6 +147,12 @@ Get your API keys:
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
+- **Gemini**: [ai.google.dev](https://ai.google.dev/)
+- **Groq**: [console.groq.com](https://console.groq.com/)
+- **Cerebras**: [cloud.cerebras.ai](https://cloud.cerebras.ai/)
+- **Deepseek**: [platform.deepseek.com](https://platform.deepseek.com/)
+- **Mistral** :[console.mistral.ai](https://console.mistral.ai/)
+- **Together AI**: [api.together.xyz](https://api.together.xyz/) 
 
 ## Testing Your Agent
 
