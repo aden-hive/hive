@@ -86,26 +86,38 @@ class ChatRepl(Vertical):
         margin-top: 1;
     }
 
-    ChatRepl > #input-row > #stop-button {
+    ChatRepl > #input-row > #action-button {
         width: auto;
         height: auto;
-        min-width: 8;
+        min-width: 10;
         margin-top: 1;
         margin-left: 1;
-        background: red;
-        color: white;
         border: none;
         dock: none;
     }
 
-    ChatRepl > #input-row > #stop-button:hover {
+    ChatRepl > #input-row > #action-button.send-mode {
+        background: $success;
+        color: $text;
+    }
+
+    ChatRepl > #input-row > #action-button.send-mode:hover {
+        background: $success-darken-1;
+    }
+
+    ChatRepl > #input-row > #action-button.pause-mode {
+        background: red;
+        color: white;
+    }
+
+    ChatRepl > #input-row > #action-button.pause-mode:hover {
         background: darkred;
     }
 
-    ChatRepl > #input-row > #stop-button:disabled {
+    ChatRepl > #input-row > #action-button:disabled {
         background: $panel;
         color: $text-muted;
-        opacity: 0.5;
+        opacity: 0.4;
     }
 
     ChatRepl > RichLog {
@@ -204,7 +216,7 @@ class ChatRepl(Vertical):
         yield Label("Agent is processing...", id="processing-indicator")
         with Horizontal(id="input-row"):
             yield ChatTextArea(id="chat-input", placeholder="Enter input for agent...")
-            yield Button("■ Stop", id="stop-button", disabled=True)
+            yield Button("↵ Send", id="action-button", disabled=True)
 
     # Regex for file:// URIs that are NOT already inside Rich [link=...] markup
     _FILE_URI_RE = re.compile(r"(?<!\[link=)(file://[^\s)\]>*]+)")
@@ -743,6 +755,8 @@ class ChatRepl(Vertical):
                     f"[green]✓[/green] Resume started (execution: {exec_id[:12]}...)"
                 )
                 self._write_history("  Agent is continuing from where it stopped...")
+                # Enable Pause button now that execution is running
+                self._set_button_pause_mode()
 
             except Exception as e:
                 self._write_history(f"[bold red]Error starting resume:[/bold red] {e}")
@@ -831,6 +845,8 @@ class ChatRepl(Vertical):
                     f"[green]✓[/green] Recovery started (execution: {exec_id[:12]}...)"
                 )
                 self._write_history("  Agent is continuing from checkpoint...")
+                # Enable Pause button now that execution is running
+                self._set_button_pause_mode()
 
             except Exception as e:
                 self._write_history(f"[bold red]Error starting recovery:[/bold red] {e}")
@@ -1120,14 +1136,70 @@ class ChatRepl(Vertical):
             # Silently fail - don't block TUI startup
             pass
 
+    def _set_button_send_mode(self) -> None:
+        """Switch the action button to Send mode (green arrow)."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "↵ Send"
+            btn.disabled = False
+            btn.remove_class("pause-mode")
+            btn.add_class("send-mode")
+        except Exception:
+            pass
+
+    def _set_button_pause_mode(self) -> None:
+        """Switch the action button to Pause mode (red pause)."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "⏸ Pause"
+            btn.disabled = False
+            btn.remove_class("send-mode")
+            btn.add_class("pause-mode")
+        except Exception:
+            pass
+
+    def _set_button_idle_mode(self) -> None:
+        """Switch the action button to idle/disabled state."""
+        try:
+            btn = self.query_one("#action-button", Button)
+            btn.label = "↵ Send"
+            btn.disabled = True
+            btn.remove_class("pause-mode")
+            btn.add_class("send-mode")
+        except Exception:
+            pass
+
     async def on_chat_text_area_submitted(self, message: ChatTextArea.Submitted) -> None:
         """Handle chat input submission."""
         await self._submit_input(message.text)
 
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Toggle the Send button based on whether there is text in the input."""
+        if event.text_area.id != "chat-input":
+            return
+        # Only update button if we're not currently executing (Pause takes priority)
+        if self._current_exec_id is not None:
+            return
+        has_text = bool(event.text_area.text.strip())
+        if has_text:
+            self._set_button_send_mode()
+        else:
+            self._set_button_idle_mode()
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle stop button click."""
-        if event.button.id == "stop-button":
+        """Handle action button click — Send when idle, Pause when executing."""
+        if event.button.id != "action-button":
+            return
+        if self._current_exec_id is not None:
+            # Execution running → act as Pause
             await self._cmd_pause()
+        else:
+            # No execution → act as Send (submit whatever is in the input)
+            chat_input = self.query_one("#chat-input", ChatTextArea)
+            text = chat_input.text.strip()
+            if text:
+                chat_input.clear()
+                await self._submit_input(text)
 
     async def _submit_input(self, user_input: str) -> None:
         """Handle submitted text — either start new execution or inject input."""
@@ -1214,9 +1286,8 @@ class ChatRepl(Vertical):
             indicator.update("Thinking...")
             indicator.display = True
 
-            # Enable stop button
-            stop_button = self.query_one("#stop-button", Button)
-            stop_button.disabled = False
+            # Switch button to Pause mode
+            self._set_button_pause_mode()
 
             # Keep input enabled for commands during execution
             chat_input = self.query_one("#chat-input", ChatTextArea)
@@ -1367,13 +1438,14 @@ class ChatRepl(Vertical):
         self._pending_ask_question = ""
         self._log_buffer.clear()
 
-        # Re-enable input, disable stop button
+        # Reset button to idle/send mode
+        self._set_button_idle_mode()
+
+        # Re-enable input
         chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
-        stop_button = self.query_one("#stop-button", Button)
-        stop_button.disabled = True
 
     def handle_execution_failed(self, error: str) -> None:
         """Handle execution failing."""
@@ -1392,13 +1464,14 @@ class ChatRepl(Vertical):
         self._active_node_id = None
         self._log_buffer.clear()
 
-        # Re-enable input, disable stop button
+        # Reset button to idle/send mode
+        self._set_button_idle_mode()
+
+        # Re-enable input
         chat_input = self.query_one("#chat-input", ChatTextArea)
         chat_input.disabled = False
         chat_input.placeholder = "Enter input for agent..."
         chat_input.focus()
-        stop_button = self.query_one("#stop-button", Button)
-        stop_button.disabled = True
 
     def handle_escalation_requested(self, data: dict) -> None:
         """Display escalation request from the worker agent."""
