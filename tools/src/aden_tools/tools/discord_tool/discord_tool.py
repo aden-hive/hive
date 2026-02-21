@@ -144,9 +144,11 @@ def register_tools(
 ) -> None:
     """Register Discord tools with the MCP server."""
 
-    def _get_token() -> str | None:
+    def _get_token(account: str = "") -> str | None:
         """Get Discord bot token from credential manager or environment."""
         if credentials is not None:
+            if account:
+                return credentials.get_by_alias("discord", account)
             token = credentials.get("discord")
             if token is not None and not isinstance(token, str):
                 raise TypeError(
@@ -155,9 +157,9 @@ def register_tools(
             return token
         return os.getenv("DISCORD_BOT_TOKEN")
 
-    def _get_client() -> _DiscordClient | dict[str, str]:
+    def _get_client(account: str = "") -> _DiscordClient | dict[str, str]:
         """Get a Discord client, or return an error dict if no credentials."""
-        token = _get_token()
+        token = _get_token(account)
         if not token:
             return {
                 "error": "Discord credentials not configured",
@@ -168,7 +170,7 @@ def register_tools(
         return _DiscordClient(token)
 
     @mcp.tool()
-    def discord_list_guilds() -> dict:
+    def discord_list_guilds(account: str = "") -> dict:
         """
         List Discord guilds (servers) the bot is a member of.
 
@@ -177,7 +179,7 @@ def register_tools(
         Returns:
             Dict with list of guilds or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -191,7 +193,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def discord_list_channels(guild_id: str, text_only: bool = True) -> dict:
+    def discord_list_channels(guild_id: str, text_only: bool = True, account: str = "") -> dict:
         """
         List channels for a Discord guild (server).
 
@@ -204,7 +206,7 @@ def register_tools(
         Returns:
             Dict with list of channels or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -218,7 +220,12 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def discord_send_message(channel_id: str, content: str, tts: bool = False) -> dict:
+    def discord_send_message(
+        channel_id: str,
+        content: str,
+        tts: bool = False,
+        account: str = "",
+    ) -> dict:
         """
         Send a message to a Discord channel.
 
@@ -236,7 +243,7 @@ def register_tools(
                 "max_length": MAX_MESSAGE_LENGTH,
                 "provided": len(content),
             }
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -255,6 +262,7 @@ def register_tools(
         limit: int = 50,
         before: str | None = None,
         after: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Get recent messages from a Discord channel.
@@ -268,7 +276,7 @@ def register_tools(
         Returns:
             Dict with list of messages or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:

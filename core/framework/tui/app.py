@@ -366,19 +366,6 @@ class AdenTUI(App):
                 interactive=False,
             )
             runner = await loop.run_in_executor(None, load_fn)
-            if runner._agent_runtime is None:
-                await loop.run_in_executor(None, runner._setup)
-
-            if not self._no_guardian and runner._agent_runtime:
-                from framework.agents.hive_coder.guardian import attach_guardian
-
-                attach_guardian(runner._agent_runtime, runner._tool_registry)
-
-            if runner._agent_runtime and not runner._agent_runtime.is_running:
-                await runner._agent_runtime.start()
-
-            self._runner = runner
-            self.runtime = runner._agent_runtime
         except CredentialError as e:
             self.status_bar.set_graph_id("")
             self._show_credential_setup(
@@ -391,7 +378,47 @@ class AdenTUI(App):
             self.notify(f"Failed to load agent: {e}", severity="error", timeout=10)
             return
 
-        # 4. Mount new widgets and subscribe to events
+        # 4. Pre-run account selection (if agent requires it)
+        if runner.requires_account_selection and runner._configure_for_account:
+            try:
+                if runner._list_accounts:
+                    accounts = await loop.run_in_executor(None, runner._list_accounts)
+                else:
+                    accounts = []
+            except Exception as e:
+                self.notify(f"Failed to list accounts: {e}", severity="error", timeout=10)
+                accounts = []
+            if accounts:
+                self._show_account_selection(runner, accounts)
+                return  # Continuation via callback
+
+        # 5. Complete the load
+        await self._finish_agent_load(runner)
+
+    async def _finish_agent_load(self, runner) -> None:
+        """Complete agent setup, guardian attach, and widget mount."""
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        try:
+            if runner._agent_runtime is None:
+                await loop.run_in_executor(None, runner._setup)
+
+            if not self._no_guardian and not runner.skip_guardian and runner._agent_runtime:
+                from framework.agents.hive_coder.guardian import attach_guardian
+
+                attach_guardian(runner._agent_runtime, runner._tool_registry)
+
+            if runner._agent_runtime and not runner._agent_runtime.is_running:
+                await runner._agent_runtime.start()
+
+            self._runner = runner
+            self.runtime = runner._agent_runtime
+        except Exception as e:
+            self.status_bar.set_graph_id("")
+            self.notify(f"Failed to load agent: {e}", severity="error", timeout=10)
+            return
+
         self._mount_agent_widgets()
         await self._init_runtime_connection()
 
@@ -399,7 +426,49 @@ class AdenTUI(App):
         self._resume_session = None
         self._resume_checkpoint = None
 
+        agent_name = runner.agent_path.name
         self.notify(f"Agent loaded: {agent_name}", severity="information", timeout=3)
+
+    def _show_account_selection(self, runner, accounts: list[dict]) -> None:
+        """Show the account selection screen and continue loading on selection."""
+        from framework.tui.screens.account_selection import AccountSelectionScreen
+
+        def _on_selection(selected: dict | None) -> None:
+            if selected is None:
+                self.status_bar.set_graph_id("")
+                self.notify(
+                    "Account selection cancelled. Agent not loaded.",
+                    severity="warning",
+                    timeout=5,
+                )
+                return
+
+            # Scope tools to the selected provider
+            if runner._configure_for_account:
+                runner._configure_for_account(runner, selected)
+
+            # Validate credentials for the now-scoped provider
+            from framework.credentials.models import CredentialError as CredError
+            from framework.credentials.validation import validate_agent_credentials
+
+            try:
+                validate_agent_credentials(runner.graph.nodes)
+            except CredError as e:
+                self._show_credential_setup(
+                    str(runner.agent_path),
+                    credential_error=e,
+                )
+                return
+
+            # Continue with the rest of agent loading
+            self._do_finish_agent_load(runner)
+
+        self.push_screen(AccountSelectionScreen(accounts), callback=_on_selection)
+
+    @work(exclusive=True)
+    async def _do_finish_agent_load(self, runner) -> None:
+        """Worker wrapper for _finish_agent_load (used by account selection callback)."""
+        await self._finish_agent_load(runner)
 
     def _show_credential_setup(
         self,

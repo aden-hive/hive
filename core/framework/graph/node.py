@@ -502,8 +502,14 @@ class NodeContext:
     inherited_conversation: Any = None  # NodeConversation | None (from prior node)
     cumulative_output_keys: list[str] = field(default_factory=list)  # All output keys from path
 
+    # Connected accounts prompt (injected from runner)
+    accounts_prompt: str = ""
+
     # Event-triggered execution (no interactive user attached)
     event_triggered: bool = False
+
+    # Execution ID (from StreamRuntimeAdapter)
+    execution_id: str = ""
 
 
 @dataclass
