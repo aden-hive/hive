@@ -1,0 +1,351 @@
+{
+    "agent": {
+        "id": "sdr_agent",
+        "name": "SDR Agent",
+        "version": "1.0.0",
+        "description": "Automate sales development outreach using AI-powered contact scoring, scam detection, and personalized message generation. Score contacts by priority, filter suspicious profiles, generate personalized outreach messages, and create Gmail drafts for review — all without sending emails automatically."
+    },
+    "graph": {
+        "id": "sdr-agent-graph",
+        "goal_id": "sdr-agent",
+        "version": "1.0.0",
+        "entry_node": "intake",
+        "entry_points": {
+            "start": "intake"
+        },
+        "pause_nodes": [],
+        "terminal_nodes": [],
+        "conversation_mode": "continuous",
+        "identity_prompt": "You are an SDR (Sales Development Representative) assistant. You help users automate their outreach by scoring contacts, filtering suspicious profiles, generating personalized messages, and creating Gmail drafts — all with human review before anything is sent.",
+        "nodes": [
+            {
+                "id": "intake",
+                "name": "Intake",
+                "description": "Receive the contact list and outreach goal from the user. Confirm the strategy and batch size before proceeding.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "contacts",
+                    "outreach_goal",
+                    "max_contacts",
+                    "user_background"
+                ],
+                "output_keys": [
+                    "contacts",
+                    "outreach_goal",
+                    "max_contacts",
+                    "user_background"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are an SDR (Sales Development Representative) assistant helping automate outreach.\n\n**STEP 1 — Respond to the user (text only, NO tool calls):**\n\nRead the user's input from context. Confirm your understanding of:\n- The contact list they provided (or ask them to provide one)\n- Their outreach goal (e.g. \"coffee chat\", \"sales pitch\", \"networking\")\n- Their background/role (used to personalize messages)\n- The batch size (max_contacts). Default to 20 if not specified.\n\nPresent a summary like:\n\"Here's what I'll do:\n1. Score and rank your contacts by priority (alumni status, connection degree, etc.)\n2. Filter out suspicious or low-quality profiles (risk score ≥ 7)\n3. Generate a personalized outreach message for each contact\n4. Create Gmail draft emails for your review — I never send automatically\n\nReady to proceed with [N] contacts for [goal]?\"\n\n**STEP 2 — After the user confirms, call set_output:**\n\n- set_output(\"contacts\", <the contact list as a JSON string>)\n- set_output(\"outreach_goal\", <the confirmed goal, e.g. \"coffee chat\">)\n- set_output(\"max_contacts\", <the confirmed batch size as a string, e.g. \"20\">)\n- set_output(\"user_background\", <user's background/role, e.g. \"Learning Technologist at UWO\">)",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true,
+                "success_criteria": null
+            },
+            {
+                "id": "score-contacts",
+                "name": "Score Contacts",
+                "description": "Score and rank each contact from 0 to 100 based on priority factors: alumni status, connection degree, domain verification, mutual connections, and active job postings.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "contacts",
+                    "outreach_goal"
+                ],
+                "output_keys": [
+                    "scored_contacts"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are a contact prioritization engine. Score each contact from 0 to 100.\n\n**SCORING RULES (additive):**\n- Alumni of the user's school: +30 points\n- 1st degree connection: +25 points\n- 2nd degree connection: +20 points\n- 3rd degree connection: +10 points\n- Domain verified (company email matches LinkedIn company): +10 points\n- Has mutual connections (1 point each, max 10): up to +10 points\n- Active job posting at their company: +10 points\n- Has a profile photo: +5 points\n- Over 500 connections: +5 points\n\nCap the final score at 100.\n\n**STEP 1 — Load the contacts:**\nCall load_data(filename=\"contacts.jsonl\") to read the contact list.\nIf \"contacts\" in context is a JSON string (not a filename), write it first:\n- For each contact in the list, call append_data(filename=\"contacts.jsonl\", data=<JSON contact object>)\nThen read it back.\n\n**STEP 2 — Score each contact:**\nFor each contact, calculate the priority score using the rules above.\nAdd a \"priority_score\" field to each contact object.\n\n**STEP 3 — Write scored contacts and set output:**\n- Call append_data(filename=\"scored_contacts.jsonl\", data=<JSON contact with priority_score>) for each contact.\n- Sort contacts by priority_score (highest first) in your final output.\n- Call set_output(\"scored_contacts\", \"scored_contacts.jsonl\")",
+                "tools": [
+                    "load_data",
+                    "append_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false,
+                "success_criteria": null
+            },
+            {
+                "id": "filter-contacts",
+                "name": "Filter Contacts",
+                "description": "Analyze each contact for authenticity and filter out suspicious profiles. Any contact with a risk score of 7 or higher is skipped.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "scored_contacts"
+                ],
+                "output_keys": [
+                    "safe_contacts",
+                    "filtered_count"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are a profile authenticity analyzer. Your job is to detect suspicious or fake LinkedIn profiles.\n\n**RISK SCORING RULES (additive):**\n- Fewer than 50 connections: +3 points\n- No profile photo: +2 points\n- Fewer than 2 positions in work history: +2 points\n- Generic title (e.g. \"entrepreneur\", \"CEO\", \"consultant\") AND fewer than 100 connections: +2 points\n- Company name appears generic or unverifiable: +2 points\n- Profile text seems auto-generated or overly promotional: +2 points\n- Connection count over 5000 with no mutual connections: +1 point\n\n**DECISION RULE:**\n- risk_score < 4: SAFE — include in outreach\n- risk_score 4–6: CAUTION — include but flag\n- risk_score ≥ 7: SKIP — exclude from outreach\n\n**STEP 1 — Load scored contacts:**\nCall load_data(filename=<the \"scored_contacts\" value from context>).\nProcess contacts chunk by chunk if has_more=true.\n\n**STEP 2 — Analyze each contact:**\nFor each contact, calculate a risk_score using the rules above.\nDetermine: is_safe (risk_score < 7), recommendation (safe/caution/skip), flags (list of triggered rules).\n\n**STEP 3 — Write safe contacts and set output:**\n- For each contact where risk_score < 7: call append_data(filename=\"safe_contacts.jsonl\", data=<contact JSON with risk_score and flags added>)\n- Track how many contacts were filtered (risk_score ≥ 7)\n- Call set_output(\"safe_contacts\", \"safe_contacts.jsonl\")\n- Call set_output(\"filtered_count\", <number of skipped contacts as string>)",
+                "tools": [
+                    "load_data",
+                    "append_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false,
+                "success_criteria": null
+            },
+            {
+                "id": "personalize",
+                "name": "Personalize",
+                "description": "Generate a personalized outreach message for each contact based on their profile, shared background, and the user's outreach goal.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "safe_contacts",
+                    "outreach_goal",
+                    "user_background"
+                ],
+                "output_keys": [
+                    "personalized_contacts"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are a professional outreach message writer. Generate personalized messages for each contact.\n\n**TWO-STEP PERSONALIZATION:**\n\nFor each contact, follow this two-step approach:\n\nSTEP A — Extract hooks (analyze the profile):\nLook for 2-3 specific talking points from the contact's profile:\n- Shared alumni connection\n- Specific role, company, or career transition worth mentioning\n- Any mutual interests aligned with the user's background\n\nSTEP B — Generate the message:\nWrite a warm, professional outreach message using the hooks.\n\n**MESSAGE REQUIREMENTS:**\n- 80-120 words (LinkedIn message length)\n- Start with a specific observation (\"I noticed you...\" or \"Fellow [school] alum here...\")\n- Mention the shared connection or interest naturally\n- State the outreach goal clearly but softly (e.g. \"Open to a brief 15-min chat?\")\n- Professional but warm tone — NOT templated or AI-sounding\n- Do NOT mention job postings directly unless the goal is job-related\n- Do NOT use generic openers like \"I hope this finds you well\"\n- End with a low-pressure ask\n\n**STEP 1 — Load safe contacts:**\nCall load_data(filename=<the \"safe_contacts\" value from context>).\n\n**STEP 2 — Generate message for each contact:**\nFor each contact: generate the personalized message using the two-step approach above.\nAdd \"outreach_message\" field to each contact object.\n\n**STEP 3 — Write output and set:**\n- Call append_data(filename=\"personalized_contacts.jsonl\", data=<contact JSON with outreach_message>) for each.\n- Call set_output(\"personalized_contacts\", \"personalized_contacts.jsonl\")",
+                "tools": [
+                    "load_data",
+                    "append_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false,
+                "success_criteria": null
+            },
+            {
+                "id": "send-outreach",
+                "name": "Send Outreach",
+                "description": "Create Gmail draft emails for each contact using their personalized message. Drafts are created for human review — emails are never sent automatically.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "personalized_contacts",
+                    "outreach_goal"
+                ],
+                "output_keys": [
+                    "drafts_created"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are an outreach execution assistant. Create Gmail draft emails for each contact.\n\n**CRITICAL RULE: NEVER send emails automatically. Only create drafts.**\n\n**STEP 1 — Load personalized contacts:**\nCall load_data(filename=<the \"personalized_contacts\" value from context>).\nProcess chunk by chunk if has_more=true.\n\n**STEP 2 — Create Gmail draft for each contact:**\nFor each contact with an \"outreach_message\":\n- subject: \"Coffee Chat Request\" (or appropriate subject based on outreach_goal)\n- to: contact's email address (use LinkedIn profile URL if email not available — note this in body)\n- body: the \"outreach_message\" from the contact object\n\nCall gmail_create_draft(\n    to=<contact email or linkedin_url as placeholder>,\n    subject=<appropriate subject line>,\n    body=<outreach_message>\n)\n\nRecord each draft: call append_data(\n    filename=\"drafts.jsonl\",\n    data=<JSON: {contact_name, contact_email, subject, status: \"draft_created\"}>\n)\n\n**STEP 3 — Set output:**\n- Call set_output(\"drafts_created\", \"drafts.jsonl\")\n\n**IMPORTANT:** If a contact has no email address, create the draft with their LinkedIn URL as a placeholder and add a note in the body: \"Note: Please find the recipient's email before sending.\"",
+                "tools": [
+                    "gmail_create_draft",
+                    "load_data",
+                    "append_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false,
+                "success_criteria": null
+            },
+            {
+                "id": "report",
+                "name": "Report",
+                "description": "Generate a summary report of the outreach campaign: contacts scored, filtered, messaged, and drafts created. Present to user for review.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "drafts_created",
+                    "filtered_count",
+                    "outreach_goal"
+                ],
+                "output_keys": [
+                    "summary_report"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "You are an SDR assistant. Generate a clear campaign summary report and present it to the user.\n\n**STEP 1 — Load draft records:**\nCall load_data(filename=<the \"drafts_created\" value from context>) to read the draft records.\nIf has_more=true, load additional chunks until all records are loaded.\n\n**STEP 2 — Present the report (text only, NO tool calls):**\n\nPresent a clean summary:\n\n📊 **SDR Campaign Summary — [outreach_goal]**\n\n**Overview:**\n- Total contacts processed: [N]\n- Contacts filtered (suspicious profiles): [filtered_count]\n- Safe contacts messaged: [N - filtered_count]\n- Gmail drafts created: [N]\n\n**Drafts Created:**\nList each draft: Contact Name | Company | Subject\n\n**Next Steps:**\n\"Your Gmail drafts are ready for review. Please:\n1. Open Gmail and review each draft\n2. Personalize further if needed\n3. Send when ready\n\nWould you like to run another outreach batch or adjust the strategy?\"\n\n**STEP 3 — After the user responds, call set_output:**\n- set_output(\"summary_report\", <the formatted report text>)",
+                "tools": [
+                    "load_data"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true,
+                "success_criteria": null
+            }
+        ],
+        "edges": [
+            {
+                "id": "intake-to-score",
+                "source": "intake",
+                "target": "score-contacts",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "score-to-filter",
+                "source": "score-contacts",
+                "target": "filter-contacts",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "filter-to-personalize",
+                "source": "filter-contacts",
+                "target": "personalize",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "personalize-to-send",
+                "source": "personalize",
+                "target": "send-outreach",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "send-to-report",
+                "source": "send-outreach",
+                "target": "report",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            },
+            {
+                "id": "report-to-intake",
+                "source": "report",
+                "target": "intake",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            }
+        ],
+        "max_steps": 100,
+        "max_retries_per_node": 3,
+        "description": "Automated SDR outreach pipeline: score contacts by priority, filter suspicious profiles, generate personalized messages, and create Gmail drafts for human review."
+    },
+    "goal": {
+        "id": "sdr-agent",
+        "name": "SDR Agent",
+        "description": "Automate sales development outreach: score contacts by priority, filter suspicious profiles, generate personalized messages, and create Gmail drafts for human review.",
+        "status": "draft",
+        "success_criteria": [
+            {
+                "id": "contact-scoring-accuracy",
+                "description": "Contacts are correctly scored and ranked by priority factors (alumni status, connection degree, domain verification)",
+                "metric": "scoring_accuracy",
+                "target": ">=90%",
+                "weight": 0.30,
+                "met": false
+            },
+            {
+                "id": "scam-filter-effectiveness",
+                "description": "Suspicious profiles (risk_score >= 7) are correctly identified and excluded from outreach",
+                "metric": "filter_precision",
+                "target": ">=95%",
+                "weight": 0.25,
+                "met": false
+            },
+            {
+                "id": "message-personalization",
+                "description": "Generated messages reference specific profile details (alumni connection, role, company) and match the outreach goal",
+                "metric": "personalization_score",
+                "target": ">=80%",
+                "weight": 0.30,
+                "met": false
+            },
+            {
+                "id": "draft-creation",
+                "description": "Gmail drafts are created for all safe contacts without errors",
+                "metric": "draft_success_rate",
+                "target": "100%",
+                "weight": 0.15,
+                "met": false
+            }
+        ],
+        "constraints": [
+            {
+                "id": "draft-not-send",
+                "description": "Agent creates Gmail drafts but NEVER sends emails automatically",
+                "constraint_type": "hard",
+                "category": "safety",
+                "check": ""
+            },
+            {
+                "id": "respect-batch-limit",
+                "description": "Must not process more contacts than the configured max_contacts parameter",
+                "constraint_type": "hard",
+                "category": "operational",
+                "check": ""
+            },
+            {
+                "id": "skip-suspicious",
+                "description": "Contacts with risk_score >= 7 must be excluded from outreach",
+                "constraint_type": "hard",
+                "category": "safety",
+                "check": ""
+            }
+        ],
+        "context": {},
+        "required_capabilities": [],
+        "input_schema": {},
+        "output_schema": {},
+        "version": "1.0.0",
+        "parent_version": null,
+        "evolution_reason": null
+    },
+    "required_tools": [
+        "gmail_create_draft",
+        "load_data",
+        "append_data"
+    ],
+    "metadata": {
+        "node_count": 6,
+        "edge_count": 6
+    }
+}
