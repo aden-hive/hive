@@ -56,6 +56,7 @@ from .google_docs_tool import register_tools as register_google_docs
 from .google_maps_tool import register_tools as register_google_maps
 from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
+from .kafka_tool import register_tools as register_kafka
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
 from .port_scanner import register_tools as register_port_scanner
@@ -121,6 +122,7 @@ def register_all_tools(
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
+    register_kafka(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)

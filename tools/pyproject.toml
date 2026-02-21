@@ -33,6 +33,7 @@ dependencies = [
     "resend>=2.0.0",
     "framework",
     "stripe>=14.3.0",
+    "confluent-kafka>=2.0.0",
 ]
 
 [project.optional-dependencies]
