@@ -508,6 +508,9 @@ class NodeContext:
     # Event-triggered execution (no interactive user attached)
     event_triggered: bool = False
 
+    # Execution ID (from StreamRuntimeAdapter)
+    execution_id: str = ""
+
 
 @dataclass
 class NodeResult:
