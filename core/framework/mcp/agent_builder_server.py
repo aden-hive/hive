@@ -988,8 +988,8 @@ def delete_node(
     removed_node = session.nodes.pop(node_idx)
 
     # Remove all edges connected to this node
-    removed_edges = [e.id for e in session.edges if e.source == node_id or e.target == node_id]
-    session.edges = [e for e in session.edges if not (e.source == node_id or e.target == node_id)]
+    removed_edges = [e.id for e in session.edges if node_id in {e.source, e.target}]
+    session.edges = [e for e in session.edges if node_id not in {e.source, e.target}]
 
     _save_session(session)  # Auto-save
 
