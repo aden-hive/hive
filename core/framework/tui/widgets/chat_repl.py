@@ -58,6 +58,30 @@ class ChatTextArea(TextArea):
         elif event.key == "shift+enter":
             event.key = "enter"
             await super()._on_key(event)
+        elif event.key == "alt+left":
+            self.action_cursor_word_left()
+            event.stop()
+            event.prevent_default()
+        elif event.key == "alt+right":
+            self.action_cursor_word_right()
+            event.stop()
+            event.prevent_default()
+        elif event.key == "alt+backspace":
+            self.action_delete_word_left()
+            event.stop()
+            event.prevent_default()
+        elif event.key == "alt+delete":
+            self.action_delete_word_right()
+            event.stop()
+            event.prevent_default()
+        elif event.key == "alt+shift+left":
+            self.action_cursor_word_left(True)
+            event.stop()
+            event.prevent_default()
+        elif event.key == "alt+shift+right":
+            self.action_cursor_word_right(True)
+            event.stop()
+            event.prevent_default()
         else:
             await super()._on_key(event)
 
