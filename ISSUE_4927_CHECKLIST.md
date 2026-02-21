@@ -10,8 +10,8 @@ Create a complete DSA (Data Structures and Algorithms) Mentor Agent template tha
 ### 1.1 Repository Setup
 - [ ] Ensure you're on the latest main branch: `git pull upstream main`
 - [ ] Create feature branch: `git checkout -b feat/templates/dsa-mentor-agent`
-- [ ] Verify you're assigned to issue #4927 on GitHub
 
+- [ ] Verify you're assigned to issue #4927 on GitHub
 ### 1.2 Directory Structure
 - [ ] Create template directory: `examples/templates/dsa_mentor/`
 - [ ] Create nodes subdirectory: `examples/templates/dsa_mentor/nodes/`
