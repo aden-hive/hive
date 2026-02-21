@@ -493,6 +493,10 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
 
     # Run the agent (with TUI or standard)
+    load_kwargs = {}
+    if args.model is not None:
+        load_kwargs["model"] = args.model
+
     if getattr(args, "tui", False):
         from framework.tui.app import AdenTUI
 
@@ -504,7 +508,8 @@ def cmd_run(args: argparse.Namespace) -> int:
                 try:
                     runner = AgentRunner.load(
                         args.agent_path,
-                        model=args.model,
+                        enable_tui=True,
+                        **load_kwargs,
                     )
                 except CredentialError as e:
                     print(f"\n{e}", file=sys.stderr)
@@ -564,7 +569,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         try:
             runner = AgentRunner.load(
                 args.agent_path,
-                model=args.model,
+                enable_tui=False,
+                **load_kwargs,
             )
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
