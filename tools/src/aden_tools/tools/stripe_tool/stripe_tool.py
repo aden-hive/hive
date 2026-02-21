@@ -36,10 +36,10 @@ class _StripeClient:
     """Internal client wrapping Stripe API calls via the official stripe library."""
 
     def __init__(self, api_key: str):
-        self._api_key = api_key
+        self._client = stripe.StripeClient(api_key)
 
     def _stripe(self) -> stripe.StripeClient:
-        return stripe.StripeClient(self._api_key)
+        return self._client
 
     # --- Customers ---
 
@@ -198,14 +198,17 @@ class _StripeClient:
             params["metadata"] = metadata
         if cancel_at_period_end is not None:
             params["cancel_at_period_end"] = cancel_at_period_end
-        if price_id:
+        if price_id or quantity is not None:
             sub = self._stripe().subscriptions.retrieve(subscription_id)
-            item_id = sub.items.data[0].id if sub.items.data else None
-            if item_id:
-                item_params: dict[str, Any] = {"price": price_id}
-                if quantity is not None:
-                    item_params["quantity"] = quantity
-                params["items"] = [{"id": item_id, **item_params}]
+            if not sub.items.data:
+                return {"error": "Subscription has no items to update"}
+            item_id = sub.items.data[0].id
+            item_params: dict[str, Any] = {"id": item_id}
+            if price_id:
+                item_params["price"] = price_id
+            if quantity is not None:
+                item_params["quantity"] = quantity
+            params["items"] = [item_params]
         sub = self._stripe().subscriptions.update(subscription_id, params)
         return self._format_subscription(sub)
 
@@ -321,7 +324,6 @@ class _StripeClient:
             "payment_method": pi.payment_method,
             "created": pi.created,
             "metadata": pi.metadata,
-            "client_secret": pi.client_secret,
         }
 
     # --- Charges ---
@@ -355,30 +357,6 @@ class _StripeClient:
         if amount is not None:
             params["amount"] = amount
         charge = self._stripe().charges.capture(charge_id, params)
-        return self._format_charge(charge)
-
-    def create_charge(
-        self,
-        amount: int,
-        currency: str,
-        source: str | None = None,
-        customer_id: str | None = None,
-        description: str | None = None,
-        receipt_email: str | None = None,
-        metadata: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {"amount": amount, "currency": currency}
-        if source:
-            params["source"] = source
-        if customer_id:
-            params["customer"] = customer_id
-        if description:
-            params["description"] = description
-        if receipt_email:
-            params["receipt_email"] = receipt_email
-        if metadata:
-            params["metadata"] = metadata
-        charge = self._stripe().charges.create(params)
         return self._format_charge(charge)
 
     def _format_charge(self, c: Any) -> dict[str, Any]:
@@ -1603,50 +1581,6 @@ def register_tools(
         except stripe.StripeError as e:
             return _stripe_error(e)
 
-    @mcp.tool()
-    def stripe_create_charge(
-        amount: int,
-        currency: str,
-        source: str | None = None,
-        customer_id: str | None = None,
-        description: str | None = None,
-        receipt_email: str | None = None,
-        metadata: dict[str, str] | None = None,
-    ) -> dict:
-        """
-        Create a charge directly (legacy). Prefer PaymentIntents for new integrations.
-
-        Args:
-            amount: Amount in smallest currency unit (e.g., cents for USD)
-            currency: ISO 4217 currency code (e.g., "usd")
-            source: Token or source ID (e.g., "tok_visa")
-            customer_id: Stripe customer ID to charge
-            description: Description of the charge
-            receipt_email: Email to send receipt to
-            metadata: Key-value metadata to attach
-
-        Returns:
-            Dict with charge details or error
-
-        Example:
-            stripe_create_charge(amount=2000, currency="usd", source="tok_visa")
-        """
-        client = _get_client()
-        if isinstance(client, dict):
-            return client
-        if amount <= 0:
-            return {"error": "Amount must be positive"}
-        if not currency or len(currency) != 3:
-            return {"error": "Currency must be a 3-letter ISO code (e.g., usd)"}
-        if not source and not customer_id:
-            return {"error": "Either source or customer_id is required"}
-        try:
-            return client.create_charge(
-                amount, currency, source, customer_id, description, receipt_email, metadata
-            )
-        except stripe.StripeError as e:
-            return _stripe_error(e)
-
     # --- Refund Tools ---
 
     @mcp.tool()
@@ -1824,7 +1758,7 @@ def register_tools(
 
         Example:
             stripe_create_invoice("cus_AbcDefGhijkLmn", collection_method="send_invoice",
-              days_until_due=30)
+            days_until_due=30)
         """
         client = _get_client()
         if isinstance(client, dict):
@@ -1942,15 +1876,15 @@ def register_tools(
 
         Example:
             stripe_create_invoice_item("cus_AbcDefGhijkLmn", amount=1500, currency="usd",
-            description="Setup fee")
+              description="Setup fee")
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
         if not customer_id or not customer_id.startswith("cus_"):
             return {"error": "Invalid customer_id. Must start with: cus_"}
-        if amount <= 0:
-            return {"error": "Amount must be positive"}
+        if amount == 0:
+            return {"error": "Amount must be non-zero"}
         if not currency or len(currency) != 3:
             return {"error": "Currency must be a 3-letter ISO code (e.g., usd)"}
         try:

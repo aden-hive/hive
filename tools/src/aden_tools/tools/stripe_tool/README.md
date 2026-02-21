@@ -19,7 +19,7 @@ This tool enables Hive agents to interact with Stripe's payment infrastructure f
 
 ## Available Tools
 
-This integration provides 52 MCP tools for comprehensive payment operations:
+This integration provides 51 MCP tools for comprehensive payment operations:
 
 **Customers**
 - `stripe_create_customer` - Create a new customer
@@ -47,7 +47,6 @@ This integration provides 52 MCP tools for comprehensive payment operations:
 - `stripe_list_charges` - List charges with optional filters
 - `stripe_get_charge` - Retrieve a charge by ID
 - `stripe_capture_charge` - Capture an uncaptured charge
-- `stripe_create_charge` - Create a charge directly (legacy)
 
 **Refunds**
 - `stripe_create_refund` - Create a full or partial refund
@@ -63,7 +62,7 @@ This integration provides 52 MCP tools for comprehensive payment operations:
 - `stripe_void_invoice` - Void an open invoice
 
 **Invoice Items**
-- `stripe_create_invoice_item` - Add a line item to an invoice
+- `stripe_create_invoice_item` - Add a line item to an invoice (supports negative amounts for credits)
 - `stripe_list_invoice_items` - List invoice items with optional filters
 - `stripe_delete_invoice_item` - Delete a pending invoice item
 
@@ -131,11 +130,34 @@ stripe_get_customer_by_email(email="alice@example.com")
 stripe_get_subscription_status(customer_id="cus_AbcDefGhijkLmn")
 ```
 
+### stripe_update_subscription
+
+```python
+# Change price only
+stripe_update_subscription("sub_AbcDefGhijkLmn", price_id="price_NewPlan")
+
+# Change quantity only
+stripe_update_subscription("sub_AbcDefGhijkLmn", quantity=5)
+
+# Schedule cancellation at period end
+stripe_update_subscription("sub_AbcDefGhijkLmn", cancel_at_period_end=True)
+```
+
 ### stripe_create_payment_link
 
 ```python
 # First create a product and price, then create the link
 stripe_create_payment_link(price_id="price_AbcDefGhijkLmn", quantity=1)
+```
+
+### stripe_create_invoice_item
+
+```python
+# Standard charge
+stripe_create_invoice_item("cus_AbcDefGhijkLmn", amount=1500, currency="usd", description="Setup fee")
+
+# Credit or discount (negative amount)
+stripe_create_invoice_item("cus_AbcDefGhijkLmn", amount=-500, currency="usd", description="Loyalty credit")
 ```
 
 ### stripe_list_invoices
@@ -147,10 +169,10 @@ stripe_list_invoices(status="open", limit=20)
 ### stripe_create_refund
 
 ```python
-# Full refund
+# Full refund via payment intent
 stripe_create_refund(payment_intent_id="pi_AbcDefGhijkLmn")
 
-# Partial refund with reason
+# Partial refund via charge with reason
 stripe_create_refund(
     charge_id="ch_AbcDefGhijkLmn",
     amount=1000,
@@ -160,11 +182,11 @@ stripe_create_refund(
 
 ## Authentication
 
-Stripe uses Bearer token authentication. The tool passes your `STRIPE_API_KEY` to the official `stripe` Python library, which handles all request signing automatically.
+Stripe uses Bearer token authentication. The tool passes your `STRIPE_API_KEY` to the official `stripe` Python library on initialisation. A single `StripeClient` instance is created and stored per `_StripeClient` object, reused across all API calls rather than recreated on each request.
 
 ## Error Handling
 
-All tools return error dicts for failures:
+All tools return error dicts on failure so agents can handle errors without raising exceptions:
 
 ```json
 {
@@ -177,6 +199,22 @@ Common errors:
 - Resource not found - verify the ID exists in your Stripe account
 - Invalid request - check parameter values and types
 - Rate limit exceeded - reduce request frequency
+
+ID prefix validation is enforced before any API call is made:
+
+| Resource | Expected prefix |
+|---|---|
+| Customer | `cus_` |
+| Subscription | `sub_` |
+| Payment Intent | `pi_` |
+| Charge | `ch_` |
+| Refund | `re_` |
+| Invoice | `in_` |
+| Invoice Item | `ii_` |
+| Product | `prod_` |
+| Price | `price_` |
+| Payment Link | `plink_` |
+| Payment Method | `pm_` |
 
 ## Testing
 

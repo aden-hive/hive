@@ -313,7 +313,7 @@ class TestStripeClientCustomers:
     def test_create_customer(self):
         sc = self._mock_stripe()
         sc.customers.create.return_value = _customer()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_customer(
                 email="test@example.com",
                 name="Test User",
@@ -336,7 +336,7 @@ class TestStripeClientCustomers:
     def test_create_customer_minimal(self):
         sc = self._mock_stripe()
         sc.customers.create.return_value = _customer(email=None, name=None)
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.create_customer()
         call_args = sc.customers.create.call_args[0][0]
         assert "email" not in call_args
@@ -345,7 +345,7 @@ class TestStripeClientCustomers:
     def test_get_customer(self):
         sc = self._mock_stripe()
         sc.customers.retrieve.return_value = _customer()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_customer("cus_test123")
         sc.customers.retrieve.assert_called_once_with("cus_test123")
         assert result["id"] == "cus_test123"
@@ -353,7 +353,7 @@ class TestStripeClientCustomers:
     def test_get_customer_by_email_found(self):
         sc = self._mock_stripe()
         sc.customers.list.return_value = _make_stripe_list([_customer()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_customer_by_email("test@example.com")
         sc.customers.list.assert_called_once_with({"email": "test@example.com", "limit": 1})
         assert result["id"] == "cus_test123"
@@ -361,7 +361,7 @@ class TestStripeClientCustomers:
     def test_get_customer_by_email_not_found(self):
         sc = self._mock_stripe()
         sc.customers.list.return_value = _make_stripe_list([])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_customer_by_email("nobody@example.com")
         assert "error" in result
         assert "nobody@example.com" in result["error"]
@@ -369,7 +369,7 @@ class TestStripeClientCustomers:
     def test_update_customer(self):
         sc = self._mock_stripe()
         sc.customers.update.return_value = _customer(name="Updated Name")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.update_customer("cus_test123", name="Updated Name")
         sc.customers.update.assert_called_once_with("cus_test123", {"name": "Updated Name"})
         assert result["name"] == "Updated Name"
@@ -377,7 +377,7 @@ class TestStripeClientCustomers:
     def test_list_customers(self):
         sc = self._mock_stripe()
         sc.customers.list.return_value = _make_stripe_list([_customer(), _customer(id="cus_456")])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_customers(limit=10)
         assert len(result["customers"]) == 2
         assert result["has_more"] is False
@@ -385,7 +385,7 @@ class TestStripeClientCustomers:
     def test_list_customers_limit_capped(self):
         sc = self._mock_stripe()
         sc.customers.list.return_value = _make_stripe_list([])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.list_customers(limit=500)
         call_params = sc.customers.list.call_args[0][0]
         assert call_params["limit"] == 100
@@ -401,7 +401,7 @@ class TestStripeClientSubscriptions:
     def test_get_subscription(self):
         sc = self._mock_stripe()
         sc.subscriptions.retrieve.return_value = _subscription()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_subscription("sub_test123")
         sc.subscriptions.retrieve.assert_called_once_with("sub_test123")
         assert result["id"] == "sub_test123"
@@ -410,7 +410,7 @@ class TestStripeClientSubscriptions:
     def test_get_subscription_status_active(self):
         sc = self._mock_stripe()
         sc.subscriptions.list.return_value = _make_stripe_list([_subscription()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_subscription_status("cus_test123")
         assert result["status"] == "active"
         assert result["customer_id"] == "cus_test123"
@@ -419,7 +419,7 @@ class TestStripeClientSubscriptions:
     def test_get_subscription_status_no_subscription(self):
         sc = self._mock_stripe()
         sc.subscriptions.list.return_value = _make_stripe_list([])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_subscription_status("cus_test123")
         assert result["status"] == "no_subscription"
         assert result["subscriptions"] == []
@@ -427,7 +427,7 @@ class TestStripeClientSubscriptions:
     def test_list_subscriptions(self):
         sc = self._mock_stripe()
         sc.subscriptions.list.return_value = _make_stripe_list([_subscription()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_subscriptions(customer_id="cus_test123", status="active")
         call_params = sc.subscriptions.list.call_args[0][0]
         assert call_params["customer"] == "cus_test123"
@@ -437,7 +437,7 @@ class TestStripeClientSubscriptions:
     def test_create_subscription(self):
         sc = self._mock_stripe()
         sc.subscriptions.create.return_value = _subscription()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_subscription(
                 "cus_test123",
                 "price_test123",
@@ -453,7 +453,7 @@ class TestStripeClientSubscriptions:
     def test_update_subscription_metadata(self):
         sc = self._mock_stripe()
         sc.subscriptions.update.return_value = _subscription()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.update_subscription(
                 "sub_test123", metadata={"note": "updated"}, cancel_at_period_end=True
             )
@@ -461,10 +461,30 @@ class TestStripeClientSubscriptions:
         assert call_params["cancel_at_period_end"] is True
         assert call_params["metadata"] == {"note": "updated"}
 
+    def test_update_subscription_quantity_only(self):
+        sc = self._mock_stripe()
+        sc.subscriptions.retrieve.return_value = _subscription()
+        sc.subscriptions.update.return_value = _subscription()
+        with patch.object(self.client, "_client", sc):
+            self.client.update_subscription("sub_test123", quantity=3)
+        call_params = sc.subscriptions.update.call_args[0][1]
+        assert call_params["items"][0]["quantity"] == 3
+        assert "price" not in call_params["items"][0]
+
+    def test_update_subscription_no_items_returns_error(self):
+        sc = self._mock_stripe()
+        empty_sub = _subscription()
+        empty_sub.items.data = []
+        sc.subscriptions.retrieve.return_value = empty_sub
+        with patch.object(self.client, "_client", sc):
+            result = self.client.update_subscription("sub_test123", price_id="price_new")
+        assert "error" in result
+        assert "no items" in result["error"]
+
     def test_cancel_subscription_immediately(self):
         sc = self._mock_stripe()
         sc.subscriptions.cancel.return_value = _subscription(status="canceled")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.cancel_subscription("sub_test123", at_period_end=False)
         sc.subscriptions.cancel.assert_called_once_with("sub_test123")
         assert result["status"] == "canceled"
@@ -472,7 +492,7 @@ class TestStripeClientSubscriptions:
     def test_cancel_subscription_at_period_end(self):
         sc = self._mock_stripe()
         sc.subscriptions.update.return_value = _subscription(cancel_at_period_end=True)
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.cancel_subscription("sub_test123", at_period_end=True)
         sc.subscriptions.update.assert_called_once_with(
             "sub_test123", {"cancel_at_period_end": True}
@@ -490,7 +510,7 @@ class TestStripeClientPaymentIntents:
     def test_create_payment_intent(self):
         sc = self._mock_stripe()
         sc.payment_intents.create.return_value = _payment_intent()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_payment_intent(
                 amount=2000,
                 currency="usd",
@@ -503,12 +523,12 @@ class TestStripeClientPaymentIntents:
         assert call_params["currency"] == "usd"
         assert call_params["customer"] == "cus_test123"
         assert result["id"] == "pi_test123"
-        assert result["client_secret"] == "pi_test123_secret_abc"
+        assert result["status"] == "requires_payment_method"
 
     def test_get_payment_intent(self):
         sc = self._mock_stripe()
         sc.payment_intents.retrieve.return_value = _payment_intent()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_payment_intent("pi_test123")
         sc.payment_intents.retrieve.assert_called_once_with("pi_test123")
         assert result["id"] == "pi_test123"
@@ -516,7 +536,7 @@ class TestStripeClientPaymentIntents:
     def test_confirm_payment_intent(self):
         sc = self._mock_stripe()
         sc.payment_intents.confirm.return_value = _payment_intent(status="succeeded")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.confirm_payment_intent("pi_test123", payment_method="pm_card_visa")
         sc.payment_intents.confirm.assert_called_once_with(
             "pi_test123", {"payment_method": "pm_card_visa"}
@@ -526,7 +546,7 @@ class TestStripeClientPaymentIntents:
     def test_cancel_payment_intent(self):
         sc = self._mock_stripe()
         sc.payment_intents.cancel.return_value = _payment_intent(status="canceled")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.cancel_payment_intent("pi_test123")
         sc.payment_intents.cancel.assert_called_once_with("pi_test123")
         assert result["status"] == "canceled"
@@ -534,7 +554,7 @@ class TestStripeClientPaymentIntents:
     def test_list_payment_intents(self):
         sc = self._mock_stripe()
         sc.payment_intents.list.return_value = _make_stripe_list([_payment_intent()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_payment_intents(customer_id="cus_test123", limit=5)
         call_params = sc.payment_intents.list.call_args[0][0]
         assert call_params["customer"] == "cus_test123"
@@ -552,7 +572,7 @@ class TestStripeClientCharges:
     def test_list_charges(self):
         sc = self._mock_stripe()
         sc.charges.list.return_value = _make_stripe_list([_charge(), _charge(id="ch_456")])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_charges(customer_id="cus_test123")
         call_params = sc.charges.list.call_args[0][0]
         assert call_params["customer"] == "cus_test123"
@@ -561,7 +581,7 @@ class TestStripeClientCharges:
     def test_get_charge(self):
         sc = self._mock_stripe()
         sc.charges.retrieve.return_value = _charge()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_charge("ch_test123")
         sc.charges.retrieve.assert_called_once_with("ch_test123")
         assert result["id"] == "ch_test123"
@@ -570,7 +590,7 @@ class TestStripeClientCharges:
     def test_capture_charge(self):
         sc = self._mock_stripe()
         sc.charges.capture.return_value = _charge(amount_captured=2000)
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.capture_charge("ch_test123", amount=2000)
         sc.charges.capture.assert_called_once_with("ch_test123", {"amount": 2000})
         assert result["amount_captured"] == 2000
@@ -578,25 +598,10 @@ class TestStripeClientCharges:
     def test_capture_charge_full(self):
         sc = self._mock_stripe()
         sc.charges.capture.return_value = _charge()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.capture_charge("ch_test123")
         call_params = sc.charges.capture.call_args[0][1]
         assert call_params == {}  # No amount means full capture
-
-    def test_create_charge(self):
-        sc = self._mock_stripe()
-        sc.charges.create.return_value = _charge()
-        with patch.object(self.client, "_stripe", return_value=sc):
-            result = self.client.create_charge(
-                amount=2000,
-                currency="usd",
-                source="tok_visa",
-                description="Test",
-            )
-        call_params = sc.charges.create.call_args[0][0]
-        assert call_params["amount"] == 2000
-        assert call_params["source"] == "tok_visa"
-        assert result["id"] == "ch_test123"
 
 
 class TestStripeClientRefunds:
@@ -609,7 +614,7 @@ class TestStripeClientRefunds:
     def test_create_refund_by_charge(self):
         sc = self._mock_stripe()
         sc.refunds.create.return_value = _refund()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_refund(charge_id="ch_test123", amount=1000)
         call_params = sc.refunds.create.call_args[0][0]
         assert call_params["charge"] == "ch_test123"
@@ -619,7 +624,7 @@ class TestStripeClientRefunds:
     def test_create_refund_by_payment_intent(self):
         sc = self._mock_stripe()
         sc.refunds.create.return_value = _refund()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.create_refund(
                 payment_intent_id="pi_test123",
                 reason="customer_request",
@@ -631,7 +636,7 @@ class TestStripeClientRefunds:
     def test_get_refund(self):
         sc = self._mock_stripe()
         sc.refunds.retrieve.return_value = _refund()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_refund("re_test123")
         sc.refunds.retrieve.assert_called_once_with("re_test123")
         assert result["id"] == "re_test123"
@@ -639,7 +644,7 @@ class TestStripeClientRefunds:
     def test_list_refunds(self):
         sc = self._mock_stripe()
         sc.refunds.list.return_value = _make_stripe_list([_refund()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_refunds(charge_id="ch_test123", limit=10)
         call_params = sc.refunds.list.call_args[0][0]
         assert call_params["charge"] == "ch_test123"
@@ -656,7 +661,7 @@ class TestStripeClientInvoices:
     def test_list_invoices(self):
         sc = self._mock_stripe()
         sc.invoices.list.return_value = _make_stripe_list([_invoice(), _invoice(id="in_456")])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_invoices(customer_id="cus_test123", status="open")
         call_params = sc.invoices.list.call_args[0][0]
         assert call_params["customer"] == "cus_test123"
@@ -666,7 +671,7 @@ class TestStripeClientInvoices:
     def test_get_invoice(self):
         sc = self._mock_stripe()
         sc.invoices.retrieve.return_value = _invoice()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_invoice("in_test123")
         sc.invoices.retrieve.assert_called_once_with("in_test123")
         assert result["id"] == "in_test123"
@@ -675,7 +680,7 @@ class TestStripeClientInvoices:
     def test_create_invoice(self):
         sc = self._mock_stripe()
         sc.invoices.create.return_value = _invoice(status="draft")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.create_invoice(
                 "cus_test123",
                 description="Test invoice",
@@ -690,7 +695,7 @@ class TestStripeClientInvoices:
     def test_finalize_invoice(self):
         sc = self._mock_stripe()
         sc.invoices.finalize_invoice.return_value = _invoice(status="open")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.finalize_invoice("in_test123")
         sc.invoices.finalize_invoice.assert_called_once_with("in_test123")
         assert result["status"] == "open"
@@ -698,7 +703,7 @@ class TestStripeClientInvoices:
     def test_pay_invoice(self):
         sc = self._mock_stripe()
         sc.invoices.pay.return_value = _invoice(status="paid", amount_paid=2000)
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.pay_invoice("in_test123")
         sc.invoices.pay.assert_called_once_with("in_test123")
         assert result["status"] == "paid"
@@ -706,7 +711,7 @@ class TestStripeClientInvoices:
     def test_void_invoice(self):
         sc = self._mock_stripe()
         sc.invoices.void_invoice.return_value = _invoice(status="void")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.void_invoice("in_test123")
         sc.invoices.void_invoice.assert_called_once_with("in_test123")
         assert result["status"] == "void"
@@ -722,7 +727,7 @@ class TestStripeClientInvoiceItems:
     def test_create_invoice_item(self):
         sc = self._mock_stripe()
         sc.invoice_items.create.return_value = _invoice_item()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_invoice_item(
                 customer_id="cus_test123",
                 amount=1500,
@@ -739,7 +744,7 @@ class TestStripeClientInvoiceItems:
     def test_list_invoice_items(self):
         sc = self._mock_stripe()
         sc.invoice_items.list.return_value = _make_stripe_list([_invoice_item()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_invoice_items(
                 customer_id="cus_test123", invoice_id="in_test123"
             )
@@ -754,7 +759,7 @@ class TestStripeClientInvoiceItems:
         deleted.id = "ii_test123"
         deleted.deleted = True
         sc.invoice_items.delete.return_value = deleted
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.delete_invoice_item("ii_test123")
         sc.invoice_items.delete.assert_called_once_with("ii_test123")
         assert result["deleted"] is True
@@ -771,7 +776,7 @@ class TestStripeClientProducts:
     def test_create_product(self):
         sc = self._mock_stripe()
         sc.products.create.return_value = _product()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_product(
                 name="Premium Plan",
                 description="Full access",
@@ -786,7 +791,7 @@ class TestStripeClientProducts:
     def test_get_product(self):
         sc = self._mock_stripe()
         sc.products.retrieve.return_value = _product()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_product("prod_test123")
         sc.products.retrieve.assert_called_once_with("prod_test123")
         assert result["name"] == "Premium Plan"
@@ -794,7 +799,7 @@ class TestStripeClientProducts:
     def test_list_products(self):
         sc = self._mock_stripe()
         sc.products.list.return_value = _make_stripe_list([_product(), _product(id="prod_456")])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_products(active=True)
         call_params = sc.products.list.call_args[0][0]
         assert call_params["active"] is True
@@ -803,7 +808,7 @@ class TestStripeClientProducts:
     def test_update_product(self):
         sc = self._mock_stripe()
         sc.products.update.return_value = _product(name="Updated Plan", active=False)
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.update_product("prod_test123", name="Updated Plan", active=False)
         call_params = sc.products.update.call_args[0][1]
         assert call_params["name"] == "Updated Plan"
@@ -820,7 +825,7 @@ class TestStripeClientPrices:
     def test_create_price_recurring(self):
         sc = self._mock_stripe()
         sc.prices.create.return_value = _price()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_price(
                 unit_amount=999,
                 currency="usd",
@@ -834,7 +839,7 @@ class TestStripeClientPrices:
     def test_create_price_one_time(self):
         sc = self._mock_stripe()
         sc.prices.create.return_value = _price(recurring=None, type="one_time")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.create_price(
                 unit_amount=4999,
                 currency="usd",
@@ -846,7 +851,7 @@ class TestStripeClientPrices:
     def test_get_price(self):
         sc = self._mock_stripe()
         sc.prices.retrieve.return_value = _price()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_price("price_test123")
         sc.prices.retrieve.assert_called_once_with("price_test123")
         assert result["unit_amount"] == 999
@@ -855,7 +860,7 @@ class TestStripeClientPrices:
     def test_list_prices(self):
         sc = self._mock_stripe()
         sc.prices.list.return_value = _make_stripe_list([_price()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_prices(product_id="prod_test123", active=True)
         call_params = sc.prices.list.call_args[0][0]
         assert call_params["product"] == "prod_test123"
@@ -865,7 +870,7 @@ class TestStripeClientPrices:
     def test_update_price(self):
         sc = self._mock_stripe()
         sc.prices.update.return_value = _price(active=False, nickname="Legacy")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.update_price("price_test123", active=False, nickname="Legacy")
         call_params = sc.prices.update.call_args[0][1]
         assert call_params["active"] is False
@@ -882,7 +887,7 @@ class TestStripeClientPaymentLinks:
     def test_create_payment_link(self):
         sc = self._mock_stripe()
         sc.payment_links.create.return_value = _payment_link()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_payment_link("price_test123", quantity=2)
         call_params = sc.payment_links.create.call_args[0][0]
         assert call_params["line_items"][0]["price"] == "price_test123"
@@ -893,7 +898,7 @@ class TestStripeClientPaymentLinks:
     def test_get_payment_link(self):
         sc = self._mock_stripe()
         sc.payment_links.retrieve.return_value = _payment_link()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_payment_link("plink_test123")
         sc.payment_links.retrieve.assert_called_once_with("plink_test123")
         assert result["active"] is True
@@ -901,7 +906,7 @@ class TestStripeClientPaymentLinks:
     def test_list_payment_links(self):
         sc = self._mock_stripe()
         sc.payment_links.list.return_value = _make_stripe_list([_payment_link()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_payment_links(active=True)
         call_params = sc.payment_links.list.call_args[0][0]
         assert call_params["active"] is True
@@ -918,7 +923,7 @@ class TestStripeClientCoupons:
     def test_create_coupon_percent_off(self):
         sc = self._mock_stripe()
         sc.coupons.create.return_value = _coupon()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.create_coupon(
                 percent_off=20.0,
                 duration="once",
@@ -932,7 +937,7 @@ class TestStripeClientCoupons:
     def test_create_coupon_amount_off(self):
         sc = self._mock_stripe()
         sc.coupons.create.return_value = _coupon(percent_off=None, amount_off=500, currency="usd")
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.create_coupon(
                 amount_off=500,
                 currency="usd",
@@ -945,7 +950,7 @@ class TestStripeClientCoupons:
     def test_create_coupon_repeating(self):
         sc = self._mock_stripe()
         sc.coupons.create.return_value = _coupon(duration="repeating", duration_in_months=3)
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             self.client.create_coupon(
                 percent_off=10.0,
                 duration="repeating",
@@ -957,7 +962,7 @@ class TestStripeClientCoupons:
     def test_list_coupons(self):
         sc = self._mock_stripe()
         sc.coupons.list.return_value = _make_stripe_list([_coupon()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_coupons(limit=5)
         assert len(result["coupons"]) == 1
 
@@ -967,7 +972,7 @@ class TestStripeClientCoupons:
         deleted.id = "WELCOME20"
         deleted.deleted = True
         sc.coupons.delete.return_value = deleted
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.delete_coupon("WELCOME20")
         sc.coupons.delete.assert_called_once_with("WELCOME20")
         assert result["deleted"] is True
@@ -989,7 +994,7 @@ class TestStripeClientBalance:
         pend.amount = 5000
         pend.currency = "usd"
         sc.balance.retrieve.return_value = MagicMock(available=[avail], pending=[pend])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_balance()
         assert result["available"][0]["amount"] == 10000
         assert result["pending"][0]["currency"] == "usd"
@@ -1007,7 +1012,7 @@ class TestStripeClientBalance:
         txn.created = 1700000000
         sc = self._mock_stripe()
         sc.balance_transactions.list.return_value = _make_stripe_list([txn])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_balance_transactions(type_filter="charge")
         call_params = sc.balance_transactions.list.call_args[0][0]
         assert call_params["type"] == "charge"
@@ -1031,7 +1036,7 @@ class TestStripeClientWebhookEndpoints:
         we.created = 1700000000
         sc = self._mock_stripe()
         sc.webhook_endpoints.list.return_value = _make_stripe_list([we])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_webhook_endpoints(limit=10)
         assert len(result["webhook_endpoints"]) == 1
         assert result["webhook_endpoints"][0]["url"] == "https://example.com/webhook"
@@ -1048,7 +1053,7 @@ class TestStripeClientPaymentMethods:
     def test_list_payment_methods(self):
         sc = self._mock_stripe()
         sc.payment_methods.list.return_value = _make_stripe_list([_payment_method()])
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.list_payment_methods("cus_test123", type_filter="card")
         call_params = sc.payment_methods.list.call_args[0][0]
         assert call_params["customer"] == "cus_test123"
@@ -1059,7 +1064,7 @@ class TestStripeClientPaymentMethods:
     def test_get_payment_method(self):
         sc = self._mock_stripe()
         sc.payment_methods.retrieve.return_value = _payment_method()
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.get_payment_method("pm_test123")
         sc.payment_methods.retrieve.assert_called_once_with("pm_test123")
         assert result["type"] == "card"
@@ -1068,7 +1073,7 @@ class TestStripeClientPaymentMethods:
         sc = self._mock_stripe()
         detached = _payment_method(customer=None)
         sc.payment_methods.detach.return_value = detached
-        with patch.object(self.client, "_stripe", return_value=sc):
+        with patch.object(self.client, "_client", sc):
             result = self.client.detach_payment_method("pm_test123")
         sc.payment_methods.detach.assert_called_once_with("pm_test123")
         assert result["customer"] is None
@@ -1084,7 +1089,7 @@ class TestToolRegistration:
         mcp = MagicMock()
         mcp.tool.return_value = lambda fn: fn
         register_tools(mcp)
-        assert mcp.tool.call_count == 52
+        assert mcp.tool.call_count == 51
 
     def test_no_credentials_returns_error(self):
         mcp = MagicMock()
@@ -1310,23 +1315,6 @@ class TestChargeToolValidation:
         assert "error" in result
         assert "positive" in result["error"]
 
-    def test_create_charge_zero_amount(self):
-        result = self.fns["stripe_create_charge"](amount=0, currency="usd", source="tok_visa")
-        assert "error" in result
-        assert "positive" in result["error"]
-
-    def test_create_charge_invalid_currency(self):
-        result = self.fns["stripe_create_charge"](
-            amount=2000, currency="INVALID", source="tok_visa"
-        )
-        assert "error" in result
-        assert "3-letter" in result["error"]
-
-    def test_create_charge_no_source_or_customer(self):
-        result = self.fns["stripe_create_charge"](amount=2000, currency="usd")
-        assert "error" in result
-        assert "source" in result["error"]
-
 
 class TestRefundToolValidation:
     def setup_method(self):
@@ -1394,7 +1382,22 @@ class TestInvoiceItemToolValidation:
             customer_id="cus_test123", amount=0, currency="usd"
         )
         assert "error" in result
-        assert "positive" in result["error"]
+        assert "non-zero" in result["error"]
+
+    def test_create_invoice_item_negative_amount_allowed(self):
+        with patch("aden_tools.tools.stripe_tool.stripe_tool._StripeClient") as MockClient:
+            MockClient.return_value.create_invoice_item.return_value = {
+                "id": "ii_credit",
+                "amount": -500,
+                "currency": "usd",
+            }
+            result = self.fns["stripe_create_invoice_item"](
+                customer_id="cus_test123",
+                amount=-500,
+                currency="usd",
+                description="Discount credit",
+            )
+        assert result["id"] == "ii_credit"
 
     def test_create_invoice_item_invalid_currency(self):
         result = self.fns["stripe_create_invoice_item"](
@@ -1593,7 +1596,7 @@ class TestCredentialSpec:
         from aden_tools.credentials import CREDENTIAL_SPECS
 
         spec = CREDENTIAL_SPECS["stripe"]
-        assert len(spec.tools) == 52
+        assert len(spec.tools) == 51
 
     def test_stripe_spec_tools_include_core_methods(self):
         from aden_tools.credentials import CREDENTIAL_SPECS
@@ -1619,7 +1622,6 @@ class TestCredentialSpec:
             "stripe_list_charges",
             "stripe_get_charge",
             "stripe_capture_charge",
-            "stripe_create_charge",
             "stripe_create_refund",
             "stripe_get_refund",
             "stripe_list_refunds",
@@ -1677,7 +1679,7 @@ class TestCredentialSpec:
         spec = CREDENTIAL_SPECS["stripe"]
         assert spec.credential_id == "stripe"
         assert spec.credential_key == "api_key"
-        assert spec.credential_group == "stripe"
+        assert spec.credential_group == ""
 
     def test_stripe_spec_required_not_startup(self):
         from aden_tools.credentials import CREDENTIAL_SPECS

@@ -28,7 +28,6 @@ STRIPE_CREDENTIALS = {
             "stripe_list_charges",
             "stripe_get_charge",
             "stripe_capture_charge",
-            "stripe_create_charge",
             "stripe_create_refund",
             "stripe_get_refund",
             "stripe_list_refunds",
@@ -80,6 +79,6 @@ Note: Use test keys (sk_test_*) for development to avoid real charges""",
         # Credential store mapping
         credential_id="stripe",
         credential_key="api_key",
-        credential_group="stripe",
+        credential_group="",
     ),
 }
