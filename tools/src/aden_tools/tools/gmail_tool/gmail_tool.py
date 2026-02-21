@@ -34,6 +34,18 @@ def _sanitize_path_param(param: str, param_name: str = "parameter") -> str:
     return param
 
 
+def _ensure_list(value: str | list[str] | None) -> list[str] | None:
+    """Coerce a bare string to a single-element list.
+
+    LLMs frequently pass ``"STARRED"`` instead of ``["STARRED"]`` for
+    list parameters.  This normalises the input so Pydantic validation
+    doesn't reject it.
+    """
+    if isinstance(value, str):
+        return [value]
+    return value
+
+
 def register_tools(
     mcp: FastMCP,
     credentials: CredentialStoreAdapter | None = None,
@@ -277,8 +289,8 @@ def register_tools(
     @mcp.tool()
     def gmail_modify_message(
         message_id: str,
-        add_labels: list[str] | None = None,
-        remove_labels: list[str] | None = None,
+        add_labels: str | list[str] | None = None,
+        remove_labels: str | list[str] | None = None,
         account: str = "",
     ) -> dict:
         """
@@ -304,6 +316,9 @@ def register_tools(
         Returns:
             Dict with "success", "message_id", and updated "labels", or error dict.
         """
+        add_labels = _ensure_list(add_labels)
+        remove_labels = _ensure_list(remove_labels)
+
         if not message_id:
             return {"error": "message_id is required"}
         try:
@@ -341,9 +356,9 @@ def register_tools(
 
     @mcp.tool()
     def gmail_batch_modify_messages(
-        message_ids: list[str],
-        add_labels: list[str] | None = None,
-        remove_labels: list[str] | None = None,
+        message_ids: str | list[str],
+        add_labels: str | list[str] | None = None,
+        remove_labels: str | list[str] | None = None,
         account: str = "",
     ) -> dict:
         """
@@ -360,6 +375,10 @@ def register_tools(
         Returns:
             Dict with "success" and "count", or error dict.
         """
+        message_ids = _ensure_list(message_ids) or []
+        add_labels = _ensure_list(add_labels)
+        remove_labels = _ensure_list(remove_labels)
+
         if not message_ids:
             return {"error": "message_ids list is required and must not be empty"}
 

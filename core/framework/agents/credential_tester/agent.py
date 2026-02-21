@@ -165,6 +165,13 @@ or any other identifier — always use the alias exactly as shown.
 """
             break
 
+    # Set intro message for TUI display
+    runner.intro_message = (
+        f"Testing {provider}/{alias}{detail} — "
+        f"{len(tools)} tools loaded. "
+        f"I'll suggest a read-only API call to verify the credential works."
+    )
+
 
 # ---------------------------------------------------------------------------
 # Module-level graph variables (read by AgentRunner.load)
