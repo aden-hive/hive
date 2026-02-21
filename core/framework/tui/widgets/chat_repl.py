@@ -74,14 +74,6 @@ class ChatTextArea(TextArea):
             self.action_delete_word_right()
             event.stop()
             event.prevent_default()
-        elif event.key == "alt+shift+left":
-            self.action_cursor_word_left(True)
-            event.stop()
-            event.prevent_default()
-        elif event.key == "alt+shift+right":
-            self.action_cursor_word_right(True)
-            event.stop()
-            event.prevent_default()
         else:
             await super()._on_key(event)
 
