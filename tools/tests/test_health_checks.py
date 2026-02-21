@@ -49,6 +49,7 @@ class TestHealthCheckerRegistry:
         """ZohoCRMHealthChecker is registered in HEALTH_CHECKERS."""
         assert "zoho_crm" in HEALTH_CHECKERS
         assert isinstance(HEALTH_CHECKERS["zoho_crm"], ZohoCRMHealthChecker)
+
     def test_google_calendar_oauth_registered(self):
         """GoogleCalendarHealthChecker is registered in HEALTH_CHECKERS."""
         assert "google_calendar_oauth" in HEALTH_CHECKERS
