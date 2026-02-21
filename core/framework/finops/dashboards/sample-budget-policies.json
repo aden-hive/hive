@@ -1,0 +1,41 @@
+{
+  "policies": [
+    {
+      "name": "default-agent-budget",
+      "scope": "agent",
+      "scope_id": "*",
+      "max_tokens_per_run": 100000,
+      "max_cost_usd_per_run": 5.00,
+      "burn_rate_threshold": 50000,
+      "thresholds": [
+        {"threshold": 50, "action": "warn", "message": "50% budget used"},
+        {"threshold": 75, "action": "degrade", "message": "75% budget - consider switching models"},
+        {"threshold": 90, "action": "throttle", "message": "90% budget - throttling"},
+        {"threshold": 100, "action": "kill", "message": "Budget exceeded - terminating run"}
+      ],
+      "enabled": true
+    },
+    {
+      "name": "expensive-node-guard",
+      "scope": "node",
+      "scope_id": "deep-research",
+      "max_tokens_per_run": 50000,
+      "max_cost_usd_per_run": 2.00,
+      "thresholds": [
+        {"threshold": 80, "action": "warn", "message": "Deep research node approaching budget"},
+        {"threshold": 100, "action": "kill", "message": "Deep research budget exceeded"}
+      ],
+      "enabled": true
+    },
+    {
+      "name": "tool-call-limit",
+      "scope": "tool",
+      "scope_id": "web_scrape",
+      "max_tokens_per_run": 10000,
+      "thresholds": [
+        {"threshold": 80, "action": "warn", "message": "Web scrape approaching limit"}
+      ],
+      "enabled": true
+    }
+  ]
+}
