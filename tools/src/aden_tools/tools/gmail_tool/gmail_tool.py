@@ -115,8 +115,8 @@ def register_tools(
             query: Gmail search query (default: "is:unread").
             max_results: Maximum messages to return (1-500, default 100).
             page_token: Token for fetching the next page of results.
-            account: Account to use when multiple accounts are connected
-                (e.g. "alice@gmail.com"). Leave empty for default.
+            account: Account alias to target a specific account
+                (e.g. "Timothy"). Leave empty for default.
 
         Returns:
             Dict with "messages" list (each has "id" and "threadId"),

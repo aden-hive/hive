@@ -1174,6 +1174,23 @@ class GraphExecutor:
                         # Build Layer 2 (narrative) from current state
                         narrative = build_narrative(memory, path, graph)
 
+                        # Read agent working memory (adapt.md) once for both
+                        # system prompt and transition marker.
+                        _adapt_text: str | None = None
+                        if self._storage_path:
+                            _adapt_path = self._storage_path / "data" / "adapt.md"
+                            if _adapt_path.exists():
+                                _raw = _adapt_path.read_text(encoding="utf-8").strip()
+                                _adapt_text = _raw or None
+
+                        # Merge adapt.md into narrative for system prompt
+                        if _adapt_text:
+                            narrative = (
+                                f"{narrative}\n\n--- Agent Memory ---\n{_adapt_text}"
+                                if narrative
+                                else _adapt_text
+                            )
+
                         # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
@@ -1203,6 +1220,7 @@ class GraphExecutor:
                             memory=memory,
                             cumulative_tool_names=sorted(cumulative_tool_names),
                             data_dir=data_dir,
+                            adapt_content=_adapt_text,
                         )
                         await continuous_conversation.add_user_message(
                             marker,

@@ -1,32 +1,19 @@
 """Runtime configuration for Credential Tester agent."""
 
-import json
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
-
-def _load_preferred_model() -> str:
-    """Load preferred model from ~/.hive/configuration.json."""
-    config_path = Path.home() / ".hive" / "configuration.json"
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-            llm = config.get("llm", {})
-            if llm.get("provider") and llm.get("model"):
-                return f"{llm['provider']}/{llm['model']}"
-        except Exception:
-            pass
-    return "anthropic/claude-sonnet-4-20250514"
+from framework.config import RuntimeConfig
 
 
 @dataclass
-class RuntimeConfig:
-    model: str = field(default_factory=_load_preferred_model)
-    temperature: float = 0.3
-    max_tokens: int = 16000
-    api_key: str | None = None
-    api_base: str | None = None
+class AgentMetadata:
+    name: str = "Credential Tester"
+    version: str = "1.0.0"
+    description: str = (
+        "Test connected accounts by making real API calls. "
+        "Pick an account, verify credentials work, and explore available tools."
+    )
 
 
-default_config = RuntimeConfig()
+metadata = AgentMetadata()
+default_config = RuntimeConfig(temperature=0.3)

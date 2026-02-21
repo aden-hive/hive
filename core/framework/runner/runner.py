@@ -351,6 +351,11 @@ class AgentRunner:
         intro_message: str = "",
         runtime_config: "AgentRuntimeConfig | None" = None,
         interactive: bool = True,
+        skip_credential_validation: bool = False,
+        skip_guardian: bool = False,
+        requires_account_selection: bool = False,
+        configure_for_account: Callable | None = None,
+        list_accounts: Callable | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -366,6 +371,11 @@ class AgentRunner:
             runtime_config: Optional AgentRuntimeConfig (webhook settings, etc.)
             interactive: If True (default), offer interactive credential setup on failure.
                 Set to False when called from the TUI (which handles setup via its own screen).
+            skip_credential_validation: If True, skip credential checks at load time.
+            skip_guardian: If True, don't attach the Hive Coder guardian.
+            requires_account_selection: If True, TUI shows account picker before starting.
+            configure_for_account: Callback(runner, account_dict) to scope tools after selection.
+            list_accounts: Callback() -> list[dict] to fetch available accounts.
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -375,6 +385,11 @@ class AgentRunner:
         self.intro_message = intro_message
         self.runtime_config = runtime_config
         self._interactive = interactive
+        self.skip_credential_validation = skip_credential_validation
+        self.skip_guardian = skip_guardian
+        self.requires_account_selection = requires_account_selection
+        self._configure_for_account = configure_for_account
+        self._list_accounts = list_accounts
 
         # Set up storage
         if storage_path:
@@ -425,6 +440,9 @@ class AgentRunner:
         When ``interactive`` is False (e.g. TUI callers), the CredentialError
         propagates immediately so the caller can handle it with its own UI.
         """
+        if self.skip_credential_validation:
+            return
+
         if not self._interactive:
             # Let the CredentialError propagate — caller handles UI.
             validate_agent_credentials(self.graph.nodes)
@@ -586,6 +604,13 @@ class AgentRunner:
             # Read runtime config (webhook settings, etc.) if defined
             agent_runtime_config = getattr(agent_module, "runtime_config", None)
 
+            # Read pre-run hooks (e.g., credential_tester needs account selection)
+            skip_cred = getattr(agent_module, "skip_credential_validation", False)
+            no_guardian = getattr(agent_module, "skip_guardian", False)
+            needs_acct = getattr(agent_module, "requires_account_selection", False)
+            configure_fn = getattr(agent_module, "configure_for_account", None)
+            list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
+
             return cls(
                 agent_path=agent_path,
                 graph=graph,
@@ -596,6 +621,11 @@ class AgentRunner:
                 intro_message=intro_message,
                 runtime_config=agent_runtime_config,
                 interactive=interactive,
+                skip_credential_validation=skip_cred,
+                skip_guardian=no_guardian,
+                requires_account_selection=needs_acct,
+                configure_for_account=configure_fn,
+                list_accounts=list_accts_fn,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
