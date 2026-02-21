@@ -66,9 +66,7 @@ class TestTwitterCreateTweet:
         with patch("httpx.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 201
-            mock_response.json.return_value = {
-                "data": {"id": "1234567890", "text": "Hello world"}
-            }
+            mock_response.json.return_value = {"data": {"id": "1234567890", "text": "Hello world"}}
             mock_post.return_value = mock_response
 
             result = twitter_create_tweet_fn(text="Hello world")
@@ -103,14 +101,10 @@ class TestTwitterCreateTweet:
         with patch("httpx.post") as mock_post:
             mock_response = MagicMock()
             mock_response.status_code = 201
-            mock_response.json.return_value = {
-                "data": {"id": "1234567891", "text": "Great point!"}
-            }
+            mock_response.json.return_value = {"data": {"id": "1234567891", "text": "Great point!"}}
             mock_post.return_value = mock_response
 
-            result = twitter_create_tweet_fn(
-                text="Great point!", reply_to_tweet_id="1234567890"
-            )
+            result = twitter_create_tweet_fn(text="Great point!", reply_to_tweet_id="1234567890")
 
         assert result["success"] is True
         call_kwargs = mock_post.call_args[1]
@@ -380,9 +374,7 @@ class TestTwitterFollowUser:
             # First call: get user ID
             user_response = MagicMock()
             user_response.status_code = 200
-            user_response.json.return_value = {
-                "data": {"id": "1234567890", "username": "testuser"}
-            }
+            user_response.json.return_value = {"data": {"id": "1234567890", "username": "testuser"}}
             mock_get.return_value = user_response
 
             # Second call: follow user
