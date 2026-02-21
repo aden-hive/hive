@@ -9,34 +9,37 @@ revenue-leak patterns:
   OVERDUE_PAYMENT — invoice unpaid past due date
   CHURN_RISK      — 3+ unresolved support escalations
 
-Telegram delivery
------------------
-Set two environment variables to send real alerts to Telegram:
+Tools are registered via TOOLS dict + tool_executor() — discovered automatically
+by ToolRegistry.discover_from_module() at agent startup.
 
-  TELEGRAM_BOT_TOKEN  — token from @BotFather  (e.g. 7123456789:AAF...)
-  TELEGRAM_CHAT_ID    — your chat / group / channel ID (e.g. -1001234567890)
+Optional environment variables:
+  HUBSPOT_API_KEY      — HubSpot Private App token for live CRM data
+  TELEGRAM_BOT_TOKEN   — token from @BotFather for real Telegram alerts
+  TELEGRAM_CHAT_ID     — your chat / group / channel ID
+  GMAIL_USER           — Gmail address for follow-up emails
+  GMAIL_APP_PASSWORD   — Gmail App Password (16-char token)
 
-When these are absent the agent falls back to console output so it runs
-fully offline without any credentials.
+All integrations are optional — the agent runs fully offline without any
+credentials set.
 """
 
+import contextvars
+import json
 import os
+from typing import Any
+
+from framework.llm.provider import Tool, ToolUse, ToolResult
 
 
 # ---------------------------------------------------------------------------
-# Minimal @tool decorator (framework convention)
+# Session-isolated in-process state (contextvars — thread + session safe)
 # ---------------------------------------------------------------------------
-
-def tool(func):
-    """Marks a function for auto-discovery by ToolRegistry."""
-    func._tool_metadata = {"name": func.__name__}
-    return func
-
-
-# ---------------------------------------------------------------------------
-# Shared in-process state — survives across node calls within the same run
-_CURRENT_CYCLE_DATA: dict = {}
-_CURRENT_LEAKS: list = []
+_cycle_data_var: contextvars.ContextVar[dict] = contextvars.ContextVar(
+    "_cycle_data", default={}
+)
+_leaks_var: contextvars.ContextVar[list] = contextvars.ContextVar(
+    "_leaks", default=[]
+)
 
 MAX_CYCLES = 3  # halt after this many consecutive low-severity cycles
 
@@ -174,16 +177,12 @@ def _fetch_hubspot_deals() -> "dict | None":
 
 
 # ---------------------------------------------------------------------------
-# Tool 1 — scan_pipeline
+# Tool implementations (private — called via tool_executor)
 # ---------------------------------------------------------------------------
 
-@tool
-def scan_pipeline(cycle: int) -> dict:
+def _scan_pipeline(cycle: int) -> dict:
     """
     Scan the CRM pipeline for the next monitoring cycle.
-
-    Simulates polling your CRM, email platform, invoice system, and support
-    queue. Increments the cycle counter and loads a fresh deal snapshot.
 
     Args:
         cycle: Current cycle number from context (0 on first run).
@@ -194,8 +193,6 @@ def scan_pipeline(cycle: int) -> dict:
         overdue_invoices — number of overdue invoices
         support_escalations — open support tickets needing action
     """
-    global _CURRENT_CYCLE_DATA
-
     next_cycle = int(cycle) + 1
 
     # Use HubSpot CRM; fall back to empty snapshot if API key not set
@@ -206,7 +203,7 @@ def scan_pipeline(cycle: int) -> dict:
         "support_escalations": 0,
     }
 
-    _CURRENT_CYCLE_DATA = data
+    _cycle_data_var.set(data)
 
     source = data.get("_source", "simulated")
     print(
@@ -224,12 +221,7 @@ def scan_pipeline(cycle: int) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Tool 2 — detect_revenue_leaks
-# ---------------------------------------------------------------------------
-
-@tool
-def detect_revenue_leaks(cycle: int) -> dict:
+def _detect_revenue_leaks(cycle: int) -> dict:
     """
     Analyse the latest pipeline snapshot and detect revenue leak patterns.
 
@@ -248,9 +240,7 @@ def detect_revenue_leaks(cycle: int) -> dict:
         total_at_risk   — USD value at risk across all leaks
         halt            — True when severity reaches critical
     """
-    global _CURRENT_LEAKS
-
-    data = _CURRENT_CYCLE_DATA
+    data = _cycle_data_var.get()
     leaks: list[dict] = []
 
     # ---- Deal-level leak detection ----
@@ -312,7 +302,7 @@ def detect_revenue_leaks(cycle: int) -> dict:
             ),
         })
 
-    _CURRENT_LEAKS = leaks
+    _leaks_var.set(leaks)
 
     # ---- Severity calculation ----
     total_at_risk = sum(l.get("value", l.get("amount", 0)) for l in leaks)
@@ -438,12 +428,7 @@ def _build_telegram_message(
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Tool 3 — send_revenue_alert
-# ---------------------------------------------------------------------------
-
-@tool
-def send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_risk: int) -> dict:
+def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_risk: int) -> dict:
     """
     Send a formatted revenue leak alert to the operations team.
 
@@ -473,7 +458,7 @@ def send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_risk
         "low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨",
     }.get(sev, "⚪")
 
-    leaks = _CURRENT_LEAKS
+    leaks = _leaks_var.get()
 
     # ---- Console report (always printed) ----
     border = "═" * 64
@@ -546,12 +531,7 @@ def send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_risk
     }
 
 
-# ---------------------------------------------------------------------------
-# Tool 4 — send_followup_emails
-# ---------------------------------------------------------------------------
-
-@tool
-def send_followup_emails(cycle: int) -> dict:
+def _send_followup_emails(cycle: int) -> dict:
     """
     Send re-engagement emails to every GHOSTED contact found this cycle.
 
@@ -577,7 +557,7 @@ def send_followup_emails(cycle: int) -> dict:
         contacts_emailed: list of contact names
         delivery_method:  "gmail" | "console"
     """
-    ghosted = [l for l in _CURRENT_LEAKS if l.get("type") == "GHOSTED"]
+    ghosted = [l for l in _leaks_var.get() if l.get("type") == "GHOSTED"]
 
     if not ghosted:
         print(f"\n[send_followup_emails] Cycle {cycle} — no GHOSTED contacts, skipping.")
@@ -654,3 +634,115 @@ def send_followup_emails(cycle: int) -> dict:
         "contacts_emailed": sent,
         "delivery_method":  method,
     }
+
+
+# ---------------------------------------------------------------------------
+# TOOLS dict — discovered by ToolRegistry.discover_from_module()
+# ---------------------------------------------------------------------------
+
+TOOLS: dict[str, Tool] = {
+    "scan_pipeline": Tool(
+        name="scan_pipeline",
+        description=(
+            "Scan the CRM pipeline for the next monitoring cycle. "
+            "Increments the cycle counter and loads a fresh deal snapshot."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "cycle": {
+                    "type": "integer",
+                    "description": "Current cycle number from context (0 on first run).",
+                },
+            },
+            "required": ["cycle"],
+        },
+    ),
+    "detect_revenue_leaks": Tool(
+        name="detect_revenue_leaks",
+        description=(
+            "Analyse the latest pipeline snapshot and detect revenue leak patterns: "
+            "GHOSTED (21+ days silent), STALLED (10-20 days stuck), "
+            "OVERDUE_PAYMENT (unpaid invoice), CHURN_RISK (3+ escalations)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "cycle": {
+                    "type": "integer",
+                    "description": "Current monitoring cycle (for report labelling).",
+                },
+            },
+            "required": ["cycle"],
+        },
+    ),
+    "send_revenue_alert": Tool(
+        name="send_revenue_alert",
+        description=(
+            "Send a formatted revenue leak alert to the operations team. "
+            "Prints a full structured report to console and delivers a real "
+            "Telegram message when TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "cycle": {"type": "integer", "description": "Current monitoring cycle number."},
+                "leak_count": {"type": "integer", "description": "Number of leaks found this cycle."},
+                "severity": {"type": "string", "description": "Overall severity (low / medium / high / critical)."},
+                "total_at_risk": {"type": "integer", "description": "Total USD value at risk this cycle."},
+            },
+            "required": ["cycle", "leak_count", "severity", "total_at_risk"],
+        },
+    ),
+    "send_followup_emails": Tool(
+        name="send_followup_emails",
+        description=(
+            "Send re-engagement emails to every GHOSTED contact found this cycle. "
+            "Uses Gmail SMTP when GMAIL_USER + GMAIL_APP_PASSWORD are set; "
+            "otherwise prints a dry-run preview."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "cycle": {
+                    "type": "integer",
+                    "description": "Current monitoring cycle (for log labels).",
+                },
+            },
+            "required": ["cycle"],
+        },
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Unified tool executor — dispatches to private handler functions
+# ---------------------------------------------------------------------------
+
+def tool_executor(tool_use: ToolUse) -> ToolResult:
+    """Dispatch a ToolUse to the correct handler and return a JSON ToolResult."""
+    _handlers: dict[str, Any] = {
+        "scan_pipeline":       _scan_pipeline,
+        "detect_revenue_leaks": _detect_revenue_leaks,
+        "send_revenue_alert":  _send_revenue_alert,
+        "send_followup_emails": _send_followup_emails,
+    }
+    handler = _handlers.get(tool_use.name)
+    if handler is None:
+        return ToolResult(
+            tool_use_id=tool_use.id,
+            content=json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
+            is_error=True,
+        )
+    try:
+        result = handler(**tool_use.input)
+        return ToolResult(
+            tool_use_id=tool_use.id,
+            content=json.dumps(result),
+        )
+    except Exception as exc:
+        return ToolResult(
+            tool_use_id=tool_use.id,
+            content=json.dumps({"error": str(exc)}),
+            is_error=True,
+        )
