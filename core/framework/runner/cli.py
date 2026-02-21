@@ -370,6 +370,42 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     setup_creds_parser.set_defaults(func=cmd_setup_credentials)
 
+    # serve command (HTTP API server)
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start HTTP API server",
+        description="Start an HTTP server exposing REST + SSE APIs for agent control.",
+    )
+    serve_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host to bind (default: 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=8787,
+        help="Port to listen on (default: 8787)",
+    )
+    serve_parser.add_argument(
+        "--agent",
+        "-a",
+        type=str,
+        action="append",
+        default=[],
+        help="Agent path to preload (repeatable)",
+    )
+    serve_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model for preloaded agents",
+    )
+    serve_parser.set_defaults(func=cmd_serve)
+
 
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
@@ -1915,3 +1951,60 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
 
     result = session.run_interactive()
     return 0 if result.success else 1
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Start the HTTP API server."""
+    import logging
+
+    from aiohttp import web
+
+    from framework.server.app import create_app
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    model = getattr(args, "model", None)
+    app = create_app(model=model)
+
+    async def run_server():
+        manager = app["manager"]
+
+        # Preload agents specified via --agent
+        for agent_path in args.agent:
+            try:
+                slot = await manager.load_agent(agent_path, model=model)
+                print(f"Loaded agent: {slot.id} ({slot.info.name})")
+            except Exception as e:
+                print(f"Error loading {agent_path}: {e}")
+
+        # Start server using AppRunner/TCPSite (same pattern as webhook_server.py)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, args.host, args.port)
+        await site.start()
+
+        print()
+        print(f"Hive API server running on http://{args.host}:{args.port}")
+        print(f"Health: http://{args.host}:{args.port}/api/health")
+        print(f"Agents loaded: {len(manager.list_agents())}")
+        print()
+        print("Press Ctrl+C to stop")
+
+        # Run forever until interrupted
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await manager.shutdown_all()
+            await runner.cleanup()
+
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+
+    return 0

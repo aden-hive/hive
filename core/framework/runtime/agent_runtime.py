@@ -1038,6 +1038,25 @@ class AgentRuntime:
         """Get all registered entry points."""
         return list(self._entry_points.values())
 
+    def find_awaiting_node(self) -> tuple[str | None, str | None]:
+        """Find a node currently awaiting client input.
+
+        Searches all graphs and streams for an active executor whose
+        node has ``_awaiting_input`` set.
+
+        Returns:
+            (node_id, graph_id) if found, otherwise (None, None).
+        """
+        for graph_id, reg in self._graphs.items():
+            for stream in reg.streams.values():
+                if not stream.is_awaiting_input:
+                    continue
+                for executor in stream._active_executors.values():
+                    for node_id, node in executor.node_registry.items():
+                        if getattr(node, "_awaiting_input", False):
+                            return node_id, graph_id
+        return None, None
+
     def get_stream(self, entry_point_id: str) -> ExecutionStream | None:
         """Get a specific execution stream."""
         return self._streams.get(entry_point_id)
