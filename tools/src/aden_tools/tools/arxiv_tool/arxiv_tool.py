@@ -171,9 +171,7 @@ def register_tools(mcp: FastMCP) -> None:
             try:
                 # Start the Stream
                 # stream=True prevents loading the entire file into memory
-                headers = {
-                    "User-Agent": "Hive-Agent/1.0 (https://github.com/adenhq/hive)"
-                }
+                headers = {"User-Agent": "Hive-Agent/1.0 (https://github.com/adenhq/hive)"}
 
                 # No rate limiting needed for PDF download.
                 # The 3-second rule only applies to the metadata API (export.arxiv.org/api/query),
@@ -183,9 +181,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # it was just a bare urlretrieve() call,
                 # with zero rate limiting or client involvement,
                 # because Result objects are pure data and hold no reference back to the Client.
-                response = requests.get(
-                    pdf_url, stream=True, timeout=60, headers=headers
-                )
+                response = requests.get(pdf_url, stream=True, timeout=60, headers=headers)
                 response.raise_for_status()
 
                 content_type = response.headers.get("Content-Type", "")

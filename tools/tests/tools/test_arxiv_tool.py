@@ -117,9 +117,7 @@ class TestSearchPapers:
 
     def test_max_results_clamped(self):
         """max_results above 100 should be silently capped — confirm no crash."""
-        with patch(
-            "aden_tools.tools.arxiv_tool.arxiv_tool._SHARED_ARXIV_CLIENT"
-        ) as mock_client:
+        with patch("aden_tools.tools.arxiv_tool.arxiv_tool._SHARED_ARXIV_CLIENT") as mock_client:
             mock_client.results.return_value = iter([])
             result = self.search_papers(query="test", max_results=9999)
         assert result["success"] is True
@@ -138,10 +136,7 @@ class TestSearchPapers:
         mock_client.results.side_effect = ConnectionError("unreachable")
         result = self.search_papers(query="test")
         assert result["success"] is False
-        assert (
-            "unreachable" in result["error"].lower()
-            or "network" in result["error"].lower()
-        )
+        assert "unreachable" in result["error"].lower() or "network" in result["error"].lower()
 
 
 # ---------------------------------------------------------------------------
