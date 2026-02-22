@@ -79,6 +79,7 @@ Use Hive when you need:
 ## Quick Start
 
 ### Prerequisites
+> 💡 For beginners: Make sure you have Python 3.11 or higher installed and added to your PATH before running the setup script.
 
 - Python 3.11+ for agent development
 - Claude Code, Codex CLI, or Cursor for utilizing agent skills
@@ -86,6 +87,7 @@ Use Hive when you need:
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
 
 ### Installation
+The following steps will help you set up Hive locally for the first time.
 
 >**Note**
 > Hive uses a `uv` workspace layout and is not installed with `pip install`.
@@ -456,3 +458,4 @@ Hive focuses on generating agents that run real business processes, rather than 
 <p align="center">
   Made with 🔥 Passion in San Francisco
 </p>
+Minor documentation improvement
