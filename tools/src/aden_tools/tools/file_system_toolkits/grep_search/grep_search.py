@@ -17,6 +17,7 @@ def register_tools(mcp: FastMCP) -> None:
         agent_id: str,
         session_id: str,
         recursive: bool = False,
+        max_matches: int = 1000,
     ) -> dict:
         """
         Search for a pattern in a file or directory within the session sandbox.
@@ -31,12 +32,11 @@ def register_tools(mcp: FastMCP) -> None:
             agent_id: The ID of the agent
             session_id: The ID of the current session
             recursive: Whether to search recursively in directories (default: False)
+            max_matches: Maximum number of matches to return (default: 1000)
 
         Returns:
             Dict with search results and match details, or error dict
         """
-        # 1. Early Regex Validation (Issue #55 Acceptance Criteria)
-        # Using .msg for a cleaner, less noisy error response
         try:
             regex = re.compile(pattern)
         except re.error as e:
@@ -44,10 +44,10 @@ def register_tools(mcp: FastMCP) -> None:
 
         try:
             secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-            # Use session dir root for relative path calculations
             session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
 
             matches = []
+            truncated = False
 
             if os.path.isfile(secure_path):
                 files = [secure_path]
@@ -64,7 +64,6 @@ def register_tools(mcp: FastMCP) -> None:
                 ]
 
             for file_path in files:
-                # Calculate relative path for display
                 display_path = os.path.relpath(file_path, session_root)
                 try:
                     with open(file_path, encoding="utf-8") as f:
@@ -77,9 +76,14 @@ def register_tools(mcp: FastMCP) -> None:
                                         "line_content": line.strip(),
                                     }
                                 )
+                                if len(matches) >= max_matches:
+                                    truncated = True
+                                    break
                 except (UnicodeDecodeError, PermissionError):
-                    # Skips files that cannot be decoded or lack permissions
                     continue
+
+                if truncated:
+                    break
 
             return {
                 "success": True,
@@ -88,13 +92,12 @@ def register_tools(mcp: FastMCP) -> None:
                 "recursive": recursive,
                 "matches": matches,
                 "total_matches": len(matches),
+                "truncated": truncated,
             }
 
-        # 2. Specific Exception Handling (Issue #55 Requirements)
         except FileNotFoundError:
             return {"error": f"Directory or file not found: {path}"}
         except PermissionError:
             return {"error": f"Permission denied accessing: {path}"}
         except Exception as e:
-            # 3. Generic Fallback
             return {"error": f"Failed to perform grep search: {str(e)}"}

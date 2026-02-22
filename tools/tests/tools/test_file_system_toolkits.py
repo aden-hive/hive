@@ -533,6 +533,81 @@ class TestGrepSearchTool:
         assert result["success"] is True
         assert result["total_matches"] == 2  # Line 1 and Line 3
 
+    def test_grep_search_max_matches_truncation(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Searching with max_matches limits results and sets truncated flag."""
+        test_file = tmp_path / "many_matches.txt"
+        test_file.write_text("pattern\npattern\npattern\npattern\npattern\n")
+
+        result = grep_search_fn(
+            path="many_matches.txt", pattern="pattern", max_matches=2, **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["total_matches"] == 2
+        assert result["truncated"] is True
+        assert len(result["matches"]) == 2
+
+    def test_grep_search_max_matches_exactly_at_limit(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Searching with max_matches when matches exactly equal limit succeeds."""
+        test_file = tmp_path / "exact_matches.txt"
+        test_file.write_text("pattern\npattern\n")
+
+        result = grep_search_fn(
+            path="exact_matches.txt", pattern="pattern", max_matches=2, **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["total_matches"] == 2
+        assert result["truncated"] is True
+        assert len(result["matches"]) == 2
+
+    def test_grep_search_max_matches_below_limit(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Searching with max_matches when matches below limit returns all."""
+        test_file = tmp_path / "few_matches.txt"
+        test_file.write_text("pattern\npattern\n")
+
+        result = grep_search_fn(
+            path="few_matches.txt", pattern="pattern", max_matches=10, **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["total_matches"] == 2
+        assert result["truncated"] is False
+        assert len(result["matches"]) == 2
+
+    def test_grep_search_default_max_matches(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """Default max_matches is 1000."""
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("pattern")
+
+        result = grep_search_fn(path="test.txt", pattern="pattern", **mock_workspace)
+
+        assert result["success"] is True
+        assert result["truncated"] is False
+
+    def test_grep_search_max_matches_across_files(
+        self, grep_search_fn, mock_workspace, mock_secure_path, tmp_path
+    ):
+        """max_matches stops search across multiple files when limit reached."""
+        (tmp_path / "file1.txt").write_text("pattern\npattern\npattern\n")
+        (tmp_path / "file2.txt").write_text("pattern\npattern\n")
+
+        result = grep_search_fn(
+            path=".", pattern="pattern", recursive=False, max_matches=2, **mock_workspace
+        )
+
+        assert result["success"] is True
+        assert result["total_matches"] == 2
+        assert result["truncated"] is True
+
 
 class TestExecuteCommandTool:
     """Tests for execute_command_tool."""
