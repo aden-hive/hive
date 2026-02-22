@@ -47,6 +47,8 @@ https://github.com/user-attachments/assets/846c0cc7-ffd6-47fa-b4b7-495494857a55
 
 Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
 
+### Ideal Users
+
 Hive is a good fit if you:
 
 - Want AI agents that **execute real business processes**, not demos
@@ -55,7 +57,40 @@ Hive is a good fit if you:
 - Require **human-in-the-loop control**, observability, and cost limits
 - Plan to run agents in **production environments**
 
-Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
+**Typical user profiles:**
+
+- **Platform Engineers** building autonomous business process automation
+- **DevOps Teams** creating self-healing operational workflows
+- **Product Teams** deploying customer-facing AI agents at scale
+- **Data Teams** orchestrating complex multi-step data pipelines with AI reasoning
+
+### Who Hive Is NOT For
+
+Hive may not be the best fit if you:
+
+- Are building **simple RAG pipelines** with linear retrieval and generation
+- Need **static, hardcoded workflows** that never change
+- Want **quick prototypes or one-off scripts** without production requirements
+- Prefer **zero-code/no-code solutions** over developer-focused tooling
+- Only need **single-turn LLM calls** without state management or orchestration
+
+If your use case is simpler, consider lighter frameworks like LangChain, LlamaIndex, or direct API calls.
+
+## Primary Use Cases
+
+Here are concrete business scenarios where Hive excels:
+
+### Operations Automation
+**Ticket Routing & Incident Response** - Agents that classify incoming tickets, route them to the right team, escalate based on severity, and trigger remediation workflows. Built-in human-in-the-loop ensures critical issues get human review.
+
+### Sales Workflows
+**Lead Qualification & Outreach** - Multi-step agents that research prospects, score leads based on custom criteria, draft personalized outreach, and schedule follow-ups. Adaptive learning improves conversion rates over time.
+
+### Internal Tooling
+**Data Processing & Reporting** - Agents that extract data from multiple sources, validate and transform it, generate reports, and flag anomalies for review. Perfect for recurring business intelligence tasks.
+
+### Customer Support
+**Intelligent Triage & Resolution** - Agents that understand customer queries, search knowledge bases, draft responses, escalate complex issues, and learn from resolution patterns to improve future handling.
 
 ## When Should You Use Hive?
 
