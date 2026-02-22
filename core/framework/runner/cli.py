@@ -432,7 +432,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 try:
                     runner = AgentRunner.load(
                         args.agent_path,
-                        enable_tui=True,
+                        interactive=True,
                         **load_kwargs,
                     )
                 except CredentialError as e:
@@ -476,7 +476,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         try:
             runner = AgentRunner.load(
                 args.agent_path,
-                enable_tui=False,
+                interactive=False,
                 **load_kwargs,
             )
         except CredentialError as e:
