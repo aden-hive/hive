@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
 
@@ -39,18 +39,21 @@ jobs:
           uv run --project core ruff format --check tools/
 
   test:
-    name: Test Python Framework
+    name: Test (${{ matrix.os }} / Py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11', '3.12']
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -103,7 +106,6 @@ jobs:
 
       - name: Validate exported agents
         run: |
-          # Check that agent exports have valid structure
           if [ ! -d "exports" ]; then
             echo "No exports/ directory found, skipping validation"
             exit 0
