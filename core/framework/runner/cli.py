@@ -513,6 +513,14 @@ def cmd_run(args: argparse.Namespace) -> int:
                     print(f"Error loading agent: {e}")
                     return
 
+                # Validate before launching TUI
+                validation = runner.validate()
+                if not validation.valid:
+                    print("✗ Agent has errors:", file=sys.stderr)
+                    for error in validation.errors:
+                        print(f"  ERROR: {error}", file=sys.stderr)
+                    return
+
                 # Prompt before starting (allows credential updates)
                 if sys.stdin.isatty():
                     runner = _prompt_before_start(args.agent_path, runner, args.model)
@@ -572,6 +580,25 @@ def cmd_run(args: argparse.Namespace) -> int:
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
+
+        # Validate before execution
+        validation = runner.validate()
+        if not validation.valid:
+            print("✗ Agent has errors:", file=sys.stderr)
+            for error in validation.errors:
+                print(f"  ERROR: {error}", file=sys.stderr)
+            runner.cleanup()
+            return 1
+
+        if validation.warnings and not getattr(args, "quiet", False):
+            print("Warnings:", file=sys.stderr)
+            for warning in validation.warnings:
+                print(f"  WARNING: {warning}", file=sys.stderr)
+
+        if validation.missing_tools and not getattr(args, "quiet", False):
+            print("\nMissing tool implementations:", file=sys.stderr)
+            for tool in validation.missing_tools:
+                print(f"  - {tool}", file=sys.stderr)
 
         # Prompt before starting (allows credential updates)
         if sys.stdin.isatty() and not args.quiet:
