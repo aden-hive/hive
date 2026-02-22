@@ -104,9 +104,11 @@ def validate_agent_credentials(nodes: list, quiet: bool = False, verify: bool = 
         quiet: If True, suppress the credential summary output.
         verify: If True (default), run health checks on present credentials.
     """
-    # Collect required tools and node types
-    required_tools = {tool for node in nodes if node.tools for tool in node.tools}
-    node_types = {node.node_type for node in nodes}
+    required_tools: set[str] = set()
+    for node in nodes:
+        if node.tools:
+            required_tools.update(node.all_tool_names)
+    node_types: set[str] = {node.node_type for node in nodes}
 
     try:
         from aden_tools.credentials import CREDENTIAL_SPECS

@@ -11,6 +11,7 @@ The executor:
 
 import asyncio
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -185,6 +186,10 @@ class GraphExecutor:
         # Pause/resume control
         self._pause_requested = asyncio.Event()
 
+        # Resolved tools per node — populated by _validate_tools()
+        # Maps node_id → list of resolved tool names (Tier 2 groups collapsed to one winner)
+        self._resolved_node_tools: dict[str, list[str]] = {}
+
     def _write_progress(
         self,
         current_node: str,
@@ -236,24 +241,94 @@ class GraphExecutor:
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
-        Validate that all tools declared by nodes are available.
+        Validate that all tools declared by nodes are available and have credentials set.
+
+        Supports two declaration styles:
+          Tier 1 — exact name:     tools=["web_search"]
+          Tier 2 — fallback group: tools=[["web_search", "exa_search"]]
+
+        For Tier 2 groups the first tool whose credential env var is set wins.
+        Populates self._resolved_node_tools so _build_node_context() uses the
+        right tool without re-doing this work.
 
         Returns:
-            List of error messages (empty if all tools are available)
+            List of error messages (empty if all tools are valid)
         """
         errors = []
         available_tool_names = {t.name for t in self.tools}
+        self._resolved_node_tools = {}
+
+        # Build tool_name → env_var from CREDENTIAL_SPECS (best-effort)
+        tool_to_env_var: dict[str, str] = {}
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+
+            for spec in CREDENTIAL_SPECS.values():
+                for tool_name in spec.tools:
+                    tool_to_env_var[tool_name] = spec.env_var
+        except ImportError:
+            pass  # credentials package unavailable — skip credential checks
 
         for node in graph.nodes:
-            if node.tools:
-                missing = set(node.tools) - available_tool_names
-                if missing:
-                    available = sorted(available_tool_names) if available_tool_names else "none"
-                    errors.append(
-                        f"Node '{node.name}' (id={node.id}) requires tools "
-                        f"{sorted(missing)} but they are not registered. "
-                        f"Available tools: {available}"
-                    )
+            if not node.tools:
+                continue
+
+            resolved: list[str] = []
+
+            for entry in node.tools:
+                if isinstance(entry, str):
+                    # --- Tier 1: check registration AND credential ---
+                    tool_name = entry
+                    if tool_name not in available_tool_names:
+                        errors.append(f"Node '{node.name}': tool '{tool_name}' is not registered.")
+                        continue
+                    env_var = tool_to_env_var.get(tool_name)
+                    if env_var and not os.environ.get(env_var):
+                        errors.append(
+                            f"Node '{node.name}': tool '{tool_name}' requires {env_var}"
+                            f" but it is not set."
+                        )
+                        continue
+                    resolved.append(tool_name)
+
+                elif isinstance(entry, list):
+                    # --- Tier 2: fallback group ---
+                    picked: str | None = None
+                    skipped: list[str] = []
+
+                    for tool_name in entry:
+                        if tool_name not in available_tool_names:
+                            skipped.append(f"{tool_name} (not registered)")
+                            continue
+                        env_var = tool_to_env_var.get(tool_name)
+                        if env_var and not os.environ.get(env_var):
+                            skipped.append(f"{tool_name} ({env_var} not set)")
+                            continue
+                        picked = tool_name
+                        break
+
+                    if picked is None:
+                        required_vars = [tool_to_env_var[t] for t in entry if t in tool_to_env_var]
+                        hint = (
+                            f"Set one of: {', '.join(required_vars)}"
+                            if required_vars
+                            else "No credentials found for any tool in group."
+                        )
+                        errors.append(
+                            f"Node '{node.name}': no tool in {entry} has valid credentials. {hint}"
+                        )
+                    else:
+                        if skipped:
+                            self.logger.info(
+                                "[tool-resolution] Node '%s': %s resolved to '%s' (skipped: %s)",
+                                node.name,
+                                entry,
+                                picked,
+                                ", ".join(skipped),
+                            )
+                        resolved.append(picked)
+
+            self._resolved_node_tools[node.id] = resolved
 
         return errors
 
@@ -672,8 +747,11 @@ class GraphExecutor:
 
                 # Continuous mode: accumulate tools and output keys from this node
                 if is_continuous and node_spec.tools:
+                    _resolved = self._resolved_node_tools.get(
+                        node_spec.id, node_spec.all_tool_names
+                    )
                     for t in self.tools:
-                        if t.name in node_spec.tools and t.name not in cumulative_tool_names:
+                        if t.name in _resolved and t.name not in cumulative_tool_names:
                             cumulative_tools.append(t)
                             cumulative_tool_names.add(t.name)
                 if is_continuous and node_spec.output_keys:
@@ -1515,7 +1593,8 @@ class GraphExecutor:
         else:
             available_tools = []
             if node_spec.tools:
-                available_tools = [t for t in self.tools if t.name in node_spec.tools]
+                resolved = self._resolved_node_tools.get(node_spec.id, node_spec.all_tool_names)
+                available_tools = [t for t in self.tools if t.name in resolved]
 
         # Create scoped memory view
         scoped_memory = memory.with_permissions(

@@ -1457,7 +1457,7 @@ def _generate_readme(session: BuildSession, export_data: dict, all_tools: set) -
         if node.output_keys:
             node_info.append(f"   - Writes: `{', '.join(node.output_keys)}`")
         if node.tools:
-            node_info.append(f"   - Tools: `{', '.join(node.tools)}`")
+            node_info.append(f"   - Tools: `{', '.join(node.all_tool_names)}`")
         if node.routes:
             routes_str = ", ".join([f"{k}→{v}" for k, v in node.routes.items()])
             node_info.append(f"   - Routes: {routes_str}")
@@ -1746,7 +1746,7 @@ def export_graph() -> str:
     # Collect all tools referenced by nodes
     all_tools = set()
     for node in session.nodes:
-        all_tools.update(node.tools)
+        all_tools.update(node.all_tool_names)
 
     # Build export data
     export_data = {

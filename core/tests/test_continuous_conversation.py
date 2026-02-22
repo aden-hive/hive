@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -385,6 +385,7 @@ class TestCumulativeTools:
     """Test that tools accumulate in continuous mode."""
 
     @pytest.mark.asyncio
+    @patch("aden_tools.credentials.CREDENTIAL_SPECS", {}, create=True)
     async def test_isolated_mode_tools_scoped(self):
         """In isolated mode, each node only gets its own declared tools."""
         runtime = _make_runtime()
@@ -446,6 +447,7 @@ class TestCumulativeTools:
             assert "web_search" not in real_tools
 
     @pytest.mark.asyncio
+    @patch("aden_tools.credentials.CREDENTIAL_SPECS", {}, create=True)
     async def test_continuous_mode_tools_accumulate(self):
         """In continuous mode, node B should have both web_search and save_data."""
         runtime = _make_runtime()
