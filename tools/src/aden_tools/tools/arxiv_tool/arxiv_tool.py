@@ -190,10 +190,13 @@ def register_tools(mcp: FastMCP) -> None:
 
                 content_type = response.headers.get("Content-Type", "")
                 if "pdf" not in content_type.lower():
-                    raise ValueError(
-                        f"Expected PDF content but got '{content_type}'. "
-                        "arXiv may have returned an error page."
-                    )
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Failed during download or write: Expected PDF content but got "
+                            f"'{content_type}'. arXiv may have returned an error page."
+                        ),
+                    }
 
                 with open(local_path, "wb") as f:
                     for chunk in response.iter_content(chunk_size=8192):
