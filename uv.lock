@@ -524,6 +524,20 @@ wheels = [
 ]
 
 [[package]]
+name = "databricks-sdk"
+version = "0.91.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-auth" },
+    { name = "protobuf" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/af/a9/83dee5b4bbea94f21c4990aafdb1b1893d25d5bbbe5cd9a95ed2afaf0d42/databricks_sdk-0.91.0.tar.gz", hash = "sha256:7b16f424f509609dd86cb69073a9a80a755c00a7b4be8cdaac3595ce3421a274", size = 857905, upload-time = "2026-02-19T08:22:21.415Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/38/3afd8da94fa076226c470f33632d6df726c469738c01224068f009357985/databricks_sdk-0.91.0-py3-none-any.whl", hash = "sha256:f4481780e66a4c7d24d9d2acdf6778efdb82031532852ccc42b8619b81d0f73f", size = 808425, upload-time = "2026-02-19T08:22:19.161Z" },
+]
+
+[[package]]
 name = "diff-match-patch"
 version = "20241021"
 source = { registry = "https://pypi.org/simple" }
@@ -3390,6 +3404,7 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
+    { name = "databricks-sdk" },
     { name = "duckdb" },
     { name = "google-cloud-bigquery" },
     { name = "openpyxl" },
@@ -3399,6 +3414,9 @@ all = [
 ]
 bigquery = [
     { name = "google-cloud-bigquery" },
+]
+databricks = [
+    { name = "databricks-sdk" },
 ]
 dev = [
     { name = "pytest" },
@@ -3428,6 +3446,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
+    { name = "databricks-sdk", marker = "extra == 'all'", specifier = ">=0.20.0" },
+    { name = "databricks-sdk", marker = "extra == 'databricks'", specifier = ">=0.20.0" },
     { name = "diff-match-patch", specifier = ">=20230430" },
     { name = "dnspython", specifier = ">=2.4.0" },
     { name = "duckdb", marker = "extra == 'all'", specifier = ">=1.0.0" },
@@ -3457,7 +3477,7 @@ requires-dist = [
     { name = "restrictedpython", marker = "extra == 'all'", specifier = ">=7.0" },
     { name = "restrictedpython", marker = "extra == 'sandbox'", specifier = ">=7.0" },
 ]
-provides-extras = ["dev", "sandbox", "ocr", "excel", "sql", "bigquery", "all"]
+provides-extras = ["dev", "sandbox", "ocr", "excel", "sql", "bigquery", "databricks", "all"]
 
 [package.metadata.requires-dev]
 dev = [

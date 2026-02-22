@@ -27,6 +27,7 @@ from .bigquery_tool import register_tools as register_bigquery
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
+from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
 
 # Security scanning tools
@@ -109,6 +110,7 @@ def register_all_tools(
     register_apollo(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
+    register_databricks(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
     register_discord(mcp, credentials=credentials)
     register_exa_search(mcp, credentials=credentials)

@@ -56,6 +56,9 @@ sql = [
 bigquery = [
     "google-cloud-bigquery>=3.0.0",
 ]
+databricks = [
+    "databricks-sdk>=0.20.0",
+]
 all = [
     "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
@@ -63,6 +66,7 @@ all = [
     "duckdb>=1.0.0",
     "openpyxl>=3.1.0",
     "google-cloud-bigquery>=3.0.0",
+    "databricks-sdk>=0.20.0",
 ]
 
 [tool.uv.sources]

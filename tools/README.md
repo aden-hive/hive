@@ -143,6 +143,8 @@ python mcp_server.py
 | `run_bigquery_query`, `describe_dataset` | Run queries against Google BigQuery |
 | `razorpay_*` | Razorpay payments and orders |
 | `github_*` | GitHub repos, issues, and pull requests |
+| `run_databricks_sql`   | Execute a read-only SQL query on Databricks   |
+| `describe_databricks_table` | Describe a Unity Catalog table schema     |
 
 ### Security
 
@@ -185,7 +187,8 @@ tools/
 │       ├── web_scrape_tool/
 │       ├── pdf_read_tool/
 │       ├── time_tool/
-│       └── calendar_tool/
+│       ├── calendar_tool/
+│       └── databricks_tool/
 ├── tests/                   # Test suite
 ├── mcp_server.py            # MCP server entry point
 ├── README.md
