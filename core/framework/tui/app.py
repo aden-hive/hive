@@ -447,19 +447,6 @@ class AdenTUI(App):
             if runner._configure_for_account:
                 runner._configure_for_account(runner, selected)
 
-            # Validate credentials for the now-scoped provider
-            from framework.credentials.models import CredentialError as CredError
-            from framework.credentials.validation import validate_agent_credentials
-
-            try:
-                validate_agent_credentials(runner.graph.nodes)
-            except CredError as e:
-                self._show_credential_setup(
-                    str(runner.agent_path),
-                    credential_error=e,
-                )
-                return
-
             # Continue with the rest of agent loading
             self._do_finish_agent_load(runner)
 
