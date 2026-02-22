@@ -28,8 +28,54 @@ from framework.llm.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
 
+
+def _patch_litellm_anthropic_oauth() -> None:
+    """Patch litellm's Anthropic header construction to fix OAuth token handling.
+
+    litellm bug: validate_environment() puts the OAuth token into x-api-key,
+    but Anthropic's API rejects OAuth tokens in x-api-key. They must be sent
+    via Authorization: Bearer only, with x-api-key omitted entirely.
+
+    This patch wraps validate_environment to remove x-api-key when the
+    Authorization header carries an OAuth token (sk-ant-oat prefix).
+
+    See: https://github.com/BerriAI/litellm/issues/19618
+    """
+    try:
+        from litellm.llms.anthropic.common_utils import AnthropicModelInfo
+        from litellm.types.llms.anthropic import ANTHROPIC_OAUTH_TOKEN_PREFIX
+    except ImportError:
+        return
+
+    original = AnthropicModelInfo.validate_environment
+
+    def _patched_validate_environment(
+        self, headers, model, messages, optional_params, litellm_params, api_key=None, api_base=None
+    ):
+        result = original(
+            self,
+            headers,
+            model,
+            messages,
+            optional_params,
+            litellm_params,
+            api_key=api_key,
+            api_base=api_base,
+        )
+        auth = result.get("authorization", "")
+        if auth.startswith(f"Bearer {ANTHROPIC_OAUTH_TOKEN_PREFIX}"):
+            result.pop("x-api-key", None)
+        return result
+
+    AnthropicModelInfo.validate_environment = _patched_validate_environment
+
+
+if litellm is not None:
+    _patch_litellm_anthropic_oauth()
+
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
+RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
 
 # Directory for dumping failed requests
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
@@ -82,6 +128,91 @@ def _dump_failed_request(
         json.dump(dump_data, f, indent=2, default=str)
 
     return str(filepath)
+
+
+def _compute_retry_delay(
+    attempt: int,
+    exception: BaseException | None = None,
+    backoff_base: int = RATE_LIMIT_BACKOFF_BASE,
+    max_delay: int = RATE_LIMIT_MAX_DELAY,
+) -> float:
+    """Compute retry delay, preferring server-provided Retry-After headers.
+
+    Priority:
+    1. retry-after-ms header (milliseconds, float)
+    2. retry-after header as seconds (float)
+    3. retry-after header as HTTP-date (RFC 7231)
+    4. Exponential backoff: backoff_base * 2^attempt
+
+    All values are capped at max_delay seconds.
+    """
+    if exception is not None:
+        response = getattr(exception, "response", None)
+        if response is not None:
+            headers = getattr(response, "headers", None)
+            if headers is not None:
+                # Priority 1: retry-after-ms (milliseconds)
+                retry_after_ms = headers.get("retry-after-ms")
+                if retry_after_ms is not None:
+                    try:
+                        delay = float(retry_after_ms) / 1000.0
+                        return min(max(delay, 0), max_delay)
+                    except (ValueError, TypeError):
+                        pass
+
+                # Priority 2: retry-after (seconds or HTTP-date)
+                retry_after = headers.get("retry-after")
+                if retry_after is not None:
+                    # Try as seconds (float)
+                    try:
+                        delay = float(retry_after)
+                        return min(max(delay, 0), max_delay)
+                    except (ValueError, TypeError):
+                        pass
+
+                    # Try as HTTP-date (e.g., "Fri, 31 Dec 2025 23:59:59 GMT")
+                    try:
+                        from email.utils import parsedate_to_datetime
+
+                        retry_date = parsedate_to_datetime(retry_after)
+                        now = datetime.now(retry_date.tzinfo)
+                        delay = (retry_date - now).total_seconds()
+                        return min(max(delay, 0), max_delay)
+                    except (ValueError, TypeError, OverflowError):
+                        pass
+
+    # Fallback: exponential backoff
+    delay = backoff_base * (2**attempt)
+    return min(delay, max_delay)
+
+
+def _is_stream_transient_error(exc: BaseException) -> bool:
+    """Classify whether a streaming exception is transient (recoverable).
+
+    Transient errors (recoverable=True): network issues, server errors, timeouts.
+    Permanent errors (recoverable=False): auth, bad request, context window, etc.
+    """
+    try:
+        from litellm.exceptions import (
+            APIConnectionError,
+            BadGatewayError,
+            InternalServerError,
+            ServiceUnavailableError,
+        )
+
+        transient_types: tuple[type[BaseException], ...] = (
+            APIConnectionError,
+            InternalServerError,
+            BadGatewayError,
+            ServiceUnavailableError,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+        )
+    except ImportError:
+        transient_types = (TimeoutError, ConnectionError, OSError)
+
+    return isinstance(exc, transient_types)
 
 
 class LiteLLMProvider(LLMProvider):
@@ -150,10 +281,13 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
-    def _completion_with_rate_limit_retry(self, **kwargs: Any) -> Any:
+    def _completion_with_rate_limit_retry(
+        self, max_retries: int | None = None, **kwargs: Any
+    ) -> Any:
         """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
         model = kwargs.get("model", self.model)
-        for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+        retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
+        for attempt in range(retries + 1):
             try:
                 response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
@@ -194,22 +328,22 @@ class LiteLLMProvider(LLMProvider):
                         f"Full request dumped to: {dump_path}"
                     )
 
-                    if attempt == RATE_LIMIT_MAX_RETRIES:
+                    if attempt == retries:
                         logger.error(
-                            f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                            f"[retry] GAVE UP on {model} after {retries + 1} "
                             f"attempts — empty response "
                             f"(finish_reason={finish_reason}, "
                             f"choices={len(response.choices) if response.choices else 0})"
                         )
                         return response
-                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    wait = _compute_retry_delay(attempt)
                     logger.warning(
                         f"[retry] {model} returned empty response "
                         f"(finish_reason={finish_reason}, "
                         f"choices={len(response.choices) if response.choices else 0}) — "
                         f"likely rate limited or quota exceeded. "
                         f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                        f"(attempt {attempt + 1}/{retries})"
                     )
                     time.sleep(wait)
                     continue
@@ -225,21 +359,21 @@ class LiteLLMProvider(LLMProvider):
                     error_type="rate_limit",
                     attempt=attempt,
                 )
-                if attempt == RATE_LIMIT_MAX_RETRIES:
+                if attempt == retries:
                     logger.error(
-                        f"[retry] GAVE UP on {model} after {RATE_LIMIT_MAX_RETRIES + 1} "
+                        f"[retry] GAVE UP on {model} after {retries + 1} "
                         f"attempts — rate limit error: {e!s}. "
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )
                     raise
-                wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                wait = _compute_retry_delay(attempt, exception=e)
                 logger.warning(
                     f"[retry] {model} rate limited (429): {e!s}. "
                     f"~{token_count} tokens ({token_method}). "
                     f"Full request dumped to: {dump_path}. "
                     f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    f"(attempt {attempt + 1}/{retries})"
                 )
                 time.sleep(wait)
         # unreachable, but satisfies type checker
@@ -253,6 +387,7 @@ class LiteLLMProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """Generate a completion using LiteLLM."""
         # Prepare messages with system prompt
@@ -293,12 +428,17 @@ class LiteLLMProvider(LLMProvider):
             kwargs["response_format"] = response_format
 
         # Make the call
-        response = self._completion_with_rate_limit_retry(**kwargs)
+        response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
 
         # Extract content
         content = response.choices[0].message.content or ""
 
-        # Get usage info
+        # Get usage info.
+        # NOTE: completion_tokens includes reasoning/thinking tokens for models
+        # that use them (o1, gpt-5-mini, etc.). LiteLLM does not reliably expose
+        # usage.completion_tokens_details.reasoning_tokens across all providers.
+        # This means output_tokens may be inflated for reasoning models.
+        # Compaction is unaffected — it uses prompt_tokens (input-side only).
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
@@ -424,6 +564,267 @@ class LiteLLMProvider(LLMProvider):
                 )
 
         # Max iterations reached
+        return LLMResponse(
+            content="Max tool iterations reached",
+            model=self.model,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            stop_reason="max_iterations",
+            raw_response=None,
+        )
+
+    # ------------------------------------------------------------------
+    # Async variants — non-blocking on the event loop
+    # ------------------------------------------------------------------
+
+    async def _acompletion_with_rate_limit_retry(
+        self, max_retries: int | None = None, **kwargs: Any
+    ) -> Any:
+        """Async version of _completion_with_rate_limit_retry.
+
+        Uses litellm.acompletion and asyncio.sleep instead of blocking calls.
+        """
+        model = kwargs.get("model", self.model)
+        retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
+        for attempt in range(retries + 1):
+            try:
+                response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
+
+                content = response.choices[0].message.content if response.choices else None
+                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
+                if not content and not has_tool_calls:
+                    messages = kwargs.get("messages", [])
+                    last_role = next(
+                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
+                        None,
+                    )
+                    if last_role == "assistant":
+                        logger.debug(
+                            "[async-retry] Empty response after assistant message — "
+                            "expected, not retrying."
+                        )
+                        return response
+
+                    finish_reason = (
+                        response.choices[0].finish_reason if response.choices else "unknown"
+                    )
+                    token_count, token_method = _estimate_tokens(model, messages)
+                    dump_path = _dump_failed_request(
+                        model=model,
+                        kwargs=kwargs,
+                        error_type="empty_response",
+                        attempt=attempt,
+                    )
+                    logger.warning(
+                        f"[async-retry] Empty response - {len(messages)} messages, "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+
+                    if attempt == retries:
+                        logger.error(
+                            f"[async-retry] GAVE UP on {model} after {retries + 1} "
+                            f"attempts — empty response "
+                            f"(finish_reason={finish_reason}, "
+                            f"choices={len(response.choices) if response.choices else 0})"
+                        )
+                        return response
+                    wait = _compute_retry_delay(attempt)
+                    logger.warning(
+                        f"[async-retry] {model} returned empty response "
+                        f"(finish_reason={finish_reason}, "
+                        f"choices={len(response.choices) if response.choices else 0}) — "
+                        f"likely rate limited or quota exceeded. "
+                        f"Retrying in {wait}s "
+                        f"(attempt {attempt + 1}/{retries})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                return response
+            except RateLimitError as e:
+                messages = kwargs.get("messages", [])
+                token_count, token_method = _estimate_tokens(model, messages)
+                dump_path = _dump_failed_request(
+                    model=model,
+                    kwargs=kwargs,
+                    error_type="rate_limit",
+                    attempt=attempt,
+                )
+                if attempt == retries:
+                    logger.error(
+                        f"[async-retry] GAVE UP on {model} after {retries + 1} "
+                        f"attempts — rate limit error: {e!s}. "
+                        f"~{token_count} tokens ({token_method}). "
+                        f"Full request dumped to: {dump_path}"
+                    )
+                    raise
+                wait = _compute_retry_delay(attempt, exception=e)
+                logger.warning(
+                    f"[async-retry] {model} rate limited (429): {e!s}. "
+                    f"~{token_count} tokens ({token_method}). "
+                    f"Full request dumped to: {dump_path}. "
+                    f"Retrying in {wait}s "
+                    f"(attempt {attempt + 1}/{retries})"
+                )
+                await asyncio.sleep(wait)
+        raise RuntimeError("Exhausted rate limit retries")
+
+    async def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
+    ) -> LLMResponse:
+        """Async version of complete(). Uses litellm.acompletion — non-blocking."""
+        full_messages: list[dict[str, Any]] = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        if json_mode:
+            json_instruction = "\n\nPlease respond with a valid JSON object."
+            if full_messages and full_messages[0]["role"] == "system":
+                full_messages[0]["content"] += json_instruction
+            else:
+                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": full_messages,
+            "max_tokens": max_tokens,
+            **self.extra_kwargs,
+        }
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if tools:
+            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
+
+        content = response.choices[0].message.content or ""
+        usage = response.usage
+        input_tokens = usage.prompt_tokens if usage else 0
+        output_tokens = usage.completion_tokens if usage else 0
+
+        return LLMResponse(
+            content=content,
+            model=response.model or self.model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            stop_reason=response.choices[0].finish_reason or "",
+            raw_response=response,
+        )
+
+    async def acomplete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[Tool],
+        tool_executor: Callable[[ToolUse], ToolResult],
+        max_iterations: int = 10,
+        max_tokens: int = 4096,
+    ) -> LLMResponse:
+        """Async version of complete_with_tools(). Uses litellm.acompletion — non-blocking."""
+        current_messages: list[dict[str, Any]] = []
+        if system:
+            current_messages.append({"role": "system", "content": system})
+        current_messages.extend(messages)
+
+        total_input_tokens = 0
+        total_output_tokens = 0
+        openai_tools = [self._tool_to_openai_format(t) for t in tools]
+
+        for _ in range(max_iterations):
+            kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": current_messages,
+                "max_tokens": max_tokens,
+                "tools": openai_tools,
+                **self.extra_kwargs,
+            }
+
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+            if self.api_base:
+                kwargs["api_base"] = self.api_base
+
+            response = await self._acompletion_with_rate_limit_retry(**kwargs)
+
+            usage = response.usage
+            if usage:
+                total_input_tokens += usage.prompt_tokens
+                total_output_tokens += usage.completion_tokens
+
+            choice = response.choices[0]
+            message = choice.message
+
+            if choice.finish_reason == "stop" or not message.tool_calls:
+                return LLMResponse(
+                    content=message.content or "",
+                    model=response.model or self.model,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                    stop_reason=choice.finish_reason or "stop",
+                    raw_response=response,
+                )
+
+            current_messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ],
+                }
+            )
+
+            for tool_call in message.tool_calls:
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                except json.JSONDecodeError:
+                    current_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": "Invalid JSON arguments provided to tool.",
+                        }
+                    )
+                    continue
+
+                tool_use = ToolUse(
+                    id=tool_call.id,
+                    name=tool_call.function.name,
+                    input=args,
+                )
+
+                result = tool_executor(tool_use)
+
+                current_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": result.tool_use_id,
+                        "content": result.content,
+                    }
+                )
+
         return LLMResponse(
             content="Max tool iterations reached",
             model=self.model,
@@ -591,7 +992,7 @@ class LiteLLMProvider(LLMProvider):
                         for event in tail_events:
                             yield event
                         return
-                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    wait = _compute_retry_delay(attempt)
                     token_count, token_method = _estimate_tokens(
                         self.model,
                         full_messages,
@@ -619,10 +1020,10 @@ class LiteLLMProvider(LLMProvider):
 
             except RateLimitError as e:
                 if attempt < RATE_LIMIT_MAX_RETRIES:
-                    wait = RATE_LIMIT_BACKOFF_BASE * (2**attempt)
+                    wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} rate limited (429): {e!s}. "
-                        f"Retrying in {wait}s "
+                        f"Retrying in {wait:.1f}s "
                         f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
                     )
                     await asyncio.sleep(wait)
@@ -631,5 +1032,16 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
-                yield StreamErrorEvent(error=str(e), recoverable=False)
+                if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
+                    wait = _compute_retry_delay(attempt, exception=e)
+                    logger.warning(
+                        f"[stream-retry] {self.model} transient error "
+                        f"({type(e).__name__}): {e!s}. "
+                        f"Retrying in {wait:.1f}s "
+                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                recoverable = _is_stream_transient_error(e)
+                yield StreamErrorEvent(error=str(e), recoverable=recoverable)
                 return

@@ -11,7 +11,6 @@ The executor:
 
 import asyncio
 import logging
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,13 +20,10 @@ from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import (
-    FunctionNode,
-    LLMNode,
     NodeContext,
     NodeProtocol,
     NodeResult,
     NodeSpec,
-    RouterNode,
     SharedMemory,
 )
 from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
@@ -138,6 +134,7 @@ class GraphExecutor:
         runtime_logger: Any = None,
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
+        accounts_prompt: str = "",
     ):
         """
         Initialize the executor.
@@ -157,6 +154,7 @@ class GraphExecutor:
             runtime_logger: Optional RuntimeLogger for per-graph-run logging
             storage_path: Optional base path for conversation persistence
             loop_config: Optional EventLoopNode configuration (max_iterations, etc.)
+            accounts_prompt: Connected accounts block for system prompt injection
         """
         self.runtime = runtime
         self.llm = llm
@@ -171,6 +169,7 @@ class GraphExecutor:
         self.runtime_logger = runtime_logger
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
+        self.accounts_prompt = accounts_prompt
 
         # Initialize output cleaner
         self.cleansing_config = cleansing_config or CleansingConfig()
@@ -185,6 +184,55 @@ class GraphExecutor:
 
         # Pause/resume control
         self._pause_requested = asyncio.Event()
+
+    def _write_progress(
+        self,
+        current_node: str,
+        path: list[str],
+        memory: Any,
+        node_visit_counts: dict[str, int],
+    ) -> None:
+        """Update state.json with live progress at node transitions.
+
+        Reads the existing state.json (written by ExecutionStream at session
+        start) and patches the progress fields in-place.  This keeps
+        state.json as the single source of truth — readers always see
+        current progress, not stale initial values.
+
+        The write is synchronous and best-effort: never blocks execution.
+        """
+        if not self._storage_path:
+            return
+        try:
+            import json as _json
+            from datetime import datetime
+
+            state_path = self._storage_path / "state.json"
+            if state_path.exists():
+                state_data = _json.loads(state_path.read_text(encoding="utf-8"))
+            else:
+                state_data = {}
+
+            # Patch progress fields
+            progress = state_data.setdefault("progress", {})
+            progress["current_node"] = current_node
+            progress["path"] = list(path)
+            progress["node_visit_counts"] = dict(node_visit_counts)
+            progress["steps_executed"] = len(path)
+
+            # Update timestamp
+            timestamps = state_data.setdefault("timestamps", {})
+            timestamps["updated_at"] = datetime.now().isoformat()
+
+            # Persist full memory so state.json is sufficient for resume
+            # even if the process dies before the final write.
+            memory_snapshot = memory.read_all()
+            state_data["memory"] = memory_snapshot
+            state_data["memory_keys"] = list(memory_snapshot.keys())
+
+            state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
+        except Exception:
+            pass  # Best-effort — never block execution
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
@@ -257,6 +305,13 @@ class GraphExecutor:
         # Initialize execution state
         memory = SharedMemory()
 
+        # Continuous conversation mode state
+        is_continuous = getattr(graph, "conversation_mode", "isolated") == "continuous"
+        continuous_conversation = None  # NodeConversation threaded across nodes
+        cumulative_tools: list = []  # Tools accumulate, never removed
+        cumulative_tool_names: set[str] = set()
+        cumulative_output_keys: list[str] = []  # Output keys from all visited nodes
+
         # Initialize checkpoint store if checkpointing is enabled
         checkpoint_store: CheckpointStore | None = None
         if checkpoint_config and checkpoint_config.enabled and self._storage_path:
@@ -273,15 +328,25 @@ class GraphExecutor:
                     f"{type(memory_data).__name__}, expected dict"
                 )
             else:
-                # Restore memory from previous session
+                # Restore memory from previous session.
+                # Skip validation — this data was already validated when
+                # originally written, and research text triggers false
+                # positives on the code-indicator heuristic.
                 for key, value in memory_data.items():
-                    memory.write(key, value)
+                    memory.write(key, value, validate=False)
                 self.logger.info(f"📥 Restored session state with {len(memory_data)} memory keys")
 
-        # Write new input data to memory (each key individually)
-        if input_data:
+        # Write new input data to memory (each key individually).
+        # Skip when resuming from a paused session — restored memory already
+        # contains all state including the original input, and re-writing
+        # input_data would overwrite intermediate results with stale values.
+        _is_resuming = bool(session_state and session_state.get("paused_at"))
+        if input_data and not _is_resuming:
             for key, value in input_data.items():
                 memory.write(key, value)
+
+        # Detect event-triggered execution (timer/webhook) — no interactive user.
+        _event_triggered = bool(input_data and isinstance(input_data.get("event"), dict))
 
         path: list[str] = []
         total_tokens = 0
@@ -396,8 +461,75 @@ class GraphExecutor:
 
         steps = 0
 
+        # Fresh shared-session execution: clear stale cursor so the entry
+        # node doesn't restore a filled OutputAccumulator from the previous
+        # webhook run (which would cause the judge to accept immediately).
+        # The conversation history is preserved (continuous memory).
+        _is_fresh_shared = bool(
+            session_state
+            and session_state.get("resume_session_id")
+            and not session_state.get("paused_at")
+            and not session_state.get("resume_from_checkpoint")
+        )
+        if _is_fresh_shared and is_continuous and self._storage_path:
+            try:
+                from framework.storage.conversation_store import FileConversationStore
+
+                entry_conv_path = self._storage_path / "conversations" / current_node_id
+                if entry_conv_path.exists():
+                    _store = FileConversationStore(base_path=entry_conv_path)
+
+                    # Read cursor to find next seq for the transition marker.
+                    _cursor = await _store.read_cursor() or {}
+                    _next_seq = _cursor.get("next_seq", 0)
+                    if _next_seq == 0:
+                        # Fallback: scan part files for max seq
+                        _parts = await _store.read_parts()
+                        if _parts:
+                            _next_seq = max(p.get("seq", 0) for p in _parts) + 1
+
+                    # Reset cursor — clears stale accumulator outputs and
+                    # iteration counter so the node starts fresh work while
+                    # the conversation thread carries forward.
+                    await _store.write_cursor({})
+
+                    # Append a transition marker so the LLM knows a new
+                    # event arrived and previous results are outdated.
+                    await _store.write_part(
+                        _next_seq,
+                        {
+                            "role": "user",
+                            "content": (
+                                "--- NEW EVENT TRIGGER ---\n"
+                                "A new event has been received. "
+                                "Process this as a fresh request — "
+                                "previous outputs are no longer valid."
+                            ),
+                            "seq": _next_seq,
+                            "is_transition_marker": True,
+                        },
+                    )
+                    self.logger.info(
+                        "🔄 Cleared stale cursor and added transition marker "
+                        "for shared-session entry node '%s'",
+                        current_node_id,
+                    )
+            except Exception:
+                self.logger.debug(
+                    "Could not prepare conversation store for shared-session entry node '%s'",
+                    current_node_id,
+                    exc_info=True,
+                )
+
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
+
+            # Emit resume event
+            if self._event_bus:
+                await self._event_bus.emit_execution_resumed(
+                    stream_id=self._stream_id,
+                    node_id=current_node_id,
+                )
 
         # Start run
         _run_id = self.runtime.start_run(
@@ -434,6 +566,14 @@ class GraphExecutor:
                 # Check for pause request
                 if self._pause_requested.is_set():
                     self.logger.info("⏸ Pause detected - stopping at node boundary")
+
+                    # Emit pause event
+                    if self._event_bus:
+                        await self._event_bus.emit_execution_paused(
+                            stream_id=self._stream_id,
+                            node_id=current_node_id,
+                            reason="User requested pause (Ctrl+Z)",
+                        )
 
                     # Create session state for pause
                     saved_memory = memory.read_all()
@@ -481,7 +621,7 @@ class GraphExecutor:
                     cnt = node_visit_counts.get(current_node_id, 0) + 1
                     node_visit_counts[current_node_id] = cnt
                 _is_retry = False
-                max_visits = getattr(node_spec, "max_node_visits", 1)
+                max_visits = getattr(node_spec, "max_node_visits", 0)
                 if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
                     self.logger.warning(
                         f"   ⊘ Node '{node_spec.name}' visit limit reached "
@@ -489,7 +629,7 @@ class GraphExecutor:
                     )
                     # Skip execution — follow outgoing edges using current memory
                     skip_result = NodeResult(success=True, output=memory.read_all())
-                    next_node = self._follow_edges(
+                    next_node = await self._follow_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
@@ -530,6 +670,17 @@ class GraphExecutor:
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
 
+                # Continuous mode: accumulate tools and output keys from this node
+                if is_continuous and node_spec.tools:
+                    for t in self.tools:
+                        if t.name in node_spec.tools and t.name not in cumulative_tool_names:
+                            cumulative_tools.append(t)
+                            cumulative_tool_names.add(t.name)
+                if is_continuous and node_spec.output_keys:
+                    for k in node_spec.output_keys:
+                        if k not in cumulative_output_keys:
+                            cumulative_output_keys.append(k)
+
                 # Build context for node
                 ctx = self._build_context(
                     node_spec=node_spec,
@@ -537,6 +688,11 @@ class GraphExecutor:
                     goal=goal,
                     input_data=input_data or {},
                     max_tokens=graph.max_tokens,
+                    continuous_mode=is_continuous,
+                    inherited_conversation=continuous_conversation if is_continuous else None,
+                    override_tools=cumulative_tools if is_continuous else None,
+                    cumulative_output_keys=cumulative_output_keys if is_continuous else None,
+                    event_triggered=_event_triggered,
                 )
 
                 # Log actual input data being read
@@ -680,9 +836,13 @@ class GraphExecutor:
                     # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
                     max_retries = getattr(node_spec, "max_retries", 3)
 
-                    # Event loop nodes handle retry internally via judge —
-                    # executor retry is catastrophic (retry multiplication)
-                    if node_spec.node_type == "event_loop" and max_retries > 0:
+                    # EventLoopNode instances handle retry internally via judge —
+                    # executor retry would cause catastrophic retry multiplication.
+                    # Only override for actual EventLoopNode instances, not custom
+                    # NodeProtocol implementations that happen to use node_type="event_loop"
+                    from framework.graph.event_loop_node import EventLoopNode
+
+                    if isinstance(node_impl, EventLoopNode) and max_retries > 0:
                         self.logger.warning(
                             f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
                             "Overriding to 0 — event loop nodes handle retry internally via judge."
@@ -704,6 +864,17 @@ class GraphExecutor:
                         self.logger.info(
                             f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
                         )
+
+                        # Emit retry event
+                        if self._event_bus:
+                            await self._event_bus.emit_node_retry(
+                                stream_id=self._stream_id,
+                                node_id=current_node_id,
+                                retry_count=retry_count,
+                                max_retries=max_retries,
+                                error=result.error or "",
+                            )
+
                         _is_retry = True
                         continue
                     else:
@@ -713,7 +884,7 @@ class GraphExecutor:
                         )
 
                         # Check if there's an ON_FAILURE edge to follow
-                        next_node = self._follow_edges(
+                        next_node = await self._follow_edges(
                             graph=graph,
                             goal=goal,
                             current_node_id=current_node_id,
@@ -763,6 +934,7 @@ class GraphExecutor:
                                 "memory": saved_memory,
                                 "execution_path": list(path),
                                 "node_visit_counts": dict(node_visit_counts),
+                                "resume_from": current_node_id,
                             }
 
                             return ExecutionResult(
@@ -789,11 +961,22 @@ class GraphExecutor:
                 # This must happen BEFORE determining next node, since pause nodes may have no edges
                 if node_spec.id in graph.pause_nodes:
                     self.logger.info("💾 Saving session state after pause node")
+
+                    # Emit pause event
+                    if self._event_bus:
+                        await self._event_bus.emit_execution_paused(
+                            stream_id=self._stream_id,
+                            node_id=node_spec.id,
+                            reason="HITL pause node",
+                        )
+
                     saved_memory = memory.read_all()
                     session_state_out = {
                         "paused_at": node_spec.id,
                         "resume_from": f"{node_spec.id}_resume",  # Resume key
                         "memory": saved_memory,
+                        "execution_path": list(path),
+                        "node_visit_counts": dict(node_visit_counts),
                         "next_node": None,  # Will resume from entry point
                     }
 
@@ -842,10 +1025,21 @@ class GraphExecutor:
                 if result.next_node:
                     # Router explicitly set next node
                     self.logger.info(f"   → Router directing to: {result.next_node}")
+
+                    # Emit edge traversed event for router-directed edge
+                    if self._event_bus:
+                        await self._event_bus.emit_edge_traversed(
+                            stream_id=self._stream_id,
+                            source_node=current_node_id,
+                            target_node=result.next_node,
+                            edge_condition="router",
+                        )
+
                     current_node_id = result.next_node
+                    self._write_progress(current_node_id, path, memory, node_visit_counts)
                 else:
                     # Get all traversable edges for fan-out detection
-                    traversable_edges = self._get_all_traversable_edges(
+                    traversable_edges = await self._get_all_traversable_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
@@ -863,6 +1057,18 @@ class GraphExecutor:
                         # Find convergence point (fan-in node)
                         targets = [e.target for e in traversable_edges]
                         fan_in_node = self._find_convergence_node(graph, targets)
+
+                        # Emit edge traversed events for fan-out branches
+                        if self._event_bus:
+                            for edge in traversable_edges:
+                                await self._event_bus.emit_edge_traversed(
+                                    stream_id=self._stream_id,
+                                    source_node=current_node_id,
+                                    target_node=edge.target,
+                                    edge_condition=edge.condition.value
+                                    if hasattr(edge.condition, "value")
+                                    else str(edge.condition),
+                                )
 
                         # Execute branches in parallel
                         (
@@ -886,13 +1092,14 @@ class GraphExecutor:
                         if fan_in_node:
                             self.logger.info(f"   ⑃ Fan-in: converging at {fan_in_node}")
                             current_node_id = fan_in_node
+                            self._write_progress(current_node_id, path, memory, node_visit_counts)
                         else:
                             # No convergence point - branches are terminal
                             self.logger.info("   → Parallel branches completed (no convergence)")
                             break
                     else:
                         # Sequential: follow single edge (existing logic via _follow_edges)
-                        next_node = self._follow_edges(
+                        next_node = await self._follow_edges(
                             graph=graph,
                             goal=goal,
                             current_node_id=current_node_id,
@@ -905,6 +1112,14 @@ class GraphExecutor:
                             break
                         next_spec = graph.get_node(next_node)
                         self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
+
+                        # Emit edge traversed event for sequential edge
+                        if self._event_bus:
+                            await self._event_bus.emit_edge_traversed(
+                                stream_id=self._stream_id,
+                                source_node=current_node_id,
+                                target_node=next_node,
+                            )
 
                         # CHECKPOINT: node_complete (after determining next node)
                         if (
@@ -939,6 +1154,103 @@ class GraphExecutor:
                             )
 
                         current_node_id = next_node
+
+                # Write progress snapshot at node transition
+                self._write_progress(current_node_id, path, memory, node_visit_counts)
+
+                # Continuous mode: thread conversation forward with transition marker
+                if is_continuous and result.conversation is not None:
+                    continuous_conversation = result.conversation
+
+                    # Look up the next node spec for the transition marker
+                    next_spec = graph.get_node(current_node_id)
+                    if next_spec and next_spec.node_type == "event_loop":
+                        from framework.graph.prompt_composer import (
+                            build_narrative,
+                            build_transition_marker,
+                            compose_system_prompt,
+                        )
+
+                        # Build Layer 2 (narrative) from current state
+                        narrative = build_narrative(memory, path, graph)
+
+                        # Read agent working memory (adapt.md) once for both
+                        # system prompt and transition marker.
+                        _adapt_text: str | None = None
+                        if self._storage_path:
+                            _adapt_path = self._storage_path / "data" / "adapt.md"
+                            if _adapt_path.exists():
+                                _raw = _adapt_path.read_text(encoding="utf-8").strip()
+                                _adapt_text = _raw or None
+
+                        # Merge adapt.md into narrative for system prompt
+                        if _adapt_text:
+                            narrative = (
+                                f"{narrative}\n\n--- Agent Memory ---\n{_adapt_text}"
+                                if narrative
+                                else _adapt_text
+                            )
+
+                        # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
+                        new_system = compose_system_prompt(
+                            identity_prompt=getattr(graph, "identity_prompt", None),
+                            focus_prompt=next_spec.system_prompt,
+                            narrative=narrative,
+                            accounts_prompt=self.accounts_prompt or None,
+                        )
+                        continuous_conversation.update_system_prompt(new_system)
+
+                        # Switch conversation store to the next node's directory
+                        # so the transition marker and all subsequent messages are
+                        # persisted there instead of the first node's directory.
+                        if self._storage_path:
+                            from framework.storage.conversation_store import (
+                                FileConversationStore,
+                            )
+
+                            next_store_path = self._storage_path / "conversations" / next_spec.id
+                            next_store = FileConversationStore(base_path=next_store_path)
+                            await continuous_conversation.switch_store(next_store)
+
+                        # Insert transition marker into conversation
+                        data_dir = str(self._storage_path / "data") if self._storage_path else None
+                        marker = build_transition_marker(
+                            previous_node=node_spec,
+                            next_node=next_spec,
+                            memory=memory,
+                            cumulative_tool_names=sorted(cumulative_tool_names),
+                            data_dir=data_dir,
+                            adapt_content=_adapt_text,
+                        )
+                        await continuous_conversation.add_user_message(
+                            marker,
+                            is_transition_marker=True,
+                        )
+
+                        # Set current phase for phase-aware compaction
+                        continuous_conversation.set_current_phase(next_spec.id)
+
+                        # Opportunistic compaction at transition:
+                        # 1. Prune old tool results (free, no LLM call)
+                        # 2. If still over 80%, do a phase-graduated compact
+                        if continuous_conversation.usage_ratio() > 0.5:
+                            await continuous_conversation.prune_old_tool_results(
+                                protect_tokens=2000,
+                            )
+                        if continuous_conversation.needs_compaction():
+                            self.logger.info(
+                                "   Phase-boundary compaction (%.0f%% usage)",
+                                continuous_conversation.usage_ratio() * 100,
+                            )
+                            summary = (
+                                f"Summary of earlier phases (before {next_spec.name}). "
+                                "See transition markers for phase details."
+                            )
+                            await continuous_conversation.compact(
+                                summary,
+                                keep_recent=4,
+                                phase_graduated=True,
+                            )
 
                 # Update input_data for next node
                 input_data = result.output
@@ -993,11 +1305,46 @@ class GraphExecutor:
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality=exec_quality,
                 node_visit_counts=dict(node_visit_counts),
+                session_state={
+                    "memory": output,  # output IS memory.read_all()
+                    "execution_path": list(path),
+                    "node_visit_counts": dict(node_visit_counts),
+                },
             )
 
         except asyncio.CancelledError:
             # Handle cancellation (e.g., TUI quit) - save as paused instead of failed
             self.logger.info("⏸ Execution cancelled - saving state for resume")
+
+            # Flush WIP accumulator outputs from the interrupted node's
+            # cursor.json into SharedMemory so they survive resume.  The
+            # accumulator writes to cursor.json on every set() call, but
+            # only writes to SharedMemory when the judge ACCEPTs.  Without
+            # this, edge conditions checking these keys see None on resume.
+            if current_node_id and self._storage_path:
+                try:
+                    import json as _json
+
+                    cursor_path = (
+                        self._storage_path / "conversations" / current_node_id / "cursor.json"
+                    )
+                    if cursor_path.exists():
+                        cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
+                        wip_outputs = cursor_data.get("outputs", {})
+                        for key, value in wip_outputs.items():
+                            if value is not None:
+                                memory.write(key, value, validate=False)
+                        if wip_outputs:
+                            self.logger.info(
+                                "Flushed %d WIP accumulator outputs to memory: %s",
+                                len(wip_outputs),
+                                list(wip_outputs.keys()),
+                            )
+                except Exception:
+                    self.logger.debug(
+                        "Could not flush accumulator outputs from cursor",
+                        exc_info=True,
+                    )
 
             # Save memory and state for resume
             saved_memory = memory.read_all()
@@ -1076,12 +1423,32 @@ class GraphExecutor:
                     execution_quality="failed",
                 )
 
+            # Flush WIP accumulator outputs (same as CancelledError path)
+            if current_node_id and self._storage_path:
+                try:
+                    import json as _json
+
+                    cursor_path = (
+                        self._storage_path / "conversations" / current_node_id / "cursor.json"
+                    )
+                    if cursor_path.exists():
+                        cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
+                        for key, value in cursor_data.get("outputs", {}).items():
+                            if value is not None:
+                                memory.write(key, value, validate=False)
+                except Exception:
+                    self.logger.debug(
+                        "Could not flush accumulator outputs from cursor",
+                        exc_info=True,
+                    )
+
             # Save memory and state for potential resume
             saved_memory = memory.read_all()
             session_state_out: dict[str, Any] = {
                 "memory": saved_memory,
                 "execution_path": list(path),
                 "node_visit_counts": dict(node_visit_counts),
+                "resume_from": current_node_id,
             }
 
             # Mark latest checkpoint for resume on failure
@@ -1134,12 +1501,21 @@ class GraphExecutor:
         goal: Goal,
         input_data: dict[str, Any],
         max_tokens: int = 4096,
+        continuous_mode: bool = False,
+        inherited_conversation: Any = None,
+        override_tools: list | None = None,
+        cumulative_output_keys: list[str] | None = None,
+        event_triggered: bool = False,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
-        available_tools = []
-        if node_spec.tools:
-            available_tools = [t for t in self.tools if t.name in node_spec.tools]
+        if override_tools is not None:
+            # Continuous mode: use cumulative tool set
+            available_tools = list(override_tools)
+        else:
+            available_tools = []
+            if node_spec.tools:
+                available_tools = [t for t in self.tools if t.name in node_spec.tools]
 
         # Create scoped memory view
         scoped_memory = memory.with_permissions(
@@ -1160,18 +1536,25 @@ class GraphExecutor:
             max_tokens=max_tokens,
             runtime_logger=self.runtime_logger,
             pause_event=self._pause_requested,  # Pass pause event for granular control
+            continuous_mode=continuous_mode,
+            inherited_conversation=inherited_conversation,
+            cumulative_output_keys=cumulative_output_keys or [],
+            event_triggered=event_triggered,
+            accounts_prompt=self.accounts_prompt,
+            execution_id=self.runtime.execution_id,
         )
 
-    # Valid node types - no ambiguous "llm" type allowed
     VALID_NODE_TYPES = {
-        "llm_tool_use",
-        "llm_generate",
-        "router",
-        "function",
-        "human_input",
         "event_loop",
     }
-    DEPRECATED_NODE_TYPES = {"llm_tool_use": "event_loop", "llm_generate": "event_loop"}
+    # Node types removed in v0.5 — provide migration guidance
+    REMOVED_NODE_TYPES = {
+        "function": "event_loop",
+        "llm_tool_use": "event_loop",
+        "llm_generate": "event_loop",
+        "router": "event_loop",  # Unused theoretical infrastructure
+        "human_input": "event_loop",  # Use client_facing=True instead
+    }
 
     def _get_node_implementation(
         self, node_spec: NodeSpec, cleanup_llm_model: str | None = None
@@ -1181,62 +1564,23 @@ class GraphExecutor:
         if node_spec.id in self.node_registry:
             return self.node_registry[node_spec.id]
 
+        # Reject removed node types with migration guidance
+        if node_spec.node_type in self.REMOVED_NODE_TYPES:
+            replacement = self.REMOVED_NODE_TYPES[node_spec.node_type]
+            raise RuntimeError(
+                f"Node type '{node_spec.node_type}' was removed in v0.5. "
+                f"Migrate node '{node_spec.id}' to '{replacement}'. "
+                f"See https://github.com/adenhq/hive/issues/4753 for migration guide."
+            )
+
         # Validate node type
         if node_spec.node_type not in self.VALID_NODE_TYPES:
             raise RuntimeError(
                 f"Invalid node type '{node_spec.node_type}' for node '{node_spec.id}'. "
-                f"Must be one of: {sorted(self.VALID_NODE_TYPES)}. "
-                f"Use 'llm_tool_use' for nodes that call tools, 'llm_generate' for text generation."
+                f"Must be one of: {sorted(self.VALID_NODE_TYPES)}."
             )
 
-        # Warn on deprecated node types
-        if node_spec.node_type in self.DEPRECATED_NODE_TYPES:
-            replacement = self.DEPRECATED_NODE_TYPES[node_spec.node_type]
-            warnings.warn(
-                f"Node type '{node_spec.node_type}' is deprecated. "
-                f"Use '{replacement}' instead. "
-                f"Node: '{node_spec.id}'",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
-        # Create based on type
-        if node_spec.node_type == "llm_tool_use":
-            if not node_spec.tools:
-                raise RuntimeError(
-                    f"Node '{node_spec.id}' is type 'llm_tool_use' but declares no tools. "
-                    "Either add tools to the node or change type to 'llm_generate'."
-                )
-            return LLMNode(
-                tool_executor=self.tool_executor,
-                require_tools=True,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
-        if node_spec.node_type == "llm_generate":
-            return LLMNode(
-                tool_executor=None,
-                require_tools=False,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
-        if node_spec.node_type == "router":
-            return RouterNode()
-
-        if node_spec.node_type == "function":
-            # Function nodes need explicit registration
-            raise RuntimeError(
-                f"Function node '{node_spec.id}' not registered. Register with node_registry."
-            )
-
-        if node_spec.node_type == "human_input":
-            # Human input nodes are handled specially by HITL mechanism
-            return LLMNode(
-                tool_executor=None,
-                require_tools=False,
-                cleanup_llm_model=cleanup_llm_model,
-            )
-
+        # Create based on type (only event_loop is valid)
         if node_spec.node_type == "event_loop":
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
@@ -1284,7 +1628,7 @@ class GraphExecutor:
         # Should never reach here due to validation above
         raise RuntimeError(f"Unhandled node type: {node_spec.node_type}")
 
-    def _follow_edges(
+    async def _follow_edges(
         self,
         graph: GraphSpec,
         goal: Goal,
@@ -1299,7 +1643,7 @@ class GraphExecutor:
         for edge in edges:
             target_node_spec = graph.get_node(edge.target)
 
-            if edge.should_traverse(
+            if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
                 memory=memory.read_all(),
@@ -1325,7 +1669,7 @@ class GraphExecutor:
                         self.logger.warning(f"⚠ Output validation failed: {validation.errors}")
 
                         # Clean the output
-                        cleaned_output = self.output_cleaner.clean_output(
+                        cleaned_output = await self.output_cleaner.clean_output(
                             output=output_to_validate,
                             source_node_id=current_node_id,
                             target_node_spec=target_node_spec,
@@ -1363,7 +1707,7 @@ class GraphExecutor:
 
         return None
 
-    def _get_all_traversable_edges(
+    async def _get_all_traversable_edges(
         self,
         graph: GraphSpec,
         goal: Goal,
@@ -1383,7 +1727,7 @@ class GraphExecutor:
 
         for edge in edges:
             target_node_spec = graph.get_node(edge.target)
-            if edge.should_traverse(
+            if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
                 memory=memory.read_all(),
@@ -1496,14 +1840,19 @@ class GraphExecutor:
                 branch.error = f"Node {branch.node_id} not found in graph"
                 return branch, RuntimeError(branch.error)
 
+            # Get node implementation to check its type
+            branch_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
+
             effective_max_retries = node_spec.max_retries
-            if node_spec.node_type == "event_loop":
-                if effective_max_retries > 1:
-                    self.logger.warning(
-                        f"EventLoopNode '{node_spec.id}' has "
-                        f"max_retries={effective_max_retries}. Overriding "
-                        "to 1 — event loop nodes handle retry internally."
-                    )
+            # Only override for actual EventLoopNode instances, not custom NodeProtocol impls
+            from framework.graph.event_loop_node import EventLoopNode
+
+            if isinstance(branch_impl, EventLoopNode) and effective_max_retries > 1:
+                self.logger.warning(
+                    f"EventLoopNode '{node_spec.id}' has "
+                    f"max_retries={effective_max_retries}. Overriding "
+                    "to 1 — event loop nodes handle retry internally."
+                )
                 effective_max_retries = 1
 
             branch.status = "running"
@@ -1525,7 +1874,7 @@ class GraphExecutor:
                             f"⚠ Output validation failed for branch "
                             f"{branch.node_id}: {validation.errors}"
                         )
-                        cleaned_output = self.output_cleaner.clean_output(
+                        cleaned_output = await self.output_cleaner.clean_output(
                             output=mem_snapshot,
                             source_node_id=source_node_spec.id if source_node_spec else "unknown",
                             target_node_spec=node_spec,
@@ -1668,10 +2017,6 @@ class GraphExecutor:
     def register_node(self, node_id: str, implementation: NodeProtocol) -> None:
         """Register a custom node implementation."""
         self.node_registry[node_id] = implementation
-
-    def register_function(self, node_id: str, func: Callable) -> None:
-        """Register a function as a node."""
-        self.node_registry[node_id] = FunctionNode(func)
 
     def request_pause(self) -> None:
         """

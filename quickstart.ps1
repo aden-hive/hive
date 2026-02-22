@@ -15,7 +15,9 @@
     Requires: PowerShell 5.1+ and Python 3.11+
 #>
 
-$ErrorActionPreference = "Stop"
+# Use "Continue" so stderr from external tools (uv, python) does not
+# terminate the script.  Errors are handled via $LASTEXITCODE checks.
+$ErrorActionPreference = "Continue"
 
 # ============================================================
 # Colors / helpers
@@ -90,6 +92,178 @@ function Prompt-Choice {
             }
         }
         Write-Color -Text "Invalid choice. Please enter 1-$($Options.Count)" -Color Red
+    }
+}
+
+
+# ============================================================
+# Windows Defender Exclusion Functions
+# ============================================================
+
+function Test-IsAdmin {
+    <#
+    .SYNOPSIS
+        Check if current PowerShell session has admin privileges
+    #>
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]$identity
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-DefenderExclusions {
+    <#
+    .SYNOPSIS
+        Check if Windows Defender is enabled and which paths need exclusions
+    .PARAMETER Paths
+        Array of paths to check
+    .OUTPUTS
+        Hashtable with DefenderEnabled, MissingPaths, and optional Error
+    #>
+    param([string[]]$Paths)
+    
+    # Security: Define safe path prefixes (project + user directories only)
+    $safePrefixes = @(
+        $ScriptDir,         # Project directory
+        $env:LOCALAPPDATA,  # User local appdata
+        $env:APPDATA        # User roaming appdata
+    )
+    
+    # Normalize and filter null/empty values
+    $safePrefixes = $safePrefixes | Where-Object { $_ } | ForEach-Object {
+        [System.IO.Path]::GetFullPath($_)
+    }
+    
+    try {
+        # Check if Defender cmdlets are available (may not exist on older Windows)
+        $mpModule = Get-Module -ListAvailable -Name Defender -ErrorAction SilentlyContinue
+        if (-not $mpModule) {
+            return @{ 
+                DefenderEnabled = $false
+                Error = "Windows Defender module not available"
+            }
+        }
+        
+        # Check if Defender is running
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        if (-not $status.RealTimeProtectionEnabled) {
+            return @{ 
+                DefenderEnabled = $false
+                Reason = "Real-time protection is disabled"
+            }
+        }
+        
+        # Get current exclusions
+        $prefs = Get-MpPreference -ErrorAction Stop
+        $existing = $prefs.ExclusionPath
+        if (-not $existing) { $existing = @() }
+        
+        # Normalize existing paths for comparison
+        $existing = $existing | Where-Object { $_ } | ForEach-Object {
+            [System.IO.Path]::GetFullPath($_)
+        }
+        
+        # Normalize paths and find missing exclusions
+        $missing = @()
+        foreach ($path in $Paths) {
+            $normalized = [System.IO.Path]::GetFullPath($path)
+            
+            # Security: Ensure path is within safe boundaries
+            $isSafe = $false
+            foreach ($prefix in $safePrefixes) {
+                if ($normalized -like "$prefix*") {
+                    $isSafe = $true
+                    break
+                }
+            }
+            
+            if (-not $isSafe) {
+                Write-Warn "Security: Refusing to exclude path outside safe boundaries: $normalized"
+                continue
+            }
+            
+            # Info: Warn if path doesn't exist yet (but still process it)
+            if (-not (Test-Path $path -ErrorAction SilentlyContinue)) {
+                Write-Verbose "Path does not exist yet: $path (will be excluded when created)"
+            }
+            
+            # Check if path is already excluded (or is a child of an excluded path)
+            $alreadyExcluded = $false
+            foreach ($excluded in $existing) {
+                if ($normalized -like "$excluded*") {
+                    $alreadyExcluded = $true
+                    break
+                }
+            }
+            
+            if (-not $alreadyExcluded) {
+                $missing += $normalized
+            }
+        }
+        
+        return @{
+            DefenderEnabled = $true
+            MissingPaths = $missing
+            ExistingPaths = $existing
+        }
+    } catch {
+        return @{ 
+            DefenderEnabled = $false
+            Error = $_.Exception.Message
+        }
+    }
+}
+
+function Test-IsDefenderEnabled {
+    <#
+    .SYNOPSIS
+        Quick boolean check if Defender real-time protection is enabled
+    .OUTPUTS
+        Boolean - $true if enabled, $false otherwise
+    #>
+    try {
+        $mpModule = Get-Module -ListAvailable -Name Defender -ErrorAction SilentlyContinue
+        if (-not $mpModule) {
+            return $false
+        }
+        
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        return $status.RealTimeProtectionEnabled
+    } catch {
+        # If we can't check, assume disabled (fail-safe)
+        return $false
+    }
+}
+
+function Add-DefenderExclusions {
+    <#
+    .SYNOPSIS
+        Add Windows Defender exclusions for specified paths
+    .PARAMETER Paths
+        Array of paths to exclude
+    .OUTPUTS
+        Hashtable with Added and Failed arrays
+    #>
+    param([string[]]$Paths)
+    
+    $added = @()
+    $failed = @()
+    
+    foreach ($path in $Paths) {
+        try {
+            $normalized = [System.IO.Path]::GetFullPath($path)
+            Add-MpPreference -ExclusionPath $normalized -ErrorAction Stop
+            $added += $normalized
+        } catch {
+            $failed += @{ 
+                Path = $path
+                Error = $_.Exception.Message
+            }
+        }
+    }
+    
+    return @{ 
+        Added = $added
+        Failed = $failed
     }
 }
 
@@ -179,12 +353,49 @@ Write-Host ""
 # ============================================================
 
 $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+
+# If uv not in PATH, check if it exists in default location
+if (-not $uvCmd) {
+    $uvDir = Join-Path $env:USERPROFILE ".local\bin"
+    $uvExePath = Join-Path $uvDir "uv.exe"
+
+    if (Test-Path $uvExePath) {
+        Write-Host "  uv found at $uvExePath, updating PATH..." -ForegroundColor Yellow
+
+        # Add to User PATH
+        $currentUserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+        if (-not $currentUserPath.Contains($uvDir)) {
+            $newUserPath = $currentUserPath + ";" + $uvDir
+            [System.Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+        }
+
+        # Refresh PATH for current session
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+
+        if ($uvCmd) {
+            Write-Ok "uv is now in PATH"
+        }
+    }
+}
+
+# If still not found, install it
 if (-not $uvCmd) {
     Write-Warn "uv not found. Installing..."
     try {
         # Official uv installer for Windows
         Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
-        # Refresh PATH so we can find the newly installed uv
+
+        # Ensure uv directory is in User PATH for future sessions
+        $uvDir = Join-Path $env:USERPROFILE ".local\bin"
+        $currentUserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+        if (-not $currentUserPath.Contains($uvDir)) {
+            $newUserPath = $currentUserPath + ";" + $uvDir
+            [System.Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+            Write-Host "  Added $uvDir to User PATH" -ForegroundColor Green
+        }
+
+        # Refresh PATH for current session
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
         $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
     } catch {
@@ -217,8 +428,11 @@ Push-Location $ScriptDir
 try {
     if (Test-Path "pyproject.toml") {
         Write-Host "  Installing workspace packages... " -NoNewline
+
         $syncOutput = & uv sync 2>&1
-        if ($LASTEXITCODE -eq 0) {
+        $syncExitCode = $LASTEXITCODE
+
+        if ($syncExitCode -eq 0) {
             Write-Ok "workspace packages installed"
         } else {
             Write-Fail "workspace installation failed"
@@ -232,15 +446,19 @@ try {
 
     # Install Playwright browser
     Write-Host "  Installing Playwright browser... " -NoNewline
-    $null = & uv run $PythonCmd -c "import playwright" 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        $null = & uv run $PythonCmd -m playwright install chromium 2>&1
-        if ($LASTEXITCODE -eq 0) {
+    $null = & uv run python -c "import playwright" 2>&1
+    $importExitCode = $LASTEXITCODE
+    if ($importExitCode -eq 0) {
+        $null = & uv run python -m playwright install chromium 2>&1
+        $playwrightExitCode = $LASTEXITCODE
+
+        if ($playwrightExitCode -eq 0) {
             Write-Ok "ok"
         } else {
             Write-Warn "skipped (install manually: uv run python -m playwright install chromium)"
         }
     } else {
+
         Write-Warn "skipped"
     }
 } finally {
@@ -250,6 +468,136 @@ try {
 Write-Host ""
 Write-Ok "All packages installed"
 Write-Host ""
+
+# ============================================================
+# Step 2.5: Windows Defender Exclusions (Optional Performance Boost)
+# ============================================================
+
+Write-Step -Number "2.5" -Text "Step 2.5: Windows Defender exclusions (optional)"
+Write-Color -Text "Excluding project paths from real-time scanning can improve performance:" -Color DarkGray
+Write-Host "  - uv sync: ~40% faster"
+Write-Host "  - Agent startup: ~30% faster"
+Write-Host ""
+
+# Define paths to exclude
+$pathsToExclude = @(
+    $ScriptDir,                                      # Project directory
+    (Join-Path $ScriptDir ".venv"),                  # Virtual environment
+    (Join-Path $env:LOCALAPPDATA "uv")               # uv cache
+)
+
+# Check current state
+$checkResult = Test-DefenderExclusions -Paths $pathsToExclude
+
+if (-not $checkResult.DefenderEnabled) {
+    if ($checkResult.Error) {
+        Write-Warn "Cannot check Defender status: $($checkResult.Error)"
+    } elseif ($checkResult.Reason) {
+        Write-Warn "Skipping: $($checkResult.Reason)"
+    }
+    Write-Host ""
+    # Continue installation without failing
+} elseif ($checkResult.MissingPaths.Count -eq 0) {
+    Write-Ok "All paths already excluded from Defender scanning"
+    Write-Host ""
+} else {
+    # Show what will be excluded
+    Write-Host "Paths to exclude:"
+    foreach ($path in $checkResult.MissingPaths) {
+        Write-Color -Text "  - $path" -Color Cyan
+    }
+    Write-Host ""
+    
+    # Security notice
+    Write-Color -Text "⚠️  Security Trade-off:" -Color Yellow
+    Write-Host "Adding exclusions improves performance but reduces real-time protection."
+    Write-Host "Only proceed if you trust this project and its dependencies."
+    Write-Host ""
+    
+    # Prompt for consent (default = No for security)
+    if (Prompt-YesNo "Add these Defender exclusions?" "n") {
+        Write-Host ""
+        
+        # Check admin privileges
+        if (-not (Test-IsAdmin)) {
+            Write-Warn "Administrator privileges required to modify Defender settings."
+            Write-Host ""
+            Write-Color -Text "To add exclusions manually, run PowerShell as Administrator and paste:" -Color White
+            Write-Host ""
+            
+            foreach ($path in $checkResult.MissingPaths) {
+                $cmd = "Add-MpPreference -ExclusionPath '$path'"
+                Write-Color -Text "  $cmd" -Color Cyan
+            }
+            
+            Write-Host ""
+            Write-Color -Text "Or copy all commands to clipboard? [y/N]" -Color White
+            $copyChoice = Read-Host
+            if ($copyChoice -match "^[Yy]") {
+                $commands = ($checkResult.MissingPaths | ForEach-Object { 
+                    "Add-MpPreference -ExclusionPath '$_'" 
+                }) -join "`r`n"
+                
+                try {
+                    Set-Clipboard -Value $commands
+                    Write-Ok "Commands copied to clipboard"
+                } catch {
+                    Write-Warn "Could not copy to clipboard. Please copy manually."
+                }
+            }
+        } else {
+            # Re-check Defender status before adding (could have changed during prompt)
+            if (-not (Test-IsDefenderEnabled)) {
+                Write-Warn "Defender status changed during setup (now disabled)."
+                Write-Host "Skipping exclusions - they would have no effect."
+                Write-Host ""
+            } else {
+                # Add exclusions
+                Write-Host "  Adding exclusions... " -NoNewline
+                
+                # Re-check paths in case something changed
+                $freshCheck = Test-DefenderExclusions -Paths $pathsToExclude
+                if ($freshCheck.MissingPaths.Count -eq 0) {
+                    Write-Ok "already added"
+                    Write-Host "  (Exclusions were added by another process)"
+                } else {
+                    $result = Add-DefenderExclusions -Paths $freshCheck.MissingPaths
+                    
+                    if ($result.Added.Count -gt 0) {
+                        Write-Ok "done"
+                        foreach ($path in $result.Added) {
+                            Write-Ok "Excluded: $path"
+                        }
+                    }
+                    
+                    if ($result.Failed.Count -gt 0) {
+                        Write-Host ""
+                        
+                        # Calculate and show success rate
+                        $totalPaths = $result.Added.Count + $result.Failed.Count
+                        if ($totalPaths -gt 0) {
+                            $successRate = [math]::Round(($result.Added.Count / $totalPaths) * 100)
+                            Write-Warn "Only $($result.Added.Count)/$totalPaths exclusions added ($successRate%)"
+                            Write-Host "Performance benefit may be reduced."
+                            Write-Host ""
+                        }
+                        
+                        Write-Warn "Failed exclusions:"
+                        foreach ($failure in $result.Failed) {
+                            Write-Warn "  $($failure.Path): $($failure.Error)"
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Write-Host ""
+        Write-Warn "Skipped. You can add exclusions later for better performance."
+        Write-Host "  Run this script again or add them manually via Windows Security."
+    }
+    Write-Host ""
+}
+
 
 # ============================================================
 # Step 3: Verify Python Imports
@@ -268,7 +616,7 @@ $imports = @(
 
 foreach ($imp in $imports) {
     Write-Host "  $($imp.Label)... " -NoNewline
-    $null = & uv run $PythonCmd -c "import $($imp.Module)" 2>&1
+    $null = & uv run python -c "import $($imp.Module)" 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Ok "ok"
     } elseif ($imp.Required) {
@@ -501,7 +849,6 @@ if (-not $SelectedProviderId) {
             if ($apiKey) {
                 # Persist as a User-level environment variable (survives reboots)
                 [System.Environment]::SetEnvironmentVariable($SelectedEnvVar, $apiKey, "User")
-                $env:$SelectedEnvVar = $apiKey
                 # Also set in current session
                 Set-Item -Path "Env:\$SelectedEnvVar" -Value $apiKey
                 Write-Host ""
@@ -569,7 +916,7 @@ Write-Step -Number "6" -Text "Step 6: Initializing credential store..."
 Write-Color -Text "The credential store encrypts API keys and secrets for your agents." -Color DarkGray
 Write-Host ""
 
-$HiveCredDir = Join-Path $env:USERPROFILE ".hive" "credentials"
+$HiveCredDir = Join-Path (Join-Path $env:USERPROFILE ".hive") "credentials"
 
 # Check if HIVE_CREDENTIAL_KEY is already set
 $credKey = [System.Environment]::GetEnvironmentVariable("HIVE_CREDENTIAL_KEY", "User")
@@ -580,7 +927,7 @@ if ($credKey) {
 } else {
     Write-Host "  Generating encryption key... " -NoNewline
     try {
-        $generatedKey = & uv run $PythonCmd -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
+        $generatedKey = & uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
         if ($LASTEXITCODE -eq 0 -and $generatedKey) {
             Write-Ok "ok"
             [System.Environment]::SetEnvironmentVariable("HIVE_CREDENTIAL_KEY", $generatedKey.Trim(), "User")
@@ -611,7 +958,7 @@ if ($credKey) {
     Write-Ok "Credential store initialized at ~/.hive/credentials/"
 
     Write-Host "  Verifying credential store... " -NoNewline
-    $verifyOut = & uv run $PythonCmd -c "from framework.credentials.storage import EncryptedFileStorage; storage = EncryptedFileStorage(); print('ok')" 2>$null
+    $verifyOut = & uv run python -c "from framework.credentials.storage import EncryptedFileStorage; storage = EncryptedFileStorage(); print('ok')" 2>$null
     if ($verifyOut -match "ok") {
         Write-Ok "ok"
     } else {
@@ -635,20 +982,20 @@ $verifications = @(
 
 foreach ($v in $verifications) {
     Write-Host "  $([char]0x2B21) $($v.Label)... " -NoNewline
-    $null = & uv run $PythonCmd -c $v.Cmd 2>&1
+    $null = & uv run python -c $v.Cmd 2>&1
     if ($LASTEXITCODE -eq 0) { Write-Ok "ok" }
     else { Write-Fail "failed"; $verifyErrors++ }
 }
 
 Write-Host "  $([char]0x2B21) litellm... " -NoNewline
-$null = & uv run $PythonCmd -c "import litellm" 2>&1
+$null = & uv run python -c "import litellm" 2>&1
 if ($LASTEXITCODE -eq 0) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host "  $([char]0x2B21) MCP config... " -NoNewline
 if (Test-Path (Join-Path $ScriptDir ".mcp.json")) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host "  $([char]0x2B21) skills... " -NoNewline
-$skillsDir = Join-Path $ScriptDir ".claude" "skills"
+$skillsDir = Join-Path (Join-Path $ScriptDir ".claude") "skills"
 if (Test-Path $skillsDir) {
     $skillCount = (Get-ChildItem -Directory $skillsDir -ErrorAction SilentlyContinue).Count
     Write-Ok "$skillCount found"
@@ -657,7 +1004,7 @@ if (Test-Path $skillsDir) {
 }
 
 Write-Host "  $([char]0x2B21) credential store... " -NoNewline
-$credStoreDir = Join-Path $env:USERPROFILE ".hive" "credentials" "credentials"
+$credStoreDir = Join-Path (Join-Path (Join-Path $env:USERPROFILE ".hive") "credentials") "credentials"
 if ($credKey -and (Test-Path $credStoreDir)) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host ""
@@ -673,51 +1020,21 @@ if ($verifyErrors -gt 0) {
 
 Write-Step -Number "8" -Text "Step 8: Installing hive CLI..."
 
-# Create a hive.ps1 wrapper in the project root that can be added to PATH
+# Verify hive.ps1 wrapper exists in project root
 $hivePs1Path = Join-Path $ScriptDir "hive.ps1"
-
-$hivePs1Content = @"
-#!/usr/bin/env pwsh
-# Wrapper script for the Hive CLI (Windows).
-# Uses uv to run the hive command in the project's virtual environment.
-
-`$ErrorActionPreference = "Stop"
-`$ScriptDir = Split-Path -Parent `$MyInvocation.MyCommand.Definition
-
-if ((Get-Location).Path -ne `$ScriptDir) {
-    Write-Error "hive must be run from the project directory.``nCurrent directory: `$(Get-Location)``nExpected directory: `$ScriptDir``n``nRun: cd `$ScriptDir"
-    exit 1
+if (Test-Path $hivePs1Path) {
+    Write-Ok "hive.ps1 wrapper found in project root"
+} else {
+    Write-Fail "hive.ps1 not found -- please restore it from version control"
 }
-
-if (-not (Test-Path (Join-Path `$ScriptDir "pyproject.toml")) -or -not (Test-Path (Join-Path `$ScriptDir "core"))) {
-    Write-Error "Not a valid Hive project directory: `$ScriptDir"
-    exit 1
-}
-
-if (-not (Test-Path (Join-Path `$ScriptDir ".venv"))) {
-    Write-Error "Virtual environment not found. Run .\quickstart.ps1 first to set up the project."
-    exit 1
-}
-
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Error "uv is not installed. Run .\quickstart.ps1 first."
-    exit 1
-}
-
-& uv run hive @args
-"@
-
-Set-Content -Path $hivePs1Path -Value $hivePs1Content -Encoding UTF8
-Write-Ok "hive.ps1 wrapper created in project root"
 
 # Optionally add project dir to User PATH
 $currentUserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 if ($currentUserPath -notlike "*$ScriptDir*") {
-    Write-Host ""
-    Write-Host "  To run 'hive' from anywhere, add this directory to your PATH:"
-    Write-Color -Text "  `$env:Path += `";$ScriptDir`"" -Color Cyan
-    Write-Host "  Or permanently:"
-    Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('Path', `$env:Path + ';$ScriptDir', 'User')" -Color Cyan
+    $newUserPath = $currentUserPath + ";" + $ScriptDir
+    [System.Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    Write-Ok "Project directory added to User PATH"
 } else {
     Write-Ok "Project directory already in PATH"
 }
@@ -777,13 +1094,31 @@ Write-Host "  You can start an example agent or an agent built by yourself:"
 Write-Color -Text "     .\hive.ps1 tui" -Color Cyan
 Write-Host ""
 
+Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
+Write-Host ""
+Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
+Write-Host ""
+Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
+Write-Host ""
+Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
+Write-Host 'restart your terminal for them to take effect in new sessions.'
+Write-Host ""
+Write-Host "After restarting, test with:" -ForegroundColor Cyan
+Write-Color -Text "  .\hive.ps1 tui" -Color Cyan
+Write-Host ""
+
 if ($SelectedProviderId -or $credKey) {
-    Write-Color -Text "Note:" -Color White -NoNewline
-    Write-Host " Environment variables were saved at the User level."
-    Write-Host "  They will be available in new PowerShell sessions automatically."
-    Write-Host "  For the current session, they are already active."
+    Write-Color -Text "Note:" -Color White
+    Write-Host "- uv has been added to your User PATH"
+    if ($SelectedProviderId) {
+        Write-Host "- $SelectedEnvVar is set for LLM access"
+    }
+    if ($credKey) {
+        Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
+    }
+    Write-Host "- All variables will persist across reboots"
     Write-Host ""
 }
 
-Write-Color -Text "Run .\quickstart.ps1 again to reconfigure." -Color DarkGray
+Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
 Write-Host ""

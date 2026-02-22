@@ -272,6 +272,35 @@ class CredentialStoreAdapter:
         """Resolve credential templates in query parameters."""
         return self._store.resolve_params(params)
 
+    def list_accounts(self, provider_name: str) -> list[dict]:
+        """List all accounts for a provider type."""
+        return self._store.list_accounts(provider_name)
+
+    def get_all_account_info(self) -> list[dict]:
+        """Collect all accounts across all configured providers.
+
+        Deduplicates by provider name to avoid listing the same provider's
+        accounts twice when multiple specs map to the same provider.
+        """
+        accounts: list[dict] = []
+        seen: set[str] = set()
+        for name, spec in self._specs.items():
+            provider = spec.credential_id or name
+            if provider in seen or not self.is_available(name):
+                continue
+            seen.add(provider)
+            accounts.extend(self._store.list_accounts(provider))
+        return accounts
+
+    def get_by_alias(self, provider_name: str, alias: str) -> str | None:
+        """Resolve a specific account's token by alias."""
+        cred = self._store.get_credential_by_alias(provider_name, alias)
+        return cred.get_default_key() if cred else None
+
+    def get_by_identity(self, provider_name: str, label: str) -> str | None:
+        """Alias for get_by_alias (backward compat)."""
+        return self.get_by_alias(provider_name, label)
+
     @property
     def store(self) -> CredentialStore:
         """Access the underlying credential store for advanced operations."""

@@ -62,9 +62,29 @@ class EventType(StrEnum):
     NODE_INTERNAL_OUTPUT = "node_internal_output"
     NODE_INPUT_BLOCKED = "node_input_blocked"
     NODE_STALLED = "node_stalled"
+    NODE_TOOL_DOOM_LOOP = "node_tool_doom_loop"
+
+    # Judge decisions
+    JUDGE_VERDICT = "judge_verdict"
+
+    # Output tracking
+    OUTPUT_KEY_SET = "output_key_set"
+
+    # Retry / edge tracking
+    NODE_RETRY = "node_retry"
+    EDGE_TRAVERSED = "edge_traversed"
+
+    # Context management
+    CONTEXT_COMPACTED = "context_compacted"
+
+    # External triggers
+    WEBHOOK_RECEIVED = "webhook_received"
 
     # Custom events
     CUSTOM = "custom"
+
+    # Escalation (agent requests handoff to hive_coder)
+    ESCALATION_REQUESTED = "escalation_requested"
 
 
 @dataclass
@@ -78,6 +98,7 @@ class AgentEvent:
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     correlation_id: str | None = None  # For tracking related events
+    graph_id: str | None = None  # Which graph emitted this event (multi-graph sessions)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -89,6 +110,7 @@ class AgentEvent:
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
             "correlation_id": self.correlation_id,
+            "graph_id": self.graph_id,
         }
 
 
@@ -106,6 +128,7 @@ class Subscription:
     filter_stream: str | None = None  # Only receive events from this stream
     filter_node: str | None = None  # Only receive events from this node
     filter_execution: str | None = None  # Only receive events from this execution
+    filter_graph: str | None = None  # Only receive events from this graph
 
 
 class EventBus:
@@ -165,6 +188,7 @@ class EventBus:
         filter_stream: str | None = None,
         filter_node: str | None = None,
         filter_execution: str | None = None,
+        filter_graph: str | None = None,
     ) -> str:
         """
         Subscribe to events.
@@ -175,6 +199,7 @@ class EventBus:
             filter_stream: Only receive events from this stream
             filter_node: Only receive events from this node
             filter_execution: Only receive events from this execution
+            filter_graph: Only receive events from this graph
 
         Returns:
             Subscription ID (use to unsubscribe)
@@ -189,6 +214,7 @@ class EventBus:
             filter_stream=filter_stream,
             filter_node=filter_node,
             filter_execution=filter_execution,
+            filter_graph=filter_graph,
         )
 
         self._subscriptions[sub_id] = subscription
@@ -252,6 +278,10 @@ class EventBus:
 
         # Check execution filter
         if subscription.filter_execution and subscription.filter_execution != event.execution_id:
+            return False
+
+        # Check graph filter
+        if subscription.filter_graph and subscription.filter_graph != event.graph_id:
             return False
 
         return True
@@ -615,6 +645,24 @@ class EventBus:
             )
         )
 
+    async def emit_tool_doom_loop(
+        self,
+        stream_id: str,
+        node_id: str,
+        description: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit tool doom loop detection event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_TOOL_DOOM_LOOP,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"description": description},
+            )
+        )
+
     async def emit_node_input_blocked(
         self,
         stream_id: str,
@@ -630,6 +678,177 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"prompt": prompt},
+            )
+        )
+
+    # === JUDGE / OUTPUT / RETRY / EDGE PUBLISHERS ===
+
+    async def emit_judge_verdict(
+        self,
+        stream_id: str,
+        node_id: str,
+        action: str,
+        feedback: str = "",
+        judge_type: str = "implicit",
+        iteration: int = 0,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit judge verdict event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.JUDGE_VERDICT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "action": action,
+                    "feedback": feedback,
+                    "judge_type": judge_type,
+                    "iteration": iteration,
+                },
+            )
+        )
+
+    async def emit_output_key_set(
+        self,
+        stream_id: str,
+        node_id: str,
+        key: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit output key set event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.OUTPUT_KEY_SET,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"key": key},
+            )
+        )
+
+    async def emit_node_retry(
+        self,
+        stream_id: str,
+        node_id: str,
+        retry_count: int,
+        max_retries: int,
+        error: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit node retry event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.NODE_RETRY,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "retry_count": retry_count,
+                    "max_retries": max_retries,
+                    "error": error,
+                },
+            )
+        )
+
+    async def emit_edge_traversed(
+        self,
+        stream_id: str,
+        source_node: str,
+        target_node: str,
+        edge_condition: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit edge traversed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.EDGE_TRAVERSED,
+                stream_id=stream_id,
+                node_id=source_node,
+                execution_id=execution_id,
+                data={
+                    "source_node": source_node,
+                    "target_node": target_node,
+                    "edge_condition": edge_condition,
+                },
+            )
+        )
+
+    async def emit_execution_paused(
+        self,
+        stream_id: str,
+        node_id: str,
+        reason: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit execution paused event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_PAUSED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"reason": reason},
+            )
+        )
+
+    async def emit_execution_resumed(
+        self,
+        stream_id: str,
+        node_id: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit execution resumed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_RESUMED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={},
+            )
+        )
+
+    async def emit_webhook_received(
+        self,
+        source_id: str,
+        path: str,
+        method: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        query_params: dict[str, str] | None = None,
+    ) -> None:
+        """Emit webhook received event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.WEBHOOK_RECEIVED,
+                stream_id=source_id,
+                data={
+                    "path": path,
+                    "method": method,
+                    "headers": headers,
+                    "payload": payload,
+                    "query_params": query_params or {},
+                },
+            )
+        )
+
+    async def emit_escalation_requested(
+        self,
+        stream_id: str,
+        node_id: str,
+        reason: str = "",
+        context: str = "",
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit escalation requested event (agent wants hive_coder)."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.ESCALATION_REQUESTED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"reason": reason, "context": context},
             )
         )
 
@@ -686,6 +905,7 @@ class EventBus:
         stream_id: str | None = None,
         node_id: str | None = None,
         execution_id: str | None = None,
+        graph_id: str | None = None,
         timeout: float | None = None,
     ) -> AgentEvent | None:
         """
@@ -696,6 +916,7 @@ class EventBus:
             stream_id: Filter by stream
             node_id: Filter by node
             execution_id: Filter by execution
+            graph_id: Filter by graph
             timeout: Maximum time to wait (seconds)
 
         Returns:
@@ -716,6 +937,7 @@ class EventBus:
             filter_stream=stream_id,
             filter_node=node_id,
             filter_execution=execution_id,
+            filter_graph=graph_id,
         )
 
         try:

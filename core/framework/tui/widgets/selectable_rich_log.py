@@ -178,7 +178,12 @@ class SelectableRichLog(RichLog):
 
         # Build full text from all lines
         all_text = "\n".join(strip.text for strip in self.lines)
-        extracted = sel.extract(all_text)
+        try:
+            extracted = sel.extract(all_text)
+        except (IndexError, ValueError):
+            # Selection coordinates can exceed line count when the virtual
+            # canvas is larger than the actual content (e.g. after scroll).
+            return None
         return extracted if extracted else None
 
     def copy_selection(self) -> str | None:
@@ -195,12 +200,27 @@ def _copy_to_clipboard(text: str) -> None:
     try:
         if sys.platform == "darwin":
             subprocess.run(["pbcopy"], input=text.encode(), check=True, timeout=5)
-        elif sys.platform.startswith("linux"):
+        elif sys.platform == "win32":
             subprocess.run(
-                ["xclip", "-selection", "clipboard"],
-                input=text.encode(),
+                ["clip.exe"],
+                input=text.encode("utf-16le"),
                 check=True,
                 timeout=5,
             )
+        elif sys.platform.startswith("linux"):
+            try:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard"],
+                    input=text.encode(),
+                    check=True,
+                    timeout=5,
+                )
+            except (subprocess.SubprocessError, FileNotFoundError):
+                subprocess.run(
+                    ["xsel", "--clipboard", "--input"],
+                    input=text.encode(),
+                    check=True,
+                    timeout=5,
+                )
     except (subprocess.SubprocessError, FileNotFoundError):
         pass
