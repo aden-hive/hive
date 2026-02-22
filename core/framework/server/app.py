@@ -135,10 +135,12 @@ def create_app(model: str | None = None) -> web.Application:
 
 def _setup_static_serving(app: web.Application) -> None:
     """Serve frontend static files if the dist directory exists."""
-    # Try relative to CWD (repo root) and relative to this file
+    # Try: CWD/frontend/dist, core/frontend/dist, repo_root/frontend/dist
+    _here = Path(__file__).resolve().parent  # core/framework/server/
     candidates = [
         Path("frontend/dist"),
-        Path(__file__).resolve().parent.parent.parent.parent / "frontend" / "dist",
+        _here.parent.parent / "frontend" / "dist",  # core/frontend/dist
+        _here.parent.parent.parent / "frontend" / "dist",  # repo_root/frontend/dist
     ]
 
     dist_dir: Path | None = None
