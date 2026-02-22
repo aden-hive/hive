@@ -111,3 +111,97 @@ class TestPdfReadTool:
         # New behavior: explicit truncation metadata instead of silent truncation
         assert result.get("truncated") is True
         assert "truncation_warning" in result
+
+    def test_duplicate_pages_are_deduplicated(self, pdf_read_fn, tmp_path: Path, monkeypatch):
+        """Duplicate page numbers in comma-separated list are deduplicated."""
+
+        class FakePage:
+            def __init__(self, text: str) -> None:
+                self._text = text
+
+            def extract_text(self) -> str:
+                return self._text
+
+        class FakePdfReader:
+            def __init__(self, path: Path) -> None:  # noqa: ARG002
+                self.pages = [FakePage(f"Page {i + 1}") for i in range(10)]
+                self.is_encrypted = False
+                self.metadata = None
+
+        from aden_tools.tools.pdf_read_tool import pdf_read_tool
+
+        monkeypatch.setattr(pdf_read_tool, "PdfReader", FakePdfReader)
+
+        pdf_file = tmp_path / "test.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+
+        result = pdf_read_fn(file_path=str(pdf_file), pages="1,2,3,1,2,4")
+
+        assert result["pages_extracted"] == 4
+        assert "--- Page 1 ---" in result["content"]
+        assert "--- Page 2 ---" in result["content"]
+        assert "--- Page 3 ---" in result["content"]
+        assert "--- Page 4 ---" in result["content"]
+        assert result["content"].count("--- Page 1 ---") == 1
+        assert result["content"].count("--- Page 2 ---") == 1
+
+    def test_duplicate_pages_preserve_order(self, pdf_read_fn, tmp_path: Path, monkeypatch):
+        """Deduplicated pages preserve the original order."""
+
+        class FakePage:
+            def __init__(self, text: str) -> None:
+                self._text = text
+
+            def extract_text(self) -> str:
+                return self._text
+
+        class FakePdfReader:
+            def __init__(self, path: Path) -> None:  # noqa: ARG002
+                self.pages = [FakePage(f"Page {i + 1}") for i in range(20)]
+                self.is_encrypted = False
+                self.metadata = None
+
+        from aden_tools.tools.pdf_read_tool import pdf_read_tool
+
+        monkeypatch.setattr(pdf_read_tool, "PdfReader", FakePdfReader)
+
+        pdf_file = tmp_path / "test.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+
+        result = pdf_read_fn(file_path=str(pdf_file), pages="5,10,5,5,20,10")
+
+        assert result["pages_extracted"] == 3
+        import re
+
+        pages_order = [
+            int(m.group(1)) for m in re.finditer(r"--- Page (\d+) ---", result["content"])
+        ]
+        assert pages_order == [5, 10, 20]
+
+    def test_duplicate_pages_with_truncation(self, pdf_read_fn, tmp_path: Path, monkeypatch):
+        """Deduplication happens before truncation with max_pages."""
+
+        class FakePage:
+            def __init__(self, text: str) -> None:
+                self._text = text
+
+            def extract_text(self) -> str:
+                return self._text
+
+        class FakePdfReader:
+            def __init__(self, path: Path) -> None:  # noqa: ARG002
+                self.pages = [FakePage(f"Page {i + 1}") for i in range(10)]
+                self.is_encrypted = False
+                self.metadata = None
+
+        from aden_tools.tools.pdf_read_tool import pdf_read_tool
+
+        monkeypatch.setattr(pdf_read_tool, "PdfReader", FakePdfReader)
+
+        pdf_file = tmp_path / "test.pdf"
+        pdf_file.write_bytes(b"%PDF-1.4")
+
+        result = pdf_read_fn(file_path=str(pdf_file), pages="1,2,3,4,5", max_pages=3)
+
+        assert result["pages_extracted"] == 3
+        assert result.get("truncated") is True

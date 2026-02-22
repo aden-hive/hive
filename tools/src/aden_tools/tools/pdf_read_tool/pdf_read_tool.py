@@ -70,6 +70,13 @@ def register_tools(mcp: FastMCP) -> None:
             # Comma-separated: "1,3,5"
             if "," in pages:
                 page_nums = [int(p.strip()) for p in pages.split(",")]
+                seen = set()
+                unique_pages = []
+                for p in page_nums:
+                    if p not in seen:
+                        seen.add(p)
+                        unique_pages.append(p)
+                page_nums = unique_pages
                 for p in page_nums:
                     if p < 1 or p > total_pages:
                         return {"error": f"Page {p} out of range. PDF has {total_pages} pages."}
