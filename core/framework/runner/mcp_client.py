@@ -96,33 +96,11 @@ class MCPClient:
         # Standard approach: handle both sync and async contexts
         try:
             # Try to get the current event loop
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
             # If we're here, we're in an async context
-            # Create a new thread to run the coroutine
-            import threading
-
-            result = None
-            exception = None
-
-            def run_in_thread():
-                nonlocal result, exception
-                try:
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        result = new_loop.run_until_complete(coro)
-                    finally:
-                        new_loop.close()
-                except Exception as e:
-                    exception = e
-
-            thread = threading.Thread(target=run_in_thread)
-            thread.start()
-            thread.join()
-
-            if exception:
-                raise exception
-            return result
+            # Use run_coroutine_threadsafe with the current loop
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            return future.result()
         except RuntimeError:
             # No event loop running, we can use asyncio.run
             return asyncio.run(coro)
