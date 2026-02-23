@@ -8,7 +8,7 @@ from framework.graph.edge import AsyncEntryPointSpec, GraphSpec
 from framework.graph.executor import ExecutionResult
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import create_agent_runtime
+from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
@@ -193,7 +193,7 @@ class SDRAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
-        self._executor: None = None
+        self._agent_runtime: AgentRuntime | None = None
         self._graph: GraphSpec | None = None
         self._tool_registry: ToolRegistry | None = None
 
@@ -273,17 +273,18 @@ class SDRAgent:
             checkpoint_config=checkpoint_config,
         )
 
-        return self._executor
-
     async def start(self, mock_mode=False) -> None:
-        """Set up the agent (initialize executor and tools)."""
-        if self._executor is None:
+        """Set up and start the agent runtime."""
+        if self._agent_runtime is None:
             self._setup(mock_mode=mock_mode)
+        if not self._agent_runtime.is_running:
+            await self._agent_runtime.start()
 
     async def stop(self) -> None:
-        """Stop and clean up the agent runtime."""
-        if self._agent_runtime is not None and self._agent_runtime.is_running:
+        """Stop the agent runtime and clean up."""
+        if self._agent_runtime and self._agent_runtime.is_running:
             await self._agent_runtime.stop()
+        self._agent_runtime = None
 
     async def trigger_and_wait(
         self,
@@ -293,10 +294,8 @@ class SDRAgent:
         session_state: dict | None = None,
     ) -> ExecutionResult | None:
         """Execute the graph and wait for completion."""
-        if self._executor is None:
+        if self._agent_runtime is None:
             raise RuntimeError("Agent not started. Call start() first.")
-        if self._graph is None:
-            raise RuntimeError("Graph not built. Call start() first.")
 
         return await self._agent_runtime.trigger_and_wait(
             entry_point_id=entry_point,
