@@ -740,7 +740,7 @@ class GraphExecutor:
                         # Blocking checkpoint save
                         await checkpoint_store.save_checkpoint(checkpoint)
 
-                # Emit node-started event (skip event_loop nodes — they emit their own)
+              # Emit node-started event (skip event_loop nodes — they emit their own)
                 if self._event_bus and node_spec.node_type != "event_loop":
                     await self._event_bus.emit_node_loop_started(
                         stream_id=self._stream_id, node_id=current_node_id
@@ -748,7 +748,21 @@ class GraphExecutor:
 
                 # Execute node
                 self.logger.info("   Executing...")
-                result = await node_impl.execute(ctx)
+                try:
+                    result = await node_impl.execute(ctx)
+                except asyncio.CancelledError:
+                    # Let HITL / UI cancellations propagate naturally
+                    raise
+                except Exception as e:
+                    # Catch raw transient failures (500s, DB drops, Network timeouts)
+                    self.logger.error(f"   ✗ System exception during node execution: {e}")
+                    
+                    # Convert to NodeResult so it routes down to existing retry & backoff logic
+                    result = NodeResult(
+                        success=False,
+                        error=f"System exception: {str(e)}",
+                        output={},
+                    )
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
@@ -1907,7 +1921,19 @@ class GraphExecutor:
                     self.logger.info(
                         f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
                     )
-                    result = await node_impl.execute(ctx)
+                    
+                    try:
+                        result = await node_impl.execute(ctx)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        self.logger.error(f"      ✗ System exception in branch execution: {e}")
+                        result = NodeResult(
+                            success=False,
+                            error=f"System exception: {str(e)}",
+                            output={},
+                        )
+                        
                     last_result = result
 
                     # Ensure L2 entry for this branch node
