@@ -16,6 +16,7 @@ Protocol:
 """
 
 import asyncio
+import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -94,6 +95,19 @@ def find_json_object(text: str) -> str | None:
     if start == -1:
         return None
 
+    end = text.rfind("}")
+    if end == -1 or end < start:
+        return None
+
+    # Fast path: try json.loads directly (C extension, handles 1MB in ~14ms)
+    try:
+        candidate = text[start : end + 1]
+        json.loads(candidate)
+        return candidate
+    except json.JSONDecodeError:
+        pass
+
+    # Fall back to existing brace matching
     depth = 0
     in_string = False
     escape_next = False
@@ -488,8 +502,14 @@ class NodeContext:
     inherited_conversation: Any = None  # NodeConversation | None (from prior node)
     cumulative_output_keys: list[str] = field(default_factory=list)  # All output keys from path
 
+    # Connected accounts prompt (injected from runner)
+    accounts_prompt: str = ""
+
     # Event-triggered execution (no interactive user attached)
     event_triggered: bool = False
+
+    # Execution ID (from StreamRuntimeAdapter)
+    execution_id: str = ""
 
 
 @dataclass

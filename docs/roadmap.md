@@ -3,93 +3,124 @@
 Aden Agent Framework aims to help developers build outcome-oriented, self-adaptive agents. Please find our roadmap here
 
 ```mermaid
-flowchart TD
-subgraph Foundation
-    direction LR
-    subgraph arch["Architecture"]
-        a1["Node-Based Architecture"]:::done
-        a2["Python SDK"]:::done
-        a3["LLM Integration"]:::done
-        a4["Communication Protocol"]:::done
-    end
-    subgraph ca["Coding Agent"]
-        b1["Goal Creation Session"]:::done
-        b2["Worker Agent Creation"]
-        b3["MCP Tools"]:::done
-    end
-    subgraph wa["Worker Agent"]
-        c1["Human-in-the-Loop"]:::done
-        c2["Callback Handlers"]:::done
-        c3["Intervention Points"]:::done
-        c4["Streaming Interface"]
-    end
-    subgraph cred["Credentials"]
-        d1["Setup Process"]:::done
-        d2["Pluggable Sources"]:::done
-        d3["Enterprise Secrets"]
-        d4["Integration Tools"]:::done
-    end
-    subgraph tools["Tools"]
-        e1["File Use"]:::done
-        e2["Memory STM/LTM"]:::done
-        e3["Web Search/Scraper"]:::done
-        e4["CSV/PDF"]:::done
-        e5["Excel/Email"]
-    end
-    subgraph core["Core"]
-        f1["Eval System"]
-        f2["Pydantic Validation"]:::done
-        f3["Documentation"]:::done
-        f4["Adaptiveness"]
-        f5["Sample Agents"]
-    end
-end
+flowchart TB
+    %% Main Entity
+    User([User])
 
-subgraph Expansion
-    direction LR
-    subgraph intel["Intelligence"]
-        g1["Guardrails"]
-        g2["Streaming Mode"]
-        g3["Image Generation"]
-        g4["Semantic Search"]
+    %% =========================================
+    %% EXTERNAL EVENT SOURCES
+    %% =========================================
+    subgraph ExtEventSource [External Event Source]
+        E_Sch["Schedulers"]
+        E_WH["Webhook"]
+        E_SSE["SSE"]
     end
-    subgraph mem["Memory Iteration"]
-        h1["Message Model & Sessions"]
-        h2["Storage Migration"]
-        h3["Context Building"]
-        h4["Proactive Compaction"]
-        h5["Token Tracking"]
-    end
-    subgraph evt["Event System"]
-        i1["Event Bus for Nodes"]
-    end
-    subgraph cas["Coding Agent Support"]
-        j1["Claude Code"]
-        j2["Cursor"]
-        j3["Opencode"]
-        j4["Antigravity"]
-        j5["Codex CLI"]
-    end
-    subgraph plat["Platform"]
-        k1["JavaScript/TypeScript SDK"]
-        k2["Custom Tool Integrator"]
-        k3["Windows Support"]
-    end
-    subgraph dep["Deployment"]
-        l1["Self-Hosted"]
-        l2["Cloud Services"]
-        l3["CI/CD Pipeline"]
-    end
-    subgraph tmpl["Templates"]
-        m1["Sales Agent"]
-        m2["Marketing Agent"]
-        m3["Analytics Agent"]
-        m4["Training Agent"]
-        m5["Smart Form Agent"]
-    end
-end
 
-classDef done fill:#9e9e9e,color:#fff,stroke:#757575
+    %% =========================================
+    %% SYSTEM NODES
+    %% =========================================
+    subgraph WorkerBees [Worker Bees]
+        WB_C["Conversation"]
+        WB_SP["System prompt"]
+
+        subgraph Graph [Graph]
+            direction TB
+            N1["Node"] --> N2["Node"] --> N3["Node"]
+            N1 -.-> AN["Active Node"]
+            N2 -.-> AN
+            N3 -.-> AN
+
+            %% Nested Event Loop Node
+            subgraph EventLoopNode [Event Loop Node]
+                ELN_L["listener"]
+                ELN_SP["System Prompt<br/>(Task)"]
+                ELN_EL["Event loop"]
+                ELN_C["Conversation"]
+            end
+        end
+    end
+
+    subgraph JudgeNode [Judge]
+        J_C["Criteria"]
+        J_P["Principles"]
+        J_EL["Event loop"] <--> J_S["Scheduler"]
+    end
+
+    subgraph QueenBee [Queen Bee]
+        QB_SP["System prompt"]
+        QB_EL["Event loop"]
+        QB_C["Conversation"]
+    end
+
+    subgraph Infra [Infra]
+        SA["Sub Agent"]
+        TR["Tool Registry"]
+        WTM["Write through Conversation Memory<br/>(Logs/RAM/Harddrive)"]
+        SM["Shared Memory<br/>(State/Harddrive)"]
+        EB["Event Bus<br/>(RAM)"]
+        CS["Credential Store<br/>(Harddrive/Cloud)"]
+    end
+
+    subgraph PC [PC]
+        B["Browser"]
+        CB["Codebase<br/>v 0.0.x ... v n.n.n"]
+    end
+
+    %% =========================================
+    %% CONNECTIONS & DATA FLOW
+    %% =========================================
+
+    %% External Event Routing
+    E_Sch --> ELN_L
+    E_WH --> ELN_L
+    E_SSE --> ELN_L
+    ELN_L -->|"triggers"| ELN_EL
+
+    %% User Interactions
+    User -->|"Talk"| WB_C
+    User -->|"Talk"| QB_C
+    User -->|"Read/Write Access"| CS
+
+    %% Inter-System Logic
+    ELN_C <-->|"Mirror"| WB_C
+    WB_C -->|"Focus"| AN
+
+    WorkerBees -->|"Inquire"| JudgeNode
+    JudgeNode -->|"Approve"| WorkerBees
+
+    %% Judge Alignments
+    J_C <-.->|"aligns"| WB_SP
+    J_P <-.->|"aligns"| QB_SP
+
+    %% Escalate path
+    J_EL -->|"Report (Escalate)"| QB_EL
+
+    %% Pub/Sub Logic
+    AN -->|"publish"| EB
+    EB -->|"subscribe"| QB_C
+
+    %% Infra and Process Spawning
+    ELN_EL -->|"Spawn"| SA
+    SA -->|"Inform"| ELN_EL
+    SA -->|"Starts"| B
+    B -->|"Report"| ELN_EL
+    TR -->|"Assigned"| EventLoopNode
+    CB -->|"Modify Worker Bee"| WorkerBees
+
+    %% =========================================
+    %% SHARED MEMORY & LOGS ACCESS
+    %% =========================================
+
+    %% Worker Bees Access
+    Graph <-->|"Read/Write"| WTM
+    Graph <-->|"Read/Write"| SM
+
+    %% Queen Bee Access
+    QB_C <-->|"Read/Write"| WTM
+    QB_EL <-->|"Read/Write"| SM
+
+    %% Credentials Access
+    CS -->|"Read Access"| QB_C
 ```
 
 ---

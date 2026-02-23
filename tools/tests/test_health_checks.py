@@ -66,6 +66,7 @@ class TestHealthCheckerRegistry:
             "github",
             "resend",
             "google_calendar_oauth",
+            "google",
             "slack",
             "discord",
         }

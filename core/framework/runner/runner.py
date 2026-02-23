@@ -350,6 +350,12 @@ class AgentRunner:
         model: str | None = None,
         intro_message: str = "",
         runtime_config: "AgentRuntimeConfig | None" = None,
+        interactive: bool = True,
+        skip_credential_validation: bool = False,
+        skip_guardian: bool = False,
+        requires_account_selection: bool = False,
+        configure_for_account: Callable | None = None,
+        list_accounts: Callable | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -363,6 +369,13 @@ class AgentRunner:
             model: Model to use (reads from agent config or ~/.hive/configuration.json if None)
             intro_message: Optional greeting shown to user on TUI load
             runtime_config: Optional AgentRuntimeConfig (webhook settings, etc.)
+            interactive: If True (default), offer interactive credential setup on failure.
+                Set to False when called from the TUI (which handles setup via its own screen).
+            skip_credential_validation: If True, skip credential checks at load time.
+            skip_guardian: If True, don't attach the Hive Coder guardian.
+            requires_account_selection: If True, TUI shows account picker before starting.
+            configure_for_account: Callback(runner, account_dict) to scope tools after selection.
+            list_accounts: Callback() -> list[dict] to fetch available accounts.
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -371,6 +384,12 @@ class AgentRunner:
         self.model = model or self._resolve_default_model()
         self.intro_message = intro_message
         self.runtime_config = runtime_config
+        self._interactive = interactive
+        self.skip_credential_validation = skip_credential_validation
+        self.skip_guardian = skip_guardian
+        self.requires_account_selection = requires_account_selection
+        self._configure_for_account = configure_for_account
+        self._list_accounts = list_accounts
 
         # Set up storage
         if storage_path:
@@ -414,9 +433,50 @@ class AgentRunner:
     def _validate_credentials(self) -> None:
         """Check that required credentials are available before spawning MCP servers.
 
-        Raises CredentialError with actionable guidance if any are missing.
+        If ``interactive`` is True and stdin is a TTY, automatically launches
+        the interactive credential setup flow so the user can fix the issue
+        in-place.  Re-validates after setup succeeds.
+
+        When ``interactive`` is False (e.g. TUI callers), the CredentialError
+        propagates immediately so the caller can handle it with its own UI.
         """
-        validate_agent_credentials(self.graph.nodes)
+        if self.skip_credential_validation:
+            return
+
+        if not self._interactive:
+            # Let the CredentialError propagate — caller handles UI.
+            validate_agent_credentials(self.graph.nodes)
+            return
+
+        import sys
+
+        from framework.credentials.models import CredentialError
+
+        try:
+            validate_agent_credentials(self.graph.nodes)
+            return  # All good
+        except CredentialError as e:
+            if not sys.stdin.isatty():
+                raise
+
+            # Interactive: show the error then enter credential setup
+            print(f"\n{e}", file=sys.stderr)
+
+            from framework.credentials.validation import build_setup_session_from_error
+
+            session = build_setup_session_from_error(e, nodes=self.graph.nodes)
+            if not session.missing:
+                raise
+
+            result = session.run_interactive()
+            if not result.success:
+                raise CredentialError(
+                    "Credential setup incomplete. "
+                    "Run again after configuring the required credentials."
+                ) from None
+
+            # Re-validate after setup
+            validate_agent_credentials(self.graph.nodes)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -461,6 +521,7 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str | None = None,
+        interactive: bool = True,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -474,6 +535,8 @@ class AgentRunner:
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to ~/.hive/agents/{name})
             model: LLM model to use (reads from agent's default_config if None)
+            interactive: If True (default), offer interactive credential setup.
+                Set to False from TUI callers that handle setup via their own UI.
 
         Returns:
             AgentRunner instance ready to run
@@ -541,6 +604,13 @@ class AgentRunner:
             # Read runtime config (webhook settings, etc.) if defined
             agent_runtime_config = getattr(agent_module, "runtime_config", None)
 
+            # Read pre-run hooks (e.g., credential_tester needs account selection)
+            skip_cred = getattr(agent_module, "skip_credential_validation", False)
+            no_guardian = getattr(agent_module, "skip_guardian", False)
+            needs_acct = getattr(agent_module, "requires_account_selection", False)
+            configure_fn = getattr(agent_module, "configure_for_account", None)
+            list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
+
             return cls(
                 agent_path=agent_path,
                 graph=graph,
@@ -550,6 +620,12 @@ class AgentRunner:
                 model=model,
                 intro_message=intro_message,
                 runtime_config=agent_runtime_config,
+                interactive=interactive,
+                skip_credential_validation=skip_cred,
+                skip_guardian=no_guardian,
+                requires_account_selection=needs_acct,
+                configure_for_account=configure_fn,
+                list_accounts=list_accts_fn,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
@@ -567,6 +643,7 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+            interactive=interactive,
         )
 
     def register_tool(
@@ -755,7 +832,21 @@ class AgentRunner:
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
-        self._setup_agent_runtime(tools, tool_executor)
+        # Collect connected account info for system prompt injection
+        accounts_prompt = ""
+        try:
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+
+            adapter = CredentialStoreAdapter.default()
+            accounts = adapter.get_all_account_info()
+            if accounts:
+                from framework.graph.prompt_composer import build_accounts_prompt
+
+                accounts_prompt = build_accounts_prompt(accounts)
+        except Exception:
+            pass  # Best-effort — agent works without account info
+
+        self._setup_agent_runtime(tools, tool_executor, accounts_prompt=accounts_prompt)
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -816,7 +907,9 @@ class AgentRunner:
         except Exception:
             return None
 
-    def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
+    def _setup_agent_runtime(
+        self, tools: list, tool_executor: Callable | None, accounts_prompt: str = ""
+    ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
         entry_points = []
@@ -887,6 +980,7 @@ class AgentRunner:
             checkpoint_config=checkpoint_config,
             config=runtime_config,
             graph_id=self.graph.id or self.agent_path.name,
+            accounts_prompt=accounts_prompt,
         )
 
         # Pass intro_message through for TUI display

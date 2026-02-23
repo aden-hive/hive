@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .account_info_tool import register_tools as register_account_info
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
 from .calcom_tool import register_tools as register_calcom
@@ -64,6 +65,7 @@ from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .stripe_tool import register_tools as register_stripe
 from .subdomain_enumerator import register_tools as register_subdomain_enumerator
 from .tech_stack_detector import register_tools as register_tech_stack_detector
 from .telegram_tool import register_tools as register_telegram
@@ -118,6 +120,7 @@ def register_all_tools(
     register_vision(mcp, credentials=credentials)
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_account_info(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -140,6 +143,7 @@ def register_all_tools(
     register_tech_stack_detector(mcp)
     register_subdomain_enumerator(mcp)
     register_risk_scorer(mcp)
+    register_stripe(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())

@@ -143,6 +143,7 @@ class ExecutionStream:
         session_store: "SessionStore | None" = None,
         checkpoint_config: CheckpointConfig | None = None,
         graph_id: str | None = None,
+        accounts_prompt: str = "",
     ):
         """
         Initialize execution stream.
@@ -163,6 +164,7 @@ class ExecutionStream:
             session_store: Optional SessionStore for unified session storage
             checkpoint_config: Optional checkpoint configuration for resumable sessions
             graph_id: Optional graph identifier for multi-graph sessions
+            accounts_prompt: Connected accounts block for system prompt injection
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -181,6 +183,7 @@ class ExecutionStream:
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
         self._session_store = session_store
+        self._accounts_prompt = accounts_prompt
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -453,6 +456,7 @@ class ExecutionStream:
                     storage_path=exec_storage,
                     runtime_logger=runtime_logger,
                     loop_config=self.graph.loop_config,
+                    accounts_prompt=self._accounts_prompt,
                 )
                 # Track executor so inject_input() can reach EventLoopNode instances
                 self._active_executors[execution_id] = executor

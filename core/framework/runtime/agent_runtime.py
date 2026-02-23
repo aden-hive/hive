@@ -126,6 +126,7 @@ class AgentRuntime:
         runtime_log_store: Any = None,
         checkpoint_config: CheckpointConfig | None = None,
         graph_id: str | None = None,
+        accounts_prompt: str = "",
     ):
         """
         Initialize agent runtime.
@@ -141,6 +142,7 @@ class AgentRuntime:
             runtime_log_store: Optional RuntimeLogStore for per-execution logging
             checkpoint_config: Optional checkpoint configuration for resumable sessions
             graph_id: Optional identifier for the primary graph (defaults to "primary")
+            accounts_prompt: Connected accounts block for system prompt injection
         """
         self.graph = graph
         self.goal = goal
@@ -178,6 +180,7 @@ class AgentRuntime:
         self._llm = llm
         self._tools = tools or []
         self._tool_executor = tool_executor
+        self._accounts_prompt = accounts_prompt
 
         # Entry points and streams (primary graph)
         self._entry_points: dict[str, EntryPointSpec] = {}
@@ -273,6 +276,7 @@ class AgentRuntime:
                     session_store=self._session_store,
                     checkpoint_config=self._checkpoint_config,
                     graph_id=self._graph_id,
+                    accounts_prompt=self._accounts_prompt,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -674,6 +678,7 @@ class AgentRuntime:
                 session_store=self._session_store,
                 checkpoint_config=self._checkpoint_config,
                 graph_id=graph_id,
+                accounts_prompt=self._accounts_prompt,
             )
             if self._running:
                 await stream.start()
@@ -1147,6 +1152,7 @@ def create_agent_runtime(
     enable_logging: bool = True,
     checkpoint_config: CheckpointConfig | None = None,
     graph_id: str | None = None,
+    accounts_prompt: str = "",
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -1192,6 +1198,7 @@ def create_agent_runtime(
         runtime_log_store=runtime_log_store,
         checkpoint_config=checkpoint_config,
         graph_id=graph_id,
+        accounts_prompt=accounts_prompt,
     )
 
     for spec in entry_points:

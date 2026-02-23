@@ -11,9 +11,9 @@ Usage:
 
 Testing commands:
     hive test-run <agent_path> --goal <goal_id>
-    hive test-debug <goal_id> <test_id>
-    hive test-list <goal_id>
-    hive test-stats <goal_id>
+    hive test-debug <agent_path> <test_name>
+    hive test-list <agent_path>
+    hive test-stats <agent_path>
 """
 
 import argparse
