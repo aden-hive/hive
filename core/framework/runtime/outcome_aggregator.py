@@ -312,10 +312,9 @@ class OutcomeAggregator:
 
     async def _evaluate_criterion(self, criterion: Any) -> CriterionStatus:
         """
-            Evaluate a single success criterion.
-
-            This is a heuristic evaluation based on decision outcomes.
-            More sophisticated evaluation can be added per criterion type.
+        Evaluate a single success criterion.
+        This is a heuristic evaluation based on decision outcomes.
+        More sophisticated evaluation can be added per criterion type.
         """
         status = CriterionStatus(
             criterion_id=criterion.id,
