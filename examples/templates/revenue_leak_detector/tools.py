@@ -625,7 +625,13 @@ def _send_followup_emails(cycle: int) -> dict:
     ghosted = [leak for leak in _leaks_var.get([]) if leak.get("type") == "GHOSTED"]
 
     if not ghosted:
-        print(f"\n[send_followup_emails] Cycle {cycle_num} — no GHOSTED contacts, skipping.")
+        gmail_user = os.getenv("GMAIL_USER", "").strip()
+        gmail_pass = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+        if gmail_user and gmail_pass:
+            print(f"\n[send_followup_emails] Cycle {cycle_num} — no GHOSTED contacts, skipping.")
+        else:
+            print(f"\n[send_followup_emails] Cycle {cycle_num} — no GHOSTED contacts, skipping.")
+            print("  ℹ️   Gmail not configured — set GMAIL_USER + GMAIL_APP_PASSWORD to enable real emails.")
         return {"emails_sent": 0, "contacts_emailed": [], "delivery_method": "none", "emails_failed": 0}
 
     gmail_user = os.getenv("GMAIL_USER", "").strip()
