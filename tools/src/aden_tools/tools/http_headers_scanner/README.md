@@ -81,6 +81,7 @@ Pass the `grade_input` field from the response directly to the `risk_score` tool
 
 ## Notes
 
+- This is an async tool — it must be awaited in async contexts.
 - Request timeout is 15 seconds.
 - `X-XSS-Protection` is flagged as deprecated if present.
 - TLS certificate verification is enabled by default.

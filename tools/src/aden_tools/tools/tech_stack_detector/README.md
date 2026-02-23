@@ -73,6 +73,7 @@ Pass the full JSON output to the `risk_score` tool as `tech_results` to include 
 
 ## Notes
 
+- This is an async tool — it must be awaited in async contexts.
 - Request timeout is 15 seconds.
 - CMS and framework detection from path probing does not follow redirects to avoid false positives.
 - A `403 Forbidden` response to `/wp-admin/` still counts as WordPress detection (the path exists).

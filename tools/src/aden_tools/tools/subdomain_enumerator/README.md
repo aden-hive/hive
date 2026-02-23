@@ -80,6 +80,7 @@ Pass the full JSON output to the `risk_score` tool as `subdomain_results` to inc
 
 ## Notes
 
+- This is an async tool — it must be awaited in async contexts.
 - Wildcard entries (e.g. `*.example.com`) are filtered out — only concrete subdomain names are returned.
 - CT log data is historical; a subdomain appearing here does not necessarily mean it is currently active.
 - Results depend on crt.sh availability — the tool will return an error if the service times out (30-second timeout).

@@ -78,6 +78,7 @@ Pass the full JSON output (or just the `grade_input` field) to the `risk_score` 
 
 ## Notes
 
+- This is an async tool — it must be awaited in async contexts.
 - Concurrency is capped at 20 simultaneous connections to avoid overwhelming the target.
 - Banner grabbing reads up to 256 bytes from the open connection with a 2-second timeout.
 - Only use against hosts you own or have explicit written authorisation to scan.
