@@ -226,13 +226,11 @@ class AdenTUI(App):
         resume_session: str | None = None,
         resume_checkpoint: str | None = None,
         model: str | None = None,
-        no_guardian: bool = False,
     ):
         super().__init__()
 
         self.runtime = runtime
         self._model = model
-        self._no_guardian = no_guardian
         self._resume_session = resume_session
         self._resume_checkpoint = resume_checkpoint
         self._runner = None  # AgentRunner — needed for cleanup on swap
@@ -243,6 +241,7 @@ class AdenTUI(App):
         # Health judge + queen monitoring graphs (loaded alongside worker agents)
         self._queen_graph_id: str | None = None
         self._judge_graph_id: str | None = None
+        self._queen_agent = None  # HiveCoderAgent instance — kept alive to hold MCP process
 
         # Widgets are created lazily when runtime is available
         self.graph_view = None
@@ -401,25 +400,18 @@ class AdenTUI(App):
         await self._finish_agent_load(runner)
 
     async def _finish_agent_load(self, runner) -> None:
-        """Complete agent setup, guardian attach, and widget mount."""
+        """Complete agent setup and widget mount."""
         import asyncio
 
         # Reset health monitoring state from any prior agent load
         self._queen_graph_id = None
         self._judge_graph_id = None
+        self._queen_agent = None
 
         loop = asyncio.get_event_loop()
         try:
             if runner._agent_runtime is None:
                 await loop.run_in_executor(None, runner._setup)
-
-            if not self._no_guardian and not runner.skip_guardian and runner._agent_runtime:
-                from framework.agents.hive_coder.guardian import attach_guardian
-
-                attach_guardian(runner._agent_runtime, runner._tool_registry)
-
-            if runner._agent_runtime and not runner._agent_runtime.is_running:
-                await runner._agent_runtime.start()
 
             self._runner = runner
             self.runtime = runner._agent_runtime
@@ -428,7 +420,26 @@ class AdenTUI(App):
             self.notify(f"Failed to load agent: {e}", severity="error", timeout=10)
             return
 
+        # Mount widgets FIRST — creates the ChatRepl and its dedicated agent
+        # event loop on a background thread.
         self._mount_agent_widgets()
+
+        # Start the runtime on the agent loop so ALL async tasks (timers,
+        # event handlers, execution streams) live on the same loop as worker
+        # execution.  Previously runtime.start() ran on Textual's UI loop,
+        # causing timer tasks to be starved by UI rendering.
+        if self.runtime and not self.runtime.is_running:
+            try:
+                agent_loop = self.chat_repl._agent_loop
+                future = asyncio.run_coroutine_threadsafe(
+                    self.runtime.start(), agent_loop
+                )
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self.status_bar.set_graph_id("")
+                self.notify(f"Failed to start runtime: {e}", severity="error", timeout=10)
+                return
+
         await self._init_runtime_connection()
 
         # Clear resume state for subsequent loads
@@ -443,48 +454,69 @@ class AdenTUI(App):
             await self._load_judge_and_queen(runner._storage_path)
 
     async def _load_judge_and_queen(self, storage_path) -> None:
-        """Load the health judge and queen's ticket_triage as secondary monitoring graphs.
+        """Load the health judge and full Hive Coder as secondary monitoring graphs.
 
         Both are added to the current worker runtime so they share its EventBus.
-        The health judge fires every 2 minutes via a timer; the queen fires on
-        WORKER_ESCALATION_TICKET events emitted by the judge.
+        - Health judge: fires every 2 minutes via timer, emits EscalationTickets.
+        - Queen (full Hive Coder): two entry points —
+            ticket_triage_node fires automatically on WORKER_ESCALATION_TICKET;
+            coder_node is the interactive interface when operator connects via Ctrl+Q.
+
+        The queen gets the full hive-tools MCP tool set: read_file, run_command,
+        restart_agent, get_agent_session_state, etc. Gap 1 is resolved.
 
         Works for any agent automatically — no agent-side configuration needed.
         """
+        import asyncio
+        import json as _json
         from pathlib import Path
 
-        from framework.agents.hive_coder.nodes import ticket_triage_node
-        from framework.agents.hive_coder.ticket_receiver import TICKET_RECEIVER_ENTRY_POINT
-        from framework.graph import Goal
-        from framework.graph.edge import GraphSpec
+        from framework.agents.hive_coder.agent import HiveCoderAgent
         from framework.monitoring import HEALTH_JUDGE_ENTRY_POINT, judge_goal, judge_graph
         from framework.runner.tool_registry import ToolRegistry
+        from framework.runtime.execution_stream import EntryPointSpec
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
 
         try:
             storage_path = Path(storage_path)
+            loop = asyncio.get_event_loop()
 
-            # 1. Register monitoring tools bound to this runtime's EventBus + storage
+            # 1. Monitoring tools: health summary, emit ticket, notify operator
             monitoring_registry = ToolRegistry()
             register_worker_monitoring_tools(
                 monitoring_registry,
                 self.runtime._event_bus,
                 storage_path,
+                worker_graph_id=self.runtime._graph_id,
             )
             monitoring_tools = list(monitoring_registry.get_tools().values())
             monitoring_executor = monitoring_registry.get_executor()
             monitoring_tool_names = {t.name for t in monitoring_tools}
 
-            # Inject monitoring tools into runtime so secondary graphs can call them.
-            # Secondary graph streams inherit self.runtime._tools / _tool_executor.
+            # 2. Full Hive Coder setup — loads hive-tools MCP, giving the queen
+            #    read_file, write_file, run_command, restart_agent, etc.
+            #    mock_mode=True: skip LLM provider init; the queen will use the
+            #    worker runtime's LLM when it actually runs.
+            self._queen_agent = HiveCoderAgent()
+            await loop.run_in_executor(None, lambda: self._queen_agent._setup(mock_mode=True))
+            queen_tools_raw = list(self._queen_agent._tool_registry.get_tools().values())
+            queen_executor = self._queen_agent._tool_registry.get_executor()
+            queen_tool_names = {t.name for t in queen_tools_raw}
+            # Only add tools not already on the worker runtime (avoid duplicate schemas)
+            existing_tool_names = {t.name for t in self.runtime._tools}
+            queen_tools = [t for t in queen_tools_raw if t.name not in existing_tool_names]
+
+            # 3. Merge monitoring + queen tools into the worker runtime so all
+            #    secondary graphs (judge, queen) can call them.
             original_executor = self.runtime._tool_executor
 
             def merged_executor(tool_use):
                 if tool_use.name in monitoring_tool_names:
                     return monitoring_executor(tool_use)
+                if tool_use.name in queen_tool_names:
+                    return queen_executor(tool_use)
                 if original_executor is not None:
                     return original_executor(tool_use)
-                import json as _json
                 from framework.llm.provider import ToolResult
                 return ToolResult(
                     tool_use_id=tool_use.id,
@@ -492,48 +524,63 @@ class AdenTUI(App):
                     is_error=True,
                 )
 
-            self.runtime._tools = self.runtime._tools + monitoring_tools
+            self.runtime._tools = self.runtime._tools + monitoring_tools + queen_tools
             self.runtime._tool_executor = merged_executor
 
-            # 2. Load health judge as a secondary graph on the worker runtime
-            await self.runtime.add_graph(
-                graph_id="worker_health_judge",
-                graph=judge_graph,
-                goal=judge_goal,
-                entry_points={"health_check": HEALTH_JUDGE_ENTRY_POINT},
-                storage_subpath="graphs/worker_health_judge",
+            # Dispatch add_graph calls to the agent execution loop.
+            # add_graph creates asyncio.Tasks for timers and event handlers;
+            # these MUST live on the agent loop (where stream.execute runs
+            # LLM calls and tool execution), not Textual's UI loop.
+            agent_loop = self.chat_repl._agent_loop
+
+            # 4. Load health judge as a secondary graph on the worker runtime
+            future = asyncio.run_coroutine_threadsafe(
+                self.runtime.add_graph(
+                    graph_id="worker_health_judge",
+                    graph=judge_graph,
+                    goal=judge_goal,
+                    entry_points={"health_check": HEALTH_JUDGE_ENTRY_POINT},
+                    storage_subpath="graphs/worker_health_judge",
+                ),
+                agent_loop,
             )
+            await asyncio.wrap_future(future)
             self._judge_graph_id = "worker_health_judge"
 
-            # 3. Build minimal queen graph (ticket_triage only, not the full coder)
-            queen_triage_goal = Goal(
-                id="queen-ticket-triage",
-                name="Queen Ticket Triage",
-                description=(
-                    "Receive escalation tickets from the Health Judge and decide "
-                    "whether to notify the operator."
+            # 5. Load full Hive Coder as the queen graph on the worker runtime.
+            #    ticket_triage_node handles auto-triage (event-driven, isolated).
+            #    coder_node handles interactive investigation (operator via Ctrl+Q).
+            queen_entry_points = {
+                "ticket_receiver": EntryPointSpec(
+                    id="ticket_receiver",
+                    name="Ticket Receiver",
+                    entry_node="ticket_triage",
+                    trigger_type="event",
+                    trigger_config={
+                        "event_types": ["worker_escalation_ticket"],
+                        "exclude_own_graph": True,
+                    },
+                    isolation_level="isolated",
                 ),
+                "start": EntryPointSpec(
+                    id="start",
+                    name="Start",
+                    entry_node="coder",
+                    trigger_type="manual",
+                    isolation_level="shared",
+                ),
+            }
+            future = asyncio.run_coroutine_threadsafe(
+                self.runtime.add_graph(
+                    graph_id="hive_coder_queen",
+                    graph=self._queen_agent._graph,
+                    goal=self._queen_agent.goal,
+                    entry_points=queen_entry_points,
+                    storage_subpath="graphs/hive_coder_queen",
+                ),
+                agent_loop,
             )
-            queen_graph = GraphSpec(
-                id="hive-coder-queen-triage",
-                goal_id=queen_triage_goal.id,
-                version="1.0.0",
-                entry_node="ticket_triage",
-                entry_points={"ticket_receiver": "ticket_triage"},
-                terminal_nodes=[],
-                pause_nodes=[],
-                nodes=[ticket_triage_node],
-                edges=[],
-                conversation_mode="continuous",
-                async_entry_points=[TICKET_RECEIVER_ENTRY_POINT],
-            )
-            await self.runtime.add_graph(
-                graph_id="hive_coder_queen",
-                graph=queen_graph,
-                goal=queen_triage_goal,
-                entry_points={"ticket_receiver": TICKET_RECEIVER_ENTRY_POINT},
-                storage_subpath="graphs/hive_coder_queen",
-            )
+            await asyncio.wrap_future(future)
             self._queen_graph_id = "hive_coder_queen"
 
             self.notify(
@@ -760,9 +807,6 @@ class AdenTUI(App):
             coder_runtime._tools = list(runner._tool_registry.get_tools().values())
             coder_runtime._tool_executor = runner._tool_registry.get_executor()
 
-            if not coder_runtime.is_running:
-                await coder_runtime.start()
-
             self._runner = runner
             self.runtime = coder_runtime
         except CredentialError as e:
@@ -781,6 +825,20 @@ class AdenTUI(App):
 
         # 5. Mount coder widgets and subscribe
         self._mount_agent_widgets()
+
+        # Start runtime on the agent loop (same pattern as _finish_agent_load)
+        if not coder_runtime.is_running:
+            try:
+                agent_loop = self.chat_repl._agent_loop
+                future = asyncio.run_coroutine_threadsafe(
+                    coder_runtime.start(), agent_loop
+                )
+                await asyncio.wrap_future(future)
+            except Exception as e:
+                self.notify(f"Failed to start coder runtime: {e}", severity="error")
+                self._restore_from_escalation_stack()
+                return
+
         await self._init_runtime_connection()
 
         self.status_bar.set_graph_id("hive_coder (escalated)")
@@ -1419,11 +1477,15 @@ class AdenTUI(App):
         return True
 
     def action_connect_to_queen(self) -> None:
-        """Switch to the queen's ticket-triage graph view (Ctrl+Q)."""
+        """Toggle between worker and queen graph views (Ctrl+Q)."""
         if not self._queen_graph_id:
             self.notify("No queen monitoring active", severity="warning", timeout=3)
             return
-        self.action_switch_graph(self._queen_graph_id)
+        # Toggle: if already on queen, switch back to worker
+        if self.runtime and self.runtime.active_graph_id == self._queen_graph_id:
+            self.action_switch_graph(self.runtime.graph_id)
+        else:
+            self.action_switch_graph(self._queen_graph_id)
 
     def action_escalate_to_coder(self) -> None:
         """Escalate to Hive Coder (bound to Ctrl+E)."""

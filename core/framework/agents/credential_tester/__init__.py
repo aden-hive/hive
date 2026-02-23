@@ -20,7 +20,6 @@ from .agent import (
     pause_nodes,
     requires_account_selection,
     skip_credential_validation,
-    skip_guardian,
     terminal_nodes,
 )
 from .config import default_config
@@ -43,6 +42,5 @@ __all__ = [
     "pause_nodes",
     "requires_account_selection",
     "skip_credential_validation",
-    "skip_guardian",
     "terminal_nodes",
 ]

@@ -352,7 +352,6 @@ class AgentRunner:
         runtime_config: "AgentRuntimeConfig | None" = None,
         interactive: bool = True,
         skip_credential_validation: bool = False,
-        skip_guardian: bool = False,
         requires_account_selection: bool = False,
         configure_for_account: Callable | None = None,
         list_accounts: Callable | None = None,
@@ -372,7 +371,6 @@ class AgentRunner:
             interactive: If True (default), offer interactive credential setup on failure.
                 Set to False when called from the TUI (which handles setup via its own screen).
             skip_credential_validation: If True, skip credential checks at load time.
-            skip_guardian: If True, don't attach the Hive Coder guardian.
             requires_account_selection: If True, TUI shows account picker before starting.
             configure_for_account: Callback(runner, account_dict) to scope tools after selection.
             list_accounts: Callback() -> list[dict] to fetch available accounts.
@@ -386,7 +384,6 @@ class AgentRunner:
         self.runtime_config = runtime_config
         self._interactive = interactive
         self.skip_credential_validation = skip_credential_validation
-        self.skip_guardian = skip_guardian
         self.requires_account_selection = requires_account_selection
         self._configure_for_account = configure_for_account
         self._list_accounts = list_accounts
@@ -606,7 +603,6 @@ class AgentRunner:
 
             # Read pre-run hooks (e.g., credential_tester needs account selection)
             skip_cred = getattr(agent_module, "skip_credential_validation", False)
-            no_guardian = getattr(agent_module, "skip_guardian", False)
             needs_acct = getattr(agent_module, "requires_account_selection", False)
             configure_fn = getattr(agent_module, "configure_for_account", None)
             list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
@@ -622,7 +618,6 @@ class AgentRunner:
                 runtime_config=agent_runtime_config,
                 interactive=interactive,
                 skip_credential_validation=skip_cred,
-                skip_guardian=no_guardian,
                 requires_account_selection=needs_acct,
                 configure_for_account=configure_fn,
                 list_accounts=list_accts_fn,

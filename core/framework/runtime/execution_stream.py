@@ -445,7 +445,14 @@ class ExecutionStream:
                 # to this execution.  The executor sets data_dir via execution
                 # context (contextvars) so data tools and spillover share the
                 # same session-scoped directory.
-                exec_storage = self._storage.base_path / "sessions" / execution_id
+                # Derive storage from session_store (graph-specific for secondary
+                # graphs) so that all files — conversations, state, checkpoints,
+                # data — land under the graph's own sessions/ directory, not the
+                # primary worker's.
+                if self._session_store:
+                    exec_storage = self._session_store.sessions_dir / execution_id
+                else:
+                    exec_storage = self._storage.base_path / "sessions" / execution_id
                 executor = GraphExecutor(
                     runtime=runtime_adapter,
                     llm=self._llm,

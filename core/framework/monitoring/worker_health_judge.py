@@ -139,7 +139,9 @@ On each timer tick (every 2 minutes):
 ## Step 1: Read health snapshot
 Call get_worker_health_summary() with no arguments to auto-discover the active \
 session. This returns:
-- session_id: the session being monitored (record this for tickets)
+- worker_agent_id: the worker's agent name — use this for ticket identity fields
+- worker_graph_id: the worker's primary graph ID — use this for ticket identity fields
+- session_id: the session being monitored — use this for worker_session_id in tickets
 - total_steps: how many log steps have been recorded
 - recent_verdicts: list of recent ACCEPT/RETRY/CONTINUE verdicts
 - steps_since_last_accept: consecutive non-ACCEPT steps
@@ -173,10 +175,10 @@ Done.
 ### If escalating:
 Build an EscalationTicket JSON string with ALL required fields:
 {
-  "worker_agent_id": "<use the graph_id from the runtime context, or 'unknown'>",
+  "worker_agent_id": "<worker_agent_id from get_worker_health_summary>",
   "worker_session_id": "<session_id from get_worker_health_summary>",
-  "worker_node_id": "<primary node, usually from graph structure or 'unknown'>",
-  "worker_graph_id": "<graph_id, or 'unknown'>",
+  "worker_node_id": "<worker_graph_id from get_worker_health_summary>",
+  "worker_graph_id": "<worker_graph_id from get_worker_health_summary>",
   "severity": "<low|medium|high|critical>",
   "cause": "<what you observed — concrete, specific>",
   "judge_reasoning": "<why you decided to escalate, not just dismiss>",
@@ -227,7 +229,7 @@ HEALTH_JUDGE_ENTRY_POINT = AsyncEntryPointSpec(
     trigger_type="timer",
     trigger_config={
         "interval_minutes": 2,
-        "run_immediately": False,  # Give worker time to start producing logs
+        "run_immediately": True,  # Fire immediately to establish a baseline
     },
     isolation_level="isolated",  # Own memory namespace, not polluting worker's
 )

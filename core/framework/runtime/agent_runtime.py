@@ -21,6 +21,7 @@ from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import SharedStateManager
 from framework.storage.concurrent import ConcurrentStorage
+from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.storage.session_store import SessionStore
 
 if TYPE_CHECKING:
@@ -326,7 +327,10 @@ class AgentRuntime:
                 exclude_own = tc.get("exclude_own_graph", False)
 
                 def _make_handler(entry_point_id: str, _exclude_own: bool):
+                    _persistent_session_id: str | None = None
+
                     async def _on_event(event):
+                        nonlocal _persistent_session_id
                         if not self._running or entry_point_id not in self._streams:
                             return
                         # Skip events originating from this graph's own
@@ -334,17 +338,27 @@ class AgentRuntime:
                         # hive_coder failures — only secondary graphs).
                         if _exclude_own and event.graph_id == self._graph_id:
                             return
-                        # Run in the same session as the primary entry
-                        # point so memory (e.g. user-defined rules) is
-                        # shared and logs land in one session directory.
-                        session_state = self._get_primary_session_state(
-                            exclude_entry_point=entry_point_id
-                        )
-                        await self.trigger(
+                        ep_spec = self._entry_points.get(entry_point_id)
+                        is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
+                        if is_isolated:
+                            if _persistent_session_id:
+                                session_state = {"resume_session_id": _persistent_session_id}
+                            else:
+                                session_state = None
+                        else:
+                            # Run in the same session as the primary entry
+                            # point so memory (e.g. user-defined rules) is
+                            # shared and logs land in one session directory.
+                            session_state = self._get_primary_session_state(
+                                exclude_entry_point=entry_point_id
+                            )
+                        exec_id = await self.trigger(
                             entry_point_id,
                             {"event": event.to_dict()},
                             session_state=session_state,
                         )
+                        if not _persistent_session_id and is_isolated:
+                            _persistent_session_id = exec_id
 
                     return _on_event
 
@@ -387,6 +401,7 @@ class AgentRuntime:
                         async def _cron_loop():
                             from croniter import croniter
 
+                            _persistent_session_id: str | None = None
                             if not immediate:
                                 cron = croniter(expr, datetime.now())
                                 next_dt = cron.get_next(datetime)
@@ -398,10 +413,18 @@ class AgentRuntime:
                             while self._running:
                                 self._timer_next_fire.pop(entry_point_id, None)
                                 try:
-                                    session_state = self._get_primary_session_state(
-                                        exclude_entry_point=entry_point_id
-                                    )
-                                    await self.trigger(
+                                    ep_spec = self._entry_points.get(entry_point_id)
+                                    is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
+                                    if is_isolated:
+                                        if _persistent_session_id:
+                                            session_state = {"resume_session_id": _persistent_session_id}
+                                        else:
+                                            session_state = None
+                                    else:
+                                        session_state = self._get_primary_session_state(
+                                            exclude_entry_point=entry_point_id
+                                        )
+                                    exec_id = await self.trigger(
                                         entry_point_id,
                                         {
                                             "event": {
@@ -411,6 +434,8 @@ class AgentRuntime:
                                         },
                                         session_state=session_state,
                                     )
+                                    if not _persistent_session_id and is_isolated:
+                                        _persistent_session_id = exec_id
                                     logger.info(
                                         "Cron fired for entry point '%s' (expr: %s)",
                                         entry_point_id,
@@ -449,6 +474,7 @@ class AgentRuntime:
                     def _make_timer(entry_point_id: str, mins: float, immediate: bool):
                         async def _timer_loop():
                             interval_secs = mins * 60
+                            _persistent_session_id: str | None = None
                             if not immediate:
                                 self._timer_next_fire[entry_point_id] = (
                                     time.monotonic() + interval_secs
@@ -457,10 +483,18 @@ class AgentRuntime:
                             while self._running:
                                 self._timer_next_fire.pop(entry_point_id, None)
                                 try:
-                                    session_state = self._get_primary_session_state(
-                                        exclude_entry_point=entry_point_id
-                                    )
-                                    await self.trigger(
+                                    ep_spec = self._entry_points.get(entry_point_id)
+                                    is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
+                                    if is_isolated:
+                                        if _persistent_session_id:
+                                            session_state = {"resume_session_id": _persistent_session_id}
+                                        else:
+                                            session_state = None
+                                    else:
+                                        session_state = self._get_primary_session_state(
+                                            exclude_entry_point=entry_point_id
+                                        )
+                                    exec_id = await self.trigger(
                                         entry_point_id,
                                         {
                                             "event": {
@@ -470,6 +504,8 @@ class AgentRuntime:
                                         },
                                         session_state=session_state,
                                     )
+                                    if not _persistent_session_id and is_isolated:
+                                        _persistent_session_id = exec_id
                                     logger.info(
                                         "Timer fired for entry point '%s' (next in %s min)",
                                         entry_point_id,
@@ -558,12 +594,41 @@ class AgentRuntime:
             self._running = False
             logger.info("AgentRuntime stopped")
 
+    def _resolve_stream(
+        self,
+        entry_point_id: str,
+        graph_id: str | None = None,
+    ) -> ExecutionStream | None:
+        """Find the stream for an entry point, searching the active graph first.
+
+        Lookup order:
+        1. If *graph_id* is given, search that graph only.
+        2. Otherwise search the active graph (``active_graph_id``).
+        3. Fall back to the primary graph's streams (``self._streams``).
+        """
+        if graph_id:
+            reg = self._graphs.get(graph_id)
+            return reg.streams.get(entry_point_id) if reg else None
+
+        # Active graph
+        target = self._active_graph_id
+        if target != self._graph_id:
+            reg = self._graphs.get(target)
+            if reg:
+                stream = reg.streams.get(entry_point_id)
+                if stream is not None:
+                    return stream
+
+        # Primary graph (also stored in self._streams)
+        return self._streams.get(entry_point_id)
+
     async def trigger(
         self,
         entry_point_id: str,
         input_data: dict[str, Any],
         correlation_id: str | None = None,
         session_state: dict[str, Any] | None = None,
+        graph_id: str | None = None,
     ) -> str:
         """
         Trigger execution at a specific entry point.
@@ -575,6 +640,8 @@ class AgentRuntime:
             input_data: Input data for the execution
             correlation_id: Optional ID to correlate related executions
             session_state: Optional session state to resume from (with paused_at, memory)
+            graph_id: Graph to trigger on.  ``None`` uses the active graph
+                first, then falls back to the primary graph.
 
         Returns:
             Execution ID for tracking
@@ -586,7 +653,7 @@ class AgentRuntime:
         if not self._running:
             raise RuntimeError("AgentRuntime is not running")
 
-        stream = self._streams.get(entry_point_id)
+        stream = self._resolve_stream(entry_point_id, graph_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
@@ -612,7 +679,7 @@ class AgentRuntime:
             ExecutionResult or None if timeout
         """
         exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
-        stream = self._streams.get(entry_point_id)
+        stream = self._resolve_stream(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
         return await stream.wait_for_completion(exec_id, timeout)
@@ -657,6 +724,12 @@ class AgentRuntime:
             if graph.get_node(spec.entry_node) is None:
                 raise ValueError(f"Entry node '{spec.entry_node}' not found in graph '{graph_id}'")
 
+        # Secondary graphs get their own SessionStore AND RuntimeLogStore
+        # so their sessions and logs don't pollute the worker's directories.
+        graph_base = self._session_store.base_path / subpath
+        graph_session_store = SessionStore(graph_base)
+        graph_log_store = RuntimeLogStore(graph_base / "runtime_logs")
+
         # Create streams for each entry point
         streams: dict[str, ExecutionStream] = {}
         for ep_id, spec in entry_points.items():
@@ -674,8 +747,8 @@ class AgentRuntime:
                 tool_executor=self._tool_executor,
                 result_retention_max=self._config.execution_result_max,
                 result_retention_ttl_seconds=self._config.execution_result_ttl_seconds,
-                runtime_log_store=self._runtime_log_store,
-                session_store=self._session_store,
+                runtime_log_store=graph_log_store,
+                session_store=graph_session_store,
                 checkpoint_config=self._checkpoint_config,
                 graph_id=graph_id,
                 accounts_prompt=self._accounts_prompt,
@@ -706,7 +779,10 @@ class AgentRuntime:
             exclude_own = tc.get("exclude_own_graph", False)
 
             def _make_handler(entry_point_id: str, gid: str, _exclude_own: bool):
+                _persistent_session_id: str | None = None
+
                 async def _on_event(event):
+                    nonlocal _persistent_session_id
                     if not self._running or gid not in self._graphs:
                         return
                     # Skip events from this graph's own executions
@@ -717,14 +793,24 @@ class AgentRuntime:
                     stream = reg.streams.get(local_ep)
                     if stream is None:
                         return
-                    session_state = self._get_primary_session_state(
-                        local_ep,
-                        source_graph_id=gid,
-                    )
-                    await stream.execute(
+                    ep_spec = reg.entry_points.get(local_ep)
+                    is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
+                    if is_isolated:
+                        if _persistent_session_id:
+                            session_state = {"resume_session_id": _persistent_session_id}
+                        else:
+                            session_state = None
+                    else:
+                        session_state = self._get_primary_session_state(
+                            local_ep,
+                            source_graph_id=gid,
+                        )
+                    exec_id = await stream.execute(
                         {"event": event.to_dict()},
                         session_state=session_state,
                     )
+                    if not _persistent_session_id and is_isolated:
+                        _persistent_session_id = exec_id
 
                 return _on_event
 
@@ -748,30 +834,61 @@ class AgentRuntime:
             run_immediately = tc.get("run_immediately", False)
 
             if interval and interval > 0 and self._running:
+                logger.info(
+                    "Creating timer for '%s::%s': interval=%s min, immediate=%s, loop=%s",
+                    graph_id, ep_id, interval, run_immediately,
+                    id(asyncio.get_event_loop()),
+                )
 
-                def _make_timer(gid: str, local_ep: str, mins: float, immediate: bool):
+                def _make_timer(
+                    gid: str, local_ep: str, mins: float, immediate: bool,
+                ):
                     async def _timer_loop():
                         interval_secs = mins * 60
+                        # For isolated entry points, reuse ONE session across
+                        # all timer ticks so conversation_mode="continuous"
+                        # actually works and we don't create N sessions.
+                        _persistent_session_id: str | None = None
+
+                        logger.info(
+                            "Timer loop started for '%s::%s' (sleep %ss)",
+                            gid, local_ep, interval_secs,
+                        )
                         if not immediate:
                             timer_next_fire[local_ep] = time.monotonic() + interval_secs
                             await asyncio.sleep(interval_secs)
                         while self._running and gid in self._graphs:
+                            logger.info("Timer firing for '%s::%s'", gid, local_ep)
                             timer_next_fire.pop(local_ep, None)
                             try:
                                 reg = self._graphs.get(gid)
                                 if not reg:
+                                    logger.warning("Timer: no reg for '%s', stopping", gid)
                                     break
                                 stream = reg.streams.get(local_ep)
                                 if not stream:
+                                    logger.warning("Timer: no stream '%s' in '%s', stopping", local_ep, gid)
                                     break
-                                session_state = self._get_primary_session_state(
-                                    local_ep, source_graph_id=gid
-                                )
-                                await stream.execute(
+                                # Isolated entry points get their own session;
+                                # shared ones join the primary session.
+                                ep_spec = reg.entry_points.get(local_ep)
+                                if ep_spec and ep_spec.isolation_level == "isolated":
+                                    if _persistent_session_id:
+                                        session_state = {"resume_session_id": _persistent_session_id}
+                                    else:
+                                        session_state = None
+                                else:
+                                    session_state = self._get_primary_session_state(
+                                        local_ep, source_graph_id=gid
+                                    )
+                                exec_id = await stream.execute(
                                     {"event": {"source": "timer", "reason": "scheduled"}},
                                     session_state=session_state,
                                 )
-                            except Exception:
+                                # Remember session ID for reuse on next tick
+                                if not _persistent_session_id and ep_spec and ep_spec.isolation_level == "isolated":
+                                    _persistent_session_id = exec_id
+                            except Exception as exc:
                                 logger.error(
                                     "Timer trigger failed for '%s::%s'",
                                     gid,
@@ -780,6 +897,7 @@ class AgentRuntime:
                                 )
                             timer_next_fire[local_ep] = time.monotonic() + interval_secs
                             await asyncio.sleep(interval_secs)
+                        logger.info("Timer loop exited for '%s::%s'", gid, local_ep)
 
                     return _timer_loop
 
@@ -787,6 +905,7 @@ class AgentRuntime:
                     _make_timer(graph_id, ep_id, interval, run_immediately)()
                 )
                 timer_tasks.append(task)
+                logger.info("Timer task created for '%s::%s': %s", graph_id, ep_id, task)
 
         self._graphs[graph_id] = _GraphRegistration(
             graph=graph,
@@ -872,6 +991,15 @@ class AgentRuntime:
             raise ValueError(f"Graph '{value}' not registered")
         self._active_graph_id = value
 
+    def get_active_graph(self) -> "GraphSpec":
+        """Return the GraphSpec for the currently active graph."""
+        if self._active_graph_id == self._graph_id:
+            return self.graph
+        reg = self._graphs.get(self._active_graph_id)
+        if reg is not None:
+            return reg.graph
+        return self.graph
+
     @property
     def user_idle_seconds(self) -> float:
         """Seconds since the user last provided input.
@@ -938,10 +1066,16 @@ class AgentRuntime:
             if entry_node and entry_node.input_keys:
                 allowed_keys = set(entry_node.input_keys)
 
-        # Search ALL graphs' streams for an active session
+        # Search primary graph's streams for an active session.
+        # Skip isolated streams (e.g. health judge) — they have their own
+        # session directories and must never be used as a shared session.
         all_streams: list[tuple[str, ExecutionStream]] = []
         for _gid, reg in self._graphs.items():
             for ep_id, stream in reg.streams.items():
+                # Skip isolated entry points — they run in their own namespace
+                ep_spec = reg.entry_points.get(ep_id)
+                if ep_spec and getattr(ep_spec, "isolation_level", "shared") == "isolated":
+                    continue
                 all_streams.append((ep_id, stream))
 
         for ep_id, stream in all_streams:
@@ -1021,6 +1155,7 @@ class AgentRuntime:
         self,
         entry_point_id: str,
         execution_id: str,
+        graph_id: str | None = None,
     ) -> bool:
         """
         Cancel a running execution.
@@ -1028,32 +1163,50 @@ class AgentRuntime:
         Args:
             entry_point_id: Stream containing the execution
             execution_id: Execution to cancel
+            graph_id: Graph to search (defaults to active graph)
 
         Returns:
             True if cancelled, False if not found
         """
-        stream = self._streams.get(entry_point_id)
+        stream = self._resolve_stream(entry_point_id, graph_id)
         if stream is None:
             return False
         return await stream.cancel_execution(execution_id)
 
     # === QUERY OPERATIONS ===
 
-    def get_entry_points(self) -> list[EntryPointSpec]:
-        """Get all registered entry points."""
+    def get_entry_points(self, graph_id: str | None = None) -> list[EntryPointSpec]:
+        """Get entry points for a graph.
+
+        Args:
+            graph_id: Graph to query.  ``None`` (default) uses the
+                currently active graph (``active_graph_id``).
+
+        Returns:
+            List of EntryPointSpec for the requested graph. Falls back to
+            the primary graph if the graph_id is not found.
+        """
+        gid = graph_id or self._active_graph_id
+        if gid == self._graph_id:
+            return list(self._entry_points.values())
+        reg = self._graphs.get(gid)
+        if reg is not None:
+            return list(reg.entry_points.values())
+        # Fallback: primary graph
         return list(self._entry_points.values())
 
-    def get_stream(self, entry_point_id: str) -> ExecutionStream | None:
-        """Get a specific execution stream."""
-        return self._streams.get(entry_point_id)
+    def get_stream(self, entry_point_id: str, graph_id: str | None = None) -> ExecutionStream | None:
+        """Get a specific execution stream (searches active graph first)."""
+        return self._resolve_stream(entry_point_id, graph_id)
 
     def get_execution_result(
         self,
         entry_point_id: str,
         execution_id: str,
+        graph_id: str | None = None,
     ) -> ExecutionResult | None:
         """Get result of a completed execution."""
-        stream = self._streams.get(entry_point_id)
+        stream = self._resolve_stream(entry_point_id, graph_id)
         if stream:
             return stream.get_result(execution_id)
         return None

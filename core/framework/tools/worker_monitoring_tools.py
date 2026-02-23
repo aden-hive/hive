@@ -46,6 +46,7 @@ def register_worker_monitoring_tools(
     event_bus: "EventBus",
     storage_path: Path,
     stream_id: str = "worker_health_judge",
+    worker_graph_id: str | None = None,
 ) -> int:
     """Register worker monitoring tools bound to *event_bus* and *storage_path*.
 
@@ -55,6 +56,8 @@ def register_worker_monitoring_tools(
         storage_path: Root storage path of the worker runtime
                       (e.g. ``~/.hive/agents/{name}``).
         stream_id: Stream ID used when emitting events; defaults to judge's stream.
+        worker_graph_id: The primary worker graph's ID. Included in health summary
+                         so the judge can populate ticket identity fields accurately.
 
     Returns:
         Number of tools registered.
@@ -62,6 +65,10 @@ def register_worker_monitoring_tools(
     from framework.llm.provider import Tool
 
     storage_path = Path(storage_path)
+    # Derive agent identity from storage path so the judge can fill ticket fields.
+    # storage_path is ~/.hive/agents/{agent_name} — the name is the last component.
+    _worker_agent_id: str = storage_path.name
+    _worker_graph_id: str = worker_graph_id or storage_path.name
     tools_registered = 0
 
     # -------------------------------------------------------------------------
@@ -176,6 +183,8 @@ def register_worker_monitoring_tools(
 
         return json.dumps(
             {
+                "worker_agent_id": _worker_agent_id,
+                "worker_graph_id": _worker_graph_id,
                 "session_id": session_id,
                 "session_status": session_status,
                 "total_steps": total_steps,
@@ -192,7 +201,8 @@ def register_worker_monitoring_tools(
         name="get_worker_health_summary",
         description=(
             "Read the worker agent's execution logs and return a compact health snapshot. "
-            "Returns recent judge verdicts, step count, time since last step, and "
+            "Returns worker_agent_id and worker_graph_id (use these for ticket identity fields), "
+            "recent judge verdicts, step count, time since last step, and "
             "a snippet of the most recent LLM output. "
             "session_id is optional — omit it to auto-discover the most recent active session. "
             "Use this on every health check to observe trends."

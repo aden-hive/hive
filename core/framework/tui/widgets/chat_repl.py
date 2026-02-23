@@ -1264,15 +1264,23 @@ class ChatRepl(Vertical):
         self._write_history(f"[bold green]You:[/bold green] {user_input}")
 
         try:
-            # Get entry point
+            # Get entry points for the active graph, preferring manual
+            # (interactive) ones over event/timer-driven ones.
             entry_points = self.runtime.get_entry_points()
-            if not entry_points:
+            manual_eps = [
+                ep for ep in entry_points
+                if ep.trigger_type in ("manual", "api")
+            ]
+            if not manual_eps:
+                manual_eps = entry_points  # fallback: use whatever is available
+            if not manual_eps:
                 self._write_history("[bold red]Error:[/bold red] No entry points")
                 return
 
             # Determine the input key from the entry node
-            entry_point = entry_points[0]
-            entry_node = self.runtime.graph.get_node(entry_point.entry_node)
+            entry_point = manual_eps[0]
+            active_graph = self.runtime.get_active_graph()
+            entry_node = active_graph.get_node(entry_point.entry_node)
 
             if entry_node and entry_node.input_keys:
                 input_key = entry_node.input_keys[0]

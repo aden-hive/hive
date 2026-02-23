@@ -75,11 +75,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Resume from a specific checkpoint (requires --resume-session)",
     )
-    run_parser.add_argument(
-        "--no-guardian",
-        action="store_true",
-        help="Disable the Agent Guardian watchdog in TUI mode",
-    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -210,11 +205,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
-    )
-    tui_parser.add_argument(
-        "--no-guardian",
-        action="store_true",
-        help="Disable the Agent Guardian watchdog",
     )
     tui_parser.set_defaults(func=cmd_tui)
 
@@ -526,12 +516,6 @@ def cmd_run(args: argparse.Namespace) -> int:
                     except CredentialError as e:
                         print(f"\n{e}", file=sys.stderr)
                         return
-
-                # Attach hive_coder's guardian watchdog (before start)
-                if not getattr(args, "no_guardian", False) and runner._agent_runtime:
-                    from framework.agents.hive_coder.guardian import attach_guardian
-
-                    attach_guardian(runner._agent_runtime, runner._tool_registry)
 
                 # Start runtime before TUI so it's ready for user input
                 if runner._agent_runtime and not runner._agent_runtime.is_running:
@@ -1331,7 +1315,6 @@ def _get_framework_agents_dir() -> Path:
 def _launch_agent_tui(
     agent_path: str | Path,
     model: str | None = None,
-    no_guardian: bool = False,
 ) -> int:
     """Load an agent and launch the TUI. Shared by cmd_tui and cmd_code."""
     from framework.credentials.models import CredentialError
@@ -1358,12 +1341,6 @@ def _launch_agent_tui(
             except CredentialError as e:
                 print(f"\n{e}", file=sys.stderr)
                 return
-
-        # Attach hive_coder's guardian watchdog (before start)
-        if not no_guardian and runner._agent_runtime:
-            from framework.agents.hive_coder.guardian import attach_guardian
-
-            attach_guardian(runner._agent_runtime, runner._tool_registry)
 
         if runner._agent_runtime and not runner._agent_runtime.is_running:
             await runner._agent_runtime.start()
@@ -1395,7 +1372,6 @@ def cmd_tui(args: argparse.Namespace) -> int:
     async def run_tui():
         app = AdenTUI(
             model=args.model,
-            no_guardian=getattr(args, "no_guardian", False),
         )
         await app.run_async()
 

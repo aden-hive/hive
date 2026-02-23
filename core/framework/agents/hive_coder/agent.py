@@ -133,7 +133,8 @@ class HiveCoderAgent:
     Hive Coder — builds Hive agent packages from natural language.
 
     Single-node architecture: the coder runs in a continuous while(true) loop.
-    The guardian watchdog is auto-attached by the framework in TUI mode.
+    When loaded alongside a worker agent, the ticket_triage_node serves as the
+    Queen: triaging health escalations from the Worker Health Judge.
     """
 
     def __init__(self, config=None):

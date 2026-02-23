@@ -113,9 +113,6 @@ def list_connected_accounts() -> list[dict]:
 skip_credential_validation = True
 """Don't validate credentials at load time — we don't know which provider yet."""
 
-skip_guardian = True
-"""Don't attach the Hive Coder guardian — this is a standalone utility agent."""
-
 requires_account_selection = True
 """Signal TUI to show account picker before starting the agent."""
 
