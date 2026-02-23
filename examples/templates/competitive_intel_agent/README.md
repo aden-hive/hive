@@ -1,4 +1,5 @@
-# Competitive Intelligence Agent
+# Competitive Intelligence Agent (Community) 
+## Built by https://github.com/nafiyad
 
 An autonomous agent that monitors competitor websites, news sources, and GitHub repositories to deliver structured digests with key insights and trend analysis.
 
