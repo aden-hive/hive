@@ -1691,6 +1691,71 @@ class TestToolDoomLoopIntegration:
         result = await node.execute(ctx)
         assert result.success is True
 
+    @pytest.mark.asyncio
+    async def test_doom_loop_detects_repeated_failing_tool(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """A tool that keeps failing with is_error=True should trigger doom loop.
+
+        Regression test: previously, errored tool calls were excluded from
+        doom loop fingerprinting (``not tc.get("is_error")``), so a tool like
+        browser_snapshot failing with the same accessibility error every turn
+        would never be detected.
+        """
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 5:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        # 4 turns of the same failing tool call, then text
+        llm = ToolRepeatLLM("browser_snapshot", {}, tool_turns=4)
+        bus = EventBus()
+        doom_events: list = []
+        bus.subscribe(
+            event_types=[EventType.NODE_TOOL_DOOM_LOOP],
+            handler=lambda e: doom_events.append(e),
+        )
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="Error: accessibility tree unavailable",
+                is_error=True,
+            )
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            memory,
+            llm,
+            tools=[Tool(name="browser_snapshot", description="s", parameters={})],
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        # Doom loop MUST fire for repeatedly-failing tool calls
+        assert len(doom_events) >= 1
+        assert "browser_snapshot" in doom_events[0].data["description"]
+
 
 # ===========================================================================
 # execution_id plumbing

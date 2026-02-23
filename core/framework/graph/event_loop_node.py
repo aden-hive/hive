@@ -677,12 +677,14 @@ class EventLoopNode(NodeProtocol):
 
             # 6f'. Tool doom loop detection
             # Use logged_tool_calls (persists across inner iterations) and
-            # filter to real MCP tools (exclude set_output, ask_user, errors).
+            # filter to real MCP tools (exclude set_output, ask_user).
+            # NOTE: errored tool calls ARE included — a tool that keeps
+            # failing with the same args is the canonical doom loop case
+            # (e.g. browser_snapshot repeatedly hitting the same error).
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
                 if tc.get("tool_name") not in ("set_output", "ask_user", "escalate_to_coder")
-                and not tc.get("is_error")
             ]
             if mcp_tool_calls:
                 fps = self._fingerprint_tool_calls(mcp_tool_calls)
