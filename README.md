@@ -84,6 +84,7 @@ Use Hive when you need:
 - Claude Code, Codex CLI, or Cursor for utilizing agent skills
 
 > **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
+> If you see cygpath or WSL errors on Windows, see the [Windows troubleshooting](docs/environment-setup.md#windows-troubleshooting) section in docs/environment-setup.md.
 
 ### Installation
 

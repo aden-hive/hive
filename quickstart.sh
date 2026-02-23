@@ -97,6 +97,20 @@ fi
 
 echo ""
 
+# Pre-flight: on Windows Git Bash, cygpath must work (WSL must not be broken)
+if [ -n "${MSYSTEM:-}" ]; then
+    if ! cygpath -u "${TEMP:-$TMP:-.}" >/dev/null 2>&1; then
+        echo -e "${RED}Path conversion (cygpath) failed.${NC}"
+        echo ""
+        echo "On Windows, this usually means WSL is registered but has no working distribution,"
+        echo "so Git Bash is delegating to WSL instead of using its own cygpath."
+        echo ""
+        echo "See the Windows troubleshooting section in docs/environment-setup.md for how to"
+        echo "unregister broken WSL distros and ensure Git's usr/bin is in your PATH."
+        exit 1
+    fi
+fi
+
 # ============================================================
 # Step 1: Check Python
 # ============================================================
