@@ -366,6 +366,7 @@ class OutcomeAggregator:
                 target_value = float(target.rstrip("%")) / 100
                 status.met = status.progress >= target_value
             else:
+                # For non-percentage targets, consider met if progress > 0.8
                 status.met = status.progress >= 0.8
         except (ValueError, AttributeError):
             status.met = status.progress >= 0.8
