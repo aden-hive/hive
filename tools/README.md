@@ -106,6 +106,7 @@ python mcp_server.py
 | `patents_search`, `patents_get_details` | Search patents and retrieve patent details via SerpAPI |
 | `exa_search`, `exa_answer`, `exa_find_similar`, `exa_get_contents` | Semantic search and content retrieval via Exa AI |
 | `news_search`, `news_headlines`, `news_by_company`, `news_sentiment` | Search news articles and analyse sentiment |
+| `search_papers`, `download_paper` | Search arXiv for scientific papers and download PDFs |
 
 ### Communication
 
