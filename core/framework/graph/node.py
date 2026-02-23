@@ -523,6 +523,7 @@ class NodeContext:
 
     # Subagent mode
     is_subagent_mode: bool = False  # True when running as a subagent (prevents nested delegation)
+    report_callback: Any = None  # async (message: str, data: dict | None) -> None
     node_registry: dict[str, "NodeSpec"] = field(default_factory=dict)  # For subagent lookup
 
     # Full tool catalog (unfiltered) — used by _execute_subagent to resolve
