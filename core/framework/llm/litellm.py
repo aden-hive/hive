@@ -281,6 +281,21 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
+        # Pre-flight credential check: when no explicit api_key is provided,
+        # validate the environment variable for the detected provider and
+        # surface an actionable error message instead of a cryptic internal
+        # error from litellm (e.g., "completion() got unexpected keyword
+        # argument 'model'").
+        if api_key is None:
+            try:
+                from framework.credentials.validator import CredentialValidator
+
+                issue = CredentialValidator.validate_for_model(model)
+                if issue is not None:
+                    logger.warning(issue.format_message())
+            except ImportError:
+                pass  # Validator not available — skip gracefully
+
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
     ) -> Any:

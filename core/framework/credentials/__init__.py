@@ -76,6 +76,7 @@ from .storage import (
 from .store import CredentialStore
 from .template import TemplateResolver
 from .validation import ensure_credential_key_env, validate_agent_credentials
+from .validator import CredentialIssue, CredentialValidator
 
 # Aden sync components (lazy import to avoid httpx dependency when not needed)
 # Usage: from core.framework.credentials.aden import AdenSyncProvider
@@ -122,6 +123,9 @@ __all__ = [
     # Validation
     "ensure_credential_key_env",
     "validate_agent_credentials",
+    # Pre-flight credential validator (DX-friendly error messages)
+    "CredentialValidator",
+    "CredentialIssue",
     # Interactive setup
     "CredentialSetupSession",
     "MissingCredential",

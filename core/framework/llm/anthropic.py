@@ -4,6 +4,7 @@ import os
 from collections.abc import Callable
 from typing import Any
 
+from framework.credentials.models import CredentialError
 from framework.llm.litellm import LiteLLMProvider
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 
@@ -51,8 +52,24 @@ class AnthropicProvider(LLMProvider):
         # Delegate to LiteLLMProvider internally.
         self.api_key = api_key or _get_api_key_from_credential_store()
         if not self.api_key:
-            raise ValueError(
-                "Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key."
+            # Provide an actionable error message instead of a cryptic
+            # "Anthropic API key required" one-liner.
+            try:
+                from framework.credentials.validator import CredentialValidator
+
+                issue = CredentialValidator.validate("anthropic")
+                if issue is not None:
+                    raise CredentialError(issue.format_message())
+            except ImportError:
+                pass
+
+            # Fallback if validator is unavailable
+            raise CredentialError(
+                "Anthropic API key not found.\n\n"
+                "Set the ANTHROPIC_API_KEY environment variable:\n"
+                '  export ANTHROPIC_API_KEY="your-api-key-here"\n\n'
+                "Get a key at: https://console.anthropic.com/settings/keys\n"
+                "Run 'hive doctor' to check your full setup."
             )
 
         self.model = model

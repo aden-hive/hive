@@ -89,10 +89,37 @@ def main():
 
     register_testing_commands(subparsers)
 
+    # Register doctor command (diagnostic checks)
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Run diagnostic checks on Hive setup",
+        description="Check credentials, Python version, and dependencies.",
+    )
+    doctor_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Show suggested fixes for each issue",
+    )
+    doctor_parser.set_defaults(func=_cmd_doctor)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
         sys.exit(args.func(args))
+
+
+def _cmd_doctor(args) -> int:
+    """Run diagnostic checks on Hive setup.
+
+    Args:
+        args: Parsed CLI arguments with an optional ``fix`` flag.
+
+    Returns:
+        Exit code: 0 if all checks pass, 1 otherwise.
+    """
+    from framework.cli.doctor import run_doctor
+
+    return run_doctor(fix=getattr(args, "fix", False))
 
 
 if __name__ == "__main__":
