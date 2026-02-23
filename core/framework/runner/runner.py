@@ -8,17 +8,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from framework.config import get_hive_config, get_preferred_model
+from framework.credentials.validation import (
+    ensure_credential_key_env as _ensure_credential_key_env,
+    validate_agent_credentials,
+)
 from framework.graph import Goal
-from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
-from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.graph.edge import (
+    DEFAULT_MAX_TOKENS,
+    AsyncEntryPointSpec,
+    EdgeCondition,
+    EdgeSpec,
+    GraphSpec,
+)
+from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.tool_registry import ToolRegistry
-
-# Multi-entry-point runtime imports
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
-from framework.runtime.core import Runtime
+from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
+from framework.runtime.runtime_log_store import RuntimeLogStore
 
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
@@ -26,40 +35,130 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Configuration paths
-HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
+CLAUDE_OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+# Buffer in seconds before token expiry to trigger a proactive refresh
+_TOKEN_REFRESH_BUFFER_SECS = 300  # 5 minutes
 
 
-def get_hive_config() -> dict[str, Any]:
-    """Load hive configuration from ~/.hive/configuration.json."""
-    if not HIVE_CONFIG_FILE.exists():
-        return {}
+def _refresh_claude_code_token(refresh_token: str) -> dict | None:
+    """Refresh the Claude Code OAuth token using the refresh token.
+
+    POSTs to the Anthropic OAuth token endpoint with form-urlencoded data
+    (per OAuth 2.0 RFC 6749 Section 4.1.3).
+
+    Returns:
+        Dict with new token data (access_token, refresh_token, expires_in)
+        on success, None on failure.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    data = urllib.parse.urlencode(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": CLAUDE_OAUTH_CLIENT_ID,
+        }
+    ).encode("utf-8")
+
+    req = urllib.request.Request(
+        CLAUDE_OAUTH_TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
     try:
-        with open(HIVE_CONFIG_FILE) as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
+        logger.debug("Claude Code token refresh failed: %s", exc)
+        return None
+
+
+def _save_refreshed_credentials(token_data: dict) -> None:
+    """Write refreshed token data back to ~/.claude/.credentials.json."""
+    import time
+
+    if not CLAUDE_CREDENTIALS_FILE.exists():
+        return
+
+    try:
+        with open(CLAUDE_CREDENTIALS_FILE) as f:
+            creds = json.load(f)
+
+        oauth = creds.get("claudeAiOauth", {})
+        oauth["accessToken"] = token_data["access_token"]
+        if "refresh_token" in token_data:
+            oauth["refreshToken"] = token_data["refresh_token"]
+        if "expires_in" in token_data:
+            oauth["expiresAt"] = int((time.time() + token_data["expires_in"]) * 1000)
+        creds["claudeAiOauth"] = oauth
+
+        with open(CLAUDE_CREDENTIALS_FILE, "w") as f:
+            json.dump(creds, f, indent=2)
+        logger.debug("Claude Code credentials refreshed successfully")
+    except (json.JSONDecodeError, OSError, KeyError) as exc:
+        logger.debug("Failed to save refreshed credentials: %s", exc)
 
 
 def get_claude_code_token() -> str | None:
-    """
-    Get the OAuth token from Claude Code subscription.
+    """Get the OAuth token from Claude Code subscription with auto-refresh.
 
     Reads from ~/.claude/.credentials.json which is created by the
     Claude Code CLI when users authenticate with their subscription.
 
+    If the token is expired or close to expiry, attempts an automatic
+    refresh using the stored refresh token.
+
     Returns:
         The access token if available, None otherwise.
     """
+    import time
+
     if not CLAUDE_CREDENTIALS_FILE.exists():
         return None
+
     try:
         with open(CLAUDE_CREDENTIALS_FILE) as f:
             creds = json.load(f)
-        return creds.get("claudeAiOauth", {}).get("accessToken")
     except (json.JSONDecodeError, OSError):
         return None
+
+    oauth = creds.get("claudeAiOauth", {})
+    access_token = oauth.get("accessToken")
+    if not access_token:
+        return None
+
+    # Check token expiry (expiresAt is in milliseconds)
+    expires_at_ms = oauth.get("expiresAt", 0)
+    now_ms = int(time.time() * 1000)
+    buffer_ms = _TOKEN_REFRESH_BUFFER_SECS * 1000
+
+    if expires_at_ms > now_ms + buffer_ms:
+        # Token is still valid
+        return access_token
+
+    # Token is expired or near expiry — attempt refresh
+    refresh_token = oauth.get("refreshToken")
+    if not refresh_token:
+        logger.warning("Claude Code token expired and no refresh token available")
+        return access_token  # Return expired token; it may still work briefly
+
+    logger.info("Claude Code token expired or near expiry, refreshing...")
+    token_data = _refresh_claude_code_token(refresh_token)
+
+    if token_data and "access_token" in token_data:
+        _save_refreshed_credentials(token_data)
+        return token_data["access_token"]
+
+    # Refresh failed — return the existing token and warn
+    logger.warning("Claude Code token refresh failed. Run 'claude' to re-authenticate.")
+    return access_token
 
 
 @dataclass
@@ -236,6 +335,11 @@ class AgentRunner:
         result = await runner.run({"lead_id": "123"})
     """
 
+    @staticmethod
+    def _resolve_default_model() -> str:
+        """Resolve the default model from ~/.hive/configuration.json."""
+        return get_preferred_model()
+
     def __init__(
         self,
         agent_path: Path,
@@ -243,7 +347,15 @@ class AgentRunner:
         goal: Goal,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "cerebras/zai-glm-4.7",
+        model: str | None = None,
+        intro_message: str = "",
+        runtime_config: "AgentRuntimeConfig | None" = None,
+        interactive: bool = True,
+        skip_credential_validation: bool = False,
+        skip_guardian: bool = False,
+        requires_account_selection: bool = False,
+        configure_for_account: Callable | None = None,
+        list_accounts: Callable | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -254,37 +366,59 @@ class AgentRunner:
             goal: Loaded Goal object
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to temp)
-            model: Model to use - any LiteLLM-compatible model name
-                   (e.g., "claude-sonnet-4-20250514", "gpt-4o-mini", "gemini/gemini-pro")
+            model: Model to use (reads from agent config or ~/.hive/configuration.json if None)
+            intro_message: Optional greeting shown to user on TUI load
+            runtime_config: Optional AgentRuntimeConfig (webhook settings, etc.)
+            interactive: If True (default), offer interactive credential setup on failure.
+                Set to False when called from the TUI (which handles setup via its own screen).
+            skip_credential_validation: If True, skip credential checks at load time.
+            skip_guardian: If True, don't attach the Hive Coder guardian.
+            requires_account_selection: If True, TUI shows account picker before starting.
+            configure_for_account: Callback(runner, account_dict) to scope tools after selection.
+            list_accounts: Callback() -> list[dict] to fetch available accounts.
         """
         self.agent_path = agent_path
         self.graph = graph
         self.goal = goal
         self.mock_mode = mock_mode
-        self.model = model
+        self.model = model or self._resolve_default_model()
+        self.intro_message = intro_message
+        self.runtime_config = runtime_config
+        self._interactive = interactive
+        self.skip_credential_validation = skip_credential_validation
+        self.skip_guardian = skip_guardian
+        self.requires_account_selection = requires_account_selection
+        self._configure_for_account = configure_for_account
+        self._list_accounts = list_accounts
 
         # Set up storage
         if storage_path:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            # Use persistent storage in ~/.hive by default
+            # Use persistent storage in ~/.hive/agents/{agent_name}/ per RUNTIME_LOGGING.md spec
             home = Path.home()
-            default_storage = home / ".hive" / "storage" / agent_path.name
+            default_storage = home / ".hive" / "agents" / agent_path.name
             default_storage.mkdir(parents=True, exist_ok=True)
             self._storage_path = default_storage
             self._temp_dir = None
 
+        # Load HIVE_CREDENTIAL_KEY from shell config if not in env.
+        # Must happen before MCP subprocesses are spawned so they inherit it.
+        _ensure_credential_key_env()
+
         # Initialize components
         self._tool_registry = ToolRegistry()
-        self._runtime: Runtime | None = None
         self._llm: LLMProvider | None = None
-        self._executor: GraphExecutor | None = None
         self._approval_callback: Callable | None = None
 
-        # Multi-entry-point support (AgentRuntime)
+        # AgentRuntime — unified execution path for all agents
         self._agent_runtime: AgentRuntime | None = None
         self._uses_async_entry_points = self.graph.has_async_entry_points()
+
+        # Validate credentials before spawning MCP servers.
+        # Fails fast with actionable guidance — no MCP noise on screen.
+        self._validate_credentials()
 
         # Auto-discover tools from tools.py
         tools_path = agent_path / "tools.py"
@@ -296,32 +430,208 @@ class AgentRunner:
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
 
+    def _validate_credentials(self) -> None:
+        """Check that required credentials are available before spawning MCP servers.
+
+        If ``interactive`` is True and stdin is a TTY, automatically launches
+        the interactive credential setup flow so the user can fix the issue
+        in-place.  Re-validates after setup succeeds.
+
+        When ``interactive`` is False (e.g. TUI callers), the CredentialError
+        propagates immediately so the caller can handle it with its own UI.
+        """
+        if self.skip_credential_validation:
+            return
+
+        if not self._interactive:
+            # Let the CredentialError propagate — caller handles UI.
+            validate_agent_credentials(self.graph.nodes)
+            return
+
+        import sys
+
+        from framework.credentials.models import CredentialError
+
+        try:
+            validate_agent_credentials(self.graph.nodes)
+            return  # All good
+        except CredentialError as e:
+            if not sys.stdin.isatty():
+                raise
+
+            # Interactive: show the error then enter credential setup
+            print(f"\n{e}", file=sys.stderr)
+
+            from framework.credentials.validation import build_setup_session_from_error
+
+            session = build_setup_session_from_error(e, nodes=self.graph.nodes)
+            if not session.missing:
+                raise
+
+            result = session.run_interactive()
+            if not result.success:
+                raise CredentialError(
+                    "Credential setup incomplete. "
+                    "Run again after configuring the required credentials."
+                ) from None
+
+            # Re-validate after setup
+            validate_agent_credentials(self.graph.nodes)
+
+    @staticmethod
+    def _import_agent_module(agent_path: Path):
+        """Import an agent package from its directory path.
+
+        Tries package import first (works when exports/ is on sys.path,
+        which cli.py:_configure_paths() ensures). Falls back to direct
+        file import of agent.py via importlib.util.
+        """
+        import importlib
+
+        package_name = agent_path.name
+
+        # Try importing as a package (works when exports/ is on sys.path)
+        try:
+            return importlib.import_module(package_name)
+        except ImportError:
+            pass
+
+        # Fallback: import agent.py directly via file path
+        import importlib.util
+
+        agent_py = agent_path / "agent.py"
+        if not agent_py.exists():
+            raise FileNotFoundError(
+                f"No importable agent found at {agent_path}. "
+                f"Expected a Python package with agent.py."
+            )
+        spec = importlib.util.spec_from_file_location(
+            f"{package_name}.agent",
+            agent_py,
+            submodule_search_locations=[str(agent_path)],
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     @classmethod
     def load(
         cls,
         agent_path: str | Path,
         mock_mode: bool = False,
         storage_path: Path | None = None,
-        model: str = "cerebras/zai-glm-4.7",
+        model: str | None = None,
+        interactive: bool = True,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
 
+        Imports the agent's Python package and reads module-level variables
+        (goal, nodes, edges, etc.) to build a GraphSpec. Falls back to
+        agent.json if no Python module is found.
+
         Args:
-            agent_path: Path to agent folder (containing agent.json)
+            agent_path: Path to agent folder
             mock_mode: If True, use mock LLM responses
-            storage_path: Path for runtime storage (defaults to temp)
-            model: LLM model to use (any LiteLLM-compatible model name)
+            storage_path: Path for runtime storage (defaults to ~/.hive/agents/{name})
+            model: LLM model to use (reads from agent's default_config if None)
+            interactive: If True (default), offer interactive credential setup.
+                Set to False from TUI callers that handle setup via their own UI.
 
         Returns:
             AgentRunner instance ready to run
         """
         agent_path = Path(agent_path)
 
-        # Load agent.json
+        # Try loading from Python module first (code-based agents)
+        agent_py = agent_path / "agent.py"
+        if agent_py.exists():
+            agent_module = cls._import_agent_module(agent_path)
+
+            goal = getattr(agent_module, "goal", None)
+            nodes = getattr(agent_module, "nodes", None)
+            edges = getattr(agent_module, "edges", None)
+
+            if goal is None or nodes is None or edges is None:
+                raise ValueError(
+                    f"Agent at {agent_path} must define 'goal', 'nodes', and 'edges' "
+                    f"in agent.py (or __init__.py)"
+                )
+
+            # Read model and max_tokens from agent's config if not explicitly provided
+            agent_config = getattr(agent_module, "default_config", None)
+            if model is None:
+                if agent_config and hasattr(agent_config, "model"):
+                    model = agent_config.model
+
+            if agent_config and hasattr(agent_config, "max_tokens"):
+                max_tokens = agent_config.max_tokens
+            else:
+                hive_config = get_hive_config()
+                max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+
+            # Read intro_message from agent metadata (shown on TUI load)
+            agent_metadata = getattr(agent_module, "metadata", None)
+            intro_message = ""
+            if agent_metadata and hasattr(agent_metadata, "intro_message"):
+                intro_message = agent_metadata.intro_message
+
+            # Build GraphSpec from module-level variables
+            graph_kwargs: dict = {
+                "id": f"{agent_path.name}-graph",
+                "goal_id": goal.id,
+                "version": "1.0.0",
+                "entry_node": getattr(agent_module, "entry_node", nodes[0].id),
+                "entry_points": getattr(agent_module, "entry_points", {}),
+                "async_entry_points": getattr(agent_module, "async_entry_points", []),
+                "terminal_nodes": getattr(agent_module, "terminal_nodes", []),
+                "pause_nodes": getattr(agent_module, "pause_nodes", []),
+                "nodes": nodes,
+                "edges": edges,
+                "max_tokens": max_tokens,
+                "loop_config": getattr(agent_module, "loop_config", {}),
+            }
+            # Only pass optional fields if explicitly defined by the agent module
+            conversation_mode = getattr(agent_module, "conversation_mode", None)
+            if conversation_mode is not None:
+                graph_kwargs["conversation_mode"] = conversation_mode
+            identity_prompt = getattr(agent_module, "identity_prompt", None)
+            if identity_prompt is not None:
+                graph_kwargs["identity_prompt"] = identity_prompt
+
+            graph = GraphSpec(**graph_kwargs)
+
+            # Read runtime config (webhook settings, etc.) if defined
+            agent_runtime_config = getattr(agent_module, "runtime_config", None)
+
+            # Read pre-run hooks (e.g., credential_tester needs account selection)
+            skip_cred = getattr(agent_module, "skip_credential_validation", False)
+            no_guardian = getattr(agent_module, "skip_guardian", False)
+            needs_acct = getattr(agent_module, "requires_account_selection", False)
+            configure_fn = getattr(agent_module, "configure_for_account", None)
+            list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
+
+            return cls(
+                agent_path=agent_path,
+                graph=graph,
+                goal=goal,
+                mock_mode=mock_mode,
+                storage_path=storage_path,
+                model=model,
+                intro_message=intro_message,
+                runtime_config=agent_runtime_config,
+                interactive=interactive,
+                skip_credential_validation=skip_cred,
+                skip_guardian=no_guardian,
+                requires_account_selection=needs_acct,
+                configure_for_account=configure_fn,
+                list_accounts=list_accts_fn,
+            )
+
+        # Fallback: load from agent.json (legacy JSON-based agents)
         agent_json_path = agent_path / "agent.json"
         if not agent_json_path.exists():
-            raise FileNotFoundError(f"agent.json not found in {agent_path}")
+            raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
         with open(agent_json_path) as f:
             graph, goal = load_agent_export(f.read())
@@ -333,6 +643,7 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+            interactive=interactive,
         )
 
     def register_tool(
@@ -411,25 +722,8 @@ class AgentRunner:
         return self._tool_registry.register_mcp_server(server_config)
 
     def _load_mcp_servers_from_config(self, config_path: Path) -> None:
-        """
-        Load and register MCP servers from a configuration file.
-
-        Args:
-            config_path: Path to mcp_servers.json file
-        """
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-
-            servers = config.get("servers", [])
-            for server_config in servers:
-                try:
-                    self._tool_registry.register_mcp_server(server_config)
-                except Exception as e:
-                    server_name = server_config.get("name", "unknown")
-                    logger.warning(f"Failed to register MCP server '{server_name}': {e}")
-        except Exception as e:
-            logger.warning(f"Failed to load MCP servers config from {config_path}: {e}")
+        """Load and register MCP servers from a configuration file."""
+        self._tool_registry.load_mcp_config(config_path)
 
     def set_approval_callback(self, callback: Callable) -> None:
         """
@@ -439,12 +733,14 @@ class AgentRunner:
             callback: Function to call for approval (receives node info, returns bool)
         """
         self._approval_callback = callback
-        # If executor already exists, update it
-        if self._executor is not None:
-            self._executor.approval_callback = callback
 
     def _setup(self) -> None:
         """Set up runtime, LLM, and executor."""
+        # Configure structured logging (auto-detects JSON vs human-readable)
+        from framework.observability import configure_logging
+
+        configure_logging(level="INFO", format="auto")
+
         # Set up session context for tools (workspace_id, agent_id, session_id)
         workspace_id = "default"  # Could be derived from storage path
         agent_id = self.graph.id or "unknown"
@@ -471,6 +767,7 @@ class AgentRunner:
             config = get_hive_config()
             llm_config = config.get("llm", {})
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
+            api_base = llm_config.get("api_base")
 
             api_key = None
             if use_claude_code:
@@ -480,28 +777,76 @@ class AgentRunner:
                     print("Warning: Claude Code subscription configured but no token found.")
                     print("Run 'claude' to authenticate, then try again.")
 
-            if api_key:
-                # Use Claude Code subscription token
-                self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+            if api_key and use_claude_code:
+                # Use litellm's built-in Anthropic OAuth support.
+                # The lowercase "authorization" key triggers OAuth detection which
+                # adds the required anthropic-beta and browser-access headers.
+                self._llm = LiteLLMProvider(
+                    model=self.model,
+                    api_key=api_key,
+                    api_base=api_base,
+                    extra_headers={"authorization": f"Bearer {api_key}"},
+                )
             else:
                 # Fall back to environment variable
-                api_key_env = self._get_api_key_env_var(self.model)
+                # First check api_key_env_var from config (set by quickstart)
+                api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
+                    self.model
+                )
                 if api_key_env and os.environ.get(api_key_env):
-                    self._llm = LiteLLMProvider(model=self.model)
-                elif api_key_env:
-                    print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                    print(f"Set it with: export {api_key_env}=your-api-key")
+                    self._llm = LiteLLMProvider(
+                        model=self.model,
+                        api_key=os.environ[api_key_env],
+                        api_base=api_base,
+                    )
+                else:
+                    # Fall back to credential store
+                    api_key = self._get_api_key_from_credential_store()
+                    if api_key:
+                        self._llm = LiteLLMProvider(
+                            model=self.model, api_key=api_key, api_base=api_base
+                        )
+                        # Set env var so downstream code (e.g. cleanup LLM in
+                        # node._extract_json) can also find it
+                        if api_key_env:
+                            os.environ[api_key_env] = api_key
+                    elif api_key_env:
+                        print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                        print(f"Set it with: export {api_key_env}=your-api-key")
 
-        # Get tools for executor/runtime
+            # Fail fast if the agent needs an LLM but none was configured
+            if self._llm is None:
+                has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+                if has_llm_nodes:
+                    from framework.credentials.models import CredentialError
+
+                    api_key_env = self._get_api_key_env_var(self.model)
+                    hint = (
+                        f"Set it with: export {api_key_env}=your-api-key"
+                        if api_key_env
+                        else "Configure an API key for your LLM provider."
+                    )
+                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+
+        # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
-        if self._uses_async_entry_points:
-            # Multi-entry-point mode: use AgentRuntime
-            self._setup_agent_runtime(tools, tool_executor)
-        else:
-            # Single-entry-point mode: use legacy GraphExecutor
-            self._setup_legacy_executor(tools, tool_executor)
+        # Collect connected account info for system prompt injection
+        accounts_prompt = ""
+        try:
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+
+            adapter = CredentialStoreAdapter.default()
+            accounts = adapter.get_all_account_info()
+            if accounts:
+                from framework.graph.prompt_composer import build_accounts_prompt
+
+                accounts_prompt = build_accounts_prompt(accounts)
+        except Exception:
+            pass  # Best-effort — agent works without account info
+
+        self._setup_agent_runtime(tools, tool_executor, accounts_prompt=accounts_prompt)
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -516,7 +861,7 @@ class AgentRunner:
         elif model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
             return "ANTHROPIC_API_KEY"
         elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
-            return "GOOGLE_API_KEY"
+            return "GEMINI_API_KEY"
         elif model_lower.startswith("mistral/"):
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
@@ -535,21 +880,36 @@ class AgentRunner:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
 
-    def _setup_legacy_executor(self, tools: list, tool_executor: Callable | None) -> None:
-        """Set up legacy single-entry-point execution using GraphExecutor."""
-        # Create runtime
-        self._runtime = Runtime(storage_path=self._storage_path)
+    def _get_api_key_from_credential_store(self) -> str | None:
+        """Get the LLM API key from the encrypted credential store.
 
-        # Create executor
-        self._executor = GraphExecutor(
-            runtime=self._runtime,
-            llm=self._llm,
-            tools=tools,
-            tool_executor=tool_executor,
-            approval_callback=self._approval_callback,
-        )
+        Maps model name to credential store ID (e.g. "anthropic/..." -> "anthropic")
+        and retrieves the key via CredentialStore.get().
+        """
+        if not os.environ.get("HIVE_CREDENTIAL_KEY"):
+            return None
 
-    def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
+        # Map model prefix to credential store ID
+        model_lower = self.model.lower()
+        cred_id = None
+        if model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
+            cred_id = "anthropic"
+        # Add more mappings as providers are added to LLM_CREDENTIALS
+
+        if cred_id is None:
+            return None
+
+        try:
+            from framework.credentials import CredentialStore
+
+            store = CredentialStore.with_encrypted_storage()
+            return store.get(cred_id)
+        except Exception:
+            return None
+
+    def _setup_agent_runtime(
+        self, tools: list, tool_executor: Callable | None, accounts_prompt: str = ""
+    ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
         entry_points = []
@@ -566,7 +926,48 @@ class AgentRunner:
             )
             entry_points.append(ep)
 
+        # Always create a primary entry point for the graph's entry node.
+        # For multi-entry-point agents this ensures the primary path (e.g.
+        # user-facing rule setup) is reachable alongside async entry points.
+        if self.graph.entry_node:
+            entry_points.insert(
+                0,
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=self.graph.entry_node,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                ),
+            )
+
         # Create AgentRuntime with all entry points
+        log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
+
+        # Enable checkpointing by default for resumable sessions
+        from framework.graph.checkpoint_config import CheckpointConfig
+
+        checkpoint_config = CheckpointConfig(
+            enabled=True,
+            checkpoint_on_node_start=False,  # Only checkpoint after nodes complete
+            checkpoint_on_node_complete=True,
+            checkpoint_max_age_days=7,
+            async_checkpoint=True,  # Non-blocking
+        )
+
+        # Handle runtime_config - ensure it's AgentRuntimeConfig, not RuntimeConfig
+        # RuntimeConfig is for LLM settings; AgentRuntimeConfig is for AgentRuntime settings
+        runtime_config = None
+        if self.runtime_config is not None:
+            from framework.config import RuntimeConfig
+
+            # If it's a RuntimeConfig (LLM config), don't pass it
+            if isinstance(self.runtime_config, RuntimeConfig):
+                runtime_config = None
+            else:
+                # It's already an AgentRuntimeConfig or compatible type
+                runtime_config = self.runtime_config
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -575,7 +976,15 @@ class AgentRunner:
             llm=self._llm,
             tools=tools,
             tool_executor=tool_executor,
+            runtime_log_store=log_store,
+            checkpoint_config=checkpoint_config,
+            config=runtime_config,
+            graph_id=self.graph.id or self.agent_path.name,
+            accounts_prompt=accounts_prompt,
         )
+
+        # Pass intro_message through for TUI display
+        self._agent_runtime.intro_message = self.intro_message
 
     async def run(
         self,
@@ -616,32 +1025,9 @@ class AgentRunner:
                 error=error_msg,
             )
 
-        if self._uses_async_entry_points:
-            # Multi-entry-point mode: use AgentRuntime
-            return await self._run_with_agent_runtime(
-                input_data=input_data or {},
-                entry_point_id=entry_point_id,
-            )
-        else:
-            # Legacy single-entry-point mode
-            return await self._run_with_executor(
-                input_data=input_data or {},
-                session_state=session_state,
-            )
-
-    async def _run_with_executor(
-        self,
-        input_data: dict,
-        session_state: dict | None = None,
-    ) -> ExecutionResult:
-        """Run using legacy GraphExecutor (single entry point)."""
-        if self._executor is None:
-            self._setup()
-
-        return await self._executor.execute(
-            graph=self.graph,
-            goal=self.goal,
-            input_data=input_data,
+        return await self._run_with_agent_runtime(
+            input_data=input_data or {},
+            entry_point_id=entry_point_id,
             session_state=session_state,
         )
 
@@ -649,14 +1035,63 @@ class AgentRunner:
         self,
         input_data: dict,
         entry_point_id: str | None = None,
+        session_state: dict | None = None,
     ) -> ExecutionResult:
-        """Run using AgentRuntime (multi-entry-point)."""
+        """Run using AgentRuntime."""
+        import sys
+
         if self._agent_runtime is None:
             self._setup()
 
         # Start runtime if not running
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
+
+        # Set up stdin-based I/O for client-facing nodes in headless mode.
+        # When a client_facing EventLoopNode calls ask_user(), it emits
+        # CLIENT_INPUT_REQUESTED on the event bus and blocks.  We subscribe
+        # a handler that prints the prompt and reads from stdin, then injects
+        # the user's response back into the node to unblock it.
+        has_client_facing = any(n.client_facing for n in self.graph.nodes)
+        sub_ids: list[str] = []
+
+        if has_client_facing and sys.stdin.isatty():
+            from framework.runtime.event_bus import EventType
+
+            runtime = self._agent_runtime
+
+            async def _handle_client_output(event):
+                """Print agent output to stdout as it streams."""
+                content = event.data.get("content", "")
+                if content:
+                    print(content, end="", flush=True)
+
+            async def _handle_input_requested(event):
+                """Read user input from stdin and inject it into the node."""
+                import asyncio
+
+                node_id = event.node_id
+                try:
+                    loop = asyncio.get_event_loop()
+                    user_input = await loop.run_in_executor(None, input, "\n>>> ")
+                except EOFError:
+                    user_input = ""
+
+                # Inject into the waiting EventLoopNode via runtime
+                await runtime.inject_input(node_id, user_input)
+
+            sub_ids.append(
+                runtime.subscribe_to_events(
+                    event_types=[EventType.CLIENT_OUTPUT_DELTA],
+                    handler=_handle_client_output,
+                )
+            )
+            sub_ids.append(
+                runtime.subscribe_to_events(
+                    event_types=[EventType.CLIENT_INPUT_REQUESTED],
+                    handler=_handle_input_requested,
+                )
+            )
 
         # Determine entry point
         if entry_point_id is None:
@@ -667,44 +1102,38 @@ class AgentRunner:
             else:
                 entry_point_id = "default"
 
-        # Trigger and wait for result
-        result = await self._agent_runtime.trigger_and_wait(
-            entry_point_id=entry_point_id,
-            input_data=input_data,
-        )
-
-        # Return result or create error result
-        if result is not None:
-            return result
-        else:
-            return ExecutionResult(
-                success=False,
-                error="Execution timed out or failed to complete",
+        try:
+            # Trigger and wait for result
+            result = await self._agent_runtime.trigger_and_wait(
+                entry_point_id=entry_point_id,
+                input_data=input_data,
+                session_state=session_state,
             )
 
-    # === Multi-Entry-Point API (for agents with async_entry_points) ===
+            # Return result or create error result
+            if result is not None:
+                return result
+            else:
+                return ExecutionResult(
+                    success=False,
+                    error="Execution timed out or failed to complete",
+                )
+        finally:
+            # Clean up subscriptions
+            for sub_id in sub_ids:
+                self._agent_runtime.unsubscribe_from_events(sub_id)
+
+    # === Runtime API ===
 
     async def start(self) -> None:
-        """
-        Start the agent runtime (for multi-entry-point agents).
-
-        This starts all registered entry points and allows concurrent execution.
-        For single-entry-point agents, this is a no-op.
-        """
-        if not self._uses_async_entry_points:
-            return
-
+        """Start the agent runtime."""
         if self._agent_runtime is None:
             self._setup()
 
         await self._agent_runtime.start()
 
     async def stop(self) -> None:
-        """
-        Stop the agent runtime (for multi-entry-point agents).
-
-        For single-entry-point agents, this is a no-op.
-        """
+        """Stop the agent runtime."""
         if self._agent_runtime is not None:
             await self._agent_runtime.stop()
 
@@ -717,7 +1146,7 @@ class AgentRunner:
         """
         Trigger execution at a specific entry point (non-blocking).
 
-        For multi-entry-point agents only. Returns execution ID for tracking.
+        Returns execution ID for tracking.
 
         Args:
             entry_point_id: Which entry point to trigger
@@ -726,16 +1155,7 @@ class AgentRunner:
 
         Returns:
             Execution ID for tracking
-
-        Raises:
-            RuntimeError: If agent doesn't use async entry points
         """
-        if not self._uses_async_entry_points:
-            raise RuntimeError(
-                "trigger() is only available for multi-entry-point agents. "
-                "Use run() for single-entry-point agents."
-            )
-
         if self._agent_runtime is None:
             self._setup()
 
@@ -752,19 +1172,9 @@ class AgentRunner:
         """
         Get goal progress across all execution streams.
 
-        For multi-entry-point agents only.
-
         Returns:
             Dict with overall_progress, criteria_status, constraint_violations, etc.
-
-        Raises:
-            RuntimeError: If agent doesn't use async entry points
         """
-        if not self._uses_async_entry_points:
-            raise RuntimeError(
-                "get_goal_progress() is only available for multi-entry-point agents."
-            )
-
         if self._agent_runtime is None:
             self._setup()
 
@@ -772,14 +1182,11 @@ class AgentRunner:
 
     def get_entry_points(self) -> list[EntryPointSpec]:
         """
-        Get all registered entry points (for multi-entry-point agents).
+        Get all registered entry points.
 
         Returns:
             List of EntryPointSpec objects
         """
-        if not self._uses_async_entry_points:
-            return []
-
         if self._agent_runtime is None:
             self._setup()
 
@@ -896,78 +1303,36 @@ class AgentRunner:
             warnings.append(f"Missing tool implementations: {', '.join(missing_tools)}")
 
         # Check credentials for required tools and node types
-        # Uses CredentialStore (encrypted files + env var fallback)
+        # Uses CredentialStoreAdapter.default() which includes Aden sync support
         missing_credentials = []
         try:
-            from aden_tools.credentials import CREDENTIAL_SPECS
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
-            from framework.credentials import CredentialStore
-            from framework.credentials.storage import (
-                CompositeStorage,
-                EncryptedFileStorage,
-                EnvVarStorage,
-            )
-
-            # Build env mapping for fallback
-            env_mapping = {
-                (spec.credential_id or name): spec.env_var
-                for name, spec in CREDENTIAL_SPECS.items()
-            }
-            storage = CompositeStorage(
-                primary=EncryptedFileStorage(),
-                fallbacks=[EnvVarStorage(env_mapping=env_mapping)],
-            )
-            store = CredentialStore(storage=storage)
-
-            # Build reverse mappings
-            tool_to_cred: dict[str, str] = {}
-            node_type_to_cred: dict[str, str] = {}
-            for cred_name, spec in CREDENTIAL_SPECS.items():
-                for tool_name in spec.tools:
-                    tool_to_cred[tool_name] = cred_name
-                for nt in spec.node_types:
-                    node_type_to_cred[nt] = cred_name
+            adapter = CredentialStoreAdapter.default()
 
             # Check tool credentials
-            checked: set[str] = set()
-            for tool_name in info.required_tools:
-                cred_name = tool_to_cred.get(tool_name)
-                if cred_name is None or cred_name in checked:
-                    continue
-                checked.add(cred_name)
-                spec = CREDENTIAL_SPECS[cred_name]
-                cred_id = spec.credential_id or cred_name
-                if spec.required and not store.is_available(cred_id):
-                    missing_credentials.append(spec.env_var)
-                    affected_tools = [t for t in info.required_tools if t in spec.tools]
-                    tools_str = ", ".join(affected_tools)
-                    warning_msg = f"Missing {spec.env_var} for {tools_str}"
-                    if spec.help_url:
-                        warning_msg += f"\n  Get it at: {spec.help_url}"
-                    warnings.append(warning_msg)
+            for _cred_name, spec in adapter.get_missing_for_tools(list(info.required_tools)):
+                missing_credentials.append(spec.env_var)
+                affected_tools = [t for t in info.required_tools if t in spec.tools]
+                tools_str = ", ".join(affected_tools)
+                warning_msg = f"Missing {spec.env_var} for {tools_str}"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
 
             # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
             node_types = list({node.node_type for node in self.graph.nodes})
-            for nt in node_types:
-                cred_name = node_type_to_cred.get(nt)
-                if cred_name is None or cred_name in checked:
-                    continue
-                checked.add(cred_name)
-                spec = CREDENTIAL_SPECS[cred_name]
-                cred_id = spec.credential_id or cred_name
-                if spec.required and not store.is_available(cred_id):
-                    missing_credentials.append(spec.env_var)
-                    affected_types = [t for t in node_types if t in spec.node_types]
-                    types_str = ", ".join(affected_types)
-                    warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
-                    if spec.help_url:
-                        warning_msg += f"\n  Get it at: {spec.help_url}"
-                    warnings.append(warning_msg)
+            for _cred_name, spec in adapter.get_missing_for_node_types(node_types):
+                missing_credentials.append(spec.env_var)
+                affected_types = [t for t in node_types if t in spec.node_types]
+                types_str = ", ".join(affected_types)
+                warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(
-                node.node_type in ("llm_generate", "llm_tool_use") for node in self.graph.nodes
-            )
+            has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):
@@ -1049,7 +1414,7 @@ Respond with JSON only:
 }}"""
 
         try:
-            response = eval_llm.complete(
+            response = await eval_llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You are a capability evaluator. Respond with JSON only.",
                 max_tokens=256,
@@ -1183,6 +1548,61 @@ Respond with JSON only:
             type=MessageType.RESPONSE,
         )
 
+    @classmethod
+    async def setup_as_secondary(
+        cls,
+        agent_path: str | Path,
+        runtime: AgentRuntime,
+        graph_id: str | None = None,
+    ) -> str:
+        """Load an agent and register it as a secondary graph on *runtime*.
+
+        Uses :meth:`AgentRunner.load` to parse the agent, then calls
+        :meth:`AgentRuntime.add_graph` with the extracted graph, goal,
+        and entry points.
+
+        Args:
+            agent_path: Path to the agent directory
+            runtime: The running AgentRuntime to attach to
+            graph_id: Optional graph identifier (defaults to directory name)
+
+        Returns:
+            The graph_id used for registration
+        """
+        agent_path = Path(agent_path)
+        runner = cls.load(agent_path)
+        gid = graph_id or agent_path.name
+
+        # Build entry points
+        entry_points: dict[str, EntryPointSpec] = {}
+        if runner.graph.entry_node:
+            entry_points["default"] = EntryPointSpec(
+                id="default",
+                name="Default",
+                entry_node=runner.graph.entry_node,
+                trigger_type="manual",
+                isolation_level="shared",
+            )
+        for aep in runner.graph.async_entry_points:
+            entry_points[aep.id] = EntryPointSpec(
+                id=aep.id,
+                name=aep.name,
+                entry_node=aep.entry_node,
+                trigger_type=aep.trigger_type,
+                trigger_config=aep.trigger_config,
+                isolation_level=aep.isolation_level,
+                priority=aep.priority,
+                max_concurrent=aep.max_concurrent,
+            )
+
+        await runtime.add_graph(
+            graph_id=gid,
+            graph=runner.graph,
+            goal=runner.goal,
+            entry_points=entry_points,
+        )
+        return gid
+
     def cleanup(self) -> None:
         """Clean up resources (synchronous)."""
         # Clean up MCP client connections
@@ -1193,7 +1613,7 @@ Respond with JSON only:
             self._temp_dir = None
 
     async def cleanup_async(self) -> None:
-        """Clean up resources (asynchronous - for multi-entry-point agents)."""
+        """Clean up resources (asynchronous)."""
         # Stop agent runtime if running
         if self._agent_runtime is not None and self._agent_runtime.is_running:
             await self._agent_runtime.stop()
@@ -1204,8 +1624,7 @@ Respond with JSON only:
     async def __aenter__(self) -> "AgentRunner":
         """Context manager entry."""
         self._setup()
-        # Start runtime for multi-entry-point agents
-        if self._uses_async_entry_points and self._agent_runtime is not None:
+        if self._agent_runtime is not None:
             await self._agent_runtime.start()
         return self
 

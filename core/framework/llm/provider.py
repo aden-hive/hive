@@ -1,8 +1,10 @@
 """LLM Provider abstraction for pluggable LLM backends."""
 
+import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 
@@ -65,6 +67,7 @@ class LLMProvider(ABC):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """
         Generate a completion from the LLM.
@@ -79,6 +82,8 @@ class LLMProvider(ABC):
                 - {"type": "json_schema", "json_schema": {"name": "...", "schema": {...}}}
                   for strict JSON schema enforcement
             json_mode: If True, request structured JSON output from the LLM
+            max_retries: Override retry count for rate-limit/empty-response retries.
+                None uses the provider default.
 
         Returns:
             LLMResponse with content and metadata
@@ -108,3 +113,101 @@ class LLMProvider(ABC):
             Final LLMResponse after tool use completes
         """
         pass
+
+    async def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list["Tool"] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
+    ) -> "LLMResponse":
+        """Async version of complete(). Non-blocking on the event loop.
+
+        Default implementation offloads the sync complete() to a thread pool.
+        Subclasses SHOULD override for native async I/O.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(
+                self.complete,
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+                max_retries=max_retries,
+            ),
+        )
+
+    async def acomplete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list["Tool"],
+        tool_executor: Callable[["ToolUse"], "ToolResult"],
+        max_iterations: int = 10,
+    ) -> "LLMResponse":
+        """Async version of complete_with_tools(). Non-blocking on the event loop.
+
+        Default implementation offloads the sync complete_with_tools() to a thread pool.
+        Subclasses SHOULD override for native async I/O.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(
+                self.complete_with_tools,
+                messages=messages,
+                system=system,
+                tools=tools,
+                tool_executor=tool_executor,
+                max_iterations=max_iterations,
+            ),
+        )
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator["StreamEvent"]:
+        """
+        Stream a completion as an async iterator of StreamEvents.
+
+        Default implementation wraps complete() with synthetic events.
+        Subclasses SHOULD override for true streaming.
+
+        Tool orchestration is the CALLER's responsibility:
+        - Caller detects ToolCallEvent, executes tool, adds result
+          to messages, calls stream() again.
+        """
+        from framework.llm.stream_events import (
+            FinishEvent,
+            TextDeltaEvent,
+            TextEndEvent,
+        )
+
+        response = await self.acomplete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
+        )
+        yield TextDeltaEvent(content=response.content, snapshot=response.content)
+        yield TextEndEvent(full_text=response.content)
+        yield FinishEvent(
+            stop_reason=response.stop_reason,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            model=response.model,
+        )
+
+
+# Deferred import target for type annotation
+from framework.llm.stream_events import StreamEvent as StreamEvent  # noqa: E402, F401

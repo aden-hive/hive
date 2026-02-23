@@ -12,13 +12,13 @@ Goals are:
 """
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class GoalStatus(str, Enum):
+class GoalStatus(StrEnum):
     """Lifecycle status of a goal."""
 
     DRAFT = "draft"  # Being defined
@@ -44,6 +44,11 @@ class SuccessCriterion(BaseModel):
     metric: str = Field(
         description="How to measure: 'output_contains', 'output_equals', 'llm_judge', 'custom'"
     )
+    # NEW: runtime evaluation type (separate from metric)
+    type: str = Field(
+        default="success_rate", description="Runtime evaluation type, e.g. 'success_rate'"
+    )
+
     target: Any = Field(description="The target value or condition")
     weight: float = Field(default=1.0, ge=0.0, le=1.0, description="Relative importance (0-1)")
     met: bool = False

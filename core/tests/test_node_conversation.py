@@ -169,6 +169,68 @@ class TestNodeConversation:
         assert conv.estimate_tokens() == 100
 
     @pytest.mark.asyncio
+    async def test_update_token_count_overrides_estimate(self):
+        """When actual API token count is provided, estimate_tokens uses it."""
+        conv = NodeConversation()
+        await conv.add_user_message("a" * 400)
+        assert conv.estimate_tokens() == 100  # chars/4 fallback
+
+        conv.update_token_count(500)
+        assert conv.estimate_tokens() == 500  # actual API value
+
+    @pytest.mark.asyncio
+    async def test_compact_resets_token_count(self):
+        """After compaction, actual token count is cleared (recalibrates on next LLM call)."""
+        conv = NodeConversation()
+        await conv.add_user_message("a" * 400)
+        conv.update_token_count(500)
+        assert conv.estimate_tokens() == 500
+
+        await conv.compact("summary", keep_recent=0)
+        # Falls back to chars/4 for the summary message
+        assert conv.estimate_tokens() == len("summary") // 4
+
+    @pytest.mark.asyncio
+    async def test_clear_resets_token_count(self):
+        """clear() also resets the actual token count."""
+        conv = NodeConversation()
+        await conv.add_user_message("hello")
+        conv.update_token_count(1000)
+        assert conv.estimate_tokens() == 1000
+
+        await conv.clear()
+        assert conv.estimate_tokens() == 0
+
+    @pytest.mark.asyncio
+    async def test_usage_ratio(self):
+        """usage_ratio returns estimate / max_history_tokens."""
+        conv = NodeConversation(max_history_tokens=1000)
+        await conv.add_user_message("a" * 400)
+        assert conv.usage_ratio() == pytest.approx(0.1)  # 100/1000
+
+        conv.update_token_count(800)
+        assert conv.usage_ratio() == pytest.approx(0.8)  # 800/1000
+
+    @pytest.mark.asyncio
+    async def test_usage_ratio_zero_budget(self):
+        """usage_ratio returns 0 when max_history_tokens is 0 (unlimited)."""
+        conv = NodeConversation(max_history_tokens=0)
+        await conv.add_user_message("a" * 400)
+        assert conv.usage_ratio() == 0.0
+
+    @pytest.mark.asyncio
+    async def test_needs_compaction_with_actual_tokens(self):
+        """needs_compaction uses actual API token count when available."""
+        conv = NodeConversation(max_history_tokens=1000, compaction_threshold=0.8)
+        await conv.add_user_message("a" * 100)  # chars/4 = 25, well under 800
+
+        assert conv.needs_compaction() is False
+
+        # Simulate API reporting much higher actual token usage
+        conv.update_token_count(850)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
     async def test_needs_compaction(self):
         conv = NodeConversation(max_history_tokens=100, compaction_threshold=0.8)
         await conv.add_user_message("x" * 320)
@@ -558,3 +620,313 @@ class TestFileConversationStore:
         assert (base / "cursor.json").exists()
         assert (base / "parts" / "0000000000.json").exists()
         assert (base / "parts" / "0000000001.json").exists()
+
+
+# ===================================================================
+# Integration tests — real FileConversationStore, no mocks
+# ===================================================================
+
+
+class TestConversationIntegration:
+    """End-to-end tests using real FileConversationStore on disk.
+
+    Every test creates a fresh directory, writes real JSON files,
+    and restores from a *new* store instance (simulating process restart).
+    """
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_agent_conversation(self, tmp_path):
+        """Simulate a realistic agent conversation with multiple turns,
+        tool calls, and tool results — then restore from disk."""
+        base = tmp_path / "agent_conv"
+        store = FileConversationStore(base)
+        conv = NodeConversation(
+            system_prompt="You are a helpful travel agent.",
+            max_history_tokens=16000,
+            store=store,
+        )
+
+        # Turn 1: user asks, assistant responds with tool call
+        await conv.add_user_message("Find me flights from NYC to London next Friday.")
+        await conv.add_assistant_message(
+            "Let me search for flights.",
+            tool_calls=[
+                {
+                    "id": "call_flight_1",
+                    "type": "function",
+                    "function": {
+                        "name": "search_flights",
+                        "arguments": '{"origin":"JFK","destination":"LHR","date":"2025-06-13"}',
+                    },
+                }
+            ],
+        )
+        await conv.add_tool_result(
+            "call_flight_1",
+            '{"flights":[{"airline":"BA","price":450,"departure":"08:00"},{"airline":"AA","price":520,"departure":"14:30"}]}',
+        )
+
+        # Turn 2: assistant presents results, user picks one
+        await conv.add_assistant_message(
+            "I found 2 flights:\n"
+            "1. British Airways at $450, departing 08:00\n"
+            "2. American Airlines at $520, departing 14:30\n"
+            "Which one would you like?"
+        )
+        await conv.add_user_message("Book the British Airways one.")
+        await conv.add_assistant_message(
+            "Booking the BA flight now.",
+            tool_calls=[
+                {
+                    "id": "call_book_1",
+                    "type": "function",
+                    "function": {
+                        "name": "book_flight",
+                        "arguments": '{"flight_id":"BA-JFK-LHR-0800","passenger":"user"}',
+                    },
+                }
+            ],
+        )
+        await conv.add_tool_result(
+            "call_book_1",
+            '{"confirmation":"BA-12345","status":"confirmed"}',
+        )
+        await conv.add_assistant_message("Your flight is booked! Confirmation: BA-12345.")
+
+        # Verify in-memory state
+        assert conv.turn_count == 2
+        assert conv.message_count == 8
+        assert conv.next_seq == 8
+
+        # --- Simulate process restart: new store, same path ---
+        store2 = FileConversationStore(base)
+        restored = await NodeConversation.restore(store2)
+
+        assert restored is not None
+        assert restored.system_prompt == "You are a helpful travel agent."
+        assert restored.turn_count == 2
+        assert restored.message_count == 8
+        assert restored.next_seq == 8
+
+        # Verify message content integrity
+        msgs = restored.messages
+        assert msgs[0].role == "user"
+        assert "NYC to London" in msgs[0].content
+        assert msgs[1].role == "assistant"
+        assert msgs[1].tool_calls[0]["id"] == "call_flight_1"
+        assert msgs[2].role == "tool"
+        assert msgs[2].tool_use_id == "call_flight_1"
+        assert "BA" in msgs[2].content
+        assert msgs[7].content == "Your flight is booked! Confirmation: BA-12345."
+
+        # Verify LLM-format output
+        llm_msgs = restored.to_llm_messages()
+        assert llm_msgs[0] == {"role": "user", "content": msgs[0].content}
+        assert llm_msgs[2]["role"] == "tool"
+        assert llm_msgs[2]["tool_call_id"] == "call_flight_1"
+
+    @pytest.mark.asyncio
+    async def test_compaction_and_restore_preserves_continuity(self, tmp_path):
+        """Build up a long conversation, compact it, continue adding
+        messages, then restore — verifying seq continuity and content."""
+        base = tmp_path / "compact_conv"
+        store = FileConversationStore(base)
+        conv = NodeConversation(
+            system_prompt="research assistant",
+            store=store,
+        )
+
+        # Build 10 messages (5 turns)
+        for i in range(5):
+            await conv.add_user_message(f"question {i}")
+            await conv.add_assistant_message(f"answer {i}")
+
+        assert conv.message_count == 10
+        assert conv.next_seq == 10
+
+        # Compact: keep last 2 messages (question 4, answer 4)
+        await conv.compact("Summary of questions 0-3 and their answers.", keep_recent=2)
+
+        assert conv.message_count == 3  # summary + 2 recent
+        assert conv.messages[0].content == "Summary of questions 0-3 and their answers."
+        assert conv.messages[1].content == "question 4"
+        assert conv.messages[2].content == "answer 4"
+
+        # Continue the conversation post-compaction
+        await conv.add_user_message("question 5")
+        await conv.add_assistant_message("answer 5")
+        assert conv.next_seq == 12
+
+        # Verify disk: old part files (seq 0-7) should be deleted
+        parts_dir = base / "parts"
+        part_files = sorted(parts_dir.glob("*.json"))
+        part_seqs = [int(f.stem) for f in part_files]
+        # Should have: summary (seq 7), question 4 (seq 8), answer 4 (seq 9),
+        #              question 5 (seq 10), answer 5 (seq 11)
+        assert all(s >= 7 for s in part_seqs), f"Stale parts found: {part_seqs}"
+
+        # Restore from fresh store
+        store2 = FileConversationStore(base)
+        restored = await NodeConversation.restore(store2)
+
+        assert restored is not None
+        assert restored.next_seq == 12
+        assert restored.message_count == 5
+        assert "Summary of questions 0-3" in restored.messages[0].content
+        assert restored.messages[-1].content == "answer 5"
+
+        # Verify seq monotonicity across all restored messages
+        seqs = [m.seq for m in restored.messages]
+        assert seqs == sorted(seqs), f"Seqs not monotonic: {seqs}"
+
+    @pytest.mark.asyncio
+    async def test_output_key_preservation_through_compact_and_restore(self, tmp_path):
+        """Output keys in compacted messages survive disk persistence."""
+        base = tmp_path / "output_key_conv"
+        store = FileConversationStore(base)
+        conv = NodeConversation(
+            system_prompt="classifier",
+            output_keys=["classification", "confidence"],
+            store=store,
+        )
+
+        await conv.add_user_message("Classify this email: 'You won a prize!'")
+        await conv.add_assistant_message('{"classification": "spam", "confidence": "0.97"}')
+        await conv.add_user_message("What about: 'Meeting at 3pm'")
+        await conv.add_assistant_message('{"classification": "ham", "confidence": "0.99"}')
+        await conv.add_user_message("And: 'Buy cheap meds now'")
+        await conv.add_assistant_message('{"classification": "spam", "confidence": "0.95"}')
+
+        # Compact keeping only the last 2 messages
+        await conv.compact("Classified 3 emails.", keep_recent=2)
+
+        # The summary should contain preserved output keys from discarded messages
+        summary_content = conv.messages[0].content
+        assert "PRESERVED VALUES" in summary_content
+        # Most recent values from discarded messages (msgs 0-3) are "ham"/"0.99"
+        assert "ham" in summary_content or "spam" in summary_content
+
+        # Restore and verify the preserved values survived
+        store2 = FileConversationStore(base)
+        restored = await NodeConversation.restore(store2)
+        assert restored is not None
+        assert "PRESERVED VALUES" in restored.messages[0].content
+
+    @pytest.mark.asyncio
+    async def test_tool_error_roundtrip(self, tmp_path):
+        """Tool errors persist and restore with ERROR: prefix in LLM output."""
+        base = tmp_path / "error_conv"
+        store = FileConversationStore(base)
+        conv = NodeConversation(store=store)
+
+        await conv.add_user_message("Calculate 1/0")
+        await conv.add_assistant_message(
+            "Let me calculate that.",
+            tool_calls=[
+                {
+                    "id": "call_calc",
+                    "type": "function",
+                    "function": {"name": "calculator", "arguments": '{"expr":"1/0"}'},
+                }
+            ],
+        )
+        await conv.add_tool_result(
+            "call_calc", "ZeroDivisionError: division by zero", is_error=True
+        )
+        await conv.add_assistant_message("The calculation failed: division by zero is undefined.")
+
+        # Restore
+        store2 = FileConversationStore(base)
+        restored = await NodeConversation.restore(store2)
+        assert restored is not None
+
+        tool_msg = restored.messages[2]
+        assert tool_msg.role == "tool"
+        assert tool_msg.is_error is True
+        assert tool_msg.tool_use_id == "call_calc"
+
+        llm_dict = tool_msg.to_llm_dict()
+        assert llm_dict["content"].startswith("ERROR: ")
+        assert "ZeroDivisionError" in llm_dict["content"]
+        assert llm_dict["tool_call_id"] == "call_calc"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_conversations_isolated(self, tmp_path):
+        """Two conversations in separate directories don't interfere."""
+        store_a = FileConversationStore(tmp_path / "conv_a")
+        store_b = FileConversationStore(tmp_path / "conv_b")
+
+        conv_a = NodeConversation(system_prompt="Agent A", store=store_a)
+        conv_b = NodeConversation(system_prompt="Agent B", store=store_b)
+
+        await conv_a.add_user_message("Hello from A")
+        await conv_b.add_user_message("Hello from B")
+        await conv_a.add_assistant_message("Response A")
+        await conv_b.add_assistant_message("Response B")
+        await conv_b.add_user_message("Follow-up B")
+
+        # Restore independently
+        restored_a = await NodeConversation.restore(FileConversationStore(tmp_path / "conv_a"))
+        restored_b = await NodeConversation.restore(FileConversationStore(tmp_path / "conv_b"))
+
+        assert restored_a.system_prompt == "Agent A"
+        assert restored_b.system_prompt == "Agent B"
+        assert restored_a.message_count == 2
+        assert restored_b.message_count == 3
+        assert restored_a.messages[0].content == "Hello from A"
+        assert restored_b.messages[2].content == "Follow-up B"
+
+    @pytest.mark.asyncio
+    async def test_destroy_removes_all_files(self, tmp_path):
+        """destroy() wipes the entire conversation directory."""
+        base = tmp_path / "doomed_conv"
+        store = FileConversationStore(base)
+        conv = NodeConversation(system_prompt="temp", store=store)
+        await conv.add_user_message("ephemeral")
+        await conv.add_assistant_message("gone soon")
+
+        assert base.exists()
+        assert (base / "meta.json").exists()
+        assert (base / "parts").exists()
+
+        await store.destroy()
+
+        assert not base.exists()
+
+    @pytest.mark.asyncio
+    async def test_restore_empty_store_returns_none(self, tmp_path):
+        """Restoring from a path that was never written to returns None."""
+        store = FileConversationStore(tmp_path / "empty")
+        result = await NodeConversation.restore(store)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_clear_then_continue_then_restore(self, tmp_path):
+        """clear() removes messages but preserves seq counter for new messages."""
+        base = tmp_path / "clear_conv"
+        store = FileConversationStore(base)
+        conv = NodeConversation(system_prompt="s", store=store)
+
+        await conv.add_user_message("old msg 0")
+        await conv.add_assistant_message("old msg 1")
+        assert conv.next_seq == 2
+
+        await conv.clear()
+        assert conv.message_count == 0
+        assert conv.next_seq == 2  # seq counter preserved
+
+        # Continue with new messages — seqs should start at 2
+        await conv.add_user_message("new msg")
+        await conv.add_assistant_message("new response")
+        assert conv.next_seq == 4
+        assert conv.messages[0].seq == 2
+        assert conv.messages[1].seq == 3
+
+        # Restore
+        store2 = FileConversationStore(base)
+        restored = await NodeConversation.restore(store2)
+        assert restored is not None
+        assert restored.message_count == 2
+        assert restored.next_seq == 4
+        assert restored.messages[0].content == "new msg"
+        assert restored.messages[0].seq == 2

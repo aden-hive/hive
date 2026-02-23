@@ -18,7 +18,7 @@ def _get_api_key_from_credential_store() -> str | None:
     try:
         from aden_tools.credentials import CredentialStoreAdapter
 
-        creds = CredentialStoreAdapter.with_env_storage()
+        creds = CredentialStoreAdapter.default()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
     except ImportError:
@@ -70,6 +70,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """Generate a completion from Claude (via LiteLLM)."""
         return self._provider.complete(
@@ -79,6 +80,7 @@ class AnthropicProvider(LLMProvider):
             max_tokens=max_tokens,
             response_format=response_format,
             json_mode=json_mode,
+            max_retries=max_retries,
         )
 
     def complete_with_tools(
@@ -91,6 +93,44 @@ class AnthropicProvider(LLMProvider):
     ) -> LLMResponse:
         """Run a tool-use loop until Claude produces a final response (via LiteLLM)."""
         return self._provider.complete_with_tools(
+            messages=messages,
+            system=system,
+            tools=tools,
+            tool_executor=tool_executor,
+            max_iterations=max_iterations,
+        )
+
+    async def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
+    ) -> LLMResponse:
+        """Async completion via LiteLLM."""
+        return await self._provider.acomplete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+            max_retries=max_retries,
+        )
+
+    async def acomplete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[Tool],
+        tool_executor: Callable[[ToolUse], ToolResult],
+        max_iterations: int = 10,
+    ) -> LLMResponse:
+        """Async tool-use loop via LiteLLM."""
+        return await self._provider.acomplete_with_tools(
             messages=messages,
             system=system,
             tools=tools,

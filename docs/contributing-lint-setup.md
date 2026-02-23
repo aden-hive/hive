@@ -8,7 +8,7 @@ Hive uses [Ruff](https://docs.astral.sh/ruff/) for all Python linting and format
 
 ```bash
 # 1. Install dev dependencies
-cd core && pip install -e ".[dev]"
+cd core && uv pip install -e ".[dev]"
 
 # 2. Install pre-commit hooks (runs ruff automatically before each commit)
 make install-hooks
@@ -102,6 +102,14 @@ The repository includes a `.claude/settings.json` hook that automatically runs `
 
 The `.cursorrules` file at the repo root tells Cursor's AI the project's style rules (line length, import order, quote style, etc.) so generated code follows convention.
 
+### Antigravity IDE
+
+Antigravity IDE (Google's AI-powered IDE) is supported via `.antigravity/mcp_config.json` and `.antigravity/skills/` (symlinks to `.claude/skills/`). See [antigravity-setup.md](antigravity-setup.md) for setup and troubleshooting.
+
+### Codex CLI
+
+Codex CLI (OpenAI, v0.101.0+) is supported via `.codex/config.toml` (MCP server config) and `.agents/skills/` (symlinks to `.claude/skills/`). These files are tracked in git. Run `codex` in the repo root and type `use hive` to start. See the [Codex CLI section in the README](../README.md#codex-cli) for details.
+
 ---
 
 ## CI Pipeline
@@ -142,7 +150,7 @@ The single source of truth for lint rules is the `[tool.ruff]` section in each p
 
 ## FAQ
 
-**Q: Do I need to install anything beyond `pip install -e ".[dev]"`?**
+**Q: Do I need to install anything beyond `uv pip install -e ".[dev]"`?**
 Only if you want pre-commit hooks: `make install-hooks`. Everything else (VS Code settings, editorconfig) works automatically.
 
 **Q: Can I use a different formatter (black, autopep8)?**

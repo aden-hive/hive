@@ -64,6 +64,8 @@ class AdenCachedStorage(CredentialStorage):
     - **Reads**: Try local cache first, fallback to Aden if stale/missing
     - **Writes**: Always write to local cache
     - **Offline resilience**: Uses cached credentials when Aden is unreachable
+    - **Provider-based lookup**: Match credentials by provider name (e.g., "hubspot")
+      when direct ID lookup fails, since Aden uses hash-based IDs internally.
 
     The cache TTL determines how long to trust local credentials before
     checking with the Aden server for updates. This balances:
@@ -85,6 +87,7 @@ class AdenCachedStorage(CredentialStorage):
 
         # First access fetches from Aden
         # Subsequent accesses use cache until TTL expires
+        # Can look up by provider name OR credential ID
         token = store.get_key("hubspot", "access_token")
     """
 
@@ -111,21 +114,26 @@ class AdenCachedStorage(CredentialStorage):
         self._cache_ttl = timedelta(seconds=cache_ttl_seconds)
         self._prefer_local = prefer_local
         self._cache_timestamps: dict[str, datetime] = {}
+        # Index: provider name (e.g., "hubspot") -> list of credential hash IDs
+        self._provider_index: dict[str, list[str]] = {}
+        # Index: "provider:alias" -> credential hash ID (for alias-based routing)
+        self._alias_index: dict[str, str] = {}
 
     def save(self, credential: CredentialObject) -> None:
         """
-        Save credential to local cache.
+        Save credential to local cache and update provider index.
 
         Args:
             credential: The credential to save.
         """
         self._local.save(credential)
         self._cache_timestamps[credential.id] = datetime.now(UTC)
+        self._index_provider(credential)
         logger.debug(f"Cached credential '{credential.id}'")
 
     def load(self, credential_id: str) -> CredentialObject | None:
         """
-        Load credential from cache, with Aden fallback.
+        Load credential from cache, with Aden fallback and provider-based lookup.
 
         The loading strategy depends on the `prefer_local` setting:
 
@@ -141,8 +149,39 @@ class AdenCachedStorage(CredentialStorage):
         2. Update local cache with response
         3. Fall back to local cache only if Aden fails
 
+        Provider-based lookup:
+        When a provider index mapping exists for the credential_id (e.g.,
+        "hubspot" → hash ID), the Aden-synced credential is loaded first.
+        This ensures fresh OAuth tokens from Aden take priority over stale
+        local credentials (env vars, old encrypted files).
+
         Args:
-            credential_id: The credential identifier.
+            credential_id: The credential identifier or provider name.
+
+        Returns:
+            CredentialObject if found, None otherwise.
+        """
+        # Check provider index first — Aden-synced credentials take priority
+        resolved_ids = self._provider_index.get(credential_id)
+        if resolved_ids:
+            for rid in resolved_ids:
+                if rid != credential_id:
+                    result = self._load_by_id(rid)
+                    if result is not None:
+                        logger.info(
+                            f"Loaded credential '{credential_id}' via provider index (id='{rid}')"
+                        )
+                        return result
+
+        # Direct lookup (exact credential_id match)
+        return self._load_by_id(credential_id)
+
+    def _load_by_id(self, credential_id: str) -> CredentialObject | None:
+        """
+        Load credential by exact ID from cache, with Aden fallback.
+
+        Args:
+            credential_id: The exact credential identifier.
 
         Returns:
             CredentialObject if found, None otherwise.
@@ -173,6 +212,22 @@ class AdenCachedStorage(CredentialStorage):
         # Return local credential if it exists (may be None)
         return local_cred
 
+    def load_all_for_provider(self, provider_name: str) -> list[CredentialObject]:
+        """Load all credentials for a given provider type.
+
+        Args:
+            provider_name: Provider name (e.g. "google", "slack").
+
+        Returns:
+            List of CredentialObjects for all accounts of this provider.
+        """
+        results: list[CredentialObject] = []
+        for cid in self._provider_index.get(provider_name, []):
+            cred = self._load_by_id(cid)
+            if cred:
+                results.append(cred)
+        return results
+
     def delete(self, credential_id: str) -> bool:
         """
         Delete credential from local cache.
@@ -200,15 +255,23 @@ class AdenCachedStorage(CredentialStorage):
 
     def exists(self, credential_id: str) -> bool:
         """
-        Check if credential exists in local cache.
+        Check if credential exists in local cache (by ID or provider name).
 
         Args:
-            credential_id: The credential identifier.
+            credential_id: The credential identifier or provider name.
 
         Returns:
             True if credential exists locally.
         """
-        return self._local.exists(credential_id)
+        if self._local.exists(credential_id):
+            return True
+        # Check provider index
+        resolved_ids = self._provider_index.get(credential_id)
+        if resolved_ids:
+            for rid in resolved_ids:
+                if rid != credential_id and self._local.exists(rid):
+                    return True
+        return False
 
     def _is_cache_fresh(self, credential_id: str) -> bool:
         """
@@ -242,12 +305,81 @@ class AdenCachedStorage(CredentialStorage):
         self._cache_timestamps.clear()
         logger.debug("Invalidated all cache entries")
 
+    def _index_provider(self, credential: CredentialObject) -> None:
+        """
+        Index a credential by its provider/integration type and alias.
+
+        Aden credentials carry an ``_integration_type`` key whose value is
+        the provider name (e.g., ``hubspot``).  This method maps that
+        provider name to the credential's hash ID so that subsequent
+        ``load("hubspot")`` calls resolve to the correct credential.
+
+        Also indexes by ``_alias`` for alias-based multi-account routing.
+
+        Args:
+            credential: The credential to index.
+        """
+        integration_type_key = credential.keys.get("_integration_type")
+        if integration_type_key is None:
+            return
+        provider_name = integration_type_key.value.get_secret_value()
+        if provider_name:
+            if provider_name not in self._provider_index:
+                self._provider_index[provider_name] = []
+            if credential.id not in self._provider_index[provider_name]:
+                self._provider_index[provider_name].append(credential.id)
+            logger.debug(f"Indexed provider '{provider_name}' -> '{credential.id}'")
+
+            # Index by alias for multi-account routing
+            alias_key = credential.keys.get("_alias")
+            if alias_key:
+                alias = alias_key.value.get_secret_value()
+                if alias:
+                    self._alias_index[f"{provider_name}:{alias}"] = credential.id
+
+    def load_by_alias(self, provider_name: str, alias: str) -> CredentialObject | None:
+        """Load a credential by provider name and alias.
+
+        Args:
+            provider_name: Provider type (e.g. "google", "slack").
+            alias: User-set alias from the Aden platform.
+
+        Returns:
+            CredentialObject if found, None otherwise.
+        """
+        cred_id = self._alias_index.get(f"{provider_name}:{alias}")
+        if cred_id:
+            return self._load_by_id(cred_id)
+        return None
+
+    def rebuild_provider_index(self) -> int:
+        """
+        Rebuild the provider and alias indexes from all locally cached credentials.
+
+        Useful after loading from disk when the in-memory indexes are empty.
+
+        Returns:
+            Number of provider mappings indexed.
+        """
+        self._provider_index.clear()
+        self._alias_index.clear()
+        indexed = 0
+        for cred_id in self._local.list_all():
+            cred = self._local.load(cred_id)
+            if cred:
+                before = len(self._provider_index)
+                self._index_provider(cred)
+                if len(self._provider_index) > before:
+                    indexed += 1
+        logger.debug(f"Rebuilt provider index with {indexed} mappings")
+        return indexed
+
     def sync_all_from_aden(self) -> int:
         """
         Sync all credentials from Aden server to local cache.
 
-        Fetches the list of available integrations from Aden and
-        updates the local cache with current tokens.
+        Calls GET /v1/credentials to list active integrations,
+        then fetches tokens for each.
 
         Returns:
             Number of credentials synced.
@@ -259,9 +391,7 @@ class AdenCachedStorage(CredentialStorage):
 
             for info in integrations:
                 if info.status != "active":
-                    logger.warning(
-                        f"Skipping integration '{info.integration_id}': status={info.status}"
-                    )
+                    logger.warning(f"Skipping integration '{info.alias}': status={info.status}")
                     continue
 
                 try:
@@ -269,9 +399,9 @@ class AdenCachedStorage(CredentialStorage):
                     if cred:
                         self.save(cred)
                         synced += 1
-                        logger.info(f"Synced credential '{info.integration_id}' from Aden")
+                        logger.info(f"Synced credential '{info.alias}' from Aden")
                 except Exception as e:
-                    logger.warning(f"Failed to sync '{info.integration_id}': {e}")
+                    logger.warning(f"Failed to sync '{info.alias}': {e}")
 
         except Exception as e:
             logger.error(f"Failed to list integrations from Aden: {e}")

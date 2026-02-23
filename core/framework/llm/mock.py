@@ -2,10 +2,16 @@
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.stream_events import (
+    FinishEvent,
+    StreamEvent,
+    TextDeltaEvent,
+    TextEndEvent,
+)
 
 
 class MockLLMProvider(LLMProvider):
@@ -114,6 +120,7 @@ class MockLLMProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """
         Generate a mock completion without calling a real LLM.
@@ -175,3 +182,66 @@ class MockLLMProvider(LLMProvider):
             output_tokens=0,
             stop_reason="mock_complete",
         )
+
+    async def acomplete(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
+    ) -> LLMResponse:
+        """Async mock completion (no I/O, returns immediately)."""
+        return self.complete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+            max_retries=max_retries,
+        )
+
+    async def acomplete_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[Tool],
+        tool_executor: Callable[[ToolUse], ToolResult],
+        max_iterations: int = 10,
+    ) -> LLMResponse:
+        """Async mock tool-use completion (no I/O, returns immediately)."""
+        return self.complete_with_tools(
+            messages=messages,
+            system=system,
+            tools=tools,
+            tool_executor=tool_executor,
+            max_iterations=max_iterations,
+        )
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream a mock completion as word-level TextDeltaEvents.
+
+        Splits the mock response into words and yields each as a separate
+        TextDeltaEvent with an accumulating snapshot, exercising the full
+        streaming pipeline without any API calls.
+        """
+        content = self._generate_mock_response(system=system, json_mode=False)
+        words = content.split(" ")
+        accumulated = ""
+
+        for i, word in enumerate(words):
+            chunk = word if i == 0 else " " + word
+            accumulated += chunk
+            yield TextDeltaEvent(content=chunk, snapshot=accumulated)
+
+        yield TextEndEvent(full_text=accumulated)
+        yield FinishEvent(stop_reason="mock_complete", model=self.model)

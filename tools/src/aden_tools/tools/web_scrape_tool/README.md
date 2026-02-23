@@ -21,11 +21,9 @@ Use when you need to read the content of a specific URL, extract data from a web
 Requires Chromium browser binaries:
 
 ```bash
-pip install playwright playwright-stealth
-playwright install chromium
+uv pip install playwright playwright-stealth
+uv run playwright install chromium
 ```
-
-In Docker, add `RUN playwright install chromium --with-deps` to the Dockerfile.
 
 ## Environment Variables
 

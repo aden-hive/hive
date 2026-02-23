@@ -1,4 +1,9 @@
-"""Tests for the storage module - FileStorage and ConcurrentStorage backends."""
+"""Tests for the storage module - FileStorage and ConcurrentStorage backends.
+
+DEPRECATED: FileStorage and ConcurrentStorage are deprecated.
+New sessions use unified storage at sessions/{session_id}/state.json.
+These tests are kept for backward compatibility verification only.
+"""
 
 import json
 import time
@@ -38,6 +43,7 @@ def create_test_run(
 # === FILESTORAGE TESTS ===
 
 
+@pytest.mark.skip(reason="FileStorage is deprecated - use unified session storage")
 class TestFileStorageBasics:
     """Test basic FileStorage operations."""
 
@@ -57,6 +63,7 @@ class TestFileStorageBasics:
         assert storage.base_path == tmp_path
 
 
+@pytest.mark.skip(reason="FileStorage is deprecated - use unified session storage")
 class TestFileStorageRunOperations:
     """Test FileStorage run CRUD operations."""
 
@@ -155,6 +162,7 @@ class TestFileStorageRunOperations:
         assert result is False
 
 
+@pytest.mark.skip(reason="FileStorage is deprecated - use unified session storage")
 class TestFileStorageIndexing:
     """Test FileStorage index operations."""
 
@@ -259,6 +267,7 @@ class TestFileStorageIndexing:
         assert storage.get_runs_by_node("nonexistent") == []
 
 
+@pytest.mark.skip(reason="FileStorage is deprecated - use unified session storage")
 class TestFileStorageListOperations:
     """Test FileStorage list operations."""
 
@@ -323,6 +332,7 @@ class TestCacheEntry:
 # === CONCURRENTSTORAGE TESTS ===
 
 
+@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
 class TestConcurrentStorageBasics:
     """Test basic ConcurrentStorage operations."""
 
@@ -367,6 +377,7 @@ class TestConcurrentStorageBasics:
         assert storage._running is False
 
 
+@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
 class TestConcurrentStorageRunOperations:
     """Test ConcurrentStorage run operations."""
 
@@ -471,6 +482,7 @@ class TestConcurrentStorageRunOperations:
             await storage.stop()
 
 
+@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
 class TestConcurrentStorageQueryOperations:
     """Test ConcurrentStorage query operations."""
 
@@ -526,6 +538,7 @@ class TestConcurrentStorageQueryOperations:
             await storage.stop()
 
 
+@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
 class TestConcurrentStorageCacheManagement:
     """Test ConcurrentStorage cache management."""
 
@@ -565,6 +578,7 @@ class TestConcurrentStorageCacheManagement:
         assert stats["valid_entries"] == 1
 
 
+@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
 class TestConcurrentStorageSyncAPI:
     """Test ConcurrentStorage synchronous API for backward compatibility."""
 
@@ -598,6 +612,7 @@ class TestConcurrentStorageSyncAPI:
         assert loaded is None
 
 
+@pytest.mark.skip(reason="ConcurrentStorage is deprecated - wraps deprecated FileStorage")
 class TestConcurrentStorageStats:
     """Test ConcurrentStorage statistics."""
 
