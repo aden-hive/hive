@@ -34,12 +34,8 @@ from framework.llm.provider import Tool, ToolUse, ToolResult
 # ---------------------------------------------------------------------------
 # Session-isolated in-process state (contextvars — thread + session safe)
 # ---------------------------------------------------------------------------
-_cycle_data_var: contextvars.ContextVar[dict] = contextvars.ContextVar(
-    "_cycle_data", default={}
-)
-_leaks_var: contextvars.ContextVar[list] = contextvars.ContextVar(
-    "_leaks", default=[]
-)
+_cycle_data_var: contextvars.ContextVar[dict] = contextvars.ContextVar("_cycle_data")
+_leaks_var: contextvars.ContextVar[list] = contextvars.ContextVar("_leaks")
 
 MAX_CYCLES = 3  # halt after this many consecutive low-severity cycles
 
@@ -201,6 +197,10 @@ def _scan_pipeline(cycle: int) -> dict:
         support_escalations — open support tickets needing action
     """
     next_cycle = int(cycle) + 1
+
+    # Initialize fresh session state — must happen before any reads this cycle
+    _cycle_data_var.set({})
+    _leaks_var.set([])
 
     # Use HubSpot CRM; fall back to empty snapshot if API key not set
     hs_data = _fetch_hubspot_deals()
