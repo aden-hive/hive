@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from framework.config import RuntimeConfig
 
+VERSION = "1.0.0"
 
 default_config = RuntimeConfig()
 
@@ -10,7 +11,7 @@ default_config = RuntimeConfig()
 @dataclass
 class AgentMetadata:
     name: str = "Revenue Leak Detector"
-    version: str = "1.0.0"
+    version: str = VERSION
     description: str = (
         "Autonomous business health monitor that detects revenue leaks — "
         "ghosted prospects, stalled deals, overdue invoices, and churn risk — "

@@ -166,15 +166,7 @@ class RevenueLeakDetectorAgent:
             goal_id=self.goal.id,
             version="1.0.0",
             entry_node=self.entry_node,
-            entry_points=[
-                EntryPointSpec(
-                    id="start",
-                    name="Start Monitoring",
-                    entry_node=self.entry_node,
-                    trigger_type="manual",
-                    isolation_level="isolated",
-                )
-            ],
+            entry_points=self.entry_points,
             terminal_nodes=self.terminal_nodes,
             pause_nodes=self.pause_nodes,
             nodes=self.nodes,

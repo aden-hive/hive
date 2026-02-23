@@ -10,6 +10,7 @@ import logging
 import sys
 import click
 
+from .config import VERSION
 from .agent import default_agent, RevenueLeakDetectorAgent
 
 
@@ -26,7 +27,7 @@ def setup_logging(verbose=False, debug=False):
 
 
 @click.group()
-@click.version_option(version="1.0.0")
+@click.version_option(version=VERSION)
 def cli():
     """Revenue Leak Detector — Autonomous business health monitor."""
     pass
