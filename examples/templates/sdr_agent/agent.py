@@ -231,8 +231,10 @@ class SDRAgent:
         if tools_path.exists():
             self._tool_registry.discover_from_module(tools_path)
 
-        llm = None
-        if not mock_mode:
+        if mock_mode:
+            from framework.llm.mock import MockLLMProvider
+            llm = MockLLMProvider()
+        else:
             llm = LiteLLMProvider(
                 model=self.config.model,
                 api_key=self.config.api_key,
