@@ -475,11 +475,20 @@ class BrowserSession:
         if not self._is_running():
             await self.start(persistent=self.persistent)
 
-    async def open_tab(self, url: str) -> dict:
-        """Open a new tab with the given URL."""
+    async def open_tab(self, url: str, background: bool = False) -> dict:
+        """Open a new tab with the given URL.
+
+        Args:
+            url: URL to navigate to.
+            background: If True, open the tab via CDP Target.createTarget with
+                background=True so it does not steal focus from the current tab.
+        """
         await self.ensure_running()
         if not self.context:
             raise RuntimeError("Browser context not initialized")
+
+        if background:
+            return await self._open_tab_background(url)
 
         page = await self.context.new_page()
         target_id = f"tab_{id(page)}"
@@ -497,6 +506,71 @@ class BrowserSession:
             "targetId": target_id,
             "url": page.url,
             "title": await page.title(),
+        }
+
+    async def _open_tab_background(self, url: str) -> dict:
+        """Open a tab in the background using CDP Target.createTarget.
+
+        Uses CDP to create the target with background=True so the current
+        active tab keeps focus, then picks up the new page via Playwright's
+        context page event.
+        """
+        # Need an existing page to create a CDP session from
+        anchor_page = self.get_active_page()
+        if not anchor_page and self.context.pages:
+            anchor_page = self.context.pages[0]
+        if not anchor_page:
+            # Nothing to steal focus from — just open normally
+            page = await self.context.new_page()
+            target_id = f"tab_{id(page)}"
+            self.pages[target_id] = page
+            self.active_page_id = target_id
+            self.console_messages[target_id] = []
+            page.on("console", lambda msg: self._capture_console(target_id, msg))
+            await page.goto(url, wait_until="domcontentloaded", timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
+            return {
+                "ok": True,
+                "targetId": target_id,
+                "url": page.url,
+                "title": await page.title(),
+                "background": False,
+            }
+
+        cdp = await self.context.new_cdp_session(anchor_page)
+        try:
+            # Get the browserContextId so the new tab lands in the same context
+            target_info = await cdp.send("Target.getTargetInfo")
+            browser_context_id = target_info.get("targetInfo", {}).get("browserContextId")
+
+            # Listen for the new page before creating it
+            page_promise = asyncio.ensure_future(
+                self.context.wait_for_event("page", timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
+            )
+
+            create_params: dict[str, Any] = {"url": url, "background": True}
+            if browser_context_id:
+                create_params["browserContextId"] = browser_context_id
+
+            await cdp.send("Target.createTarget", create_params)
+
+            # Playwright picks up the new target automatically
+            page = await page_promise
+            await page.wait_for_load_state("domcontentloaded", timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
+        finally:
+            await cdp.detach()
+
+        target_id = f"tab_{id(page)}"
+        self.pages[target_id] = page
+        # Don't update active_page_id — the whole point is to stay on the current tab
+        self.console_messages[target_id] = []
+        page.on("console", lambda msg: self._capture_console(target_id, msg))
+
+        return {
+            "ok": True,
+            "targetId": target_id,
+            "url": page.url,
+            "title": await page.title(),
+            "background": True,
         }
 
     def _capture_console(self, target_id: str, msg: Any) -> None:

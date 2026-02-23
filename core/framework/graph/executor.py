@@ -1549,6 +1549,7 @@ class GraphExecutor:
             accounts_prompt=self.accounts_prompt,
             execution_id=self.runtime.execution_id,
             node_registry=node_registry or {},
+            all_tools=list(self.tools),  # Full catalog for subagent tool resolution
         )
 
     VALID_NODE_TYPES = {

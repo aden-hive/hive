@@ -530,6 +530,10 @@ class NodeContext:
     is_subagent_mode: bool = False  # True when running as a subagent (prevents nested delegation)
     node_registry: dict[str, "NodeSpec"] = field(default_factory=dict)  # For subagent lookup
 
+    # Full tool catalog (unfiltered) — used by _execute_subagent to resolve
+    # subagent tools that aren't in the parent node's filtered available_tools.
+    all_tools: list[Tool] = field(default_factory=list)
+
 
 @dataclass
 class NodeResult:

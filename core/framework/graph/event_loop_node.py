@@ -2798,12 +2798,25 @@ class EventLoopNode(NodeProtocol):
         )
 
         # 3. Filter tools for subagent
-        # Only include tools declared in subagent's spec, never include delegate_to_sub_agent
+        # Use the full tool catalog (ctx.all_tools) so subagents can access tools
+        # that aren't in the parent node's filtered set (e.g. browser tools for a
+        # GCU subagent when the parent only has web_scrape/save_data).
+        # Falls back to ctx.available_tools if all_tools is empty (e.g. in tests).
         subagent_tool_names = set(subagent_spec.tools or [])
+        tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
+
         subagent_tools = [
-            t for t in ctx.available_tools
+            t for t in tool_source
             if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
         ]
+
+        missing = subagent_tool_names - {t.name for t in subagent_tools}
+        if missing:
+            logger.warning(
+                "Subagent '%s' requested tools not found in catalog: %s",
+                agent_id,
+                sorted(missing),
+            )
 
         logger.info(
             "📦 Subagent '%s' configuration:\n"
