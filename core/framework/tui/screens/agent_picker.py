@@ -76,20 +76,24 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
             if not _is_valid_agent_dir(path):
                 continue
 
+            # config.py is source of truth for name/description
+            name, desc = _extract_python_agent_metadata(path)
+            config_fallback_name = path.name.replace("_", " ").title()
+            used_config = name != config_fallback_name
+
             agent_json = path / "agent.json"
             node_count, tool_count, tags = 0, 0, []
             if agent_json.exists():
-                try:
-                    data = json.loads(agent_json.read_text())
-                    meta = data.get("agent", {})
-                    name = meta.get("name", path.name)
-                    desc = meta.get("description", "")
-                except Exception:
-                    name = path.name
-                    desc = "(error reading agent.json)"
                 node_count, tool_count, tags = _extract_agent_stats(agent_json)
-            else:
-                name, desc = _extract_python_agent_metadata(path)
+                if not used_config:
+                    # config.py didn't provide values, fall back to agent.json
+                    try:
+                        data = json.loads(agent_json.read_text())
+                        meta = data.get("agent", {})
+                        name = meta.get("name", name)
+                        desc = meta.get("description", desc)
+                    except Exception:
+                        pass
 
             entries.append(
                 AgentEntry(
