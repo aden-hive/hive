@@ -1043,6 +1043,24 @@ class FinlightHealthChecker(BaseHttpHealthChecker):
     SERVICE_NAME = "Finlight"
 
 
+class BrevoHealthChecker(BaseHttpHealthChecker):
+    """Health checker for Brevo API key."""
+
+    ENDPOINT = "https://api.brevo.com/v3/account"
+    SERVICE_NAME = "Brevo"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_HEADER
+    AUTH_HEADER_NAME = "api-key"
+    AUTH_HEADER_TEMPLATE = "{token}"
+
+    def _extract_identity(self, data: dict) -> dict[str, str]:
+        identity: dict[str, str] = {}
+        if data.get("email"):
+            identity["email"] = data["email"]
+        if data.get("companyName"):
+            identity["company"] = data["companyName"]
+        return identity
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "discord": DiscordHealthChecker(),
@@ -1065,6 +1083,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "telegram": TelegramHealthChecker(),
     "newsdata": NewsdataHealthChecker(),
     "finlight": FinlightHealthChecker(),
+    "brevo": BrevoHealthChecker(),
 }
 
 

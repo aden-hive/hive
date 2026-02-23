@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 from .account_info_tool import register_tools as register_account_info
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
+from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
@@ -144,6 +145,7 @@ def register_all_tools(
     register_subdomain_enumerator(mcp)
     register_risk_scorer(mcp)
     register_stripe(mcp, credentials=credentials)
+    register_brevo(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())
