@@ -69,6 +69,7 @@ from .stripe_tool import register_tools as register_stripe
 from .subdomain_enumerator import register_tools as register_subdomain_enumerator
 from .tech_stack_detector import register_tools as register_tech_stack_detector
 from .telegram_tool import register_tools as register_telegram
+from .ticktick_tool import register_tools as register_ticktick
 from .time_tool import register_tools as register_time
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
@@ -117,6 +118,7 @@ def register_all_tools(
     register_serpapi(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
+    register_ticktick(mcp, credentials=credentials)
     register_vision(mcp, credentials=credentials)
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
