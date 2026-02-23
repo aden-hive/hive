@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .account_info_tool import register_tools as register_account_info
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
 from .calcom_tool import register_tools as register_calcom
@@ -119,6 +120,7 @@ def register_all_tools(
     register_vision(mcp, credentials=credentials)
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_account_info(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)

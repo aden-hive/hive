@@ -907,26 +907,27 @@ if [ -z "$SELECTED_PROVIDER_ID" ]; then
         fi
     fi
 
-    # For ZAI subscription: prompt for API key if not already set
-    if [ "$SUBSCRIPTION_MODE" = "zai_code" ] && [ -z "${ZAI_API_KEY:-}" ]; then
-        echo ""
-        read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
+fi
 
-        if [ -n "$API_KEY" ]; then
-            echo "" >> "$SHELL_RC_FILE"
-            echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
-            echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
-            export ZAI_API_KEY="$API_KEY"
-            echo ""
-            echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
-        else
-            echo ""
-            echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
-            echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
-            SELECTED_ENV_VAR=""
-            SELECTED_PROVIDER_ID=""
-            SUBSCRIPTION_MODE=""
-        fi
+# For ZAI subscription: always prompt for API key
+if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
+    echo ""
+    read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
+
+    if [ -n "$API_KEY" ]; then
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
+        echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+        export ZAI_API_KEY="$API_KEY"
+        echo ""
+        echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
+    else
+        echo ""
+        echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
+        echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
+        SELECTED_ENV_VAR=""
+        SELECTED_PROVIDER_ID=""
+        SUBSCRIPTION_MODE=""
     fi
 fi
 

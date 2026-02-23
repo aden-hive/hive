@@ -66,6 +66,10 @@ class Runtime:
         self._current_run: Run | None = None
         self._current_node: str = "unknown"
 
+    @property
+    def execution_id(self) -> str:
+        return ""
+
     # === RUN LIFECYCLE ===
 
     def start_run(
