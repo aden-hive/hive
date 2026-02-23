@@ -312,10 +312,10 @@ class OutcomeAggregator:
 
     async def _evaluate_criterion(self, criterion: Any) -> CriterionStatus:
         """
-        Evaluate a single success criterion.
+            Evaluate a single success criterion.
 
-        This is a heuristic evaluation based on decision outcomes.
-        More sophisticated evaluation can be added per criterion type.
+            This is a heuristic evaluation based on decision outcomes.
+            More sophisticated evaluation can be added per criterion type.
         """
         status = CriterionStatus(
             criterion_id=criterion.id,
@@ -324,6 +324,11 @@ class OutcomeAggregator:
             progress=0.0,
             evidence=[],
         )
+
+        # Guard: only apply this heuristic to success-rate criteria
+        criterion_type = getattr(criterion, "type", "success_rate")
+        if criterion_type != "success_rate":
+            return status
 
         # Get relevant decisions (those mentioning this criterion or related intents)
         relevant_decisions = [
@@ -348,7 +353,6 @@ class OutcomeAggregator:
             # Add evidence
             for d in relevant_decisions[:5]:  # Limit evidence
                 if d.outcome:
-                    # Add more explicit evidence for observability
                     evidence = (
                         f"decision_id={d.decision.id}, "
                         f"intent={d.decision.intent}, "
@@ -363,7 +367,6 @@ class OutcomeAggregator:
                 target_value = float(target.rstrip("%")) / 100
                 status.met = status.progress >= target_value
             else:
-                # For non-percentage targets, consider met if progress > 0.8
                 status.met = status.progress >= 0.8
         except (ValueError, AttributeError):
             status.met = status.progress >= 0.8
