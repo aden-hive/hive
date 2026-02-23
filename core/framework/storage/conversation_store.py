@@ -19,9 +19,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class FileConversationStore:
@@ -94,9 +97,13 @@ class FileConversationStore:
             if not self._parts_dir.exists():
                 return
             for f in self._parts_dir.glob("*.json"):
-                file_seq = int(f.stem)
-                if file_seq < seq:
-                    f.unlink()
+                try:
+                    file_seq = int(f.stem)
+                    if file_seq < seq:
+                        f.unlink()
+                except ValueError:
+                    logger.warning(f"FileConversationStore found non-numeric file: {f}")
+                    continue
 
         await self._run(_delete)
 
