@@ -35,6 +35,37 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Escalation receiver (temporary routing target for subagent → user input)
+# ---------------------------------------------------------------------------
+
+
+class _EscalationReceiver:
+    """Temporary receiver registered in node_registry for subagent escalation routing.
+
+    When a subagent calls ``report_to_parent(wait_for_response=True)``, the callback
+    creates one of these, registers it under a unique escalation ID in the executor's
+    ``node_registry``, and awaits ``wait()``.  The TUI / runner calls
+    ``inject_input(escalation_id, content)`` which the ``ExecutionStream`` routes here
+    via ``inject_event()`` — matching the same ``hasattr(node, "inject_event")`` check
+    used for regular ``EventLoopNode`` instances.
+    """
+
+    def __init__(self) -> None:
+        self._event = asyncio.Event()
+        self._response: str | None = None
+
+    async def inject_event(self, content: str) -> None:
+        """Called by ExecutionStream.inject_input() when the user responds."""
+        self._response = content
+        self._event.set()
+
+    async def wait(self) -> str | None:
+        """Block until inject_event() delivers the user's response."""
+        await self._event.wait()
+        return self._response
+
+
+# ---------------------------------------------------------------------------
 # Judge protocol (simple 3-action interface for event loop evaluation)
 # ---------------------------------------------------------------------------
 
@@ -56,6 +87,27 @@ class JudgeProtocol(Protocol):
     """
 
     async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict: ...
+
+
+class SubagentJudge:
+    """Judge for subagent execution.
+
+    Accepts immediately when all required output keys are filled,
+    regardless of whether real tool calls were also made in the same turn.
+    On RETRY, reminds the subagent of its specific task.
+    """
+
+    def __init__(self, task: str):
+        self._task = task
+
+    async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict:
+        missing = context.get("missing_keys", [])
+        if not missing:
+            return JudgeVerdict(action="ACCEPT")
+        return JudgeVerdict(
+            action="RETRY",
+            feedback=f"Your task: {self._task}\nMissing output keys: {missing}. Use set_output to provide them.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +259,8 @@ class EventLoopNode(NodeProtocol):
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
         self._shutdown = False
+        # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
+        self._mark_complete_flag = False
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
         """Validate hard requirements only.
@@ -885,7 +939,7 @@ class EventLoopNode(NodeProtocol):
                 missing = self._get_missing_output_keys(
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 )
-                if missing and self._judge is not None:
+                if missing and self._judge is not None and not self._mark_complete_flag:
                     hint = (
                         f"Missing required output keys: {missing}. Use set_output to provide them."
                     )
@@ -1357,21 +1411,35 @@ class EventLoopNode(NodeProtocol):
                     pending_subagent.append(tc)
 
                 elif tc.tool_name == "report_to_parent":
-                    # --- One-way report from sub-agent to parent ---
+                    # --- Report from sub-agent to parent (optionally blocking) ---
                     msg = tc.tool_input.get("message", "")
                     data = tc.tool_input.get("data")
+                    wait = tc.tool_input.get("wait_for_response", False)
+                    mark_complete = tc.tool_input.get("mark_complete", False)
+                    response = None
+
                     if ctx.report_callback:
                         try:
-                            await ctx.report_callback(msg, data)
+                            response = await ctx.report_callback(
+                                msg, data, wait_for_response=wait,
+                            )
                         except Exception:
                             logger.warning(
                                 "[%s] report_to_parent callback failed (swallowed)",
                                 node_id,
                                 exc_info=True,
                             )
+
+                    if mark_complete:
+                        self._mark_complete_flag = True
+                        logger.info(
+                            "[%s] mark_complete=True — subagent will accept on this iteration",
+                            node_id,
+                        )
+
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
-                        content="Report sent to parent.",
+                        content=response if (wait and response) else "Report sent to parent.",
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
@@ -1733,14 +1801,24 @@ class EventLoopNode(NodeProtocol):
         Sub-agents call this to send one-way progress updates, partial findings,
         or status reports to the parent node (and external observers via event bus)
         without blocking execution.
+
+        When ``wait_for_response`` is True, the sub-agent blocks until the parent
+        relays the user's response — used for escalation (e.g. login pages, CAPTCHAs).
+
+        When ``mark_complete`` is True, the sub-agent terminates immediately after
+        sending the report — no need to call set_output for each output key.
         """
         return Tool(
             name="report_to_parent",
             description=(
-                "Send a one-way progress report to the parent agent. Use this to "
-                "communicate partial findings, status updates, or intermediate results "
-                "while you continue working. The parent receives the report but does not "
-                "respond — this is a fire-and-forget channel."
+                "Send a report to the parent agent. By default this is fire-and-forget: "
+                "the parent receives the report but does not respond. "
+                "Set wait_for_response=true to BLOCK until the user replies — use this "
+                "when you need human intervention (e.g. login pages, CAPTCHAs, "
+                "authentication walls). The user's response is returned as the tool result. "
+                "Set mark_complete=true to finish your task and terminate immediately "
+                "after sending the report — use this when your findings are in the "
+                "message/data fields and you don't need to call set_output."
             ),
             parameters={
                 "type": "object",
@@ -1752,6 +1830,23 @@ class EventLoopNode(NodeProtocol):
                     "data": {
                         "type": "object",
                         "description": "Optional structured data to include with the report.",
+                    },
+                    "wait_for_response": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, block execution until the user responds. "
+                            "Use for escalation scenarios requiring human intervention."
+                        ),
+                        "default": False,
+                    },
+                    "mark_complete": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, terminate the sub-agent immediately after sending "
+                            "this report. The report message and data are delivered to the "
+                            "parent as the final result. No set_output calls are needed."
+                        ),
+                        "default": False,
                     },
                 },
                 "required": ["message"],
@@ -1822,6 +1917,10 @@ class EventLoopNode(NodeProtocol):
         iteration: int,
     ) -> JudgeVerdict:
         """Evaluate the current state using judge or implicit logic."""
+        # Short-circuit: subagent called report_to_parent(mark_complete=True)
+        if self._mark_complete_flag:
+            return JudgeVerdict(action="ACCEPT")
+
         if self._judge is not None:
             context = {
                 "assistant_text": assistant_text,
@@ -2834,7 +2933,12 @@ class EventLoopNode(NodeProtocol):
         # 2b. Set up report callback (one-way channel to parent / event bus)
         subagent_reports: list[dict] = []
 
-        async def _report_callback(message: str, data: dict | None = None) -> None:
+        async def _report_callback(
+            message: str,
+            data: dict | None = None,
+            *,
+            wait_for_response: bool = False,
+        ) -> str | None:
             subagent_reports.append({"message": message, "data": data, "timestamp": time.time()})
             if self._event_bus:
                 await self._event_bus.emit_subagent_report(
@@ -2845,6 +2949,45 @@ class EventLoopNode(NodeProtocol):
                     data=data,
                     execution_id=ctx.execution_id,
                 )
+
+            if not wait_for_response:
+                return None
+
+            if not self._event_bus:
+                logger.warning(
+                    "Subagent '%s' requested user response but no event_bus available",
+                    agent_id,
+                )
+                return None
+
+            # Create isolated receiver and register for input routing
+            import uuid
+
+            escalation_id = f"{ctx.node_id}:escalation:{uuid.uuid4().hex[:8]}"
+            receiver = _EscalationReceiver()
+            registry = ctx.shared_node_registry
+
+            registry[escalation_id] = receiver
+            try:
+                # Stream message to user (parent's node_id so TUI shows parent talking)
+                await self._event_bus.emit_client_output_delta(
+                    stream_id=ctx.node_id,
+                    node_id=ctx.node_id,
+                    content=message,
+                    snapshot=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Request input (escalation_id for routing response back)
+                await self._event_bus.emit_client_input_requested(
+                    stream_id=ctx.node_id,
+                    node_id=escalation_id,
+                    prompt=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Block until user responds
+                return await receiver.wait()
+            finally:
+                registry.pop(escalation_id, None)
 
         # 3. Filter tools for subagent
         # Use the full tool catalog (ctx.all_tools) so subagents can access tools
@@ -2888,19 +3031,20 @@ class EventLoopNode(NodeProtocol):
             input_data={"task": task, **parent_data},
             llm=ctx.llm,
             available_tools=subagent_tools,
-            goal_context=ctx.goal_context,
+            goal_context=f"Your specific task: {task}",
             goal=ctx.goal,
             max_tokens=ctx.max_tokens,
             runtime_logger=ctx.runtime_logger,
             is_subagent_mode=True,  # Prevents nested delegation
             report_callback=_report_callback,
             node_registry={},  # Empty - no nested subagents
+            shared_node_registry=ctx.shared_node_registry,  # For escalation routing
         )
 
         # 5. Create and execute subagent EventLoopNode
         subagent_node = EventLoopNode(
             event_bus=None,  # Subagents don't emit events to parent's bus
-            judge=None,  # Implicit judge: accept when output_keys filled
+            judge=SubagentJudge(task=task),
             config=LoopConfig(
                 max_iterations=min(self._config.max_iterations, 20),  # Limit iterations
                 max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
