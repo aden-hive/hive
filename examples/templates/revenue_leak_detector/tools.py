@@ -24,6 +24,7 @@ credentials set.
 """
 
 import contextvars
+import html as _html
 import json
 import os
 from typing import Any
@@ -38,6 +39,7 @@ _cycle_data_var: contextvars.ContextVar[dict] = contextvars.ContextVar("_cycle_d
 _leaks_var: contextvars.ContextVar[list] = contextvars.ContextVar("_leaks")
 
 MAX_CYCLES = 3  # halt after this many consecutive low-severity cycles
+MAX_TOTAL_CYCLES = 10  # absolute cap — halt regardless of severity to prevent infinite loops
 
 _SEVERITY_EMOJI: dict[str, str] = {
     "low": "🟢",
@@ -59,7 +61,10 @@ def _fetch_hubspot_contact_emails(headers: dict, deal_ids: list) -> dict:
     result: dict = {}
     try:
         import httpx
-        for deal_id in deal_ids[:10]:          # cap at 10 to avoid rate limits
+    except ImportError:
+        return result
+    for deal_id in deal_ids[:10]:          # cap at 10 to avoid rate limits
+        try:
             r = httpx.get(
                 f"https://api.hubapi.com/crm/v3/objects/deals/{deal_id}/associations/contacts",
                 headers=headers,
@@ -80,8 +85,8 @@ def _fetch_hubspot_contact_emails(headers: dict, deal_ids: list) -> dict:
                 email = cr.json().get("properties", {}).get("email", "")
                 if email:
                     result[str(deal_id)] = email
-    except Exception as exc:
-        print(f"[HubSpot] contact batch fetch error (partial results returned): {exc}")
+        except Exception as exc:
+            print(f"[HubSpot] contact fetch error for deal {deal_id}: {exc}")
     return result
 
 
@@ -340,6 +345,10 @@ def _detect_revenue_leaks(cycle: int) -> dict:
         severity = "low"
         halt = int(float(cycle)) >= MAX_CYCLES  # stop after MAX_CYCLES with no leaks
 
+    # Absolute cycle cap — prevent infinite loops when severity stays medium/high
+    if not halt and int(float(cycle)) >= MAX_TOTAL_CYCLES:
+        halt = True
+
     print(
         f"[detect_revenue_leaks] Cycle {cycle} — "
         f"{len(leaks)} leaks | severity={severity} | at_risk=${total_at_risk:,} | halt={halt}"
@@ -413,26 +422,27 @@ def _build_telegram_message(
         "",
         f"Severity:       {emoji} <b>{sev.upper()}</b>",
         f"Leaks detected: <b>{int(float(leak_count))}</b>",
-        f"Total at risk:  <b>${int(total_at_risk):,}</b>",
+        f"Total at risk:  <b>${int(float(total_at_risk)):,}</b>",
         "",
     ]
 
     if not leaks:
         lines.append("✅ Pipeline healthy — no leaks found.")
     else:
+        esc = _html.escape  # guard against & < > in CRM data
         for i, leak in enumerate(leaks, 1):
             t = leak.get("type", "UNKNOWN")
             lines.append(f"<b>[{i}] {t}</b>")
             if t in ("GHOSTED", "STALLED"):
-                lines.append(f"  Deal    : {leak.get('deal_id')} ({leak.get('contact')})")
-                lines.append(f"  Stage   : {leak.get('stage')}  |  Inactive {leak.get('days_inactive')}d")
+                lines.append(f"  Deal    : {esc(str(leak.get('deal_id', '')))} ({esc(str(leak.get('contact', '')))})")
+                lines.append(f"  Stage   : {esc(str(leak.get('stage', '')))}  |  Inactive {leak.get('days_inactive')}d")
                 lines.append(f"  Value   : ${leak.get('value', 0):,}")
             elif t == "OVERDUE_PAYMENT":
-                lines.append(f"  Invoice : {leak.get('invoice_id')} ({leak.get('client')})")
+                lines.append(f"  Invoice : {esc(str(leak.get('invoice_id', '')))} ({esc(str(leak.get('client', '')))})")
                 lines.append(f"  Amount  : ${leak.get('amount', 0):,}  |  {leak.get('days_overdue')}d overdue")
             elif t == "CHURN_RISK":
                 lines.append(f"  Open escalations: {leak.get('escalations')}")
-            lines.append(f"  ➜ {leak.get('recommendation')}")
+            lines.append(f"  ➜ {esc(str(leak.get('recommendation', '')))}")
             lines.append("")
 
     action = {
@@ -487,7 +497,7 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
     print(f"{border}")
     print(f"  Severity        : {severity_emoji}  {sev.upper()}")
     print(f"  Leaks Detected  : {int(float(leak_count))}")
-    print(f"  Total At Risk   : ${int(total_at_risk):,}")
+    print(f"  Total At Risk   : ${int(float(total_at_risk)):,}")
     print(f"{thin}")
 
     if not leaks:
@@ -526,7 +536,7 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
         cycle=int(float(cycle)),
         severity=severity,
         leak_count=int(float(leak_count)),
-        total_at_risk=int(total_at_risk),
+        total_at_risk=int(float(total_at_risk)),
         leaks=leaks,
     )
     tg_result = _send_telegram(tg_message)
@@ -544,7 +554,7 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
         "cycle": int(float(cycle)),
         "severity": severity,
         "leaks_reported": int(float(leak_count)),
-        "total_at_risk_usd": int(total_at_risk),
+        "total_at_risk_usd": int(float(total_at_risk)),
         "telegram": tg_result,
     }
 
@@ -573,7 +583,7 @@ def _send_followup_emails(cycle: int) -> dict:
     Returns:
         emails_sent:      number of emails dispatched (or dry-run previewed)
         contacts_emailed: list of contact names
-        delivery_method:  "gmail" | "console"
+        delivery_method:  "gmail" | "console" | "none"
     """
     ghosted = [leak for leak in _leaks_var.get([]) if leak.get("type") == "GHOSTED"]
 

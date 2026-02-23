@@ -323,6 +323,10 @@ class RevenueLeakDetectorAgent:
         if self.entry_node not in node_ids:
             errors.append(f"Entry node '{self.entry_node}' not found")
 
+        for ep_id, ep_node in self.entry_points.items():
+            if ep_node not in node_ids:
+                errors.append(f"Entry point '{ep_id}': node '{ep_node}' not found")
+
         return {
             "valid": len(errors) == 0,
             "errors": errors,
