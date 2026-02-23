@@ -7,13 +7,10 @@ Designed for **introspection, querying, and analysis** without allowing data mut
 
 ## Setup
 
+Set the `DATABASE_URL` environment variable or configure it via the credential store:
+
 ```bash
-export PG_HOST=localhost
-export PG_PORT=5432
-export PG_DATABASE=mydb
-export PG_USER=myuser
-export PG_PASSWORD=mypassword
-export PG_SSLMODE=disable
+export DATABASE_URL=postgresql://user:password@localhost:5432/mydb
 ```
 
 

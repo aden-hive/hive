@@ -41,7 +41,6 @@ _connection_pool: pool.ThreadedConnectionPool | None = None
 _pool_database_url: str | None = None
 
 
-
 # ============================================================
 # SQL GUARD (First-pass validation)
 # ============================================================
@@ -111,6 +110,7 @@ ORDER BY ordinal_position
 # Pooling
 # ============================================================
 
+
 def _get_pool(database_url: str):
     """
     Retrieve a connection pool for the given PostgreSQL database URL.
@@ -129,9 +129,7 @@ def _get_pool(database_url: str):
         if _connection_pool is not None:
             _connection_pool.closeall()
         _connection_pool = pool.ThreadedConnectionPool(
-            MIN_POOL_SIZE,
-            MAX_POOL_SIZE,
-            dsn=database_url
+            MIN_POOL_SIZE, MAX_POOL_SIZE, dsn=database_url
         )
         _pool_database_url = database_url
     return _connection_pool
@@ -173,10 +171,10 @@ def _get_connection(database_url: str):
         pool_instance.putconn(conn)
 
 
-
 # ============================================================
 # Helpers
 # ============================================================
+
 
 def _hash_sql(sql: str) -> str:
     """
@@ -251,6 +249,7 @@ def _get_database_url(
 
     return database_url
 
+
 def register_tools(
     mcp: FastMCP,
     credentials: CredentialStoreAdapter | None = None,
@@ -267,6 +266,7 @@ def register_tools(
     Returns:
         None
     """
+
     @mcp.tool()
     def pg_query(sql: str, params: dict | None = None) -> dict:
         """
@@ -416,11 +416,7 @@ def register_tools(
                     cur.execute(sql, params)
                     rows = cur.fetchall()
 
-            result = [
-                {"schema": r[0], "table": r[1]}
-                for r in rows
-                if len(r) >= 2
-            ]
+            result = [{"schema": r[0], "table": r[1]} for r in rows if len(r) >= 2]
 
             return {"result": result, "success": True}
 
@@ -501,9 +497,7 @@ def register_tools(
 
             with _get_connection(database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        pg_sql.SQL("EXPLAIN {}").format(pg_sql.SQL(sql))
-                    )
+                    cur.execute(pg_sql.SQL("EXPLAIN {}").format(pg_sql.SQL(sql)))
                     plan = [r[0] for r in cur.fetchall()]
 
             duration_ms = int((time.monotonic() - start) * 1000)

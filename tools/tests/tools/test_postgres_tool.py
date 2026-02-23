@@ -29,6 +29,7 @@ def _mock_database_url(monkeypatch):
 # Database Mocking
 # ============================================================
 
+
 def _mock_db(monkeypatch):
     class FakeCursor:
         description = [type("D", (), {"name": "col"})]
@@ -109,8 +110,8 @@ def pg_explain_fn(mcp: FastMCP, monkeypatch):
 # Tests
 # ============================================================
 
-class TestPgQuery:
 
+class TestPgQuery:
     def test_simple_select(self, pg_query_fn):
         result = pg_query_fn(sql="SELECT 1")
 
@@ -167,7 +168,6 @@ class TestPgQuery:
 
 
 class TestPgListSchemas:
-
     def test_list_schemas_success(self, pg_list_schemas_fn):
         result = pg_list_schemas_fn()
 
@@ -177,7 +177,6 @@ class TestPgListSchemas:
 
 
 class TestPgListTables:
-
     def test_list_tables_all(self, pg_list_tables_fn):
         result = pg_list_tables_fn()
         assert result["success"] is True
@@ -190,7 +189,6 @@ class TestPgListTables:
 
 
 class TestPgDescribeTable:
-
     def test_describe_table_success(self, pg_describe_table_fn, monkeypatch):
 
         class DescribeCursor:
@@ -241,7 +239,6 @@ class TestPgDescribeTable:
 
 
 class TestPgExplain:
-
     def test_explain_success(self, pg_explain_fn):
         result = pg_explain_fn(sql="SELECT 1")
 
