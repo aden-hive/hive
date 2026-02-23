@@ -12,6 +12,11 @@ from typing import Any
 from pydantic import BaseModel, Field, computed_field
 
 from framework.schemas.decision import Decision, Outcome
+from framework.schemas.failure_taxonomy import (
+    ClassifiedFailure,
+    FailureDistribution,
+    FailureCategory,
+)
 
 
 class RunStatus(StrEnum):
@@ -96,6 +101,8 @@ class Run(BaseModel):
     goal_description: str = ""
     input_data: dict[str, Any] = Field(default_factory=dict)
     output_data: dict[str, Any] = Field(default_factory=dict)
+
+    classified_failure: ClassifiedFailure | None = None
 
     model_config = {"extra": "allow"}
 
@@ -219,6 +226,8 @@ class RunSummary(BaseModel):
     # What worked
     successes: list[str] = Field(default_factory=list)
 
+    classified_failure_category: str | None = None
+
     model_config = {"extra": "allow"}
 
     @classmethod
@@ -258,4 +267,7 @@ class RunSummary(BaseModel):
             critical_problems=critical,
             warnings=warnings,
             successes=successes,
+            classified_failure_category=(
+                run.classified_failure.category.value if run.classified_failure else None
+            ),
         )

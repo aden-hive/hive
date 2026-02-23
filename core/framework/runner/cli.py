@@ -331,6 +331,36 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     resume_parser.set_defaults(func=cmd_resume)
 
+    failures_parser = subparsers.add_parser(
+        "failures",
+        help="Analyze agent failure distribution",
+        description="Show failure distribution and evolution strategies for an agent.",
+    )
+    failures_parser.add_argument(
+        "agent_path",
+        type=str,
+        help="Path to agent folder",
+    )
+    failures_parser.add_argument(
+        "--category",
+        "-c",
+        type=str,
+        default=None,
+        help="Filter by failure category (e.g., tool_error, timeout, routing_error)",
+    )
+    failures_parser.add_argument(
+        "--suggest",
+        "-s",
+        action="store_true",
+        help="Show evolution strategy suggestions for each failure",
+    )
+    failures_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON",
+    )
+    failures_parser.set_defaults(func=cmd_failures)
+
 
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
@@ -1710,7 +1740,7 @@ def cmd_pause(args: argparse.Namespace) -> int:
 
 def cmd_resume(args: argparse.Namespace) -> int:
     """Resume a session from checkpoint."""
-    print("⚠ Resume command not yet implemented")
+    print("Resume command not yet implemented")
     print("This will be available once checkpoint resume integration is complete.")
     print(f"\nAgent: {args.agent_path}")
     print(f"Session: {args.session_id}")
@@ -1719,3 +1749,110 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if args.tui:
         print("Mode: TUI")
     return 1
+
+
+def cmd_failures(args: argparse.Namespace) -> int:
+    """Analyze failure distribution for an agent."""
+    from framework.builder.query import BuilderQuery
+    from framework.schemas.failure_taxonomy import (
+        FailureCategory,
+        CATEGORY_DESCRIPTIONS,
+        STRATEGY_DESCRIPTIONS,
+        FAILURE_CATEGORY_TO_STRATEGY,
+    )
+
+    agent_path = Path(args.agent_path)
+    agent_name = agent_path.name
+    storage_path = Path.home() / ".hive" / "agents" / agent_name / "runs"
+
+    if not storage_path.exists():
+        print(f"No run data found for agent: {agent_name}")
+        print(f"Expected at: {storage_path}")
+        return 1
+
+    query = BuilderQuery(storage_path)
+
+    goal_id = agent_name
+    distribution = query.failure_distribution(goal_id)
+
+    if distribution.total_failures == 0:
+        print(f"No failures recorded for agent: {agent_name}")
+        return 0
+
+    if args.category:
+        try:
+            category = FailureCategory(args.category.lower())
+        except ValueError:
+            print(f"Unknown category: {args.category}")
+            print(f"Valid categories: {', '.join(c.value for c in FailureCategory)}")
+            return 1
+
+        summaries = query.get_failures_by_category(goal_id, category)
+        if args.json:
+            output = {
+                "category": category.value,
+                "count": len(summaries),
+                "runs": [
+                    {
+                        "run_id": s.run_id,
+                        "status": s.status.value,
+                        "narrative": s.narrative,
+                    }
+                    for s in summaries
+                ],
+            }
+            print(json.dumps(output, indent=2, default=str))
+        else:
+            print(f"\n=== Failures with category: {category.value} ({len(summaries)} runs) ===\n")
+            for s in summaries:
+                print(f"  Run: {s.run_id}")
+                print(f"    Status: {s.status.value}")
+                print(
+                    f"    Narrative: {s.narrative[:100]}..."
+                    if len(s.narrative) > 100
+                    else f"    Narrative: {s.narrative}"
+                )
+                print()
+        return 0
+
+    if args.json:
+        output = {
+            "agent": agent_name,
+            "total_failures": distribution.total_failures,
+            "distribution": distribution.to_dict(),
+            "suggestions": query.suggest_improvements(goal_id),
+        }
+        print(json.dumps(output, indent=2, default=str))
+    else:
+        print(f"\n{'=' * 60}")
+        print(f"Failure Distribution for: {agent_name}")
+        print(f"{'=' * 60}\n")
+
+        print(f"Total Failures: {distribution.total_failures}\n")
+
+        print("Failure Categories:")
+        for category, count in distribution.get_top_categories():
+            pct = distribution.get_percentage(category)
+            desc = CATEGORY_DESCRIPTIONS.get(category, "")
+            bar = "#" * int(pct / 5)
+            print(f"  {category.value:20} {count:4} ({pct:5.1f}%) {bar}")
+            if args.suggest:
+                strategy = FAILURE_CATEGORY_TO_STRATEGY.get(category)
+                if strategy:
+                    strategy_desc = STRATEGY_DESCRIPTIONS.get(strategy, "")
+                    print(f"    -> Strategy: {strategy.value} - {strategy_desc}")
+
+        if args.suggest:
+            print(f"\n{'=' * 60}")
+            print("Evolution Suggestions:")
+            print(f"{'=' * 60}\n")
+
+            suggestions = query.suggest_improvements(goal_id)
+            for i, sug in enumerate(suggestions[:10], 1):
+                priority_icon = "[HIGH]" if sug.get("priority") == "high" else "[MED]"
+                print(f"{i}. {priority_icon} [{sug['type']}] {sug['target']}")
+                print(f"   Reason: {sug['reason']}")
+                print(f"   -> {sug['recommendation']}")
+                print()
+
+    return 0
