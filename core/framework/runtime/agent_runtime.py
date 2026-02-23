@@ -276,6 +276,7 @@ class AgentRuntime:
                     session_store=self._session_store,
                     checkpoint_config=self._checkpoint_config,
                     graph_id=self._graph_id,
+                    accounts_prompt=self.accounts_prompt,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
