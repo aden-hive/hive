@@ -355,14 +355,9 @@ class EventLoopNode(NodeProtocol):
             if delegate_tool:
                 tools.append(delegate_tool)
 
-        # Add delegate_to_sub_agent tool if:
-        # - Node has sub_agents defined
-        # - We are NOT in subagent mode (prevents nested delegation)
-        if not ctx.is_subagent_mode:
-            sub_agents = getattr(ctx.node_spec, "sub_agents", [])
-            delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
-            if delegate_tool:
-                tools.append(delegate_tool)
+        # Add report_to_parent tool for sub-agents with a report callback
+        if ctx.is_subagent_mode and ctx.report_callback is not None:
+            tools.append(self._build_report_to_parent_tool())
 
         logger.info(
             "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
@@ -1361,6 +1356,26 @@ class EventLoopNode(NodeProtocol):
                     )
                     pending_subagent.append(tc)
 
+                elif tc.tool_name == "report_to_parent":
+                    # --- One-way report from sub-agent to parent ---
+                    msg = tc.tool_input.get("message", "")
+                    data = tc.tool_input.get("data")
+                    if ctx.report_callback:
+                        try:
+                            await ctx.report_callback(msg, data)
+                        except Exception:
+                            logger.warning(
+                                "[%s] report_to_parent callback failed (swallowed)",
+                                node_id,
+                                exc_info=True,
+                            )
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content="Report sent to parent.",
+                        is_error=False,
+                    )
+                    results_by_id[tc.tool_use_id] = result
+
                 else:
                     # --- Real tool: check for truncated args, else queue ---
                     if "_raw" in tc.tool_input:
@@ -1447,7 +1462,7 @@ class EventLoopNode(NodeProtocol):
                     continue  # shouldn't happen
 
                 # Build log entries for real tools (exclude synthetic tools)
-                if tc.tool_name not in ("set_output", "ask_user", "escalate_to_coder", "delegate_to_sub_agent"):
+                if tc.tool_name not in ("set_output", "ask_user", "escalate_to_coder", "delegate_to_sub_agent", "report_to_parent"):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
@@ -1709,6 +1724,37 @@ class EventLoopNode(NodeProtocol):
                     },
                 },
                 "required": ["agent_id", "task"],
+            },
+        )
+
+    def _build_report_to_parent_tool(self) -> Tool:
+        """Build the synthetic report_to_parent tool for sub-agent progress reports.
+
+        Sub-agents call this to send one-way progress updates, partial findings,
+        or status reports to the parent node (and external observers via event bus)
+        without blocking execution.
+        """
+        return Tool(
+            name="report_to_parent",
+            description=(
+                "Send a one-way progress report to the parent agent. Use this to "
+                "communicate partial findings, status updates, or intermediate results "
+                "while you continue working. The parent receives the report but does not "
+                "respond — this is a fire-and-forget channel."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "A human-readable status or progress message.",
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "Optional structured data to include with the report.",
+                    },
+                },
+                "required": ["message"],
             },
         )
 
@@ -2785,6 +2831,21 @@ class EventLoopNode(NodeProtocol):
             write_keys=[],  # Read-only!
         )
 
+        # 2b. Set up report callback (one-way channel to parent / event bus)
+        subagent_reports: list[dict] = []
+
+        async def _report_callback(message: str, data: dict | None = None) -> None:
+            subagent_reports.append({"message": message, "data": data, "timestamp": time.time()})
+            if self._event_bus:
+                await self._event_bus.emit_subagent_report(
+                    stream_id=ctx.node_id,
+                    node_id=f"{ctx.node_id}:subagent:{agent_id}",
+                    subagent_id=agent_id,
+                    message=message,
+                    data=data,
+                    execution_id=ctx.execution_id,
+                )
+
         # 3. Filter tools for subagent
         # Use the full tool catalog (ctx.all_tools) so subagents can access tools
         # that aren't in the parent node's filtered set (e.g. browser tools for a
@@ -2832,6 +2893,7 @@ class EventLoopNode(NodeProtocol):
             max_tokens=ctx.max_tokens,
             runtime_logger=ctx.runtime_logger,
             is_subagent_mode=True,  # Prevents nested delegation
+            report_callback=_report_callback,
             node_registry={},  # Empty - no nested subagents
         )
 
@@ -2878,11 +2940,13 @@ class EventLoopNode(NodeProtocol):
                     else f"Sub-agent '{agent_id}' failed: {result.error}"
                 ),
                 "data": result.output,
+                "reports": subagent_reports if subagent_reports else None,
                 "metadata": {
                     "agent_id": agent_id,
                     "success": result.success,
                     "tokens_used": result.tokens_used,
                     "latency_ms": latency_ms,
+                    "report_count": len(subagent_reports),
                 },
             }
 

@@ -86,6 +86,9 @@ class EventType(StrEnum):
     # Escalation (agent requests handoff to hive_coder)
     ESCALATION_REQUESTED = "escalation_requested"
 
+    # Subagent reports (one-way progress updates from sub-agents)
+    SUBAGENT_REPORT = "subagent_report"
+
 
 @dataclass
 class AgentEvent:
@@ -849,6 +852,30 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"reason": reason, "context": context},
+            )
+        )
+
+    async def emit_subagent_report(
+        self,
+        stream_id: str,
+        node_id: str,
+        subagent_id: str,
+        message: str,
+        data: dict[str, Any] | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit a one-way progress report from a sub-agent."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.SUBAGENT_REPORT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "subagent_id": subagent_id,
+                    "message": message,
+                    "data": data,
+                },
             )
         )
 
