@@ -1,102 +1,31 @@
 """
-CLI entry point for Meeting Notes Agent.
+CLI entry point for the Meeting Notes Agent.
+
+Usage:
+    hive run examples/templates/meeting_notes_agent --input '{"transcript": "..."}'
+
+    # Or directly:
+    PYTHONPATH=examples/templates uv run python -m meeting_notes_agent run \\
+        --input '{"transcript": "...", "slack_channel": "#team-standup"}'
+
+    # With Gemini as LLM:
+    PYTHONPATH=examples/templates uv run python -m meeting_notes_agent run \\
+        --input '{"transcript": "...", "llm_provider": "gemini"}'
+
+    # Validate structure:
+    PYTHONPATH=examples/templates uv run python -m meeting_notes_agent validate
+
+    # Run tests:
+    PYTHONPATH=examples/templates uv run python -m meeting_notes_agent test
 """
 
-import asyncio
-import json
-import logging
 import sys
-import click
+import os
 
-from .agent import default_agent, MeetingNotesAgent
+# Allow running from repo root with PYTHONPATH=examples/templates
+sys.path.insert(0, os.path.dirname(__file__))
 
-
-def setup_logging(verbose=False, debug=False):
-    """Configure logging for execution visibility."""
-    if debug:
-        level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
-    elif verbose:
-        level, fmt = logging.INFO, "%(message)s"
-    else:
-        level, fmt = logging.WARNING, "%(levelname)s: %(message)s"
-    logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
-    logging.getLogger("framework").setLevel(level)
-
-
-@click.group()
-@click.version_option(version="1.0.0")
-def cli():
-    """Meeting Notes Agent - Extract structured data from meeting transcripts."""
-    pass
-
-
-@cli.command()
-@click.option("--transcript", "-t", type=str, required=True, help="Meeting transcript text")
-@click.option("--meeting-name", type=str, help="Meeting name/title")
-@click.option("--meeting-date", type=str, help="Meeting date")
-@click.option("--slack-channel", type=str, help="Slack channel to post results")
-@click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
-@click.option("--verbose", "-v", is_flag=True, help="Show execution details")
-@click.option("--debug", is_flag=True, help="Show debug logging")
-def run(transcript, meeting_name, meeting_date, slack_channel, quiet, verbose, debug):
-    """Extract meeting notes from a transcript."""
-    if not quiet:
-        setup_logging(verbose=verbose, debug=debug)
-
-    context = {"transcript": transcript}
-    if meeting_name:
-        context["meeting_name"] = meeting_name
-    if meeting_date:
-        context["meeting_date"] = meeting_date
-    if slack_channel:
-        context["slack_channel"] = slack_channel
-
-    result = asyncio.run(default_agent.run(context))
-
-    output_data = {
-        "success": result.success,
-        "steps_executed": result.steps_executed,
-        "output": result.output,
-    }
-    if result.error:
-        output_data["error"] = result.error
-
-    click.echo(json.dumps(output_data, indent=2, default=str))
-    sys.exit(0 if result.success else 1)
-
-
-@cli.command()
-@click.option("--json", "output_json", is_flag=True)
-def info(output_json):
-    """Show agent information."""
-    info_data = default_agent.info()
-    if output_json:
-        click.echo(json.dumps(info_data, indent=2))
-    else:
-        click.echo(f"Agent: {info_data['name']}")
-        click.echo(f"Version: {info_data['version']}")
-        click.echo(f"Description: {info_data['description']}")
-        click.echo(f"\nNodes: {', '.join(info_data['nodes'])}")
-        click.echo(f"Client-facing: {', '.join(info_data['client_facing_nodes'])}")
-        click.echo(f"Entry: {info_data['entry_node']}")
-        click.echo(f"Terminal: {', '.join(info_data['terminal_nodes'])}")
-
-
-@cli.command()
-def validate():
-    """Validate agent structure."""
-    validation = default_agent.validate()
-    if validation["valid"]:
-        click.echo("Agent is valid")
-        if validation["warnings"]:
-            for warning in validation["warnings"]:
-                click.echo(f"  WARNING: {warning}")
-    else:
-        click.echo("Agent has errors:")
-        for error in validation["errors"]:
-            click.echo(f"  ERROR: {error}")
-    sys.exit(0 if validation["valid"] else 1)
-
+from framework.runner import run_agent_cli  # noqa: E402
 
 if __name__ == "__main__":
-    cli()
+    run_agent_cli(agent_dir=os.path.dirname(__file__))

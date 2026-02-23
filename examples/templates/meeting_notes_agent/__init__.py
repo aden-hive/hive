@@ -1,28 +1,34 @@
 """
-Meeting Notes Agent
+meeting_notes_agent
 ===================
-Parses meeting transcripts to extract structured summaries, decisions,
-action items with owners and due dates, blockers, and follow-ups.
-Optionally posts results to Slack.
+Aden Hive agent that parses meeting transcripts and extracts structured
+action items, decisions, blockers, and summaries. Supports Slack delivery.
 
 Usage:
-    hive run examples.templates.meeting_notes_agent
-    python -m examples.templates.meeting_notes_agent
+    hive run examples/templates/meeting_notes_agent --input '{"transcript": "..."}'
+    hive run examples/templates/meeting_notes_agent --tui
 """
 
-from .agent import MeetingNotesAgent, default_agent, goal, nodes, edges
-from .config import RuntimeConfig, AgentMetadata, default_config, metadata
-
-__version__ = "1.0.0"
+from .agent import (
+    MeetingNotesOutput,
+    ActionItem,
+    validate_input,
+    extract_meeting_data,
+    parse_and_validate_output,
+    format_slack_message,
+    post_to_slack,
+    compile_final_output,
+    handle_error,
+)
 
 __all__ = [
-    "MeetingNotesAgent",
-    "default_agent",
-    "goal",
-    "nodes",
-    "edges",
-    "RuntimeConfig",
-    "AgentMetadata",
-    "default_config",
-    "metadata",
+    "MeetingNotesOutput",
+    "ActionItem",
+    "validate_input",
+    "extract_meeting_data",
+    "parse_and_validate_output",
+    "format_slack_message",
+    "post_to_slack",
+    "compile_final_output",
+    "handle_error",
 ]
