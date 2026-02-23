@@ -293,17 +293,32 @@ class CredentialStoreAdapter:
     def get_all_account_info(self) -> list[dict]:
         """Collect all accounts across all configured providers.
 
-        Deduplicates by provider name to avoid listing the same provider's
-        accounts twice when multiple specs map to the same provider.
+        Includes both Aden OAuth accounts and named local API key accounts.
+        Deduplicates by (provider, alias) to avoid listing the same account
+        twice when it appears in both stores.
         """
         accounts: list[dict] = []
-        seen: set[str] = set()
+        seen_specs: set[str] = set()
+        seen_accounts: set[tuple[str, str]] = set()
+
         for name, spec in self._specs.items():
             provider = spec.credential_id or name
-            if provider in seen or not self.is_available(name):
+            if provider in seen_specs or not self.is_available(name):
                 continue
-            seen.add(provider)
-            accounts.extend(self._store.list_accounts(provider))
+            seen_specs.add(provider)
+            for acct in self._store.list_accounts(provider):
+                key = (acct.get("provider", ""), acct.get("alias", ""))
+                if key not in seen_accounts:
+                    seen_accounts.add(key)
+                    accounts.append(acct)
+
+        # Include named local API key accounts
+        for acct in self.list_local_accounts():
+            key = (acct.get("provider", ""), acct.get("alias", ""))
+            if key not in seen_accounts:
+                seen_accounts.add(key)
+                accounts.append(acct)
+
         return accounts
 
     def get_tool_provider_map(self) -> dict[str, str]:
@@ -326,9 +341,7 @@ class CredentialStoreAdapter:
 
     # --- Local credential registry ---
 
-    def list_local_accounts(
-        self, credential_id: str | None = None
-    ) -> list[dict]:
+    def list_local_accounts(self, credential_id: str | None = None) -> list[dict]:
         """
         List named local API key accounts from LocalCredentialRegistry.
 

@@ -105,11 +105,17 @@ def build_accounts_prompt(
                 continue
             tools_for_provider = relevant_tools
 
+        # Local-only providers: tools read from env vars, no account= routing
+        all_local = all(a.get("source") == "local" for a in acct_list)
+
         # Provider header with tools
         display_name = provider.replace("_", " ").title()
-        if tools_for_provider:
+        if tools_for_provider and not all_local:
             tools_str = ", ".join(tools_for_provider)
             sections.append(f'\n{display_name} (use account="<alias>" with: {tools_str}):')
+        elif tools_for_provider and all_local:
+            tools_str = ", ".join(tools_for_provider)
+            sections.append(f"\n{display_name} (tools: {tools_str}):")
         else:
             sections.append(f"\n{display_name}:")
 
@@ -119,7 +125,8 @@ def build_accounts_prompt(
             identity = acct.get("identity", {})
             detail_parts = [f"{k}: {v}" for k, v in identity.items() if v]
             detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
-            sections.append(f"  - {provider}/{alias}{detail}")
+            source_tag = " [local]" if acct.get("source") == "local" else ""
+            sections.append(f"  - {provider}/{alias}{detail}{source_tag}")
 
     # If filtering removed all providers, return empty
     if len(sections) <= 1:
