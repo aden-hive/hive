@@ -325,12 +325,6 @@ class OutcomeAggregator:
             evidence=[],
         )
 
-        # 🔹 NEW: Explicitly guard supported evaluation behavior
-        # Currently, only success-rate–based evaluation is supported.
-        criterion_type = getattr(criterion, "type", None)
-        if criterion_type is not None and criterion_type != "success_rate":
-            return status
-
         # Get relevant decisions (those mentioning this criterion or related intents)
         relevant_decisions = [
             d
@@ -348,14 +342,13 @@ class OutcomeAggregator:
         if outcomes:
             success_count = sum(1 for o in outcomes if o.success)
 
-            # 🔹 NEW: Explicitly document progress semantics
             # Progress is computed as raw success rate of decision outcomes.
             status.progress = success_count / len(outcomes)
 
             # Add evidence
             for d in relevant_decisions[:5]:  # Limit evidence
                 if d.outcome:
-                    # 🔹 NEW: More explicit evidence for observability
+                    # Add more explicit evidence for observability
                     evidence = (
                         f"decision_id={d.decision.id}, "
                         f"intent={d.decision.intent}, "
