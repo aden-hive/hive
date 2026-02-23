@@ -62,17 +62,17 @@ export default function Home() {
   }, []);
 
   const handleSelect = (agentPath: string) => {
-    navigate(`/dashboard?agent=${encodeURIComponent(agentPath)}`);
+    navigate(`/workspace?agent=${encodeURIComponent(agentPath)}`);
   };
 
   const handlePromptHint = (text: string) => {
-    navigate(`/dashboard?agent=new-agent&prompt=${encodeURIComponent(text)}`);
+    navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(text)}`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim()) {
-      navigate(`/dashboard?agent=new-agent&prompt=${encodeURIComponent(inputValue.trim())}`);
+      navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(inputValue.trim())}`);
     }
   };
 

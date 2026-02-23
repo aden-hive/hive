@@ -218,7 +218,7 @@ function NewTabPopover({ open, onClose, anchorRef, onNewInstance: _onNewInstance
               <span className={iconWrap}><Layers className="w-3.5 h-3.5 text-muted-foreground" /></span>
               <div>
                 <div className="font-medium leading-tight">Existing agent</div>
-                <div className="text-xs text-muted-foreground mt-0.5">Open another agent's dashboard</div>
+                <div className="text-xs text-muted-foreground mt-0.5">Open another agent's workspace</div>
               </div>
             </button>
             <button className={optionClass} onClick={() => setStep("new-agent-choice")}>
@@ -285,7 +285,7 @@ function resolveMockId(agentParam: string): string {
   return PATH_TO_MOCK_ID[agentParam] || agentParam;
 }
 
-export default function Dashboard() {
+export default function Workspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const rawAgent = searchParams.get("agent") || "inbox-management";

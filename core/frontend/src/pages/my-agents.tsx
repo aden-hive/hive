@@ -59,7 +59,7 @@ export default function MyAgents() {
             </p>
           </div>
           <button
-            onClick={() => navigate("/dashboard?agent=new-agent")}
+            onClick={() => navigate("/workspace?agent=new-agent")}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
           >
             <Plus className="w-4 h-4" />
@@ -82,7 +82,7 @@ export default function MyAgents() {
             {agents.map((agent) => (
               <button
                 key={agent.path}
-                onClick={() => navigate(`/dashboard?agent=${encodeURIComponent(agent.path)}`)}
+                onClick={() => navigate(`/workspace?agent=${encodeURIComponent(agent.path)}`)}
                 className="group text-left rounded-xl border border-border/60 bg-card/50 p-5 hover:border-primary/40 hover:bg-card transition-all duration-200"
               >
                 <div className="flex items-start justify-between mb-3">
