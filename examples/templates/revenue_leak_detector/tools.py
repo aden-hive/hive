@@ -266,13 +266,17 @@ def _detect_revenue_leaks(cycle: int) -> dict:
     try:
         data = _cycle_data_var.get()
     except LookupError:
-        # scan_pipeline must be called before detect_revenue_leaks each cycle
+        # scan_pipeline must be called before detect_revenue_leaks each cycle.
+        # Still apply halt logic so the agent doesn't loop forever.
+        _no_data_halt = cycle_num >= MAX_CYCLES
+        if not _no_data_halt and cycle_num >= MAX_TOTAL_CYCLES:
+            _no_data_halt = True
         return {
             "cycle": cycle_num,
             "leak_count": 0,
             "severity": "low",
             "total_at_risk": 0,
-            "halt": False,
+            "halt": _no_data_halt,
             "warning": "No pipeline data — call scan_pipeline first",
         }
     leaks: list[dict] = []
