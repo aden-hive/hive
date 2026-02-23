@@ -47,6 +47,7 @@ Call gmail_list_labels() to show the user their current Gmail labels. This helps
 
 - set_output("rules", <the confirmed rules as a clear text description>)
 - set_output("max_emails", <the confirmed max_emails as a string number, e.g. "100">)
+
 """,
     tools=["gmail_list_labels"],
 )
@@ -71,23 +72,25 @@ fetch_emails_node = NodeSpec(
 You are a data pipeline step. Your job is to fetch emails from Gmail and write them to emails.jsonl.
 
 **FIRST-TIME FETCH (default path):**
-1. Read "max_emails" from input context.
+1. Read "max_emails" and "rules" from input context.
 2. Call bulk_fetch_emails(max_emails=<value>).
 3. The tool returns {"filename": "emails.jsonl"}.
 4. Call set_output("emails", "emails.jsonl").
 
 **NEXT-BATCH FETCH (when user asks for "the next N" emails):**
 The user wants emails BEYOND what was already fetched. Use pagination:
-1. Call gmail_list_messages(query="label:INBOX", max_results=<previous + new count>) to get message IDs. Use page_token if needed to paginate past already-fetched emails.
-2. Identify message IDs NOT in the previous batch (you remember them from continuous conversation).
-3. Call gmail_batch_get_messages(message_ids=<new_ids>, format="metadata") for full metadata.
-4. For each message in the result, call append_data(filename="emails.jsonl", data=<JSON: {id, subject, from, to, date, snippet, labels}>).
+1. Call gmail_list_messages(query="label:INBOX", max_results=<previous + new count>).
+   Use page_token if needed to paginate past already-fetched emails.
+2. Identify message IDs NOT in the previous batch.
+3. Call gmail_batch_get_messages(message_ids=<new_ids>, format="metadata").
+4. For each message, call append_data(filename="emails.jsonl",
+   data=<JSON: {id, subject, from, to, date, snippet, labels}>).
 5. Call set_output("emails", "emails.jsonl").
 
 **TOOLS:**
-- bulk_fetch_emails(max_emails) — Bulk fetch from inbox, writes emails.jsonl. Use for first fetch.
-- gmail_list_messages(query, max_results, page_token) — List message IDs with pagination. Returns {messages, next_page_token}.
-- gmail_batch_get_messages(message_ids, format) — Fetch metadata for specific IDs (max 50 per call).
+- bulk_fetch_emails(max_emails) — Bulk fetch from inbox, writes emails.jsonl.
+- gmail_list_messages(query, max_results, page_token) — List message IDs.
+- gmail_batch_get_messages(message_ids, format) — Fetch metadata (max 50/call).
 - append_data(filename, data) — Append a line to a JSONL file.
 
 Do NOT add commentary or explanation. Execute the appropriate path and call set_output when done.
@@ -118,19 +121,20 @@ classify_and_act_node = NodeSpec(
 You are an inbox management assistant. Apply the user's rules to their emails and execute Gmail actions.
 
 **YOUR TOOLS:**
-- load_data(filename, limit, offset) — Read emails from a local file. This is how you access the emails.
-- append_data(filename, data) — Append a line to a file. Use this to record actions taken.
-- gmail_batch_modify_messages(message_ids, add_labels, remove_labels) — Modify Gmail labels in batch. ALWAYS prefer this.
+- load_data(filename, limit, offset) — Read emails from a local file.
+- append_data(filename, data) — Append a line to a file. Record actions taken.
+- gmail_batch_modify_messages(message_ids, add_labels, remove_labels) — Modify labels in batch. ALWAYS prefer this.
 - gmail_modify_message(message_id, add_labels, remove_labels) — Modify a single message's labels.
-- gmail_trash_message(message_id) — Move a message to trash. No batch version; call per email.
+- gmail_trash_message(message_id) — Move a message to trash.
 - gmail_create_draft(to, subject, body) — Create a draft reply. NEVER sends automatically.
 - gmail_create_label(name) — Create a new Gmail label. Returns the label ID.
 - gmail_list_labels() — List all existing Gmail labels with their IDs.
 - set_output(key, value) — Set an output value. Call ONLY after all actions are executed.
 
 **CONTEXT:**
-- "rules" = the user's rule to apply (e.g. "mark all as unread")
-- "emails" = a filename (e.g. "emails.jsonl") containing the fetched emails as JSONL. Each line has: id, subject, from, to, date, snippet, labels.
+- "rules" = the user's rule to apply (e.g. "mark all as unread").
+- "emails" = a filename (e.g. "emails.jsonl") containing the fetched emails as JSONL.
+  Each line has: id, subject, from, to, date, snippet, labels.
 
 **PROCESS EMAILS ONE CHUNK AT A TIME (you will get multiple turns):**
 

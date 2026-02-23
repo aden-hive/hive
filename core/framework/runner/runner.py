@@ -834,19 +834,28 @@ class AgentRunner:
 
         # Collect connected account info for system prompt injection
         accounts_prompt = ""
+        accounts_data: list[dict] | None = None
+        tool_provider_map: dict[str, str] | None = None
         try:
             from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
             adapter = CredentialStoreAdapter.default()
-            accounts = adapter.get_all_account_info()
-            if accounts:
+            accounts_data = adapter.get_all_account_info()
+            tool_provider_map = adapter.get_tool_provider_map()
+            if accounts_data:
                 from framework.graph.prompt_composer import build_accounts_prompt
 
-                accounts_prompt = build_accounts_prompt(accounts)
+                accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
         except Exception:
             pass  # Best-effort — agent works without account info
 
-        self._setup_agent_runtime(tools, tool_executor, accounts_prompt=accounts_prompt)
+        self._setup_agent_runtime(
+            tools,
+            tool_executor,
+            accounts_prompt=accounts_prompt,
+            accounts_data=accounts_data,
+            tool_provider_map=tool_provider_map,
+        )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -908,7 +917,12 @@ class AgentRunner:
             return None
 
     def _setup_agent_runtime(
-        self, tools: list, tool_executor: Callable | None, accounts_prompt: str = ""
+        self,
+        tools: list,
+        tool_executor: Callable | None,
+        accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
@@ -981,6 +995,8 @@ class AgentRunner:
             config=runtime_config,
             graph_id=self.graph.id or self.agent_path.name,
             accounts_prompt=accounts_prompt,
+            accounts_data=accounts_data,
+            tool_provider_map=tool_provider_map,
         )
 
         # Pass intro_message through for TUI display

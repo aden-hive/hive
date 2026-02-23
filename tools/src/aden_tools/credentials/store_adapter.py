@@ -292,6 +292,15 @@ class CredentialStoreAdapter:
             accounts.extend(self._store.list_accounts(provider))
         return accounts
 
+    def get_tool_provider_map(self) -> dict[str, str]:
+        """Map tool names to provider names for account routing.
+
+        Returns:
+            Dict mapping tool_name -> provider_name
+            (e.g. {"gmail_list_messages": "google", "slack_send_message": "slack"})
+        """
+        return dict(self._tool_to_cred)
+
     def get_by_alias(self, provider_name: str, alias: str) -> str | None:
         """Resolve a specific account's token by alias."""
         cred = self._store.get_credential_by_alias(provider_name, alias)

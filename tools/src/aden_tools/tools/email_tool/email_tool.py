@@ -114,10 +114,15 @@ def register_tools(
             "subject": subject,
         }
 
-    def _get_credential(provider: Literal["resend", "gmail"]) -> str | None:
+    def _get_credential(
+        provider: Literal["resend", "gmail"],
+        account: str = "",
+    ) -> str | None:
         """Get the credential for the requested provider."""
         if provider == "gmail":
             if credentials is not None:
+                if account:
+                    return credentials.get_by_alias("google", account)
                 return credentials.get("google")
             return os.getenv("GOOGLE_ACCESS_TOKEN")
         # resend
@@ -150,6 +155,7 @@ def register_tools(
         from_email: str | None = None,
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """Core email sending logic, callable by other tools."""
         from_email = _resolve_from_email(from_email)
@@ -182,7 +188,7 @@ def register_tools(
                 "help": "Pass from_email or set EMAIL_FROM environment variable",
             }
 
-        credential = _get_credential(provider)
+        credential = _get_credential(provider, account)
         if not credential:
             if provider == "gmail":
                 return {
@@ -215,6 +221,7 @@ def register_tools(
         from_email: str | None = None,
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Send an email.
@@ -232,12 +239,14 @@ def register_tools(
                         Optional for Gmail (defaults to authenticated user's address).
             cc: CC recipient(s). Single string or list of strings. Optional.
             bcc: BCC recipient(s). Single string or list of strings. Optional.
+            account: Account alias for multi-account routing (e.g. "timothy-home").
+                     Only used with Gmail provider. Optional.
 
         Returns:
             Dict with send result including provider used and message ID,
             or error dict with "error" and optional "help" keys.
         """
-        return _send_email_impl(to, subject, html, provider, from_email, cc, bcc)
+        return _send_email_impl(to, subject, html, provider, from_email, cc, bcc, account)
 
     def _fetch_original_message(access_token: str, message_id: str) -> dict:
         """Fetch the original message to extract threading info."""
@@ -278,6 +287,7 @@ def register_tools(
         html: str,
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Reply to a Gmail message, keeping it in the same thread.
@@ -291,6 +301,8 @@ def register_tools(
             html: Reply body as HTML string.
             cc: CC recipient(s). Single string or list of strings. Optional.
             bcc: BCC recipient(s). Single string or list of strings. Optional.
+            account: Account alias for multi-account routing (e.g. "timothy-home").
+                     Optional.
 
         Returns:
             Dict with send result including reply message ID and threadId,
@@ -305,7 +317,7 @@ def register_tools(
         if not html:
             return {"error": "Reply body (html) is required"}
 
-        credential = _get_credential("gmail")
+        credential = _get_credential("gmail", account)
         if not credential:
             return {
                 "error": "Gmail credentials not configured",
