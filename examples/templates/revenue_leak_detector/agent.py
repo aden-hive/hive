@@ -11,6 +11,7 @@ cycles have elapsed without leaks.
 """
 
 from pathlib import Path
+from types import MappingProxyType
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
@@ -86,10 +87,12 @@ goal = Goal(
 )
 
 # ---- Nodes ----
-nodes = [monitor_node, analyze_node, notify_node, followup_node]
+# Tuples prevent accidental mutation of the module-level templates;
+# RevenueLeakDetectorAgent.__init__ copies these into per-instance lists.
+nodes: tuple = (monitor_node, analyze_node, notify_node, followup_node)
 
 # ---- Edges ----
-edges = [
+edges: tuple = (
     # monitor → analyze (always proceed to analysis after scanning)
     EdgeSpec(
         id="monitor-to-analyze",
@@ -123,12 +126,12 @@ edges = [
         condition_expr='str(halt).lower() != "true"',
         priority=1,
     ),
-]
+)
 
 entry_node = "monitor"
-entry_points = {"start": "monitor"}
-terminal_nodes = []
-pause_nodes = []
+entry_points = MappingProxyType({"start": "monitor"})  # read-only at module level
+terminal_nodes: tuple = ()
+pause_nodes: tuple = ()
 
 
 # ---------------------------------------------------------------------------
@@ -148,12 +151,13 @@ class RevenueLeakDetectorAgent:
     def __init__(self, config=None):
         self.config = config or default_config
         self.goal = goal
-        self.nodes = nodes
-        self.edges = edges
+        # Copy module-level lists/dicts so each instance has independent state
+        self.nodes = list(nodes)
+        self.edges = list(edges)
         self.entry_node = entry_node
-        self.entry_points = entry_points
-        self.pause_nodes = pause_nodes
-        self.terminal_nodes = terminal_nodes
+        self.entry_points = dict(entry_points)
+        self.pause_nodes = list(pause_nodes)
+        self.terminal_nodes = list(terminal_nodes)
         self._graph: GraphSpec | None = None
         self._agent_runtime: AgentRuntime | None = None
         self._tool_registry: ToolRegistry | None = None
@@ -279,7 +283,7 @@ class RevenueLeakDetectorAgent:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait(
-                "start", context or {"cycle": "0"}, session_state=session_state
+                "start", context or {"cycle": 0}, session_state=session_state
             )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
