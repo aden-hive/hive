@@ -44,7 +44,7 @@ if [ ! -f "$SCRIPT_DIR/pyproject.toml" ] || [ ! -d "$SCRIPT_DIR/core" ]; then
     exit 1
 fi
 
-if [ ! -d "$SCRIPT_DIR/.venv" ]; then
+if [ ! -d "$SCRIPT_DIR/core/.venv" ]; then
     echo "Error: Virtual environment not found." >&2
     echo "" >&2
     echo "Run ./quickstart.sh first to set up the project." >&2
@@ -59,4 +59,4 @@ if ! command -v uv &> /dev/null; then
     exit 1
 fi
 
-exec uv run hive "$@"
+cd "$SCRIPT_DIR/core" && exec uv run hive "$@"

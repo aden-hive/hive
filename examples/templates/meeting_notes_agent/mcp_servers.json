@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "tools": {
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools",
+      "description": "Aden built-in tools: web_search, web_scrape, csv, pdf, file_system"
+    },
+    "slack": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "tools.slack_tool"],
+      "cwd": ".",
+      "description": "Slack integration: post messages, list channels",
+      "env": {
+        "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}"
+      }
+    }
+  }
+}

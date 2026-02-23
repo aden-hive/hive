@@ -1,0 +1,263 @@
+{
+  "id": "meeting_notes_agent",
+  "name": "Meeting Notes & Action Item Agent",
+  "version": "1.0.0",
+  "description": "Parses meeting transcripts to extract structured summaries, decisions, action items with owners and due dates, blockers, and follow-ups. Optionally posts results to Slack.",
+  "goal": {
+    "description": "Given a meeting transcript, produce a fully structured report containing: an executive summary, list of key decisions made, action items with assigned owners and due dates, blockers flagged during the meeting, and follow-up items. Optionally deliver the report to a Slack channel.",
+    "success_criteria": [
+      {
+        "id": "sc_summary",
+        "description": "A concise 2-3 sentence executive summary is produced that accurately reflects the meeting's purpose and outcomes",
+        "metric": "summary field is non-empty and coherent"
+      },
+      {
+        "id": "sc_action_items",
+        "description": "All action items are extracted with owner name, task description, due date or timeframe, and a priority level (high/medium/low)",
+        "metric": "action_items list is non-empty when commitments exist in the transcript"
+      },
+      {
+        "id": "sc_decisions",
+        "description": "All key decisions agreed upon during the meeting are captured",
+        "metric": "decisions list reflects explicit agreements in the transcript"
+      },
+      {
+        "id": "sc_output_format",
+        "description": "Output is valid JSON matching the MeetingNotesOutput schema",
+        "metric": "output passes Pydantic schema validation"
+      },
+      {
+        "id": "sc_slack_delivery",
+        "description": "When a Slack channel is specified, a formatted summary is delivered successfully",
+        "metric": "slack_message_sent is true when slack_channel is provided"
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c_no_hallucination",
+        "description": "Agent must only extract information explicitly stated in the transcript; no fabrication of names, dates, or tasks",
+        "type": "hard"
+      },
+      {
+        "id": "c_owner_assignment",
+        "description": "Action items must only be assigned to people explicitly named in the transcript",
+        "type": "hard"
+      },
+      {
+        "id": "c_token_budget",
+        "description": "Total LLM token usage per run must stay under 10,000 tokens",
+        "type": "soft"
+      },
+      {
+        "id": "c_dual_llm",
+        "description": "Agent supports both Anthropic Claude and Google Gemini as the primary LLM provider, selectable via config",
+        "type": "soft"
+      }
+    ],
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "transcript": {
+          "type": "string",
+          "description": "Raw meeting transcript text"
+        },
+        "meeting_name": {
+          "type": "string",
+          "description": "Optional name/title of the meeting"
+        },
+        "meeting_date": {
+          "type": "string",
+          "description": "Optional ISO-format date string (YYYY-MM-DD)"
+        },
+        "slack_channel": {
+          "type": "string",
+          "description": "Optional Slack channel ID or name to post results to"
+        },
+        "llm_provider": {
+          "type": "string",
+          "description": "Optional LLM provider override: 'anthropic' or 'gemini'",
+          "default": "anthropic"
+        }
+      },
+      "required": ["transcript"]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "attendees": { "type": "array", "items": { "type": "string" } },
+        "decisions": { "type": "array", "items": { "type": "string" } },
+        "action_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "task": { "type": "string" },
+              "owner": { "type": "string" },
+              "due": { "type": "string" },
+              "priority": { "type": "string", "enum": ["high", "medium", "low"] }
+            },
+            "required": ["task", "owner", "due", "priority"]
+          }
+        },
+        "blockers": { "type": "array", "items": { "type": "string" } },
+        "follow_ups": { "type": "array", "items": { "type": "string" } },
+        "slack_message_sent": { "type": "boolean" }
+      },
+      "required": ["summary", "action_items", "decisions"]
+    }
+  },
+  "nodes": [
+    {
+      "id": "validate_input",
+      "name": "Validate Input",
+      "type": "function",
+      "description": "Validates and normalises the incoming transcript input. Checks transcript is non-empty and trims whitespace.",
+      "input_keys": ["transcript", "meeting_name", "meeting_date", "slack_channel", "llm_provider"],
+      "output_keys": ["validated_transcript", "meeting_name", "meeting_date", "slack_channel", "llm_provider", "validation_error"],
+      "function": "validate_input"
+    },
+    {
+      "id": "extract_meeting_data",
+      "name": "Extract Meeting Data",
+      "type": "llm",
+      "description": "Uses the configured LLM (Claude or Gemini) to parse the transcript and extract structured meeting data: summary, attendees, decisions, action items, blockers, and follow-ups.",
+      "input_keys": ["validated_transcript", "meeting_name", "meeting_date"],
+      "output_keys": ["raw_extraction"],
+      "prompt": "You are a professional meeting analyst. Analyse the provided meeting transcript and return ONLY a valid JSON object with no markdown fencing, no preamble.\n\nJSON structure:\n{\n  \"summary\": \"2-3 sentence executive summary\",\n  \"attendees\": [\"Name (Role)\"],\n  \"decisions\": [\"Decision made...\"],\n  \"action_items\": [\n    {\n      \"task\": \"Clear task description\",\n      \"owner\": \"Person name\",\n      \"due\": \"Due date or timeframe\",\n      \"priority\": \"high|medium|low\"\n    }\n  ],\n  \"blockers\": [\"Blocker description...\"],\n  \"follow_ups\": [\"Follow-up item...\"]\n}\n\nRules:\n- Extract ONLY what is explicitly stated; never fabricate names, tasks, or dates\n- Assign priority based on urgency cues: 'urgent/today/asap/critical' = high, 'this week/by Friday' = medium, otherwise low\n- Blockers are unresolved issues preventing progress\n- Follow-ups are items needing future attention but not yet formally assigned\n- If no attendees are listed, set attendees to []\n\nMeeting title: {{meeting_name}}\nDate: {{meeting_date}}\n\nTranscript:\n{{validated_transcript}}"
+    },
+    {
+      "id": "parse_and_validate_output",
+      "name": "Parse & Validate Output",
+      "type": "function",
+      "description": "Parses the raw LLM JSON output and validates it against the MeetingNotesOutput Pydantic schema. Normalises field names and types.",
+      "input_keys": ["raw_extraction"],
+      "output_keys": ["meeting_notes", "parse_error"],
+      "function": "parse_and_validate_output"
+    },
+    {
+      "id": "format_slack_message",
+      "name": "Format Slack Message",
+      "type": "function",
+      "description": "Converts the structured meeting notes into a rich Slack Block Kit message payload ready for delivery.",
+      "input_keys": ["meeting_notes", "meeting_name", "meeting_date"],
+      "output_keys": ["slack_payload"],
+      "function": "format_slack_message"
+    },
+    {
+      "id": "post_to_slack",
+      "name": "Post to Slack",
+      "type": "function",
+      "description": "Delivers the formatted message to the specified Slack channel via the Slack MCP tool.",
+      "input_keys": ["slack_payload", "slack_channel"],
+      "output_keys": ["slack_result"],
+      "function": "post_to_slack"
+    },
+    {
+      "id": "compile_final_output",
+      "name": "Compile Final Output",
+      "type": "function",
+      "description": "Assembles the final agent output including meeting notes and Slack delivery status.",
+      "input_keys": ["meeting_notes", "slack_result"],
+      "output_keys": ["final_output"],
+      "function": "compile_final_output"
+    },
+    {
+      "id": "handle_error",
+      "name": "Handle Error",
+      "type": "function",
+      "description": "Captures validation or parse errors and returns a structured error response.",
+      "input_keys": ["validation_error", "parse_error"],
+      "output_keys": ["final_output"],
+      "function": "handle_error"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "validate_input",
+      "to": "extract_meeting_data",
+      "condition": "on_success",
+      "description": "Proceed to extraction when input validation passes"
+    },
+    {
+      "id": "e2",
+      "from": "validate_input",
+      "to": "handle_error",
+      "condition": "on_failure",
+      "description": "Route to error handler when validation fails"
+    },
+    {
+      "id": "e3",
+      "from": "extract_meeting_data",
+      "to": "parse_and_validate_output",
+      "condition": "on_success",
+      "description": "Parse and validate LLM extraction output"
+    },
+    {
+      "id": "e4",
+      "from": "extract_meeting_data",
+      "to": "handle_error",
+      "condition": "on_failure",
+      "description": "Route to error handler on LLM failure"
+    },
+    {
+      "id": "e5",
+      "from": "parse_and_validate_output",
+      "to": "format_slack_message",
+      "condition": "conditional",
+      "condition_key": "slack_channel",
+      "description": "Only format Slack message if a channel was specified"
+    },
+    {
+      "id": "e6",
+      "from": "parse_and_validate_output",
+      "to": "compile_final_output",
+      "condition": "conditional",
+      "condition_key": "no_slack",
+      "description": "Skip Slack if no channel was provided"
+    },
+    {
+      "id": "e7",
+      "from": "parse_and_validate_output",
+      "to": "handle_error",
+      "condition": "on_failure",
+      "description": "Route to error handler when schema validation fails"
+    },
+    {
+      "id": "e8",
+      "from": "format_slack_message",
+      "to": "post_to_slack",
+      "condition": "on_success"
+    },
+    {
+      "id": "e9",
+      "from": "post_to_slack",
+      "to": "compile_final_output",
+      "condition": "always",
+      "description": "Always compile final output regardless of Slack success/failure"
+    },
+    {
+      "id": "e10",
+      "from": "compile_final_output",
+      "to": null,
+      "condition": "always",
+      "description": "Terminal node - agent run complete"
+    },
+    {
+      "id": "e11",
+      "from": "handle_error",
+      "to": null,
+      "condition": "always",
+      "description": "Terminal error node"
+    }
+  ],
+  "entry_point": "validate_input",
+  "mcp_servers": {
+    "tools": {
+      "command": "uv",
+      "args": ["run", "mcp_server.py", "--stdio"],
+      "cwd": "tools"
+    }
+  }
+}
