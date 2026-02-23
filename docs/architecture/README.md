@@ -21,22 +21,24 @@ flowchart TB
     %% =========================================
     %% SYSTEM NODES
     %% =========================================
-    subgraph EventLoopNode [Event Loop Node]
-        ELN_L["listener"]
-        ELN_SP["System Prompt<br/>(Task)"]
-        ELN_EL["Event loop"]
-        ELN_C["Conversation"]
-    end
-
     subgraph WorkerBees [Worker Bees]
         WB_C["Conversation"]
         WB_SP["System prompt"]
+
         subgraph Graph [Graph]
             direction TB
             N1["Node"] --> N2["Node"] --> N3["Node"]
             N1 -.-> AN["Active Node"]
             N2 -.-> AN
             N3 -.-> AN
+
+            %% Nested Event Loop Node
+            subgraph EventLoopNode [Event Loop Node]
+                ELN_L["listener"]
+                ELN_SP["System Prompt<br/>(Task)"]
+                ELN_EL["Event loop"]
+                ELN_C["Conversation"]
+            end
         end
     end
 
@@ -125,13 +127,13 @@ flowchart TB
 
 ### Key Subsystems
 
-| Subsystem | Role | Description |
-| --- | --- | --- |
-| **Event Loop Node** | Entry point | Listens for external events (schedulers, webhooks, SSE), triggers the event loop, and spawns sub-agents. Its conversation mirrors the Worker Bees conversation for context continuity. |
-| **Worker Bees** | Execution | A graph of nodes that execute the actual work. Each node in the graph can become the Active Node. Workers maintain their own conversation and system prompt, and read/write to shared memory. |
-| **Judge** | Evaluation | Evaluates Worker Bee output against criteria (aligned with Worker system prompt) and principles (aligned with Queen Bee system prompt). Runs on a scheduled event loop and escalates to the Queen Bee when needed. |
-| **Queen Bee** | Oversight | The orchestration layer. Subscribes to Active Node events via the Event Bus, receives escalation reports from the Judge, and has read/write access to shared memory and credentials. Users can talk directly to the Queen Bee. |
-| **Infra** | Services | Shared infrastructure: Tool Registry (assigned to Event Loop Nodes), Write-through Conversation Memory (logs across RAM and disk), Shared Memory (state on disk), Event Bus (pub/sub in RAM), Credential Store (encrypted on disk or cloud), and Sub Agents. |
+| Subsystem           | Role        | Description                                                                                                                                                                                                                                                  |
+| ------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Event Loop Node** | Entry point | Listens for external events (schedulers, webhooks, SSE), triggers the event loop, and spawns sub-agents. Its conversation mirrors the Worker Bees conversation for context continuity.                                                                       |
+| **Worker Bees**     | Execution   | A graph of nodes that execute the actual work. Each node in the graph can become the Active Node. Workers maintain their own conversation and system prompt, and read/write to shared memory.                                                                |
+| **Judge**           | Evaluation  | Evaluates Worker Bee output against criteria (aligned with Worker system prompt) and principles (aligned with Queen Bee system prompt). Runs on a scheduled event loop and escalates to the Queen Bee when needed.                                           |
+| **Queen Bee**       | Oversight   | The orchestration layer. Subscribes to Active Node events via the Event Bus, receives escalation reports from the Judge, and has read/write access to shared memory and credentials. Users can talk directly to the Queen Bee.                               |
+| **Infra**           | Services    | Shared infrastructure: Tool Registry (assigned to Event Loop Nodes), Write-through Conversation Memory (logs across RAM and disk), Shared Memory (state on disk), Event Bus (pub/sub in RAM), Credential Store (encrypted on disk or cloud), and Sub Agents. |
 
 ### Data Flow Patterns
 

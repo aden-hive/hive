@@ -293,22 +293,24 @@ flowchart TB
     %% =========================================
     %% SYSTEM NODES
     %% =========================================
-    subgraph EventLoopNode [Event Loop Node]
-        ELN_L["listener"]
-        ELN_SP["System Prompt<br/>(Task)"]
-        ELN_EL["Event loop"]
-        ELN_C["Conversation"]
-    end
-
     subgraph WorkerBees [Worker Bees]
         WB_C["Conversation"]
         WB_SP["System prompt"]
+
         subgraph Graph [Graph]
             direction TB
             N1["Node"] --> N2["Node"] --> N3["Node"]
             N1 -.-> AN["Active Node"]
             N2 -.-> AN
             N3 -.-> AN
+
+            %% Nested Event Loop Node
+            subgraph EventLoopNode [Event Loop Node]
+                ELN_L["listener"]
+                ELN_SP["System Prompt<br/>(Task)"]
+                ELN_EL["Event loop"]
+                ELN_C["Conversation"]
+            end
         end
     end
 
