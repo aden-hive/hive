@@ -17,6 +17,13 @@ from .nodes import (
     post_to_slack_node,
     compile_output_node,
     handle_error_node,
+    validate_input,
+    extract_meeting_data,
+    parse_and_validate_output,
+    format_slack_message,
+    post_to_slack,
+    compile_final_output,
+    handle_error,
 )
 
 # Goal definition
@@ -154,20 +161,6 @@ edges = [
         id="post-slack-to-compile",
         source="post-to-slack",
         target="compile-final-output",
-        condition=EdgeCondition.ALWAYS,
-        priority=1,
-    ),
-    EdgeSpec(
-        id="compile-terminal",
-        source="compile-final-output",
-        target=None,
-        condition=EdgeCondition.ALWAYS,
-        priority=1,
-    ),
-    EdgeSpec(
-        id="error-terminal",
-        source="handle-error",
-        target=None,
         condition=EdgeCondition.ALWAYS,
         priority=1,
     ),
@@ -358,43 +351,15 @@ class MeetingNotesAgent:
 # Create default instance
 default_agent = MeetingNotesAgent()
 
-# ── Required by AgentRunner ───────────────────────────────────────────────────
-from framework.graph import Goal, SuccessCriterion, Constraint, EdgeSpec, EdgeCondition
-from framework.graph.node import NodeSpec, NodeType
-
-goal = Goal(
-    id="meeting-notes-agent",
-    name="Meeting Notes & Action Item Agent",
-    description="Given a meeting transcript, extract summary, decisions, action items, blockers, and follow-ups.",
-    success_criteria=[
-        SuccessCriterion(id="sc-summary", description="Summary produced", metric="summary_produced", target="true", weight=0.5),
-        SuccessCriterion(id="sc-actions", description="Action items extracted", metric="action_items_count", target=">=1", weight=0.5),
-    ],
-    constraints=[
-        Constraint(id="c-no-hallucination", description="Only extract what is explicitly stated", constraint_type="hard", category="quality"),
-    ],
-)
-
-nodes = [
-    NodeSpec(id="validate-input", name="Validate Input", node_type=NodeType.FUNCTION, description="Validates transcript.", function=validate_input, input_keys=["transcript", "meeting_name", "meeting_date", "slack_channel", "llm_provider"], output_keys=["validated_transcript", "validation_error"], client_facing=False),
-    NodeSpec(id="extract-meeting-data", name="Extract Meeting Data", node_type=NodeType.LLM, description="Extracts structured data via LLM.", function=extract_meeting_data, input_keys=["validated_transcript", "meeting_name", "meeting_date", "llm_provider"], output_keys=["raw_extraction"], client_facing=False),
-    NodeSpec(id="parse-and-validate", name="Parse & Validate", node_type=NodeType.FUNCTION, description="Parses and validates LLM output.", function=parse_and_validate_output, input_keys=["raw_extraction"], output_keys=["meeting_notes", "parse_error"], client_facing=False),
-    NodeSpec(id="compile-final-output", name="Compile Output", node_type=NodeType.FUNCTION, description="Compiles final output.", function=compile_final_output, input_keys=["meeting_notes", "slack_result"], output_keys=["final_output"], client_facing=True),
-    NodeSpec(id="handle-error", name="Handle Error", node_type=NodeType.FUNCTION, description="Handles errors.", function=handle_error, input_keys=["validation_error", "parse_error"], output_keys=["final_output"], client_facing=True),
+# ── Module-level exports for AgentRunner ─────────────────────────────────────
+__all__ = [
+    "goal",
+    "nodes",
+    "edges",
+    "entry_node",
+    "entry_points",
+    "pause_nodes",
+    "terminal_nodes",
+    "MeetingNotesAgent",
+    "default_agent",
 ]
-
-edges = [
-    EdgeSpec(id="validate-to-extract", source="validate-input", target="extract-meeting-data", condition=EdgeCondition.ON_SUCCESS, priority=1),
-    EdgeSpec(id="validate-to-error", source="validate-input", target="handle-error", condition=EdgeCondition.ON_FAILURE, priority=1),
-    EdgeSpec(id="extract-to-parse", source="extract-meeting-data", target="parse-and-validate", condition=EdgeCondition.ON_SUCCESS, priority=1),
-    EdgeSpec(id="extract-to-error", source="extract-meeting-data", target="handle-error", condition=EdgeCondition.ON_FAILURE, priority=1),
-    EdgeSpec(id="parse-to-compile", source="parse-and-validate", target="compile-final-output", condition=EdgeCondition.ON_SUCCESS, priority=1),
-    EdgeSpec(id="parse-to-error", source="parse-and-validate", target="handle-error", condition=EdgeCondition.ON_FAILURE, priority=1),
-    EdgeSpec(id="compile-terminal", source="compile-final-output", target=None, condition=EdgeCondition.ALWAYS, priority=1),
-    EdgeSpec(id="error-terminal", source="handle-error", target=None, condition=EdgeCondition.ALWAYS, priority=1),
-]
-
-entry_node = "validate-input"
-entry_points = {"start": "validate-input"}
-pause_nodes = []
-terminal_nodes = ["compile-final-output", "handle-error"]

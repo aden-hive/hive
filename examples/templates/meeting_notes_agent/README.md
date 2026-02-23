@@ -52,7 +52,8 @@ meeting_notes_agent/
 ├── __init__.py          # Package exports
 ├── __main__.py          # CLI entry point
 ├── agent.json           # GraphSpec (nodes, edges, goal, success criteria)
-├── agent.py             # Node function implementations + Pydantic schemas
+├── agent.py             # Agent class and graph construction
+├── nodes.py             # Node function implementations + Pydantic schemas + NodeSpec definitions
 ├── config.py            # Model config + dual LLM registry
 ├── mcp_servers.json     # MCP server configuration
 ├── tools/
@@ -63,6 +64,22 @@ meeting_notes_agent/
 │   └── test_meeting_notes_agent.py   # Full test suite
 └── README.md            # This file
 ```
+
+### Architecture Overview
+
+The agent follows a clean separation of concerns:
+
+- **nodes.py** - Contains all node function implementations, Pydantic schemas (ActionItem, MeetingNotesOutput), and NodeSpec definitions. This is where the business logic lives.
+
+- **agent.py** - Orchestrates the graph construction. Imports node functions and NodeSpecs from nodes.py, defines the Goal, edges, and the MeetingNotesAgent class that manages execution.
+
+- **config.py** - Centralized configuration for LLM providers (Anthropic Claude, Google Gemini), model settings, and agent metadata.
+
+- **agent.json** - Declarative graph specification in JSON format. Defines nodes, edges, goal, success criteria, and constraints in a format that can be read by external tools.
+
+- **__init__.py** - Package entry point that exports all public APIs from nodes.py and agent.py.
+
+- **__main__.py** - CLI entry point for running the agent via `python -m meeting_notes_agent`.
 
 ---
 
