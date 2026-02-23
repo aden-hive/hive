@@ -20,6 +20,18 @@ The framework includes a Goal-Based Testing system (Goal → Agent → Eval):
 - Debug tools with fix suggestions
 
 See `framework.testing` for details.
+
+## Personality DNA
+
+The framework includes Agent Personality DNA (APDNA) for persistent behavioral
+identity across evolution:
+- Extract personality signals from sessions
+- Synthesize signals into stable traits
+- Inject personality into prompts
+- Preserve DNA during evolution
+- Track trait fitness
+
+See `framework.personality` for details.
 """
 
 from framework.builder.query import BuilderQuery
@@ -38,6 +50,25 @@ from framework.testing import (
     TestResult,
     TestStorage,
     TestSuiteResult,
+)
+
+# Personality DNA
+from framework.personality import (
+    AgentPersonalityDNA,
+    CommunicationProfile,
+    CommunicationStyle,
+    DecisionProfile,
+    EscalationProfile,
+    EscalationTrigger,
+    FilePersonalityStore,
+    Heuristic,
+    PersonalityExtractor,
+    PersonalityFitnessEvaluator,
+    PersonalityInjector,
+    PersonalitySignal,
+    PersonalityStore,
+    PersonalitySynthesizer,
+    RiskToleranceLevel,
 )
 
 __all__ = [
@@ -67,4 +98,20 @@ __all__ = [
     "ApprovalStatus",
     "ErrorCategory",
     "DebugTool",
+    # Personality DNA
+    "AgentPersonalityDNA",
+    "CommunicationProfile",
+    "CommunicationStyle",
+    "DecisionProfile",
+    "EscalationProfile",
+    "EscalationTrigger",
+    "FilePersonalityStore",
+    "Heuristic",
+    "PersonalityExtractor",
+    "PersonalityFitnessEvaluator",
+    "PersonalityInjector",
+    "PersonalitySignal",
+    "PersonalityStore",
+    "PersonalitySynthesizer",
+    "RiskToleranceLevel",
 ]
