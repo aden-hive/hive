@@ -22,6 +22,15 @@ def safe_path_segment(value: str) -> str:
     return value
 
 
+def sessions_dir(slot) -> Path:
+    """Resolve the sessions directory for an agent slot.
+
+    Storage layout: ~/.hive/agents/{agent_name}/sessions/
+    """
+    agent_name = slot.agent_path.name
+    return Path.home() / ".hive" / "agents" / agent_name / "sessions"
+
+
 # Allowed CORS origins (localhost on any port)
 _CORS_ORIGINS = {"http://localhost", "http://127.0.0.1"}
 
@@ -105,6 +114,18 @@ def create_app(model: str | None = None) -> web.Application:
     # Store manager on app for handlers
     app["manager"] = AgentManager(model=model)
 
+    # Initialize credential store
+    from framework.credentials.store import CredentialStore
+
+    try:
+        from framework.credentials.validation import ensure_credential_key_env
+
+        ensure_credential_key_env()
+        app["credential_store"] = CredentialStore.with_aden_sync()
+    except Exception:
+        logger.debug("Encrypted credential store unavailable, using in-memory fallback")
+        app["credential_store"] = CredentialStore.for_testing({})
+
     # Register shutdown hook
     app.on_shutdown.append(_on_shutdown)
 
@@ -113,12 +134,14 @@ def create_app(model: str | None = None) -> web.Application:
 
     # Register route modules
     from framework.server.routes_agents import register_routes as register_agent_routes
+    from framework.server.routes_credentials import register_routes as register_credential_routes
     from framework.server.routes_events import register_routes as register_event_routes
     from framework.server.routes_execution import register_routes as register_execution_routes
     from framework.server.routes_graphs import register_routes as register_graph_routes
     from framework.server.routes_logs import register_routes as register_log_routes
     from framework.server.routes_sessions import register_routes as register_session_routes
 
+    register_credential_routes(app)
     register_agent_routes(app)
     register_execution_routes(app)
     register_event_routes(app)

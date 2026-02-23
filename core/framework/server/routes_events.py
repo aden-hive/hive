@@ -93,7 +93,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         while True:
             try:
                 data = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_INTERVAL)
-                await sse.send_event(data, event=data.get("type"))
+                await sse.send_event(data)
             except TimeoutError:
                 await sse.send_keepalive()
             except ConnectionResetError:

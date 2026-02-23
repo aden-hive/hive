@@ -1165,6 +1165,109 @@ class TestNodeLogs:
             assert resp.status == 400
 
 
+class TestCredentials:
+    """Tests for credential CRUD routes (/api/credentials)."""
+
+    def _make_app(self, initial_creds=None):
+        """Create app with in-memory credential store."""
+        from framework.credentials.store import CredentialStore
+
+        app = create_app()
+        app["credential_store"] = CredentialStore.for_testing(initial_creds or {})
+        return app
+
+    @pytest.mark.asyncio
+    async def test_list_credentials_empty(self):
+        app = self._make_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/credentials")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["credentials"] == []
+
+    @pytest.mark.asyncio
+    async def test_save_and_list_credential(self):
+        app = self._make_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/credentials",
+                json={"credential_id": "brave_search", "keys": {"api_key": "test-key-123"}},
+            )
+            assert resp.status == 201
+            data = await resp.json()
+            assert data["saved"] == "brave_search"
+
+            resp2 = await client.get("/api/credentials")
+            data2 = await resp2.json()
+            assert len(data2["credentials"]) == 1
+            assert data2["credentials"][0]["credential_id"] == "brave_search"
+            assert "api_key" in data2["credentials"][0]["key_names"]
+            # Secret value must NOT appear
+            assert "test-key-123" not in json.dumps(data2)
+
+    @pytest.mark.asyncio
+    async def test_get_credential(self):
+        app = self._make_app({"test_cred": {"api_key": "secret-value"}})
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/credentials/test_cred")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["credential_id"] == "test_cred"
+            assert "api_key" in data["key_names"]
+            # Secret value must NOT appear
+            assert "secret-value" not in json.dumps(data)
+
+    @pytest.mark.asyncio
+    async def test_get_credential_not_found(self):
+        app = self._make_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/credentials/nonexistent")
+            assert resp.status == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_credential(self):
+        app = self._make_app({"test_cred": {"api_key": "val"}})
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.delete("/api/credentials/test_cred")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["deleted"] is True
+
+            # Verify it's gone
+            resp2 = await client.get("/api/credentials/test_cred")
+            assert resp2.status == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_credential_not_found(self):
+        app = self._make_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.delete("/api/credentials/nonexistent")
+            assert resp.status == 404
+
+    @pytest.mark.asyncio
+    async def test_save_credential_missing_fields(self):
+        app = self._make_app()
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post("/api/credentials", json={})
+            assert resp.status == 400
+
+            resp2 = await client.post("/api/credentials", json={"credential_id": "x"})
+            assert resp2.status == 400
+
+    @pytest.mark.asyncio
+    async def test_save_overwrites_existing(self):
+        app = self._make_app({"test_cred": {"api_key": "old-value"}})
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/credentials",
+                json={"credential_id": "test_cred", "keys": {"api_key": "new-value"}},
+            )
+            assert resp.status == 201
+
+            store = app["credential_store"]
+            assert store.get_key("test_cred", "api_key") == "new-value"
+
+
 class TestErrorMiddleware:
     @pytest.mark.asyncio
     async def test_404_on_unknown_api_route(self):

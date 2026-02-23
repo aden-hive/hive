@@ -280,6 +280,11 @@ const PATH_TO_MOCK_ID: Record<string, string> = {
   "examples/templates/fitness_coach": "fitness-coach",
 };
 
+// Reverse mapping: mock ID → real agent path on disk (for credential detection)
+const MOCK_ID_TO_PATH: Record<string, string> = Object.fromEntries(
+  Object.entries(PATH_TO_MOCK_ID).map(([path, id]) => [id, path]),
+);
+
 function resolveMockId(agentParam: string): string {
   if (workerGraphs[agentParam]) return agentParam;
   return PATH_TO_MOCK_ID[agentParam] || agentParam;
@@ -604,16 +609,19 @@ export default function Workspace() {
       <CredentialsModal
         agentType={activeWorker}
         agentLabel={activeWorkerLabel}
+        agentPath={MOCK_ID_TO_PATH[activeWorker] || rawAgent}
         open={credentialsOpen}
         onClose={() => setCredentialsOpen(false)}
         credentials={activeSession?.credentials || []}
-        onToggleCredential={(credId) => {
+        onCredentialChange={() => {
+          // Re-sync local credential state from templates after backend change
+          // This keeps the send gate working until plan-chat.md wires real execution
           if (!activeSession) return;
           setSessionsByAgent(prev => ({
             ...prev,
             [activeWorker]: prev[activeWorker].map(s =>
               s.id === activeSession.id
-                ? { ...s, credentials: s.credentials.map(c => c.id === credId ? { ...c, connected: !c.connected } : c) }
+                ? { ...s, credentials: s.credentials.map(c => ({ ...c, connected: true })) }
                 : s
             ),
           }));

@@ -2,12 +2,11 @@
 
 import json
 import logging
-from pathlib import Path
 
 from aiohttp import web
 
 from framework.server.agent_manager import AgentManager
-from framework.server.app import safe_path_segment
+from framework.server.app import safe_path_segment, sessions_dir
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +98,10 @@ async def handle_chat(request: web.Request) -> web.Response:
             }
         )
     else:
+        entry_points = slot.runtime.get_entry_points()
+        ep_id = entry_points[0].id if entry_points else "default"
         execution_id = await slot.runtime.trigger(
-            "default",
+            ep_id,
             {"user_request": message},
         )
         return web.json_response(
@@ -119,12 +120,6 @@ async def handle_goal_progress(request: web.Request) -> web.Response:
 
     progress = await slot.runtime.get_goal_progress()
     return web.json_response(progress, dumps=lambda obj: json.dumps(obj, default=str))
-
-
-def _sessions_dir(slot) -> Path:
-    """Resolve the sessions directory for an agent slot."""
-    agent_name = slot.agent_path.name
-    return Path.home() / ".hive" / "agents" / agent_name / "sessions"
 
 
 async def handle_resume(request: web.Request) -> web.Response:
@@ -152,7 +147,7 @@ async def handle_resume(request: web.Request) -> web.Response:
         checkpoint_id = safe_path_segment(checkpoint_id)
 
     # Read session state
-    session_dir = _sessions_dir(slot) / session_id
+    session_dir = sessions_dir(slot) / session_id
     state_path = session_dir / "state.json"
     if not state_path.exists():
         return web.json_response({"error": "Session not found"}, status=404)
@@ -267,7 +262,7 @@ async def handle_replay(request: web.Request) -> web.Response:
     checkpoint_id = safe_path_segment(checkpoint_id)
 
     # Verify checkpoint exists
-    cp_path = _sessions_dir(slot) / session_id / "checkpoints" / f"{checkpoint_id}.json"
+    cp_path = sessions_dir(slot) / session_id / "checkpoints" / f"{checkpoint_id}.json"
     if not cp_path.exists():
         return web.json_response({"error": "Checkpoint not found"}, status=404)
 

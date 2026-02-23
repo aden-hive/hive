@@ -3,27 +3,17 @@
 import json
 import logging
 import shutil
-from pathlib import Path
 
 from aiohttp import web
 
 from framework.server.agent_manager import AgentManager
-from framework.server.app import safe_path_segment
+from framework.server.app import safe_path_segment, sessions_dir
 
 logger = logging.getLogger(__name__)
 
 
 def _get_manager(request: web.Request) -> AgentManager:
     return request.app["manager"]
-
-
-def _sessions_dir(slot) -> Path:
-    """Resolve the sessions directory for an agent slot.
-
-    Storage layout: ~/.hive/agents/{agent_name}/sessions/
-    """
-    agent_name = slot.agent_path.name
-    return Path.home() / ".hive" / "agents" / agent_name / "sessions"
 
 
 async def handle_list_sessions(request: web.Request) -> web.Response:
@@ -35,7 +25,7 @@ async def handle_list_sessions(request: web.Request) -> web.Response:
     if slot is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    sess_dir = _sessions_dir(slot)
+    sess_dir = sessions_dir(slot)
     if not sess_dir.exists():
         return web.json_response({"sessions": []})
 
@@ -81,7 +71,7 @@ async def handle_get_session(request: web.Request) -> web.Response:
     if slot is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    state_path = _sessions_dir(slot) / session_id / "state.json"
+    state_path = sessions_dir(slot) / session_id / "state.json"
     if not state_path.exists():
         return web.json_response({"error": "Session not found"}, status=404)
 
@@ -103,7 +93,7 @@ async def handle_list_checkpoints(request: web.Request) -> web.Response:
     if slot is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    cp_dir = _sessions_dir(slot) / session_id / "checkpoints"
+    cp_dir = sessions_dir(slot) / session_id / "checkpoints"
     if not cp_dir.exists():
         return web.json_response({"checkpoints": []})
 
@@ -138,7 +128,7 @@ async def handle_delete_session(request: web.Request) -> web.Response:
     if slot is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    session_path = _sessions_dir(slot) / session_id
+    session_path = sessions_dir(slot) / session_id
     if not session_path.exists():
         return web.json_response({"error": "Session not found"}, status=404)
 
@@ -163,7 +153,7 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
     # Verify checkpoint exists
-    cp_path = _sessions_dir(slot) / session_id / "checkpoints" / f"{checkpoint_id}.json"
+    cp_path = sessions_dir(slot) / session_id / "checkpoints" / f"{checkpoint_id}.json"
     if not cp_path.exists():
         return web.json_response({"error": "Checkpoint not found"}, status=404)
 
@@ -208,7 +198,7 @@ async def handle_messages(request: web.Request) -> web.Response:
     if slot is None:
         return web.json_response({"error": f"Agent '{agent_id}' not found"}, status=404)
 
-    convs_dir = _sessions_dir(slot) / session_id / "conversations"
+    convs_dir = sessions_dir(slot) / session_id / "conversations"
     if not convs_dir.exists():
         return web.json_response({"messages": []})
 

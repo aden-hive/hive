@@ -45,7 +45,10 @@ async def handle_logs(request: web.Request) -> web.Response:
 
     session_id = request.query.get("session_id")
     level = request.query.get("level", "summary")
-    limit = int(request.query.get("limit", "20"))
+    try:
+        limit = min(int(request.query.get("limit", "20")), 1000)
+    except (ValueError, TypeError):
+        limit = 20
 
     if not session_id:
         # List run summaries across all sessions
