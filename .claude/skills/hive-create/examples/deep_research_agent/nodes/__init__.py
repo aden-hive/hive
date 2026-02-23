@@ -2,12 +2,10 @@
 
 from framework.graph import NodeSpec
 
-# Node 1: Intake (client-facing)
-# Brief conversation to clarify what the user wants researched.
 intake_node = NodeSpec(
     id="intake",
     name="Research Intake",
-    description="Discuss the research topic with the user, clarify scope, and confirm direction",
+    description="Clarify research scope and confirm direction",
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
@@ -18,26 +16,19 @@ intake_node = NodeSpec(
         "the key questions to answer, the desired scope, and depth."
     ),
     system_prompt="""\
-You are a research intake specialist. The user wants to research a topic.
-Have a brief conversation to clarify what they need.
+You are a research intake specialist. Your job: quickly produce a research brief.
 
-**STEP 1 — Read and respond (text only, NO tool calls):**
-1. Read the topic provided
-2. If it's vague, ask 1-2 clarifying questions (scope, angle, depth)
-3. If it's already clear, confirm your understanding and ask the user to confirm
+**STEP 1 — Assess the topic (text only, NO tool calls):**
+- If clear and specific → state your interpretation in 1-2 sentences, ask user to confirm
+- If genuinely ambiguous → ask 1-2 focused clarifying questions (scope, depth, angle)
+- Do NOT ask questions when a reasonable interpretation exists
 
-Keep it short. Don't over-ask.
-
-**STEP 2 — After the user confirms, call set_output:**
-- set_output("research_brief", "A clear paragraph describing exactly what to research, \
-what questions to answer, what scope to cover, and how deep to go.")
+**STEP 2 — After confirmation, call set_output:**
+- set_output("research_brief", "Topic, key questions, scope, and depth in 2-3 sentences")
 """,
     tools=[],
 )
 
-# Node 2: Research
-# The workhorse — searches the web, fetches content, analyzes sources.
-# One node with both tools avoids the context-passing overhead of 5 separate nodes.
 research_node = NodeSpec(
     id="research",
     name="Research",
@@ -87,12 +78,10 @@ Include themes, contradictions, and confidence levels.")
     ],
 )
 
-# Node 3: Review (client-facing)
-# Shows the user what was found and asks whether to dig deeper or proceed.
 review_node = NodeSpec(
     id="review",
     name="Review Findings",
-    description="Present findings to user and decide whether to research more or write the report",
+    description="Present findings and get user direction",
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
@@ -103,31 +92,28 @@ review_node = NodeSpec(
         "whether they want more research or are ready for the report."
     ),
     system_prompt="""\
-Present the research findings to the user clearly and concisely.
+Present findings and ask for direction.
 
-**STEP 1 — Present (your first message, text only, NO tool calls):**
-1. **Summary** (2-3 sentences of what was found)
-2. **Key Findings** (bulleted, with confidence levels)
-3. **Sources Used** (count and quality assessment)
-4. **Gaps** (what's still unclear or under-covered)
+**STEP 1 — Present findings (text only, NO tool calls):**
+Structure:
+- **Summary**: 2-3 sentences of what was found
+- **Key Findings**: bullet points with confidence levels
+- **Sources**: count and quality
+- **Gaps**: what's missing (if any)
 
-End by asking: Are they satisfied, or do they want deeper research? \
-Should we proceed to writing the final report?
+Then ask: Ready for the report, or dig deeper?
 
-**STEP 2 — After the user responds, call set_output:**
-- set_output("needs_more_research", "true")  — if they want more
-- set_output("needs_more_research", "false") — if they're satisfied
-- set_output("feedback", "What the user wants explored further, or empty string")
+**STEP 2 — After user responds, call set_output:**
+- set_output("needs_more_research", "true" or "false")
+- set_output("feedback", "What to explore further, or empty string")
 """,
     tools=[],
 )
 
-# Node 4: Report (client-facing)
-# Writes an HTML report, serves the link to the user, and answers follow-ups.
 report_node = NodeSpec(
     id="report",
     name="Write & Deliver Report",
-    description="Write a cited HTML report from the findings and present it to the user",
+    description="Write cited HTML report and deliver to user",
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
@@ -138,53 +124,35 @@ report_node = NodeSpec(
         "and the user has indicated what they want to do next."
     ),
     system_prompt="""\
-Write a research report as an HTML file and present it to the user.
+Write and deliver a research report.
 
-IMPORTANT: save_data requires TWO separate arguments: filename and data.
-Call it like: save_data(filename="report.html", data="<html>...</html>")
-Do NOT use _raw, do NOT nest arguments inside a JSON string.
+**CRITICAL: Build the file in multiple append_data calls, never one giant save_data.**
 
-**STEP 1 — Write and save the HTML report (tool calls, NO text to user yet):**
+**PROCESS:**
+1. **save_data** — HTML head + CSS + executive summary
+2. **append_data** — Key findings with [n] citations
+3. **append_data** — Analysis + conclusion
+4. **append_data** — References list + footer
+5. **serve_file_to_user** — filename="report.html"
+6. **Text response** — Include the file_path, brief summary, ask if questions
+7. **After user responds** — set_output("delivery_status", "completed") and set_output("next_action", "new_topic" or "more_research")
 
-Build a clean HTML document. Keep the HTML concise — aim for clarity over length.
-Use minimal embedded CSS (a few lines of style, not a full framework).
+**CSS (copy exactly):**
+body{font-family:Georgia,'Times New Roman',serif;max-width:800px;margin:0 auto;padding:40px;line-height:1.8;color:#333}
+h1{font-size:1.8em;color:#1a1a1a;border-bottom:2px solid #333;padding-bottom:10px}
+h2{font-size:1.4em;color:#1a1a1a;margin-top:40px;padding-top:20px;border-top:1px solid #ddd}
+h3{font-size:1.1em;color:#444;margin-top:25px}
+p{margin:12px 0}
+.executive-summary{background:#f8f9fa;padding:25px;border-radius:8px;margin:25px 0;border-left:4px solid #333}
+.finding-section{margin:20px 0}
+.citation{color:#1a73e8;text-decoration:none;font-size:0.85em}
+.references{margin-top:40px;padding-top:20px;border-top:2px solid #333}
+.references ol{padding-left:20px}
+.references li{margin:8px 0;font-size:0.95em}
+.references a{color:#1a73e8;text-decoration:none}
+.footer{text-align:center;color:#999;border-top:1px solid #ddd;padding-top:20px;margin-top:50px;font-size:0.85em}
 
-Report structure:
-- Title & date
-- Executive Summary (2-3 paragraphs)
-- Key Findings (organized by theme, with [n] citation links)
-- Analysis (synthesis, implications)
-- Conclusion (key takeaways)
-- References (numbered list with clickable URLs)
-
-Requirements:
-- Every factual claim must cite its source with [n] notation
-- Be objective — present multiple viewpoints where sources disagree
-- Answer the original research questions from the brief
-
-Save the HTML:
-  save_data(filename="report.html", data="<html>...</html>")
-
-Then get the clickable link:
-  serve_file_to_user(filename="report.html", label="Research Report")
-
-If save_data fails, simplify and shorten the HTML, then retry.
-
-**STEP 2 — Present the link to the user (text only, NO tool calls):**
-
-Tell the user the report is ready and include the file:// URI from
-serve_file_to_user so they can click it to open. Give a brief summary
-of what the report covers. Ask if they have questions or want to continue.
-
-**STEP 3 — After the user responds:**
-- Answer any follow-up questions from the research material
-- When the user is ready to move on, ask what they'd like to do next:
-  - Research a new topic?
-  - Dig deeper into the current topic?
-- Then call set_output:
-  - set_output("delivery_status", "completed")
-  - set_output("next_action", "new_topic")       — if they want a new topic
-  - set_output("next_action", "more_research")   — if they want deeper research
+**Citation format:** <a class="citation" href="#ref-n">[n]</a>
 """,
     tools=[
         "save_data",

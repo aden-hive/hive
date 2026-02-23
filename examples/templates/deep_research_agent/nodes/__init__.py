@@ -7,7 +7,7 @@ from framework.graph import NodeSpec
 intake_node = NodeSpec(
     id="intake",
     name="Research Intake",
-    description="Discuss the research topic with the user, clarify scope, and confirm direction",
+    description="Clarify research scope and confirm direction",
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
@@ -18,19 +18,15 @@ intake_node = NodeSpec(
         "the key questions to answer, the desired scope, and depth."
     ),
     system_prompt="""\
-You are a research intake specialist. The user wants to research a topic.
-Have a brief conversation to clarify what they need.
+You are a research intake specialist. Your job: quickly produce a research brief.
 
-**STEP 1 — Read and respond (text only, NO tool calls):**
-1. Read the topic provided
-2. If it's vague, ask 1-2 clarifying questions (scope, angle, depth)
-3. If it's already clear, confirm your understanding and ask the user to confirm
+**STEP 1 — Assess the topic (text only, NO tool calls):**
+- If clear and specific → state your interpretation in 1-2 sentences, ask user to confirm
+- If genuinely ambiguous → ask 1-2 focused clarifying questions (scope, depth, angle)
+- Do NOT ask questions when a reasonable interpretation exists
 
-Keep it short. Don't over-ask.
-
-**STEP 2 — After the user confirms, call set_output:**
-- set_output("research_brief", "A clear paragraph describing exactly what to research, \
-what questions to answer, what scope to cover, and how deep to go.")
+**STEP 2 — After confirmation, call set_output:**
+- set_output("research_brief", "Topic, key questions, scope, and depth in 2-3 sentences")
 """,
     tools=[],
 )
@@ -92,7 +88,7 @@ Include themes, contradictions, and confidence levels.")
 review_node = NodeSpec(
     id="review",
     name="Review Findings",
-    description="Present findings to user and decide whether to research more or write the report",
+    description="Present findings and get user direction",
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
@@ -103,21 +99,20 @@ review_node = NodeSpec(
         "whether they want more research or are ready for the report."
     ),
     system_prompt="""\
-Present the research findings to the user clearly and concisely.
+Present findings and ask for direction.
 
-**STEP 1 — Present (your first message, text only, NO tool calls):**
-1. **Summary** (2-3 sentences of what was found)
-2. **Key Findings** (bulleted, with confidence levels)
-3. **Sources Used** (count and quality assessment)
-4. **Gaps** (what's still unclear or under-covered)
+**STEP 1 — Present findings (text only, NO tool calls):**
+Structure:
+- **Summary**: 2-3 sentences of what was found
+- **Key Findings**: bullet points with confidence levels
+- **Sources**: count and quality
+- **Gaps**: what's missing (if any)
 
-End by asking: Are they satisfied, or do they want deeper research? \
-Should we proceed to writing the final report?
+Then ask: Ready for the report, or dig deeper?
 
-**STEP 2 — After the user responds, call set_output:**
-- set_output("needs_more_research", "true")  — if they want more
-- set_output("needs_more_research", "false") — if they're satisfied
-- set_output("feedback", "What the user wants explored further, or empty string")
+**STEP 2 — After user responds, call set_output:**
+- set_output("needs_more_research", "true" or "false")
+- set_output("feedback", "What to explore further, or empty string")
 """,
     tools=[],
 )
@@ -127,7 +122,7 @@ Should we proceed to writing the final report?
 report_node = NodeSpec(
     id="report",
     name="Write & Deliver Report",
-    description="Write a cited HTML report from the findings and present it to the user",
+    description="Write cited HTML report and deliver to user",
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
@@ -138,114 +133,35 @@ report_node = NodeSpec(
         "and the user has indicated what they want to do next."
     ),
     system_prompt="""\
-Write a research report as an HTML file and present it to the user.
+Write and deliver a research report.
 
-**CRITICAL: You MUST build the file in multiple append_data calls. NEVER try to write the \
-entire HTML in a single save_data call — it will exceed the output token limit and fail.**
+**CRITICAL: Build the file in multiple append_data calls, never one giant save_data.**
 
-IMPORTANT: save_data and append_data require TWO separate arguments: filename and data.
-Call like: save_data(filename="report.html", data="<html>...")
-Do NOT use _raw, do NOT nest arguments inside a JSON string.
-Do NOT include data_dir in tool calls — it is auto-injected.
+**PROCESS:**
+1. **save_data** — HTML head + CSS + executive summary
+2. **append_data** — Key findings with [n] citations
+3. **append_data** — Analysis + conclusion
+4. **append_data** — References list + footer
+5. **serve_file_to_user** — filename="report.html"
+6. **Text response** — Include the file_path, brief summary, ask if questions
+7. **After user responds** — set_output("delivery_status", "completed") and set_output("next_action", "new_topic" or "more_research")
 
-**PROCESS (follow exactly):**
-
-**Step 1 — Write HTML head + executive summary (save_data):**
-Call save_data to create the file with the HTML head, CSS, title, and executive summary.
-```
-save_data(filename="report.html", data="<!DOCTYPE html>\\n<html>...")
-```
-
-Include: DOCTYPE, head with ALL styles below, opening body, h1 title, date, and the \
-executive summary (2-3 paragraphs). End after the executive summary section.
-
-**CSS to use (copy exactly):**
-```
-body{font-family:Georgia,'Times New Roman',serif;max-width:800px;margin:0 auto;\
-padding:40px;line-height:1.8;color:#333}
+**CSS (copy exactly):**
+body{font-family:Georgia,'Times New Roman',serif;max-width:800px;margin:0 auto;padding:40px;line-height:1.8;color:#333}
 h1{font-size:1.8em;color:#1a1a1a;border-bottom:2px solid #333;padding-bottom:10px}
-h2{font-size:1.4em;color:#1a1a1a;margin-top:40px;padding-top:20px;\
-border-top:1px solid #ddd}
+h2{font-size:1.4em;color:#1a1a1a;margin-top:40px;padding-top:20px;border-top:1px solid #ddd}
 h3{font-size:1.1em;color:#444;margin-top:25px}
 p{margin:12px 0}
-.date{color:#666;font-size:0.95em;margin-bottom:30px}
-.executive-summary{background:#f8f9fa;padding:25px;border-radius:8px;\
-margin:25px 0;border-left:4px solid #333}
+.executive-summary{background:#f8f9fa;padding:25px;border-radius:8px;margin:25px 0;border-left:4px solid #333}
 .finding-section{margin:20px 0}
 .citation{color:#1a73e8;text-decoration:none;font-size:0.85em}
-.citation:hover{text-decoration:underline}
-.analysis{background:#fff;padding:20px 0}
 .references{margin-top:40px;padding-top:20px;border-top:2px solid #333}
 .references ol{padding-left:20px}
 .references li{margin:8px 0;font-size:0.95em}
 .references a{color:#1a73e8;text-decoration:none}
-.references a:hover{text-decoration:underline}
-.footer{text-align:center;color:#999;border-top:1px solid #ddd;\
-padding-top:20px;margin-top:50px;font-size:0.85em;font-family:sans-serif}
-```
+.footer{text-align:center;color:#999;border-top:1px solid #ddd;padding-top:20px;margin-top:50px;font-size:0.85em}
 
-**Step 2 — Append key findings (append_data):**
-```
-append_data(filename="report.html", data="<h2>Key Findings</h2>...")
-```
-
-Organize findings by theme. Use [n] citation notation for every factual claim. \
-Pattern per theme:
-```
-<div class="finding-section">
-  <h3>{Theme Name}</h3>
-  <p>{Finding text with <a class="citation" href="#ref-n">[n]</a> citations}</p>
-</div>
-```
-
-**Step 3 — Append analysis + conclusion (append_data):**
-```
-append_data(filename="report.html", data="<h2>Analysis</h2>...")
-```
-
-Include: synthesis of findings, implications, and a Conclusion section with key \
-takeaways. Be objective — present multiple viewpoints where sources disagree.
-
-**Step 4 — Append references + footer (append_data):**
-```
-append_data(filename="report.html", data="<div class='references'>...")
-```
-
-Include: numbered reference list with clickable URLs, then footer, then \
-`</body></html>`. Pattern:
-```
-<div class="references">
-  <h2>References</h2>
-  <ol>
-    <li id="ref-1"><a href="{url}" target="_blank">{title}</a> — {source}</li>
-  </ol>
-</div>
-```
-
-**Step 5 — Serve the file:**
-```
-serve_file_to_user(filename="report.html", label="Research Report", open_in_browser=true)
-```
-
-**Step 6 — Present to user (text only, NO tool calls):**
-**CRITICAL: Print the file_path from the serve_file_to_user result in your response** \
-so the user can click it to reopen the report later. Give a brief summary of what the \
-report covers. Ask if they have questions.
-
-**Step 7 — After the user responds:**
-- Answer any follow-up questions from the research material
-- When the user is ready to move on, ask what they'd like to do next:
-  - Research a new topic?
-  - Dig deeper into the current topic?
-- Then call set_output:
-  - set_output("delivery_status", "completed")
-  - set_output("next_action", "new_topic")       — if they want a new topic
-  - set_output("next_action", "more_research")   — if they want deeper research
-
-**IMPORTANT:**
-- Every factual claim MUST cite its source with [n] notation
-- Answer the original research questions from the brief
-- If an append_data call fails with a truncation error, break it into smaller chunks
+**Citation format:** <a class="citation" href="#ref-n">[n]</a>
 """,
     tools=["save_data", "append_data", "serve_file_to_user"],
 )

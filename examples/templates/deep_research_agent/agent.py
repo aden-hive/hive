@@ -198,6 +198,7 @@ class DeepResearchAgent:
                 "max_tool_calls_per_turn": 20,
                 "max_history_tokens": 32000,
             },
+            response_style="output_first",
         )
 
     def _setup(self, mock_mode: bool = False) -> None:

@@ -1197,6 +1197,7 @@ class GraphExecutor:
                             focus_prompt=next_spec.system_prompt,
                             narrative=narrative,
                             accounts_prompt=self.accounts_prompt or None,
+                            response_style=getattr(graph, "response_style", "output_first"),
                         )
                         continuous_conversation.update_system_prompt(new_system)
 

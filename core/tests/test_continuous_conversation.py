@@ -23,7 +23,9 @@ from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import NodeResult, NodeSpec, SharedMemory
 from framework.graph.prompt_composer import (
+    RESPONSE_STYLES,
     build_narrative,
+    build_response_style_prompt,
     build_transition_marker,
     compose_system_prompt,
 )
@@ -159,6 +161,43 @@ class TestComposeSystemPrompt:
     def test_empty(self):
         result = compose_system_prompt(identity_prompt=None, focus_prompt=None)
         assert "Current date and time:" in result
+
+
+class TestResponseStyle:
+    def test_build_response_style_output_first(self):
+        result = build_response_style_prompt("output_first")
+        assert "LEAD WITH THE ANSWER" in result
+        assert "BE CONCISE" in result
+        assert "FAST TIME-TO-VALUE" in result
+
+    def test_build_response_style_conversational(self):
+        result = build_response_style_prompt("conversational")
+        assert "conversational assistant" in result
+        assert "Greet users" in result
+
+    def test_build_response_style_unknown_defaults_to_output_first(self):
+        result = build_response_style_prompt("unknown_style")
+        assert "LEAD WITH THE ANSWER" in result
+
+    def test_compose_includes_output_first_style_by_default(self):
+        result = compose_system_prompt(
+            identity_prompt="I am a research agent.",
+            focus_prompt="Focus on writing the report.",
+        )
+        assert "LEAD WITH THE ANSWER" in result
+
+    def test_compose_includes_conversational_style_when_specified(self):
+        result = compose_system_prompt(
+            identity_prompt="I am a research agent.",
+            focus_prompt="Focus on writing the report.",
+            response_style="conversational",
+        )
+        assert "conversational assistant" in result
+        assert "LEAD WITH THE ANSWER" not in result
+
+    def test_response_style_styles_dict_has_required_keys(self):
+        assert "output_first" in RESPONSE_STYLES
+        assert "conversational" in RESPONSE_STYLES
 
 
 class TestBuildNarrative:

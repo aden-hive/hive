@@ -454,6 +454,16 @@ class GraphSpec(BaseModel):
         ),
     )
 
+    response_style: str = Field(
+        default="output_first",
+        description=(
+            "Controls how the agent structures responses. "
+            "'output_first' (default): Lead with the answer/output, then add context. "
+            "Ask clarifying questions only when genuinely ambiguous. "
+            "'conversational': Traditional conversational style with introductions and clarifications."
+        ),
+    )
+
     # Metadata
     description: str = ""
     created_by: str = ""  # "human" or "builder_agent"

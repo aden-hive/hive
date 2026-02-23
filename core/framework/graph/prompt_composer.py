@@ -59,11 +59,47 @@ def build_accounts_prompt(accounts: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+RESPONSE_STYLES = {
+    "output_first": """\
+--- Response Style ---
+You prioritize FAST TIME-TO-VALUE. Follow these principles:
+
+1. LEAD WITH THE ANSWER. When the user's request is clear, provide the output/result first.
+2. BE CONCISE. No introductions, no "good question" filler, no restating the obvious.
+3. CLARIFY ONLY WHEN AMBIGUOUS. If the request is genuinely unclear, ask 1-2 focused questions.
+   Do not ask clarifying questions when a reasonable interpretation exists.
+4. CONTEXT AFTER OUTPUT. Add explanation, alternatives, or follow-up suggestions after the main answer.
+5. NO CONVERSATIONAL FILLER. Skip "I'd be happy to help" or "Let me think about that."
+
+Remember: Users want results, not conversation. Get to the point immediately.""",
+    "conversational": """\
+--- Response Style ---
+You are a helpful, conversational assistant. Feel free to:
+- Greet users warmly
+- Acknowledge good questions
+- Ask clarifying questions to ensure understanding
+- Provide context before and after answers""",
+}
+
+
+def build_response_style_prompt(style: str) -> str:
+    """Build the response style section of the system prompt.
+
+    Args:
+        style: One of 'output_first' (default) or 'conversational'.
+
+    Returns:
+        Response style guidance block.
+    """
+    return RESPONSE_STYLES.get(style, RESPONSE_STYLES["output_first"])
+
+
 def compose_system_prompt(
     identity_prompt: str | None,
     focus_prompt: str | None,
     narrative: str | None = None,
     accounts_prompt: str | None = None,
+    response_style: str = "output_first",
 ) -> str:
     """Compose the three-layer system prompt.
 
@@ -72,6 +108,7 @@ def compose_system_prompt(
         focus_prompt: Layer 3 — per-node focus directive (from NodeSpec.system_prompt).
         narrative: Layer 2 — auto-generated from conversation state.
         accounts_prompt: Connected accounts block (sits between identity and narrative).
+        response_style: Response style guidance ('output_first' or 'conversational').
 
     Returns:
         Composed system prompt with all layers present, plus current datetime.
@@ -81,6 +118,10 @@ def compose_system_prompt(
     # Layer 1: Identity (always first, anchors the personality)
     if identity_prompt:
         parts.append(identity_prompt)
+
+    # Response style (output-first vs conversational)
+    if response_style:
+        parts.append(f"\n{build_response_style_prompt(response_style)}")
 
     # Accounts (semi-static, deployment-specific)
     if accounts_prompt:

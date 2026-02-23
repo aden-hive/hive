@@ -752,6 +752,7 @@ class ExecutionStream:
             loop_config=self.graph.loop_config,
             conversation_mode=self.graph.conversation_mode,
             identity_prompt=self.graph.identity_prompt,
+            response_style=self.graph.response_style,
         )
 
     async def wait_for_completion(
