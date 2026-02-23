@@ -43,6 +43,13 @@ _leaks_var: contextvars.ContextVar[list] = contextvars.ContextVar(
 
 MAX_CYCLES = 3  # halt after this many consecutive low-severity cycles
 
+_SEVERITY_EMOJI: dict[str, str] = {
+    "low": "🟢",
+    "medium": "🟡",
+    "high": "🔴",
+    "critical": "🚨",
+}
+
 
 # ---------------------------------------------------------------------------
 # HubSpot CRM integration helpers  
@@ -387,7 +394,7 @@ def _build_telegram_message(
 ) -> str:
     """Build an HTML-formatted Telegram message from the current leak report."""
     sev = str(severity).lower()
-    emoji = {"low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨"}.get(sev, "⚪")
+    emoji = _SEVERITY_EMOJI.get(sev, "⚪")
 
     lines = [
         f"<b>💰 Revenue Leak Detector — Cycle {cycle}</b>",
@@ -454,9 +461,7 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
         Confirmation dict including telegram delivery status.
     """
     sev = str(severity).lower()
-    severity_emoji = {
-        "low": "🟢", "medium": "🟡", "high": "🔴", "critical": "🚨",
-    }.get(sev, "⚪")
+    severity_emoji = _SEVERITY_EMOJI.get(sev, "⚪")
 
     leaks = _leaks_var.get()
 
