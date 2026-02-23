@@ -1550,6 +1550,7 @@ class GraphExecutor:
             execution_id=self.runtime.execution_id,
             node_registry=node_registry or {},
             all_tools=list(self.tools),  # Full catalog for subagent tool resolution
+            shared_node_registry=self.node_registry,  # For subagent escalation routing
         )
 
     VALID_NODE_TYPES = {

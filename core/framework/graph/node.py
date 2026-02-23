@@ -530,6 +530,11 @@ class NodeContext:
     # subagent tools that aren't in the parent node's filtered available_tools.
     all_tools: list[Tool] = field(default_factory=list)
 
+    # Shared reference to the executor's node_registry — used by subagent
+    # escalation (_EscalationReceiver) to register temporary receivers that
+    # the inject_input() routing chain can find.
+    shared_node_registry: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass
 class NodeResult:
