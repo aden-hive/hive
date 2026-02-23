@@ -157,39 +157,6 @@ class TestEventLoopOutputKeyOverlap:
         key_errors = [e for e in errors if "output_key" in e]
         assert len(key_errors) == 0
 
-    def test_overlapping_keys_non_event_loop_no_error(self):
-        """Non-event_loop nodes with overlapping keys -> no error (last-wins OK)."""
-        graph = GraphSpec(
-            id="g1",
-            goal_id="goal1",
-            entry_node="src",
-            nodes=[
-                NodeSpec(id="src", name="src", description="Source node"),
-                NodeSpec(
-                    id="a",
-                    name="a",
-                    description="Node a",
-                    node_type="llm_generate",
-                    output_keys=["shared"],
-                ),
-                NodeSpec(
-                    id="b",
-                    name="b",
-                    description="Node b",
-                    node_type="llm_generate",
-                    output_keys=["shared"],
-                ),
-            ],
-            edges=[
-                EdgeSpec(id="src->a", source="src", target="a", condition=EdgeCondition.ON_SUCCESS),
-                EdgeSpec(id="src->b", source="src", target="b", condition=EdgeCondition.ON_SUCCESS),
-            ],
-        )
-
-        errors = graph.validate()
-        key_errors = [e for e in errors if "output_key" in e]
-        assert len(key_errors) == 0
-
 
 # ---------------------------------------------------------------------------
 # Baseline: no fan-out -> no errors from these rules

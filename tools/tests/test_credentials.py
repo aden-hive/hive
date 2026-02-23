@@ -278,7 +278,7 @@ class TestCredentialSpec:
         spec = CredentialSpec(
             env_var="API_KEY",
             tools=["tool_a", "tool_b"],
-            node_types=["llm_generate"],
+            node_types=["event_loop"],
             required=False,
             startup_required=True,
             help_url="https://example.com",
@@ -287,7 +287,7 @@ class TestCredentialSpec:
 
         assert spec.env_var == "API_KEY"
         assert spec.tools == ["tool_a", "tool_b"]
-        assert spec.node_types == ["llm_generate"]
+        assert spec.node_types == ["event_loop"]
         assert spec.required is False
         assert spec.startup_required is True
         assert spec.help_url == "https://example.com"
@@ -315,8 +315,7 @@ class TestCredentialSpecs:
         spec = CREDENTIAL_SPECS["anthropic"]
         assert spec.env_var == "ANTHROPIC_API_KEY"
         assert spec.tools == []
-        assert "llm_generate" in spec.node_types
-        assert "llm_tool_use" in spec.node_types
+        assert "event_loop" in spec.node_types
         assert spec.required is False
         assert spec.startup_required is False
         assert "anthropic.com" in spec.help_url
@@ -399,7 +398,7 @@ class TestNodeTypeValidation:
         creds = CredentialStoreAdapter.with_env_storage()
 
         # Should not raise
-        creds.validate_for_node_types(["llm_generate", "llm_tool_use"])
+        creds.validate_for_node_types(["event_loop"])
 
 
 class TestStartupValidation:

@@ -51,7 +51,9 @@ class TestGoogleDocsCreateDocument:
 
     def test_service_account_json_without_access_token_is_not_used(self, mcp):
         """Test that service account JSON alone is not treated as an access token."""
-        with patch.dict("os.environ", {"GOOGLE_SERVICE_ACCOUNT_JSON": '{"type":"service_account"}'}):
+        with patch.dict(
+            "os.environ", {"GOOGLE_SERVICE_ACCOUNT_JSON": '{"type":"service_account"}'}
+        ):
             tool_fn = get_tool_fn(mcp, "google_docs_create_document")
             result = tool_fn(title="Test Document")
             assert "error" in result
@@ -160,9 +162,7 @@ class TestGoogleDocsInsertText:
         # Mock get document for finding end index
         mock_get_response = MagicMock()
         mock_get_response.status_code = 200
-        mock_get_response.json.return_value = {
-            "body": {"content": [{"endIndex": 100}]}
-        }
+        mock_get_response.json.return_value = {"body": {"content": [{"endIndex": 100}]}}
         mock_get.return_value = mock_get_response
 
         # Mock batch update
@@ -236,10 +236,12 @@ class TestGoogleDocsBatchUpdate:
         mock_post.return_value = mock_response
 
         tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_batch_update")
-        requests = json.dumps([
-            {"insertText": {"location": {"index": 1}, "text": "Hello"}},
-            {"insertText": {"location": {"index": 6}, "text": " World"}},
-        ])
+        requests = json.dumps(
+            [
+                {"insertText": {"location": {"index": 1}, "text": "Hello"}},
+                {"insertText": {"location": {"index": 6}, "text": " World"}},
+            ]
+        )
         result = tool_fn(document_id="doc123", requests_json=requests)
 
         assert "error" not in result
@@ -468,6 +470,7 @@ class TestServiceAccountTokenExchange:
 
         # Should use the pre-exchanged token and make the API call
         assert "error" not in result or "not configured" not in result.get("error", "")
+
 
 class TestGoogleDocsListComments:
     """Tests for google_docs_list_comments tool."""

@@ -16,8 +16,9 @@ Layer 3 — Focus (per-node system_prompt, reframed as focus directive):
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -26,10 +27,43 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _with_datetime(prompt: str) -> str:
+    """Append current datetime with local timezone to a system prompt."""
+    local = datetime.now().astimezone()
+    stamp = f"Current date and time: {local.strftime('%Y-%m-%d %H:%M %Z (UTC%z)')}"
+    return f"{prompt}\n\n{stamp}" if prompt else stamp
+
+
+def build_accounts_prompt(accounts: list[dict[str, Any]]) -> str:
+    """Build a prompt section describing connected accounts.
+
+    Args:
+        accounts: List of account info dicts from CredentialStoreAdapter.get_all_account_info().
+
+    Returns:
+        Formatted accounts block, or empty string if no accounts.
+    """
+    if not accounts:
+        return ""
+    lines = [
+        "Connected accounts (use the alias as the `account` parameter "
+        "when calling tools to target a specific account):"
+    ]
+    for acct in accounts:
+        provider = acct.get("provider", "unknown")
+        alias = acct.get("alias", "unknown")
+        identity = acct.get("identity", {})
+        detail_parts = [f"{k}: {v}" for k, v in identity.items() if v]
+        detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
+        lines.append(f"- {provider}/{alias}{detail}")
+    return "\n".join(lines)
+
+
 def compose_system_prompt(
     identity_prompt: str | None,
     focus_prompt: str | None,
     narrative: str | None = None,
+    accounts_prompt: str | None = None,
 ) -> str:
     """Compose the three-layer system prompt.
 
@@ -37,15 +71,20 @@ def compose_system_prompt(
         identity_prompt: Layer 1 — static agent identity (from GraphSpec).
         focus_prompt: Layer 3 — per-node focus directive (from NodeSpec.system_prompt).
         narrative: Layer 2 — auto-generated from conversation state.
+        accounts_prompt: Connected accounts block (sits between identity and narrative).
 
     Returns:
-        Composed system prompt with all layers present.
+        Composed system prompt with all layers present, plus current datetime.
     """
     parts: list[str] = []
 
     # Layer 1: Identity (always first, anchors the personality)
     if identity_prompt:
         parts.append(identity_prompt)
+
+    # Accounts (semi-static, deployment-specific)
+    if accounts_prompt:
+        parts.append(f"\n{accounts_prompt}")
 
     # Layer 2: Narrative (what's happened so far)
     if narrative:
@@ -55,7 +94,7 @@ def compose_system_prompt(
     if focus_prompt:
         parts.append(f"\n--- Current Focus ---\n{focus_prompt}")
 
-    return "\n".join(parts) if parts else ""
+    return _with_datetime("\n".join(parts) if parts else "")
 
 
 def build_narrative(
@@ -112,6 +151,7 @@ def build_transition_marker(
     memory: SharedMemory,
     cumulative_tool_names: list[str],
     data_dir: Path | str | None = None,
+    adapt_content: str | None = None,
 ) -> str:
     """Build a 'State of the World' transition marker.
 
@@ -125,6 +165,7 @@ def build_transition_marker(
         memory: Current shared memory state.
         cumulative_tool_names: All tools available (cumulative set).
         data_dir: Path to spillover data directory.
+        adapt_content: Agent working memory (adapt.md) content.
 
     Returns:
         Transition marker message text.
@@ -165,6 +206,10 @@ def build_transition_marker(
                     sections.append(
                         "\nData files (use load_data to access):\n" + "\n".join(file_lines)
                     )
+
+    # Agent working memory
+    if adapt_content:
+        sections.append(f"\n--- Agent Memory ---\n{adapt_content}")
 
     # Available tools
     if cumulative_tool_names:

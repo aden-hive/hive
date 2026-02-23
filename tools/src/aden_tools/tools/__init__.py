@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 # Import register_tools from each tool module
+from .account_info_tool import register_tools as register_account_info
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
 from .calcom_tool import register_tools as register_calcom
@@ -34,11 +35,6 @@ from .email_tool import register_tools as register_email
 from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
-from .github_tool import register_tools as register_github
-from .gmail_tool import register_tools as register_gmail
-from .google_docs_tool import register_tools as register_google_docs
-from .google_maps_tool import register_tools as register_google_maps
-from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -54,6 +50,11 @@ from .file_system_toolkits.replace_file_content import (
 # Import file system toolkits
 from .file_system_toolkits.view_file import register_tools as register_view_file
 from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
+from .github_tool import register_tools as register_github
+from .gmail_tool import register_tools as register_gmail
+from .google_docs_tool import register_tools as register_google_docs
+from .google_maps_tool import register_tools as register_google_maps
+from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
@@ -64,6 +65,7 @@ from .runtime_logs_tool import register_tools as register_runtime_logs
 from .serpapi_tool import register_tools as register_serpapi
 from .slack_tool import register_tools as register_slack
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .stripe_tool import register_tools as register_stripe
 from .subdomain_enumerator import register_tools as register_subdomain_enumerator
 from .tech_stack_detector import register_tools as register_tech_stack_detector
 from .telegram_tool import register_tools as register_telegram
@@ -118,6 +120,7 @@ def register_all_tools(
     register_vision(mcp, credentials=credentials)
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_account_info(mcp, credentials=credentials)
 
     # Register file system toolkits
     register_view_file(mcp)
@@ -140,6 +143,7 @@ def register_all_tools(
     register_tech_stack_detector(mcp)
     register_subdomain_enumerator(mcp)
     register_risk_scorer(mcp)
+    register_stripe(mcp, credentials=credentials)
 
     # Return the list of all registered tool names
     return list(mcp._tool_manager._tools.keys())

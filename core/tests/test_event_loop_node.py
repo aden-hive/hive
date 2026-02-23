@@ -1690,3 +1690,73 @@ class TestToolDoomLoopIntegration:
         )
         result = await node.execute(ctx)
         assert result.success is True
+
+
+# ===========================================================================
+# execution_id plumbing
+# ===========================================================================
+
+
+class TestExecutionId:
+    """Tests for execution_id on NodeContext and its wiring through the framework."""
+
+    def test_node_context_accepts_execution_id(self, runtime, node_spec, memory):
+        """NodeContext stores execution_id when constructed with one."""
+        ctx = NodeContext(
+            runtime=runtime,
+            node_id=node_spec.id,
+            node_spec=node_spec,
+            memory=memory,
+            execution_id="exec_abc",
+        )
+        assert ctx.execution_id == "exec_abc"
+
+    def test_node_context_execution_id_defaults_to_empty(self, runtime, node_spec, memory):
+        """build_ctx without execution_id gives ctx.execution_id == ''."""
+        llm = MockStreamingLLM()
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        assert ctx.execution_id == ""
+
+    def test_stream_runtime_adapter_exposes_execution_id(self):
+        """StreamRuntimeAdapter.execution_id returns the value passed at construction."""
+        from framework.runtime.stream_runtime import StreamRuntimeAdapter
+
+        mock_stream_runtime = MagicMock()
+        adapter = StreamRuntimeAdapter(stream_runtime=mock_stream_runtime, execution_id="exec_456")
+        assert adapter.execution_id == "exec_456"
+
+    def test_build_context_passes_execution_id_from_adapter(self):
+        """_build_context picks up execution_id from a StreamRuntimeAdapter runtime."""
+        from framework.graph.executor import GraphExecutor
+        from framework.graph.goal import Goal
+
+        runtime = MagicMock()
+        runtime.execution_id = "exec_123"
+        executor = GraphExecutor(runtime=runtime)
+
+        goal = Goal(id="g1", name="test", description="test", success_criteria=[])
+        node_spec = NodeSpec(
+            id="n1", name="n1", description="test", node_type="event_loop", output_keys=["r"]
+        )
+        ctx = executor._build_context(
+            node_spec=node_spec, memory=SharedMemory(), goal=goal, input_data={}
+        )
+        assert ctx.execution_id == "exec_123"
+
+    def test_build_context_defaults_execution_id_for_plain_runtime(self):
+        """Plain Runtime.execution_id returns '' by default."""
+        from framework.graph.executor import GraphExecutor
+        from framework.graph.goal import Goal
+
+        runtime = MagicMock(spec=Runtime)
+        runtime.execution_id = ""
+        executor = GraphExecutor(runtime=runtime)
+
+        goal = Goal(id="g1", name="test", description="test", success_criteria=[])
+        node_spec = NodeSpec(
+            id="n1", name="n1", description="test", node_type="event_loop", output_keys=["r"]
+        )
+        ctx = executor._build_context(
+            node_spec=node_spec, memory=SharedMemory(), goal=goal, input_data={}
+        )
+        assert ctx.execution_id == ""

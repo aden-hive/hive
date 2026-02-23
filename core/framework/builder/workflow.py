@@ -245,19 +245,13 @@ class GraphBuilder:
             warnings.append(f"Node '{node.id}' should have a description")
 
         # Type-specific validation
-        if node.node_type == "llm_tool_use":
-            if not node.tools:
-                errors.append(f"LLM tool node '{node.id}' must specify tools")
-            if not node.system_prompt:
-                warnings.append(f"LLM node '{node.id}' should have a system_prompt")
+        if node.node_type == "event_loop":
+            if node.tools and not node.system_prompt:
+                warnings.append(f"Event loop node '{node.id}' should have a system_prompt")
 
         if node.node_type == "router":
             if not node.routes:
                 errors.append(f"Router node '{node.id}' must specify routes")
-
-        if node.node_type == "function":
-            if not node.function:
-                errors.append(f"Function node '{node.id}' must specify function name")
 
         # Check input/output keys
         if not node.input_keys:

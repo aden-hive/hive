@@ -75,6 +75,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Resume from a specific checkpoint (requires --resume-session)",
     )
+    run_parser.add_argument(
+        "--no-guardian",
+        action="store_true",
+        help="Disable the Agent Guardian watchdog in TUI mode",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -206,7 +211,27 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="LLM model to use (any LiteLLM-compatible name)",
     )
+    tui_parser.add_argument(
+        "--no-guardian",
+        action="store_true",
+        help="Disable the Agent Guardian watchdog",
+    )
     tui_parser.set_defaults(func=cmd_tui)
+
+    # code command (Hive Coder — framework agent builder)
+    code_parser = subparsers.add_parser(
+        "code",
+        help="Launch Hive Coder to build agents",
+        description="Interactive agent builder. Describe what you want and Hive Coder builds it.",
+    )
+    code_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model to use (any LiteLLM-compatible name)",
+    )
+    code_parser.set_defaults(func=cmd_code)
 
     # sessions command group (checkpoint/resume management)
     sessions_parser = subparsers.add_parser(
@@ -331,6 +356,20 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     resume_parser.set_defaults(func=cmd_resume)
 
+    # setup-credentials command
+    setup_creds_parser = subparsers.add_parser(
+        "setup-credentials",
+        help="Interactive credential setup",
+        description="Guide through setting up required credentials for an agent.",
+    )
+    setup_creds_parser.add_argument(
+        "agent_path",
+        type=str,
+        nargs="?",
+        help="Path to agent folder (optional - runs general setup if not specified)",
+    )
+    setup_creds_parser.set_defaults(func=cmd_setup_credentials)
+
 
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
@@ -388,6 +427,40 @@ def _load_resume_state(
         }
 
 
+def _prompt_before_start(agent_path: str, runner, model: str | None = None):
+    """Prompt user to start agent or update credentials.
+
+    Returns:
+        Updated runner if user proceeds, None if user aborts.
+    """
+    from framework.credentials.setup import CredentialSetupSession
+    from framework.runner import AgentRunner
+
+    while True:
+        print()
+        try:
+            choice = input("Press Enter to start agent, or 'u' to update credentials: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+        if choice == "":
+            return runner
+        elif choice.lower() == "u":
+            session = CredentialSetupSession.from_agent_path(agent_path)
+            result = session.run_interactive()
+            if result.success:
+                # Reload runner with updated credentials
+                try:
+                    runner = AgentRunner.load(agent_path, model=model)
+                except Exception as e:
+                    print(f"Error reloading agent: {e}")
+                    return None
+            # Loop back to prompt again
+        elif choice.lower() == "q":
+            return None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
     import logging
@@ -427,6 +500,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             try:
                 # Load runner inside the async loop to ensure strict loop affinity
                 # (only one load — avoids spawning duplicate MCP subprocesses)
+                # AgentRunner handles credential setup interactively when stdin is a TTY.
                 try:
                     runner = AgentRunner.load(
                         args.agent_path,
@@ -439,9 +513,25 @@ def cmd_run(args: argparse.Namespace) -> int:
                     print(f"Error loading agent: {e}")
                     return
 
+                # Prompt before starting (allows credential updates)
+                if sys.stdin.isatty():
+                    runner = _prompt_before_start(args.agent_path, runner, args.model)
+                    if runner is None:
+                        return
+
                 # Force setup inside the loop
                 if runner._agent_runtime is None:
-                    runner._setup()
+                    try:
+                        runner._setup()
+                    except CredentialError as e:
+                        print(f"\n{e}", file=sys.stderr)
+                        return
+
+                # Attach hive_coder's guardian watchdog (before start)
+                if not getattr(args, "no_guardian", False) and runner._agent_runtime:
+                    from framework.agents.hive_coder.guardian import attach_guardian
+
+                    attach_guardian(runner._agent_runtime, runner._tool_registry)
 
                 # Start runtime before TUI so it's ready for user input
                 if runner._agent_runtime and not runner._agent_runtime.is_running:
@@ -470,6 +560,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 0
     else:
         # Standard execution — load runner here (not shared with TUI path)
+        # AgentRunner handles credential setup interactively when stdin is a TTY.
         try:
             runner = AgentRunner.load(
                 args.agent_path,
@@ -481,6 +572,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         except FileNotFoundError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
+
+        # Prompt before starting (allows credential updates)
+        if sys.stdin.isatty() and not args.quiet:
+            runner = _prompt_before_start(args.agent_path, runner, args.model)
+            if runner is None:
+                return 1
 
         # Load session/checkpoint state for resume (headless mode)
         session_state = None
@@ -1226,60 +1323,27 @@ def cmd_shell(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_tui(args: argparse.Namespace) -> int:
-    """Browse agents and launch the interactive TUI dashboard."""
-    import logging
+def _get_framework_agents_dir() -> Path:
+    """Resolve the framework agents directory relative to this file."""
+    return Path(__file__).resolve().parent.parent / "agents"
 
+
+def _launch_agent_tui(
+    agent_path: str | Path,
+    model: str | None = None,
+    no_guardian: bool = False,
+) -> int:
+    """Load an agent and launch the TUI. Shared by cmd_tui and cmd_code."""
     from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
     from framework.tui.app import AdenTUI
 
-    logging.basicConfig(level=logging.WARNING, format="%(message)s")
-
-    exports_dir = Path("exports")
-    examples_dir = Path("examples/templates")
-
-    has_exports = _has_agents(exports_dir)
-    has_examples = _has_agents(examples_dir)
-
-    if not has_exports and not has_examples:
-        print("No agents found in exports/ or examples/templates/", file=sys.stderr)
-        return 1
-
-    # Determine which directory to browse
-    if has_exports and has_examples:
-        print("\nAgent sources:\n")
-        print("  1. Your Agents (exports/)")
-        print("  2. Sample Agents (examples/templates/)")
-        print()
-        try:
-            choice = input("Select source (number): ").strip()
-            if choice == "1":
-                agents_dir = exports_dir
-            elif choice == "2":
-                agents_dir = examples_dir
-            else:
-                print("Invalid selection")
-                return 1
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return 1
-    elif has_exports:
-        agents_dir = exports_dir
-    else:
-        agents_dir = examples_dir
-
-    # Let user pick an agent
-    agent_path = _select_agent(agents_dir)
-    if not agent_path:
-        return 1
-
-    # Launch TUI (same pattern as cmd_run --tui)
     async def run_with_tui():
+        # AgentRunner handles credential setup interactively when stdin is a TTY.
         try:
             runner = AgentRunner.load(
                 agent_path,
-                model=args.model,
+                model=model,
             )
         except CredentialError as e:
             print(f"\n{e}", file=sys.stderr)
@@ -1289,12 +1353,122 @@ def cmd_tui(args: argparse.Namespace) -> int:
             return
 
         if runner._agent_runtime is None:
-            runner._setup()
+            try:
+                runner._setup()
+            except CredentialError as e:
+                print(f"\n{e}", file=sys.stderr)
+                return
+
+        # Attach hive_coder's guardian watchdog (before start)
+        if not no_guardian and runner._agent_runtime:
+            from framework.agents.hive_coder.guardian import attach_guardian
+
+            attach_guardian(runner._agent_runtime, runner._tool_registry)
 
         if runner._agent_runtime and not runner._agent_runtime.is_running:
             await runner._agent_runtime.start()
 
         app = AdenTUI(runner._agent_runtime)
+        try:
+            await app.run_async()
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            print(f"TUI error: {e}")
+
+        await runner.cleanup_async()
+
+    asyncio.run(run_with_tui())
+    print("TUI session ended.")
+    return 0
+
+
+def cmd_tui(args: argparse.Namespace) -> int:
+    """Launch the interactive TUI dashboard with in-app agent picker."""
+    import logging
+
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    from framework.tui.app import AdenTUI
+
+    async def run_tui():
+        app = AdenTUI(
+            model=args.model,
+            no_guardian=getattr(args, "no_guardian", False),
+        )
+        await app.run_async()
+
+    asyncio.run(run_tui())
+    print("TUI session ended.")
+    return 0
+
+
+def cmd_code(args: argparse.Namespace) -> int:
+    """Launch Hive Coder with multi-graph support.
+
+    Unlike ``_launch_agent_tui``, this sets up graph lifecycle tools and
+    assigns ``graph_id="hive_coder"`` so the coder can load, supervise,
+    and restart secondary agent graphs within the same session.
+    """
+    import logging
+
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
+    framework_agents_dir = _get_framework_agents_dir()
+    hive_coder_path = framework_agents_dir / "hive_coder"
+
+    if not (hive_coder_path / "agent.py").exists():
+        print("Error: Hive Coder agent not found.", file=sys.stderr)
+        return 1
+
+    # Ensure framework agents dir is on sys.path for import
+    fa_str = str(framework_agents_dir)
+    if fa_str not in sys.path:
+        sys.path.insert(0, fa_str)
+
+    from framework.credentials.models import CredentialError
+    from framework.runner import AgentRunner
+    from framework.tools.session_graph_tools import register_graph_tools
+    from framework.tui.app import AdenTUI
+
+    async def run_with_tui():
+        try:
+            runner = AgentRunner.load(hive_coder_path, model=args.model)
+        except CredentialError as e:
+            print(f"\n{e}", file=sys.stderr)
+            return
+        except Exception as e:
+            print(f"Error loading agent: {e}")
+            return
+
+        if runner._agent_runtime is None:
+            try:
+                runner._setup()
+            except CredentialError as e:
+                print(f"\n{e}", file=sys.stderr)
+                return
+
+        runtime = runner._agent_runtime
+
+        # -- Multi-graph setup --
+        # Tag the primary graph so events carry graph_id="hive_coder"
+        runtime._graph_id = "hive_coder"
+        runtime._active_graph_id = "hive_coder"
+
+        # Register graph lifecycle tools (load_agent, unload_agent, etc.)
+        register_graph_tools(runner._tool_registry, runtime)
+
+        # Refresh tool schemas AND executor so streams see the new tools.
+        # The executor closure references the registry dict by ref, but
+        # refreshing both is robust against any copy-on-read behavior.
+        runtime._tools = list(runner._tool_registry.get_tools().values())
+        runtime._tool_executor = runner._tool_registry.get_executor()
+
+        if not runtime.is_running:
+            await runtime.start()
+
+        app = AdenTUI(runtime)
         try:
             await app.run_async()
         except Exception as e:
@@ -1719,3 +1893,25 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if args.tui:
         print("Mode: TUI")
     return 1
+
+
+def cmd_setup_credentials(args: argparse.Namespace) -> int:
+    """Interactive credential setup for an agent."""
+    from framework.credentials.setup import CredentialSetupSession
+
+    agent_path = getattr(args, "agent_path", None)
+
+    if agent_path:
+        # Setup credentials for a specific agent
+        session = CredentialSetupSession.from_agent_path(agent_path)
+    else:
+        # No agent specified - show usage
+        print("Usage: hive setup-credentials <agent_path>")
+        print()
+        print("Examples:")
+        print("  hive setup-credentials exports/my-agent")
+        print("  hive setup-credentials examples/templates/deep_research_agent")
+        return 1
+
+    result = session.run_interactive()
+    return 0 if result.success else 1

@@ -36,26 +36,129 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 CLAUDE_CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
+CLAUDE_OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+# Buffer in seconds before token expiry to trigger a proactive refresh
+_TOKEN_REFRESH_BUFFER_SECS = 300  # 5 minutes
+
+
+def _refresh_claude_code_token(refresh_token: str) -> dict | None:
+    """Refresh the Claude Code OAuth token using the refresh token.
+
+    POSTs to the Anthropic OAuth token endpoint with form-urlencoded data
+    (per OAuth 2.0 RFC 6749 Section 4.1.3).
+
+    Returns:
+        Dict with new token data (access_token, refresh_token, expires_in)
+        on success, None on failure.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    data = urllib.parse.urlencode(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": CLAUDE_OAUTH_CLIENT_ID,
+        }
+    ).encode("utf-8")
+
+    req = urllib.request.Request(
+        CLAUDE_OAUTH_TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
+        logger.debug("Claude Code token refresh failed: %s", exc)
+        return None
+
+
+def _save_refreshed_credentials(token_data: dict) -> None:
+    """Write refreshed token data back to ~/.claude/.credentials.json."""
+    import time
+
+    if not CLAUDE_CREDENTIALS_FILE.exists():
+        return
+
+    try:
+        with open(CLAUDE_CREDENTIALS_FILE) as f:
+            creds = json.load(f)
+
+        oauth = creds.get("claudeAiOauth", {})
+        oauth["accessToken"] = token_data["access_token"]
+        if "refresh_token" in token_data:
+            oauth["refreshToken"] = token_data["refresh_token"]
+        if "expires_in" in token_data:
+            oauth["expiresAt"] = int((time.time() + token_data["expires_in"]) * 1000)
+        creds["claudeAiOauth"] = oauth
+
+        with open(CLAUDE_CREDENTIALS_FILE, "w") as f:
+            json.dump(creds, f, indent=2)
+        logger.debug("Claude Code credentials refreshed successfully")
+    except (json.JSONDecodeError, OSError, KeyError) as exc:
+        logger.debug("Failed to save refreshed credentials: %s", exc)
 
 
 def get_claude_code_token() -> str | None:
-    """
-    Get the OAuth token from Claude Code subscription.
+    """Get the OAuth token from Claude Code subscription with auto-refresh.
 
     Reads from ~/.claude/.credentials.json which is created by the
     Claude Code CLI when users authenticate with their subscription.
 
+    If the token is expired or close to expiry, attempts an automatic
+    refresh using the stored refresh token.
+
     Returns:
         The access token if available, None otherwise.
     """
+    import time
+
     if not CLAUDE_CREDENTIALS_FILE.exists():
         return None
+
     try:
         with open(CLAUDE_CREDENTIALS_FILE) as f:
             creds = json.load(f)
-        return creds.get("claudeAiOauth", {}).get("accessToken")
     except (json.JSONDecodeError, OSError):
         return None
+
+    oauth = creds.get("claudeAiOauth", {})
+    access_token = oauth.get("accessToken")
+    if not access_token:
+        return None
+
+    # Check token expiry (expiresAt is in milliseconds)
+    expires_at_ms = oauth.get("expiresAt", 0)
+    now_ms = int(time.time() * 1000)
+    buffer_ms = _TOKEN_REFRESH_BUFFER_SECS * 1000
+
+    if expires_at_ms > now_ms + buffer_ms:
+        # Token is still valid
+        return access_token
+
+    # Token is expired or near expiry — attempt refresh
+    refresh_token = oauth.get("refreshToken")
+    if not refresh_token:
+        logger.warning("Claude Code token expired and no refresh token available")
+        return access_token  # Return expired token; it may still work briefly
+
+    logger.info("Claude Code token expired or near expiry, refreshing...")
+    token_data = _refresh_claude_code_token(refresh_token)
+
+    if token_data and "access_token" in token_data:
+        _save_refreshed_credentials(token_data)
+        return token_data["access_token"]
+
+    # Refresh failed — return the existing token and warn
+    logger.warning("Claude Code token refresh failed. Run 'claude' to re-authenticate.")
+    return access_token
 
 
 @dataclass
@@ -247,6 +350,12 @@ class AgentRunner:
         model: str | None = None,
         intro_message: str = "",
         runtime_config: "AgentRuntimeConfig | None" = None,
+        interactive: bool = True,
+        skip_credential_validation: bool = False,
+        skip_guardian: bool = False,
+        requires_account_selection: bool = False,
+        configure_for_account: Callable | None = None,
+        list_accounts: Callable | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -260,6 +369,13 @@ class AgentRunner:
             model: Model to use (reads from agent config or ~/.hive/configuration.json if None)
             intro_message: Optional greeting shown to user on TUI load
             runtime_config: Optional AgentRuntimeConfig (webhook settings, etc.)
+            interactive: If True (default), offer interactive credential setup on failure.
+                Set to False when called from the TUI (which handles setup via its own screen).
+            skip_credential_validation: If True, skip credential checks at load time.
+            skip_guardian: If True, don't attach the Hive Coder guardian.
+            requires_account_selection: If True, TUI shows account picker before starting.
+            configure_for_account: Callback(runner, account_dict) to scope tools after selection.
+            list_accounts: Callback() -> list[dict] to fetch available accounts.
         """
         self.agent_path = agent_path
         self.graph = graph
@@ -268,6 +384,12 @@ class AgentRunner:
         self.model = model or self._resolve_default_model()
         self.intro_message = intro_message
         self.runtime_config = runtime_config
+        self._interactive = interactive
+        self.skip_credential_validation = skip_credential_validation
+        self.skip_guardian = skip_guardian
+        self.requires_account_selection = requires_account_selection
+        self._configure_for_account = configure_for_account
+        self._list_accounts = list_accounts
 
         # Set up storage
         if storage_path:
@@ -316,9 +438,50 @@ class AgentRunner:
     def _validate_credentials(self) -> None:
         """Check that required credentials are available before spawning MCP servers.
 
-        Raises CredentialError with actionable guidance if any are missing.
+        If ``interactive`` is True and stdin is a TTY, automatically launches
+        the interactive credential setup flow so the user can fix the issue
+        in-place.  Re-validates after setup succeeds.
+
+        When ``interactive`` is False (e.g. TUI callers), the CredentialError
+        propagates immediately so the caller can handle it with its own UI.
         """
-        validate_agent_credentials(self.graph.nodes)
+        if self.skip_credential_validation:
+            return
+
+        if not self._interactive:
+            # Let the CredentialError propagate — caller handles UI.
+            validate_agent_credentials(self.graph.nodes)
+            return
+
+        import sys
+
+        from framework.credentials.models import CredentialError
+
+        try:
+            validate_agent_credentials(self.graph.nodes)
+            return  # All good
+        except CredentialError as e:
+            if not sys.stdin.isatty():
+                raise
+
+            # Interactive: show the error then enter credential setup
+            print(f"\n{e}", file=sys.stderr)
+
+            from framework.credentials.validation import build_setup_session_from_error
+
+            session = build_setup_session_from_error(e, nodes=self.graph.nodes)
+            if not session.missing:
+                raise
+
+            result = session.run_interactive()
+            if not result.success:
+                raise CredentialError(
+                    "Credential setup incomplete. "
+                    "Run again after configuring the required credentials."
+                ) from None
+
+            # Re-validate after setup
+            validate_agent_credentials(self.graph.nodes)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -363,6 +526,7 @@ class AgentRunner:
         mock_mode: bool = False,
         storage_path: Path | None = None,
         model: str | None = None,
+        interactive: bool = True,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -376,6 +540,8 @@ class AgentRunner:
             mock_mode: If True, use mock LLM responses
             storage_path: Path for runtime storage (defaults to ~/.hive/agents/{name})
             model: LLM model to use (reads from agent's default_config if None)
+            interactive: If True (default), offer interactive credential setup.
+                Set to False from TUI callers that handle setup via their own UI.
 
         Returns:
             AgentRunner instance ready to run
@@ -443,6 +609,13 @@ class AgentRunner:
             # Read runtime config (webhook settings, etc.) if defined
             agent_runtime_config = getattr(agent_module, "runtime_config", None)
 
+            # Read pre-run hooks (e.g., credential_tester needs account selection)
+            skip_cred = getattr(agent_module, "skip_credential_validation", False)
+            no_guardian = getattr(agent_module, "skip_guardian", False)
+            needs_acct = getattr(agent_module, "requires_account_selection", False)
+            configure_fn = getattr(agent_module, "configure_for_account", None)
+            list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
+
             return cls(
                 agent_path=agent_path,
                 graph=graph,
@@ -452,6 +625,12 @@ class AgentRunner:
                 model=model,
                 intro_message=intro_message,
                 runtime_config=agent_runtime_config,
+                interactive=interactive,
+                skip_credential_validation=skip_cred,
+                skip_guardian=no_guardian,
+                requires_account_selection=needs_acct,
+                configure_for_account=configure_fn,
+                list_accounts=list_accts_fn,
             )
 
         # Fallback: load from agent.json (legacy JSON-based agents)
@@ -469,6 +648,7 @@ class AgentRunner:
             mock_mode=mock_mode,
             storage_path=storage_path,
             model=model,
+            interactive=interactive,
         )
 
     def register_tool(
@@ -592,6 +772,7 @@ class AgentRunner:
             config = get_hive_config()
             llm_config = config.get("llm", {})
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
+            api_base = llm_config.get("api_base")
 
             api_key = None
             if use_claude_code:
@@ -601,9 +782,16 @@ class AgentRunner:
                     print("Warning: Claude Code subscription configured but no token found.")
                     print("Run 'claude' to authenticate, then try again.")
 
-            if api_key:
-                # Use Claude Code subscription token
-                self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+            if api_key and use_claude_code:
+                # Use litellm's built-in Anthropic OAuth support.
+                # The lowercase "authorization" key triggers OAuth detection which
+                # adds the required anthropic-beta and browser-access headers.
+                self._llm = LiteLLMProvider(
+                    model=self.model,
+                    api_key=api_key,
+                    api_base=api_base,
+                    extra_headers={"authorization": f"Bearer {api_key}"},
+                )
             else:
                 # Fall back to environment variable
                 # First check api_key_env_var from config (set by quickstart)
@@ -611,12 +799,18 @@ class AgentRunner:
                     self.model
                 )
                 if api_key_env and os.environ.get(api_key_env):
-                    self._llm = LiteLLMProvider(model=self.model)
+                    self._llm = LiteLLMProvider(
+                        model=self.model,
+                        api_key=os.environ[api_key_env],
+                        api_base=api_base,
+                    )
                 else:
                     # Fall back to credential store
                     api_key = self._get_api_key_from_credential_store()
                     if api_key:
-                        self._llm = LiteLLMProvider(model=self.model, api_key=api_key)
+                        self._llm = LiteLLMProvider(
+                            model=self.model, api_key=api_key, api_base=api_base
+                        )
                         # Set env var so downstream code (e.g. cleanup LLM in
                         # node._extract_json) can also find it
                         if api_key_env:
@@ -625,11 +819,39 @@ class AgentRunner:
                         print(f"Warning: {api_key_env} not set. LLM calls will fail.")
                         print(f"Set it with: export {api_key_env}=your-api-key")
 
+            # Fail fast if the agent needs an LLM but none was configured
+            if self._llm is None:
+                has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
+                if has_llm_nodes:
+                    from framework.credentials.models import CredentialError
+
+                    api_key_env = self._get_api_key_env_var(self.model)
+                    hint = (
+                        f"Set it with: export {api_key_env}=your-api-key"
+                        if api_key_env
+                        else "Configure an API key for your LLM provider."
+                    )
+                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+
         # Get tools for runtime
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
-        self._setup_agent_runtime(tools, tool_executor)
+        # Collect connected account info for system prompt injection
+        accounts_prompt = ""
+        try:
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+
+            adapter = CredentialStoreAdapter.default()
+            accounts = adapter.get_all_account_info()
+            if accounts:
+                from framework.graph.prompt_composer import build_accounts_prompt
+
+                accounts_prompt = build_accounts_prompt(accounts)
+        except Exception:
+            pass  # Best-effort — agent works without account info
+
+        self._setup_agent_runtime(tools, tool_executor, accounts_prompt=accounts_prompt)
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -690,7 +912,9 @@ class AgentRunner:
         except Exception:
             return None
 
-    def _setup_agent_runtime(self, tools: list, tool_executor: Callable | None) -> None:
+    def _setup_agent_runtime(
+        self, tools: list, tool_executor: Callable | None, accounts_prompt: str = ""
+    ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
         # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
         entry_points = []
@@ -736,6 +960,19 @@ class AgentRunner:
             async_checkpoint=True,  # Non-blocking
         )
 
+        # Handle runtime_config - ensure it's AgentRuntimeConfig, not RuntimeConfig
+        # RuntimeConfig is for LLM settings; AgentRuntimeConfig is for AgentRuntime settings
+        runtime_config = None
+        if self.runtime_config is not None:
+            from framework.config import RuntimeConfig
+
+            # If it's a RuntimeConfig (LLM config), don't pass it
+            if isinstance(self.runtime_config, RuntimeConfig):
+                runtime_config = None
+            else:
+                # It's already an AgentRuntimeConfig or compatible type
+                runtime_config = self.runtime_config
+
         self._agent_runtime = create_agent_runtime(
             graph=self.graph,
             goal=self.goal,
@@ -746,7 +983,9 @@ class AgentRunner:
             tool_executor=tool_executor,
             runtime_log_store=log_store,
             checkpoint_config=checkpoint_config,
-            config=self.runtime_config,
+            config=runtime_config,
+            graph_id=self.graph.id or self.agent_path.name,
+            accounts_prompt=accounts_prompt,
         )
 
         # Pass intro_message through for TUI display
@@ -1069,88 +1308,36 @@ class AgentRunner:
             warnings.append(f"Missing tool implementations: {', '.join(missing_tools)}")
 
         # Check credentials for required tools and node types
-        # Uses CredentialStore (encrypted files + env var fallback)
+        # Uses CredentialStoreAdapter.default() which includes Aden sync support
         missing_credentials = []
         try:
-            from aden_tools.credentials import CREDENTIAL_SPECS
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
 
-            from framework.credentials import CredentialStore
-            from framework.credentials.storage import (
-                CompositeStorage,
-                EncryptedFileStorage,
-                EnvVarStorage,
-            )
-
-            # Build env mapping for credential lookup
-            env_mapping = {
-                (spec.credential_id or name): spec.env_var
-                for name, spec in CREDENTIAL_SPECS.items()
-            }
-
-            # Only use EncryptedFileStorage if the encryption key is configured;
-            # otherwise just check env vars (avoids generating a throwaway key)
-            storages: list = [EnvVarStorage(env_mapping=env_mapping)]
-            if os.environ.get("HIVE_CREDENTIAL_KEY"):
-                storages.insert(0, EncryptedFileStorage())
-
-            if len(storages) == 1:
-                storage = storages[0]
-            else:
-                storage = CompositeStorage(
-                    primary=storages[0],
-                    fallbacks=storages[1:],
-                )
-            store = CredentialStore(storage=storage)
-
-            # Build reverse mappings
-            tool_to_cred: dict[str, str] = {}
-            node_type_to_cred: dict[str, str] = {}
-            for cred_name, spec in CREDENTIAL_SPECS.items():
-                for tool_name in spec.tools:
-                    tool_to_cred[tool_name] = cred_name
-                for nt in spec.node_types:
-                    node_type_to_cred[nt] = cred_name
+            adapter = CredentialStoreAdapter.default()
 
             # Check tool credentials
-            checked: set[str] = set()
-            for tool_name in info.required_tools:
-                cred_name = tool_to_cred.get(tool_name)
-                if cred_name is None or cred_name in checked:
-                    continue
-                checked.add(cred_name)
-                spec = CREDENTIAL_SPECS[cred_name]
-                cred_id = spec.credential_id or cred_name
-                if spec.required and not store.is_available(cred_id):
-                    missing_credentials.append(spec.env_var)
-                    affected_tools = [t for t in info.required_tools if t in spec.tools]
-                    tools_str = ", ".join(affected_tools)
-                    warning_msg = f"Missing {spec.env_var} for {tools_str}"
-                    if spec.help_url:
-                        warning_msg += f"\n  Get it at: {spec.help_url}"
-                    warnings.append(warning_msg)
+            for _cred_name, spec in adapter.get_missing_for_tools(list(info.required_tools)):
+                missing_credentials.append(spec.env_var)
+                affected_tools = [t for t in info.required_tools if t in spec.tools]
+                tools_str = ", ".join(affected_tools)
+                warning_msg = f"Missing {spec.env_var} for {tools_str}"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
 
             # Check node type credentials (e.g., ANTHROPIC_API_KEY for LLM nodes)
             node_types = list({node.node_type for node in self.graph.nodes})
-            for nt in node_types:
-                cred_name = node_type_to_cred.get(nt)
-                if cred_name is None or cred_name in checked:
-                    continue
-                checked.add(cred_name)
-                spec = CREDENTIAL_SPECS[cred_name]
-                cred_id = spec.credential_id or cred_name
-                if spec.required and not store.is_available(cred_id):
-                    missing_credentials.append(spec.env_var)
-                    affected_types = [t for t in node_types if t in spec.node_types]
-                    types_str = ", ".join(affected_types)
-                    warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
-                    if spec.help_url:
-                        warning_msg += f"\n  Get it at: {spec.help_url}"
-                    warnings.append(warning_msg)
+            for _cred_name, spec in adapter.get_missing_for_node_types(node_types):
+                missing_credentials.append(spec.env_var)
+                affected_types = [t for t in node_types if t in spec.node_types]
+                types_str = ", ".join(affected_types)
+                warning_msg = f"Missing {spec.env_var} for {types_str} nodes"
+                if spec.help_url:
+                    warning_msg += f"\n  Get it at: {spec.help_url}"
+                warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(
-                node.node_type in ("llm_generate", "llm_tool_use") for node in self.graph.nodes
-            )
+            has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):
@@ -1365,6 +1552,61 @@ Respond with JSON only:
             content={"error": f"Unknown message type: {message.type}"},
             type=MessageType.RESPONSE,
         )
+
+    @classmethod
+    async def setup_as_secondary(
+        cls,
+        agent_path: str | Path,
+        runtime: AgentRuntime,
+        graph_id: str | None = None,
+    ) -> str:
+        """Load an agent and register it as a secondary graph on *runtime*.
+
+        Uses :meth:`AgentRunner.load` to parse the agent, then calls
+        :meth:`AgentRuntime.add_graph` with the extracted graph, goal,
+        and entry points.
+
+        Args:
+            agent_path: Path to the agent directory
+            runtime: The running AgentRuntime to attach to
+            graph_id: Optional graph identifier (defaults to directory name)
+
+        Returns:
+            The graph_id used for registration
+        """
+        agent_path = Path(agent_path)
+        runner = cls.load(agent_path)
+        gid = graph_id or agent_path.name
+
+        # Build entry points
+        entry_points: dict[str, EntryPointSpec] = {}
+        if runner.graph.entry_node:
+            entry_points["default"] = EntryPointSpec(
+                id="default",
+                name="Default",
+                entry_node=runner.graph.entry_node,
+                trigger_type="manual",
+                isolation_level="shared",
+            )
+        for aep in runner.graph.async_entry_points:
+            entry_points[aep.id] = EntryPointSpec(
+                id=aep.id,
+                name=aep.name,
+                entry_node=aep.entry_node,
+                trigger_type=aep.trigger_type,
+                trigger_config=aep.trigger_config,
+                isolation_level=aep.isolation_level,
+                priority=aep.priority,
+                max_concurrent=aep.max_concurrent,
+            )
+
+        await runtime.add_graph(
+            graph_id=gid,
+            graph=runner.graph,
+            goal=runner.goal,
+            entry_points=entry_points,
+        )
+        return gid
 
     def cleanup(self) -> None:
         """Clean up resources (synchronous)."""

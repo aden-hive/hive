@@ -253,9 +253,7 @@ class _GoogleDocsClient:
         )
         return self._handle_response(response)
 
-    def batch_update(
-        self, document_id: str, requests: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def batch_update(self, document_id: str, requests: list[dict[str, Any]]) -> dict[str, Any]:
         """Execute multiple requests in a single atomic operation."""
         response = httpx.post(
             f"{GOOGLE_DOCS_API_BASE}/documents/{document_id}:batchUpdate",
@@ -483,9 +481,14 @@ def register_tools(
 ) -> None:
     """Register Google Docs tools with the MCP server."""
 
-    def _get_token() -> str | None:
+    def _get_token(account: str = "") -> str | None:
         """Get Google access token from credential manager or environment."""
         if credentials is not None:
+            if account:
+                return credentials.get_by_alias(
+                    "google_docs",
+                    account,
+                )
             token = credentials.get("google_docs")
             if token is not None and not isinstance(token, str):
                 raise TypeError(
@@ -503,9 +506,9 @@ def register_tools(
             return _create_service_account_token(service_account)
         return None
 
-    def _get_client() -> _GoogleDocsClient | dict[str, str]:
+    def _get_client(account: str = "") -> _GoogleDocsClient | dict[str, str]:
         """Get a Google Docs client, or return an error dict if no credentials."""
-        token = _get_token()
+        token = _get_token(account)
         if not token:
             return {
                 "error": "Google Docs credentials not configured",
@@ -520,7 +523,7 @@ def register_tools(
     # --- Document Management ---
 
     @mcp.tool()
-    def google_docs_create_document(title: str) -> dict:
+    def google_docs_create_document(title: str, account: str = "") -> dict:
         """
         Create a new blank Google Docs document with a specified title.
 
@@ -530,7 +533,7 @@ def register_tools(
         Returns:
             Dict with document ID and metadata, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -548,7 +551,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def google_docs_get_document(document_id: str) -> dict:
+    def google_docs_get_document(document_id: str, account: str = "") -> dict:
         """
         Retrieve the full structural content, metadata, and elements of a document.
 
@@ -558,7 +561,7 @@ def register_tools(
         Returns:
             Dict with document content and structure, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -573,6 +576,7 @@ def register_tools(
         document_id: str,
         text: str,
         index: int | None = None,
+        account: str = "",
     ) -> dict:
         """
         Insert text at a specific index or at the end of the document.
@@ -587,7 +591,7 @@ def register_tools(
         Returns:
             Dict with update result, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -603,6 +607,7 @@ def register_tools(
         find_text: str,
         replace_text: str,
         match_case: bool = True,
+        account: str = "",
     ) -> dict:
         """
         Global find-and-replace (ideal for populating templates with dynamic data).
@@ -618,7 +623,7 @@ def register_tools(
         Returns:
             Dict with number of replacements made, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -649,6 +654,7 @@ def register_tools(
         index: int,
         width_pt: float | None = None,
         height_pt: float | None = None,
+        account: str = "",
     ) -> dict:
         """
         Insert an image into the document body via URI.
@@ -665,7 +671,7 @@ def register_tools(
         Returns:
             Dict with update result, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -687,6 +693,7 @@ def register_tools(
         foreground_color_red: float | None = None,
         foreground_color_green: float | None = None,
         foreground_color_blue: float | None = None,
+        account: str = "",
     ) -> dict:
         """
         Apply styling (bold, italic, font size, colors) to specific text ranges.
@@ -706,7 +713,7 @@ def register_tools(
         Returns:
             Dict with update result, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
 
@@ -741,6 +748,7 @@ def register_tools(
     def google_docs_batch_update(
         document_id: str,
         requests_json: str,
+        account: str = "",
     ) -> dict:
         """
         Execute multiple requests (inserts, deletes, formatting) in a single atomic operation.
@@ -755,7 +763,7 @@ def register_tools(
         Returns:
             Dict with batch update result, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -776,6 +784,7 @@ def register_tools(
         start_index: int,
         end_index: int,
         list_type: str = "bullet",
+        account: str = "",
     ) -> dict:
         """
         Create or modify bulleted and numbered lists within the document.
@@ -789,7 +798,7 @@ def register_tools(
         Returns:
             Dict with update result, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
 
@@ -811,6 +820,7 @@ def register_tools(
         document_id: str,
         content: str,
         quoted_text: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Create a comment or anchor a discussion thread to a specific text segment.
@@ -825,7 +835,7 @@ def register_tools(
         Returns:
             Dict with comment details, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -841,6 +851,7 @@ def register_tools(
         page_size: int = 20,
         page_token: str | None = None,
         include_deleted: bool = False,
+        account: str = "",
     ) -> dict:
         """
         Retrieve comments for a document, with pagination support.
@@ -856,7 +867,7 @@ def register_tools(
         Returns:
             Dict containing comments list and optional next_page_token, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -877,6 +888,7 @@ def register_tools(
     def google_docs_export_content(
         document_id: str,
         format: str = "pdf",
+        account: str = "",
     ) -> dict:
         """
         Export the document to different formats (PDF, DOCX, TXT).
@@ -888,7 +900,7 @@ def register_tools(
         Returns:
             Dict with base64-encoded content and metadata, or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
 

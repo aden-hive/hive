@@ -28,6 +28,51 @@ from framework.llm.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
 
+
+def _patch_litellm_anthropic_oauth() -> None:
+    """Patch litellm's Anthropic header construction to fix OAuth token handling.
+
+    litellm bug: validate_environment() puts the OAuth token into x-api-key,
+    but Anthropic's API rejects OAuth tokens in x-api-key. They must be sent
+    via Authorization: Bearer only, with x-api-key omitted entirely.
+
+    This patch wraps validate_environment to remove x-api-key when the
+    Authorization header carries an OAuth token (sk-ant-oat prefix).
+
+    See: https://github.com/BerriAI/litellm/issues/19618
+    """
+    try:
+        from litellm.llms.anthropic.common_utils import AnthropicModelInfo
+        from litellm.types.llms.anthropic import ANTHROPIC_OAUTH_TOKEN_PREFIX
+    except ImportError:
+        return
+
+    original = AnthropicModelInfo.validate_environment
+
+    def _patched_validate_environment(
+        self, headers, model, messages, optional_params, litellm_params, api_key=None, api_base=None
+    ):
+        result = original(
+            self,
+            headers,
+            model,
+            messages,
+            optional_params,
+            litellm_params,
+            api_key=api_key,
+            api_base=api_base,
+        )
+        auth = result.get("authorization", "")
+        if auth.startswith(f"Bearer {ANTHROPIC_OAUTH_TOKEN_PREFIX}"):
+            result.pop("x-api-key", None)
+        return result
+
+    AnthropicModelInfo.validate_environment = _patched_validate_environment
+
+
+if litellm is not None:
+    _patch_litellm_anthropic_oauth()
+
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits

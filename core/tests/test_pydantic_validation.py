@@ -46,7 +46,7 @@ class TestNodeSpecOutputModel:
             id="test_node",
             name="Test Node",
             description="A test node",
-            node_type="llm_generate",
+            node_type="event_loop",
             output_model=SimpleOutput,
         )
 
@@ -400,7 +400,7 @@ class TestPydanticValidationIntegrationExtended:
             id="full_test",
             name="Full Validation Test",
             description="Tests all validation options",
-            node_type="llm_generate",
+            node_type="event_loop",
             output_keys=["category", "priority", "summary", "suggested_action"],
             output_model=TicketAnalysis,
             max_validation_retries=3,
