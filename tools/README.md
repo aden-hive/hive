@@ -142,6 +142,7 @@ python mcp_server.py
 | `maps_*` | Places search, geocoding, directions (Google Maps) |
 | `run_bigquery_query`, `describe_dataset` | Run queries against Google BigQuery |
 | `razorpay_*` | Razorpay payments and orders |
+| `stripe_*` | Stripe customers, subscriptions, payment intents, charges, refunds, invoices, products, and coupons |
 | `github_*` | GitHub repos, issues, and pull requests |
 
 ### Security
@@ -160,6 +161,7 @@ python mcp_server.py
 
 | Tool | Description |
 | ---- | ----------- |
+| `get_account_info` | List connected accounts and their identities (provider, email, workspace) |
 | `get_current_time` | Get current date/time with timezone support |
 | `query_runtime_logs`, `query_runtime_log_details`, `query_runtime_log_raw` | Access agent runtime logs for the current session |
 
@@ -171,21 +173,42 @@ tools/
 │   ├── __init__.py          # Main exports
 │   ├── credentials/         # Credential management
 │   └── tools/               # Tool implementations
-│       ├── example_tool/
-│       ├── file_system_toolkits/  # File operation tools
-│       │   ├── view_file.py
-│       │   ├── write_to_file.py
-│       │   ├── list_dir.py
-│       │   ├── replace_file_content.py
-│       │   ├── apply_diff.py
-│       │   ├── apply_patch.py
-│       │   ├── grep_search.py
-│       │   └── execute_command_tool.py
-│       ├── web_search_tool/
-│       ├── web_scrape_tool/
-│       ├── pdf_read_tool/
-│       ├── time_tool/
-│       └── calendar_tool/
+│       ├── account_info_tool/     # List connected accounts
+│       ├── apollo_tool/           # Apollo.io prospect search & enrichment
+│       ├── bigquery_tool/         # Google BigQuery queries
+│       ├── calcom_tool/           # Cal.com scheduling & bookings
+│       ├── calendar_tool/         # Google Calendar events
+│       ├── csv_tool/              # CSV read, write, append, query (DuckDB)
+│       ├── discord_tool/          # Discord messages & channels
+│       ├── dns_security_scanner/  # SPF, DMARC, DKIM, DNSSEC, zone transfer
+│       ├── email_tool/            # Send email via SMTP / Resend
+│       ├── exa_search_tool/       # Semantic search via Exa AI
+│       ├── example_tool/          # Template for new tools
+│       ├── excel_tool/            # Excel read, write, append, query (DuckDB)
+│       ├── file_system_toolkits/  # File operations & data persistence
+│       ├── github_tool/           # GitHub repos, issues, pull requests
+│       ├── gmail_tool/            # Gmail read, reply, draft, manage
+│       ├── google_docs_tool/      # Google Docs read & write
+│       ├── google_maps_tool/      # Places search, geocoding, directions
+│       ├── http_headers_scanner/  # OWASP security header analysis
+│       ├── hubspot_tool/          # HubSpot CRM contacts, companies, deals
+│       ├── news_tool/             # News search & sentiment analysis
+│       ├── pdf_read_tool/         # PDF text extraction
+│       ├── port_scanner/          # TCP port scan & banner grabbing
+│       ├── razorpay_tool/         # Razorpay payments & orders
+│       ├── risk_scorer/           # Weighted security grade aggregator
+│       ├── runtime_logs_tool/     # Query agent runtime logs
+│       ├── serpapi_tool/          # Academic & patent search via SerpAPI
+│       ├── slack_tool/            # Slack messages, channels, files
+│       ├── ssl_tls_scanner/       # TLS version, cipher & certificate check
+│       ├── stripe_tool/           # Stripe payments, subscriptions, invoices
+│       ├── subdomain_enumerator/  # Subdomain discovery via CT logs
+│       ├── tech_stack_detector/   # Website technology fingerprinting
+│       ├── telegram_tool/         # Telegram bot messages & documents
+│       ├── time_tool/             # Current date/time with timezone support
+│       ├── vision_tool/           # Google Cloud Vision image analysis
+│       ├── web_scrape_tool/       # Web page content extraction
+│       └── web_search_tool/       # Web search (Brave or Google)
 ├── tests/                   # Test suite
 ├── mcp_server.py            # MCP server entry point
 ├── README.md
