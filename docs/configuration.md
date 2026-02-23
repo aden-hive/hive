@@ -50,6 +50,8 @@ export GROQ_API_KEY="..."
 
 The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
 
+> **Local LLMs:** You can also run agents with [Ollama](./local-llm-ollama.md) — no API keys or cloud account needed.
+
 ### Search & Tools (optional)
 
 ```bash

@@ -114,6 +114,8 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 
 We recommend using quickstart.sh for LLM API credential setup and /hive-credentials for the tools credentials
 
+> **No API keys?** Try [running with Ollama](./local-llm-ollama.md) for local, offline LLM inference.
+
 ## Running Agents
 
 The `hive` CLI is the primary interface for running agents:
