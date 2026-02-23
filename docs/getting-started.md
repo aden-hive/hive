@@ -169,7 +169,8 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
 4. **Build Agents**: Use `/hive` skill in Claude Code
 5. **Custom Tools**: Learn to integrate MCP servers
-6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
+6. **Understand Evolution**: See [how agents evolve after failures](./key_concepts/evolution-example.md)
+7. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
 ## Troubleshooting
 

@@ -6,6 +6,8 @@ Agents don't just fail; they fail inevitably. Real-world variables—private Lin
 
 Evolution is how Hive handles this. When an agent fails, the framework captures what went wrong — which node failed, which success criteria weren't met, what the agent tried and why it didn't work. Then a coding agent (Claude Code, Cursor, or similar) uses that failure data to generate an improved version of the agent. The new version gets deployed, runs, encounters new edge cases, and the cycle continues.
 
+> **📖 See [Agent Evolution: A Concrete Example](./evolution-example.md)** for a step-by-step walkthrough of how an agent graph evolves after a runtime failure.
+
 Over generations, the agent gets more reliable. Not because someone sat down and anticipated every possible failure, but because each failure teaches the next version something specific.
 
 ## How It Works
