@@ -126,7 +126,7 @@ def _fetch_hubspot_deals() -> "dict | None":
             timeout=15.0,
         )
         if resp.status_code != 200:
-            print(f"[HubSpot] API {resp.status_code} — falling back to simulated data")
+            print(f"[HubSpot] API {resp.status_code} — falling back to empty snapshot")
             return None
 
         deals: list = []
@@ -175,7 +175,7 @@ def _fetch_hubspot_deals() -> "dict | None":
         }
 
     except Exception as exc:
-        print(f"[HubSpot] Error: {exc} — falling back to simulated data")
+        print(f"[HubSpot] Error: {exc} — falling back to empty snapshot")
         return None
 
 
@@ -196,7 +196,7 @@ def _scan_pipeline(cycle: int) -> dict:
         overdue_invoices — number of overdue invoices
         support_escalations — open support tickets needing action
     """
-    next_cycle = int(cycle) + 1
+    next_cycle = int(float(cycle)) + 1
 
     # Initialize fresh session state — must happen before any reads this cycle
     _cycle_data_var.set({})
@@ -252,7 +252,7 @@ def _detect_revenue_leaks(cycle: int) -> dict:
     except LookupError:
         # scan_pipeline must be called before detect_revenue_leaks each cycle
         return {
-            "cycle": int(cycle),
+            "cycle": int(float(cycle)),
             "leak_count": 0,
             "severity": "low",
             "total_at_risk": 0,
@@ -338,7 +338,7 @@ def _detect_revenue_leaks(cycle: int) -> dict:
         halt = False
     else:
         severity = "low"
-        halt = int(cycle) >= MAX_CYCLES  # stop after MAX_CYCLES with no leaks
+        halt = int(float(cycle)) >= MAX_CYCLES  # stop after MAX_CYCLES with no leaks
 
     print(
         f"[detect_revenue_leaks] Cycle {cycle} — "
@@ -346,7 +346,7 @@ def _detect_revenue_leaks(cycle: int) -> dict:
     )
 
     return {
-        "cycle": int(cycle),
+        "cycle": int(float(cycle)),
         "leak_count": len(leaks),
         "severity": severity,
         "total_at_risk": total_at_risk,
@@ -409,10 +409,10 @@ def _build_telegram_message(
     emoji = _SEVERITY_EMOJI.get(sev, "⚪")
 
     lines = [
-        f"<b>💰 Revenue Leak Detector — Cycle {cycle}</b>",
+        f"<b>💰 Revenue Leak Detector — Cycle {int(float(cycle))}</b>",
         "",
         f"Severity:       {emoji} <b>{sev.upper()}</b>",
-        f"Leaks detected: <b>{int(leak_count)}</b>",
+        f"Leaks detected: <b>{int(float(leak_count))}</b>",
         f"Total at risk:  <b>${int(total_at_risk):,}</b>",
         "",
     ]
@@ -483,10 +483,10 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
     thin   = "─" * 64
 
     print(f"\n{border}")
-    print(f"  💰  REVENUE LEAK DETECTOR  ·  Cycle {cycle} Report")
+    print(f"  💰  REVENUE LEAK DETECTOR  ·  Cycle {int(float(cycle))} Report")
     print(f"{border}")
     print(f"  Severity        : {severity_emoji}  {sev.upper()}")
-    print(f"  Leaks Detected  : {int(leak_count)}")
+    print(f"  Leaks Detected  : {int(float(leak_count))}")
     print(f"  Total At Risk   : ${int(total_at_risk):,}")
     print(f"{thin}")
 
@@ -512,7 +512,7 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
     print(f"\n{thin}")
     if sev == "critical":
         print(f"  🚨  CRITICAL — Escalating to VP Sales & Finance immediately.")
-        print(f"      Immediate action required across {int(leak_count)} revenue risks.")
+        print(f"      Immediate action required across {int(float(leak_count))} revenue risks.")
     elif sev == "high":
         print(f"  🔴  HIGH PRIORITY — Assign owners and act within 24 hours.")
     elif sev == "medium":
@@ -523,9 +523,9 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
 
     # ---- Real Telegram delivery ----
     tg_message = _build_telegram_message(
-        cycle=int(cycle),
+        cycle=int(float(cycle)),
         severity=severity,
-        leak_count=int(leak_count),
+        leak_count=int(float(leak_count)),
         total_at_risk=int(total_at_risk),
         leaks=leaks,
     )
@@ -541,9 +541,9 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
 
     return {
         "sent": True,
-        "cycle": int(cycle),
+        "cycle": int(float(cycle)),
         "severity": severity,
-        "leaks_reported": int(leak_count),
+        "leaks_reported": int(float(leak_count)),
         "total_at_risk_usd": int(total_at_risk),
         "telegram": tg_result,
     }
@@ -578,7 +578,7 @@ def _send_followup_emails(cycle: int) -> dict:
     ghosted = [leak for leak in _leaks_var.get([]) if leak.get("type") == "GHOSTED"]
 
     if not ghosted:
-        print(f"\n[send_followup_emails] Cycle {cycle} — no GHOSTED contacts, skipping.")
+        print(f"\n[send_followup_emails] Cycle {int(float(cycle))} — no GHOSTED contacts, skipping.")
         return {"emails_sent": 0, "contacts_emailed": [], "delivery_method": "none"}
 
     gmail_user = os.getenv("GMAIL_USER", "").strip()
@@ -589,7 +589,7 @@ def _send_followup_emails(cycle: int) -> dict:
     border = "─" * 64
 
     print(f"\n{border}")
-    print(f"  ✉️   FOLLOWUP EMAILS  ·  Cycle {cycle}")
+    print(f"  ✉️   FOLLOWUP EMAILS  ·  Cycle {int(float(cycle))}")
     print(f"{border}")
 
     for leak in ghosted:
