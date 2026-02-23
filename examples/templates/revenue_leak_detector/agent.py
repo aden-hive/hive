@@ -12,7 +12,7 @@ cycles have elapsed without leaks.
 
 from pathlib import Path
 
-from framework.graph import EdgeSpec, EdgeCondition, Goal
+from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult
 from framework.graph.checkpoint_config import CheckpointConfig
@@ -34,6 +34,55 @@ goal = Goal(
         "churn risk), and sends structured alerts until a critical leak threshold "
         "triggers escalation."
     ),
+    success_criteria=[
+        SuccessCriterion(
+            id="leak-detection",
+            description="Detect all revenue leaks in the CRM pipeline each cycle",
+            metric="output_contains",
+            target="leak_count",
+            weight=0.4,
+        ),
+        SuccessCriterion(
+            id="alert-delivery",
+            description="Successfully send alerts for every detected leak via console and Telegram",
+            metric="output_contains",
+            target="sent",
+            weight=0.3,
+        ),
+        SuccessCriterion(
+            id="followup-coverage",
+            description="Send follow-up emails to all GHOSTED contacts",
+            metric="output_contains",
+            target="emails_sent",
+            weight=0.3,
+        ),
+    ],
+    constraints=[
+        Constraint(
+            id="real-data-only",
+            description="Only report leaks found in actual CRM data — never fabricate deals or contacts",
+            constraint_type="hard",
+            category="accuracy",
+        ),
+        Constraint(
+            id="single-tool-call",
+            description="Each node calls its designated tool exactly once per cycle",
+            constraint_type="hard",
+            category="scope",
+        ),
+        Constraint(
+            id="halt-on-critical",
+            description="Halt the monitoring loop when severity reaches critical or MAX_CYCLES of low severity elapse",
+            constraint_type="hard",
+            category="safety",
+        ),
+        Constraint(
+            id="graceful-offline",
+            description="Operate fully offline when Telegram/Gmail/HubSpot credentials are not set",
+            constraint_type="soft",
+            category="quality",
+        ),
+    ],
 )
 
 # ---- Nodes ----
@@ -155,6 +204,11 @@ class RevenueLeakDetectorAgent:
         # Register tools from tools.py via TOOLS dict + tool_executor pattern
         tools_path = Path(__file__).parent / "tools.py"
         self._tool_registry.discover_from_module(tools_path)
+
+        # Load MCP server config if present
+        mcp_config_path = Path(__file__).parent / "mcp_servers.json"
+        if mcp_config_path.exists():
+            self._tool_registry.load_mcp_config(mcp_config_path)
 
         llm = None
         if not mock_mode:

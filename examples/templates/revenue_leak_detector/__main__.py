@@ -72,60 +72,15 @@ def tui(mock, verbose, debug):
         )
         sys.exit(1)
 
-    from pathlib import Path
-
-    from framework.llm import LiteLLMProvider
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import create_agent_runtime
-    from framework.runtime.execution_stream import EntryPointSpec
-
     async def run_with_tui():
         agent = RevenueLeakDetectorAgent()
-
-        storage_path = Path.home() / ".hive" / "agents" / "revenue_leak_detector"
-        storage_path.mkdir(parents=True, exist_ok=True)
-
-        agent._tool_registry = ToolRegistry()
-        tools_path = Path(__file__).parent / "tools.py"
-        agent._tool_registry.discover_from_module(tools_path)
-
-        llm = None
-        if not mock:
-            llm = LiteLLMProvider(
-                model=agent.config.model,
-                api_key=agent.config.api_key,
-                api_base=agent.config.api_base,
-            )
-
-        tools = list(agent._tool_registry.get_tools().values())
-        tool_executor = agent._tool_registry.get_executor()
-        graph = agent._build_graph()
-
-        runtime = create_agent_runtime(
-            graph=graph,
-            goal=agent.goal,
-            storage_path=storage_path,
-            entry_points=[
-                EntryPointSpec(
-                    id="start",
-                    name="Start Monitoring",
-                    entry_node="monitor",
-                    trigger_type="manual",
-                    isolation_level="isolated",
-                ),
-            ],
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor,
-        )
-
-        await runtime.start()
+        await agent.start(mock_mode=mock)
 
         try:
-            app = AdenTUI(runtime)
+            app = AdenTUI(agent._agent_runtime)
             await app.run_async()
         finally:
-            await runtime.stop()
+            await agent.stop()
 
     asyncio.run(run_with_tui())
 
