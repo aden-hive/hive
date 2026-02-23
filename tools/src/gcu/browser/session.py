@@ -4,9 +4,10 @@ Browser session management.
 Manages Playwright browser instances with support for multiple profiles,
 each with independent browser context and multiple tabs.
 
-Supports two modes:
-- Ephemeral: Fresh browser state each time (default for testing/CI)
-- Persistent: Chrome profile persisted to disk (cookies, history, storage retained)
+Supports three session types:
+- Standard: Single browser with ephemeral or persistent context
+- Agent: Isolated context spawned from a running profile's state,
+  sharing a single browser process with other agent sessions
 """
 
 from __future__ import annotations
@@ -158,6 +159,56 @@ HIVE_START_PAGE = """
 DEFAULT_TIMEOUT_MS = 30000
 DEFAULT_NAVIGATION_TIMEOUT_MS = 60000
 
+# ---------------------------------------------------------------------------
+# Shared browser for agent contexts
+# ---------------------------------------------------------------------------
+# All agent sessions share this single browser process. Created via
+# chromium.launch() (not persistent context) so we can call
+# browser.new_context() multiple times with different storage states.
+
+_shared_browser: Browser | None = None
+_shared_playwright: Any = None
+
+# Chrome flags shared between all browser launches
+_CHROME_ARGS = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-blink-features=AutomationControlled",
+    "--no-first-run",
+    "--no-default-browser-check",
+]
+
+
+async def get_shared_browser(headless: bool = True) -> Browser:
+    """Get or create the shared browser instance for agent contexts."""
+    global _shared_browser, _shared_playwright
+
+    if _shared_browser and _shared_browser.is_connected():
+        return _shared_browser
+
+    _shared_playwright = await async_playwright().start()
+    _shared_browser = await _shared_playwright.chromium.launch(
+        headless=headless,
+        args=_CHROME_ARGS,
+    )
+    logger.info("Started shared browser for agent contexts")
+    return _shared_browser
+
+
+async def close_shared_browser() -> None:
+    """Close the shared browser and clean up all agent contexts."""
+    global _shared_browser, _shared_playwright
+
+    if _shared_browser:
+        await _shared_browser.close()
+        _shared_browser = None
+        logger.info("Closed shared browser")
+
+    if _shared_playwright:
+        await _shared_playwright.stop()
+        _shared_playwright = None
+
 
 @dataclass
 class BrowserSession:
@@ -188,8 +239,14 @@ class BrowserSession:
     user_data_dir: Path | None = None
     cdp_port: int | None = None
 
+    # Session type: "standard" (default) or "agent" (ephemeral context from shared browser)
+    session_type: str = "standard"
+
     def _is_running(self) -> bool:
         """Check if browser is currently running."""
+        if self.session_type == "agent":
+            # Agent sessions use a shared browser; check context is alive
+            return self.context is not None and self.browser is not None and self.browser.is_connected()
         if self.persistent:
             # Persistent context doesn't have a separate browser object
             return self.context is not None
@@ -328,14 +385,18 @@ class BrowserSession:
                 await self.context.close()
                 self.context = None
 
-            # Close browser if not using persistent context
-            if self.browser:
-                await self.browser.close()
-                self.browser = None
+            # Agent sessions share a browser — don't close it (other agents depend on it).
+            # Only standard sessions own their browser and playwright instances.
+            if self.session_type != "agent":
+                if self.browser:
+                    await self.browser.close()
+                    self.browser = None
 
-            if self._playwright:
-                await self._playwright.stop()
-                self._playwright = None
+                if self._playwright:
+                    await self._playwright.stop()
+                    self._playwright = None
+            else:
+                self.browser = None  # Drop reference to shared browser
 
             self.pages.clear()
             self.active_page_id = None
@@ -345,11 +406,62 @@ class BrowserSession:
 
             return {"ok": True, "status": "stopped", "profile": self.profile}
 
+    @staticmethod
+    async def create_agent_session(
+        agent_id: str,
+        source_session: BrowserSession,
+        headless: bool = True,
+    ) -> BrowserSession:
+        """
+        Create an agent session by snapshotting a running profile's state.
+
+        Takes the source session's current cookies/localStorage via storageState
+        and stamps them into a new isolated context on the shared browser.
+        Each agent context is fully independent after creation.
+
+        Args:
+            agent_id: Unique name for this agent's session
+            source_session: Running session to snapshot state from
+            headless: Run shared browser headless (default: True)
+        """
+        if not source_session.context:
+            raise RuntimeError(
+                f"Source profile '{source_session.profile}' has no active context. "
+                f"Start it first with browser_start."
+            )
+
+        # Snapshot the source profile's cookies + localStorage in memory
+        storage_state = await source_session.context.storage_state()
+
+        # Get the shared browser (creates it on first call)
+        browser = await get_shared_browser(headless=headless)
+
+        # Create an isolated context stamped with the snapshot
+        context = await browser.new_context(
+            storage_state=storage_state,
+            viewport={"width": 1920, "height": 1080},
+            user_agent=BROWSER_USER_AGENT,
+            locale="en-US",
+        )
+        await context.add_init_script(STEALTH_SCRIPT)
+
+        session = BrowserSession(
+            profile=agent_id,
+            browser=browser,
+            context=context,
+            session_type="agent",
+        )
+        logger.info(
+            f"Created agent session '{agent_id}' from profile '{source_session.profile}'"
+        )
+        return session
+
     async def status(self) -> dict:
         """Get browser status."""
         return {
             "ok": True,
             "profile": self.profile,
+            "session_type": self.session_type,
             "running": self._is_running(),
             "persistent": self.persistent,
             "user_data_dir": str(self.user_data_dir) if self.user_data_dir else None,

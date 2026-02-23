@@ -8,9 +8,11 @@ This package provides browser automation tools for GCU nodes:
 - inspection: Page content extraction (snapshot, screenshot, console, pdf)
 - interactions: Element interactions (click, type, fill, etc.)
 - advanced: Wait, evaluate, resize, upload, dialog handling
+- agents: Create isolated agent contexts from shared profiles
 """
 
 from .advanced import register_advanced_tools
+from .agent_profile import register_agent_tools
 from .inspection import register_inspection_tools
 from .interactions import register_interaction_tools
 from .lifecycle import register_lifecycle_tools
@@ -24,4 +26,5 @@ __all__ = [
     "register_inspection_tools",
     "register_interaction_tools",
     "register_advanced_tools",
+    "register_agent_tools",
 ]

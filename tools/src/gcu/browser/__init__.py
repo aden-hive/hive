@@ -8,6 +8,7 @@ Provides comprehensive browser automation capabilities:
 - Content extraction (snapshot, screenshot, console, pdf)
 - Element interaction (click, type, fill, etc.)
 - Advanced operations (wait, evaluate, upload, dialog)
+- Agent contexts (isolated sessions spawned from shared profiles)
 
 Uses Playwright for browser automation.
 
@@ -25,11 +26,14 @@ from .session import (
     DEFAULT_NAVIGATION_TIMEOUT_MS,
     DEFAULT_TIMEOUT_MS,
     BrowserSession,
+    close_shared_browser,
     get_all_sessions,
     get_session,
+    get_shared_browser,
 )
 from .tools import (
     register_advanced_tools,
+    register_agent_tools,
     register_inspection_tools,
     register_interaction_tools,
     register_lifecycle_tools,
@@ -51,6 +55,7 @@ def register_tools(mcp: FastMCP) -> None:
                     browser_hover, browser_select, browser_scroll, browser_drag
     - Advanced: browser_wait, browser_evaluate, browser_get_text, browser_get_attribute,
                 browser_resize, browser_upload, browser_dialog
+    - Agents: browser_agent_create
     """
     register_lifecycle_tools(mcp)
     register_tab_tools(mcp)
@@ -58,6 +63,7 @@ def register_tools(mcp: FastMCP) -> None:
     register_inspection_tools(mcp)
     register_interaction_tools(mcp)
     register_advanced_tools(mcp)
+    register_agent_tools(mcp)
 
 
 __all__ = [
@@ -67,6 +73,9 @@ __all__ = [
     "BrowserSession",
     "get_session",
     "get_all_sessions",
+    # Shared browser for agent contexts
+    "get_shared_browser",
+    "close_shared_browser",
     # Constants
     "DEFAULT_TIMEOUT_MS",
     "DEFAULT_NAVIGATION_TIMEOUT_MS",
