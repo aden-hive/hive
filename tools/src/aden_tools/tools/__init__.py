@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 from .account_info_tool import register_tools as register_account_info
 from .apollo_tool import register_tools as register_apollo
 from .bigquery_tool import register_tools as register_bigquery
+from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .csv_tool import register_tools as register_csv
@@ -107,6 +108,7 @@ def register_all_tools(
     register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
+    register_brevo(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
