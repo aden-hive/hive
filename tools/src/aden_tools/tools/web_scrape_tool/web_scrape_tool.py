@@ -88,16 +88,13 @@ def register_tools(mcp: FastMCP) -> None:
                         timeout=60000,
                     )
 
-                    # Give JS a moment to render dynamic content
-                    await page.wait_for_timeout(2000)
-
+                    # Validate response before waiting for JS render
                     if response is None:
                         return {"error": "Navigation failed: no response received"}
 
                     if response.status != 200:
                         return {"error": f"HTTP {response.status}: Failed to fetch URL"}
 
-                    # Validate Content-Type
                     content_type = response.headers.get("content-type", "").lower()
                     if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
                         return {
@@ -105,6 +102,12 @@ def register_tools(mcp: FastMCP) -> None:
                             "url": url,
                             "skipped": True,
                         }
+
+                    # Wait for JS to finish rendering dynamic content
+                    try:
+                        await page.wait_for_load_state("networkidle", timeout=3000)
+                    except PlaywrightTimeout:
+                        pass  # Proceed with whatever has loaded
 
                     # Get fully rendered HTML
                     html_content = await page.content()
