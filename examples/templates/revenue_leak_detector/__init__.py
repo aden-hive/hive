@@ -21,4 +21,5 @@ __all__ = [
     "AgentMetadata",
     "default_config",
     "metadata",
+    "__version__",
 ]
