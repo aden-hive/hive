@@ -54,6 +54,23 @@ def register_tools(mcp: FastMCP) -> None:
 
                 columns = list(reader.fieldnames)
 
+                seen = set()
+                duplicates = set()
+                for col in columns:
+                    if col in seen:
+                        duplicates.add(col)
+                    seen.add(col)
+
+                if duplicates:
+                    sorted_duplicates = sorted(duplicates)
+                    return {
+                        "error": (
+                            f"Duplicate column names detected: {', '.join(sorted_duplicates)}. "
+                            "CSV file has duplicate column names which would result in data loss. "
+                            "Please ensure all column names are unique."
+                        )
+                    }
+
                 # Apply offset and limit
                 rows = []
                 for i, row in enumerate(reader):
@@ -182,6 +199,7 @@ def register_tools(mcp: FastMCP) -> None:
                 reader = csv.DictReader(f)
                 if reader.fieldnames is None:
                     return {"error": "CSV file is empty or has no headers"}
+
                 columns = list(reader.fieldnames)
 
             # Append rows

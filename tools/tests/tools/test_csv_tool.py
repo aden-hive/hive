@@ -360,6 +360,41 @@ class TestCsvRead:
         assert result["rows"] == []
         assert result["total_rows"] == 3
 
+    def test_duplicate_column_names_error(self, csv_tool_fn, session_dir, tmp_path):
+        """Return error for CSV with duplicate column names."""
+        csv_file = session_dir / "duplicate.csv"
+        csv_file.write_text("name,name,age\nAlice,Smith,30\nBob,Jones,25\n")
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="duplicate.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+            )
+
+        assert "error" in result
+        assert "duplicate column" in result["error"].lower()
+        assert "name" in result["error"]
+
+    def test_multiple_duplicate_column_names_error(self, csv_tool_fn, session_dir, tmp_path):
+        """Return error for CSV with multiple duplicate column names."""
+        csv_file = session_dir / "multi_duplicate.csv"
+        csv_file.write_text("a,a,b,b,c\n1,2,3,4,5\n")
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="multi_duplicate.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+            )
+
+        assert "error" in result
+        assert "duplicate column" in result["error"].lower()
+        assert "a" in result["error"]
+        assert "b" in result["error"]
+
 
 class TestCsvWrite:
     """Tests for csv_write function."""
