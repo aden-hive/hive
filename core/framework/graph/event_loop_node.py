@@ -94,20 +94,30 @@ class SubagentJudge:
 
     Accepts immediately when all required output keys are filled,
     regardless of whether real tool calls were also made in the same turn.
-    On RETRY, reminds the subagent of its specific task.
+    On RETRY, reminds the subagent of its specific task with progressive
+    urgency based on remaining iterations.
     """
 
-    def __init__(self, task: str):
+    def __init__(self, task: str, max_iterations: int = 10):
         self._task = task
+        self._max_iterations = max_iterations
 
     async def evaluate(self, context: dict[str, Any]) -> JudgeVerdict:
         missing = context.get("missing_keys", [])
         if not missing:
             return JudgeVerdict(action="ACCEPT")
-        return JudgeVerdict(
-            action="RETRY",
-            feedback=f"Your task: {self._task}\nMissing output keys: {missing}. Use set_output to provide them.",
-        )
+
+        iteration = context.get("iteration", 0)
+        remaining = self._max_iterations - iteration - 1
+
+        if remaining <= 3:
+            urgency = f"URGENT: Only {remaining} iterations left. Stop all other work and call set_output NOW for: {missing}"
+        elif remaining <= self._max_iterations // 2:
+            urgency = f"WARNING: {remaining} iterations remaining. You must call set_output for: {missing}"
+        else:
+            urgency = f"Missing output keys: {missing}. Use set_output to provide them."
+
+        return JudgeVerdict(action="RETRY", feedback=f"Your task: {self._task}\n{urgency}")
 
 
 # ---------------------------------------------------------------------------
@@ -883,7 +893,8 @@ class EventLoopNode(NodeProtocol):
 
             # 6i. Judge evaluation
             should_judge = (
-                (iteration + 1) % self._config.judge_every_n_turns == 0
+                ctx.is_subagent_mode  # Always evaluate subagents
+                or (iteration + 1) % self._config.judge_every_n_turns == 0
                 or not real_tool_results  # no real tool calls = natural stop
             )
 
@@ -3025,6 +3036,7 @@ class EventLoopNode(NodeProtocol):
         )
 
         # 4. Build subagent context
+        max_iter = min(self._config.max_iterations, 10)
         subagent_ctx = NodeContext(
             runtime=ctx.runtime,
             node_id=f"{ctx.node_id}:subagent:{agent_id}",
@@ -3033,7 +3045,13 @@ class EventLoopNode(NodeProtocol):
             input_data={"task": task, **parent_data},
             llm=ctx.llm,
             available_tools=subagent_tools,
-            goal_context=f"Your specific task: {task}",
+            goal_context=(
+                f"Your specific task: {task}\n\n"
+                f"COMPLETION REQUIREMENTS:\n"
+                f"When your task is done, you MUST call set_output() for each required key: {subagent_spec.output_keys}\n"
+                f"Alternatively, call report_to_parent(mark_complete=true) with your findings in message/data.\n"
+                f"You have a maximum of {max_iter} turns to complete this task."
+            ),
             goal=ctx.goal,
             max_tokens=ctx.max_tokens,
             runtime_logger=ctx.runtime_logger,
@@ -3046,9 +3064,9 @@ class EventLoopNode(NodeProtocol):
         # 5. Create and execute subagent EventLoopNode
         subagent_node = EventLoopNode(
             event_bus=None,  # Subagents don't emit events to parent's bus
-            judge=SubagentJudge(task=task),
+            judge=SubagentJudge(task=task, max_iterations=max_iter),
             config=LoopConfig(
-                max_iterations=min(self._config.max_iterations, 20),  # Limit iterations
+                max_iterations=max_iter,  # Tighter budget
                 max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
                 max_history_tokens=self._config.max_history_tokens,
                 stall_detection_threshold=self._config.stall_detection_threshold,
