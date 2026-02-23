@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Setup script for Aden Hive Framework MCP Server
-# This script installs the framework and configures the MCP server
+# Setup script for Aden Hive Framework MCP Serve
+# This script installs the framework and configures the MCP serve
 
-set -e  # Exit on error
+set -e  # Exit on erro
 
 echo "=== Aden Hive Framework MCP Server Setup ==="
 echo ""
@@ -12,7 +12,7 @@ echo ""
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m' # No Colo
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"

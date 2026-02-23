@@ -204,8 +204,8 @@ class DeepResearchAgent:
         """Set up the executor with all components."""
         from pathlib import Path
 
-        storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
-        storage_path.mkdir(parents=True, exist_ok=True)
+        self._storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
+        self._storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
 
@@ -236,8 +236,8 @@ class DeepResearchAgent:
 
         entry_point_specs = [
             EntryPointSpec(
-                id="default",
-                name="Default",
+                id="start",
+                name="Start Research",
                 entry_node=self.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
@@ -270,7 +270,7 @@ class DeepResearchAgent:
 
     async def trigger_and_wait(
         self,
-        entry_point: str = "default",
+        entry_point: str = "start",
         input_data: dict | None = None,
         timeout: float | None = None,
         session_state: dict | None = None,
@@ -292,7 +292,7 @@ class DeepResearchAgent:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
+                "start", context, session_state=session_state
             )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:

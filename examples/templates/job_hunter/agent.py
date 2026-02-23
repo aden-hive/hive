@@ -226,8 +226,8 @@ class JobHunterAgent:
 
         entry_point_specs = [
             EntryPointSpec(
-                id="default",
-                name="Default",
+                id="start",
+                name="Start Job Hunt",
                 entry_node=self.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
@@ -260,7 +260,7 @@ class JobHunterAgent:
 
     async def trigger_and_wait(
         self,
-        entry_point: str = "default",
+        entry_point: str = "start",
         input_data: dict | None = None,
         timeout: float | None = None,
         session_state: dict | None = None,
@@ -282,7 +282,7 @@ class JobHunterAgent:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
+                "start", context, session_state=session_state
             )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:

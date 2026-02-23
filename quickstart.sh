@@ -27,7 +27,7 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 DIM='\033[2m'
-NC='\033[0m' # No Color
+NC='\033[0m' # No Colo
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -199,7 +199,7 @@ else
     exit 1
 fi
 
-# Install Playwright browser
+# Install Playwright browse
 echo -n "  Installing Playwright browser... "
 if uv run python -c "import playwright" > /dev/null 2>&1; then
     if uv run python -m playwright install chromium > /dev/null 2>&1; then
@@ -409,7 +409,7 @@ else
     MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
     MODEL_DEFAULTS=("claude-opus-4-6" "gpt-5.2" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
-    # Helper: get provider display name for an env var
+    # Helper: get provider display name for an env va
     get_provider_name() {
         local env_var="$1"
         local i=0
@@ -422,7 +422,7 @@ else
         done
     }
 
-    # Helper: get provider id for an env var
+    # Helper: get provider id for an env va
     get_provider_id() {
         local env_var="$1"
         local i=0
@@ -455,7 +455,7 @@ else
     MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "GPT-5 Nano - Fastest" "Gemini 3 Flash - Fast (recommended)" "Gemini 3 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
     MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 16384 8192 8192 8192 8192 8192 8192)
 
-    # Helper: get number of model choices for a provider
+    # Helper: get number of model choices for a provide
     get_model_choice_count() {
         local provider_id="$1"
         local count=0
@@ -668,7 +668,7 @@ set -e
 FOUND_PROVIDERS=()      # Display names for UI
 FOUND_ENV_VARS=()       # Corresponding env var names
 SELECTED_PROVIDER_ID="" # Will hold the chosen provider ID
-SELECTED_ENV_VAR=""     # Will hold the chosen env var
+SELECTED_ENV_VAR=""     # Will hold the chosen env va
 SELECTED_MODEL=""       # Will hold the chosen model ID
 SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens
 SUBSCRIPTION_MODE=""    # "claude_code" | "zai_code" | ""
@@ -739,7 +739,7 @@ if [ ${#FOUND_PROVIDERS[@]} -gt 0 ]; then
     done
     echo ""
 
-    # Show all found providers + ZAI subscription + Other
+    # Show all found providers + ZAI subscription + Othe
     echo -e "${BOLD}Select your default LLM provider:${NC}"
     echo ""
 
@@ -1143,7 +1143,7 @@ echo ""
 # Success!
 # ============================================================
 
-clear
+clea
 echo ""
 echo -e "${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}${DIM}⬡${NC}${GREEN}⬢${NC}"
 echo ""
@@ -1154,7 +1154,7 @@ echo ""
 echo -e "Your environment is configured for building AI agents."
 echo ""
 
-# Show configured provider
+# Show configured provide
 if [ -n "$SELECTED_PROVIDER_ID" ]; then
     if [ -z "$SELECTED_MODEL" ]; then
         SELECTED_MODEL="$(get_default_model "$SELECTED_PROVIDER_ID")"

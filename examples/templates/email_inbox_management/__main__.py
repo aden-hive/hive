@@ -10,7 +10,7 @@ import logging
 import sys
 import click
 
-from .agent import default_agent, InboxManagementAgent
+from .agent import default_agent, EmailInboxManagementAgent
 
 
 def setup_logging(verbose=False, debug=False):
@@ -91,7 +91,7 @@ def tui(mock, verbose, debug):
     from framework.runtime.execution_stream import EntryPointSpec
 
     async def run_with_tui():
-        agent = InboxManagementAgent()
+        agent = EmailInboxManagementAgent()
 
         agent._event_bus = EventBus()
         agent._tool_registry = ToolRegistry()
@@ -196,7 +196,7 @@ async def _interactive_shell(verbose=False):
     click.echo("=== Inbox Management Agent ===")
     click.echo("Enter your triage rules (or 'quit' to exit):\n")
 
-    agent = InboxManagementAgent()
+    agent = EmailInboxManagementAgent()
     await agent.start()
 
     try:

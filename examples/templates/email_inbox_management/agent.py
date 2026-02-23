@@ -255,8 +255,8 @@ class EmailInboxManagementAgent:
         entry_point_specs = [
             # Primary entry point (user-facing)
             EntryPointSpec(
-                id="default",
-                name="Default",
+                id="start",
+                name="Start Inbox Triage",
                 entry_node=self.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
@@ -323,7 +323,7 @@ class EmailInboxManagementAgent:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
+                "start", context, session_state=session_state
             )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
