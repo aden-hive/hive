@@ -201,6 +201,10 @@ class NodeSpec(BaseModel):
         default_factory=list,
         description="Node IDs that can be invoked as subagents from this node",
     )
+    max_sub_agents: int = Field(
+        default=3,
+        description="Max concurrent subagent delegations per turn. 0 = unlimited.",
+    )
 
     # For function nodes
     function: str | None = Field(

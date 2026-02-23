@@ -1270,13 +1270,25 @@ class EventLoopNode(NodeProtocol):
 
                 elif tc.tool_name == "delegate_to_sub_agent":
                     # --- Framework-level subagent delegation ---
-                    # Queue for parallel execution in Phase 2
-                    logger.info(
-                        "🔄 LLM requesting subagent delegation: agent_id='%s', task='%s'",
-                        tc.tool_input.get("agent_id", "?"),
-                        (tc.tool_input.get("task", "")[:100] + "...") if len(tc.tool_input.get("task", "")) > 100 else tc.tool_input.get("task", ""),
-                    )
-                    pending_subagent.append(tc)
+                    max_sa = getattr(ctx.node_spec, "max_sub_agents", 3) or 0
+                    if max_sa and len(pending_subagent) >= max_sa:
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                f"Sub-agent limit reached ({max_sa} per turn). "
+                                "Wait for current sub-agents to finish before delegating more."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                    else:
+                        # Queue for parallel execution in Phase 2
+                        logger.info(
+                            "🔄 LLM requesting subagent delegation: agent_id='%s', task='%s'",
+                            tc.tool_input.get("agent_id", "?"),
+                            (tc.tool_input.get("task", "")[:100] + "...") if len(tc.tool_input.get("task", "")) > 100 else tc.tool_input.get("task", ""),
+                        )
+                        pending_subagent.append(tc)
 
                 else:
                     # --- Real tool: check for truncated args, else queue ---
