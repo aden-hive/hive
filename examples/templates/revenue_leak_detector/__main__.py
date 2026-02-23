@@ -43,7 +43,7 @@ def run(mock, quiet, verbose, debug):
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 
-    result = asyncio.run(default_agent.run({"cycle": "0"}, mock_mode=mock))
+    result = asyncio.run(default_agent.run({"cycle": 0}, mock_mode=mock))
 
     output_data = {
         "success": result.success,

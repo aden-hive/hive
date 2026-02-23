@@ -80,16 +80,16 @@ def _fetch_hubspot_contact_emails(headers: dict, deal_ids: list) -> dict:
                 email = cr.json().get("properties", {}).get("email", "")
                 if email:
                     result[str(deal_id)] = email
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[HubSpot] contact batch fetch error (partial results returned): {exc}")
     return result
 
 
 def _fetch_hubspot_deals() -> "dict | None":
     """
     Pull open deals from HubSpot CRM v3 API and return a pipeline snapshot
-    dict (same shape as _PIPELINE_DB entries), or None when HUBSPOT_API_KEY
-    is absent / the request fails — caller then falls back to _PIPELINE_DB.
+    dict, or None when HUBSPOT_API_KEY is absent / the request fails —
+    caller then falls back to an empty snapshot.
 
     Required env var:
       HUBSPOT_API_KEY  — Private App token from HubSpot:
@@ -143,8 +143,8 @@ def _fetch_hubspot_deals() -> "dict | None":
                 try:
                     dt = datetime.fromisoformat(last_mod.replace("Z", "+00:00"))
                     days_inactive = max(0, (now - dt).days)
-                except Exception:
-                    pass
+                except (ValueError, OverflowError):
+                    pass  # malformed or out-of-range timestamp — default to 0
 
             value = 0
             try:
@@ -212,7 +212,7 @@ def _scan_pipeline(cycle: int) -> dict:
 
     _cycle_data_var.set(data)
 
-    source = data.get("_source", "simulated")
+    source = data.get("_source", "offline")
     print(
         f"\n[scan_pipeline] Cycle {next_cycle} [{source}] — "
         f"{len(data['deals'])} deals | "
@@ -247,7 +247,18 @@ def _detect_revenue_leaks(cycle: int) -> dict:
         total_at_risk   — USD value at risk across all leaks
         halt            — True when severity reaches critical
     """
-    data = _cycle_data_var.get()
+    try:
+        data = _cycle_data_var.get()
+    except LookupError:
+        # scan_pipeline must be called before detect_revenue_leaks each cycle
+        return {
+            "cycle": int(cycle),
+            "leak_count": 0,
+            "severity": "low",
+            "total_at_risk": 0,
+            "halt": False,
+            "warning": "No pipeline data — call scan_pipeline first",
+        }
     leaks: list[dict] = []
 
     # ---- Deal-level leak detection ----
@@ -312,8 +323,9 @@ def _detect_revenue_leaks(cycle: int) -> dict:
     _leaks_var.set(leaks)
 
     # ---- Severity calculation ----
-    total_at_risk = sum(l.get("value", l.get("amount", 0)) for l in leaks)
-    critical_signals = [l for l in leaks if l["type"] in ("GHOSTED", "CHURN_RISK")]
+    # int() cast ensures consistent type regardless of float deal values from HubSpot
+    total_at_risk = int(sum(leak.get("value", leak.get("amount", 0)) for leak in leaks))
+    critical_signals = [leak for leak in leaks if leak["type"] in ("GHOSTED", "CHURN_RISK")]
 
     if len(critical_signals) >= 2 or total_at_risk >= 50000:
         severity = "critical"
@@ -463,7 +475,8 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
     sev = str(severity).lower()
     severity_emoji = _SEVERITY_EMOJI.get(sev, "⚪")
 
-    leaks = _leaks_var.get()
+    # _leaks_var.get([]) — [] is a fresh object each call (safe, not a shared default)
+    leaks = _leaks_var.get([])
 
     # ---- Console report (always printed) ----
     border = "═" * 64
@@ -562,7 +575,7 @@ def _send_followup_emails(cycle: int) -> dict:
         contacts_emailed: list of contact names
         delivery_method:  "gmail" | "console"
     """
-    ghosted = [l for l in _leaks_var.get() if l.get("type") == "GHOSTED"]
+    ghosted = [leak for leak in _leaks_var.get([]) if leak.get("type") == "GHOSTED"]
 
     if not ghosted:
         print(f"\n[send_followup_emails] Cycle {cycle} — no GHOSTED contacts, skipping.")
@@ -615,6 +628,7 @@ def _send_followup_emails(cycle: int) -> dict:
 
                 print(f"  ✅  Sent to {contact} <{to_email}>")
                 method = "gmail"
+                sent.append(contact)  # only count successful sends
             except Exception as exc:
                 print(f"  ⚠️   Gmail failed for {contact}: {exc}")
                 print(f"  📋  [DRY-RUN] To: {to_email}  |  {subject}")
@@ -623,8 +637,7 @@ def _send_followup_emails(cycle: int) -> dict:
             print(f"  📋  [DRY-RUN] To      : {label}")
             print(f"       Subject : {subject}")
             print(f"       Preview : {body[:100].strip()}...")
-
-        sent.append(contact)
+            sent.append(contact)  # dry-run counts as processed
 
     print(f"\n  Total: {len(sent)} followup(s)  |  method={method}")
     print(f"{border}")
@@ -724,15 +737,18 @@ TOOLS: dict[str, Tool] = {
 # Unified tool executor — dispatches to private handler functions
 # ---------------------------------------------------------------------------
 
+# Built once at import time — never changes, no need to recreate per call
+_TOOL_HANDLERS: dict[str, Any] = {
+    "scan_pipeline":        _scan_pipeline,
+    "detect_revenue_leaks": _detect_revenue_leaks,
+    "send_revenue_alert":   _send_revenue_alert,
+    "send_followup_emails": _send_followup_emails,
+}
+
+
 def tool_executor(tool_use: ToolUse) -> ToolResult:
     """Dispatch a ToolUse to the correct handler and return a JSON ToolResult."""
-    _handlers: dict[str, Any] = {
-        "scan_pipeline":       _scan_pipeline,
-        "detect_revenue_leaks": _detect_revenue_leaks,
-        "send_revenue_alert":  _send_revenue_alert,
-        "send_followup_emails": _send_followup_emails,
-    }
-    handler = _handlers.get(tool_use.name)
+    handler = _TOOL_HANDLERS.get(tool_use.name)
     if handler is None:
         return ToolResult(
             tool_use_id=tool_use.id,
