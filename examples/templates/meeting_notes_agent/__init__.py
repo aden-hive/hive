@@ -9,7 +9,7 @@ Usage:
     hive run examples/templates/meeting_notes_agent --tui
 """
 
-from .agent import (
+from .nodes import (
     MeetingNotesOutput,
     ActionItem,
     validate_input,
@@ -19,6 +19,17 @@ from .agent import (
     post_to_slack,
     compile_final_output,
     handle_error,
+)
+from .agent import (
+    MeetingNotesAgent,
+    default_agent,
+    goal,
+    nodes,
+    edges,
+    entry_node,
+    entry_points,
+    pause_nodes,
+    terminal_nodes,
 )
 
 __all__ = [
@@ -31,4 +42,13 @@ __all__ = [
     "post_to_slack",
     "compile_final_output",
     "handle_error",
+    "MeetingNotesAgent",
+    "default_agent",
+    "goal",
+    "nodes",
+    "edges",
+    "entry_node",
+    "entry_points",
+    "pause_nodes",
+    "terminal_nodes",
 ]
