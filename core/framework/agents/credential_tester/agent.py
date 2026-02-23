@@ -1,7 +1,8 @@
-"""Credential Tester agent — verify synced credentials via live API calls.
+"""Credential Tester agent — verify credentials via live API calls.
 
-A framework agent that lets the user pick a connected account and test it
-by making real API calls via the provider's tools.
+Supports both Aden OAuth2-synced accounts AND locally-stored API key accounts.
+Aden accounts use account="alias" routing; local accounts inject the key into
+the session environment so tools read it without an account= parameter.
 
 When loaded via AgentRunner.load() (TUI picker, ``hive run``), the module-level
 ``nodes`` / ``edges`` variables provide a static graph.  The TUI detects
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
 goal = Goal(
     id="credential-tester",
     name="Credential Tester",
-    description="Verify that a synced credential can make real API calls.",
+    description="Verify that a credential can make real API calls.",
     success_criteria=[
         SuccessCriterion(
             id="api-call-success",
@@ -59,51 +60,148 @@ goal = Goal(
 
 
 def get_tools_for_provider(provider_name: str) -> list[str]:
-    """Collect tool names for a specific Aden credential by credential_id.
+    """Collect tool names for a credential by credential_id OR credential_group.
 
-    Matches on ``credential_id`` (e.g. "google" → Gmail tools only),
-    NOT ``aden_provider_name`` which can be shared across products
-    (e.g. both google and google_docs have aden_provider_name="google").
+    Matches on both ``credential_id`` (e.g. "google" → Gmail tools) and
+    ``credential_group`` (e.g. "google_custom_search" → all google search tools).
     """
     from aden_tools.credentials import CREDENTIAL_SPECS
 
     tools: list[str] = []
     for spec in CREDENTIAL_SPECS.values():
-        if spec.credential_id == provider_name:
+        if spec.credential_id == provider_name or spec.credential_group == provider_name:
             tools.extend(spec.tools)
     return sorted(set(tools))
 
 
-def list_connected_accounts() -> list[dict]:
-    """List connected accounts from GET /v1/credentials."""
+def _list_aden_accounts() -> list[dict]:
+    """List active accounts from the Aden platform (requires ADEN_API_KEY)."""
     import os
-
-    from framework.credentials.aden.client import AdenClientConfig, AdenCredentialClient
 
     api_key = os.environ.get("ADEN_API_KEY")
     if not api_key:
         return []
 
-    client = AdenCredentialClient(
-        AdenClientConfig(
-            base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
-        )
-    )
     try:
-        integrations = client.list_integrations()
-    finally:
-        client.close()
+        from framework.credentials.aden.client import AdenClientConfig, AdenCredentialClient
 
-    return [
-        {
-            "provider": c.provider,
-            "alias": c.alias,
-            "identity": {"email": c.email} if c.email else {},
-            "integration_id": c.integration_id,
-        }
-        for c in integrations
-        if c.status == "active"
+        client = AdenCredentialClient(
+            AdenClientConfig(
+                base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
+            )
+        )
+        try:
+            integrations = client.list_integrations()
+        finally:
+            client.close()
+
+        return [
+            {
+                "provider": c.provider,
+                "alias": c.alias,
+                "identity": {"email": c.email} if c.email else {},
+                "integration_id": c.integration_id,
+                "source": "aden",
+            }
+            for c in integrations
+            if c.status == "active"
+        ]
+    except Exception:
+        return []
+
+
+def _list_local_accounts() -> list[dict]:
+    """List named local API key accounts from LocalCredentialRegistry."""
+    try:
+        from framework.credentials.local.registry import LocalCredentialRegistry
+
+        return [
+            info.to_account_dict()
+            for info in LocalCredentialRegistry.default().list_accounts()
+        ]
+    except Exception:
+        return []
+
+
+def _list_env_fallback_accounts() -> list[dict]:
+    """Surface configured-but-unregistered credentials as testable entries.
+
+    Detects credentials available via env vars OR stored in the encrypted
+    store in the old flat format (e.g. ``brave_search`` with no alias).
+    These are users who haven't yet run ``save_account()`` but have a working key.
+    Shows with alias="default" and status="unknown".
+    """
+    import os
+
+    from aden_tools.credentials import CREDENTIAL_SPECS
+
+    # Collect IDs in encrypted store (includes old flat entries like "brave_search")
+    try:
+        from framework.credentials.storage import EncryptedFileStorage
+
+        encrypted_ids: set[str] = set(EncryptedFileStorage().list_all())
+    except Exception:
+        encrypted_ids = set()
+
+    def _is_configured(cred_name: str, spec) -> bool:
+        # 1. Env var present
+        if os.environ.get(spec.env_var):
+            return True
+        # 2. Old flat encrypted entry (no slash — new entries have {x}/{y})
+        if cred_name in encrypted_ids:
+            return True
+        return False
+
+    seen_groups: set[str] = set()
+    accounts: list[dict] = []
+
+    for cred_name, spec in CREDENTIAL_SPECS.items():
+        if not spec.direct_api_key_supported or not spec.tools:
+            continue
+
+        if spec.credential_group:
+            if spec.credential_group in seen_groups:
+                continue
+            group_available = all(
+                _is_configured(n, s)
+                for n, s in CREDENTIAL_SPECS.items()
+                if s.credential_group == spec.credential_group
+            )
+            if not group_available:
+                continue
+            seen_groups.add(spec.credential_group)
+            provider = spec.credential_group
+        else:
+            if not _is_configured(cred_name, spec):
+                continue
+            provider = cred_name
+
+        accounts.append(
+            {
+                "provider": provider,
+                "alias": "default",
+                "identity": {},
+                "integration_id": None,
+                "source": "local",
+                "status": "unknown",
+            }
+        )
+
+    return accounts
+
+
+def list_connected_accounts() -> list[dict]:
+    """List all testable accounts: Aden-synced + named local + env-var fallbacks."""
+    aden = _list_aden_accounts()
+    local = _list_local_accounts()
+
+    # Show env-var fallbacks only for credentials not already in the named registry
+    local_providers = {a["provider"] for a in local}
+    env_fallbacks = [
+        a for a in _list_env_fallback_accounts() if a["provider"] not in local_providers
     ]
+
+    return aden + local + env_fallbacks
 
 
 # ---------------------------------------------------------------------------
@@ -123,22 +221,101 @@ requires_account_selection = True
 def configure_for_account(runner: AgentRunner, account: dict) -> None:
     """Scope the tester node's tools to the selected provider.
 
-    Called by the TUI after the user picks an account from the picker.
-    After scoping, re-enables credential validation so the selected
-    provider's credentials are checked before the agent starts.
+    Handles both Aden accounts (account= routing) and local accounts
+    (session-level env var injection, no account= parameter in prompt).
     """
     provider = account["provider"]
-    tools = get_tools_for_provider(provider)
-    tools.append("get_account_info")
-
+    source = account.get("source", "aden")
     alias = account.get("alias", "unknown")
-    email = account.get("identity", {}).get("email", "")
-    detail = f" (email: {email})" if email else ""
+    identity = account.get("identity", {})
+    tools = get_tools_for_provider(provider)
 
+    if source == "aden":
+        tools.append("get_account_info")
+        email = identity.get("email", "")
+        detail = f" (email: {email})" if email else ""
+        _configure_aden_node(runner, provider, alias, detail, tools)
+    else:
+        status = account.get("status", "unknown")
+        _activate_local_account(provider, alias)
+        _configure_local_node(runner, provider, alias, identity, tools, status)
+
+
+def _activate_local_account(credential_id: str, alias: str) -> None:
+    """Inject a named local account's key into the session environment.
+
+    Handles three cases:
+    1. Named account in LocalCredentialRegistry (new format: {credential_id}/{alias})
+    2. Old flat credential in EncryptedFileStorage (id == credential_id, no alias)
+    3. Env var already set — skip injection (nothing to do)
+    """
+    import os
+
+    from aden_tools.credentials import CREDENTIAL_SPECS
+
+    # Collect specs for this credential (handles grouped credentials too)
+    group_specs = [
+        (cred_name, spec)
+        for cred_name, spec in CREDENTIAL_SPECS.items()
+        if spec.credential_group == credential_id or spec.credential_id == credential_id
+        or cred_name == credential_id
+    ]
+    # Deduplicate — credential_id and credential_group may both match the same spec
+    seen_env_vars: set[str] = set()
+
+    try:
+        from framework.credentials.local.registry import LocalCredentialRegistry
+        from framework.credentials.storage import EncryptedFileStorage
+
+        registry = LocalCredentialRegistry.default()
+        flat_storage = EncryptedFileStorage()
+
+        for cred_name, spec in group_specs:
+            if spec.env_var in seen_env_vars:
+                continue
+            # If env var is already set, nothing to do for this one
+            if os.environ.get(spec.env_var):
+                seen_env_vars.add(spec.env_var)
+                continue
+
+            seen_env_vars.add(spec.env_var)
+
+            # Determine key name based on spec
+            key_name = "api_key"
+            if spec.credential_group and "cse" in spec.env_var.lower():
+                key_name = "cse_id"
+
+            key: str | None = None
+
+            # 1. Try named account in registry (new format)
+            if alias != "default":
+                key = registry.get_key(credential_id, alias, key_name)
+            else:
+                # For "default" alias, check registry first, then fall back to flat store
+                key = registry.get_key(credential_id, "default", key_name)
+
+            # 2. Fall back to old flat encrypted entry (id == credential_id, no alias)
+            if key is None:
+                flat_cred = flat_storage.load(credential_id)
+                if flat_cred is not None:
+                    key = flat_cred.get_key(key_name) or flat_cred.get_default_key()
+
+            if key:
+                os.environ[spec.env_var] = key
+    except Exception:
+        pass
+
+
+def _configure_aden_node(
+    runner: AgentRunner,
+    provider: str,
+    alias: str,
+    detail: str,
+    tools: list[str],
+) -> None:
     for node in runner.graph.nodes:
         if node.id == "tester":
             node.tools = sorted(set(tools))
-            # Update system prompt to be provider-specific
             node.system_prompt = f"""\
 You are a credential tester for the account: {provider}/{alias}{detail}
 
@@ -165,19 +342,60 @@ or any other identifier — always use the alias exactly as shown.
 """
             break
 
-    # Set intro message for TUI display
     runner.intro_message = (
         f"Testing {provider}/{alias}{detail} — "
         f"{len(tools)} tools loaded. "
-        f"I'll suggest a read-only API call to verify the credential works."
+        "I'll suggest a read-only API call to verify the credential works."
+    )
+
+
+def _configure_local_node(
+    runner: AgentRunner,
+    provider: str,
+    alias: str,
+    identity: dict,
+    tools: list[str],
+    status: str,
+) -> None:
+    identity_parts = [f"{k}: {v}" for k, v in identity.items() if v]
+    detail = f" ({', '.join(identity_parts)})" if identity_parts else ""
+    status_note = " [key not yet validated]" if status == "unknown" else ""
+
+    for node in runner.graph.nodes:
+        if node.id == "tester":
+            node.tools = sorted(set(tools))
+            node.system_prompt = f"""\
+You are a credential tester for the local API key: {provider}/{alias}{detail}{status_note}
+
+# Instructions
+
+1. Suggest a simple test call to verify the credential works \
+(e.g. search for "test", list items, get profile info).
+2. Execute the call when the user agrees.
+3. Report the result: success (with sample data) or failure (with error).
+4. Let the user request additional API calls to further test the credential.
+
+# Rules
+
+- Do NOT pass an `account` parameter — this credential is injected \
+directly into the session environment and tools read it automatically.
+- Start with read-only operations before write operations.
+- Always confirm with the user before performing write operations.
+- If a call fails, report the exact error — this helps diagnose credential issues.
+- Be concise. No emojis.
+"""
+            break
+
+    runner.intro_message = (
+        f"Testing {provider}/{alias}{detail} — "
+        f"{len(tools)} tools loaded. "
+        "I'll suggest a test API call to verify the credential works."
     )
 
 
 # ---------------------------------------------------------------------------
 # Module-level graph variables (read by AgentRunner.load)
 # ---------------------------------------------------------------------------
-# The static node starts with minimal tools. configure_for_account() scopes
-# it to the selected provider's tools before execution.
 
 nodes = [
     NodeSpec(
@@ -195,7 +413,7 @@ nodes = [
         tools=["get_account_info"],
         system_prompt="""\
 You are a credential tester. Your job is to help the user verify that their \
-connected accounts can make real API calls.
+connected accounts and API keys can make real API calls.
 
 # Startup
 
@@ -208,12 +426,11 @@ connected accounts can make real API calls.
 6. Report the result: success (with sample data) or failure (with error).
 7. Let the user request additional API calls to further test the credential.
 
-# Account routing
+# Account routing (Aden accounts only)
 
-IMPORTANT: Always pass the account's **alias** as the ``account`` parameter \
-when calling any tool. The alias is the routing key — never use the email or \
-any other identifier. For example, if the alias is "Timothy", call \
-``gmail_list_messages(account="Timothy", ...)``.
+IMPORTANT: For Aden-synced accounts, always pass the account's **alias** as the \
+``account`` parameter when calling any tool. For local API key accounts, do NOT \
+pass an account parameter — they are pre-injected into the session.
 
 # Rules
 
@@ -234,7 +451,8 @@ terminal_nodes = []  # Forever-alive: loops until user exits
 
 conversation_mode = "continuous"
 identity_prompt = (
-    "You are a credential tester that verifies connected accounts can make real API calls."
+    "You are a credential tester that verifies connected accounts and API keys "
+    "can make real API calls."
 )
 loop_config = {
     "max_iterations": 50,
@@ -255,7 +473,6 @@ class CredentialTesterAgent:
         accounts = agent.list_accounts()
         agent.select_account(accounts[0])
         await agent.start()
-        # ... user chats via TUI or CLI ...
         await agent.stop()
     """
 
@@ -267,7 +484,7 @@ class CredentialTesterAgent:
         self._storage_path: Path | None = None
 
     def list_accounts(self) -> list[dict]:
-        """List connected accounts from the Aden credential store."""
+        """List all testable accounts (Aden + local named + env-var fallbacks)."""
         return list_connected_accounts()
 
     def select_account(self, account: dict) -> None:
@@ -275,7 +492,7 @@ class CredentialTesterAgent:
 
         Args:
             account: Account dict from list_accounts() with
-                     provider, alias, identity keys.
+                     provider, alias, identity, source keys.
         """
         self._selected_account = account
 
@@ -294,14 +511,21 @@ class CredentialTesterAgent:
     def _build_graph(self) -> GraphSpec:
         provider = self.selected_provider
         alias = self.selected_alias
+        source = self._selected_account.get("source", "aden")
         identity = self._selected_account.get("identity", {})
         tools = get_tools_for_provider(provider)
+
+        if source == "local":
+            _activate_local_account(provider, alias)
+        elif source == "aden":
+            tools.append("get_account_info")
 
         tester_node = build_tester_node(
             provider=provider,
             alias=alias,
             tools=tools,
             identity=identity,
+            source=source,
         )
 
         return GraphSpec(
