@@ -201,7 +201,12 @@ def _scan_pipeline(cycle: int) -> dict:
         overdue_invoices — number of overdue invoices
         support_escalations — open support tickets needing action
     """
-    next_cycle = int(float(cycle)) + 1
+    # Handle missing or empty cycle value safely
+    try:
+        cycle_num = int(float(cycle or 0))
+    except (ValueError, TypeError):
+        cycle_num = 0
+    next_cycle = cycle_num + 1
 
     # Initialize fresh session state — must happen before any reads this cycle
     _cycle_data_var.set({})
@@ -252,12 +257,18 @@ def _detect_revenue_leaks(cycle: int) -> dict:
         total_at_risk   — USD value at risk across all leaks
         halt            — True when severity reaches critical
     """
+    # Handle missing or empty cycle value safely
+    try:
+        cycle_num = int(float(cycle or 0))
+    except (ValueError, TypeError):
+        cycle_num = 0
+
     try:
         data = _cycle_data_var.get()
     except LookupError:
         # scan_pipeline must be called before detect_revenue_leaks each cycle
         return {
-            "cycle": int(float(cycle)),
+            "cycle": cycle_num,
             "leak_count": 0,
             "severity": "low",
             "total_at_risk": 0,
@@ -269,46 +280,54 @@ def _detect_revenue_leaks(cycle: int) -> dict:
     # ---- Deal-level leak detection ----
     for deal in data.get("deals", []):
         days = deal.get("days_inactive", 0)
+        deal_id = deal.get("id", "")
+        contact = deal.get("contact", "Unknown Deal")
+        value = deal.get("value", 0)
+        stage = deal.get("stage", "Unknown Stage")
         if days >= 21:
             leaks.append({
                 "type": "GHOSTED",
-                "deal_id": deal["id"],
-                "contact": deal["contact"],
+                "deal_id": deal_id,
+                "contact": contact,
                 "email": deal.get("email", ""),
-                "value": deal["value"],
+                "value": value,
                 "days_inactive": days,
-                "stage": deal["stage"],
+                "stage": stage,
                 "recommendation": (
-                    f"Send re-engagement sequence to {deal['contact']} immediately. "
+                    f"Send re-engagement sequence to {contact} immediately. "
                     f"Deal has been silent for {days} days."
                 ),
             })
         elif days >= 10:
             leaks.append({
                 "type": "STALLED",
-                "deal_id": deal["id"],
-                "contact": deal["contact"],
+                "deal_id": deal_id,
+                "contact": contact,
                 "email": deal.get("email", ""),
-                "value": deal["value"],
+                "value": value,
                 "days_inactive": days,
-                "stage": deal["stage"],
+                "stage": stage,
                 "recommendation": (
-                    f"Schedule an unblocking call with {deal['contact']} — "
-                    f"stuck in '{deal['stage']}' for {days} days."
+                    f"Schedule an unblocking call with {contact} — "
+                    f"stuck in '{stage}' for {days} days."
                 ),
             })
 
     # ---- Invoice-level leak detection ----
     for payment in data.get("overdue_payments", []):
+        invoice_id = payment.get("id", "")
+        client = payment.get("client", "Unknown Client")
+        amount = payment.get("amount", 0)
+        days_overdue = payment.get("days_overdue", 0)
         leaks.append({
             "type": "OVERDUE_PAYMENT",
-            "invoice_id": payment["id"],
-            "client": payment["client"],
-            "amount": payment["amount"],
-            "days_overdue": payment["days_overdue"],
+            "invoice_id": invoice_id,
+            "client": client,
+            "amount": amount,
+            "days_overdue": days_overdue,
             "recommendation": (
-                f"Escalate {payment['id']} (${payment['amount']:,}) to Finance — "
-                f"{payment['days_overdue']} days overdue."
+                f"Escalate {invoice_id} (${amount:,}) to Finance — "
+                f"{days_overdue} days overdue."
             ),
         })
 
@@ -329,7 +348,8 @@ def _detect_revenue_leaks(cycle: int) -> dict:
 
     # ---- Severity calculation ----
     # int() cast ensures consistent type regardless of float deal values from HubSpot
-    total_at_risk = int(sum(leak.get("value", leak.get("amount", 0)) for leak in leaks))
+    # Use .get("value") first, fallback to .get("amount", 0) for overdue payments
+    total_at_risk = int(sum(leak.get("value", leak.get("amount") if "amount" in leak else 0) for leak in leaks))
     critical_signals = [leak for leak in leaks if leak["type"] in ("GHOSTED", "CHURN_RISK")]
 
     if len(critical_signals) >= 2 or total_at_risk >= 50000:
@@ -343,19 +363,19 @@ def _detect_revenue_leaks(cycle: int) -> dict:
         halt = False
     else:
         severity = "low"
-        halt = int(float(cycle)) >= MAX_CYCLES  # stop after MAX_CYCLES with no leaks
+        halt = cycle_num >= MAX_CYCLES  # stop after MAX_CYCLES with no leaks
 
     # Absolute cycle cap — prevent infinite loops when severity stays medium/high
-    if not halt and int(float(cycle)) >= MAX_TOTAL_CYCLES:
+    if not halt and cycle_num >= MAX_TOTAL_CYCLES:
         halt = True
 
     print(
-        f"[detect_revenue_leaks] Cycle {cycle} — "
+        f"[detect_revenue_leaks] Cycle {cycle_num} — "
         f"{len(leaks)} leaks | severity={severity} | at_risk=${total_at_risk:,} | halt={halt}"
     )
 
     return {
-        "cycle": int(float(cycle)),
+        "cycle": cycle_num,
         "leak_count": len(leaks),
         "severity": severity,
         "total_at_risk": total_at_risk,
@@ -431,17 +451,17 @@ def _build_telegram_message(
     else:
         esc = _html.escape  # guard against & < > in CRM data
         for i, leak in enumerate(leaks, 1):
-            t = leak.get("type", "UNKNOWN")
+            t = esc(leak.get("type", "UNKNOWN"))
             lines.append(f"<b>[{i}] {t}</b>")
             if t in ("GHOSTED", "STALLED"):
                 lines.append(f"  Deal    : {esc(str(leak.get('deal_id', '')))} ({esc(str(leak.get('contact', '')))})")
-                lines.append(f"  Stage   : {esc(str(leak.get('stage', '')))}  |  Inactive {leak.get('days_inactive')}d")
+                lines.append(f"  Stage   : {esc(str(leak.get('stage', '')))}  |  Inactive {esc(str(leak.get('days_inactive', 0)))}d")
                 lines.append(f"  Value   : ${leak.get('value', 0):,}")
             elif t == "OVERDUE_PAYMENT":
                 lines.append(f"  Invoice : {esc(str(leak.get('invoice_id', '')))} ({esc(str(leak.get('client', '')))})")
-                lines.append(f"  Amount  : ${leak.get('amount', 0):,}  |  {leak.get('days_overdue')}d overdue")
+                lines.append(f"  Amount  : ${leak.get('amount', 0):,}  |  {esc(str(leak.get('days_overdue', 0)))}d overdue")
             elif t == "CHURN_RISK":
-                lines.append(f"  Open escalations: {leak.get('escalations')}")
+                lines.append(f"  Open escalations: {esc(str(leak.get('escalations', 0)))}")
             lines.append(f"  ➜ {esc(str(leak.get('recommendation', '')))}")
             lines.append("")
 
@@ -490,10 +510,16 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
 
     # ---- Console report (always printed) ----
     border = "═" * 64
-    thin   = "─" * 64
+    thin = "─" * 64
+
+    # Handle empty/invalid cycle safely
+    try:
+        cycle_num = int(float(cycle or 0))
+    except (ValueError, TypeError):
+        cycle_num = 0
 
     print(f"\n{border}")
-    print(f"  💰  REVENUE LEAK DETECTOR  ·  Cycle {int(float(cycle))} Report")
+    print(f"  💰  REVENUE LEAK DETECTOR  ·  Cycle {cycle_num} Report")
     print(f"{border}")
     print(f"  Severity        : {severity_emoji}  {sev.upper()}")
     print(f"  Leaks Detected  : {int(float(leak_count))}")
@@ -507,17 +533,17 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
             leak_type = leak.get("type", "UNKNOWN")
             print(f"\n  [{i}]  {leak_type}")
             if leak_type in ("GHOSTED", "STALLED"):
-                print(f"        Deal     :  {leak.get('deal_id')}  ({leak.get('contact')})")
-                print(f"        Stage    :  {leak.get('stage')}")
-                print(f"        Inactive :  {leak.get('days_inactive')} days")
+                print(f"        Deal     :  {leak.get('deal_id', '')}  ({leak.get('contact', '')})")
+                print(f"        Stage    :  {leak.get('stage', '')}")
+                print(f"        Inactive :  {leak.get('days_inactive', 0)} days")
                 print(f"        Value    :  ${leak.get('value', 0):,}")
             elif leak_type == "OVERDUE_PAYMENT":
-                print(f"        Invoice  :  {leak.get('invoice_id')}  ({leak.get('client')})")
+                print(f"        Invoice  :  {leak.get('invoice_id', '')}  ({leak.get('client', '')})")
                 print(f"        Amount   :  ${leak.get('amount', 0):,}")
-                print(f"        Overdue  :  {leak.get('days_overdue')} days")
+                print(f"        Overdue  :  {leak.get('days_overdue', 0)} days")
             elif leak_type == "CHURN_RISK":
-                print(f"        Open Escalations :  {leak.get('escalations')}")
-            print(f"        ➜  {leak.get('recommendation')}")
+                print(f"        Open Escalations :  {leak.get('escalations', 0)}")
+            print(f"        ➜  {leak.get('recommendation', '')}")
 
     print(f"\n{thin}")
     if sev == "critical":
@@ -533,7 +559,7 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
 
     # ---- Real Telegram delivery ----
     tg_message = _build_telegram_message(
-        cycle=int(float(cycle)),
+        cycle=cycle_num,
         severity=severity,
         leak_count=int(float(leak_count)),
         total_at_risk=int(float(total_at_risk)),
@@ -551,7 +577,7 @@ def _send_revenue_alert(cycle: int, leak_count: int, severity: str, total_at_ris
 
     return {
         "sent": True,
-        "cycle": int(float(cycle)),
+        "cycle": cycle_num,
         "severity": severity,
         "leaks_reported": int(float(leak_count)),
         "total_at_risk_usd": int(float(total_at_risk)),
@@ -584,30 +610,40 @@ def _send_followup_emails(cycle: int) -> dict:
         emails_sent:      number of emails dispatched (or dry-run previewed)
         contacts_emailed: list of contact names
         delivery_method:  "gmail" | "console" | "none"
+        emails_failed:    number of email send failures (when Gmail enabled)
     """
+    # Handle empty/invalid cycle safely
+    try:
+        cycle_num = int(float(cycle or 0))
+    except (ValueError, TypeError):
+        cycle_num = 0
+
     ghosted = [leak for leak in _leaks_var.get([]) if leak.get("type") == "GHOSTED"]
 
     if not ghosted:
-        print(f"\n[send_followup_emails] Cycle {int(float(cycle))} — no GHOSTED contacts, skipping.")
-        return {"emails_sent": 0, "contacts_emailed": [], "delivery_method": "none"}
+        print(f"\n[send_followup_emails] Cycle {cycle_num} — no GHOSTED contacts, skipping.")
+        return {"emails_sent": 0, "contacts_emailed": [], "delivery_method": "none", "emails_failed": 0}
 
     gmail_user = os.getenv("GMAIL_USER", "").strip()
     gmail_pass = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+    gmail_enabled = bool(gmail_user and gmail_pass)
 
-    sent:   list[str] = []
-    method: str       = "console"
+    sent: list[str] = []
+    dry_run_contacts: list[str] = []
+    failed: list[str] = []
+    method: str = "console"
     border = "─" * 64
 
     print(f"\n{border}")
-    print(f"  ✉️   FOLLOWUP EMAILS  ·  Cycle {int(float(cycle))}")
+    print(f"  ✉️   FOLLOWUP EMAILS  ·  Cycle {cycle_num}")
     print(f"{border}")
 
     for leak in ghosted:
-        contact  = leak["contact"]
+        contact = leak.get("contact", "Unknown Contact")
         to_email = leak.get("email", "")
-        days     = leak.get("days_inactive", 0)
-        value    = leak.get("value", 0)
-        deal_id  = leak.get("deal_id", "")
+        days = leak.get("days_inactive", 0)
+        value = leak.get("value", 0)
+        deal_id = leak.get("deal_id", "")
 
         subject = f"Re: {deal_id} — Checking in with {contact}"
         body = (
@@ -617,18 +653,18 @@ def _send_followup_emails(cycle: int) -> dict:
             f"We believe our solution could deliver real value for your team. "
             f"Could we find 15 minutes this week to reconnect?\n\n"
             f"Best regards,\nSales Team\n\n"
-            f"Deal ref: {deal_id}  |  Value: ${value:,}"
+            f"Deal ref: {deal_id}  |  Value: ${int(value):,}"
         )
 
-        if gmail_user and gmail_pass and to_email:
+        if gmail_enabled and to_email:
             try:
                 import smtplib
                 from email.mime.multipart import MIMEMultipart
                 from email.mime.text import MIMEText
 
                 msg = MIMEMultipart()
-                msg["From"]    = gmail_user
-                msg["To"]      = to_email
+                msg["From"] = gmail_user
+                msg["To"] = to_email
                 msg["Subject"] = subject
                 msg.attach(MIMEText(body, "plain"))
 
@@ -637,30 +673,39 @@ def _send_followup_emails(cycle: int) -> dict:
                     server.sendmail(gmail_user, to_email, msg.as_string())
 
                 print(f"  ✅  Sent to {contact} <{to_email}>")
+                sent.append(contact)
                 method = "gmail"
-                sent.append(contact)  # only count successful sends
             except Exception as exc:
                 print(f"  ⚠️   Gmail failed for {contact}: {exc}")
                 print(f"  📋  [DRY-RUN] To: {to_email}  |  {subject}")
+                failed.append(contact)
+                dry_run_contacts.append(contact)
         else:
             label = to_email if to_email else "(no email — set HUBSPOT_API_KEY to fetch from CRM)"
             print(f"  📋  [DRY-RUN] To      : {label}")
             print(f"       Subject : {subject}")
             print(f"       Preview : {body[:100].strip()}...")
-            sent.append(contact)  # dry-run counts as processed
+            dry_run_contacts.append(contact)
+            method = "console"
 
-    print(f"\n  Total: {len(sent)} followup(s)  |  method={method}")
+    # Determine final counts based on delivery method
+    emails_sent_count = len(sent) if gmail_enabled else len(dry_run_contacts)
+
+    print(f"\n  Total: {emails_sent_count} followup(s)  |  method={method}")
+    if gmail_enabled and failed:
+        print(f"  Failed: {len(failed)} email(s)")
     print(f"{border}")
 
-    if not (gmail_user and gmail_pass):
+    if not gmail_enabled:
         print(
             "  ℹ️   Dry-run mode — set GMAIL_USER + GMAIL_APP_PASSWORD to send real emails."
         )
 
     return {
-        "emails_sent":      len(sent),
-        "contacts_emailed": sent,
-        "delivery_method":  method,
+        "emails_sent": emails_sent_count,
+        "contacts_emailed": sent if gmail_enabled else dry_run_contacts,
+        "delivery_method": method,
+        "emails_failed": len(failed) if gmail_enabled else 0,
     }
 
 
