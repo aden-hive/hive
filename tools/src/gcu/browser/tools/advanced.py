@@ -15,6 +15,7 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeout,
 )
 
+from ..highlight import highlight_element
 from ..session import DEFAULT_TIMEOUT_MS, get_session
 
 
@@ -235,6 +236,8 @@ def register_advanced_tools(mcp: FastMCP) -> None:
             for path in file_paths:
                 if not Path(path).exists():
                     return {"ok": False, "error": f"File not found: {path}"}
+
+            await highlight_element(page, selector)
 
             element = await page.wait_for_selector(selector, timeout=timeout_ms)
             if not element:

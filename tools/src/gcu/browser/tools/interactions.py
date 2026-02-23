@@ -14,6 +14,7 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeout,
 )
 
+from ..highlight import highlight_coordinate, highlight_element
 from ..session import DEFAULT_TIMEOUT_MS, get_session
 
 
@@ -49,6 +50,8 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             if not page:
                 return {"ok": False, "error": "No active tab"}
 
+            await highlight_element(page, selector)
+
             if double_click:
                 await page.dblclick(selector, button=button, timeout=timeout_ms)
             else:
@@ -57,6 +60,40 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return {"ok": True, "action": "click", "selector": selector}
         except PlaywrightTimeout:
             return {"ok": False, "error": f"Element not found: {selector}"}
+        except PlaywrightError as e:
+            return {"ok": False, "error": f"Click failed: {e!s}"}
+
+    @mcp.tool()
+    async def browser_click_coordinate(
+        x: float,
+        y: float,
+        target_id: str | None = None,
+        profile: str = "default",
+        button: Literal["left", "right", "middle"] = "left",
+    ) -> dict:
+        """
+        Click at specific viewport coordinates.
+
+        Args:
+            x: X coordinate in the viewport
+            y: Y coordinate in the viewport
+            target_id: Tab ID (default: active tab)
+            profile: Browser profile name (default: "default")
+            button: Mouse button to click (left, right, middle)
+
+        Returns:
+            Dict with click result
+        """
+        try:
+            session = get_session(profile)
+            page = session.get_page(target_id)
+            if not page:
+                return {"ok": False, "error": "No active tab"}
+
+            await highlight_coordinate(page, x, y)
+
+            await page.mouse.click(x, y, button=button)
+            return {"ok": True, "action": "click_coordinate", "x": x, "y": y}
         except PlaywrightError as e:
             return {"ok": False, "error": f"Click failed: {e!s}"}
 
@@ -90,6 +127,8 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             page = session.get_page(target_id)
             if not page:
                 return {"ok": False, "error": "No active tab"}
+
+            await highlight_element(page, selector)
 
             if clear_first:
                 await page.fill(selector, "", timeout=timeout_ms)
@@ -129,6 +168,8 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             page = session.get_page(target_id)
             if not page:
                 return {"ok": False, "error": "No active tab"}
+
+            await highlight_element(page, selector)
 
             await page.fill(selector, value, timeout=timeout_ms)
             return {"ok": True, "action": "fill", "selector": selector}
