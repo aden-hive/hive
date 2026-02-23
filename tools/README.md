@@ -32,6 +32,10 @@ Some tools require API keys to function. Credentials are managed through the enc
 | `SERPAPI_API_KEY`      | `scholar_*`, `patents_*` tools | [serpapi.com](https://serpapi.com/)                                                |
 | `NEWSDATA_API_KEY`     | `news_search`, `news_headlines`, `news_by_company` | [newsdata.io](https://newsdata.io/)                        |
 | `FINLIGHT_API_KEY`     | `news_sentiment` tool         | [finlight.me](https://finlight.me/)                                                 |
+| `GOOGLE_ACCESS_TOKEN`  | `gmail_*` tools               | [console.cloud.google.com](https://console.cloud.google.com/) (OAuth 2.0)           |
+| `RESEND_API_KEY`       | `send_email` tool             | [resend.com](https://resend.com/)                                                   |
+| `SLACK_BOT_TOKEN`      | `slack_*` tools               | [api.slack.com/apps](https://api.slack.com/apps)                                    |
+| `DISCORD_BOT_TOKEN`    | `discord_*` tools             | [discord.com/developers/applications](https://discord.com/developers/applications)  |
 
 > **Note:** `web_search` supports multiple providers. Set either Brave OR Google credentials. Brave is preferred for backward compatibility.
 
