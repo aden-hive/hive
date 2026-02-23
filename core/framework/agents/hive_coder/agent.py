@@ -12,7 +12,8 @@ from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
-from .nodes import coder_node
+from .nodes import coder_node, ticket_triage_node
+from .ticket_receiver import TICKET_RECEIVER_ENTRY_POINT
 
 # Goal definition
 goal = Goal(
@@ -90,8 +91,9 @@ goal = Goal(
     ],
 )
 
-# Nodes — single coder node (guardian is now auto-attached by the framework)
-nodes = [coder_node]
+# Nodes: primary coder node + ticket_triage for queen role when loaded as
+# a secondary graph alongside a worker.
+nodes = [coder_node, ticket_triage_node]
 
 # No edges needed — single forever-alive event_loop node
 edges = []
@@ -102,8 +104,9 @@ entry_points = {"start": "coder"}
 pause_nodes = []
 terminal_nodes = []  # Forever-alive: loops until user exits
 
-# No async entry points — guardian is now auto-attached via attach_guardian()
-async_entry_points = []
+# Async entry points: queen receives escalation tickets from the health judge
+# when loaded as a secondary graph alongside a worker runtime.
+async_entry_points = [TICKET_RECEIVER_ENTRY_POINT]
 
 # Module-level variables read by AgentRunner.load()
 conversation_mode = "continuous"

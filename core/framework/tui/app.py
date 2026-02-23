@@ -215,6 +215,7 @@ class AdenTUI(App):
         Binding("ctrl+a", "show_agent_picker", "Agents", show=True, priority=True),
         Binding("ctrl+e", "escalate_to_coder", "Coder", show=True, priority=True),
         Binding("ctrl+e", "return_from_coder", "← Back", show=True, priority=True),
+        Binding("ctrl+q", "connect_to_queen", "Queen", show=True, priority=True),
         Binding("tab", "focus_next", "Next Panel", show=True),
         Binding("shift+tab", "focus_previous", "Previous Panel", show=False),
     ]
@@ -238,6 +239,10 @@ class AdenTUI(App):
 
         # Escalation stack: stores worker state when coder is in foreground
         self._escalation_stack: list[dict] = []
+
+        # Health judge + queen monitoring graphs (loaded alongside worker agents)
+        self._queen_graph_id: str | None = None
+        self._judge_graph_id: str | None = None
 
         # Widgets are created lazily when runtime is available
         self.graph_view = None
@@ -399,6 +404,10 @@ class AdenTUI(App):
         """Complete agent setup, guardian attach, and widget mount."""
         import asyncio
 
+        # Reset health monitoring state from any prior agent load
+        self._queen_graph_id = None
+        self._judge_graph_id = None
+
         loop = asyncio.get_event_loop()
         try:
             if runner._agent_runtime is None:
@@ -428,6 +437,119 @@ class AdenTUI(App):
 
         agent_name = runner.agent_path.name
         self.notify(f"Agent loaded: {agent_name}", severity="information", timeout=3)
+
+        # Load health judge + queen for worker agents (skip for hive_coder itself)
+        if agent_name != "hive_coder":
+            await self._load_judge_and_queen(runner._storage_path)
+
+    async def _load_judge_and_queen(self, storage_path) -> None:
+        """Load the health judge and queen's ticket_triage as secondary monitoring graphs.
+
+        Both are added to the current worker runtime so they share its EventBus.
+        The health judge fires every 2 minutes via a timer; the queen fires on
+        WORKER_ESCALATION_TICKET events emitted by the judge.
+
+        Works for any agent automatically — no agent-side configuration needed.
+        """
+        from pathlib import Path
+
+        from framework.agents.hive_coder.nodes import ticket_triage_node
+        from framework.agents.hive_coder.ticket_receiver import TICKET_RECEIVER_ENTRY_POINT
+        from framework.graph import Goal
+        from framework.graph.edge import GraphSpec
+        from framework.monitoring import HEALTH_JUDGE_ENTRY_POINT, judge_goal, judge_graph
+        from framework.runner.tool_registry import ToolRegistry
+        from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
+
+        try:
+            storage_path = Path(storage_path)
+
+            # 1. Register monitoring tools bound to this runtime's EventBus + storage
+            monitoring_registry = ToolRegistry()
+            register_worker_monitoring_tools(
+                monitoring_registry,
+                self.runtime._event_bus,
+                storage_path,
+            )
+            monitoring_tools = list(monitoring_registry.get_tools().values())
+            monitoring_executor = monitoring_registry.get_executor()
+            monitoring_tool_names = {t.name for t in monitoring_tools}
+
+            # Inject monitoring tools into runtime so secondary graphs can call them.
+            # Secondary graph streams inherit self.runtime._tools / _tool_executor.
+            original_executor = self.runtime._tool_executor
+
+            def merged_executor(tool_use):
+                if tool_use.name in monitoring_tool_names:
+                    return monitoring_executor(tool_use)
+                if original_executor is not None:
+                    return original_executor(tool_use)
+                import json as _json
+                from framework.llm.provider import ToolResult
+                return ToolResult(
+                    tool_use_id=tool_use.id,
+                    content=_json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
+                    is_error=True,
+                )
+
+            self.runtime._tools = self.runtime._tools + monitoring_tools
+            self.runtime._tool_executor = merged_executor
+
+            # 2. Load health judge as a secondary graph on the worker runtime
+            await self.runtime.add_graph(
+                graph_id="worker_health_judge",
+                graph=judge_graph,
+                goal=judge_goal,
+                entry_points={"health_check": HEALTH_JUDGE_ENTRY_POINT},
+                storage_subpath="graphs/worker_health_judge",
+            )
+            self._judge_graph_id = "worker_health_judge"
+
+            # 3. Build minimal queen graph (ticket_triage only, not the full coder)
+            queen_triage_goal = Goal(
+                id="queen-ticket-triage",
+                name="Queen Ticket Triage",
+                description=(
+                    "Receive escalation tickets from the Health Judge and decide "
+                    "whether to notify the operator."
+                ),
+            )
+            queen_graph = GraphSpec(
+                id="hive-coder-queen-triage",
+                goal_id=queen_triage_goal.id,
+                version="1.0.0",
+                entry_node="ticket_triage",
+                entry_points={"ticket_receiver": "ticket_triage"},
+                terminal_nodes=[],
+                pause_nodes=[],
+                nodes=[ticket_triage_node],
+                edges=[],
+                conversation_mode="continuous",
+                async_entry_points=[TICKET_RECEIVER_ENTRY_POINT],
+            )
+            await self.runtime.add_graph(
+                graph_id="hive_coder_queen",
+                graph=queen_graph,
+                goal=queen_triage_goal,
+                entry_points={"ticket_receiver": TICKET_RECEIVER_ENTRY_POINT},
+                storage_subpath="graphs/hive_coder_queen",
+            )
+            self._queen_graph_id = "hive_coder_queen"
+
+            self.notify(
+                "Health judge + queen monitoring active",
+                severity="information",
+                timeout=3,
+            )
+        except Exception as e:
+            logging.getLogger("tui.judge").error(
+                "Failed to load health monitoring: %s", e, exc_info=True
+            )
+            self.notify(
+                f"Health monitoring unavailable: {e}",
+                severity="warning",
+                timeout=5,
+            )
 
     def _show_account_selection(self, runner, accounts: list[dict]) -> None:
         """Show the account selection screen and continue loading on selection."""
@@ -851,6 +973,8 @@ class AdenTUI(App):
         EventType.EXECUTION_PAUSED,
         EventType.EXECUTION_RESUMED,
         EventType.ESCALATION_REQUESTED,
+        EventType.WORKER_ESCALATION_TICKET,
+        EventType.QUEEN_INTERVENTION_REQUESTED,
     ]
 
     _LOG_PANE_EVENTS = frozenset(_EVENT_TYPES) - {
@@ -922,6 +1046,15 @@ class AdenTUI(App):
                         severity="information",
                         timeout=5,
                     )
+                elif et == EventType.WORKER_ESCALATION_TICKET:
+                    # Judge ticket from background graph — still update status bar
+                    ticket = event.data.get("ticket", {})
+                    severity = ticket.get("severity", "")
+                    if severity:
+                        self.status_bar.set_node_detail(f"judge: {severity} ticket")
+                elif et == EventType.QUEEN_INTERVENTION_REQUESTED:
+                    # Always surface queen interventions regardless of active graph
+                    self._handle_queen_intervention(event.data)
                 # All other background events are silently dropped (visible in logs)
                 return
 
@@ -958,6 +1091,13 @@ class AdenTUI(App):
                     context=event.data.get("context", ""),
                     node_id=event.node_id or "",
                 )
+            elif et == EventType.WORKER_ESCALATION_TICKET:
+                ticket = event.data.get("ticket", {})
+                severity = ticket.get("severity", "")
+                if severity:
+                    self.status_bar.set_node_detail(f"judge: {severity} ticket")
+            elif et == EventType.QUEEN_INTERVENTION_REQUESTED:
+                self._handle_queen_intervention(event.data)
             elif et == EventType.NODE_LOOP_STARTED:
                 self.chat_repl.handle_node_started(event.node_id or "")
             elif et == EventType.NODE_LOOP_ITERATION:
@@ -1081,6 +1221,30 @@ class AdenTUI(App):
                 e,
                 exc_info=True,
             )
+
+    def _handle_queen_intervention(self, data: dict) -> None:
+        """Notify the operator of a queen escalation — non-disruptively.
+
+        The worker keeps running. The operator can press Ctrl+Q to switch to
+        the queen's graph view for a conversation about the issue.
+        """
+        severity = data.get("severity", "unknown")
+        analysis = data.get("analysis", "(no analysis)")
+
+        severity_markup = {
+            "low": "[dim]low[/dim]",
+            "medium": "[yellow]medium[/yellow]",
+            "high": "[bold red]high[/bold red]",
+            "critical": "[bold red]CRITICAL[/bold red]",
+        }
+        sev_label = severity_markup.get(severity, severity)
+
+        msg = f"Queen escalation ({sev_label}): {analysis}"
+        if self._queen_graph_id:
+            msg += "\nPress [bold]Ctrl+Q[/bold] to chat with queen."
+
+        textual_severity = "error" if severity in ("high", "critical") else "warning"
+        self.notify(msg, severity=textual_severity, timeout=30)
 
     # -- Actions --
 
@@ -1244,12 +1408,22 @@ class AdenTUI(App):
         Both escalate_to_coder and return_from_coder are bound to Ctrl+E.
         check_action toggles which one is active based on escalation state,
         so the footer shows "Coder" or "← Back" accordingly.
+        connect_to_queen is only shown when a queen monitoring graph is active.
         """
         if action == "escalate_to_coder":
             return not self._escalation_stack
         if action == "return_from_coder":
             return bool(self._escalation_stack)
+        if action == "connect_to_queen":
+            return bool(self._queen_graph_id and self.runtime is not None)
         return True
+
+    def action_connect_to_queen(self) -> None:
+        """Switch to the queen's ticket-triage graph view (Ctrl+Q)."""
+        if not self._queen_graph_id:
+            self.notify("No queen monitoring active", severity="warning", timeout=3)
+            return
+        self.action_switch_graph(self._queen_graph_id)
 
     def action_escalate_to_coder(self) -> None:
         """Escalate to Hive Coder (bound to Ctrl+E)."""

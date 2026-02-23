@@ -553,4 +553,56 @@ forbidden action attempted, output format invalid).
 )
 
 
-__all__ = ["coder_node", "guardian_node", "ALL_GUARDIAN_TOOLS"]
+ticket_triage_node = NodeSpec(
+    id="ticket_triage",
+    name="Ticket Triage",
+    description=(
+        "Queen's triage node. Receives an EscalationTicket from the Health Judge "
+        "via event-driven entry point and decides: dismiss or notify the operator."
+    ),
+    node_type="event_loop",
+    client_facing=True,    # Operator can chat with queen once connected (Ctrl+Q)
+    max_node_visits=0,
+    input_keys=["ticket"],
+    output_keys=["intervention_decision"],
+    nullable_output_keys=["intervention_decision"],
+    success_criteria=(
+        "A clear intervention decision: either dismissed with documented reasoning, "
+        "or operator notified via notify_operator with specific analysis."
+    ),
+    tools=["notify_operator"],
+    system_prompt="""\
+You are the Queen (Hive Coder). The Worker Health Judge has escalated a worker \
+issue to you. The ticket is in your memory under key "ticket". Read it carefully.
+
+## Dismiss criteria — do NOT call notify_operator:
+- severity is "low" AND steps_since_last_accept < 8
+- Cause is clearly a transient issue (single API timeout, brief stall that \
+  self-resolved based on the evidence)
+- Evidence shows the agent is making real progress despite bad verdicts
+
+## Intervene criteria — call notify_operator:
+- severity is "high" or "critical"
+- steps_since_last_accept >= 10 with no sign of recovery
+- stall_minutes > 4 (worker definitively stuck)
+- Evidence shows a doom loop (same error, same tool, no progress)
+- Cause suggests a logic bug, missing configuration, or unrecoverable state
+
+## When intervening:
+Call notify_operator with:
+  ticket_id: <ticket["ticket_id"]>
+  analysis: "<2-3 sentences: what is wrong, why it matters, suggested action>"
+  urgency: "<low|medium|high|critical>"
+
+## After deciding:
+set_output("intervention_decision", "dismissed: <reason>" or "escalated: <summary>")
+
+Be conservative but not passive. You are the last quality gate before the human \
+is disturbed. One unnecessary alert is less costly than alert fatigue — but \
+genuine stuck agents must be caught.
+""",
+)
+
+ALL_QUEEN_TRIAGE_TOOLS = ["notify_operator"]
+
+__all__ = ["coder_node", "guardian_node", "ticket_triage_node", "ALL_GUARDIAN_TOOLS", "ALL_QUEEN_TRIAGE_TOOLS"]
