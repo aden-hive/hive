@@ -28,6 +28,29 @@ class AgentEntry:
     node_count: int = 0
     tool_count: int = 0
     tags: list[str] = field(default_factory=list)
+    last_active: str | None = None
+
+
+def _get_last_active(agent_name: str) -> str | None:
+    """Return the most recent updated_at timestamp across all sessions."""
+    sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
+    if not sessions_dir.exists():
+        return None
+    latest: str | None = None
+    for session_dir in sessions_dir.iterdir():
+        if not session_dir.is_dir() or not session_dir.name.startswith("session_"):
+            continue
+        state_file = session_dir / "state.json"
+        if not state_file.exists():
+            continue
+        try:
+            data = json.loads(state_file.read_text())
+            ts = data.get("timestamps", {}).get("updated_at")
+            if ts and (latest is None or ts > latest):
+                latest = ts
+        except Exception:
+            continue
+    return latest
 
 
 def _count_sessions(agent_name: str) -> int:
@@ -105,6 +128,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     node_count=node_count,
                     tool_count=tool_count,
                     tags=tags,
+                    last_active=_get_last_active(path.name),
                 )
             )
         if entries:

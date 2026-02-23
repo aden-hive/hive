@@ -32,6 +32,9 @@ async def handle_discover(request: web.Request) -> web.Response:
     """GET /api/discover — discover agents from filesystem."""
     from framework.tui.screens.agent_picker import discover_agents
 
+    manager = _get_manager(request)
+    loaded_paths = {str(slot.agent_path) for slot in manager.list_agents()}
+
     groups = discover_agents()
     result = {}
     for category, entries in groups.items():
@@ -45,6 +48,8 @@ async def handle_discover(request: web.Request) -> web.Response:
                 "node_count": entry.node_count,
                 "tool_count": entry.tool_count,
                 "tags": entry.tags,
+                "last_active": entry.last_active,
+                "is_loaded": str(entry.path) in loaded_paths,
             }
             for entry in entries
         ]

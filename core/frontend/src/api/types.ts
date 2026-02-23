@@ -32,6 +32,8 @@ export interface DiscoverEntry {
   node_count: number;
   tool_count: number;
   tags: string[];
+  last_active: string | null;
+  is_loaded: boolean;
 }
 
 /** Keyed by category name. */
