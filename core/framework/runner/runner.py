@@ -827,6 +827,12 @@ class AgentRunner:
                 if has_llm_nodes:
                     from framework.credentials.models import CredentialError
 
+                    if self._is_local_model(self.model):
+                        raise CredentialError(
+                            f"Failed to initialize LLM for local model '{self.model}'. "
+                            f"Ensure your local LLM server is running "
+                            f"(e.g. 'ollama serve' for Ollama)."
+                        )
                     api_key_env = self._get_api_key_env_var(self.model)
                     hint = (
                         f"Set it with: export {api_key_env}=your-api-key"
@@ -1003,6 +1009,7 @@ class AgentRunner:
             checkpoint_config=checkpoint_config,
             config=runtime_config,
             graph_id=self.graph.id or self.agent_path.name,
+            accounts_prompt=accounts_prompt,
         )
 
         # Pass intro_message through for TUI display
