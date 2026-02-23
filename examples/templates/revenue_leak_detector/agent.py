@@ -21,7 +21,7 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
-from .config import default_config, metadata
+from .config import default_config, metadata, VERSION
 from .nodes import monitor_node, analyze_node, notify_node, followup_node
 
 # ---- Goal ----
@@ -164,7 +164,7 @@ class RevenueLeakDetectorAgent:
         return GraphSpec(
             id="revenue-leak-detector-graph",
             goal_id=self.goal.id,
-            version="1.0.0",
+            version=VERSION,
             entry_node=self.entry_node,
             entry_points=self.entry_points,
             terminal_nodes=self.terminal_nodes,
@@ -268,6 +268,7 @@ class RevenueLeakDetectorAgent:
         return await self._agent_runtime.trigger_and_wait(
             entry_point_id=entry_point,
             input_data=input_data or {},
+            timeout=timeout,
             session_state=session_state,
         )
 
