@@ -148,18 +148,9 @@ class CodeValidator:
     def __init__(self, blocked_nodes: set[type] | None = None):
         self.blocked_nodes = blocked_nodes or BLOCKED_AST_NODES
 
-    def validate(self, code: str) -> list[str]:
-        """
-        Validate code and return list of issues.
-
-        Returns empty list if code is safe.
-        """
+    def _validate_tree(self, tree: ast.AST) -> list[str]:
+        """Validate a parsed AST and return security issues."""
         issues = []
-
-        try:
-            tree = ast.parse(code)
-        except SyntaxError as e:
-            return [f"Syntax error: {e}"]
 
         for node in ast.walk(tree):
             # Check for blocked node types
@@ -170,19 +161,38 @@ class CodeValidator:
             # Check for dangerous attribute access
             if isinstance(node, ast.Attribute):
                 if node.attr.startswith("_"):
-                    issues.append(
-                        f"Access to private attribute '{node.attr}' at line {node.lineno}"
-                    )
+                    issues.append(f"Access to private attribute '{node.attr}' at line {node.lineno}")
 
             # Check for exec/eval calls
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name):
-                    if node.func.id in ("exec", "eval", "compile", "__import__"):
-                        issues.append(
-                            f"Blocked function call: {node.func.id} at line {node.lineno}"
-                        )
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in ("exec", "eval", "compile", "__import__"):
+                    issues.append(
+                        f"Blocked function call: {node.func.id} at line {node.lineno}"
+                    )
 
         return issues
+
+    def validate(self, code: str) -> list[str]:
+        """
+        Validate code and return list of issues.
+
+        Returns empty list if code is safe.
+        """
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            return [f"Syntax error: {e}"]
+
+        return self._validate_tree(tree)
+
+    def validate_expression(self, expression: str) -> list[str]:
+        """Validate an expression intended for eval()."""
+        try:
+            tree = ast.parse(expression, mode="eval")
+        except SyntaxError as e:
+            return [f"Syntax error: {e}"]
+
+        return self._validate_tree(tree)
 
 
 class CodeSandbox:
@@ -348,11 +358,13 @@ class CodeSandbox:
         """
         inputs = inputs or {}
 
-        # Validate
-        try:
-            ast.parse(expression, mode="eval")
-        except SyntaxError as e:
-            return SandboxResult(success=False, error=f"Syntax error: {e}")
+        # Validate expression with the same threat model used for execute().
+        issues = self.validator.validate_expression(expression)
+        if issues:
+            return SandboxResult(
+                success=False,
+                error=f"Code validation failed: {'; '.join(issues)}",
+            )
 
         namespace = self._create_namespace(inputs)
 
