@@ -60,6 +60,7 @@ from .http_headers_scanner import register_tools as register_http_headers_scanne
 from .hubspot_tool import register_tools as register_hubspot
 from .news_tool import register_tools as register_news
 from .pdf_read_tool import register_tools as register_pdf_read
+from .browser_automation_tool import register_tools as register_browser_automation
 from .port_scanner import register_tools as register_port_scanner
 from .postgres_tool import register_tools as register_postgres
 from .razorpay_tool import register_tools as register_razorpay
@@ -99,6 +100,7 @@ def register_all_tools(
     # Tools that don't need credentials
     register_example(mcp)
     register_web_scrape(mcp)
+    register_browser_automation(mcp)
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
