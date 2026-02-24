@@ -144,6 +144,8 @@ class ExecutionStream:
         checkpoint_config: CheckpointConfig | None = None,
         graph_id: str | None = None,
         accounts_prompt: str = "",
+        accounts_data: list[dict] | None = None,
+        tool_provider_map: dict[str, str] | None = None,
     ):
         """
         Initialize execution stream.
@@ -164,7 +166,9 @@ class ExecutionStream:
             session_store: Optional SessionStore for unified session storage
             checkpoint_config: Optional checkpoint configuration for resumable sessions
             graph_id: Optional graph identifier for multi-graph sessions
-            accounts_prompt: Optional connected-accounts context for system prompt injection
+            accounts_prompt: Connected accounts block for system prompt injection
+            accounts_data: Raw account data for per-node prompt generation
+            tool_provider_map: Tool name to provider name mapping for account routing
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -183,7 +187,9 @@ class ExecutionStream:
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
         self._session_store = session_store
-        self.accounts_prompt = accounts_prompt
+        self._accounts_prompt = accounts_prompt
+        self._accounts_data = accounts_data
+        self._tool_provider_map = tool_provider_map
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -456,7 +462,9 @@ class ExecutionStream:
                     storage_path=exec_storage,
                     runtime_logger=runtime_logger,
                     loop_config=self.graph.loop_config,
-                    accounts_prompt=self.accounts_prompt,
+                    accounts_prompt=self._accounts_prompt,
+                    accounts_data=self._accounts_data,
+                    tool_provider_map=self._tool_provider_map,
                 )
                 # Track executor so inject_input() can reach EventLoopNode instances
                 self._active_executors[execution_id] = executor
