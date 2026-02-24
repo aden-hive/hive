@@ -129,7 +129,3 @@ PYTHONPATH=core python examples/template/rss_twitter_agent/run.py
 
 **Tweet over 280 characters**  
 The approval step shows a ⚠️ warning. Skip that thread or the LLM will vary on the next run.
-
-## License
-
-MIT
