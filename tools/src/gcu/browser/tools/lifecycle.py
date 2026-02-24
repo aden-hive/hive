@@ -27,7 +27,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_start(
         profile: str = "default",
-        headless: bool = True,
+        headless: bool = False,
         persistent: bool = True,
     ) -> dict:
         """
@@ -35,7 +35,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
 
         Args:
             profile: Browser profile name (default: "default")
-            headless: Run browser in headless mode (default: True)
+            headless: Run browser in headless mode (default: False)
             persistent: Use persistent profile for cookies/storage (default: True)
                 When True, browser data persists at ~/.hive/agents/{agent}/browser/{profile}/
                 CDP debugging port allocated in range 18800-18899
